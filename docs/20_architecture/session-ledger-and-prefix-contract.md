@@ -9,6 +9,7 @@
 > prefix stability, and fail-closed validation. Their target ownership and
 > simpler versioning policy are defined in
 > [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
+> R4-W5 retired StateV2; no current reader or compatibility surface.
 > This document's former M4 cost-harness and milestone-closure requirements are
 > superseded; issue #54 and PR #74 are historical inputs for later R6
 > refinement, not remaining prerequisites for closing M4.

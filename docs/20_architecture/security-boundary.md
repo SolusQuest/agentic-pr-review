@@ -403,7 +403,7 @@ Existing legacy raw-debug behavior does not automatically migrate to the new run
 
 ## Current Implementation Compatibility
 
-The current deterministic C# bridge, `ProviderSessionLedgerV1`, provider metadata, and prefix contracts retain their documented safeguards while they remain in the codebase. `StateManifestV2` was removed by W5 after its C# replacement disposition and is historical evidence only, like the retired state-acceptance Git-ref route; neither can be selected as current state.
+The current deterministic C# bridge, `ProviderSessionLedgerV1`, provider metadata, and prefix contracts retain their documented safeguards while they remain in the codebase. `StateManifestV2` was removed by W5 after its C# replacement disposition and is historical evidence only, like the retired state-acceptance Git-ref route. R4-W5 retired StateV2; no current reader or compatibility surface. Neither can be selected as current state.
 
 Migration work may simplify or replace their shape, but it must not remove:
 

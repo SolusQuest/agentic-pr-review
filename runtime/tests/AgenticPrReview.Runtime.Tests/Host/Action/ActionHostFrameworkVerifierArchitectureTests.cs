@@ -237,6 +237,37 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Equal(25, w5Groups.Length);
         Assert.Equal(25, w5Groups.Select(value => value.GetProperty("id").GetString())
             .Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(new[]
+        {
+            "aggregation.test.ts::bounded diagnostic aggregation:retained",
+            "builder-input-domain.test.ts::candidate input rejection:retained",
+            "builder-string-safety.test.ts::bounded safe strings and paths:retained",
+            "classifier-precedence.test.ts::selected-current failure precedence:retained",
+            "classifier-wire-format.test.ts::tampered bundle rejection:retained",
+            "compat-fixtures.test.ts::compatibility outcome corpus:reviewed_obsolete",
+            "compatibility.test.ts::ancestry and state-key compatibility:reviewed_obsolete",
+            "constants-mirror.test.ts::StateV2 schema parity:reviewed_obsolete",
+            "core.test.ts::StateV2 parser serializer and classifier representation:reviewed_obsolete",
+            "cross-field.test.ts::provenance generation and transition binding:retained",
+            "deep-path-oracle.test.ts::M4 sidecar traversal oracle:reviewed_obsolete",
+            "diagnostic-bounds.test.ts::bounded failure diagnostics:retained",
+            "diagnostic-privacy.test.ts::private diagnostic suppression:retained",
+            "empty-name-unknown-field.test.ts::closed names and unknown fields:retained",
+            "fixtures.test.ts::byte-identical StateV2 fixture bundles:reviewed_obsolete",
+            "import-boundary.test.ts::StateV2 dependency and directory contract:reviewed_obsolete",
+            "import-boundary.test.ts::canonical-json recursive AST filesystem boundary:transferred",
+            "public-surface.test.ts::StateV2 barrel exports:reviewed_obsolete",
+            "resolver-runtime-consequence.test.ts::M4 resolver runtime consequences:reviewed_obsolete",
+            "rfc3339.test.ts::accepted-state timestamp grammar:retained",
+            "schema-conformance.test.ts::closed schema and reference validation:retained",
+            "shared-vectors.test.ts::shared M4 vector projection:reviewed_obsolete",
+            "shared-vocabulary.test.ts::StateV2 vocabulary parity:reviewed_obsolete",
+            "short-circuit-and-exhaustive.test.ts::failure precedence and exhaustive branches:retained",
+            "strict-json.test.ts::strict JSON byte and duplicate-property rejection:reviewed_obsolete",
+        }, w5Groups.Select(value => $"{value.GetProperty("id").GetString()}:{value.GetProperty("disposition").GetString()}")
+            .Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal("c8c60db8919bc5b2cb8148e79d87c8e2f0082a3cb507c82b85c1ecd1cb7c25af",
+            w5.GetProperty("mapping_digest").GetString());
         var canonicalBoundary = w5Groups.Single(value => value.GetProperty("id")
             .GetString() == "import-boundary.test.ts::canonical-json recursive AST filesystem boundary");
         Assert.Equal("transferred", canonicalBoundary.GetProperty("disposition").GetString());
@@ -244,8 +275,29 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Equal("src/canonical-json/import-boundary.test.ts",
             canonicalBoundary.GetProperty("target_path").GetString());
         Assert.Equal(12, w5.GetProperty("fixture_dispositions").GetArrayLength());
-        Assert.Contains("compat-unsafe-provenance", w5.GetProperty("fixture_dispositions")
-            .EnumerateArray().Select(value => value.GetProperty("id").GetString()));
+        Assert.Equal(new[]
+        {
+            "compat-base-change:S5",
+            "compat-cache-contract-change:reviewed_obsolete",
+            "compat-continuation:S5",
+            "compat-contract-version-mismatch:S5",
+            "compat-nondescendant-head:S5",
+            "compat-state-key-mismatch:S5",
+            "compat-unknown-ancestry:S5",
+            "compat-unsafe-provenance:S5",
+            "positive-bootstrap:S5",
+            "positive-continuation:S5",
+            "positive-recovery-root:S6",
+            "positive-reset:S5",
+        }, w5.GetProperty("fixture_dispositions").EnumerateArray().Select(value =>
+            $"{value.GetProperty("id").GetString()}:{(value.TryGetProperty("semantic_owner", out var owner) ? owner.GetString() : value.GetProperty("semantic_disposition").GetString())}")
+            .Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[]
+        {
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateArchitectureTests.cs",
+        }, w5.GetProperty("updated_reference_dispositions").EnumerateArray()
+            .Select(value => value.GetProperty("path").GetString()).Order(StringComparer.Ordinal).ToArray());
         Assert.Contains("runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
             w5.GetProperty("w5_residual_scan").GetProperty("immutable_provenance_paths")
                 .EnumerateArray().Select(value => value.GetString()));

@@ -1492,6 +1492,7 @@ internal static class FrameworkSupervisor
                 "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
                 "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
                 "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/TrustedHeadAncestryClassifier.cs#TrustedHeadAncestryClassifier",
+                "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateRecordCodecs.cs#AcceptedStateGenerationRecordCodec",
                 "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
                 "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
                 "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
@@ -1502,6 +1503,7 @@ internal static class FrameworkSupervisor
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/TrustedHeadAncestryClassifierTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateRecordCodecTests.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionContractTests.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
@@ -1517,6 +1519,8 @@ internal static class FrameworkSupervisor
             !RequiredExactTextArray(entry, "deletion_prerequisites", new HashSet<string>([
                 "S5 / #155 merged", "S6 / #156 merged", "P5 / #161 merged",
                 "P6 / #162 merged", "E1 / #178 framework evidence green",
+                "W3 / #165 merged", "W6 / #168 merged", "W7 / #169 merged",
+                "W12 / #173 merged",
             ], StringComparer.Ordinal)) ||
             !RequiredExactTextArray(entry, "updated_reference_paths", new HashSet<string>([
                 ".prettierignore", ".github/workflows/ci.yml",
@@ -1532,11 +1536,14 @@ internal static class FrameworkSupervisor
                 "docs/20_architecture/session-ledger-and-prefix-contract.md",
                 "docs/20_architecture/state-manifest-v2.md",
                 "docs/90_roadmap/roadmap-seed.md",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateArchitectureTests.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerSchemaConformanceTests.cs",
                 "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
                 "runtime/tests/fixtures/action-host/framework/replacement-record.json",
             ], StringComparer.Ordinal), value => LandingPathExists(repository, value)) ||
+            !ValidateW5ReferenceDispositions(entry) ||
             !ValidateW5LegacyGroups(entry, repository, inventory) ||
             !ValidateW5Fixtures(entry, repository) ||
             !ValidateW5ResidualScan(entry, repository)) return false;
@@ -1559,6 +1566,21 @@ internal static class FrameworkSupervisor
             !File.ReadAllText(Path.Join(repository, "src",
                 "residual-reference-allowlist.ts"))
                 .Contains("RR-012", StringComparison.Ordinal);
+    }
+
+    private static bool ValidateW5ReferenceDispositions(JsonElement entry)
+    {
+        var dispositions = entry.GetProperty("updated_reference_dispositions")
+            .EnumerateArray().ToArray();
+        var expected = new HashSet<string>([
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateArchitectureTests.cs",
+        ], StringComparer.Ordinal);
+        return dispositions.Length == expected.Count && dispositions.All(disposition =>
+            expected.Contains(disposition.GetProperty("path").GetString() ?? "") &&
+            disposition.GetProperty("disposition").GetString() ==
+                "superseded_by_w5_residual_scan" &&
+            !string.IsNullOrWhiteSpace(disposition.GetProperty("reason").GetString()));
     }
 
     private static bool ValidateW5LegacyGroups(
@@ -1596,7 +1618,12 @@ internal static class FrameworkSupervisor
         ], StringComparer.Ordinal);
         if (groups.Length != expected.Count ||
             !groups.Select(group => group.GetProperty("id").GetString() ?? "")
-                .ToHashSet(StringComparer.Ordinal).SetEquals(expected)) return false;
+                .ToHashSet(StringComparer.Ordinal).SetEquals(expected) ||
+            entry.GetProperty("mapping_digest").GetString() !=
+                "c8c60db8919bc5b2cb8148e79d87c8e2f0082a3cb507c82b85c1ecd1cb7c25af" ||
+            !StringComparer.Ordinal.Equals(
+                Sha256Text(W5MappingText(entry)),
+                "c8c60db8919bc5b2cb8148e79d87c8e2f0082a3cb507c82b85c1ecd1cb7c25af")) return false;
         foreach (var group in groups)
         {
             var source = group.GetProperty("source_path").GetString() ?? "";
@@ -1638,13 +1665,48 @@ internal static class FrameworkSupervisor
         return fixtures.Length == expected.Count && fixtures.Select(fixture =>
                 fixture.GetProperty("id").GetString() ?? "").ToHashSet(StringComparer.Ordinal)
                 .SetEquals(expected) && fixtures.All(fixture =>
-                fixture.GetProperty("semantic_owner").GetString() is "S5" or "S6" or "P5" or "P6" or "E1" &&
-                LandingPathExists(repository,
-                    fixture.GetProperty("semantic_evidence_path").GetString() ?? "") &&
+                ((fixture.TryGetProperty("semantic_owner", out var owner) &&
+                    owner.GetString() is "S5" or "S6" or "P5" or "P6" or "E1" &&
+                    fixture.TryGetProperty("semantic_evidence_path", out var evidence) &&
+                    LandingPathExists(repository, evidence.GetString() ?? "")) ||
+                 (fixture.TryGetProperty("semantic_disposition", out var semanticDisposition) &&
+                    semanticDisposition.GetString() == "reviewed_obsolete" &&
+                    fixture.TryGetProperty("semantic_reason", out var semanticReason) &&
+                    !string.IsNullOrWhiteSpace(semanticReason.GetString()))) &&
                 fixture.GetProperty("representation_disposition").GetString() == "reviewed_obsolete" &&
                 !string.IsNullOrWhiteSpace(
                     fixture.GetProperty("representation_reason").GetString()));
     }
+
+    private static string W5MappingText(JsonElement entry)
+    {
+        var rows = new List<string>();
+        foreach (var group in entry.GetProperty("legacy_test_groups").EnumerateArray()
+                     .OrderBy(value => value.GetProperty("id").GetString(), StringComparer.Ordinal))
+        {
+            rows.Add(string.Join("\u001f", [
+                "group", OptionalText(group, "id"), OptionalText(group, "disposition"),
+                OptionalText(group, "owner"), OptionalText(group, "owner_member"),
+                OptionalText(group, "evidence_path"), OptionalText(group, "target_path"),
+                OptionalText(group, "reason"),
+            ]));
+        }
+        foreach (var fixture in entry.GetProperty("fixture_dispositions").EnumerateArray()
+                     .OrderBy(value => value.GetProperty("id").GetString(), StringComparer.Ordinal))
+        {
+            rows.Add(string.Join("\u001f", [
+                "fixture", OptionalText(fixture, "id"), OptionalText(fixture, "semantic_owner"),
+                OptionalText(fixture, "semantic_evidence_path"),
+                OptionalText(fixture, "semantic_disposition"), OptionalText(fixture, "semantic_reason"),
+                OptionalText(fixture, "representation_disposition"),
+                OptionalText(fixture, "representation_reason"),
+            ]));
+        }
+        return string.Join("\n", rows);
+    }
+
+    private static string OptionalText(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
 
     private static bool ValidateW5ResidualScan(JsonElement entry, string repository)
     {
@@ -1666,6 +1728,8 @@ internal static class FrameworkSupervisor
             .ToHashSet(StringComparer.Ordinal);
         var historical = TextArray(scan, "historical_document_paths")
             .ToHashSet(StringComparer.Ordinal);
+        var currentPosition = TextArray(scan, "current_position_document_paths")
+            .ToHashSet(StringComparer.Ordinal);
         var derived = TextArray(scan, "derived_bundle_paths")
             .ToHashSet(StringComparer.Ordinal);
         if (!evidence.SetEquals([
@@ -1677,6 +1741,10 @@ internal static class FrameworkSupervisor
                 "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
             ]) ||
             !historical.SetEquals([
+                "docs/20_architecture/session-ledger-and-prefix-contract.md",
+                "docs/20_architecture/state-manifest-v2.md",
+            ]) ||
+            !currentPosition.SetEquals([
                 "docs/00_project/project-context.md",
                 "docs/20_architecture/agent-runtime-rebaseline.md",
                 "docs/20_architecture/agent-session-format.md",
@@ -1684,11 +1752,11 @@ internal static class FrameworkSupervisor
                 "docs/20_architecture/r4-actionhost-wrapper-plan.md",
                 "docs/20_architecture/runtime-protocol.md",
                 "docs/20_architecture/security-boundary.md",
-                "docs/20_architecture/session-ledger-and-prefix-contract.md",
-                "docs/20_architecture/state-manifest-v2.md",
                 "docs/90_roadmap/roadmap-seed.md",
             ]) ||
             !derived.SetEquals([".github/actions/agentic-pr-review/dist/index.js"])) return false;
+        const string retirementMarker =
+            "R4-W5 retired StateV2; no current reader or compatibility surface.";
         foreach (var path in TrackedPaths(repository).Where(path =>
                      !derived.Contains(path)))
         {
@@ -1699,9 +1767,17 @@ internal static class FrameworkSupervisor
             if (evidence.Contains(path) || immutable.Contains(path)) continue;
             if (historical.Contains(path))
             {
-                if (!text.Contains("W5", StringComparison.Ordinal) ||
+                if (!text.Contains(retirementMarker, StringComparison.Ordinal) ||
                     text.Contains("remains the acceptance contract", StringComparison.Ordinal) ||
                     text.Contains("under its current owner", StringComparison.Ordinal)) return false;
+                continue;
+            }
+            if (currentPosition.Contains(path))
+            {
+                if (!text.Contains(retirementMarker, StringComparison.Ordinal) ||
+                    text.Split('\n').Any(line => forbidden.Any(token =>
+                        line.Contains(token, StringComparison.Ordinal)) &&
+                        !line.Contains(retirementMarker, StringComparison.Ordinal))) return false;
                 continue;
             }
             if (forbidden.Any(token => text.Contains(token, StringComparison.Ordinal))) return false;

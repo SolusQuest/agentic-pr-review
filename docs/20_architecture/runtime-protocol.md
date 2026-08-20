@@ -177,7 +177,7 @@ Replay must not require GitHub credentials or live GitHub state. Replay material
 
 ## M4: Session Ledger Artifact
 
-The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. M4 historically added the restricted durable `ProviderSessionLedgerV1`, its `StateManifestV2` binding, and a separate `ProviderRunMetadataV1` sidecar. R4-W5 removed the StateV2 TypeScript surface, schema, fixture corpora, and generators after the C# replacement disposition; R4-W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus after the retained C# DeepSeek and ActionHost evidence passed. See [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md) for the historical cross-issue contract.
+The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. M4 historically added the restricted durable `ProviderSessionLedgerV1`, its `StateManifestV2` binding, and a separate `ProviderRunMetadataV1` sidecar. R4-W5 removed the StateV2 TypeScript surface, schema, fixture corpora, and generators after the C# replacement disposition; R4-W5 retired StateV2; no current reader or compatibility surface. R4-W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus after the retained C# DeepSeek and ActionHost evidence passed. See [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md) for the historical cross-issue contract.
 
 ## Historical Issue #33 Deterministic C# Host Integration
 
@@ -192,6 +192,6 @@ The protocol will also need to partition stable context (system instructions, po
 
 The existing `Review*V1` schemas remain unchanged. The ledger artifact, provider-run metadata sidecar, and stable/volatile partitioning are designed by issue #29; implementation follow-ups own the concrete process flags and file names.
 
-The historical implementation-level `StateManifestV2` contract library (issue #48) is documented in [`state-manifest-v2.md`](state-manifest-v2.md). W5 removed its manifest schema, byte-stable serializer, closed-shape validator, pure builder, pure classifier, host-compatibility comparator, fixture corpora, and generators after the retained C# replacement evidence passed. Filesystem I/O and manifest-last commit remain historical workstream-8 facts rather than a current StateV2 route.
+The historical implementation-level `StateManifestV2` contract library (issue #48) is documented in [`state-manifest-v2.md`](state-manifest-v2.md). W5 removed its manifest schema, byte-stable serializer, closed-shape validator, pure builder, pure classifier, host-compatibility comparator, fixture corpora, and generators after the retained C# replacement evidence passed. R4-W5 retired StateV2; no current reader or compatibility surface. Filesystem I/O and manifest-last commit remain historical workstream-8 facts rather than a current StateV2 route.
 
 The retired provider-run-metadata sidecar is recorded in the historical [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md); it has no current TypeScript schema, parser, fixture corpus, or compatibility reader.

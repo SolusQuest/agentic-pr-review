@@ -5,7 +5,7 @@
 > replacement disposition. This document is historical M4 evidence only; it
 > does not define a current reader, converter, compatibility surface, fixture
 > owner, or acceptance contract. The retained C# Host owns the current
-> fail-closed state protections.
+> fail-closed state protections. R4-W5 retired StateV2; no current reader or compatibility surface.
 
 This historical workstream guide records the former M4 v2 state-bundle contract. It does NOT re-state the shared M4 Batch #1 machinery — the sole historical source for cross-workstream vocabulary, byte caps, resolver semantics, traversal, safe-path sanitizer, deep-path oracle, and conformance vectors is [session-ledger-and-prefix-contract.md](./session-ledger-and-prefix-contract.md), section `## M4 Batch #1 Frozen Vocabulary`.
 
