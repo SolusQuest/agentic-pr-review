@@ -1887,7 +1887,7 @@
             "LineageAction"
           ],
           "typescript_alias_disposition": "superseded",
-          "retained_direct_runtime_owners": ["RuntimeApplication", "RuntimeJsonContext"],
+          "retained_direct_runtime_owners": ["SchemaContracts", "ProtocolFixtureTests"],
           "actionhost_owners": [
             "LiveAgentFreshProcessLineage",
             "LineageService",
@@ -1896,7 +1896,8 @@
           "evidence_paths": [
             "protocol/schemas/review-result.v1.json",
             "protocol/schemas/review-trace.v1.json",
-            "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
             "runtime/src/AgenticPrReview.Runtime/Application/LiveAgentFreshProcessLineage.cs",
             "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs",
             "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs"
@@ -1945,7 +1946,11 @@
           "id": "hashing",
           "symbols": ["sha256"],
           "typescript_alias_disposition": "retained_replacement",
-          "actionhost_owners": ["R4PublicationIdentityV1", "ReviewedTreePath", "LineageService"],
+          "actionhost_owners": [
+            "R4PublicationIdentityV1",
+            "ReviewedTreeIdentityWriter",
+            "LineageService"
+          ],
           "evidence_paths": [
             "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs",
             "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedTreeSnapshot.cs",
