@@ -202,6 +202,9 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Equal(new[] { "scripts/check-r3-live-proof.mjs" },
             residual.GetProperty("retained_unrelated_policy_paths").EnumerateArray()
                 .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[] { ".github/actions/agentic-pr-review/dist/index.js" },
+            residual.GetProperty("bundled_dependency_artifact_paths").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
         var w11 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W11");

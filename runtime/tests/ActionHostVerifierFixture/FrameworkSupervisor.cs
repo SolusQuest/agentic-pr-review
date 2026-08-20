@@ -1608,7 +1608,7 @@ internal static class FrameworkSupervisor
         var allowed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in new[] { "w8_marker_paths", "deletion_evidence_paths",
                      "immutable_provenance_paths", "retired_document_paths",
-                     "retained_unrelated_policy_paths" })
+                     "retained_unrelated_policy_paths", "bundled_dependency_artifact_paths" })
         {
             if (!RequiredExactTextArray(scan, property,
                     ExpectedW6ResidualPaths(property))) return false;
@@ -1657,6 +1657,9 @@ internal static class FrameworkSupervisor
             ], StringComparer.Ordinal),
             "retained_unrelated_policy_paths" => new HashSet<string>([
                 "scripts/check-r3-live-proof.mjs"
+            ], StringComparer.Ordinal),
+            "bundled_dependency_artifact_paths" => new HashSet<string>([
+                ".github/actions/agentic-pr-review/dist/index.js"
             ], StringComparer.Ordinal),
             _ => throw new ArgumentOutOfRangeException(nameof(property)),
         };

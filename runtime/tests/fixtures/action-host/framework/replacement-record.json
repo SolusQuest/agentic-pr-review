@@ -599,7 +599,8 @@
           "docs/20_architecture/security-boundary.md",
           "docs/90_roadmap/roadmap-seed.md"
         ],
-        "retained_unrelated_policy_paths": ["scripts/check-r3-live-proof.mjs"]
+        "retained_unrelated_policy_paths": ["scripts/check-r3-live-proof.mjs"],
+        "bundled_dependency_artifact_paths": [".github/actions/agentic-pr-review/dist/index.js"]
       },
       "deletion_gate": "No callable Git-ref, cache, plaintext, compatibility, or dual state writer remains."
     },
