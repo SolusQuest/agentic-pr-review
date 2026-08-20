@@ -120,7 +120,91 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "docs/20_architecture/r4-actionhost-wrapper-plan.md",
             "docs/50_ai/agent-context.md",
         }, w3.GetProperty("referenced_tests_and_docs").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        var w6 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W6");
+        Assert.Equal("removed", w6.GetProperty("disposition").GetString());
+        Assert.Equal(new[]
+        {
+            "src/state-acceptance/",
+            "protocol/schemas/candidate-registration.v1.json",
+            "protocol/schemas/accepted-state-marker.v1.json",
+            "protocol/schemas/state-selector.v1.json",
+            "protocol/schemas/state-publication-receipt.v1.json",
+        }, w6.GetProperty("removed_paths").EnumerateArray()
             .Select(value => value.GetString()).ToArray());
+        Assert.False(Directory.Exists(Path.Join(root, "src", "state-acceptance")));
+        Assert.Contains(
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+            w6.GetProperty("owner_members").EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Contains(
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+            w6.GetProperty("retained_evidence_paths").EnumerateArray()
+                .Select(value => value.GetString()));
+        var w6Cases = w6.GetProperty("legacy_test_cases")
+            .EnumerateArray().ToArray();
+        var w6CaseIds = w6Cases.Select(value => value.GetProperty("id")
+            .GetString()).ToArray();
+        Assert.Equal(47, w6CaseIds.Length);
+        Assert.Equal(47, w6CaseIds.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains("contract.test.ts::contract-version-legacy-v1", w6CaseIds);
+        Assert.Contains("contract.test.ts::contract-version-unknown-version", w6CaseIds);
+        Assert.Contains("contract.test.ts::kernel-lock", w6CaseIds);
+        Assert.Contains("github-state-store.test.ts::counter-transaction", w6CaseIds);
+        Assert.All(w6Cases, value =>
+        {
+            var retained = value.GetProperty("disposition").GetString() == "retained";
+            Assert.True(retained || value.GetProperty("disposition").GetString() ==
+                "reviewed_obsolete");
+            Assert.Equal(retained, value.TryGetProperty("evidence_path", out _));
+            Assert.Equal(retained, value.TryGetProperty("owner", out _));
+            Assert.Equal(!retained, value.TryGetProperty("reason", out _));
+        });
+        var w6Helpers = w6.GetProperty("legacy_helper_cases")
+            .EnumerateArray().ToArray();
+        Assert.Equal(new[] { "lock-child.mjs::unix-socket-lock",
+                "store-child.mjs::reference-store-child" },
+            w6Helpers.Select(value => value.GetProperty("id").GetString())
+                .Order(StringComparer.Ordinal).ToArray());
+        var receipt = w6.GetProperty("receipt_disposition");
+        Assert.Equal("protocol/schemas/state-publication-receipt.v1.json",
+            receipt.GetProperty("legacy_schema").GetString());
+        Assert.Equal(new[] { "P2", "P5", "P6", "S5", "S6" },
+            receipt.GetProperty("owners").EnumerateArray()
+                .Select(value => value.GetString()).Order(StringComparer.Ordinal).ToArray());
+        Assert.Contains(
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+            receipt.GetProperty("owner_members").EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Contains(
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+            receipt.GetProperty("evidence_paths").EnumerateArray()
+                .Select(value => value.GetString()));
+        var residual = w6.GetProperty("w6_residual_scan");
+        var forbiddenTokens = residual.GetProperty("forbidden_tokens")
+            .EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Equal(22, forbiddenTokens.Length);
+        Assert.Contains("StateAcceptanceStore", forbiddenTokens);
+        Assert.Contains("ReferenceStateStore", forbiddenTokens);
+        Assert.Contains("OctokitGitDataClient", forbiddenTokens);
+        Assert.Contains("acceptLocalCandidate", forbiddenTokens);
+        Assert.Contains("candidate-registration.v1.json", forbiddenTokens);
+        Assert.Contains("state-publication-receipt.v1.json", forbiddenTokens);
+        Assert.Contains("@actions/cache", forbiddenTokens);
+        Assert.Contains("actions/cache", forbiddenTokens);
+        Assert.Contains("src/comments.ts", residual.GetProperty("w8_marker_paths")
+            .EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+            residual.GetProperty("immutable_provenance_paths").EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Equal(new[] { "scripts/check-r3-live-proof.mjs" },
+            residual.GetProperty("retained_unrelated_policy_paths").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[] { ".github/actions/agentic-pr-review/dist/index.js" },
+            residual.GetProperty("bundled_dependency_artifact_paths").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
         var w11 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W11");
@@ -157,7 +241,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             w12.GetProperty("retained_evidence_paths").EnumerateArray()
                 .Select(value => value.GetString()));
         Assert.Contains(
-            "W5/W6 opaque sidecar bytes descriptors hashes and fixtures remain under their current owners",
+            "W5 opaque sidecar bytes descriptors hashes and fixtures remain under its current owner",
             w12.GetProperty("retained_owner_groups").EnumerateArray()
                 .Select(value => value.GetString()));
 

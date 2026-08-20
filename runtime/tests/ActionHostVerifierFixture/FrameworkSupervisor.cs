@@ -1146,6 +1146,12 @@ internal static class FrameworkSupervisor
                 return false;
             }
 
+            if (entry.GetProperty("leaf_id").GetString() == "W6" &&
+                !ValidateW6Ownership(entry, repository))
+            {
+                return false;
+            }
+
             if (entry.GetProperty("leaf_id").GetString() == "W11" &&
                 !ValidateW11Ownership(entry, repository, inventoryPath))
             {
@@ -1436,6 +1442,256 @@ internal static class FrameworkSupervisor
             IsClosedPath(value) && LandingPathExists(repository, value)) &&
         RequiredTextArray(entry, "retained_owner_groups") &&
         RequiredTextArray(entry, "obsolete_groups");
+
+    private static bool ValidateW6Ownership(JsonElement entry, string repository) =>
+        entry.GetProperty("disposition").GetString() == "removed" &&
+        RequiredTextArray(entry, "removed_paths", value =>
+            IsClosedPath(value) && !LandingPathExists(repository, value)) &&
+        RequiredExactTextArray(entry, "owner_members", ExpectedW6OwnerMembers(),
+            member => MemberExists(repository, member)) &&
+        RequiredExactTextArray(entry, "retained_evidence_paths",
+            ExpectedW6EvidencePaths(), value =>
+                IsClosedPath(value) && LandingPathExists(repository, value)) &&
+        RequiredExactTextArray(entry, "framework_scenario_ids",
+            new HashSet<string>([
+                "dispatch-continuation", "dispatch-cross-head-conflict",
+                "stale-head", "artifact-upload-outcome-unknown",
+                "artifact-delete-outcome-unknown", "crash-mutation",
+                "crash-recovery", "cancel-known-commit",
+                "cancel-outcome-unknown", "delete-exact"
+            ], StringComparer.Ordinal)) &&
+        RequiredExactTextArray(entry, "deletion_prerequisites",
+            new HashSet<string>([
+                "S6 / #156 merged", "P6 / #162 merged",
+                "W7 / #169 merged", "E1 / #178 framework evidence green"
+            ], StringComparer.Ordinal)) &&
+        RequiredTextArray(entry, "retained_owner_groups") &&
+        RequiredTextArray(entry, "obsolete_groups") &&
+        ValidateW6LegacyManifest(entry, repository) &&
+        ValidateW6ReceiptDisposition(entry, repository) &&
+        ValidateW6ResidualScan(entry, repository) &&
+        !Directory.Exists(Path.Join(repository, "src", "state-acceptance")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "candidate-registration.v1.json")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "accepted-state-marker.v1.json")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "state-selector.v1.json")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "state-publication-receipt.v1.json"));
+
+    private static bool ValidateW6LegacyManifest(JsonElement entry,
+        string repository)
+    {
+        return ValidateW6CaseSet(entry.GetProperty("legacy_test_cases")
+                .EnumerateArray().ToArray(), ExpectedW6CaseIds(), repository) &&
+            ValidateW6CaseSet(entry.GetProperty("legacy_helper_cases")
+                .EnumerateArray().ToArray(), ExpectedW6HelperIds(), repository);
+    }
+
+    private static bool ValidateW6CaseSet(
+        JsonElement[] values,
+        IReadOnlySet<string> expected,
+        string repository)
+    {
+        var actual = values.Select(value => value.GetProperty("id").GetString() ?? "")
+            .ToArray();
+        if (actual.Length != expected.Count || !actual.ToHashSet(StringComparer.Ordinal)
+                .SetEquals(expected)) return false;
+        foreach (var value in values)
+        {
+            var retained = value.GetProperty("disposition").GetString() == "retained";
+            if (value.GetProperty("disposition").GetString() is not
+                    ("retained" or "reviewed_obsolete") ||
+                retained != value.TryGetProperty("evidence_path", out var path) ||
+                retained && (!IsClosedPath(path.GetString() ?? "") ||
+                    !LandingPathExists(repository, path.GetString() ?? "")) ||
+                retained != value.TryGetProperty("owner", out var owner) ||
+                retained && owner.GetString() is not ("S1" or "S2" or "S3" or "S5" or "S6" or "P6") ||
+                !retained && (!value.TryGetProperty("reason", out var reason) ||
+                    string.IsNullOrWhiteSpace(reason.GetString()))) return false;
+        }
+        return true;
+    }
+
+    private static IReadOnlySet<string> ExpectedW6CaseIds() => new HashSet<string>([
+        "github-git-data.test.ts::non-forced-ref-update", "github-git-data.test.ts::truncated-tree", "github-git-data.test.ts::duplicate-tree-paths", "github-state-paths.test.ts::frozen-m4-paths",
+        "contract.test.ts::canonical-records", "contract.test.ts::schema-stage-order", "contract.test.ts::codec-diagnostics", "contract.test.ts::unicode-canonical-diagnostics", "contract.test.ts::state-key-parity", "contract.test.ts::unsafe-unicode", "contract.test.ts::candidate-winner-conflict", "contract.test.ts::aggregate-snapshot-bytes", "contract.test.ts::enumeration-receipt-digest", "contract.test.ts::marker-selector-order", "contract.test.ts::predecessor-byte-hash", "contract.test.ts::cancel-before-mutation", "contract.test.ts::selection-identity-state-key", "contract.test.ts::bootstrap-and-corruption", "contract.test.ts::committed-selector-retry", "contract.test.ts::contract-version-legacy-v1", "contract.test.ts::contract-version-unknown-version", "contract.test.ts::unsafe-candidate-files", "contract.test.ts::unsafe-expected-files", "contract.test.ts::reopen-candidate-bytes", "contract.test.ts::registration-crash-residue", "contract.test.ts::child-process-registration", "contract.test.ts::registration-count-boundary", "contract.test.ts::immutable-target-id", "contract.test.ts::registration-cap", "contract.test.ts::registration-sequence", "contract.test.ts::kernel-lock", "contract.test.ts::lease-selector-cas",
+        "github-state-store.test.ts::bootstrap-without-selector", "github-state-store.test.ts::explicit-restore-without-selector", "github-state-store.test.ts::default-branch-identity", "github-state-store.test.ts::counter-transaction", "github-state-store.test.ts::contiguous-registration", "github-state-store.test.ts::global-counter-cutoff", "github-state-store.test.ts::counter-enumeration", "github-state-store.test.ts::moved-global-ref", "github-state-store.test.ts::noncanonical-sentinel", "github-state-store.test.ts::shared-git-data-processes", "github-state-store.test.ts::selector-successor", "github-state-store.test.ts::bootstrap-predecessor", "github-state-store.test.ts::workflow-provenance",
+        "schema.test.ts::strict-closed-schemas", "schema.test.ts::nested-key-transition"
+    ], StringComparer.Ordinal);
+
+    private static IReadOnlySet<string> ExpectedW6HelperIds() => new HashSet<string>([
+        "lock-child.mjs::unix-socket-lock", "store-child.mjs::reference-store-child"
+    ], StringComparer.Ordinal);
+
+    private static IReadOnlySet<string> ExpectedW6OwnerMembers() => new HashSet<string>([
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/RestrictedStateOpaqueStoreContracts.cs#OpaqueStoreValidation",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/LocalRestrictedStateStore.cs#LocalRestrictedStateStore",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/GitHubArtifactRestrictedStateStore.cs#GitHubArtifactRestrictedStateStore",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/PrivateArtifactBridgeClient.cs#PrivateArtifactBridgeClient",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Locator/LocatorRootService.cs#LocatorRootService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs#LineageService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/ScopedStateInventory.cs#ScopedStateInventory",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+    ], StringComparer.Ordinal);
+
+    private static IReadOnlySet<string> ExpectedW6EvidencePaths() => new HashSet<string>([
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/LocalRestrictedStateStoreTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Locator/LocatorCodecAndSelectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs"
+    ], StringComparer.Ordinal);
+
+    private static bool ValidateW6ReceiptDisposition(JsonElement entry,
+        string repository)
+    {
+        var receipt = entry.GetProperty("receipt_disposition");
+        return receipt.GetProperty("legacy_schema").GetString() ==
+                "protocol/schemas/state-publication-receipt.v1.json" &&
+            RequiredExactTextArray(receipt, "owners",
+                new HashSet<string>(["P2", "P5", "S5", "S6", "P6"], StringComparer.Ordinal)) &&
+            RequiredExactTextArray(receipt, "owner_members",
+                new HashSet<string>([
+                    "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+                    "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+                    "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+                    "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+                    "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+                    "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+                    "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+                ], StringComparer.Ordinal), member => MemberExists(repository, member)) &&
+            RequiredExactTextArray(receipt, "evidence_paths",
+                new HashSet<string>([
+                    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+                    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+                    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+                    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+                    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+                    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs"
+                ], StringComparer.Ordinal), value => LandingPathExists(repository, value)) &&
+            RequiredExactTextArray(receipt, "framework_scenarios",
+                new HashSet<string>(["crash-mutation", "crash-recovery", "cancel-known-commit", "cancel-outcome-unknown"], StringComparer.Ordinal));
+    }
+
+    private static bool ValidateW6ResidualScan(JsonElement entry,
+        string repository)
+    {
+        var scan = entry.GetProperty("w6_residual_scan");
+        var forbidden = new HashSet<string>([
+            "GitDataStateTransport", "GitHubGitStateAcceptanceStore",
+            "StateAcceptanceStore", "ReferenceStateStore", "OctokitGitDataClient",
+            "acceptLocalCandidate", "heads/agentic-pr-review-m4-state-v1",
+            "agentic-pr-review-m4-state-v1", "m4-state/v1", "m4-state-v1",
+            "candidate-registration.v1.json", "accepted-state-marker.v1.json",
+            "state-selector.v1.json", "state-publication-receipt.v1.json",
+            "CandidateRegistrationV1", "AcceptedStateMarkerV1", "StateSelectorV1",
+            "StatePublicationReceiptV1", "@actions/cache", "actions/cache",
+            "restoreCache", "saveCache"
+        ], StringComparer.Ordinal);
+        var allowed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in new[] { "w8_marker_paths", "deletion_evidence_paths",
+                     "immutable_provenance_paths", "retired_document_paths",
+                     "retained_unrelated_policy_paths", "bundled_dependency_artifact_paths" })
+        {
+            if (!RequiredExactTextArray(scan, property,
+                    ExpectedW6ResidualPaths(property))) return false;
+            foreach (var path in TextArray(scan, property)) allowed.Add(path);
+        }
+        if (!TextArray(scan, "forbidden_tokens").ToHashSet(StringComparer.Ordinal)
+                .SetEquals(forbidden)) return false;
+        foreach (var path in TrackedPaths(repository))
+        {
+            if (allowed.Contains(path)) continue;
+            var fullPath = Path.Join(repository,
+                path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(fullPath)) continue;
+            var text = File.ReadAllText(fullPath);
+            if (forbidden.Any(token => text.Contains(token,
+                    StringComparison.Ordinal))) return false;
+        }
+        return true;
+    }
+
+    private static IReadOnlySet<string> ExpectedW6ResidualPaths(string property) =>
+        property switch
+        {
+            "w8_marker_paths" => new HashSet<string>([
+                "src/comments.ts", "src/comments.test.ts",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs"
+            ], StringComparer.Ordinal),
+            "deletion_evidence_paths" => new HashSet<string>([
+                "src/residual-reference-allowlist.ts",
+                "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+                "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+            ], StringComparer.Ordinal),
+            "immutable_provenance_paths" => new HashSet<string>([
+                "docs/20_architecture/r1-legacy-removal-handoff.md",
+                "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+            ], StringComparer.Ordinal),
+            "retired_document_paths" => new HashSet<string>([
+                "docs/00_project/project-context.md",
+                "docs/20_architecture/agent-runtime-rebaseline.md",
+                "docs/20_architecture/m4-state-acceptance.md",
+                "docs/20_architecture/m4-stateful-action.md",
+                "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+                "docs/20_architecture/security-boundary.md",
+                "docs/90_roadmap/roadmap-seed.md"
+            ], StringComparer.Ordinal),
+            "retained_unrelated_policy_paths" => new HashSet<string>([
+                "scripts/check-r3-live-proof.mjs"
+            ], StringComparer.Ordinal),
+            "bundled_dependency_artifact_paths" => new HashSet<string>([
+                ".github/actions/agentic-pr-review/dist/index.js"
+            ], StringComparer.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(property)),
+        };
+
+    private static IEnumerable<string> TrackedPaths(string repository)
+    {
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = repository,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        start.ArgumentList.Add("ls-files");
+        using var process = Process.Start(start);
+        if (process is null) return [];
+        var paths = process.StandardOutput.ReadToEnd().Split('\n',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        process.WaitForExit();
+        return process.ExitCode == 0 ? paths : [];
+    }
+
+    private static bool RequiredExactTextArray(JsonElement value,
+        string property,
+        IReadOnlySet<string> expected,
+        Func<string, bool>? additional = null)
+    {
+        if (!RequiredTextArray(value, property, item =>
+                expected.Contains(item) && (additional?.Invoke(item) ?? true)))
+            return false;
+        var actual = TextArray(value, property).ToHashSet(StringComparer.Ordinal);
+        return actual.Count == expected.Count && actual.SetEquals(expected);
+    }
 
     private static bool MemberExists(string repository, string member)
     {

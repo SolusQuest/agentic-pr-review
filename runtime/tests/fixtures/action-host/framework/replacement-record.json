@@ -146,19 +146,463 @@
         "protocol/schemas/state-publication-receipt.v1.json"
       ],
       "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Locator/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/",
         "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/",
-        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/"
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/"
       ],
-      "classification": "remove_after_state_transaction_gate",
+      "classification": "removed_after_encrypted_state_transaction_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/state-acceptance/",
+        "protocol/schemas/candidate-registration.v1.json",
+        "protocol/schemas/accepted-state-marker.v1.json",
+        "protocol/schemas/state-selector.v1.json",
+        "protocol/schemas/state-publication-receipt.v1.json"
+      ],
       "protective_behaviors": [
         "candidate and acceptance concurrency",
         "scope and ancestry validation",
         "mutation outcome reconciliation"
       ],
-      "csharp_owners": ["AuthorizedAcceptedStateComposer", "RetainedStatePersistence"],
-      "framework_scenario_ids": ["dispatch-continuation", "crash-recovery", "stale-head"],
-      "deletion_prerequisites": ["S6 merged", "P6 merged", "E1 recovery pair green"],
-      "deletion_gate": "No Git-ref, cache, plaintext, compatibility, or dual state writer remains."
+      "csharp_owners": [
+        "OpaqueStoreValidation",
+        "GitHubArtifactRestrictedStateStore",
+        "LocatorRootService",
+        "LineageService",
+        "AuthorizedAcceptedStateComposer",
+        "RetainedStateTransactionAuthority",
+        "StickyCommentPublisher",
+        "PublicationRecoveryService",
+        "ActionHostCoordinator"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/RestrictedStateOpaqueStoreContracts.cs#OpaqueStoreValidation",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/LocalRestrictedStateStore.cs#LocalRestrictedStateStore",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/GitHubArtifactRestrictedStateStore.cs#GitHubArtifactRestrictedStateStore",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/PrivateArtifactBridgeClient.cs#PrivateArtifactBridgeClient",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Locator/LocatorRootService.cs#LocatorRootService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs#LineageService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/ScopedStateInventory.cs#ScopedStateInventory",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/LocalRestrictedStateStoreTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Locator/LocatorCodecAndSelectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs"
+      ],
+      "framework_scenario_ids": [
+        "dispatch-continuation",
+        "dispatch-cross-head-conflict",
+        "stale-head",
+        "artifact-upload-outcome-unknown",
+        "artifact-delete-outcome-unknown",
+        "crash-mutation",
+        "crash-recovery",
+        "cancel-known-commit",
+        "cancel-outcome-unknown",
+        "delete-exact"
+      ],
+      "deletion_prerequisites": [
+        "S6 / #156 merged",
+        "P6 / #162 merged",
+        "W7 / #169 merged",
+        "E1 / #178 framework evidence green"
+      ],
+      "retained_owner_groups": [
+        "encrypted immutable artifact and complete enumeration",
+        "locator lineage and stale-authority admission",
+        "accepted-state candidate reconciliation and cleanup",
+        "sticky mutation/readback receipt identity",
+        "publication recovery and P6 ordering"
+      ],
+      "obsolete_groups": [
+        "Unix socket lock naming and retry",
+        "Git ref CAS tree blob and plaintext namespace",
+        "registration counter contiguous sequence and child harness",
+        "selector-before-sticky acceptance order"
+      ],
+      "legacy_test_cases": [
+        {
+          "id": "github-git-data.test.ts::non-forced-ref-update",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git ref transport is retired."
+        },
+        {
+          "id": "github-git-data.test.ts::truncated-tree",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git tree transport is retired."
+        },
+        {
+          "id": "github-git-data.test.ts::duplicate-tree-paths",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git tree transport is retired."
+        },
+        {
+          "id": "github-state-paths.test.ts::frozen-m4-paths",
+          "disposition": "reviewed_obsolete",
+          "reason": "The frozen Git path grammar is no longer a state route."
+        },
+        {
+          "id": "contract.test.ts::canonical-records",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::schema-stage-order",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::codec-diagnostics",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unicode-canonical-diagnostics",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::state-key-parity",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unsafe-unicode",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::candidate-winner-conflict",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::aggregate-snapshot-bytes",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::enumeration-receipt-digest",
+          "disposition": "retained",
+          "owner": "S3",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs"
+        },
+        {
+          "id": "contract.test.ts::marker-selector-order",
+          "disposition": "reviewed_obsolete",
+          "reason": "Selector-before-sticky mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::predecessor-byte-hash",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::cancel-before-mutation",
+          "disposition": "retained",
+          "owner": "P6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::selection-identity-state-key",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::bootstrap-and-corruption",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::committed-selector-retry",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::contract-version-legacy-v1",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::contract-version-unknown-version",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unsafe-candidate-files",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unsafe-expected-files",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::reopen-candidate-bytes",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::registration-crash-residue",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::child-process-registration",
+          "disposition": "reviewed_obsolete",
+          "reason": "The local child-process registration harness is retired."
+        },
+        {
+          "id": "contract.test.ts::registration-count-boundary",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::immutable-target-id",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::registration-cap",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::registration-sequence",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::kernel-lock",
+          "disposition": "reviewed_obsolete",
+          "reason": "The Unix-kernel lock is retired."
+        },
+        {
+          "id": "contract.test.ts::lease-selector-cas",
+          "disposition": "reviewed_obsolete",
+          "reason": "Selector CAS-before-publication mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::bootstrap-without-selector",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::explicit-restore-without-selector",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::default-branch-identity",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::counter-transaction",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git ref counters are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::contiguous-registration",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::global-counter-cutoff",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::counter-enumeration",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::moved-global-ref",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git ref retries are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::noncanonical-sentinel",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::shared-git-data-processes",
+          "disposition": "reviewed_obsolete",
+          "reason": "The Git-data process harness is retired."
+        },
+        {
+          "id": "github-state-store.test.ts::selector-successor",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::bootstrap-predecessor",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::workflow-provenance",
+          "disposition": "retained",
+          "owner": "S3",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs"
+        },
+        {
+          "id": "schema.test.ts::strict-closed-schemas",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "schema.test.ts::nested-key-transition",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        }
+      ],
+      "legacy_helper_cases": [
+        {
+          "id": "lock-child.mjs::unix-socket-lock",
+          "disposition": "reviewed_obsolete",
+          "reason": "The Unix-socket lock harness belongs only to the retired local reference store."
+        },
+        {
+          "id": "store-child.mjs::reference-store-child",
+          "disposition": "reviewed_obsolete",
+          "reason": "The local reference-store child harness belongs only to the retired route."
+        }
+      ],
+      "receipt_disposition": {
+        "legacy_schema": "protocol/schemas/state-publication-receipt.v1.json",
+        "owners": ["P2", "P5", "S5", "S6", "P6"],
+        "owner_members": [
+          "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+          "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+          "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+          "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+          "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+          "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+          "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+        ],
+        "evidence_paths": [
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs"
+        ],
+        "framework_scenarios": [
+          "crash-mutation",
+          "crash-recovery",
+          "cancel-known-commit",
+          "cancel-outcome-unknown"
+        ]
+      },
+      "w6_residual_scan": {
+        "forbidden_tokens": [
+          "GitDataStateTransport",
+          "GitHubGitStateAcceptanceStore",
+          "StateAcceptanceStore",
+          "ReferenceStateStore",
+          "OctokitGitDataClient",
+          "acceptLocalCandidate",
+          "heads/agentic-pr-review-m4-state-v1",
+          "agentic-pr-review-m4-state-v1",
+          "m4-state/v1",
+          "m4-state-v1",
+          "candidate-registration.v1.json",
+          "accepted-state-marker.v1.json",
+          "state-selector.v1.json",
+          "state-publication-receipt.v1.json",
+          "CandidateRegistrationV1",
+          "AcceptedStateMarkerV1",
+          "StateSelectorV1",
+          "StatePublicationReceiptV1",
+          "@actions/cache",
+          "actions/cache",
+          "restoreCache",
+          "saveCache"
+        ],
+        "w8_marker_paths": [
+          "src/comments.ts",
+          "src/comments.test.ts",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs"
+        ],
+        "deletion_evidence_paths": [
+          "src/residual-reference-allowlist.ts",
+          "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+          "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+        ],
+        "immutable_provenance_paths": [
+          "docs/20_architecture/r1-legacy-removal-handoff.md",
+          "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+        ],
+        "retired_document_paths": [
+          "docs/00_project/project-context.md",
+          "docs/20_architecture/agent-runtime-rebaseline.md",
+          "docs/20_architecture/m4-state-acceptance.md",
+          "docs/20_architecture/m4-stateful-action.md",
+          "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+          "docs/20_architecture/security-boundary.md",
+          "docs/90_roadmap/roadmap-seed.md"
+        ],
+        "retained_unrelated_policy_paths": ["scripts/check-r3-live-proof.mjs"],
+        "bundled_dependency_artifact_paths": [".github/actions/agentic-pr-review/dist/index.js"]
+      },
+      "deletion_gate": "No callable Git-ref, cache, plaintext, compatibility, or dual state writer remains."
     },
     {
       "leaf_id": "W7",
@@ -353,7 +797,7 @@
         "request identity privacy bounds ordering and cancellation",
         "response identity usage cache observations and malformed failures",
         "continuation SESSION restoration and provider-private failures",
-        "W5/W6 opaque sidecar bytes descriptors hashes and fixtures remain under their current owners"
+        "W5 opaque sidecar bytes descriptors hashes and fixtures remain under its current owner"
       ],
       "obsolete_groups": [
         "raw JSON schema semantic aggregate telemetry and hash sidecar representation",
