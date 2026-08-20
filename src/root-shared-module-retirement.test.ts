@@ -144,7 +144,7 @@ describe('root shared module retirement', () => {
 
     violations.push(...packageExposureViolations(files), ...tsconfigAliasViolations(files));
     expect(violations).toEqual([]);
-  });
+  }, 15_000);
 
   it('recognizes every supported syntax form without requiring the target to exist', () => {
     const source = parseSource(

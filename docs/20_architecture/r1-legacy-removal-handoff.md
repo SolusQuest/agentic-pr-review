@@ -89,7 +89,7 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------- |
 | `src/runtime-invocation/` and direct integration                  | Runtime process, file, validation, cleanup, privacy, and capability evidence  | R2 runtime and R4 Host             |
 | `src/live-runtime-invocation/` and `src/live-provider/`           | Temporary M4 live-provider evidence                                           | R2/R4 replacement                  |
-| removed `src/state-v2/`                                           | R4-W5 retired StateV2; no current reader or compatibility surface             | Replaced by R4 Host W5             |
+| removed `src/state-v2/`                                           | R4-W5 retired StateV2; no current reader or compatibility surface.            | Replaced by R4 Host W5             |
 | removed `src/state-acceptance/`                                   | Historical candidate-to-receipt transaction evidence; replacement is checked  | Replaced by R4 Host W6             |
 | removed sticky root files/tests                                   | Historical sticky evidence; replacement is checked in C#                      | Replaced by R4 Host W8             |
 | removed inline-comment and target root files/tests                | Historical mapped inline/target evidence; replacement is checked in C#        | Replaced by R4 Host W9             |
