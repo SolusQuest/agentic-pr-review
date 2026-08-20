@@ -85,17 +85,17 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 ## Retained family ownership
 
-| Retained family                                     | Current role                                                                 | Lifecycle owner         |
-| --------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------- |
-| `src/runtime-invocation/` and direct integration    | Runtime process, file, validation, cleanup, privacy, and capability evidence | R2 runtime and R4 Host  |
-| `src/live-runtime-invocation/` and `src/live-provider/` | Temporary M4 live-provider evidence                                       | R2/R4 replacement       |
-| `src/state-v2/`                                     | Unsupported-v1 classifier and StateManifestV2 conformance                    | R4 state bridge         |
-| removed `src/state-acceptance/`                     | Historical candidate-to-receipt transaction evidence; replacement is checked | Replaced by R4 Host W6  |
-| removed sticky root files/tests                     | Historical sticky evidence; replacement is checked in C#                     | Replaced by R4 Host W8  |
-| removed inline-comment and target root files/tests  | Historical mapped inline/target evidence; replacement is checked in C#       | Replaced by R4 Host W9  |
-| removed `src/ledger-csharp.ts` and root tests       | Historical internal ledger composition evidence; no public Action caller     | Replaced by R4 Host W7  |
-| `protocol/` and protocol TypeScript DTOs            | Frozen migration/conformance evidence                                        | R2 protocol replacement |
-| Artifact provenance vectors                         | R4 security input manifest                                                   | R4 artifact bridge      |
+| Retained family                                         | Current role                                                                 | Lifecycle owner         |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------- |
+| `src/runtime-invocation/` and direct integration        | Runtime process, file, validation, cleanup, privacy, and capability evidence | R2 runtime and R4 Host  |
+| `src/live-runtime-invocation/` and `src/live-provider/` | Temporary M4 live-provider evidence                                          | R2/R4 replacement       |
+| `src/state-v2/`                                         | Unsupported-v1 classifier and StateManifestV2 conformance                    | R4 state bridge         |
+| removed `src/state-acceptance/`                         | Historical candidate-to-receipt transaction evidence; replacement is checked | Replaced by R4 Host W6  |
+| removed sticky root files/tests                         | Historical sticky evidence; replacement is checked in C#                     | Replaced by R4 Host W8  |
+| removed inline-comment and target root files/tests      | Historical mapped inline/target evidence; replacement is checked in C#       | Replaced by R4 Host W9  |
+| removed `src/ledger-csharp.ts` and root tests           | Historical internal ledger composition evidence; no public Action caller     | Replaced by R4 Host W7  |
+| `protocol/` and protocol TypeScript DTOs                | Frozen migration/conformance evidence                                        | R2 protocol replacement |
+| Artifact provenance vectors                             | R4 security input manifest                                                   | R4 artifact bridge      |
 
 ## Residual-reference ownership
 

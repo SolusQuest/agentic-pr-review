@@ -1265,50 +1265,11 @@ internal static class FrameworkSupervisor
         if (entry.GetProperty("disposition").GetString() != "removed" ||
             !RequiredTextArray(entry, "removed_paths", value =>
                 IsClosedPath(value) && !LandingPathExists(repository, value)) ||
-            !RequiredExactTextArray(entry, "retained_paths",
-                new HashSet<string>(
-            [
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/",
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
-                "runtime/src/AgenticPrReview.Runtime/Host/Action/",
-            ], StringComparer.Ordinal)) ||
-            !RequiredExactTextArray(entry, "csharp_owners",
-                new HashSet<string>(
-            [
-                "R4StickyRenderer",
-                "R4StickyMarker",
-                "R4PublicationIdentityV1",
-                "StickyCommentPublisher",
-                "PublicationRecoveryService",
-                "ActionHostCoordinator",
-                "ActionHostComposition",
-            ], StringComparer.Ordinal)) ||
-            !RequiredExactTextArray(entry, "owner_members",
-                new HashSet<string>(
-            [
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs#R4StickyRenderer",
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyMarker.cs#R4StickyMarker",
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs#R4PublicationIdentityV1",
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
-                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
-                "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator",
-                "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs#ActionHostComposition",
-            ], StringComparer.Ordinal), member => MemberExists(repository, member)) ||
-            !RequiredExactTextArray(entry, "deletion_prerequisites",
-                new HashSet<string>(
-            [
-                "P2 / #158 merged",
-                "P6 / #162 merged",
-                "W7 / #169 merged",
-                "E1 / #178 framework evidence green",
-            ], StringComparer.Ordinal)) ||
             !RequiredTextArray(entry, "retained_evidence_paths", value =>
                 IsClosedPath(value) && LandingPathExists(repository, value)) ||
             !RequiredTextArray(entry, "inventory_evidence_paths", value =>
                 IsClosedPath(value) && LandingPathExists(repository, value) &&
                 InventoryCovers(inventory, value)) ||
-            !RequiredTextArray(entry, "retained_assertion_groups") ||
             !RequiredTextArray(entry, "retained_assertion_groups") ||
             !RequiredTextArray(entry, "superseded_assertion_groups") ||
             !RequiredTextArray(entry, "later_leaf_assertion_owners"))
@@ -1373,6 +1334,44 @@ internal static class FrameworkSupervisor
         if (entry.GetProperty("disposition").GetString() != "removed" ||
             !RequiredTextArray(entry, "removed_paths", value =>
                 IsClosedPath(value) && !LandingPathExists(repository, value)) ||
+            !RequiredExactTextArray(entry, "retained_paths",
+                new HashSet<string>(
+            [
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+                "runtime/src/AgenticPrReview.Runtime/Host/Action/",
+            ], StringComparer.Ordinal)) ||
+            !RequiredExactTextArray(entry, "csharp_owners",
+                new HashSet<string>(
+            [
+                "R4StickyRenderer",
+                "R4StickyMarker",
+                "R4PublicationIdentityV1",
+                "StickyCommentPublisher",
+                "PublicationRecoveryService",
+                "ActionHostCoordinator",
+                "ActionHostComposition",
+            ], StringComparer.Ordinal)) ||
+            !RequiredExactTextArray(entry, "owner_members",
+                new HashSet<string>(
+            [
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs#R4StickyRenderer",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyMarker.cs#R4StickyMarker",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs#R4PublicationIdentityV1",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+                "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator",
+                "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs#ActionHostComposition",
+            ], StringComparer.Ordinal), member => MemberExists(repository, member)) ||
+            !RequiredExactTextArray(entry, "deletion_prerequisites",
+                new HashSet<string>(
+            [
+                "P2 / #158 merged",
+                "P6 / #162 merged",
+                "W7 / #169 merged",
+                "E1 / #178 framework evidence green",
+            ], StringComparer.Ordinal)) ||
             !RequiredTextArray(entry, "retained_evidence_paths", value =>
                 IsClosedPath(value) && LandingPathExists(repository, value)) ||
             !RequiredTextArray(entry, "historical_provenance_paths", value =>
