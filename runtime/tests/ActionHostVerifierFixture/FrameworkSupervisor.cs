@@ -1146,6 +1146,12 @@ internal static class FrameworkSupervisor
                 return false;
             }
 
+            if (entry.GetProperty("leaf_id").GetString() == "W5" &&
+                !ValidateW5Ownership(entry, repository, inventory))
+            {
+                return false;
+            }
+
             if (entry.GetProperty("leaf_id").GetString() == "W6" &&
                 !ValidateW6Ownership(entry, repository))
             {
@@ -1458,6 +1464,244 @@ internal static class FrameworkSupervisor
             "W10: structured review validation grounding and host-owned metadata",
             "W15: root shared DTO and utility consumer retirement",
         ]);
+    }
+
+    private static bool ValidateW5Ownership(
+        JsonElement entry,
+        string repository,
+        IReadOnlySet<string> inventory)
+    {
+        var removed = new HashSet<string>([
+            "src/state-v2/", "protocol/schemas/state-manifest.v2.json",
+            "protocol/fixtures/state-manifest-v2/",
+            "protocol/fixtures/state-manifest-v2-compat/",
+            "scripts/regenerate-state-v2-fixtures.mjs",
+            "scripts/regenerate-state-v2-compat-fixtures.mjs",
+        ], StringComparer.Ordinal);
+        if (entry.GetProperty("disposition").GetString() != "removed" ||
+            !RequiredExactTextArray(entry, "removed_paths", removed,
+                value => !LandingPathExists(repository, value) &&
+                    InventoryCovers(inventory, value)) ||
+            !RequiredExactTextArray(entry, "owner_members", new HashSet<string>([
+                "runtime/src/AgenticPrReview.Runtime/Host/State/RestrictedStateService.cs#RestrictedStateService",
+                "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
+                "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+                "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/TrustedHeadAncestryClassifier.cs#TrustedHeadAncestryClassifier",
+                "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
+                "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+                "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+                "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator",
+            ], StringComparer.Ordinal), member => MemberExists(repository, member)) ||
+            !RequiredExactTextArray(entry, "retained_evidence_paths", new HashSet<string>([
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/TrustedHeadAncestryClassifierTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionContractTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+            ], StringComparer.Ordinal), value => LandingPathExists(repository, value)) ||
+            !RequiredExactTextArray(entry, "framework_scenario_ids", new HashSet<string>([
+                "dispatch-bootstrap", "dispatch-continuation", "dispatch-cross-head-conflict",
+                "stale-head", "artifact-digest-mismatch", "artifact-expired",
+                "artifact-upload-outcome-unknown", "crash-mutation", "crash-recovery",
+                "cancel-outcome-unknown",
+            ], StringComparer.Ordinal), FrameworkScenarioIds().Contains) ||
+            !RequiredExactTextArray(entry, "deletion_prerequisites", new HashSet<string>([
+                "S5 / #155 merged", "S6 / #156 merged", "P5 / #161 merged",
+                "P6 / #162 merged", "E1 / #178 framework evidence green",
+            ], StringComparer.Ordinal)) ||
+            !RequiredExactTextArray(entry, "updated_reference_paths", new HashSet<string>([
+                ".prettierignore", ".github/workflows/ci.yml",
+                "src/residual-reference-allowlist.ts",
+                "src/canonical-json/import-boundary.test.ts",
+                "docs/00_project/project-context.md",
+                "docs/20_architecture/agent-runtime-rebaseline.md",
+                "docs/20_architecture/agent-session-format.md",
+                "docs/20_architecture/r1-legacy-removal-handoff.md",
+                "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+                "docs/20_architecture/runtime-protocol.md",
+                "docs/20_architecture/security-boundary.md",
+                "docs/20_architecture/session-ledger-and-prefix-contract.md",
+                "docs/20_architecture/state-manifest-v2.md",
+                "docs/90_roadmap/roadmap-seed.md",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerSchemaConformanceTests.cs",
+                "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+                "runtime/tests/fixtures/action-host/framework/replacement-record.json",
+            ], StringComparer.Ordinal), value => LandingPathExists(repository, value)) ||
+            !ValidateW5LegacyGroups(entry, repository, inventory) ||
+            !ValidateW5Fixtures(entry, repository) ||
+            !ValidateW5ResidualScan(entry, repository)) return false;
+
+        return !Directory.Exists(Path.Join(repository, "src", "state-v2")) &&
+            !File.Exists(Path.Join(repository, "protocol", "schemas",
+                "state-manifest.v2.json")) &&
+            !Directory.Exists(Path.Join(repository, "protocol", "fixtures",
+                "state-manifest-v2")) &&
+            !Directory.Exists(Path.Join(repository, "protocol", "fixtures",
+                "state-manifest-v2-compat")) &&
+            !File.Exists(Path.Join(repository, "scripts",
+                "regenerate-state-v2-fixtures.mjs")) &&
+            !File.Exists(Path.Join(repository, "scripts",
+                "regenerate-state-v2-compat-fixtures.mjs")) &&
+            !File.ReadAllText(Path.Join(repository, ".prettierignore"))
+                .Contains("state-manifest-v2", StringComparison.Ordinal) &&
+            !File.ReadAllText(Path.Join(repository, ".github", "workflows", "ci.yml"))
+                .Contains("src/state-v2", StringComparison.Ordinal) &&
+            !File.ReadAllText(Path.Join(repository, "src",
+                "residual-reference-allowlist.ts"))
+                .Contains("RR-012", StringComparison.Ordinal);
+    }
+
+    private static bool ValidateW5LegacyGroups(
+        JsonElement entry,
+        string repository,
+        IReadOnlySet<string> inventory)
+    {
+        var groups = entry.GetProperty("legacy_test_groups").EnumerateArray().ToArray();
+        var expected = new HashSet<string>([
+            "aggregation.test.ts::bounded diagnostic aggregation",
+            "builder-input-domain.test.ts::candidate input rejection",
+            "builder-string-safety.test.ts::bounded safe strings and paths",
+            "classifier-precedence.test.ts::selected-current failure precedence",
+            "classifier-wire-format.test.ts::tampered bundle rejection",
+            "compat-fixtures.test.ts::compatibility outcome corpus",
+            "compatibility.test.ts::ancestry and state-key compatibility",
+            "constants-mirror.test.ts::StateV2 schema parity",
+            "core.test.ts::StateV2 parser serializer and classifier representation",
+            "cross-field.test.ts::provenance generation and transition binding",
+            "deep-path-oracle.test.ts::M4 sidecar traversal oracle",
+            "diagnostic-bounds.test.ts::bounded failure diagnostics",
+            "diagnostic-privacy.test.ts::private diagnostic suppression",
+            "empty-name-unknown-field.test.ts::closed names and unknown fields",
+            "fixtures.test.ts::byte-identical StateV2 fixture bundles",
+            "import-boundary.test.ts::StateV2 dependency and directory contract",
+            "import-boundary.test.ts::canonical-json recursive AST filesystem boundary",
+            "public-surface.test.ts::StateV2 barrel exports",
+            "resolver-runtime-consequence.test.ts::M4 resolver runtime consequences",
+            "rfc3339.test.ts::accepted-state timestamp grammar",
+            "schema-conformance.test.ts::closed schema and reference validation",
+            "shared-vectors.test.ts::shared M4 vector projection",
+            "shared-vocabulary.test.ts::StateV2 vocabulary parity",
+            "short-circuit-and-exhaustive.test.ts::failure precedence and exhaustive branches",
+            "strict-json.test.ts::strict JSON byte and duplicate-property rejection",
+        ], StringComparer.Ordinal);
+        if (groups.Length != expected.Count ||
+            !groups.Select(group => group.GetProperty("id").GetString() ?? "")
+                .ToHashSet(StringComparer.Ordinal).SetEquals(expected)) return false;
+        foreach (var group in groups)
+        {
+            var source = group.GetProperty("source_path").GetString() ?? "";
+            var disposition = group.GetProperty("disposition").GetString();
+            if (!source.StartsWith("src/state-v2/", StringComparison.Ordinal) ||
+                !InventoryCovers(inventory, source)) return false;
+            if (disposition == "retained" &&
+                group.TryGetProperty("owner", out var owner) &&
+                owner.GetString() is "S5" or "S6" or "P5" or "P6" or "E1" &&
+                group.TryGetProperty("owner_member", out var member) &&
+                MemberExists(repository, member.GetString() ?? "") &&
+                group.TryGetProperty("evidence_path", out var evidence) &&
+                LandingPathExists(repository, evidence.GetString() ?? "")) continue;
+            if (disposition == "transferred" &&
+                group.GetProperty("owner").GetString() == "W14" &&
+                group.GetProperty("target_path").GetString() ==
+                    "src/canonical-json/import-boundary.test.ts" &&
+                group.GetProperty("evidence_path").GetString() ==
+                    "src/canonical-json/import-boundary.test.ts" &&
+                LandingPathExists(repository, "src/canonical-json/import-boundary.test.ts")) continue;
+            if (disposition == "reviewed_obsolete" &&
+                group.TryGetProperty("reason", out var reason) &&
+                !string.IsNullOrWhiteSpace(reason.GetString())) continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static bool ValidateW5Fixtures(JsonElement entry, string repository)
+    {
+        var fixtures = entry.GetProperty("fixture_dispositions").EnumerateArray().ToArray();
+        var expected = new HashSet<string>([
+            "positive-bootstrap", "positive-continuation", "positive-recovery-root",
+            "positive-reset", "compat-base-change", "compat-cache-contract-change",
+            "compat-continuation", "compat-contract-version-mismatch",
+            "compat-nondescendant-head", "compat-state-key-mismatch",
+            "compat-unknown-ancestry", "compat-unsafe-provenance",
+        ], StringComparer.Ordinal);
+        return fixtures.Length == expected.Count && fixtures.Select(fixture =>
+                fixture.GetProperty("id").GetString() ?? "").ToHashSet(StringComparer.Ordinal)
+                .SetEquals(expected) && fixtures.All(fixture =>
+                fixture.GetProperty("semantic_owner").GetString() is "S5" or "S6" or "P5" or "P6" or "E1" &&
+                LandingPathExists(repository,
+                    fixture.GetProperty("semantic_evidence_path").GetString() ?? "") &&
+                fixture.GetProperty("representation_disposition").GetString() == "reviewed_obsolete" &&
+                !string.IsNullOrWhiteSpace(
+                    fixture.GetProperty("representation_reason").GetString()));
+    }
+
+    private static bool ValidateW5ResidualScan(JsonElement entry, string repository)
+    {
+        var scan = entry.GetProperty("w5_residual_scan");
+        var forbidden = new HashSet<string>([
+            "src/state-v2", "state-manifest.v2.json", "state-manifest-v2/",
+            "state-manifest-v2-compat/", "regenerate-state-v2-fixtures.mjs",
+            "regenerate-state-v2-compat-fixtures.mjs", "StateManifestV2", "StateKeyV2",
+            "buildStateBundleV2", "classifyStateBundleV2", "validateStateManifestV2",
+            "serializeStateManifestV2", "checkStateManifestV2Compatibility",
+            "ExpectedStateManifestV2Context", "state_unsupported_legacy_v1",
+            "unsupported_legacy_v1",
+        ], StringComparer.Ordinal);
+        if (!TextArray(scan, "forbidden_tokens").ToHashSet(StringComparer.Ordinal)
+                .SetEquals(forbidden)) return false;
+        var evidence = TextArray(scan, "deletion_evidence_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var immutable = TextArray(scan, "immutable_provenance_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var historical = TextArray(scan, "historical_document_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var derived = TextArray(scan, "derived_bundle_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        if (!evidence.SetEquals([
+                "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+                "runtime/tests/fixtures/action-host/framework/replacement-record.json",
+            ]) ||
+            !immutable.SetEquals([
+                "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+            ]) ||
+            !historical.SetEquals([
+                "docs/00_project/project-context.md",
+                "docs/20_architecture/agent-runtime-rebaseline.md",
+                "docs/20_architecture/agent-session-format.md",
+                "docs/20_architecture/r1-legacy-removal-handoff.md",
+                "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+                "docs/20_architecture/runtime-protocol.md",
+                "docs/20_architecture/security-boundary.md",
+                "docs/20_architecture/session-ledger-and-prefix-contract.md",
+                "docs/20_architecture/state-manifest-v2.md",
+                "docs/90_roadmap/roadmap-seed.md",
+            ]) ||
+            !derived.SetEquals([".github/actions/agentic-pr-review/dist/index.js"])) return false;
+        foreach (var path in TrackedPaths(repository))
+        {
+            if (derived.Contains(path)) continue;
+            var fullPath = Path.Join(repository,
+                path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(fullPath)) continue;
+            var text = File.ReadAllText(fullPath);
+            if (evidence.Contains(path) || immutable.Contains(path)) continue;
+            if (historical.Contains(path))
+            {
+                if (!text.Contains("W5", StringComparison.Ordinal) ||
+                    text.Contains("remains the acceptance contract", StringComparison.Ordinal) ||
+                    text.Contains("under its current owner", StringComparison.Ordinal)) return false;
+                continue;
+            }
+            if (forbidden.Any(token => text.Contains(token, StringComparison.Ordinal))) return false;
+        }
+        return true;
     }
 
     private static bool ValidateW11Ownership(

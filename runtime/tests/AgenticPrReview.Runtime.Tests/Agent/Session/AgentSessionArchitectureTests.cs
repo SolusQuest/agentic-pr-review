@@ -15,7 +15,6 @@ public sealed class AgentSessionArchitectureTests
     private static readonly string[] RetiredTypeNames =
     [
         "ProviderSessionLedgerV1",
-        "StateManifestV2",
         "ReviewInputV1",
     ];
 

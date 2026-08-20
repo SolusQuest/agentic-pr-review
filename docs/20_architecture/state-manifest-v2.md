@@ -1,28 +1,23 @@
-# StateManifestV2 And v2 State Bundle
+# Historical StateManifestV2 And v2 State Bundle
 
-> **Rebaseline note (2026-07-24):** This remains the acceptance contract for
-> existing v2 state bundles. Before a public release, the implementation may
-> replace it with a simpler durable format because there are no active
-> downstream consumers. Preserve the semantic requirements—integrity,
-> repository and lineage binding, deterministic recovery, bounded growth, and
-> fail-closed parsing—rather than carrying this exact version structure into
-> every internal type. See
-> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
-> The target Agent state has a separate restricted storage class; this manifest
-> and the M4 repository-visible transport do not authorize plaintext reasoning,
-> tool results, or provider continuation material in Git-backed state.
+> **Retired by R4-W5 (issue #167):** The TypeScript StateV2 implementation,
+> schema, fixture corpora, and generators were removed after S5/S6/P5/P6/E1
+> replacement disposition. This document is historical M4 evidence only; it
+> does not define a current reader, converter, compatibility surface, fixture
+> owner, or acceptance contract. The retained C# Host owns the current
+> fail-closed state protections.
 
-Workstream-specific implementation guide for the M4 v2 state-bundle contract. This document does NOT re-state the shared M4 Batch #1 machinery — the sole normative source for cross-workstream vocabulary, byte caps, resolver semantics, traversal, safe-path sanitizer, deep-path oracle, and conformance vectors is [session-ledger-and-prefix-contract.md](./session-ledger-and-prefix-contract.md), section `## M4 Batch #1 Frozen Vocabulary`.
+This historical workstream guide records the former M4 v2 state-bundle contract. It does NOT re-state the shared M4 Batch #1 machinery — the sole historical source for cross-workstream vocabulary, byte caps, resolver semantics, traversal, safe-path sanitizer, deep-path oracle, and conformance vectors is [session-ledger-and-prefix-contract.md](./session-ledger-and-prefix-contract.md), section `## M4 Batch #1 Frozen Vocabulary`.
 
-Reader flow: read this document for `#48`'s workstream-specific bindings (schema, TypeScript public surface, workstream error types, filesystem layout of positive/negative fixtures) and follow anchor references to the shared contract for algorithmic details.
+The remaining sections preserve issue `#48`'s former bindings (schema, TypeScript public surface, workstream error types, and fixture layout) solely as historical deletion provenance.
 
 ## Purpose
 
-Turn the shared vocabulary into a concrete, byte-stable v2 manifest contract implemented under `src/state-v2/` and `src/canonical-json/`. All shared algorithms (resolver, traversal, sanitizer, truncation, oracle) are consumed by reference — the code in this workstream implements them; this document does not re-freeze them.
+The former workstream turned the shared vocabulary into a concrete, byte-stable v2 manifest contract under `src/state-v2/`. Its W5 removal did not delete the separately owned `src/canonical-json/` implementation. All shared algorithms (resolver, traversal, sanitizer, truncation, oracle) were consumed by reference; this historical record does not re-freeze them.
 
 ## Ownership boundary
 
-`#48` owns: the authoritative JSON Schema `protocol/schemas/state-manifest.v2.json`; the byte-stable canonical serializer; the closed-shape validator; the discriminated-union classifier for an already-loaded bundle; the pure builder; the pure host-compatibility comparator; the workstream diagnostic-code taxonomy; the workstream-specific bounded-aggregation algorithm; and the shared canonical-JSON helper under `src/canonical-json/` (per `### Canonical JSON helper (per-language)` in the shared contract).
+`#48` formerly owned the JSON Schema `protocol/schemas/state-manifest.v2.json`; the byte-stable serializer; the closed-shape validator; the discriminated-union classifier for an already-loaded bundle; the pure builder; the host-compatibility comparator; the workstream diagnostic-code taxonomy; and the workstream-specific bounded-aggregation algorithm. W5 removed those StateV2 surfaces. The shared canonical-JSON helper remains separately owned under `src/canonical-json/` (per `### Canonical JSON helper (per-language)` in the shared contract).
 
 Not owned by `#48`: filesystem I/O (owned by `#55`); artifact selection and stale-writer CAS (`#53`); ledger internal schema (`#49`); prefix materialization (`#50`); provider-run-metadata internal schema (`#51`); the live adapter and mode config (`#52`); cost harness (`#54`); `EpochId` generation (`#55`).
 

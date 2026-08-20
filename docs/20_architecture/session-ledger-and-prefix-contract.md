@@ -26,8 +26,8 @@ This document defines the cross-issue semantics for the project-owned live provi
 - Provider adapters own provider-specific request envelopes, cache markers, capability detection, telemetry mapping, and provider invocation. The core ledger schema remains provider-neutral. M4's reference profile is DeepSeek first-party OpenAI-compatible Chat Completions with automatic provider-owned prefix caching, no cache marker, no cache-disable claim, and no stateless mode; exact transport and model choices are frozen by the adapter issue.
 - The W2 Node wrapper and C# ActionHost own the current trusted launch boundary. Remaining TypeScript state and publisher families are migration evidence for their named R4 leaves, not the removed invocation host or a supported public Host.
 - M4 implementation must prove one explicit, default-off, trusted-workflow-only live path. Its deterministic and trusted live gates each use two separate workflow runs. It remains sticky-only, does not replace `claude-code-cli`, does not implement the full tool loop, and does not require production Native AOT release packaging.
-- M4 introduces `StateManifestV2`, which references an independent ledger file in the same state artifact bundle. The M4 live path writes and fully validates v2. Existing v1 paths remain outside this ledger contract until a separately documented breaking cutover.
-- A pre-v2 manifest is not migrated or used to construct a ledger. In the M4 live path, v1 is recognized as `unsupported_legacy_v1` and follows the safe bootstrap policy. A v1 rejection fixture prevents accidental reuse.
+- M4 historically introduced `StateManifestV2`, which referenced an independent ledger file in the same state artifact bundle. R4-W5 removed that TypeScript family, schema, fixtures, and generators after its C# replacement disposition; it is not a current state route.
+- A pre-v2 manifest was not migrated or used to construct a ledger. In the historical M4 live path, v1 was recognized as `unsupported_legacy_v1` and followed the safe bootstrap policy. The retained C# Host now owns current safe-bootstrap behavior.
 
 ## Scope And Non-Goals
 
@@ -86,13 +86,13 @@ The first M4 live path was experimental and explicit:
 
 The exact environment variable name, direct HTTP construction, selected model string, and provider request contract are implementation decisions under the live adapter issue. The reference adapter must conform to the DeepSeek OpenAI-compatible profile; Anthropic Messages-style behavior and gateway-specific behavior are not implicitly covered. The trust category and fail-closed rules are design decisions in #29. R4-W3 removed the TypeScript invocation hosts and their `LiveRuntimeInvocationContextV1` schema; current launch authority belongs to the W2 wrapper/C# ActionHost boundary.
 
-The closed `ReviewInputV1.host.review.runtimeProvider` enum is not expanded by M4. The #55 synthetic live-process bridge historically used the existing `"test"` value as a compatibility sentinel only; it was not a provider identity and must never be copied into the historical `ProviderRunMetadataV1`, the ledger, the manifest cache-contract identity, or published host metadata. After W3 and W12, neither `LiveRuntimeInvocationContextV1` nor provider-run metadata has current authority; the v2 manifest and C# Host-owned configuration carry the remaining historical identity inputs. A future decision to represent a real provider in `ReviewInputV1` requires a separately versioned protocol change and is outside #55.
+The closed `ReviewInputV1.host.review.runtimeProvider` enum is not expanded by M4. The #55 synthetic live-process bridge historically used the existing `"test"` value as a compatibility sentinel only; it was not a provider identity and must never be copied into the historical `ProviderRunMetadataV1`, the ledger, the manifest cache-contract identity, or published host metadata. After W3, W5, and W12, neither `LiveRuntimeInvocationContextV1`, StateV2, nor provider-run metadata has current authority; C# Host-owned configuration carries the retained current identity inputs. A future decision to represent a real provider in `ReviewInputV1` requires a separately versioned protocol change and is outside #55.
 
 ## StateManifestV2 And Legacy Policy
 
-The implementation-level contract library, exact schema `$id`, closed shape, byte caps, and classifier step order are documented in [`state-manifest-v2.md`](state-manifest-v2.md) (issue #48). That document is authoritative for JSON property names, diagnostic codes, and the composite ledger descriptor.
+The historical implementation-level contract library, former schema `$id`, closed shape, byte caps, and classifier step order are documented in [`state-manifest-v2.md`](state-manifest-v2.md) (issue #48). W5 removed its executable ownership; that document is deletion provenance, not a current authority for JSON property names, diagnostic codes, or a composite ledger descriptor.
 
-The existing state manifest is an active v1 contract for current action paths. It is not rewritten in place under `version: 1`. M4 adds a v2 shape for the ledger-aware live path.
+The historical M4 state-manifest discussion is not a current action contract. W5 removed the v2 shape rather than rewriting it in place under `version: 1`.
 
 The v2 manifest keeps the existing host-owned state metadata and adds ledger and provider-run-metadata descriptors with at least:
 
@@ -311,7 +311,7 @@ M4 implementation closure requires the two deterministic and two trusted live wo
 
 The following workstreams are created or explicitly identified before #29 closes. They may begin as refinement-ready outlines; each must be refined to agent-ready before implementation and must not redefine this document:
 
-1. `StateManifestV2` descriptor, v2 namespace, local bundle schema, host-fact authority, and v1 unsupported-state handling. It does not own artifact selection/upload or concurrency orchestration.
+1. Historical `StateManifestV2` descriptor, v2 namespace, local bundle schema, host-fact authority, and v1 unsupported-state handling. W5 removed that former TypeScript family after C# replacement proof; it did not own artifact selection/upload or concurrency orchestration.
 2. `ProviderSessionLedgerV1` schema, bounded content validation, integrity, unsafe/corrupt fixtures, over-bound restore bootstrap, and append-rejection behavior. It does not design rollover.
 3. Canonical logical projection, append-safe provider-prefix segment stream, `prefixSha256`, and golden byte/hash fixtures. It does not own the provider envelope.
 4. Provider capability, normalized usage, cache status, and `ProviderRunMetadataV1` sidecar schema.
@@ -980,7 +980,7 @@ This is a category precedence, not a code-unit-position precedence, so implement
 
 **Value-level scan** (a plain string node) uses code-unit-position precedence: the first violating code unit (by index) wins, whether it is a NUL or a surrogate.
 
-The initial invocation is `scan(rootValue, "", normalizePosition(rootSidecarSchema, {}), /*trustedChain=*/ true)`. This shared pseudocode is authoritative for `validateStateManifestV2` / `classifyStateBundleV2` step 5 / `buildStateBundleV2` step 3 (#48), for `LedgerParser.ParseAndValidate` and the builder pipeline (#49), and for `parseProviderRunMetadata` stage 2 (#51).
+The initial invocation was `scan(rootValue, "", normalizePosition(rootSidecarSchema, {}), /*trustedChain=*/ true)`. This shared pseudocode was authoritative for the removed StateV2 validator, classifier, and builder (#48), for `LedgerParser.ParseAndValidate` and the builder pipeline (#49), and for `parseProviderRunMetadata` stage 2 (#51).
 
 ### Shared conformance vectors
 

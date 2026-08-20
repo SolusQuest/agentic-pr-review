@@ -31,8 +31,7 @@ public sealed class RestrictedStateArchitectureTests
                     name.Contains("System.Net.Http", StringComparison.Ordinal) ||
                     name.Contains("IServiceProvider", StringComparison.Ordinal) ||
                     name.Contains("System.Diagnostics.Process", StringComparison.Ordinal) ||
-                    name.Contains("ProviderSessionLedgerV1", StringComparison.Ordinal) ||
-                    name.Contains("StateManifestV2", StringComparison.Ordinal);
+                    name.Contains("ProviderSessionLedgerV1", StringComparison.Ordinal);
             });
     }
 

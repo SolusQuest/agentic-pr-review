@@ -4,7 +4,7 @@ namespace AgenticPrReview.Runtime.Tests.Ledger;
 
 /// <summary>
 /// Author-time conformance checks for protocol/schemas/provider-session-ledger.v1.json,
-/// mirroring src/state-v2/schema-conformance.test.ts: no tuple-form items/additionalItems,
+/// requiring no tuple-form items/additionalItems,
 /// an acyclic local $ref graph, no $ref sibling keywords, and every object node closed
 /// with explicit additionalProperties: false.
 /// </summary>

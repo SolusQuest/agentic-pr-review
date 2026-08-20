@@ -207,7 +207,6 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Equal(new[]
         {
             ".github/workflows/ci.yml",
-            "src/state-v2/import-boundary.test.ts",
             "src/residual-reference-allowlist.ts",
             "docs/20_architecture/agent-runtime-rebaseline.md",
             "docs/20_architecture/r1-legacy-removal-handoff.md",
@@ -216,6 +215,40 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "docs/50_ai/agent-context.md",
         }, w3.GetProperty("referenced_tests_and_docs").EnumerateArray()
                 .Select(value => value.GetString()).ToArray());
+        var w5 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W5");
+        Assert.Equal("removed", w5.GetProperty("disposition").GetString());
+        Assert.Equal(new[]
+        {
+            "src/state-v2/",
+            "protocol/schemas/state-manifest.v2.json",
+            "protocol/fixtures/state-manifest-v2/",
+            "protocol/fixtures/state-manifest-v2-compat/",
+            "scripts/regenerate-state-v2-fixtures.mjs",
+            "scripts/regenerate-state-v2-compat-fixtures.mjs",
+        }, w5.GetProperty("removed_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.False(Directory.Exists(Path.Join(root, "src", "state-v2")));
+        Assert.False(File.Exists(Path.Join(root, "protocol", "schemas",
+            "state-manifest.v2.json")));
+        var w5Groups = w5.GetProperty("legacy_test_groups").EnumerateArray()
+            .ToArray();
+        Assert.Equal(25, w5Groups.Length);
+        Assert.Equal(25, w5Groups.Select(value => value.GetProperty("id").GetString())
+            .Distinct(StringComparer.Ordinal).Count());
+        var canonicalBoundary = w5Groups.Single(value => value.GetProperty("id")
+            .GetString() == "import-boundary.test.ts::canonical-json recursive AST filesystem boundary");
+        Assert.Equal("transferred", canonicalBoundary.GetProperty("disposition").GetString());
+        Assert.Equal("W14", canonicalBoundary.GetProperty("owner").GetString());
+        Assert.Equal("src/canonical-json/import-boundary.test.ts",
+            canonicalBoundary.GetProperty("target_path").GetString());
+        Assert.Equal(12, w5.GetProperty("fixture_dispositions").GetArrayLength());
+        Assert.Contains("compat-unsafe-provenance", w5.GetProperty("fixture_dispositions")
+            .EnumerateArray().Select(value => value.GetProperty("id").GetString()));
+        Assert.Contains("runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+            w5.GetProperty("w5_residual_scan").GetProperty("immutable_provenance_paths")
+                .EnumerateArray().Select(value => value.GetString()));
         var w6 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W6");
@@ -581,7 +614,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             w12.GetProperty("retained_evidence_paths").EnumerateArray()
                 .Select(value => value.GetString()));
         Assert.Contains(
-            "W5 opaque sidecar bytes descriptors hashes and fixtures remain under its current owner",
+            "W5 opaque sidecar bytes descriptors hashes and fixtures were removed by W5 after S5/S6/P5/P6/E1 disposition",
             w12.GetProperty("retained_owner_groups").EnumerateArray()
                 .Select(value => value.GetString()));
 
