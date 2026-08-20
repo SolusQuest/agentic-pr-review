@@ -1520,7 +1520,7 @@ internal static class FrameworkSupervisor
                 "S5 / #155 merged", "S6 / #156 merged", "P5 / #161 merged",
                 "P6 / #162 merged", "E1 / #178 framework evidence green",
                 "W3 / #165 merged", "W6 / #168 merged", "W7 / #169 merged",
-                "W12 / #173 merged",
+                "W12 / #174 merged",
             ], StringComparer.Ordinal)) ||
             !RequiredExactTextArray(entry, "updated_reference_paths", new HashSet<string>([
                 ".prettierignore", ".github/workflows/ci.yml",
@@ -1620,10 +1620,10 @@ internal static class FrameworkSupervisor
             !groups.Select(group => group.GetProperty("id").GetString() ?? "")
                 .ToHashSet(StringComparer.Ordinal).SetEquals(expected) ||
             entry.GetProperty("mapping_digest").GetString() !=
-                "c8c60db8919bc5b2cb8148e79d87c8e2f0082a3cb507c82b85c1ecd1cb7c25af" ||
+                "7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800" ||
             !StringComparer.Ordinal.Equals(
                 Sha256Text(W5MappingText(entry)),
-                "c8c60db8919bc5b2cb8148e79d87c8e2f0082a3cb507c82b85c1ecd1cb7c25af")) return false;
+                "7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800")) return false;
         foreach (var group in groups)
         {
             var source = group.GetProperty("source_path").GetString() ?? "";

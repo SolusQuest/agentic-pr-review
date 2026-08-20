@@ -190,7 +190,7 @@
         "W3 / #165 merged",
         "W6 / #168 merged",
         "W7 / #169 merged",
-        "W12 / #173 merged"
+        "W12 / #174 merged"
       ],
       "deletion_gate": "No StateV2 reader, converter, dual format, fixture consumer, or current claim remains.",
       "legacy_test_groups": [
@@ -291,10 +291,8 @@
         {
           "id": "empty-name-unknown-field.test.ts::closed names and unknown fields",
           "source_path": "src/state-v2/empty-name-unknown-field.test.ts",
-          "disposition": "retained",
-          "owner": "S5",
-          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateRecordCodecs.cs#AcceptedStateGenerationRecordCodec",
-          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateRecordCodecTests.cs"
+          "disposition": "reviewed_obsolete",
+          "reason": "Closed JSON-property names and Ajv diagnostic precedence belonged only to the removed StateV2 JSON reader; the current binary codec has no property-name parser or equivalent diagnostic surface."
         },
         {
           "id": "fixtures.test.ts::byte-identical StateV2 fixture bundles",
@@ -331,18 +329,14 @@
         {
           "id": "rfc3339.test.ts::accepted-state timestamp grammar",
           "source_path": "src/state-v2/rfc3339.test.ts",
-          "disposition": "retained",
-          "owner": "S5",
-          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
-          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs"
+          "disposition": "reviewed_obsolete",
+          "reason": "RFC 3339 grammar was parsed only by the removed StateV2 JSON reader; AcceptedStateSelector receives decoded records with bounded integer expiry values and has no timestamp-string parser."
         },
         {
           "id": "schema-conformance.test.ts::closed schema and reference validation",
           "source_path": "src/state-v2/schema-conformance.test.ts",
-          "disposition": "retained",
-          "owner": "S5",
-          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateRecordCodecs.cs#AcceptedStateGenerationRecordCodec",
-          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateRecordCodecTests.cs"
+          "disposition": "reviewed_obsolete",
+          "reason": "StateManifestV2 JSON Schema reference resolution, tuple-form items, and additionalItems validation were removed with the JSON schema and reader; the current binary codec does not resolve JSON Schema references."
         },
         {
           "id": "shared-vectors.test.ts::shared M4 vector projection",
@@ -423,8 +417,8 @@
         },
         {
           "id": "compat-contract-version-mismatch",
-          "semantic_owner": "S5",
-          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+          "semantic_disposition": "reviewed_obsolete",
+          "semantic_reason": "The expectedLedgerSchemaVersion versus StateV2 contract-version comparison belonged to the removed ledger/prefix composite compatibility reader; no current record codec or selector evaluates that boundary.",
           "representation_disposition": "reviewed_obsolete",
           "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
         },
@@ -457,7 +451,7 @@
           "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
         }
       ],
-      "mapping_digest": "c8c60db8919bc5b2cb8148e79d87c8e2f0082a3cb507c82b85c1ecd1cb7c25af",
+      "mapping_digest": "7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800",
       "updated_reference_paths": [
         ".prettierignore",
         ".github/workflows/ci.yml",

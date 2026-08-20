@@ -232,6 +232,19 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.False(Directory.Exists(Path.Join(root, "src", "state-v2")));
         Assert.False(File.Exists(Path.Join(root, "protocol", "schemas",
             "state-manifest.v2.json")));
+        Assert.Equal(new[]
+        {
+            "S5 / #155 merged",
+            "S6 / #156 merged",
+            "P5 / #161 merged",
+            "P6 / #162 merged",
+            "E1 / #178 framework evidence green",
+            "W3 / #165 merged",
+            "W6 / #168 merged",
+            "W7 / #169 merged",
+            "W12 / #174 merged",
+        }, w5.GetProperty("deletion_prerequisites").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
         var w5Groups = w5.GetProperty("legacy_test_groups").EnumerateArray()
             .ToArray();
         Assert.Equal(25, w5Groups.Length);
@@ -252,21 +265,21 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "deep-path-oracle.test.ts::M4 sidecar traversal oracle:reviewed_obsolete",
             "diagnostic-bounds.test.ts::bounded failure diagnostics:retained",
             "diagnostic-privacy.test.ts::private diagnostic suppression:retained",
-            "empty-name-unknown-field.test.ts::closed names and unknown fields:retained",
+            "empty-name-unknown-field.test.ts::closed names and unknown fields:reviewed_obsolete",
             "fixtures.test.ts::byte-identical StateV2 fixture bundles:reviewed_obsolete",
             "import-boundary.test.ts::StateV2 dependency and directory contract:reviewed_obsolete",
             "import-boundary.test.ts::canonical-json recursive AST filesystem boundary:transferred",
             "public-surface.test.ts::StateV2 barrel exports:reviewed_obsolete",
             "resolver-runtime-consequence.test.ts::M4 resolver runtime consequences:reviewed_obsolete",
-            "rfc3339.test.ts::accepted-state timestamp grammar:retained",
-            "schema-conformance.test.ts::closed schema and reference validation:retained",
+            "rfc3339.test.ts::accepted-state timestamp grammar:reviewed_obsolete",
+            "schema-conformance.test.ts::closed schema and reference validation:reviewed_obsolete",
             "shared-vectors.test.ts::shared M4 vector projection:reviewed_obsolete",
             "shared-vocabulary.test.ts::StateV2 vocabulary parity:reviewed_obsolete",
             "short-circuit-and-exhaustive.test.ts::failure precedence and exhaustive branches:retained",
             "strict-json.test.ts::strict JSON byte and duplicate-property rejection:reviewed_obsolete",
         }, w5Groups.Select(value => $"{value.GetProperty("id").GetString()}:{value.GetProperty("disposition").GetString()}")
             .Order(StringComparer.Ordinal).ToArray());
-        Assert.Equal("c8c60db8919bc5b2cb8148e79d87c8e2f0082a3cb507c82b85c1ecd1cb7c25af",
+        Assert.Equal("7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800",
             w5.GetProperty("mapping_digest").GetString());
         var canonicalBoundary = w5Groups.Single(value => value.GetProperty("id")
             .GetString() == "import-boundary.test.ts::canonical-json recursive AST filesystem boundary");
@@ -280,7 +293,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "compat-base-change:S5",
             "compat-cache-contract-change:reviewed_obsolete",
             "compat-continuation:S5",
-            "compat-contract-version-mismatch:S5",
+            "compat-contract-version-mismatch:reviewed_obsolete",
             "compat-nondescendant-head:S5",
             "compat-state-key-mismatch:S5",
             "compat-unknown-ancestry:S5",
