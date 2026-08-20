@@ -40,7 +40,7 @@
     "repoRelativePath": {
       "type": "string",
       "minLength": 1,
-      "description": "Normalized POSIX repo-relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths. Aligned with normalizeRepoRelativePath in src/utils.ts; serialized protocol JSON must already be normalized.",
+      "description": "Normalized POSIX repo-relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths. The embedded schema loaded by SchemaContracts owns this direct-runtime constraint; serialized protocol JSON must already be normalized.",
       "allOf": [
         {
           "pattern": "^[^/]"

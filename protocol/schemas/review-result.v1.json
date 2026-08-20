@@ -86,7 +86,7 @@
       "minLength": 1,
       "maxLength": 500,
       "pattern": "\\S",
-      "description": "Normalized POSIX relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths. Used for repo-relative finding paths and artifact-relative trace references; aligned with normalizeRepoRelativePath in src/utils.ts.",
+      "description": "Normalized POSIX relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths. Used for repo-relative finding paths and artifact-relative trace references; the embedded schema loaded by SchemaContracts owns this direct-runtime constraint.",
       "allOf": [
         {
           "pattern": "^[^/]"
