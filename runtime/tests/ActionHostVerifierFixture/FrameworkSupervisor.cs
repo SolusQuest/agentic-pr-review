@@ -1689,9 +1689,9 @@ internal static class FrameworkSupervisor
                 "docs/90_roadmap/roadmap-seed.md",
             ]) ||
             !derived.SetEquals([".github/actions/agentic-pr-review/dist/index.js"])) return false;
-        foreach (var path in TrackedPaths(repository))
+        foreach (var path in TrackedPaths(repository).Where(path =>
+                     !derived.Contains(path)))
         {
-            if (derived.Contains(path)) continue;
             var fullPath = Path.Join(repository,
                 path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPath)) continue;
