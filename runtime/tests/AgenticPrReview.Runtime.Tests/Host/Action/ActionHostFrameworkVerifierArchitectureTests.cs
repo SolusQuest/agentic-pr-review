@@ -754,14 +754,13 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.True(recordedW14Methods.SetEquals(expectedW14Methods));
         var exactRoundTripMethod =
             $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.CanonicalizationRoundTripsSemanticallyAndIsIdempotent)}";
-        foreach (var id in new[]
+        foreach (var disposition in new[]
                  {
                      "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
                      "edge-cases.test.ts::output parses to an equal JSON value",
-                 })
+                 }.Select(id => w14Dispositions.Single(value =>
+                     value.GetProperty("id").GetString() == id)))
         {
-            var disposition = w14Dispositions.Single(value =>
-                value.GetProperty("id").GetString() == id);
             Assert.Equal(new[] { exactRoundTripMethod },
                 disposition.GetProperty("evidence_methods").EnumerateArray()
                     .Select(value => value.GetString()).ToArray());

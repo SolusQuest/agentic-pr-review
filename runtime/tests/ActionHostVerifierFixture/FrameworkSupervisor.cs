@@ -2089,14 +2089,13 @@ internal static class FrameworkSupervisor
         var exactRoundTripMethod = new HashSet<string>([
             "CanonicalWriterTests#CanonicalizationRoundTripsSemanticallyAndIsIdempotent",
         ], StringComparer.Ordinal);
-        foreach (var id in new[]
+        foreach (var disposition in new[]
                  {
                      "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
                      "edge-cases.test.ts::output parses to an equal JSON value",
-                 })
+                 }.Select(id => dispositions.Single(value =>
+                     value.GetProperty("id").GetString() == id)))
         {
-            var disposition = dispositions.Single(value =>
-                value.GetProperty("id").GetString() == id);
             if (!RequiredExactTextArray(disposition, "evidence_methods",
                     exactRoundTripMethod, method =>
                         EvidenceMethodExists(repository, method))) return false;
