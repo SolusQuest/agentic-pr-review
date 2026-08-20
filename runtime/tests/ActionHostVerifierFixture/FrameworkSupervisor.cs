@@ -1188,6 +1188,12 @@ internal static class FrameworkSupervisor
                 return false;
             }
 
+            if (entry.GetProperty("leaf_id").GetString() == "W14" &&
+                !ValidateW14Ownership(entry, repository))
+            {
+                return false;
+            }
+
             if (entry.GetProperty("leaf_id").GetString() == "W15" &&
                 !RequiredObjectArray(entry,
                     "retired_w8_consumer_handoffs", 2,
@@ -1542,7 +1548,10 @@ internal static class FrameworkSupervisor
                 "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
                 "runtime/tests/fixtures/action-host/framework/replacement-record.json",
-            ], StringComparer.Ordinal), value => LandingPathExists(repository, value)) ||
+            ], StringComparer.Ordinal), value =>
+                value == "src/canonical-json/import-boundary.test.ts"
+                    ? !LandingPathExists(repository, value)
+                    : LandingPathExists(repository, value)) ||
             !ValidateW5ReferenceDispositions(entry) ||
             !ValidateW5LegacyGroups(entry, repository, inventory) ||
             !ValidateW5Fixtures(entry, repository) ||
@@ -1620,10 +1629,10 @@ internal static class FrameworkSupervisor
             !groups.Select(group => group.GetProperty("id").GetString() ?? "")
                 .ToHashSet(StringComparer.Ordinal).SetEquals(expected) ||
             entry.GetProperty("mapping_digest").GetString() !=
-                "7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800" ||
+                "1c143510afc05a57af6b7bca8ccaa982329bd3409e77e39b7b72be99346a69c2" ||
             !StringComparer.Ordinal.Equals(
                 Sha256Text(W5MappingText(entry)),
-                "7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800")) return false;
+                "1c143510afc05a57af6b7bca8ccaa982329bd3409e77e39b7b72be99346a69c2")) return false;
         foreach (var group in groups)
         {
             var source = group.GetProperty("source_path").GetString() ?? "";
@@ -1637,13 +1646,15 @@ internal static class FrameworkSupervisor
                 MemberExists(repository, member.GetString() ?? "") &&
                 group.TryGetProperty("evidence_path", out var evidence) &&
                 LandingPathExists(repository, evidence.GetString() ?? "")) continue;
-            if (disposition == "transferred" &&
+            if (disposition == "retired_by_w14" &&
                 group.GetProperty("owner").GetString() == "W14" &&
                 group.GetProperty("target_path").GetString() ==
                     "src/canonical-json/import-boundary.test.ts" &&
                 group.GetProperty("evidence_path").GetString() ==
-                    "src/canonical-json/import-boundary.test.ts" &&
-                LandingPathExists(repository, "src/canonical-json/import-boundary.test.ts")) continue;
+                    "runtime/tests/fixtures/action-host/framework/replacement-record.json" &&
+                !LandingPathExists(repository, "src/canonical-json/import-boundary.test.ts") &&
+                group.TryGetProperty("reason", out var retirementReason) &&
+                !string.IsNullOrWhiteSpace(retirementReason.GetString())) continue;
             if (disposition == "reviewed_obsolete" &&
                 group.TryGetProperty("reason", out var reason) &&
                 !string.IsNullOrWhiteSpace(reason.GetString())) continue;
@@ -1914,6 +1925,256 @@ internal static class FrameworkSupervisor
             expected.All(pair => Sha256(Path.Join(repository,
                     pair.Key.Replace('/', Path.DirectorySeparatorChar))) ==
                 pair.Value);
+    }
+
+    private static bool ValidateW14Ownership(JsonElement entry, string repository)
+    {
+        var removedPaths = new HashSet<string>([
+            "src/canonical-json/index.ts",
+            "src/canonical-json/index.test.ts",
+            "src/canonical-json/edge-cases.test.ts",
+            "src/canonical-json/import-boundary.test.ts",
+        ], StringComparer.Ordinal);
+        var ownerMembers = new HashSet<string>([
+            "runtime/src/AgenticPrReview.Runtime/Canonical/Rfc8785Writer.cs#Rfc8785Writer",
+            "runtime/src/AgenticPrReview.Runtime/Canonical/JsonElementCanonicalizer.cs#JsonElementCanonicalizer",
+            "runtime/src/AgenticPrReview.Runtime/Canonical/EcmaScriptNumberFormatter.cs#EcmaScriptNumberFormatter",
+            "runtime/src/AgenticPrReview.Runtime/Canonical/LenientJsonObjectEnumerator.cs#LenientJsonObjectEnumerator",
+            "runtime/src/AgenticPrReview.Runtime/Canonical/Rfc8785CanonicalizationException.cs#Rfc8785CanonicalizationException",
+            "runtime/src/AgenticPrReview.Runtime/Canonical/CanonicalJsonWriter.cs#CanonicalJsonWriter",
+        ], StringComparer.Ordinal);
+        var evidencePaths = new HashSet<string>([
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/CanonicalWriterTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/EcmaScriptNumberFormatterCorpusTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/LenientJsonObjectEnumeratorTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixCanonicalBoundaryTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixEnvelopeValidatorTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixGoldenVectorTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureManifestRejectionTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixMaterializerTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerBuilderTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        ], StringComparer.Ordinal);
+        var historicalPaths = new HashSet<string>([
+            "protocol/fixtures/prefix-contract/v1/manifest.json",
+            "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+        ], StringComparer.Ordinal);
+        if (entry.GetProperty("disposition").GetString() != "removed" ||
+            !RequiredExactTextArray(entry, "removed_paths", removedPaths,
+                value => !LandingPathExists(repository, value)) ||
+            Directory.Exists(Path.Join(repository, "src", "canonical-json")) ||
+            !RequiredExactTextArray(entry, "owner_members", ownerMembers,
+                member => MemberExists(repository, member)) ||
+            !RequiredExactTextArray(entry, "retained_evidence_paths", evidencePaths,
+                value => LandingPathExists(repository, value)) ||
+            !RequiredExactTextArray(entry, "historical_provenance_paths", historicalPaths,
+                value => LandingPathExists(repository, value)) ||
+            !RequiredExactTextArray(entry, "framework_scenario_ids",
+                new HashSet<string>(["dispatch-continuation"], StringComparer.Ordinal),
+                FrameworkScenarioIds().Contains) ||
+            !RequiredExactTextArray(entry, "deletion_prerequisites",
+                new HashSet<string>([
+                    "W3 W4 W5 W6 W11 and W12 merged",
+                    "repository-wide no-import proof",
+                    "E1 green",
+                ], StringComparer.Ordinal)) ||
+            !ValidateW14TestDispositions(entry, repository) ||
+            !ValidateW14ResidualScan(entry, repository)) return false;
+
+        var cap = entry.GetProperty("cap_precedence_difference");
+        return RequiredText(cap, "retired_behavior") &&
+            RequiredText(cap, "retained_behavior") &&
+            RequiredExactTextArray(cap, "evidence_methods",
+                new HashSet<string>([
+                    "CanonicalWriterTests#DiscardModeRemainsLatchedAfterTheFirstExceededAppend",
+                    "PrefixCanonicalBoundaryTests#EarlyOversizeStringDoesNotMaskLaterLoneSurrogate",
+                    "PrefixStagePrecedenceTests#CanonicalDefectBeatsEnvelopeCap",
+                ], StringComparer.Ordinal), method =>
+                    EvidenceMethodExists(repository, method)) &&
+            RequiredExactTextArray(entry, "retained_integration_evidence_methods",
+                new HashSet<string>([
+                    "PrefixGoldenVectorTests#DigestVectorsMatch",
+                    "PrefixGoldenVectorTests#InteractionVectorsMatch",
+                    "PrefixFixtureManifestRejectionTests#SyntheticManifestViolationsReachTheirIntendedBranch",
+                    "LedgerBuilderTests#CacheContractDigestMatchesIndependentSevenFieldKnownAnswer",
+                    "ActionHostFrameworkVerifierArchitectureTests#ReplacementAndInventoryArtifactsAreClosedAndPinned",
+                ], StringComparer.Ordinal), method =>
+                    EvidenceMethodExists(repository, method));
+    }
+
+    private static bool ValidateW14TestDispositions(
+        JsonElement entry,
+        string repository)
+    {
+        var expected = new HashSet<string>([
+            "index.test.ts::sorts object keys by UTF-16 code units",
+            "index.test.ts::emits ECMAScript ToString for numbers",
+            "index.test.ts::serializes negative zero as 0 per RFC 8785",
+            "index.test.ts::rejects NaN Infinity and -Infinity",
+            "index.test.ts::rejects non-JSON JavaScript values and built-ins",
+            "index.test.ts::rejects cyclic structures",
+            "index.test.ts::rejects sparse arrays",
+            "index.test.ts::rejects symbol-keyed own properties",
+            "index.test.ts::rejects accessor properties",
+            "index.test.ts::rejects non-enumerable own properties",
+            "index.test.ts::rejects custom object prototypes",
+            "index.test.ts::rejects arrays with extra string properties",
+            "index.test.ts::rejects arrays with accessor indices",
+            "index.test.ts::rejects arrays with custom prototypes",
+            "index.test.ts::rejects lone surrogates in values and names",
+            "index.test.ts::produces byte-stable output on repeated calls",
+            "index.test.ts::does not import node fs",
+            "edge-cases.test.ts::exports canonical JSON version 1",
+            "edge-cases.test.ts::positive and negative zero are byte-equal",
+            "edge-cases.test.ts::accepts a null-prototype object",
+            "edge-cases.test.ts::accepts a repeated non-cyclic reference",
+            "edge-cases.test.ts::sorts non-ASCII names by UTF-16 code units",
+            "edge-cases.test.ts::encodes ordinary Unicode without unnecessary escaping",
+            "edge-cases.test.ts::encodes controls with unicode escapes",
+            "edge-cases.test.ts::encodes standard short escapes",
+            "edge-cases.test.ts::preserves supplementary-plane characters",
+            "edge-cases.test.ts::nested rejection carries a useful path",
+            "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
+            "edge-cases.test.ts::output parses to an equal JSON value",
+            "edge-cases.test.ts::near-cap performance smoke",
+            "import-boundary.test.ts::canonical-json recursive AST filesystem boundary",
+        ], StringComparer.Ordinal);
+        var allowedMethods = new HashSet<string>([
+            "CanonicalWriterTests#ObjectKeysSortByUtf16CodeUnits",
+            "CanonicalWriterTests#NumberFormattingMatchesEcmaScript",
+            "EcmaScriptNumberFormatterCorpusTests#MatchesNodeCorpus",
+            "CanonicalWriterTests#NonFiniteNumbersAreRejected",
+            "CanonicalWriterTests#LoneSurrogateIsRejected",
+            "PrefixCanonicalBoundaryTests#InvalidPropertyNameAtOpenJsonRoot",
+            "PrefixMaterializerTests#SameInputProducesByteIdenticalOutput",
+            "PrefixGoldenVectorTests#FramingVectorsMatch",
+            "CanonicalWriterTests#StringEscapingMatchesRfc8785",
+            "PrefixCanonicalBoundaryTests#InvalidPropertyNameUnderUnknownAncestor",
+            "LenientJsonObjectEnumeratorTests#LongCommonPrefixSortingHasLinearDecodedWork",
+            "PrefixCanonicalBoundaryTests#OversizeStringValidationAllocationIsBoundedBelowTokenSize",
+        ], StringComparer.Ordinal);
+        var dispositions = entry.GetProperty("typescript_test_dispositions")
+            .EnumerateArray().ToArray();
+        if (dispositions.Length != expected.Count ||
+            !dispositions.Select(value => value.GetProperty("id").GetString() ?? "")
+                .ToHashSet(StringComparer.Ordinal).SetEquals(expected) ||
+            dispositions.Count(value => value.GetProperty("disposition").GetString() ==
+                "retained") != 16 ||
+            dispositions.Count(value => value.GetProperty("disposition").GetString() ==
+                "reviewed_obsolete") != 15) return false;
+
+        foreach (var disposition in dispositions)
+        {
+            var id = disposition.GetProperty("id").GetString() ?? "";
+            var source = disposition.GetProperty("source_path").GetString() ?? "";
+            if (!id.StartsWith(Path.GetFileName(source) + "::", StringComparison.Ordinal) ||
+                source is not (
+                    "src/canonical-json/index.test.ts" or
+                    "src/canonical-json/edge-cases.test.ts" or
+                    "src/canonical-json/import-boundary.test.ts")) return false;
+            if (disposition.GetProperty("disposition").GetString() == "retained")
+            {
+                if (!RequiredTextArray(disposition, "evidence_methods", method =>
+                        allowedMethods.Contains(method) &&
+                        EvidenceMethodExists(repository, method))) return false;
+                continue;
+            }
+            if (disposition.GetProperty("disposition").GetString() ==
+                    "reviewed_obsolete" &&
+                RequiredText(disposition, "reason")) continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static bool EvidenceMethodExists(string repository, string evidence)
+    {
+        var parts = evidence.Split('#', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2) return false;
+        var testRoot = Path.Join(repository, "runtime", "tests",
+            "AgenticPrReview.Runtime.Tests");
+        return Directory.EnumerateFiles(testRoot, "*.cs", SearchOption.AllDirectories)
+            .Select(File.ReadAllText)
+            .Any(source =>
+                source.Contains($"class {parts[0]}", StringComparison.Ordinal) &&
+                source.Contains($" {parts[1]}(", StringComparison.Ordinal));
+    }
+
+    private static bool ValidateW14ResidualScan(JsonElement entry, string repository)
+    {
+        var scan = entry.GetProperty("w14_residual_scan");
+        var forbidden = TextArray(scan, "forbidden_tokens")
+            .ToHashSet(StringComparer.Ordinal);
+        var evidence = TextArray(scan, "deletion_evidence_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var immutable = TextArray(scan, "immutable_provenance_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var historical = TextArray(scan, "historical_document_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var currentPosition = TextArray(scan, "current_position_document_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var derived = TextArray(scan, "derived_bundle_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        if (!forbidden.SetEquals([
+                "src/canonical-json", "canonicalJsonBytes",
+                "CANONICAL_JSON_VERSION", "CanonicalJsonValue",
+                "CanonicalJsonInputError", "CanonicalJsonByteCapError",
+            ]) ||
+            !evidence.SetEquals([
+                "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+                "runtime/tests/fixtures/action-host/framework/replacement-record.json",
+            ]) ||
+            !immutable.SetEquals([
+                "protocol/fixtures/prefix-contract/",
+                "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+            ]) ||
+            !historical.SetEquals([
+                "docs/20_architecture/session-ledger-and-prefix-contract.md",
+                "docs/20_architecture/state-manifest-v2.md",
+            ]) ||
+            !currentPosition.SetEquals([
+                "docs/00_project/project-context.md",
+                "docs/20_architecture/agent-runtime-rebaseline.md",
+                "docs/20_architecture/r1-legacy-removal-handoff.md",
+                "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+                "docs/50_ai/agent-context.md",
+                "docs/90_roadmap/roadmap-seed.md",
+            ]) ||
+            !derived.SetEquals([".github/actions/agentic-pr-review/dist/index.js"]))
+        {
+            return false;
+        }
+
+        const string retirementMarker =
+            "R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.";
+        foreach (var path in TrackedPaths(repository).Where(path =>
+                     !derived.Contains(path)))
+        {
+            var fullPath = Path.Join(repository,
+                path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(fullPath)) continue;
+            var text = File.ReadAllText(fullPath);
+            if (evidence.Contains(path) ||
+                path == "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json" ||
+                path.StartsWith("protocol/fixtures/prefix-contract/",
+                    StringComparison.Ordinal)) continue;
+            if (historical.Contains(path) || currentPosition.Contains(path))
+            {
+                if (!text.Contains(retirementMarker, StringComparison.Ordinal) ||
+                    currentPosition.Contains(path) && text.Split('\n').Any(line =>
+                        forbidden.Any(token =>
+                            line.Contains(token, StringComparison.Ordinal)) &&
+                        !line.Contains(retirementMarker, StringComparison.Ordinal)))
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (forbidden.Any(token => text.Contains(token,
+                    StringComparison.Ordinal))) return false;
+        }
+        return true;
     }
 
     private static bool ValidateW12Ownership(JsonElement entry, string repository) =>

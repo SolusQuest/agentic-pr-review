@@ -1,7 +1,7 @@
 {
   "schema": "apr.action-host.framework-evidence.v3",
-  "source_inventory_digest": "5d688deda4c9697fe9c6d9481f74354da9096c25decb3a357afc4d2e49d05720",
-  "replacement_record_digest": "773a7df6f6bee1251909310ccc630255b2250472538968c118ebdcc22e7f7076",
+  "source_inventory_digest": "3ea93211cee0db8c9ea851da59f7d4c76fede86596623a4675dbeb2910b40b20",
+  "replacement_record_digest": "3ac456f8cb5bdd046da9169332996e216e453516f3a80b46737650fc270a855f",
   "base_inventory_digest": "7eacf6e0aacac15a99330e1c54050d4d259688f60ab729c9b0d6383b1f584b6d",
   "canary_table_digest": "e66aaf2ab5881094a6c7425b579c65d4fd4989b3486b0e5464105355837acd4b",
   "scenarios": [

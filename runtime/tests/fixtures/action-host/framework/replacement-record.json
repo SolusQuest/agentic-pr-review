@@ -309,10 +309,11 @@
         {
           "id": "import-boundary.test.ts::canonical-json recursive AST filesystem boundary",
           "source_path": "src/state-v2/import-boundary.test.ts",
-          "disposition": "transferred",
+          "disposition": "retired_by_w14",
           "owner": "W14",
           "target_path": "src/canonical-json/import-boundary.test.ts",
-          "evidence_path": "src/canonical-json/import-boundary.test.ts"
+          "evidence_path": "runtime/tests/fixtures/action-host/framework/replacement-record.json",
+          "reason": "W14 removed the transferred TypeScript family and records the no-filesystem assertion as reviewed obsolete because no implementation remains behind that boundary."
         },
         {
           "id": "public-surface.test.ts::StateV2 barrel exports",
@@ -451,7 +452,7 @@
           "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
         }
       ],
-      "mapping_digest": "7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800",
+      "mapping_digest": "1c143510afc05a57af6b7bca8ccaa982329bd3409e77e39b7b72be99346a69c2",
       "updated_reference_paths": [
         ".prettierignore",
         ".github/workflows/ci.yml",
@@ -1555,18 +1556,310 @@
         "protocol/fixtures/prefix-contract/"
       ],
       "classification": "remove_after_last_consumer_gate",
-      "protective_behaviors": [
-        "RFC 8785 numeric string and key ordering",
-        "invalid Unicode and number rejection",
-        "canonical bounds and canary behavior"
+      "disposition": "removed",
+      "removed_paths": [
+        "src/canonical-json/index.ts",
+        "src/canonical-json/index.test.ts",
+        "src/canonical-json/edge-cases.test.ts",
+        "src/canonical-json/import-boundary.test.ts"
       ],
-      "csharp_owners": ["CanonicalJsonWriter", "PrefixGoldenVectorTests"],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/CanonicalWriterTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/EcmaScriptNumberFormatterCorpusTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/LenientJsonObjectEnumeratorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixCanonicalBoundaryTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixEnvelopeValidatorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixGoldenVectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureManifestRejectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixMaterializerTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerBuilderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+      ],
+      "historical_provenance_paths": [
+        "protocol/fixtures/prefix-contract/v1/manifest.json",
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Canonical/Rfc8785Writer.cs#Rfc8785Writer",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/JsonElementCanonicalizer.cs#JsonElementCanonicalizer",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/EcmaScriptNumberFormatter.cs#EcmaScriptNumberFormatter",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/LenientJsonObjectEnumerator.cs#LenientJsonObjectEnumerator",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/Rfc8785CanonicalizationException.cs#Rfc8785CanonicalizationException",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/CanonicalJsonWriter.cs#CanonicalJsonWriter"
+      ],
+      "typescript_test_dispositions": [
+        {
+          "id": "index.test.ts::sorts object keys by UTF-16 code units",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#ObjectKeysSortByUtf16CodeUnits"]
+        },
+        {
+          "id": "index.test.ts::emits ECMAScript ToString for numbers",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "CanonicalWriterTests#NumberFormattingMatchesEcmaScript",
+            "EcmaScriptNumberFormatterCorpusTests#MatchesNodeCorpus"
+          ]
+        },
+        {
+          "id": "index.test.ts::serializes negative zero as 0 per RFC 8785",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#NumberFormattingMatchesEcmaScript"]
+        },
+        {
+          "id": "index.test.ts::rejects NaN Infinity and -Infinity",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#NonFiniteNumbersAreRejected"]
+        },
+        {
+          "id": "index.test.ts::rejects non-JSON JavaScript values and built-ins",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The retained C# canonicalizer consumes a closed JsonElement or typed Ledger model, not arbitrary JavaScript values or built-ins."
+        },
+        {
+          "id": "index.test.ts::rejects cyclic structures",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The retained closed JsonElement and typed Ledger inputs cannot contain JavaScript object-graph cycles."
+        },
+        {
+          "id": "index.test.ts::rejects sparse arrays",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Sparse-array holes are JavaScript object-model mechanics absent from the retained closed JSON input domain."
+        },
+        {
+          "id": "index.test.ts::rejects symbol-keyed own properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Symbol-keyed properties are outside JSON and absent from the retained closed input domain."
+        },
+        {
+          "id": "index.test.ts::rejects accessor properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Getter and setter descriptors are JavaScript mechanics; the retained owner reads inert JsonElement tokens."
+        },
+        {
+          "id": "index.test.ts::rejects non-enumerable own properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Property enumerability is a JavaScript descriptor concern absent from JsonElement."
+        },
+        {
+          "id": "index.test.ts::rejects custom object prototypes",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Prototype identity is not represented by the retained closed JSON input model."
+        },
+        {
+          "id": "index.test.ts::rejects arrays with extra string properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "JsonElement arrays expose only ordered elements and cannot carry JavaScript side properties."
+        },
+        {
+          "id": "index.test.ts::rejects arrays with accessor indices",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Accessor indices are JavaScript descriptor mechanics absent from JsonElement arrays."
+        },
+        {
+          "id": "index.test.ts::rejects arrays with custom prototypes",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Array prototype identity is not represented by the retained closed JSON input model."
+        },
+        {
+          "id": "index.test.ts::rejects lone surrogates in values and names",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "CanonicalWriterTests#LoneSurrogateIsRejected",
+            "PrefixCanonicalBoundaryTests#InvalidPropertyNameAtOpenJsonRoot"
+          ]
+        },
+        {
+          "id": "index.test.ts::produces byte-stable output on repeated calls",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "PrefixMaterializerTests#SameInputProducesByteIdenticalOutput",
+            "PrefixGoldenVectorTests#FramingVectorsMatch"
+          ]
+        },
+        {
+          "id": "index.test.ts::does not import node fs",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "W14 removes the complete TypeScript implementation, so no TypeScript dependency boundary remains to enforce."
+        },
+        {
+          "id": "edge-cases.test.ts::exports canonical JSON version 1",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The private TypeScript version export has no surviving consumer and is removed without a compatibility alias."
+        },
+        {
+          "id": "edge-cases.test.ts::positive and negative zero are byte-equal",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#NumberFormattingMatchesEcmaScript"]
+        },
+        {
+          "id": "edge-cases.test.ts::accepts a null-prototype object",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Null-prototype acceptance is a JavaScript object-model rule absent from the retained JsonElement domain."
+        },
+        {
+          "id": "edge-cases.test.ts::accepts a repeated non-cyclic reference",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Reference alias identity is not represented after values are parsed into the retained JsonElement domain."
+        },
+        {
+          "id": "edge-cases.test.ts::sorts non-ASCII names by UTF-16 code units",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#ObjectKeysSortByUtf16CodeUnits"]
+        },
+        {
+          "id": "edge-cases.test.ts::encodes ordinary Unicode without unnecessary escaping",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::encodes controls with unicode escapes",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::encodes standard short escapes",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::preserves supplementary-plane characters",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::nested rejection carries a useful path",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "PrefixCanonicalBoundaryTests#InvalidPropertyNameUnderUnknownAncestor"
+          ],
+          "deliberate_difference": "The retained host emits bounded typed paths for its closed JSON domain rather than exposing the retired TypeScript exception class."
+        },
+        {
+          "id": "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["PrefixGoldenVectorTests#FramingVectorsMatch"]
+        },
+        {
+          "id": "edge-cases.test.ts::output parses to an equal JSON value",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["PrefixGoldenVectorTests#FramingVectorsMatch"]
+        },
+        {
+          "id": "edge-cases.test.ts::near-cap performance smoke",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "LenientJsonObjectEnumeratorTests#LongCommonPrefixSortingHasLinearDecodedWork",
+            "PrefixCanonicalBoundaryTests#OversizeStringValidationAllocationIsBoundedBelowTokenSize"
+          ],
+          "deliberate_difference": "The retained C# path locks linear decoded-name work and bounded allocation instead of a wall-clock threshold."
+        },
+        {
+          "id": "import-boundary.test.ts::canonical-json recursive AST filesystem boundary",
+          "source_path": "src/canonical-json/import-boundary.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "W14 removes the complete TypeScript implementation, leaving no module whose filesystem imports require policing."
+        }
+      ],
+      "cap_precedence_difference": {
+        "retired_behavior": "The TypeScript byte cap throws during traversal.",
+        "retained_behavior": "The C# writer enters discard and count-only mode so a later canonical-domain defect can take precedence over the cap result.",
+        "evidence_methods": [
+          "CanonicalWriterTests#DiscardModeRemainsLatchedAfterTheFirstExceededAppend",
+          "PrefixCanonicalBoundaryTests#EarlyOversizeStringDoesNotMaskLaterLoneSurrogate",
+          "PrefixStagePrecedenceTests#CanonicalDefectBeatsEnvelopeCap"
+        ]
+      },
+      "retained_integration_evidence_methods": [
+        "PrefixGoldenVectorTests#DigestVectorsMatch",
+        "PrefixGoldenVectorTests#InteractionVectorsMatch",
+        "PrefixFixtureManifestRejectionTests#SyntheticManifestViolationsReachTheirIntendedBranch",
+        "LedgerBuilderTests#CacheContractDigestMatchesIndependentSevenFieldKnownAnswer",
+        "ActionHostFrameworkVerifierArchitectureTests#ReplacementAndInventoryArtifactsAreClosedAndPinned"
+      ],
+      "protective_behaviors": [
+        "RFC 8785 numeric string and UTF-16 key ordering",
+        "invalid Unicode duplicate property and non-finite number rejection",
+        "bounded canonical output with fail-closed diagnostic precedence",
+        "byte-identical prefix identities and Ledger cache-contract known answer"
+      ],
+      "csharp_owners": [
+        "Rfc8785Writer",
+        "JsonElementCanonicalizer",
+        "EcmaScriptNumberFormatter",
+        "LenientJsonObjectEnumerator",
+        "Rfc8785CanonicalizationException",
+        "CanonicalJsonWriter",
+        "PrefixGoldenVectorTests"
+      ],
       "framework_scenario_ids": ["dispatch-continuation"],
       "deletion_prerequisites": [
         "W3 W4 W5 W6 W11 and W12 merged",
         "repository-wide no-import proof",
         "E1 green"
       ],
+      "w14_residual_scan": {
+        "forbidden_tokens": [
+          "src/canonical-json",
+          "canonicalJsonBytes",
+          "CANONICAL_JSON_VERSION",
+          "CanonicalJsonValue",
+          "CanonicalJsonInputError",
+          "CanonicalJsonByteCapError"
+        ],
+        "deletion_evidence_paths": [
+          "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+          "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+        ],
+        "immutable_provenance_paths": [
+          "protocol/fixtures/prefix-contract/",
+          "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+        ],
+        "historical_document_paths": [
+          "docs/20_architecture/session-ledger-and-prefix-contract.md",
+          "docs/20_architecture/state-manifest-v2.md"
+        ],
+        "current_position_document_paths": [
+          "docs/00_project/project-context.md",
+          "docs/20_architecture/agent-runtime-rebaseline.md",
+          "docs/20_architecture/r1-legacy-removal-handoff.md",
+          "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+          "docs/50_ai/agent-context.md",
+          "docs/90_roadmap/roadmap-seed.md"
+        ],
+        "derived_bundle_paths": [".github/actions/agentic-pr-review/dist/index.js"]
+      },
       "deletion_gate": "No TypeScript canonicalizer, import, alias, generator, export, or current documentation claim remains."
     },
     {

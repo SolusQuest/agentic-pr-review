@@ -13,11 +13,11 @@ The remaining sections preserve issue `#48`'s former bindings (schema, TypeScrip
 
 ## Purpose
 
-The former workstream turned the shared vocabulary into a concrete, byte-stable v2 manifest contract under `src/state-v2/`. Its W5 removal did not delete the separately owned `src/canonical-json/` implementation. All shared algorithms (resolver, traversal, sanitizer, truncation, oracle) were consumed by reference; this historical record does not re-freeze them.
+The former workstream turned the shared vocabulary into a concrete, byte-stable v2 manifest contract under `src/state-v2/`. Its W5 removal initially left the separately owned `src/canonical-json/` implementation for W14. All shared algorithms (resolver, traversal, sanitizer, truncation, oracle) were consumed by reference; this historical record does not re-freeze them. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
 ## Ownership boundary
 
-`#48` formerly owned the JSON Schema `protocol/schemas/state-manifest.v2.json`; the byte-stable serializer; the closed-shape validator; the discriminated-union classifier for an already-loaded bundle; the pure builder; the host-compatibility comparator; the workstream diagnostic-code taxonomy; and the workstream-specific bounded-aggregation algorithm. W5 removed those StateV2 surfaces. The shared canonical-JSON helper remains separately owned under `src/canonical-json/` (per `### Canonical JSON helper (per-language)` in the shared contract).
+`#48` formerly owned the JSON Schema `protocol/schemas/state-manifest.v2.json`; the byte-stable serializer; the closed-shape validator; the discriminated-union classifier for an already-loaded bundle; the pure builder; the host-compatibility comparator; the workstream diagnostic-code taxonomy; and the workstream-specific bounded-aggregation algorithm. W5 removed those StateV2 surfaces. The shared TypeScript canonical-JSON helper then remained under `src/canonical-json/` only until W14 closed its final consumer and evidence gate.
 
 Not owned by `#48`: filesystem I/O (owned by `#55`); artifact selection and stale-writer CAS (`#53`); ledger internal schema (`#49`); prefix materialization (`#50`); provider-run-metadata internal schema (`#51`); the live adapter and mode config (`#52`); cost harness (`#54`); `EpochId` generation (`#55`).
 
@@ -40,7 +40,7 @@ The v2 state-bundle directory layout consumed by `classifyStateBundleV2` is exac
 
 `src/state-v2/index.ts` exports the following names (the authoritative surface is asserted by `src/state-v2/public-surface.test.ts`): types `StateManifestV2`, `StateManifestV2Input`, `ClassifyStateBundleV2Input`, `BundleClassification`, `BuildResult` / `BuildStateBundleV2Result`, `EntryDescriptor`, `ExpectedStateManifestV2Context`, `HeadRelationship`, `CompatibilityOutcome`, `ExpectedInvalidationCode`, `IncompatibilityCode`, `EpochId`, `Sha256Hex`, `GitSha`, `DiagnosticCode`, `InvalidDiagnosticCode`, `UnsupportedLegacyDiagnostic`, `StateManifestSerializationReason`, `StateManifestSerializationDiagnostic`; functions `validateStateManifestV2`, `serializeStateManifestV2`, `buildStateBundleV2`, `classifyStateBundleV2`, `checkStateManifestV2Compatibility`, `boundedDiagnosticMessage`, `boundedJoin`, `crossFieldValidate`, `semanticIdentityValidate`, `isRfc3339`; typed errors `LedgerOverBoundError`, `MetadataOverBoundError`, `BuilderValidationError`, `BuilderInputRejectedError`, `StateManifestSerializationError`; constants module (see below).
 
-The canonical-JSON helper exports `canonicalJsonBytes`, `CANONICAL_JSON_VERSION`, `CanonicalJsonValue`, and `CanonicalJsonInputError` from `src/canonical-json/index.ts`.
+Historically, the canonical-JSON helper exported `canonicalJsonBytes`, `CANONICAL_JSON_VERSION`, `CanonicalJsonValue`, and `CanonicalJsonInputError` from `src/canonical-json/index.ts`; W14 removed that private surface without an alias.
 
 ## Constants module
 
