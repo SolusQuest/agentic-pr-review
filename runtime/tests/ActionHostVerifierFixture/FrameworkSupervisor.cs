@@ -1152,6 +1152,21 @@ internal static class FrameworkSupervisor
                 return false;
             }
 
+            if (entry.GetProperty("leaf_id").GetString() == "W8" &&
+                !ValidateW8Ownership(entry, repository))
+            {
+                return false;
+            }
+
+            if (entry.GetProperty("leaf_id").GetString() == "W10" &&
+                !RequiredObjectArray(entry,
+                    "inherited_w8_replacement_handoffs", 5,
+                    "prior_typescript_assertion", "later_owner",
+                    "replacement", "deliberate_difference"))
+            {
+                return false;
+            }
+
             if (entry.GetProperty("leaf_id").GetString() == "W11" &&
                 !ValidateW11Ownership(entry, repository, inventoryPath))
             {
@@ -1160,6 +1175,15 @@ internal static class FrameworkSupervisor
 
             if (entry.GetProperty("leaf_id").GetString() == "W12" &&
                 !ValidateW12Ownership(entry, repository))
+            {
+                return false;
+            }
+
+            if (entry.GetProperty("leaf_id").GetString() == "W15" &&
+                !RequiredObjectArray(entry,
+                    "retired_w8_consumer_handoffs", 2,
+                    "prior_typescript_consumer", "later_owner",
+                    "disposition", "deliberate_difference"))
             {
                 return false;
             }
@@ -1300,6 +1324,139 @@ internal static class FrameworkSupervisor
             "W11: src/prefix-contract/",
             "W12: src/provider-metadata/",
             "W14: src/canonical-json/",
+            ]);
+    }
+
+    private static bool ValidateW8Ownership(
+        JsonElement entry,
+        string repository)
+    {
+        if (entry.GetProperty("disposition").GetString() != "removed" ||
+            !RequiredTextArray(entry, "removed_paths", value =>
+                IsClosedPath(value) && !LandingPathExists(repository, value)) ||
+            !RequiredExactTextArray(entry, "retained_paths",
+                new HashSet<string>(
+            [
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+                "runtime/src/AgenticPrReview.Runtime/Host/Action/",
+            ], StringComparer.Ordinal)) ||
+            !RequiredExactTextArray(entry, "csharp_owners",
+                new HashSet<string>(
+            [
+                "R4StickyRenderer",
+                "R4StickyMarker",
+                "R4PublicationIdentityV1",
+                "StickyCommentPublisher",
+                "PublicationRecoveryService",
+                "ActionHostCoordinator",
+                "ActionHostComposition",
+            ], StringComparer.Ordinal)) ||
+            !RequiredExactTextArray(entry, "owner_members",
+                new HashSet<string>(
+            [
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs#R4StickyRenderer",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyMarker.cs#R4StickyMarker",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs#R4PublicationIdentityV1",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+                "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+                "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator",
+                "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs#ActionHostComposition",
+            ], StringComparer.Ordinal), member => MemberExists(repository, member)) ||
+            !RequiredExactTextArray(entry, "deletion_prerequisites",
+                new HashSet<string>(
+            [
+                "P2 / #158 merged",
+                "P6 / #162 merged",
+                "W7 / #169 merged",
+                "E1 / #178 framework evidence green",
+            ], StringComparer.Ordinal)) ||
+            !RequiredTextArray(entry, "retained_evidence_paths", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "historical_provenance_paths", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "named_replacement_vectors", value =>
+            {
+                var parts = value.Split(':', 3);
+                return parts.Length == 3 &&
+                    new[] { "P1", "P2", "P5", "P6" }.Contains(
+                        parts[1], StringComparer.Ordinal) &&
+                    parts[2].Contains('.');
+            }) ||
+            !RequiredTextArray(entry, "superseded_assertion_groups") ||
+            !RequiredTextArray(entry, "later_leaf_assertion_owners"))
+        {
+            return false;
+        }
+
+        var removed = TextArray(entry, "removed_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var retainedEvidence = TextArray(entry, "retained_evidence_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var historical = TextArray(entry, "historical_provenance_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var vectors = TextArray(entry, "named_replacement_vectors");
+        var categories = vectors.Select(value => value.Split(':', 3)[0])
+            .ToHashSet(StringComparer.Ordinal);
+        var scenarios = TextArray(entry, "framework_scenario_ids")
+            .ToHashSet(StringComparer.Ordinal);
+        var retainedAssertions = TextArray(entry, "retained_assertion_groups")
+            .ToHashSet(StringComparer.Ordinal);
+        var laterOwners = TextArray(entry, "later_leaf_assertion_owners")
+            .ToHashSet(StringComparer.Ordinal);
+        return removed.SetEquals(["src/comments.ts", "src/comments.test.ts"]) &&
+            retainedEvidence.SetEquals(
+        [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4StickyRendererTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4StickyMarkerTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentSerializerTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryClassifierTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        ]) &&
+            historical.SetEquals(
+        [
+            "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+        ]) &&
+            vectors.Length == vectors.Distinct(StringComparer.Ordinal).Count() &&
+            categories.SetEquals(
+        [
+            "rendering",
+            "marker",
+            "fingerprint",
+            "pathless_rejection",
+            "target_discovery",
+            "duplicate_handling",
+            "create_update",
+            "empty_result",
+            "escaping",
+            "bounds",
+            "response_validation_readback",
+            "outcome_unknown",
+        ]) &&
+            scenarios.SetEquals(
+        [
+            "workflow-run",
+            "dispatch-continuation",
+            "crash-mutation",
+            "crash-recovery",
+        ]) &&
+            retainedAssertions.SetEquals(
+        [
+            "complete ordered projection with whole-block public truncation and an explicit omission notice",
+            "grounded findings reject empty evidence before identity or rendering",
+            "bounded-complete discovery fails closed on page item and completeness overflow",
+        ]) &&
+            laterOwners.SetEquals(
+        [
+            "W9: inline candidate and target publication behavior",
+            "W10: structured review validation grounding and host-owned metadata",
+            "W15: root shared DTO and utility consumer retirement",
         ]);
     }
 
@@ -1633,7 +1790,6 @@ internal static class FrameworkSupervisor
         property switch
         {
             "w8_marker_paths" => new HashSet<string>([
-                "src/comments.ts", "src/comments.test.ts",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs"
             ], StringComparer.Ordinal),
             "deletion_evidence_paths" => new HashSet<string>([
@@ -1711,6 +1867,20 @@ internal static class FrameworkSupervisor
     private static string[] TextArray(JsonElement value, string property) =>
         value.GetProperty(property).EnumerateArray()
             .Select(item => item.GetString() ?? "").ToArray();
+
+    private static bool RequiredObjectArray(
+        JsonElement value,
+        string property,
+        int expectedLength,
+        params string[] fields) =>
+        value.TryGetProperty(property, out var items) &&
+        items.ValueKind == JsonValueKind.Array &&
+        items.GetArrayLength() == expectedLength &&
+        items.EnumerateArray().All(item =>
+            item.ValueKind == JsonValueKind.Object &&
+            fields.All(field => item.TryGetProperty(field, out var member) &&
+                member.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(member.GetString())));
 
     private static HashSet<string> InventoryPaths(string path)
     {

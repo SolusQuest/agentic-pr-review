@@ -576,8 +576,6 @@
           "saveCache"
         ],
         "w8_marker_paths": [
-          "src/comments.ts",
-          "src/comments.test.ts",
           "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs"
         ],
         "deletion_evidence_paths": [
@@ -631,16 +629,113 @@
       "leaf_id": "W8",
       "issue_number": 170,
       "owned_paths": ["src/comments.ts", "src/comments.test.ts"],
-      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/"],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/"
+      ],
       "classification": "remove_after_sticky_gate",
+      "disposition": "removed",
+      "removed_paths": ["src/comments.ts", "src/comments.test.ts"],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4StickyRendererTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4StickyMarkerTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentSerializerTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryClassifierTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+      ],
+      "historical_provenance_paths": [
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "named_replacement_vectors": [
+        "rendering:P1:R4StickyRendererTests.NonEmptyReviewFreezesExactMarkdownAndBodyDigest",
+        "rendering:P1:R4StickyRendererTests.ProductionTruncationKeepsCompleteProjectionAndWholeBlocks",
+        "marker:P1:R4StickyMarkerTests.OrdinaryAndHistoricalCommentsAreNotR4Targets",
+        "fingerprint:P1:R4PublicationIdentityTests.FindingFingerprintMatchesIndependentGoldenAndEvidenceOrderMatters",
+        "fingerprint:P1:R4PublicationIdentityTests.UnicodeNormalizationDoesNotParticipateInFindingIdentity",
+        "pathless_rejection:P1:R4PublicationIdentityTests.MalformedInternalFindingValuesFailClosed",
+        "target_discovery:P2:StickyCommentPublisherTests.HistoricalAndForeignScopeCommentsAreNotAdopted",
+        "target_discovery:P2:StickyCommentPublisherTests.DiscoveryAcceptsExactlyFiftyPagesAndFiveThousandRecords",
+        "target_discovery:P2:StickyCommentPublisherTests.PageItemAndCompletenessCapPlusOneFailClosed",
+        "target_discovery:P2:StickyCommentPublisherTests.CrossPageLastEvidenceIsRequiredForCompleteDiscovery",
+        "duplicate_handling:P1:R4PublicationIdentityTests.DuplicateFingerprintsFailClosedWithoutAlternateIdentity",
+        "duplicate_handling:P2:StickyCommentPublisherTests.MultipleOrMalformedR4TargetsFailBeforeWrite",
+        "create_update:P2:StickyCommentPublisherTests.ZeroCreatesAndExactResponseGetRelistProduceReceipt",
+        "create_update:P2:StickyCommentPublisherTests.OneUpdatesEvenWhenExistingBodyIsAlreadyExact",
+        "empty_result:P1:R4StickyMarkerTests.EmptyReviewFreezesExactBodyDigestMarkerAndPlacement",
+        "escaping:P1:R4StickyRendererTests.EveryFreeTextRenderContextKeepsTheFullCanaryCorpusInert",
+        "escaping:P1:R4StickyRendererTests.EvidencePathsStayInertInRepeatedListPositions",
+        "bounds:P1:R4StickyRendererTests.ExactFiftyThousandScalarBoundaryIsAccepted",
+        "bounds:P1:R4StickyRendererTests.Utf8BudgetCountsFourByteScalarsIndependently",
+        "bounds:P1:R4StickyRendererTests.TwentyFindingsAreAcceptedAndTwentyOneFailClosed",
+        "bounds:P2:StickyCommentSerializerTests.SerializedRequestAcceptsExactCapAndRejectsCapPlusOne",
+        "response_validation_readback:P2:StickyCommentPublisherTests.ZeroCreatesAndExactResponseGetRelistProduceReceipt",
+        "response_validation_readback:P2:StickyCommentPublisherTests.ReadOnlyExactDiscoveryReturnsObservedReceiptWithoutMutation",
+        "response_validation_readback:P2:StickyPublicationContractsTests.PersistedP1OrReceiptCanAuthorizeReadOnlyDiscovery",
+        "outcome_unknown:P2:StickyCommentPublisherTests.LostCreateResponseReconcilesWithoutSecondWrite",
+        "outcome_unknown:P2:StickyCommentPublisherTests.UnresolvedMutationNeverRetriesAndHasNoReceipt",
+        "outcome_unknown:P5:PublicationRecoveryClassifierTests.AcceptedOutcomeUnknownConvergesOnExactMarkerAfterRestart",
+        "outcome_unknown:P5:PublicationRecoveryClassifierTests.DurableStickyReceiptPinsCommentIdAcrossProcessRestart",
+        "outcome_unknown:P5:PublicationRecoveryServiceTests.ExactStoredPayloadDiscoveryCompletesAcceptanceWithoutMutation",
+        "outcome_unknown:P6:ActionHostCompositionTests.P2FailureClassesConvergeThroughDurableRecovery",
+        "outcome_unknown:P6:ActionHostCompositionTests.RecoversAcceptanceCrashWithoutProviderKeyOrDuplicateSticky"
+      ],
+      "retained_assertion_groups": [
+        "complete ordered projection with whole-block public truncation and an explicit omission notice",
+        "grounded findings reject empty evidence before identity or rendering",
+        "bounded-complete discovery fails closed on page item and completeness overflow"
+      ],
+      "superseded_assertion_groups": [
+        "M4 marker publication and incremental lineage-comment rewriting",
+        "TypeScript pre-render mutation of the structured review envelope",
+        "16-hex JSON fingerprinting"
+      ],
+      "later_leaf_assertion_owners": [
+        "W9: inline candidate and target publication behavior",
+        "W10: structured review validation grounding and host-owned metadata",
+        "W15: root shared DTO and utility consumer retirement"
+      ],
       "protective_behaviors": [
         "bounded sticky rendering and marker identity",
         "create update dedup and readback",
         "publication outcome recovery"
       ],
-      "csharp_owners": ["StickyCommentPublisher", "PublicationRecoveryService"],
-      "framework_scenario_ids": ["workflow-run", "crash-recovery"],
-      "deletion_prerequisites": ["P2 merged", "P6 merged", "E1 sticky recovery green"],
+      "csharp_owners": [
+        "R4StickyRenderer",
+        "R4StickyMarker",
+        "R4PublicationIdentityV1",
+        "StickyCommentPublisher",
+        "PublicationRecoveryService",
+        "ActionHostCoordinator",
+        "ActionHostComposition"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs#R4StickyRenderer",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyMarker.cs#R4StickyMarker",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs#R4PublicationIdentityV1",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs#ActionHostComposition"
+      ],
+      "framework_scenario_ids": [
+        "workflow-run",
+        "dispatch-continuation",
+        "crash-mutation",
+        "crash-recovery"
+      ],
+      "deletion_prerequisites": [
+        "P2 / #158 merged",
+        "P6 / #162 merged",
+        "W7 / #169 merged",
+        "E1 / #178 framework evidence green"
+      ],
       "deletion_gate": "No TypeScript sticky publisher, renderer, fingerprint, export, or current marker owner remains."
     },
     {
@@ -730,6 +825,38 @@
         "runtime/src/AgenticPrReview.Runtime/Protocol/"
       ],
       "classification": "remove_typescript_and_retain_csharp_contracts",
+      "inherited_w8_replacement_handoffs": [
+        {
+          "prior_typescript_assertion": "structured.test.ts validates model JSON and injects trusted action-owned metadata",
+          "later_owner": "W10 with P1",
+          "replacement": "R4PublicationIdentityTests.FindingFingerprintMatchesIndependentGoldenAndEvidenceOrderMatters",
+          "deliberate_difference": "P1 computes a full Host-owned 64-hex framed fingerprint and consumes no model fingerprint."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts generates stable action-owned fingerprints for equivalent normalized findings",
+          "later_owner": "W10 with P1",
+          "replacement": "R4PublicationIdentityTests.UnicodeNormalizationDoesNotParticipateInFindingIdentity",
+          "deliberate_difference": "The old 16-hex JSON fingerprint is deliberately incompatible with exact R4 scalar bytes."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts normalizes safe repo-relative finding paths and rejects unsafe non-relative paths",
+          "later_owner": "W10 with Agent H5 and P1",
+          "replacement": "R4StickyRendererTests.EvidencePathsStayInertInRepeatedListPositions",
+          "deliberate_difference": "P1 consumes canonical grounded paths and owns Markdown inertness rather than renormalizing them."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts caps normalized findings and records truncation before rendering and artifacts",
+          "later_owner": "W10 with Agent and P1",
+          "replacement": "R4StickyRendererTests.TwentyFindingsAreAcceptedAndTwentyOneFailClosed",
+          "deliberate_difference": "Agent admission is fixed at 20 and P1 independently bounds complete public blocks."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts drops or keeps findings by current pull-request file membership",
+          "later_owner": "W10 with Agent H5 and W9 P3",
+          "replacement": "reviewed grounding contract plus InlineCandidateMapperTests.ExactCurrentPathAdditionAndContextAreTheOnlyTargets",
+          "deliberate_difference": "P1 consumes grounded evidence; later inline mapping owns exact diff targeting."
+        }
+      ],
       "protective_behaviors": [
         "credential exclusion and host-owned fields",
         "safe paths bounds grounding and fingerprints",
@@ -906,6 +1033,20 @@
         "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs"
       ],
       "classification": "remove_after_root_consumer_gate",
+      "retired_w8_consumer_handoffs": [
+        {
+          "prior_typescript_consumer": "src/comments.ts imported review lineage target usage and structured review DTOs from src/types.ts",
+          "later_owner": "W15",
+          "disposition": "W8 consumer removed; retain shared DTOs until the W15 root-consumer gate",
+          "deliberate_difference": "The C# Host owns sticky publication without a TypeScript compatibility DTO surface."
+        },
+        {
+          "prior_typescript_consumer": "src/comments.ts imported sha256 and truncateText from src/utils.ts",
+          "later_owner": "W15",
+          "disposition": "W8 consumer removed; retain utilities until all remaining root consumers close",
+          "deliberate_difference": "C# publication uses its own strict hashing and bounded rendering implementations."
+        }
+      ],
       "protective_behaviors": [
         "safe path normalization and SHA-256",
         "bounded truncation and review DTOs",

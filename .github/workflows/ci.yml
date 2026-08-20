@@ -42,10 +42,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Exercise retained state, publisher, artifact, and residual conformance
+      - name: Exercise retained state, artifact, and residual conformance
         run: >-
           npm test -- --run
-          src/comments.test.ts
           src/artifact-provenance-vectors.test.ts
           src/residual-reference-guard.test.ts
           src/state-v2/core.test.ts

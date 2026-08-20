@@ -42,7 +42,7 @@ The engineering goals are to:
 - publish pinned, verifiable, self-contained runtime payloads;
 - keep compatibility machinery proportional to actual independently released or durable boundaries.
 
-Cross-language contract implementation is no longer an objective by itself. TypeScript remains as narrow state, publisher, migration, and conformance evidence plus the R4 thin wrapper and official artifact bridge. Business decisions remain in the C# Host.
+Cross-language contract implementation is no longer an objective by itself. TypeScript remains as narrow state, protocol, migration, and conformance evidence plus the R4 thin wrapper and official artifact bridge. Business decisions, sticky publication, and inline publication remain in the C# Host.
 
 C# and Native AOT are architecture commitments, not product success criteria. Review quality, grounded evidence, safety, resumability, cache economics, and operational reliability decide whether the runtime succeeds.
 
@@ -58,7 +58,7 @@ The current implementation contains:
 - authenticated encrypted local STATE, independent Host lineage, same-head and verified-ahead admission, and framework-dependent plus Linux x64 Native AOT validation;
 - must-find, must-not-find, invalid-tool, tamper, replay, scope, continuation, and secret-canary evaluation;
 - a protected, default-branch, no-publication live-provider proof at the final R3 commit;
-- retained internal TypeScript state, publisher, and protocol families only as named R4 replacement evidence; W3 removed the invocation families and obsolete live-context schema, W6 removed the Git-ref state-acceptance family and its dedicated schemas after S1-S6/P5/P6/E1 evidence, W11 removed the prefix family and generator after C# ownership, immutable-corpus, and E1 continuation proof, and W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus. W5 retains ownership of its distinct opaque sidecar bytes, descriptors, hashes, and fixtures.
+- retained internal TypeScript state and protocol families only as named R4 replacement evidence; W3 removed the invocation families and obsolete live-context schema, W6 removed the Git-ref state-acceptance family and its dedicated schemas after S1-S6/P5/P6/E1 evidence, W8 removed the sticky publisher after P1/P2/P5/P6/E1 evidence, W9 independently removed the inline/target publisher after H2/H5/P3/P4/P6/E1 evidence, W11 removed the prefix family and generator after C# ownership, immutable-corpus, and E1 continuation proof, and W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus. The W8/W9 checked C# replacement evidence remains current, and W5 retains ownership of its distinct opaque sidecar bytes, descriptors, hashes, and fixtures.
 
 R3 is complete. R4 has restored the bounded wrapper and its official artifact bridge over an explicitly prepared payload. The development head is still not a supported downstream Action and does not yet provide the complete trusted two-run proof, release payload delivery, or R7 public default.
 
