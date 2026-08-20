@@ -1,16 +1,17 @@
 # Runtime Protocol
 
-> **R4-W3 supersession note (2026-08-16):** This document preserves the pre-W3
-> TypeScript-to-.NET protocol and conformance contract. The TypeScript launcher
-> and issue #33 adapter route described below are historical after W3; they are
-> not a current executable path. The retained schemas and TypeScript protocol
-> conformance family remain current until their named later leaves. Current
-> launch ownership is defined in
+> **R4-W10 supersession note (2026-08-20):** The TypeScript launcher, protocol
+> DTOs/Ajv validators, builder/result mapper, fixture runner, and structured
+> review assembly are removed. The three JSON schemas and complete mixed
+> `protocol/fixtures/v1/**` corpus remain live internal C# contracts embedded by
+> `AgenticPrReview.Runtime`, consumed by `RuntimeApplication`/`RuntimeJson`, and
+> checked by `ProtocolFixtureTests`. Current ActionHost launch ownership is
+> defined in
 > [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md): a
 > thin Node action wrapper starts one .NET application with explicit Host,
-> Agent, tool, provider, state, and publisher modules. Preserve this protocol
-> only until each responsibility has moved and equivalent acceptance coverage
-> exists.
+> Agent, tool, provider, state, and publisher modules. This retained direct
+> runtime protocol is internal validation infrastructure, not a supported public
+> Action protocol or cross-language compatibility promise.
 
 The runtime boundary is protocol-first and file-based.
 
@@ -26,7 +27,7 @@ The protocol is defined as JSON Schema files under `protocol/schemas/`:
 - `review-result.v1.json` - result contract (ReviewResultV1), defined in #15
 - `review-trace.v1.json` - trace contract (ReviewTraceV1), defined in #16
 
-TypeScript hand-writes convenience interfaces that mirror the schemas and uses ajv for runtime validation. JSON Schema is the authoritative source of truth shared with the selected C# runtime. See `src/protocol/` for the TypeScript types and validation wiring.
+The C# runtime embeds these resources with stable logical names. `SchemaContracts` loads Input, Result, and Trace, while `RuntimeApplication`, `RuntimeJson`, and the C# protocol tests own deserialization, serialization, schema validation, and Result location semantics. JSON Schema remains the authoritative direct-runtime contract; no parallel TypeScript validator remains.
 
 ## Input Contract (ReviewInputV1)
 
@@ -51,7 +52,7 @@ Input is sanitized for runtime consumption. GitHub write credentials do not belo
 
 ## Output Contract (ReviewResultV1)
 
-ReviewResultV1 is defined (#15) and carries runtime-proposed content only. The host assembles the full `StructuredReviewEnvelopeV1` by combining the result with host-owned metadata (phase, SHAs, reviewedRange, runtimeProvider, sessionId, usageBudgetStatus, lineageTotals). Host-owned workflow facts are excluded from the result by closed object shapes.
+ReviewResultV1 is defined (#15) and carries direct-runtime content only. Host-owned workflow facts remain excluded by closed object shapes. The current ActionHost does not convert this payload into the historical `StructuredReviewEnvelopeV1`; its separate Agent/H5/P1/P6 route binds trusted repository facts, requires grounded evidence, computes current publication identities, and produces a closed completion.
 
 ReviewResultV1 includes:
 
@@ -120,7 +121,7 @@ Restricted raw diagnostics (raw provider request/response bodies) remain a separ
 
 ## Protocol Fixtures
 
-Synthetic fixture files under `protocol/fixtures/v1/` prove the schemas work with realistic payloads and make schema drift visible in CI. Fixtures are reused by #18 (TS builder tests), #19 (runtime CLI), and #21 (CI fixture check).
+Synthetic fixture files under `protocol/fixtures/v1/` prove the embedded schemas work with realistic payloads and make schema drift visible in CI. `ProtocolFixtureTests` consumes the review entries, applies Result semantic validation, verifies the bootstrap hash chain, and rejects unregistered files. The same manifest and directory also contain provider-session-ledger fixtures delegated to `LedgerFixtureTests`; W10 preserves that mixed corpus byte-for-byte.
 
 ### Layout
 
@@ -133,11 +134,11 @@ Synthetic fixture files under `protocol/fixtures/v1/` prove the schemas work wit
 
 Each entry is either a single fixture (`type: "fixture"` with `file`, `contract`, `valid`, optional `expectedErrorIncludes`) or a paired case (`type: "case"` with `directory`, `contracts`, `valid`, `verifyHashChain`).
 
-For invalid fixtures, `expectedErrorIncludes` is an array of substrings matched against joined validator error messages. Each invalid fixture includes at least one field-specific or rule-specific token.
+For invalid fixtures, historical `expectedErrorIncludes` values record field- or rule-specific TypeScript/Ajv diagnostic provenance. Current C# conformance preserves fail-closed valid/invalid classification and sanitized diagnostics, not Ajv error-text compatibility.
 
 ### Validator entrypoints
 
-The fixture runner (`src/protocol/fixtures.test.ts`) calls the TS validators (`validateReviewInputV1`/`validateReviewResultV1`/`validateReviewTraceV1`), not raw Ajv. This ensures post-schema semantic validation (e.g., ReviewResultV1 line-range cross-field rules) is exercised.
+`ProtocolFixtureTests.ManifestFixturesMatchTheEmbeddedSchemasAndSemanticRules` loads the embedded resources through `SchemaContracts` and additionally calls `SemanticValidation.HasValidFindingLocations` for ReviewResultV1 line-range cross-field rules. `RuntimeApplicationTests` covers typed input consumption plus Result/Trace serialization and self-validation.
 
 ### Hash-chain verification
 
@@ -150,34 +151,13 @@ Paired cases verify non-circular hash links over exact file bytes (no canonical 
 - When modifying a schema, verify all fixtures still produce expected outcomes.
 - When adding a paired case, construct files in dependency order: input first, then trace (with `resultSha256` omitted), then result (with `trace.sha256` filled from trace file bytes).
 
-The protocol uses JSON Schema (draft-07) files as the single source of truth, avoiding two independently drifting definitions of business behavior across TypeScript and C#. TypeScript interfaces are developer ergonomics only; the schemas are authoritative.
+The protocol uses JSON Schema (draft-07) files as the single source of truth. The deleted TypeScript interfaces and Ajv validators are not compatibility artifacts; the embedded schemas and current C# consumers are authoritative.
 
-## TypeScript Builders and Mappers (retained conformance, historical M2 wiring)
+## Retired TypeScript Adapters
 
-Two pure helpers bridge existing host structures and the protocol contracts. They were added in #18 as M1 test-only functions and were wired into the historical action execution path in M2 via #33. W3 removed that adapter route; the retained helpers and tests remain protocol-conformance evidence for the later W10 owner, not a current launcher.
+R4-W10 deleted the historical `buildReviewInputV1`, `mapReviewResultV1ToRuntimeContent`, TypeScript protocol DTO/validator family, and `StructuredReviewEnvelopeV1` extraction/assembly. They had no current production or package caller after W3.
 
-### `buildReviewInputV1` (`src/protocol/build-review-input.ts`)
-
-Given the existing host structures (`ReviewTarget`, `LoadedBlock[]`, a `Pick<>` subset of `ActionConfig`, optional `RestoredState`, explicit previous-review and existing-comment fingerprint lists, and an authoritative repository identity), produces a schema-valid `ReviewInputV1`.
-
-Notable rules:
-
-- The `config` parameter is a `Pick<ActionConfig, ...>` that excludes credential- and debug-control-shaped fields (`githubToken`, `apiKey`, `debugAcknowledgement`, `debugCaptureRawApiBodies`). The builder receives resolved config values; it does not compute defaults.
-- `previousFindingFingerprints` and `existingCommentFingerprints` are independent inputs; the builder must not reuse one for the other. `previousState.findingFingerprints` and `commentEvidence.existingFindingFingerprints` come from these two separate parameters.
-- `previousState.lineage` is intentionally omitted: `RestoredState.lineageTotals` does not currently expose a stable review-count source.
-- Bounded patch: truncation is strict `>` (equality is not truncated); `patch.sha256` hashes the bounded `patch.text`; a missing patch is omitted entirely (never emitted as `{}`).
-- Path safety is fail-closed: unsafe paths in `ChangedFile.filename` propagate as-is and are rejected by `validateReviewInputV1`; the builder does not silently normalize.
-
-### `mapReviewResultV1ToRuntimeContent` (`src/protocol/map-review-result.ts`)
-
-Given a validated `ReviewResultV1`, produces a runtime-owned projection consumed by future host assembly (M2):
-
-- `content`: `summary`, `findings`, `limitations`, optional `usage`, optional `observedTurns`, optional `observedTurnSource`.
-- `sideChannel`: `warnings` (always an array), `diagnostics` (always an array), optional `inputSha256`, optional `trace`.
-
-The helper does not produce `StructuredReviewEnvelopeV1`, does not compute fingerprints, does not apply `maxFindings` capping or scope filtering, and does not accept or return host-owned facts (`phase`, `baseSha`, `headSha`, `reviewedRange`, `runtimeProvider`, `sessionId`, `usageBudgetStatus`, `lineageTotals`, `stateKey`, `repository`, `toolMode`). Envelope assembly, fingerprinting, capping, filtering, and publisher inline eligibility remain in the existing host pipeline and its M2 successor.
-
-The helper assumes the caller has already validated the input with `validateReviewResultV1`; it performs no mutation.
+Their security and contract assertions have explicit replacement dispositions in the E1 W10 replacement record. The direct runtime retains the schema-valid Input/Result/Trace and non-circular hash chain. The internal ActionHost route separately retains credential exclusion, trusted host facts, H5/Agent grounding, P1 ordering and full evidence-sensitive SHA-256 fingerprints, and P6 completion/publication authority. Historical pathless Result support remains valid for the direct runtime, but ActionHost findings require grounded evidence. The old 16-hex fingerprint and TypeScript caps/filtering/error wording are deliberately superseded; no alias, converter, or compatibility reader is provided.
 
 ## Future: Replay Bundle
 
@@ -201,7 +181,7 @@ The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTrace
 
 ## Historical Issue #33 Deterministic C# Host Integration
 
-The removed default-off `runtime_backend=deterministic-csharp` path constructed and validated `ReviewInputV1`, invoked the trusted command through `invokeRuntime()`, validated deterministic trace semantics, and mapped `ReviewResultV1` with `mapReviewResultV1ToRuntimeContent()`. W3 deleted that TypeScript adapter and added no alias or replacement route. The retained schemas and conformance helpers remain later W10 inputs; the W2 Node wrapper/C# ActionHost route owns current launch, lifecycle, and result handling.
+The removed default-off `runtime_backend=deterministic-csharp` path constructed and validated `ReviewInputV1`, invoked the trusted command through `invokeRuntime()`, validated deterministic trace semantics, and mapped `ReviewResultV1` through a TypeScript helper. W3 deleted that launcher; W10 deleted the now-uncalled helper and duplicate validators. No alias or replacement route was added. The retained schemas and C# conformance tests own the direct-runtime contract, while the Node wrapper/C# ActionHost route owns current Action launch, lifecycle, and result handling.
 
 This ledger artifact is distinct from `ReviewTraceV1`:
 

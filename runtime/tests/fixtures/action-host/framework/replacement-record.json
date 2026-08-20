@@ -857,12 +857,164 @@
           "deliberate_difference": "P1 consumes grounded evidence; later inline mapping owns exact diff targeting."
         }
       ],
+      "disposition": "removed",
+      "removed_paths": [
+        "src/protocol/build-review-input.test.ts",
+        "src/protocol/build-review-input.ts",
+        "src/protocol/fixtures.test.ts",
+        "src/protocol/map-review-result.test.ts",
+        "src/protocol/map-review-result.ts",
+        "src/protocol/review-input.test.ts",
+        "src/protocol/review-input.ts",
+        "src/protocol/review-result.test.ts",
+        "src/protocol/review-result.ts",
+        "src/protocol/review-trace.test.ts",
+        "src/protocol/review-trace.ts",
+        "src/structured.test.ts",
+        "src/structured.ts"
+      ],
+      "retained_evidence_paths": [
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs",
+        "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+        "runtime/src/AgenticPrReview.Runtime/Agent/Tools/TerminalReviewValidator.cs",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Application/RuntimeApplicationTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Tools/AgentToolsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "docs/20_architecture/runtime-protocol.md",
+        "docs/20_architecture/runtime-cli-process-contract.md"
+      ],
+      "inventory_evidence_paths": [
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.review-input.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.review-result.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.review-trace.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.Input => input",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.Result => result",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.Trace => trace",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#public static bool HasValidFindingLocations",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs#[JsonSerializable(typeof(ReviewInput))]",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs#[JsonSerializable(typeof(ReviewResult))]",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs#[JsonSerializable(typeof(ReviewTrace))]",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj#protocol\\fixtures\\v1\\**\\*",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs#ManifestFixturesMatchTheEmbeddedSchemasAndSemanticRules"
+      ],
+      "retained_corpus": {
+        "schema_paths": [
+          "protocol/schemas/review-input.v1.json",
+          "protocol/schemas/review-result.v1.json",
+          "protocol/schemas/review-trace.v1.json"
+        ],
+        "fixture_root": "protocol/fixtures/v1/",
+        "file_count": 148,
+        "aggregate_sha256": "15b1b49367cc652d324d48004d61472ba1274ccb8556588b045cf8480b65323a",
+        "framing": "ordinal path + NUL + lowercase file sha256 + LF"
+      },
+      "legacy_assertion_dispositions": [
+        {
+          "id": "input-assembly-credentials-and-host-shape",
+          "disposition": "retained",
+          "current_owner": "SchemaContracts RuntimeApplication and H1 ActionHost input",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+          "semantic_difference": "C# consumes the canonical closed schema; the deleted TypeScript builder is not preserved"
+        },
+        {
+          "id": "patch-hash-path-location-and-string-bounds",
+          "disposition": "retained",
+          "current_owner": "SchemaContracts SemanticValidation H5 and Agent",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Tools/AgentToolsTests.cs",
+          "semantic_difference": "current H5 and Agent bounds replace the historical TypeScript cap and filtering mechanics"
+        },
+        {
+          "id": "result-host-fields-grounding-and-fingerprint",
+          "disposition": "retained",
+          "current_owner": "ReviewResultV1 Agent and P1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+          "semantic_difference": "external results may be pathless while ActionHost findings require grounding and use full evidence-ordered SHA-256"
+        },
+        {
+          "id": "trace-privacy-hashes-and-usage-lineage",
+          "disposition": "retained",
+          "current_owner": "SchemaContracts RuntimeJson and RuntimeApplication",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/RuntimeApplicationTests.cs",
+          "semantic_difference": "ReviewTraceV1 remains a direct runtime protocol; ActionHost E1 does not produce it"
+        },
+        {
+          "id": "fixture-manifest-and-noncircular-hash-chain",
+          "disposition": "retained",
+          "current_owner": "ProtocolFixtureTests and LedgerFixtureTests",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+          "semantic_difference": "C# validates embedded schemas semantics manifest closure and ledger delegation"
+        },
+        {
+          "id": "result-content-and-sidechannel-mapping",
+          "disposition": "superseded",
+          "current_owner": "RuntimeApplication and Agent P1 P6",
+          "evidence_path": "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+          "semantic_difference": "the direct runtime and ActionHost routes own separate outputs; no compatibility mapper remains"
+        },
+        {
+          "id": "structured-extraction-host-assembly-filter-and-cap",
+          "disposition": "superseded",
+          "current_owner": "Agent H5 P1 and P6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs",
+          "semantic_difference": "grounded Agent evidence and host-owned authorization replace raw or fenced TypeScript assembly"
+        },
+        {
+          "id": "typescript-ajv-diagnostic-wording",
+          "disposition": "obsolete",
+          "current_owner": "SchemaContracts and RuntimeApplication sanitized diagnostics",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/RuntimeApplicationTests.cs",
+          "semantic_difference": "fail-closed classification is retained; Ajv error text and expectedErrorIncludes substring parity are not contracts"
+        },
+        {
+          "id": "typescript-dtos-validators-exports-and-old-fingerprint",
+          "disposition": "obsolete",
+          "current_owner": "C# protocol models and P1 identity",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+          "semantic_difference": "no dual validator alias converter or 16-hex compatibility reader remains"
+        }
+      ],
+      "retained_assertion_groups": [
+        "embedded Input Result and Trace schemas with complete mixed fixture manifest",
+        "credential exclusion and closed host-owned result fields",
+        "safe paths string bounds and result location semantics",
+        "grounded Agent evidence and full evidence-ordered P1 fingerprint",
+        "RuntimeApplication input result and trace self-validation with sanitized failures",
+        "trace privacy hash links and current-run usage lineage exclusion",
+        "internal ActionHost continuation publication completion and privacy route"
+      ],
+      "superseded_assertion_groups": [
+        "hand-written TypeScript protocol DTOs Ajv validators and diagnostic text",
+        "TypeScript ReviewInput config restored-state and patch adapter",
+        "TypeScript ReviewResult content and side-channel projection",
+        "raw or fenced structured extraction and host metadata assembly",
+        "historical pathless confidence category normalization filtering and caps",
+        "historical 16-hex fingerprint and usage or lineage DTO compatibility",
+        "external cross-language or public protocol compatibility converter claim"
+      ],
       "protective_behaviors": [
         "credential exclusion and host-owned fields",
         "safe paths bounds grounding and fingerprints",
         "trace privacy and usage lineage"
       ],
-      "csharp_owners": ["RuntimeApplication", "RuntimeJson", "AgentLoop"],
+      "csharp_owners": [
+        "RuntimeApplication",
+        "RuntimeJson",
+        "AgentLoop",
+        "TerminalReviewValidator",
+        "R4PublicationIdentityV1",
+        "ActionHostCoordinator"
+      ],
       "framework_scenario_ids": ["dispatch-continuation", "inline", "public-result"],
       "deletion_prerequisites": ["W3 merged", "W7 merged", "H1 H5 P1 P6 and E1 green"],
       "deletion_gate": "Only TypeScript review and structured implementations are removed; C# schemas, resources, and golden fixtures remain."

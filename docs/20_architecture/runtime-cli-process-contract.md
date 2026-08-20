@@ -5,6 +5,11 @@ output of issue #20: issue #19 implements it, issue #21 exercises it in CI, and 
 consumed it from the TypeScript host. R4-W3 removed that launcher after the W2 wrapper/C# ActionHost
 replacement proof; the retained CLI contract still governs direct runtime validation.
 
+This is an internal repository validation contract. It does not define a supported public Action
+interface, downstream wire-compatibility promise, independently released integration surface, or
+migration obligation. R4-W10 removed the uncalled TypeScript protocol bridge without changing the
+live C# command, embedded schemas, fixture bytes, exit taxonomy, or failure semantics below.
+
 The contract applies only to:
 
     review --input <path> --output <path> --trace <path>
