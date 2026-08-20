@@ -1775,6 +1775,8 @@ internal static class FrameworkSupervisor
             if (currentPosition.Contains(path))
             {
                 if (!text.Contains(retirementMarker, StringComparison.Ordinal) ||
+                    text.Contains("remains the acceptance contract", StringComparison.Ordinal) ||
+                    text.Contains("under its current owner", StringComparison.Ordinal) ||
                     text.Split('\n').Any(line => forbidden.Any(token =>
                         line.Contains(token, StringComparison.Ordinal)) &&
                         !line.Contains(retirementMarker, StringComparison.Ordinal))) return false;

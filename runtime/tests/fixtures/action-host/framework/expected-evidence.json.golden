@@ -1,6 +1,6 @@
 {
   "schema": "apr.action-host.framework-evidence.v3",
-  "source_inventory_digest": "752622881870e208751cd51d6152ae6b9143704cf9e1028d5b891c1a5edf4358",
+  "source_inventory_digest": "5d688deda4c9697fe9c6d9481f74354da9096c25decb3a357afc4d2e49d05720",
   "replacement_record_digest": "67ececbd0e0ab5e105e92b73309a37f4b7ce185d8458a4db9a123c4c4684c154",
   "base_inventory_digest": "7eacf6e0aacac15a99330e1c54050d4d259688f60ab729c9b0d6383b1f584b6d",
   "canary_table_digest": "e66aaf2ab5881094a6c7425b579c65d4fd4989b3486b0e5464105355837acd4b",
