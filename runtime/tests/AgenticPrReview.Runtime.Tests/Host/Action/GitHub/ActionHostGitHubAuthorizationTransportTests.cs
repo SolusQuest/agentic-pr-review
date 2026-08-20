@@ -491,6 +491,31 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
         Assert.Equal(ActionHostGitHubFailure.InvalidResponse, result.Failure);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(",\n    \"repo\": null")]
+    public async Task PullRequestReadRejectsMissingOrNullHeadRepository(
+        string headRepositorySuffix)
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            PullRequestResponse(
+                "\"draft\": false,\n  \"merged_at\": null,",
+                headRepositorySuffix)));
+        using var transport =
+            ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                "token-canary",
+                handler);
+
+        var result = await transport.GetPullRequestAsync(
+            "SolusQuest/agentic-pr-review",
+            147,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitHubFailure.InvalidResponse, result.Failure);
+        Assert.Single(handler.Requests);
+    }
+
     public static TheoryData<string, bool> CompleteMergeStatusMembers => new()
     {
         { "null", false },
@@ -541,7 +566,18 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
         }
         """;
 
-    private static string PullRequestResponse(string eligibilityMembers) => $$"""
+    private static string PullRequestResponse(
+        string eligibilityMembers,
+        string? headRepositorySuffix = null)
+    {
+        headRepositorySuffix ??= """
+            ,
+                "repo": {
+                  "id": 42,
+                  "full_name": "SolusQuest/agentic-pr-review"
+                }
+            """;
+        return $$"""
         {
           "id": 1000,
           "number": 147,
@@ -555,14 +591,11 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
             }
           },
           "head": {
-            "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-            "repo": {
-              "id": 42,
-              "full_name": "SolusQuest/agentic-pr-review"
-            }
+            "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"{{headRepositorySuffix}}
           }
         }
         """;
+    }
 
     private static string GitBlobSha(byte[] bytes)
     {

@@ -37,7 +37,7 @@ Coordinator routing, Action outputs, step summaries, artifact upload ordering, l
 - at the R1 handoff, the production `ledger-csharp` pre-acceptance stage owned runtime/result/trace/cancellation-to-zero-write composition; R4-W7 later removed that TypeScript coordinator after P6/S6/E1 replacement evidence passed;
 - state selection owns exact-v1 automatic recovery and explicit fail-closed restore without predecessor replay;
 - state acceptance owns candidate, registration, marker, selector, cancellation, stale, conflict, CAS, idempotency, publication, and receipt behavior;
-- comments, inline comments, fingerprints, target snapshots, ledger planning, and protocol suites retain their narrow contracts.
+- comments and fingerprints retain their narrow sticky contracts; R4-W9 removed inline comments and target snapshots after the H2/H5/P3/P4/P6/E1 disposition map passed; ledger planning and protocol suites retain their separately owned contracts.
 
 Under the retained M4 contract, sticky publication occurs after selector acceptance. A failed or unknown sticky publication can therefore coexist with accepted state and a receipt outcome; the deleted Action artifact-ordering assertion is not carried forward.
 
@@ -90,7 +90,8 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 | `src/live-runtime-invocation/` and `src/live-provider/` | Temporary M4 live-provider evidence                                          | R2/R4 replacement       |
 | `src/state-v2/`                                         | Unsupported-v1 classifier and StateManifestV2 conformance                    | R4 state bridge         |
 | `src/state-acceptance/`                                 | Temporary candidate-to-receipt state transaction evidence                    | R4 state bridge         |
-| `src/comments.ts`, inline comments, and fingerprints    | Temporary deterministic publisher and lineage evidence                       | R4 Host/publisher       |
+| `src/comments.ts` and sticky fingerprints               | Temporary deterministic sticky publisher and lineage evidence                | R4 Host/publisher W8    |
+| removed inline-comment and target root files/tests      | Historical mapped inline/target evidence; no current TypeScript caller       | Replaced by R4 Host W9  |
 | removed `src/ledger-csharp.ts` and root tests           | Historical internal ledger composition evidence; no public Action caller     | Replaced by R4 Host W7  |
 | `protocol/` and protocol TypeScript DTOs                | Frozen migration/conformance evidence                                        | R2 protocol replacement |
 | Artifact provenance vectors                             | R4 security input manifest                                                   | R4 artifact bridge      |
