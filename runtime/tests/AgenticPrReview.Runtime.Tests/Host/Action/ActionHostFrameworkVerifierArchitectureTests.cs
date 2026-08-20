@@ -400,6 +400,151 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
                 retained.Replace('/', Path.DirectorySeparatorChar))),
                 $"Missing W9 retained evidence: {retained}");
         }
+        var w10 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W10");
+        Assert.Equal("removed", w10.GetProperty("disposition").GetString());
+        Assert.Equal(new[]
+        {
+            "src/protocol/build-review-input.test.ts",
+            "src/protocol/build-review-input.ts",
+            "src/protocol/fixtures.test.ts",
+            "src/protocol/map-review-result.test.ts",
+            "src/protocol/map-review-result.ts",
+            "src/protocol/review-input.test.ts",
+            "src/protocol/review-input.ts",
+            "src/protocol/review-result.test.ts",
+            "src/protocol/review-result.ts",
+            "src/protocol/review-trace.test.ts",
+            "src/protocol/review-trace.ts",
+            "src/structured.test.ts",
+            "src/structured.ts",
+        }, w10.GetProperty("removed_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        foreach (var removed in w10.GetProperty("removed_paths")
+                     .EnumerateArray().Select(value => value.GetString()!))
+        {
+            Assert.False(File.Exists(Path.Join(root,
+                removed.Replace('/', Path.DirectorySeparatorChar))));
+            Assert.Contains(removed, inventory.RootElement.GetProperty("files")
+                .EnumerateArray().Select(value =>
+                    value.GetProperty("path").GetString()));
+        }
+        Assert.True(File.Exists(Path.Join(root, "src", "types.ts")));
+        Assert.True(File.Exists(Path.Join(root, "src", "utils.ts")));
+
+        Assert.Equal(new[]
+        {
+            "RuntimeApplication",
+            "RuntimeJson",
+            "AgentLoop",
+            "TerminalReviewValidator",
+            "R4PublicationIdentityV1",
+            "ActionHostCoordinator",
+        }, w10.GetProperty("csharp_owners").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "dispatch-continuation", "inline", "public-result",
+        }, w10.GetProperty("framework_scenario_ids").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        foreach (var retained in w10.GetProperty("retained_evidence_paths")
+                     .EnumerateArray().Select(value => value.GetString()!))
+        {
+            Assert.True(File.Exists(Path.Join(root,
+                retained.Replace('/', Path.DirectorySeparatorChar))),
+                $"Missing W10 retained evidence: {retained}");
+        }
+        foreach (var member in w10.GetProperty("owner_members")
+                     .EnumerateArray().Select(value => value.GetString()!))
+        {
+            var separator = member.IndexOf('#', StringComparison.Ordinal);
+            Assert.True(separator > 0, $"Invalid W10 owner member: {member}");
+            var path = member[..separator];
+            var requiredText = member[(separator + 1)..];
+            var source = File.ReadAllText(Path.Join(root,
+                path.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Contains(requiredText, source, StringComparison.Ordinal);
+        }
+
+        var dispositions = w10.GetProperty("legacy_assertion_dispositions")
+            .EnumerateArray().ToArray();
+        Assert.Equal(new[]
+        {
+            "input-assembly-credentials-and-host-shape",
+            "patch-hash-path-location-and-string-bounds",
+            "result-host-fields-grounding-and-fingerprint",
+            "trace-privacy-hashes-and-usage-lineage",
+            "fixture-manifest-and-noncircular-hash-chain",
+            "result-content-and-sidechannel-mapping",
+            "structured-extraction-host-assembly-filter-and-cap",
+            "typescript-ajv-diagnostic-wording",
+            "typescript-dtos-validators-exports-and-old-fingerprint",
+        }, dispositions.Select(value => value.GetProperty("id").GetString())
+            .ToArray());
+        Assert.Equal(new[] { "retained", "superseded", "obsolete" },
+            dispositions.Select(value => value.GetProperty("disposition")
+                    .GetString()).Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal).OrderBy(value => value switch
+                {
+                    "retained" => 0,
+                    "superseded" => 1,
+                    _ => 2,
+                }).ToArray());
+        Assert.All(dispositions, value =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(value
+                .GetProperty("current_owner").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(value
+                .GetProperty("semantic_difference").GetString()));
+            var evidence = value.GetProperty("evidence_path").GetString()!;
+            Assert.True(File.Exists(Path.Join(root,
+                evidence.Replace('/', Path.DirectorySeparatorChar))),
+                $"Missing W10 disposition evidence: {evidence}");
+        });
+
+        var corpus = w10.GetProperty("retained_corpus");
+        var schemaPaths = corpus.GetProperty("schema_paths")
+            .EnumerateArray().Select(value => value.GetString()!).ToArray();
+        Assert.Equal(new[]
+        {
+            "protocol/schemas/review-input.v1.json",
+            "protocol/schemas/review-result.v1.json",
+            "protocol/schemas/review-trace.v1.json",
+        }, schemaPaths);
+        var fixtureRoot = corpus.GetProperty("fixture_root").GetString()!;
+        Assert.Equal("protocol/fixtures/v1/", fixtureRoot);
+        var fixtureDirectory = Path.Join(root,
+            fixtureRoot.Replace('/', Path.DirectorySeparatorChar));
+        var corpusPaths = schemaPaths.Concat(Directory.GetFiles(
+                fixtureDirectory, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path)
+                .Replace('\\', '/')))
+            .Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(corpus.GetProperty("file_count").GetInt32(),
+            corpusPaths.Length);
+        var corpusFraming = new StringBuilder();
+        foreach (var path in corpusPaths)
+        {
+            var digest = Convert.ToHexString(SHA256.HashData(
+                    File.ReadAllBytes(Path.Join(root,
+                        path.Replace('/', Path.DirectorySeparatorChar)))))
+                .ToLowerInvariant();
+            corpusFraming.Append(path).Append('\0').Append(digest).Append('\n');
+        }
+        Assert.Equal(corpus.GetProperty("aggregate_sha256").GetString(),
+            Convert.ToHexString(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(corpusFraming.ToString())))
+                .ToLowerInvariant());
+        Assert.Equal("ordinal path + NUL + lowercase file sha256 + LF",
+            corpus.GetProperty("framing").GetString());
+        Assert.True(File.Exists(Path.Join(fixtureDirectory,
+            "provider-session-ledger", "valid-bootstrap.json")));
+        Assert.Equal(new[]
+        {
+            "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+        }, w10.GetProperty("inventory_evidence_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
         var w11 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W11");
@@ -440,10 +585,10 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             w12.GetProperty("retained_owner_groups").EnumerateArray()
                 .Select(value => value.GetString()));
 
-        var w10 = replacement.RootElement.GetProperty("entries")
+        var w10HandoffEntry = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W10");
-        var structuredHandoffs = w10.GetProperty(
+        var structuredHandoffs = w10HandoffEntry.GetProperty(
             "inherited_w8_replacement_handoffs").EnumerateArray().ToArray();
         Assert.Equal(5, structuredHandoffs.Length);
         Assert.All(structuredHandoffs, handoff =>
