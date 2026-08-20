@@ -100,7 +100,7 @@ The current implementation on `main` includes:
 - the project-owned DeepSeek thinking adapter with exact provider continuation and a protected no-publication official-endpoint proof;
 - authenticated encrypted local STATE with same-head/verified-ahead admission and two-fresh-process continuation;
 - framework-dependent and Linux x64 Native AOT product validation;
-- retained TypeScript state, sticky-publisher, and protocol families only as named R4 replacement evidence; R4-W3 removed the invocation families and obsolete live-context schema, R4-W6 removed the Git-ref state-acceptance family and dedicated schemas after mapped C# state/publisher evidence passed, R4-W7 removed the ledger coordinator, R4-W9 removed the inline/target publisher family after mapped H2/H5/P3/P4/P6/E1 proof, R4-W11 removed the prefix family and generator after mapped C# and immutable-corpus evidence passed, and R4-W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus after C# DeepSeek/ActionHost proof while leaving W5 opaque sidecars with their current owner.
+- retained TypeScript state and protocol families only as named R4 replacement evidence; R4-W3 removed the invocation families and obsolete live-context schema, R4-W6 removed the Git-ref state-acceptance family and dedicated schemas after mapped C# state/publisher evidence passed, R4-W7 removed the ledger coordinator, R4-W8 removed the sticky publisher after mapped P1/P2/P5/P6/E1 proof, R4-W9 independently removed the inline/target publisher after mapped H2/H5/P3/P4/P6/E1 proof, R4-W11 removed the prefix family and generator after mapped C# and immutable-corpus evidence passed, and R4-W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus after C# DeepSeek/ActionHost proof while leaving W5 opaque sidecars with their current owner. The W8/W9 checked C# replacement evidence remains current.
 
 R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper now exists for repository-controlled prepared-payload proof; downstream artifact-backed encrypted state, complete C# publication, supported release payload delivery, and the public default remain later R4/R7 work as allocated below.
 
@@ -351,7 +351,7 @@ In scope:
 - no stable public outputs until a named consumer requires one;
 - official JavaScript artifact bridge where retained;
 - deletion of duplicate TypeScript business modules, review-domain cross-language protocols, duplicate validators, and parity-only fixtures;
-- R4-W8 has removed the TypeScript sticky publisher and its tests after checked P1/P2/P5/P6 plus E1 replacement proof; W9 inline/target paths remain independently owned;
+- R4-W8 removed the TypeScript sticky publisher and its tests after checked P1/P2/P5/P6 plus E1 replacement proof; R4-W9 independently removed the inline/target paths after checked H2/H5/P3/P4/P6/E1 proof, and both leaves retain independently owned C# replacement evidence;
 - one minimal lockstep launcher/Host contract for cancellation, bounded outcome/output handoff, exit status, and executable build identity;
 - a two-run trusted-workflow proof using an explicitly prepared trusted payload path;
 - a downstream-repository-owned encrypted GitHub Actions artifact adapter satisfying the scope-bound state class while allowing public metadata/ciphertext visibility;
