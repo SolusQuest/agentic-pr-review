@@ -32,6 +32,10 @@ cleanup() {
           echo "APR_ACTION_HOST_FRAMEWORK_INCOMPLETE_CASE ${scenario_path##*/}" >&2
         fi
       done < <(find "$evidence_root" -mindepth 1 -maxdepth 1 -type d -print | sort)
+      if [[ -f "$evidence_root/normalized-evidence.json" ]]; then
+        echo "APR_ACTION_HOST_FRAMEWORK_NORMALIZED_EVIDENCE" >&2
+        cat "$evidence_root/normalized-evidence.json" >&2
+      fi
     fi
   fi
   chmod -R u+rwX "$temporary_root" 2>/dev/null || true
