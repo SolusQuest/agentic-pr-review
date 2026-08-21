@@ -131,9 +131,10 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         var supervisor = typeof(global::AgenticPrReview.Runtime.ActionHostVerifierFixture.Program).Assembly
             .GetType("AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor");
         var validator = supervisor?.GetMethod("ValidateReplacementRecord",
-            BindingFlags.Static | BindingFlags.NonPublic);
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException(
+                "FrameworkSupervisor replacement-record validator is unavailable.");
 
-        Assert.NotNull(validator);
         Assert.True((bool)validator.Invoke(null,
         [
             Path.Join(fixture, "replacement-record.json"),
