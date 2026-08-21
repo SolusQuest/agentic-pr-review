@@ -440,8 +440,21 @@ internal sealed class FrameworkGitHubHandler(
                 FrameworkCanaries.Repository),
             ("name", "apr178-repository-canary"));
 
-    private string PullRequest(string mode) => FrameworkJson.Serialize(
-        FrameworkJson.Object(
+    private string PullRequest(string mode)
+    {
+        var head = FrameworkJson.Object(
+            ("sha", CurrentHead(mode)),
+            ("repo", Identity(mode == "fork"
+                ? RepositoryId + 1
+                : RepositoryId)));
+        if (IsTrustedProofPayload())
+        {
+            head.Add("ref", "r4-trusted-proof/" +
+                (mode == "stale" ? new string('7', 64) :
+                    new string('1', 64)));
+        }
+
+        return FrameworkJson.Serialize(FrameworkJson.Object(
             ("id", PullRequestId),
             ("number", PullRequestNumber),
             ("state", "open"),
@@ -450,14 +463,8 @@ internal sealed class FrameworkGitHubHandler(
             ("base", FrameworkJson.Object(
                 ("sha", BaseSha),
                 ("repo", Identity(RepositoryId)))),
-            ("head", FrameworkJson.Object(
-                ("sha", CurrentHead(mode)),
-                ("ref", "r4-trusted-proof/" +
-                    (mode == "stale" ? new string('7', 64) :
-                        new string('1', 64))),
-                ("repo", Identity(mode == "fork"
-                    ? RepositoryId + 1
-                    : RepositoryId))))));
+            ("head", head)));
+    }
 
     private string Workflow(string mode)
     {

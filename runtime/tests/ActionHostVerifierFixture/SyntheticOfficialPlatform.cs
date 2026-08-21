@@ -419,7 +419,10 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         var path = context.Request.Url!.AbsolutePath;
         var prefix = "/repos/" + FrameworkCanaries.Repository +
             "/actions/artifacts";
-        if (!path.StartsWith(prefix, StringComparison.Ordinal))
+        var attemptPrefix = "/repos/" + FrameworkCanaries.Repository +
+            "/actions/runs/";
+        if (!path.StartsWith(prefix, StringComparison.Ordinal) &&
+            !path.StartsWith(attemptPrefix, StringComparison.Ordinal))
         {
             await ForwardGitHubAsync(context).ConfigureAwait(false);
             return;
@@ -586,8 +589,6 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             return;
         }
 
-        var attemptPrefix = "/repos/" + FrameworkCanaries.Repository +
-            "/actions/runs/";
         if (context.Request.HttpMethod == "GET" &&
             path.StartsWith(attemptPrefix, StringComparison.Ordinal) &&
             TryRunAttempt(path[attemptPrefix.Length..], out var runId,
