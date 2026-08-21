@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost;
@@ -15,8 +16,16 @@ public sealed class ActionHostAotProofTests : IDisposable
     [Fact]
     public void ManagedArchitecturePinsRequiredFixtureAndRuntimeTypes()
     {
-        Assert.True(ManagedArchitectureAudit.TryAudit(FixtureAssembly,
-            RuntimeAssembly, out var digest));
+        var audited = ManagedArchitectureAudit.TryAudit(FixtureAssembly,
+            RuntimeAssembly, out var digest);
+        Assert.True(audited, string.Join(Environment.NewLine,
+            ManagedArchitectureAudit.CallSitesForTesting(FixtureAssembly,
+            [
+                "AgenticPrReview.Runtime.ActionHost.ActionHostDeepSeekProviderRunnerFactory",
+                "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitHubAuthorizationTransportFactory",
+                "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory",
+                "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies",
+            ])));
         Assert.Matches("^[0-9a-f]{64}$", digest);
         Assert.False(ManagedArchitectureAudit.TryAudit(RuntimeAssembly,
             FixtureAssembly, out _));
@@ -26,6 +35,33 @@ public sealed class ActionHostAotProofTests : IDisposable
         File.WriteAllText(invalid, "not a managed assembly");
         Assert.False(ManagedArchitectureAudit.TryAudit(invalid,
             RuntimeAssembly, out _));
+    }
+
+    [Fact]
+    public void ManagedArchitectureRejectsCallAndTypeSetDrift()
+    {
+        var assembly = typeof(ManagedAuditRequiredRoot).Assembly.Location;
+        var required = new[] { typeof(ManagedAuditRequiredRoot).FullName! };
+
+        Assert.True(ManagedArchitectureAudit.TryAuditForTesting(
+            assembly, required, [], typeof(ManagedAuditTarget).FullName!, 1));
+        Assert.False(ManagedArchitectureAudit.TryAuditForTesting(
+            assembly, ["Missing.Required.Root"], [],
+            typeof(ManagedAuditTarget).FullName!, 1));
+        Assert.False(ManagedArchitectureAudit.TryAuditForTesting(
+            assembly, required, [], typeof(ManagedAuditTarget).FullName!, 2));
+        Assert.False(ManagedArchitectureAudit.TryAuditForTesting(
+            assembly, required, [typeof(ManagedAuditForbiddenRoot).FullName!],
+            typeof(ManagedAuditTarget).FullName!, 1));
+        Assert.False(ManagedArchitectureAudit.TryAuditForTesting(
+            assembly, required,
+            [typeof(MethodImplAttribute).FullName!],
+            typeof(ManagedAuditTarget).FullName!, 1));
+        Assert.False(ManagedArchitectureAudit.TryAuditForTesting(
+            assembly, required, [],
+            typeof(ManagedAuditExtraTarget).FullName!, 1));
+        Assert.False(ManagedArchitectureAudit.TryDecodeInstructionsForTesting(
+            assembly, [0x29, 0, 0, 0, 0]));
     }
 
     [Fact]
@@ -228,4 +264,22 @@ public sealed class ActionHostAotProofTests : IDisposable
         string RuntimeIntermediateSha256,
         string PairSha256,
         IReadOnlyDictionary<string, string> Arguments);
+}
+
+internal sealed class ManagedAuditRequiredRoot;
+
+internal sealed class ManagedAuditForbiddenRoot;
+
+internal sealed class ManagedAuditTarget;
+
+internal sealed class ManagedAuditExtraTarget;
+
+internal static class ManagedAuditRoutes
+{
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static object OneCallSite() => new ManagedAuditTarget();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static object[] TwoCallSites() =>
+        [new ManagedAuditExtraTarget(), new ManagedAuditExtraTarget()];
 }

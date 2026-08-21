@@ -1,4 +1,5 @@
 using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,6 +10,9 @@ internal static class ManagedArchitectureAudit
 {
     private const string Kind = "apr-r4-e2-managed-architecture-v1";
     private const long MaximumAssemblyBytes = 64 * 1024 * 1024;
+    private const string FixtureAssemblyName =
+        "AgenticPrReview.Runtime.ActionHostVerifierFixture";
+    private const string RuntimeAssemblyName = "AgenticPrReview.Runtime";
 
     private static readonly string[] RequiredFixtureTypes =
     [
@@ -66,12 +70,48 @@ internal static class ManagedArchitectureAudit
         "AgenticPrReview.Runtime.TypeScriptHost",
     ];
 
-    private static readonly string[] RequiredFixtureConstructorRoutes =
+    private static readonly string[] RequiredFixtureConstructorTargets =
     [
-        "AgenticPrReview.Runtime.ActionHost.ActionHostDeepSeekProviderRunnerFactory::.ctor",
-        "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitHubAuthorizationTransportFactory::.ctor",
-        "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory::.ctor",
-        "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies::.ctor",
+        "AgenticPrReview.Runtime.ActionHost.ActionHostDeepSeekProviderRunnerFactory",
+        "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitHubAuthorizationTransportFactory",
+        "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory",
+        "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies",
+    ];
+
+    private static readonly ManagedCallSite[] RequiredFixtureCalls =
+    [
+        new(FixtureAssemblyName,
+            FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
+            "MoveNext", "200001", RuntimeAssemblyName,
+            RequiredFixtureConstructorTargets[0], ".ctor",
+            "20010115126102128145128141", ILOpCode.Newobj),
+        new(FixtureAssemblyName,
+            FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
+            "MoveNext", "200001", RuntimeAssemblyName,
+            RequiredFixtureConstructorTargets[1], ".ctor",
+            "20010115128165011280cd", ILOpCode.Newobj),
+        new(FixtureAssemblyName,
+            FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
+            "MoveNext", "200001", RuntimeAssemblyName,
+            RequiredFixtureConstructorTargets[2], ".ctor",
+            "20010115128165011280cd", ILOpCode.Newobj),
+        new(FixtureAssemblyName,
+            FixtureAssemblyName + ".FrameworkStateDependencies",
+            ".ctor", "2002010e1281e5", RuntimeAssemblyName,
+            RequiredFixtureConstructorTargets[3], ".ctor",
+            "2001011281e5", ILOpCode.Newobj),
+        new(FixtureAssemblyName,
+            FixtureAssemblyName + ".FrameworkStateDependencies",
+            "CreateAncestryTransport", "20011281ed1281f1",
+            RuntimeAssemblyName, RequiredFixtureConstructorTargets[3],
+            "CreateAncestryTransport", "20011281ed1281f1",
+            ILOpCode.Callvirt),
+        new(FixtureAssemblyName,
+            FixtureAssemblyName + ".FrameworkStateDependencies",
+            "CreateArtifactStore", "20011281e9128161",
+            RuntimeAssemblyName, RequiredFixtureConstructorTargets[3],
+            "CreateArtifactStore", "20011281e9128161",
+            ILOpCode.Callvirt),
     ];
 
     internal static bool TryAudit(
@@ -84,15 +124,13 @@ internal static class ManagedArchitectureAudit
         {
             var fixture = Read(fixtureAssembly);
             var runtime = Read(runtimeAssembly);
-            if (fixture.AssemblyName !=
-                    "AgenticPrReview.Runtime.ActionHostVerifierFixture" ||
-                runtime.AssemblyName != "AgenticPrReview.Runtime" ||
+            if (fixture.AssemblyName != FixtureAssemblyName ||
+                runtime.AssemblyName != RuntimeAssemblyName ||
                 !fixture.AssemblyReferences.Contains(
-                    "AgenticPrReview.Runtime") ||
+                    RuntimeAssemblyName) ||
                 !RequiredFixtureTypes.All(fixture.TypeDefinitions.Contains) ||
                 !RequiredRuntimeTypes.All(runtime.TypeDefinitions.Contains) ||
-                RequiredFixtureConstructorRoutes.Any(route =>
-                    fixture.MemberReferences.GetValueOrDefault(route) != 1) ||
+                !ConstructorRoutesValid(fixture.CallSites) ||
                 ForbiddenAssemblies.Any(name =>
                     fixture.AssemblyReferences.Contains(name) ||
                     runtime.AssemblyReferences.Contains(name)) ||
@@ -108,7 +146,8 @@ internal static class ManagedArchitectureAudit
                 .Append('\n')
                 .Append("runtime-assembly:").Append(runtime.AssemblyName)
                 .Append('\n')
-                .Append("fixture-reference:AgenticPrReview.Runtime\n");
+                .Append("fixture-reference:").Append(RuntimeAssemblyName)
+                .Append('\n');
             foreach (var type in RequiredFixtureTypes)
             {
                 framing.Append("fixture-type:").Append(type).Append('\n');
@@ -117,10 +156,15 @@ internal static class ManagedArchitectureAudit
             {
                 framing.Append("runtime-type:").Append(type).Append('\n');
             }
-            foreach (var route in RequiredFixtureConstructorRoutes)
+            foreach (var route in fixture.CallSites
+                         .Where(call => RequiredFixtureConstructorTargets
+                             .Contains(call.TargetType,
+                                 StringComparer.Ordinal))
+                         .OrderBy(call => call.Canonical,
+                             StringComparer.Ordinal))
             {
-                framing.Append("fixture-constructor:").Append(route)
-                    .Append(":1\n");
+                framing.Append("fixture-call:").Append(route.Canonical)
+                    .Append('\n');
             }
             foreach (var assembly in ForbiddenAssemblies)
             {
@@ -139,10 +183,78 @@ internal static class ManagedArchitectureAudit
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or BadImageFormatException or
-            InvalidOperationException)
+            InvalidOperationException or InvalidDataException)
         {
             return false;
         }
+    }
+
+    internal static bool TryAuditForTesting(
+        string assembly,
+        IReadOnlyCollection<string> requiredTypes,
+        IReadOnlyCollection<string> forbiddenTypes,
+        string targetType,
+        int expectedCallCount)
+    {
+        try
+        {
+            var metadata = Read(assembly);
+            return requiredTypes.All(metadata.TypeDefinitions.Contains) &&
+                !forbiddenTypes.Any(metadata.AllTypes.Contains) &&
+                metadata.CallSites.Count(call =>
+                    call.TargetType == targetType) == expectedCallCount;
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException or BadImageFormatException or
+            InvalidOperationException or InvalidDataException)
+        {
+            return false;
+        }
+    }
+
+    internal static IReadOnlyCollection<string> CallSitesForTesting(
+        string assembly,
+        IReadOnlyCollection<string> targetTypes) => Read(assembly).CallSites
+            .Where(call => targetTypes.Contains(call.TargetType))
+            .Select(call => call.Canonical)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+    internal static bool TryDecodeInstructionsForTesting(
+        string assembly,
+        byte[] il)
+    {
+        try
+        {
+            using var stream = File.OpenRead(assembly);
+            using var pe = new PEReader(stream,
+                PEStreamOptions.PrefetchMetadata);
+            _ = ReadMethodReferences(pe.GetMetadataReader(), il).ToArray();
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException or BadImageFormatException or
+            InvalidOperationException or InvalidDataException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ConstructorRoutesValid(
+        IReadOnlyCollection<ManagedCallSite> calls)
+    {
+        var relevant = calls.Where(call => RequiredFixtureConstructorTargets
+                .Contains(call.TargetType, StringComparer.Ordinal))
+            .Select(call => call.Canonical)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        return relevant.SequenceEqual(RequiredFixtureCalls
+                .Select(call => call.Canonical)
+                .Order(StringComparer.Ordinal), StringComparer.Ordinal) &&
+            RequiredFixtureConstructorTargets.All(target =>
+                calls.Count(call => call.TargetType == target &&
+                    call.TargetName == ".ctor" &&
+                    call.OpCode == ILOpCode.Newobj) == 1);
     }
 
     private static ManagedAssemblyMetadata Read(string path)
@@ -155,7 +267,7 @@ internal static class ManagedArchitectureAudit
 
         using var stream = File.OpenRead(path);
         using var pe = new PEReader(stream,
-            PEStreamOptions.PrefetchMetadata);
+            PEStreamOptions.PrefetchEntireImage);
         if (!pe.HasMetadata)
         {
             throw new BadImageFormatException();
@@ -168,53 +280,216 @@ internal static class ManagedArchitectureAudit
         }
 
         var definitions = metadata.TypeDefinitions
-            .Select(handle => FullName(metadata,
-                metadata.GetTypeDefinition(handle).Namespace,
-                metadata.GetTypeDefinition(handle).Name))
+            .Select(handle => DefinitionName(metadata, handle))
             .ToHashSet(StringComparer.Ordinal);
         var references = metadata.TypeReferences
-            .Select(handle => FullName(metadata,
-                metadata.GetTypeReference(handle).Namespace,
-                metadata.GetTypeReference(handle).Name))
+            .Select(handle => ReferenceName(metadata, handle))
             .ToHashSet(StringComparer.Ordinal);
         var assemblyReferences = metadata.AssemblyReferences
             .Select(handle => metadata.GetString(
                 metadata.GetAssemblyReference(handle).Name))
             .ToHashSet(StringComparer.Ordinal);
-        var memberReferences = metadata.MemberReferences
-            .Select(handle => metadata.GetMemberReference(handle))
-            .Select(member => (Parent: ParentName(metadata, member.Parent),
-                Name: metadata.GetString(member.Name)))
-            .Where(member => member.Parent is not null)
-            .GroupBy(member => member.Parent + "::" + member.Name,
-                StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Count(),
-                StringComparer.Ordinal);
+        var callSites = ReadCallSites(pe, metadata).ToArray();
         return new ManagedAssemblyMetadata(
             metadata.GetString(metadata.GetAssemblyDefinition().Name),
             definitions,
             definitions.Concat(references).ToHashSet(StringComparer.Ordinal),
             assemblyReferences,
-            memberReferences);
+            callSites);
     }
 
-    private static string? ParentName(
+    private static IEnumerable<ManagedCallSite> ReadCallSites(
+        PEReader pe,
+        MetadataReader metadata)
+    {
+        var assemblyName = AssemblyName(metadata);
+        foreach (var typeHandle in metadata.TypeDefinitions)
+        {
+            var type = metadata.GetTypeDefinition(typeHandle);
+            foreach (var methodHandle in type.GetMethods())
+            {
+                var method = metadata.GetMethodDefinition(methodHandle);
+                if (method.RelativeVirtualAddress == 0)
+                {
+                    continue;
+                }
+
+                var callerType = DefinitionName(metadata, typeHandle);
+                var callerName = metadata.GetString(method.Name);
+                var callerSignature = Signature(metadata, method.Signature);
+                var il = pe.GetMethodBody(method.RelativeVirtualAddress)
+                    .GetILBytes() ?? throw new InvalidDataException(
+                        "The managed audit found a method without IL bytes.");
+                foreach (var target in ReadMethodReferences(metadata, il))
+                {
+                    yield return new ManagedCallSite(
+                        assemblyName,
+                        callerType,
+                        callerName,
+                        callerSignature,
+                        target.AssemblyName,
+                        target.TypeName,
+                        target.MethodName,
+                        target.Signature,
+                        target.OpCode);
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<ManagedMethodReference> ReadMethodReferences(
+        MetadataReader metadata,
+        byte[] il)
+    {
+        var offset = 0;
+        while (offset < il.Length)
+        {
+            var opCode = ReadOpCode(il, ref offset);
+            if (opCode == ILOpCode.Calli)
+            {
+                throw new InvalidDataException(
+                    "Indirect managed audit calls are not permitted.");
+            }
+
+            var operandOffset = offset;
+            var operandSize = OperandSize(opCode, il, offset);
+            if (operandOffset + operandSize > il.Length)
+            {
+                throw new InvalidDataException(
+                    "The managed audit found a truncated IL operand.");
+            }
+
+            if (IsMethodTokenOpCode(opCode))
+            {
+                var token = BitConverter.ToInt32(il, operandOffset);
+                yield return ResolveMethod(metadata,
+                    MetadataTokens.EntityHandle(token), opCode);
+            }
+
+            offset += operandSize;
+        }
+    }
+
+    private static bool IsMethodTokenOpCode(ILOpCode opCode) => opCode is
+        ILOpCode.Call or
+        ILOpCode.Callvirt or
+        ILOpCode.Jmp or
+        ILOpCode.Newobj or
+        ILOpCode.Ldftn or
+        ILOpCode.Ldvirtftn;
+
+    private static ManagedMethodReference ResolveMethod(
+        MetadataReader metadata,
+        EntityHandle handle,
+        ILOpCode opCode) => handle.Kind switch
+    {
+        HandleKind.MemberReference => ResolveMemberReference(metadata,
+            (MemberReferenceHandle)handle, opCode),
+        HandleKind.MethodDefinition => ResolveMethodDefinition(metadata,
+            (MethodDefinitionHandle)handle, opCode),
+        HandleKind.MethodSpecification => ResolveMethodSpecification(metadata,
+            (MethodSpecificationHandle)handle, opCode),
+        _ => throw new InvalidDataException(
+            "The managed audit found an unsupported method target."),
+    };
+
+    private static ManagedMethodReference ResolveMemberReference(
+        MetadataReader metadata,
+        MemberReferenceHandle handle,
+        ILOpCode opCode)
+    {
+        var reference = metadata.GetMemberReference(handle);
+        if (reference.GetKind() != MemberReferenceKind.Method)
+        {
+            throw new InvalidDataException(
+                "The managed audit found a field token in a method position.");
+        }
+
+        var identity = TypeIdentity(metadata, reference.Parent);
+        return new ManagedMethodReference(
+            identity.AssemblyName,
+            identity.TypeName,
+            metadata.GetString(reference.Name),
+            Signature(metadata, reference.Signature),
+            opCode);
+    }
+
+    private static ManagedMethodReference ResolveMethodDefinition(
+        MetadataReader metadata,
+        MethodDefinitionHandle handle,
+        ILOpCode opCode)
+    {
+        var definition = metadata.GetMethodDefinition(handle);
+        return new ManagedMethodReference(
+            AssemblyName(metadata),
+            DefinitionName(metadata, definition.GetDeclaringType()),
+            metadata.GetString(definition.Name),
+            Signature(metadata, definition.Signature),
+            opCode);
+    }
+
+    private static ManagedMethodReference ResolveMethodSpecification(
+        MetadataReader metadata,
+        MethodSpecificationHandle handle,
+        ILOpCode opCode)
+    {
+        var specification = metadata.GetMethodSpecification(handle);
+        var method = ResolveMethod(metadata, specification.Method, opCode);
+        return method with
+        {
+            Signature = string.Concat(method.Signature, "<",
+                Signature(metadata, specification.Signature), ">"),
+        };
+    }
+
+    private static ManagedTypeIdentity TypeIdentity(
         MetadataReader metadata,
         EntityHandle handle) => handle.Kind switch
-        {
-            HandleKind.TypeDefinition => DefinitionName(metadata,
-                (TypeDefinitionHandle)handle),
-            HandleKind.TypeReference => ReferenceName(metadata,
-                (TypeReferenceHandle)handle),
-            _ => null,
-        };
+    {
+        HandleKind.TypeDefinition => new ManagedTypeIdentity(
+            AssemblyName(metadata),
+            DefinitionName(metadata, (TypeDefinitionHandle)handle)),
+        HandleKind.TypeReference => new ManagedTypeIdentity(
+            ResolutionAssembly(metadata,
+                metadata.GetTypeReference((TypeReferenceHandle)handle)
+                    .ResolutionScope),
+            ReferenceName(metadata, (TypeReferenceHandle)handle)),
+        HandleKind.TypeSpecification => new ManagedTypeIdentity(
+            "<type-specification>",
+            string.Concat("<type-specification:", Signature(metadata,
+                metadata.GetTypeSpecification((TypeSpecificationHandle)handle)
+                    .Signature), ">")),
+        _ => throw new InvalidDataException(
+            "The managed audit found an unresolved metadata type."),
+    };
+
+    private static string ResolutionAssembly(
+        MetadataReader metadata,
+        EntityHandle scope) => scope.Kind switch
+    {
+        HandleKind.AssemblyReference => metadata.GetString(
+            metadata.GetAssemblyReference((AssemblyReferenceHandle)scope).Name),
+        HandleKind.ModuleDefinition => AssemblyName(metadata),
+        HandleKind.TypeReference => ResolutionAssembly(metadata,
+            metadata.GetTypeReference((TypeReferenceHandle)scope)
+                .ResolutionScope),
+        HandleKind.ModuleReference => string.Concat("<module:",
+            metadata.GetString(metadata.GetModuleReference(
+                (ModuleReferenceHandle)scope).Name), ">"),
+        _ => throw new InvalidDataException(
+            "The managed audit found an unresolved type scope."),
+    };
 
     private static string DefinitionName(
         MetadataReader metadata,
         TypeDefinitionHandle handle)
     {
         var definition = metadata.GetTypeDefinition(handle);
-        return FullName(metadata, definition.Namespace, definition.Name);
+        var name = metadata.GetString(definition.Name);
+        return definition.GetDeclaringType().IsNil
+            ? JoinName(metadata.GetString(definition.Namespace), name)
+            : string.Concat(DefinitionName(metadata,
+                definition.GetDeclaringType()), "+", name);
     }
 
     private static string ReferenceName(
@@ -222,23 +497,141 @@ internal static class ManagedArchitectureAudit
         TypeReferenceHandle handle)
     {
         var reference = metadata.GetTypeReference(handle);
-        return FullName(metadata, reference.Namespace, reference.Name);
+        var name = metadata.GetString(reference.Name);
+        return reference.ResolutionScope.Kind == HandleKind.TypeReference
+            ? string.Concat(ReferenceName(metadata,
+                (TypeReferenceHandle)reference.ResolutionScope), "+", name)
+            : JoinName(metadata.GetString(reference.Namespace), name);
     }
 
-    private static string FullName(
+    private static string AssemblyName(MetadataReader metadata) =>
+        metadata.IsAssembly
+            ? metadata.GetString(metadata.GetAssemblyDefinition().Name)
+            : throw new InvalidDataException(
+                "The managed metadata does not define an assembly.");
+
+    private static string Signature(
         MetadataReader metadata,
-        StringHandle namespaceHandle,
-        StringHandle nameHandle)
+        BlobHandle handle) => Convert.ToHexString(
+            metadata.GetBlobBytes(handle)).ToLowerInvariant();
+
+    private static ILOpCode ReadOpCode(byte[] il, ref int offset)
     {
-        var @namespace = metadata.GetString(namespaceHandle);
-        var name = metadata.GetString(nameHandle);
-        return @namespace.Length == 0 ? name : @namespace + "." + name;
+        if (offset >= il.Length)
+        {
+            throw new InvalidDataException(
+                "The managed audit found truncated IL.");
+        }
+
+        var first = il[offset++];
+        var value = first == 0xfe
+            ? offset < il.Length
+                ? (ushort)(0xfe00 | il[offset++])
+                : throw new InvalidDataException(
+                    "The managed audit found a truncated IL opcode.")
+            : first;
+        var opCode = (ILOpCode)value;
+        if (!Enum.IsDefined(opCode))
+        {
+            throw new InvalidDataException(
+                string.Concat("Unknown IL opcode ", value.ToString("x4"), "."));
+        }
+
+        return opCode;
     }
+
+    private static int OperandSize(
+        ILOpCode opCode,
+        byte[] il,
+        int offset) => opCode switch
+    {
+        ILOpCode.Ldarg_s or ILOpCode.Ldarga_s or ILOpCode.Starg_s or
+            ILOpCode.Ldloc_s or ILOpCode.Ldloca_s or ILOpCode.Stloc_s or
+            ILOpCode.Ldc_i4_s or ILOpCode.Br_s or ILOpCode.Brfalse_s or
+            ILOpCode.Brtrue_s or ILOpCode.Beq_s or ILOpCode.Bge_s or
+            ILOpCode.Bgt_s or ILOpCode.Ble_s or ILOpCode.Blt_s or
+            ILOpCode.Bne_un_s or ILOpCode.Bge_un_s or ILOpCode.Bgt_un_s or
+            ILOpCode.Ble_un_s or ILOpCode.Blt_un_s or ILOpCode.Leave_s or
+            ILOpCode.Unaligned => 1,
+        ILOpCode.Ldarg or ILOpCode.Ldarga or ILOpCode.Starg or
+            ILOpCode.Ldloc or ILOpCode.Ldloca or ILOpCode.Stloc => 2,
+        ILOpCode.Ldc_i4 or ILOpCode.Ldc_r4 or ILOpCode.Jmp or
+            ILOpCode.Call or ILOpCode.Calli or ILOpCode.Br or
+            ILOpCode.Brfalse or ILOpCode.Brtrue or ILOpCode.Beq or
+            ILOpCode.Bge or ILOpCode.Bgt or ILOpCode.Ble or ILOpCode.Blt or
+            ILOpCode.Bne_un or ILOpCode.Bge_un or ILOpCode.Bgt_un or
+            ILOpCode.Ble_un or ILOpCode.Blt_un or ILOpCode.Callvirt or
+            ILOpCode.Cpobj or ILOpCode.Ldobj or ILOpCode.Ldstr or
+            ILOpCode.Newobj or ILOpCode.Castclass or ILOpCode.Isinst or
+            ILOpCode.Unbox or ILOpCode.Ldfld or ILOpCode.Ldflda or
+            ILOpCode.Stfld or ILOpCode.Ldsfld or ILOpCode.Ldsflda or
+            ILOpCode.Stsfld or ILOpCode.Stobj or ILOpCode.Box or
+            ILOpCode.Newarr or ILOpCode.Ldelema or ILOpCode.Ldelem or
+            ILOpCode.Stelem or ILOpCode.Unbox_any or ILOpCode.Refanyval or
+            ILOpCode.Mkrefany or ILOpCode.Ldtoken or ILOpCode.Leave or
+            ILOpCode.Ldftn or ILOpCode.Ldvirtftn or ILOpCode.Initobj or
+            ILOpCode.Constrained or ILOpCode.Sizeof => 4,
+        ILOpCode.Ldc_i8 or ILOpCode.Ldc_r8 => 8,
+        ILOpCode.Switch => SwitchOperandSize(il, offset),
+        _ => 0,
+    };
+
+    private static int SwitchOperandSize(byte[] il, int offset)
+    {
+        if (offset + sizeof(int) > il.Length)
+        {
+            throw new InvalidDataException(
+                "The managed audit found a truncated switch operand.");
+        }
+
+        var count = BitConverter.ToInt32(il, offset);
+        return count < 0
+            ? throw new InvalidDataException(
+                "The managed audit found an invalid switch operand.")
+            : checked(sizeof(int) + count * sizeof(int));
+    }
+
+    private static string JoinName(string @namespace, string name) =>
+        string.IsNullOrEmpty(@namespace)
+            ? name
+            : string.Concat(@namespace, ".", name);
 
     private sealed record ManagedAssemblyMetadata(
         string AssemblyName,
         HashSet<string> TypeDefinitions,
         HashSet<string> AllTypes,
         HashSet<string> AssemblyReferences,
-        Dictionary<string, int> MemberReferences);
+        IReadOnlyCollection<ManagedCallSite> CallSites);
+
+    private sealed record ManagedTypeIdentity(
+        string AssemblyName,
+        string TypeName);
+
+    private sealed record ManagedMethodReference(
+        string AssemblyName,
+        string TypeName,
+        string MethodName,
+        string Signature,
+        ILOpCode OpCode);
+
+    private sealed record ManagedCallSite(
+        string CallerAssembly,
+        string CallerType,
+        string CallerName,
+        string CallerSignature,
+        string TargetAssembly,
+        string TargetType,
+        string TargetName,
+        string TargetSignature,
+        ILOpCode OpCode)
+    {
+        internal string Canonical => string.Join('|',
+            CallerAssembly,
+            string.Concat(CallerType, "::", CallerName),
+            CallerSignature,
+            OpCode.ToString(),
+            TargetAssembly,
+            string.Concat(TargetType, "::", TargetName),
+            TargetSignature);
+    }
 }
