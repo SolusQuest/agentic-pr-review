@@ -15,7 +15,7 @@ internal static class FrameworkCanaries
     internal const string ReviewedPath =
         "proof/apr178-path-canary.txt";
     internal const string Workflow =
-        "APR178_WORKFLOW_IDENTITY_CANARY";
+        "apr-r4-e2p-authorization-manifest-v1";
     internal const string Prompt =
         "APR178_PROMPT_INSTRUCTIONS_CANARY";
     internal const string ToolData =

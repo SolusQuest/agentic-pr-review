@@ -68,7 +68,12 @@ internal static class TrustedProofControlService
         var comments = await transport.ListAsync(cancellationToken)
             .ConfigureAwait(false);
         if (comments is null ||
-            !TrySelect(comments, coordinates, "ready", out var ready, out var invalid))
+            !TrySelectCurrent(
+                comments,
+                coordinates,
+                "ready",
+                out var ready,
+                out var invalid))
         {
             return 1;
         }
@@ -99,7 +104,7 @@ internal static class TrustedProofControlService
                 comments = await transport.ListAsync(cancellationToken)
                     .ConfigureAwait(false);
                 if (comments is null ||
-                    !TrySelect(
+                    !TrySelectCurrent(
                         comments,
                         coordinates,
                         "ready",
@@ -118,7 +123,7 @@ internal static class TrustedProofControlService
         comments = await transport.ListAsync(cancellationToken)
             .ConfigureAwait(false);
         if (comments is null ||
-            !TrySelect(
+            !TrySelectCurrent(
                 comments,
                 coordinates,
                 "ready",
@@ -148,7 +153,7 @@ internal static class TrustedProofControlService
             comments = await transport.ListAsync(linked.Token)
                 .ConfigureAwait(false);
             if (comments is null ||
-                !TrySelect(
+                !TrySelectCurrent(
                     comments,
                     coordinates,
                     "ready",
@@ -160,7 +165,7 @@ internal static class TrustedProofControlService
                 !StringComparer.Ordinal.Equals(
                     currentReady.Body,
                     ready.Body) ||
-                !TrySelect(
+                !TrySelectCurrent(
                     comments,
                     coordinates,
                     "release",
@@ -176,6 +181,7 @@ internal static class TrustedProofControlService
                     release.Body,
                     out var releaseMarker) &&
                 releaseMarker!.PredecessorCommentId == ready.Id &&
+                release.CreatedAt > ready.CreatedAt &&
                 release.CreatedAt == release.UpdatedAt &&
                 await transport.HasWritePermissionAsync(
                     release.User.Login,
@@ -204,13 +210,13 @@ internal static class TrustedProofControlService
         var comments = await transport.ListAsync(cancellationToken)
             .ConfigureAwait(false);
         if (comments is null ||
-            !TrySelect(comments, coordinates, "ready", out var ready, out var invalid) ||
-            invalid || ready is null ||
-            !TrySelect(comments, coordinates, "release", out var release, out invalid) ||
-            invalid || release is null ||
-            !TrustedProofControlMarker.TryParse(release.Body, out var marker) ||
-            marker!.PredecessorCommentId != ready.Id ||
+            !TrySelectCompletedPair(
+                comments,
+                coordinates,
+                out var ready,
+                out var release) ||
             release.CreatedAt != release.UpdatedAt ||
+            release.CreatedAt <= ready.CreatedAt ||
             !await ReadBackExactAsync(
                 ready,
                 ready.Body!,
@@ -243,9 +249,20 @@ internal static class TrustedProofControlService
             return 1;
         }
 
+        if (comments.Any(comment =>
+                !TrustedProofControlMarker.TryParse(
+                    comment.Body,
+                    out var marker)
+                    ? TrustedProofControlMarker.HasReservedPrefix(comment.Body)
+                    : marker!.OperationId == coordinates.OperationId &&
+                        !marker.MatchesFamily(coordinates)))
+        {
+            return 1;
+        }
+
         var owned = comments.Where(comment =>
             TrustedProofControlMarker.TryParse(comment.Body, out var marker) &&
-            marker!.Matches(coordinates)).ToArray();
+            marker!.MatchesFamily(coordinates)).ToArray();
         var outcomes = new List<TrustedProofCleanupOutcome>(owned.Length);
         foreach (var comment in owned)
         {
@@ -291,8 +308,11 @@ internal static class TrustedProofControlService
         var remaining = await transport.ListAsync(cancellationToken)
             .ConfigureAwait(false);
         if (remaining is null || remaining.Any(comment =>
-                TrustedProofControlMarker.TryParse(comment.Body, out var marker) &&
-                marker!.Matches(coordinates)))
+                !TrustedProofControlMarker.TryParse(
+                    comment.Body,
+                    out var marker)
+                    ? TrustedProofControlMarker.HasReservedPrefix(comment.Body)
+                    : marker!.MatchesFamily(coordinates)))
         {
             return 1;
         }
@@ -308,7 +328,7 @@ internal static class TrustedProofControlService
         return 0;
     }
 
-    private static bool TrySelect(
+    private static bool TrySelectCurrent(
         IReadOnlyList<TrustedProofIssueComment> comments,
         TrustedProofControlCoordinates coordinates,
         string kind,
@@ -319,9 +339,30 @@ internal static class TrustedProofControlService
         invalid = false;
         foreach (var comment in comments)
         {
-            if (!TrustedProofControlMarker.TryParse(comment.Body, out var marker) ||
-                marker!.Kind != kind ||
-                !marker.Matches(coordinates))
+            if (!TrustedProofControlMarker.TryParse(comment.Body, out var marker))
+            {
+                if (TrustedProofControlMarker.HasReservedPrefix(comment.Body))
+                {
+                    invalid = true;
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (marker!.OperationId != coordinates.OperationId)
+            {
+                continue;
+            }
+
+            if (!marker.MatchesFamily(coordinates) ||
+                marker.Kind == kind && !marker.Matches(coordinates))
+            {
+                invalid = true;
+                return true;
+            }
+
+            if (marker.Kind != kind)
             {
                 continue;
             }
@@ -336,6 +377,71 @@ internal static class TrustedProofControlService
         }
 
         return true;
+    }
+
+    private static bool TrySelectCompletedPair(
+        IReadOnlyList<TrustedProofIssueComment> comments,
+        TrustedProofControlCoordinates coordinates,
+        out TrustedProofIssueComment ready,
+        out TrustedProofIssueComment release)
+    {
+        ready = null!;
+        release = null!;
+        TrustedProofControlMarker? readyMarker = null;
+        TrustedProofControlMarker? releaseMarker = null;
+        foreach (var comment in comments)
+        {
+            if (!TrustedProofControlMarker.TryParse(comment.Body, out var marker))
+            {
+                if (TrustedProofControlMarker.HasReservedPrefix(comment.Body))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (marker!.OperationId != coordinates.OperationId)
+            {
+                continue;
+            }
+
+            if (!marker.MatchesFamily(coordinates))
+            {
+                return false;
+            }
+
+            if (marker.Kind == "ready")
+            {
+                if (readyMarker is not null ||
+                    comment.CreatedAt != comment.UpdatedAt)
+                {
+                    return false;
+                }
+
+                ready = comment;
+                readyMarker = marker;
+            }
+            else if (marker.Kind == "release")
+            {
+                if (releaseMarker is not null ||
+                    comment.CreatedAt != comment.UpdatedAt)
+                {
+                    return false;
+                }
+
+                release = comment;
+                releaseMarker = marker;
+            }
+        }
+
+        return readyMarker is not null &&
+            releaseMarker is not null &&
+            readyMarker.RunId != coordinates.RunId &&
+            readyMarker.RunId > 0 &&
+            readyMarker.RunAttempt > 0 &&
+            releaseMarker.HasSameProducer(readyMarker) &&
+            releaseMarker.PredecessorCommentId == ready.Id;
     }
 
     private static async Task<bool> ReadBackExactAsync(

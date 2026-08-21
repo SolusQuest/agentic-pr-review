@@ -187,16 +187,37 @@ internal sealed class FrameworkGitHubHandler(
             }
             Increment("sticky-list-count");
             var stored = ReadOptional(mode, "sticky-comment.json");
-            return Json(HttpStatusCode.OK,
-                stored is null ? "[]" : "[" + stored + "]");
+            var comments = new List<string>();
+            if (IsTrustedProofPayload())
+            {
+                comments.AddRange(ReadProofControlComments(mode));
+            }
+
+            if (stored is not null)
+            {
+                comments.Add(stored);
+            }
+
+            return Json(HttpStatusCode.OK, "[" +
+                string.Join(',', comments) + "]");
         }
 
         if (suffix == "/issues/147/comments" && request.Method == HttpMethod.Post)
         {
-            Increment("sticky-create-count");
             var body = await request.Content!.ReadAsStringAsync(
                 cancellationToken).ConfigureAwait(false);
-            var document = IssueComment(701, ExtractString(body, "body"));
+            var commentBody = ExtractString(body, "body");
+            if (IsTrustedProofPayload() && commentBody.StartsWith(
+                    "<!-- apr-r4-e2p-control ",
+                    StringComparison.Ordinal))
+            {
+                return Json(
+                    HttpStatusCode.Created,
+                    CreateProofControlPair(mode, commentBody));
+            }
+
+            Increment("sticky-create-count");
+            var document = IssueComment(701, commentBody, "proof-bot");
             WriteStored(mode, "sticky-comment.json", document);
             if (mode is "mutation-crash" or "cancel-outcome-unknown")
             {
@@ -224,7 +245,7 @@ internal sealed class FrameworkGitHubHandler(
             }
             return Json(HttpStatusCode.OK,
                 ReadOptional(mode, "sticky-comment.json") ??
-                IssueComment(701, ""));
+                IssueComment(701, "", "proof-bot"));
         }
 
         if (suffix == "/issues/comments/701" && request.Method == HttpMethod.Patch)
@@ -234,7 +255,10 @@ internal sealed class FrameworkGitHubHandler(
                 Path.Join(scenarioRoot, "sticky-update-comment-id"), "701");
             var body = await request.Content!.ReadAsStringAsync(
                 cancellationToken).ConfigureAwait(false);
-            var document = IssueComment(701, ExtractString(body, "body"));
+            var document = IssueComment(
+                701,
+                ExtractString(body, "body"),
+                "proof-bot");
             if (mode == "continuation")
             {
                 var predecessor = ReadOptional(mode, "sticky-comment.json");
@@ -251,6 +275,39 @@ internal sealed class FrameworkGitHubHandler(
                     "sticky-successor-comment.json"), document);
             }
             return Json(HttpStatusCode.OK, document);
+        }
+
+        if (IsTrustedProofPayload() &&
+            suffix.StartsWith("/issues/comments/", StringComparison.Ordinal) &&
+            long.TryParse(
+                suffix["/issues/comments/".Length..],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var proofCommentId))
+        {
+            var proofComments = ReadProofControlComments(mode);
+            var proofComment = proofComments.SingleOrDefault(value =>
+                JsonPropertyLong(value, "id") == proofCommentId);
+            if (request.Method == HttpMethod.Get)
+            {
+                return proofComment is null
+                    ? Json(HttpStatusCode.NotFound, "{}")
+                    : Json(HttpStatusCode.OK, proofComment);
+            }
+
+            if (request.Method == HttpMethod.Delete)
+            {
+                if (proofComment is null)
+                {
+                    return Json(HttpStatusCode.NotFound, "{}");
+                }
+
+                WriteProofControlComments(
+                    mode,
+                    proofComments.Where(value =>
+                        JsonPropertyLong(value, "id") != proofCommentId));
+                return Json(HttpStatusCode.NoContent, "{}");
+            }
         }
 
         if (suffix == "/pulls/147/comments" && request.Method == HttpMethod.Get)
@@ -398,6 +455,9 @@ internal sealed class FrameworkGitHubHandler(
                 ("repo", Identity(RepositoryId)))),
             ("head", FrameworkJson.Object(
                 ("sha", CurrentHead(mode)),
+                ("ref", "r4-trusted-proof/" +
+                    (mode == "stale" ? new string('7', 64) :
+                        new string('1', 64))),
                 ("repo", Identity(mode == "fork"
                     ? RepositoryId + 1
                     : RepositoryId))))));
@@ -423,8 +483,10 @@ internal sealed class FrameworkGitHubHandler(
 
     private string CurrentHead(string mode) =>
         mode == "cross-head-conflict" ? ConflictHeadSha :
-        mode == "continuation" ||
-            mode == "stale" && ReadCounter("provider-sequence") >= 6
+        mode == "continuation" && !IsTrustedProofPayload() ||
+            mode == "stale" &&
+                (ReadCounter("provider-sequence") >= 6 ||
+                    File.Exists(Path.Join(scenarioRoot, "stale-released")))
             ? ContinuedHeadSha
             : HeadSha;
 
@@ -467,14 +529,16 @@ internal sealed class FrameworkGitHubHandler(
                 [TreeEntry(".github", "040000", "tree", GitHubRoot)],
             var value when value == GitHubRoot =>
                 [
-                    TreeEntry("trusted-proof.json", "100644", "blob",
-                        GitBlobSha(ConfigBytes(mode)), ConfigBytes(mode).Length),
                     TreeEntry("agentic-pr-review", "040000", "tree",
                         InstructionsRoot),
                 ],
             var value when value == InstructionsRoot =>
-                [TreeEntry("trusted-proof-instructions.md", "100644", "blob",
-                    GitBlobSha(InstructionsBytes), InstructionsBytes.Length)],
+                [
+                    TreeEntry("trusted-proof.json", "100644", "blob",
+                        GitBlobSha(ConfigBytes(mode)), ConfigBytes(mode).Length),
+                    TreeEntry("trusted-proof-instructions.md", "100644", "blob",
+                        GitBlobSha(InstructionsBytes), InstructionsBytes.Length),
+                ],
             var value when value == BaseRoot => [],
             var value when value == HeadRoot =>
                 [TreeEntry("proof", "040000", "tree", ProofRoot)],
@@ -519,14 +583,108 @@ internal sealed class FrameworkGitHubHandler(
             ? ",\"inlineMinSeverity\":\"high\""
             : string.Empty) + "}}");
 
-    private static string IssueComment(long id, string body) =>
+    private bool IsTrustedProofPayload() => File.Exists(
+        Path.Join(scenarioRoot, "trusted-proof-payload"));
+
+    private string CreateProofControlPair(string mode, string readyBody)
+    {
+        var stale = readyBody.Contains(
+            "\"kind\":\"stale-ready\"",
+            StringComparison.Ordinal);
+        var readyId = stale ? 820L : 810L;
+        var releaseId = readyId + 1;
+        var ready = IssueComment(readyId, readyBody, "proof-bot");
+        var releaseBody = CreateReleaseBody(
+            readyBody,
+            stale ? "stale-release" : "release",
+            readyId);
+        var release = IssueComment(releaseId, releaseBody, "maintainer");
+        WriteProofControlComments(mode, [ready, release]);
+        if (stale)
+        {
+            File.WriteAllText(Path.Join(scenarioRoot, "stale-released"), "1");
+        }
+
+        return ready;
+    }
+
+    private static string CreateReleaseBody(
+        string readyBody,
+        string kind,
+        long predecessorCommentId)
+    {
+        const string prefix = "<!-- apr-r4-e2p-control ";
+        const string suffix = " -->";
+        var value = JsonNode.Parse(
+            readyBody[prefix.Length..^suffix.Length])!.AsObject();
+        value["kind"] = kind;
+        value["predecessor_comment_id"] = predecessorCommentId;
+        value["body_sha256"] = string.Empty;
+        var preimage = value.ToJsonString();
+        value["body_sha256"] = Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes(preimage)))
+            .ToLowerInvariant();
+        return prefix + value.ToJsonString() + suffix;
+    }
+
+    private IReadOnlyList<string> ReadProofControlComments(string mode)
+    {
+        var path = ProofControlPath(mode);
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return document.RootElement.EnumerateArray()
+            .Select(value => value.GetRawText())
+            .ToArray();
+    }
+
+    private void WriteProofControlComments(
+        string mode,
+        IEnumerable<string> comments)
+    {
+        var path = ProofControlPath(mode);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "[" + string.Join(',', comments) + "]");
+    }
+
+    private string ProofControlPath(string mode) => Path.Join(
+        mode is "continuation-seed" or "continuation"
+            ? Directory.GetParent(scenarioRoot)!.FullName
+            : scenarioRoot,
+        mode is "continuation-seed" or "continuation"
+            ? "shared-proof-control-comments.json"
+            : "proof-control-comments.json");
+
+    private static long JsonPropertyLong(string value, string property)
+    {
+        using var document = JsonDocument.Parse(value);
+        return document.RootElement.GetProperty(property).GetInt64();
+    }
+
+    private static string IssueComment(long id, string body, string login) =>
         FrameworkJson.Serialize(FrameworkJson.Object(
             ("id", id),
             ("url", "https://api.github.com/repos/" +
                 FrameworkCanaries.Repository + "/issues/comments/" + id),
             ("html_url", "https://github.com/" +
                 FrameworkCanaries.Repository + "/pull/147#issuecomment-" + id),
-            ("body", body)));
+            ("body", body),
+            ("user", FrameworkJson.Object(
+                ("login", login),
+                ("id", login == "maintainer" ? 7 : 8))),
+            ("created_at", Timestamp(id)),
+            ("updated_at", Timestamp(id)),
+            ("author_association", login == "maintainer" ? "MEMBER" : "NONE")));
+
+    private static string Timestamp(long id) =>
+        DateTimeOffset.Parse(
+                "2026-08-21T00:00:00+00:00",
+                CultureInfo.InvariantCulture)
+            .AddSeconds(id)
+            .ToString("O", CultureInfo.InvariantCulture);
 
     private static string Review(long id) => FrameworkJson.Serialize(
         FrameworkJson.Object(

@@ -54,7 +54,7 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
         };
         using var client = new HttpClient(handler, disposeHandler: false)
         {
-            BaseAddress = new Uri("https://api.github.com/"),
+            BaseAddress = ResolveApiBaseAddress(),
             Timeout = TimeSpan.FromSeconds(30),
         };
         client.DefaultRequestHeaders.Authorization =
@@ -73,17 +73,19 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
             throw new InvalidOperationException("The fixture PR is unavailable.");
         }
 
-        await using var responseStream = await response.Content.ReadAsStreamAsync(
-            cancellationToken).ConfigureAwait(false);
-        using var document = await JsonDocument.ParseAsync(
-            responseStream,
+        var responseBytes = await ReadBoundedAsync(
+            response,
+            64 * 1024,
+            cancellationToken).ConfigureAwait(false) ??
+            throw new InvalidOperationException("The fixture PR is oversized.");
+        using var document = JsonDocument.Parse(
+            responseBytes,
             new JsonDocumentOptions
             {
                 AllowTrailingCommas = false,
                 CommentHandling = JsonCommentHandling.Disallow,
                 MaxDepth = 16,
-            },
-            cancellationToken).ConfigureAwait(false);
+            });
         var root = document.RootElement;
         var head = root.GetProperty("head");
         var headRef = head.GetProperty("ref").GetString();
@@ -236,6 +238,7 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
                         release.Body,
                         out var releaseMarker) &&
                     releaseMarker!.PredecessorCommentId == ready.Id &&
+                    release.CreatedAt > ready.CreatedAt &&
                     release.CreatedAt == release.UpdatedAt &&
                     await transport.HasWritePermissionAsync(
                         release.User.Login,
@@ -284,9 +287,30 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
         invalid = false;
         foreach (var comment in comments)
         {
-            if (!TrustedProofControlMarker.TryParse(comment.Body, out var marker) ||
-                marker!.Kind != kind ||
-                !marker.Matches(coordinates))
+            if (!TrustedProofControlMarker.TryParse(comment.Body, out var marker))
+            {
+                if (TrustedProofControlMarker.HasReservedPrefix(comment.Body))
+                {
+                    invalid = true;
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (marker!.OperationId != coordinates.OperationId)
+            {
+                continue;
+            }
+
+            if (!marker.MatchesFamily(coordinates) ||
+                marker.Kind == kind && !marker.Matches(coordinates))
+            {
+                invalid = true;
+                return true;
+            }
+
+            if (marker.Kind != kind)
             {
                 continue;
             }
@@ -318,5 +342,58 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
         return pullRequests.GetArrayLength() == 1
             ? pullRequests[0].GetProperty("number").GetInt64()
             : 0;
+    }
+
+    private static Uri ResolveApiBaseAddress()
+    {
+        var configured = Environment.GetEnvironmentVariable("GITHUB_API_URL");
+        if (string.IsNullOrEmpty(configured))
+        {
+            return new Uri("https://api.github.com/");
+        }
+
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out var value) ||
+            value.Scheme is not ("http" or "https") ||
+            !string.IsNullOrEmpty(value.UserInfo) ||
+            !string.IsNullOrEmpty(value.Query) ||
+            !string.IsNullOrEmpty(value.Fragment))
+        {
+            throw new InvalidOperationException("The GitHub API URL is invalid.");
+        }
+
+        return new Uri(value.AbsoluteUri.TrimEnd('/') + "/");
+    }
+
+    private static async Task<byte[]?> ReadBoundedAsync(
+        HttpResponseMessage response,
+        int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        var contentLength = response.Content.Headers.ContentLength;
+        if (contentLength.HasValue && contentLength.Value > maximumBytes)
+        {
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(
+            cancellationToken).ConfigureAwait(false);
+        using var output = new MemoryStream();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken)
+                .ConfigureAwait(false);
+            if (read == 0)
+            {
+                return output.Length == 0 ? null : output.ToArray();
+            }
+
+            if (output.Length + read > maximumBytes)
+            {
+                return null;
+            }
+
+            output.Write(buffer, 0, read);
+        }
     }
 }

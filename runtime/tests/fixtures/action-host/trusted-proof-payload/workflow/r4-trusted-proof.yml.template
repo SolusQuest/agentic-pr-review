@@ -29,8 +29,19 @@ jobs:
       - id: authorization
         env:
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           EVENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           EVENT_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          EVENT_PULL_REQUESTS_JSON: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+          EVENT_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+          EVENT_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          EVENT_WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
+          EVENT_TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+          EVENT_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
+          EVENT_REPOSITORY_ID: ${{ github.event.workflow_run.repository.id }}
+          EVENT_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          EVENT_HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
           INPUT_PR_NUMBER: ${{ inputs.pr-number }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -99,6 +110,30 @@ jobs:
               'EVENT_NAME',
               /^(?:workflow_run|workflow_dispatch)$/u,
             );
+            if (eventName === 'workflow_run') {
+              const eventPullRequests = JSON.parse(
+                required('EVENT_PULL_REQUESTS_JSON', /^\[[\s\S]{0,4096}\]$/u),
+              );
+              if (
+                process.env.EVENT_ACTION !== 'completed' ||
+                process.env.EVENT_CONCLUSION !== 'success' ||
+                process.env.EVENT_WORKFLOW_ID !== '294554742' ||
+                process.env.EVENT_WORKFLOW_NAME !== 'CI' ||
+                process.env.EVENT_WORKFLOW_PATH !== '.github/workflows/ci.yml' ||
+                process.env.EVENT_TRIGGER_EVENT !== 'pull_request' ||
+                process.env.EVENT_REPOSITORY !== repository ||
+                process.env.EVENT_REPOSITORY_ID !== repositoryId ||
+                process.env.EVENT_HEAD_REPOSITORY !== repository ||
+                process.env.EVENT_HEAD_REPOSITORY_ID !== repositoryId ||
+                !Array.isArray(eventPullRequests) ||
+                eventPullRequests.length !== 1 ||
+                String(eventPullRequests[0]?.number) !==
+                  process.env.EVENT_PR_NUMBER ||
+                eventPullRequests[0]?.head?.sha !== process.env.EVENT_HEAD_SHA
+              ) {
+                fail('workflow-run-route-facts');
+              }
+            }
             const prNumber = required(
               eventName === 'workflow_run'
                 ? 'EVENT_PR_NUMBER'
@@ -218,7 +253,7 @@ jobs:
       - id: setup-dotnet
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
-          global-json-file: payload-source/global.json
+          dotnet-version: 10.0.109
       - id: install-native-aot-dependencies
         run: |
           sudo apt-get update
@@ -249,7 +284,7 @@ jobs:
           state-key: ${{ secrets.AGENTIC_PR_REVIEW_STATE_KEY }}
           previous-state-key: ${{ secrets.AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY || '' }}
           config-path: .github/agentic-pr-review/trusted-proof.json
-          pr-number: ${{ needs.authorization-preflight.outputs.pr-number }}
+          pr-number: ''
           state-mode: auto
         env:
           AGENTIC_PR_REVIEW_PREPARED_ROOT: ${{ steps.prepare.outputs.prepared_root }}
@@ -288,7 +323,7 @@ jobs:
       - id: setup-dotnet
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
-          global-json-file: payload-source/global.json
+          dotnet-version: 10.0.109
       - id: install-native-aot-dependencies
         run: |
           sudo apt-get update

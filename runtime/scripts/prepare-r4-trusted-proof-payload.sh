@@ -61,8 +61,12 @@ expected_receipt="$control_root/runtime/tests/fixtures/action-host/trusted-proof
 runner_temp="${RUNNER_TEMP:-}"
 [[ "$runner_temp" == /* && -d "$runner_temp" && ! -L "$runner_temp" ]] || fail runner-temp
 runner_temp="$(realpath -e "$runner_temp")"
-case "$output_root" in "$runner_temp/"* ) ;; * ) fail output-parent ;; esac
+canonical_output_root="$(realpath -m -- "$output_root")"
+[[ "$canonical_output_root" == "$output_root" ]] || fail output-canonical
+case "$canonical_output_root" in "$runner_temp/"* ) ;; * ) fail output-parent ;; esac
+case "$canonical_output_root/" in "$source_root/"*|"$control_root/"* ) fail root-overlap ;; esac
 [[ -f "$github_output" && ! -L "$github_output" ]] || fail github-output
+github_output="$(realpath -e "$github_output")"
 
 if git -C "$source_root" config --local --get-regexp \
     '^(http\..*\.extraheader|credential\..*\.helper)$' >/dev/null 2>&1 ||
@@ -98,6 +102,11 @@ NODE
 
 cleanup_output=false
 artifacts_root="$output_root.intermediates"
+canonical_artifacts_root="$(realpath -m -- "$artifacts_root")"
+[[ "$canonical_artifacts_root" == "$artifacts_root" ]] || fail artifacts-canonical
+case "$canonical_artifacts_root" in "$runner_temp/"* ) ;; * ) fail artifacts-parent ;; esac
+case "$canonical_artifacts_root/" in "$source_root/"*|"$control_root/"* ) fail root-overlap ;; esac
+case "$github_output" in "$output_root/"*|"$artifacts_root/"* ) fail github-output-overlap ;; esac
 [[ ! -e "$artifacts_root" && ! -L "$artifacts_root" ]] || fail artifacts-not-fresh
 cleanup() {
   exit_code=$?

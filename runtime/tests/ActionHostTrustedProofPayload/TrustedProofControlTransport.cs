@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 
@@ -21,6 +21,8 @@ internal sealed record TrustedProofCreateResult(
 internal sealed class TrustedProofControlTransport : IDisposable
 {
     private const int MaximumPages = 10;
+    private const int MaximumResponseBytes = 512 * 1024;
+    private const int MaximumAggregateBytes = 2 * 1024 * 1024;
     private readonly HttpClient client;
     private readonly TrustedProofControlCoordinates coordinates;
 
@@ -49,7 +51,7 @@ internal sealed class TrustedProofControlTransport : IDisposable
         };
         var client = new HttpClient(handler, disposeHandler: true)
         {
-            BaseAddress = new Uri("https://api.github.com/"),
+            BaseAddress = ResolveApiBaseAddress(),
             Timeout = TimeSpan.FromSeconds(30),
         };
         client.DefaultRequestHeaders.Clear();
@@ -68,6 +70,7 @@ internal sealed class TrustedProofControlTransport : IDisposable
         CancellationToken cancellationToken)
     {
         var result = new List<TrustedProofIssueComment>();
+        var aggregateBytes = 0;
         for (var page = 1; page <= MaximumPages; page++)
         {
             using var response = await client.GetAsync(
@@ -79,11 +82,15 @@ internal sealed class TrustedProofControlTransport : IDisposable
                 return null;
             }
 
-            var items = await response.Content.ReadFromJsonAsync(
-                TrustedProofControlJsonContext.Default
+            var read = await ReadPlatformAsync(
+                response,
+                TrustedProofGitHubJsonContext.Default
                     .TrustedProofIssueCommentArray,
                 cancellationToken).ConfigureAwait(false);
-            if (items is null)
+            aggregateBytes += read.BytesRead;
+            var items = read.Value;
+            if (items is null || aggregateBytes > MaximumAggregateBytes ||
+                items.Any(comment => !IsValid(comment)))
             {
                 return null;
             }
@@ -105,11 +112,16 @@ internal sealed class TrustedProofControlTransport : IDisposable
         using var response = await client.GetAsync(
             $"repos/{coordinates.Repository}/issues/comments/{commentId}",
             cancellationToken).ConfigureAwait(false);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync(
-                TrustedProofControlJsonContext.Default.TrustedProofIssueComment,
-                cancellationToken).ConfigureAwait(false)
-            : null;
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var read = await ReadPlatformAsync(
+            response,
+            TrustedProofGitHubJsonContext.Default.TrustedProofIssueComment,
+            cancellationToken).ConfigureAwait(false);
+        return read.Value is { } comment && IsValid(comment) ? comment : null;
     }
 
     internal async Task<TrustedProofCreateResult> CreateAsync(
@@ -141,10 +153,12 @@ internal sealed class TrustedProofControlTransport : IDisposable
                     null);
             }
 
-            var comment = await response.Content.ReadFromJsonAsync(
-                TrustedProofControlJsonContext.Default.TrustedProofIssueComment,
+            var read = await ReadPlatformAsync(
+                response,
+                TrustedProofGitHubJsonContext.Default.TrustedProofIssueComment,
                 cancellationToken).ConfigureAwait(false);
-            return comment is null
+            var comment = read.Value;
+            return comment is null || !IsValid(comment)
                 ? new(TrustedProofMutationOutcome.OutcomeUnknown, null)
                 : new(TrustedProofMutationOutcome.Committed, comment);
         }
@@ -173,10 +187,11 @@ internal sealed class TrustedProofControlTransport : IDisposable
             return false;
         }
 
-        var permission = await response.Content.ReadFromJsonAsync(
-            TrustedProofControlJsonContext.Default.TrustedProofPermission,
+        var read = await ReadPlatformAsync(
+            response,
+            TrustedProofGitHubJsonContext.Default.TrustedProofPermission,
             cancellationToken).ConfigureAwait(false);
-        return permission?.Permission is "write" or "admin";
+        return read.Value?.Permission is "write" or "admin";
     }
 
     internal async Task<TrustedProofMutationOutcome> DeleteAsync(
@@ -215,6 +230,77 @@ internal sealed class TrustedProofControlTransport : IDisposable
     }
 
     public void Dispose() => client.Dispose();
+
+    private static Uri ResolveApiBaseAddress()
+    {
+        var configured = Environment.GetEnvironmentVariable("GITHUB_API_URL");
+        if (string.IsNullOrEmpty(configured))
+        {
+            return new Uri("https://api.github.com/");
+        }
+
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out var value) ||
+            value.Scheme is not ("http" or "https") ||
+            !string.IsNullOrEmpty(value.UserInfo) ||
+            !string.IsNullOrEmpty(value.Query) ||
+            !string.IsNullOrEmpty(value.Fragment))
+        {
+            throw new InvalidOperationException("The GitHub API URL is invalid.");
+        }
+
+        return new Uri(value.AbsoluteUri.TrimEnd('/') + "/");
+    }
+
+    private static bool IsValid(TrustedProofIssueComment comment) =>
+        comment.Id > 0 &&
+        comment.User is not null &&
+        !string.IsNullOrWhiteSpace(comment.User.Login) &&
+        comment.User.Login.Length <= 100 &&
+        comment.CreatedAt != default &&
+        comment.UpdatedAt != default;
+
+    private static async Task<(T? Value, int BytesRead)> ReadPlatformAsync<T>(
+        HttpResponseMessage response,
+        JsonTypeInfo<T> typeInfo,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        if (response.Content.Headers.ContentLength is > MaximumResponseBytes)
+        {
+            return (null, 0);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(
+            cancellationToken).ConfigureAwait(false);
+        using var output = new MemoryStream();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken)
+                .ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (output.Length + read > MaximumResponseBytes)
+            {
+                return (null, checked((int)output.Length + read));
+            }
+
+            output.Write(buffer, 0, read);
+        }
+
+        try
+        {
+            return (JsonSerializer.Deserialize(output.ToArray(), typeInfo),
+                checked((int)output.Length));
+        }
+        catch (JsonException)
+        {
+            return (null, checked((int)output.Length));
+        }
+    }
 
     private static bool IsKnownNotSent(HttpStatusCode statusCode)
     {

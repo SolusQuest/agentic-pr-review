@@ -159,7 +159,20 @@ internal sealed record TrustedProofControlMarker(
             if (marker is null ||
                 marker.Contract != ContractKind ||
                 !Kinds.Contains(marker.Kind, StringComparer.Ordinal) ||
-                marker.BodySha256.Length != 64)
+                marker.Repository != "SolusQuest/agentic-pr-review" ||
+                marker.RepositoryId <= 0 ||
+                marker.PullRequestNumber <= 0 ||
+                marker.RunId <= 0 ||
+                marker.RunAttempt <= 0 ||
+                !IsLowerHex(marker.OperationId, 64) ||
+                !IsLowerHex(marker.FixtureHeadSha, 40) ||
+                !IsLowerHex(marker.WorkflowSha, 40) ||
+                !IsLowerHex(marker.ActionSourceSha, 40) ||
+                !IsLowerHex(marker.PayloadSha256, 64) ||
+                !IsLowerHex(marker.BodySha256, 64) ||
+                (marker.Kind is "release" or "stale-release") !=
+                    marker.PredecessorCommentId.HasValue ||
+                marker.PredecessorCommentId is <= 0)
             {
                 marker = null;
                 return false;
@@ -194,7 +207,15 @@ internal sealed record TrustedProofControlMarker(
         }
     }
 
+    internal static bool HasReservedPrefix(string? body) =>
+        body?.StartsWith(Prefix, StringComparison.Ordinal) == true;
+
     internal bool Matches(TrustedProofControlCoordinates coordinates) =>
+        MatchesFamily(coordinates) &&
+        RunId == coordinates.RunId &&
+        RunAttempt == coordinates.RunAttempt;
+
+    internal bool MatchesFamily(TrustedProofControlCoordinates coordinates) =>
         OperationId == coordinates.OperationId &&
         RepositoryId == coordinates.RepositoryId &&
         Repository == coordinates.Repository &&
@@ -202,9 +223,14 @@ internal sealed record TrustedProofControlMarker(
         FixtureHeadSha == coordinates.FixtureHeadSha &&
         WorkflowSha == coordinates.WorkflowSha &&
         ActionSourceSha == coordinates.ActionSourceSha &&
-        PayloadSha256 == coordinates.PayloadSha256 &&
-        RunId == coordinates.RunId &&
-        RunAttempt == coordinates.RunAttempt;
+        PayloadSha256 == coordinates.PayloadSha256;
+
+    internal bool HasSameProducer(TrustedProofControlMarker other) =>
+        RunId == other.RunId && RunAttempt == other.RunAttempt;
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value?.Length == length && value.All(static character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
 internal sealed record TrustedProofIssueComment(
@@ -240,10 +266,17 @@ internal sealed record TrustedProofCleanupReceipt(
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     WriteIndented = false)]
 [JsonSerializable(typeof(TrustedProofControlMarker))]
-[JsonSerializable(typeof(TrustedProofIssueComment))]
-[JsonSerializable(typeof(TrustedProofIssueComment[]))]
-[JsonSerializable(typeof(TrustedProofPermission))]
 [JsonSerializable(typeof(TrustedProofCreateComment))]
 [JsonSerializable(typeof(TrustedProofCleanupOutcome))]
 [JsonSerializable(typeof(TrustedProofCleanupReceipt))]
 internal sealed partial class TrustedProofControlJsonContext : JsonSerializerContext;
+
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.Unspecified,
+    PropertyNameCaseInsensitive = false,
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip,
+    WriteIndented = false)]
+[JsonSerializable(typeof(TrustedProofIssueComment))]
+[JsonSerializable(typeof(TrustedProofIssueComment[]))]
+[JsonSerializable(typeof(TrustedProofPermission))]
+internal sealed partial class TrustedProofGitHubJsonContext : JsonSerializerContext;

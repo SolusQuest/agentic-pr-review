@@ -23,6 +23,16 @@ public sealed class ActionHostAuthorizationPolicyTests
         Assert.Equal(
             ActionHostAuthorizationPolicy.ConcurrencyGroup,
             evidence!.ConcurrencyGroup);
+        var canonical = Encoding.UTF8.GetString(source);
+        Assert.Contains("pr-number: ''", canonical, StringComparison.Ordinal);
+        Assert.Contains(
+            "pr-number: ${{ inputs.pr-number }}",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "pr-number: ${{ needs.authorization-preflight.outputs.pr-number }}",
+            canonical,
+            StringComparison.Ordinal);
     }
 
     public static TheoryData<string, string> RejectedMutations => new()
@@ -31,6 +41,7 @@ public sealed class ActionHostAuthorizationPolicyTests
         { "cancel-in-progress: false", "cancel-in-progress: true" },
         { "environment: r4-trusted-proof", "environment: production" },
         { "persist-credentials: false", "persist-credentials: true" },
+        { "dotnet-version: 10.0.109", "global-json-file: payload-source/global.json" },
         { "barrier hold", "barrier verify-completed" },
         { "barrier verify-completed", "barrier hold" },
         { "state-mode: auto", "state-mode: read-only" },

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using Xunit;
 
@@ -19,6 +20,8 @@ public sealed class TrustedProofControlTests
         new string('f', 64),
         900,
         2);
+    private static readonly TrustedProofControlCoordinates ProducerCoordinates =
+        Coordinates with { RunId = 899, RunAttempt = 1 };
 
     [Fact]
     public void MarkerRoundTripsAsOneCanonicalBody()
@@ -60,12 +63,15 @@ public sealed class TrustedProofControlTests
             10,
             TrustedProofControlMarker.CreateBody(
                 "ready",
-                Coordinates,
+                ProducerCoordinates,
                 predecessorCommentId: null),
             "proof-bot");
         var release = Comment(
             11,
-            TrustedProofControlMarker.CreateBody("release", Coordinates, 10),
+            TrustedProofControlMarker.CreateBody(
+                "release",
+                ProducerCoordinates,
+                10),
             "maintainer");
         var handler = new ControlHandler([ready, release]);
         var transport = TrustedProofControlTransport.Create(
@@ -86,6 +92,91 @@ public sealed class TrustedProofControlTests
             request.Path.Contains(
                 "/collaborators/maintainer/permission",
                 StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DispatchRejectsCurrentRunAndConflictingOperationFamily()
+    {
+        var currentReady = Comment(
+            10,
+            TrustedProofControlMarker.CreateBody(
+                "ready",
+                Coordinates,
+                predecessorCommentId: null),
+            "proof-bot");
+        var currentRelease = Comment(
+            11,
+            TrustedProofControlMarker.CreateBody("release", Coordinates, 10),
+            "maintainer");
+        var currentHandler = new ControlHandler([currentReady, currentRelease]);
+        var currentTransport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            currentHandler);
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["verify-completed"],
+            Coordinates,
+            currentTransport,
+            CancellationToken.None));
+
+        var conflicting = ProducerCoordinates with
+        {
+            PayloadSha256 = new string('0', 64),
+        };
+        var conflictHandler = new ControlHandler([
+            Comment(
+                12,
+                TrustedProofControlMarker.CreateBody(
+                    "ready",
+                    conflicting,
+                    predecessorCommentId: null),
+                "proof-bot"),
+        ]);
+        var conflictTransport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            conflictHandler);
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["verify-completed"],
+            Coordinates,
+            conflictTransport,
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task OversizedGitHubResponseFailsClosed()
+    {
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            new OversizedControlHandler());
+
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["verify-completed"],
+            Coordinates,
+            transport,
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ReservedMalformedControlCommentFailsClosed()
+    {
+        var malformed = Comment(
+            12,
+            TrustedProofControlMarker.Prefix + "{}" +
+                TrustedProofControlMarker.Suffix,
+            "someone");
+        var handler = new ControlHandler([malformed]);
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler);
+
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["verify-completed"],
+            Coordinates,
+            transport,
+            CancellationToken.None));
     }
 
     [Fact]
@@ -125,7 +216,8 @@ public sealed class TrustedProofControlTests
         string body,
         string login)
     {
-        var timestamp = DateTimeOffset.Parse("2026-08-21T00:00:00Z");
+        var timestamp = DateTimeOffset.Parse("2026-08-21T00:00:00Z")
+            .AddSeconds(id);
         return new(id, body, new(login), timestamp, timestamp);
     }
 
@@ -177,7 +269,9 @@ public sealed class TrustedProofControlTests
 
         private static Task<HttpResponseMessage> Json<T>(T value)
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(value);
+            var node = JsonNode.Parse(JsonSerializer.Serialize(value))!;
+            AddGitHubFields(node);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(node);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(bytes)
@@ -187,6 +281,62 @@ public sealed class TrustedProofControlTests
                         ContentType = new("application/json"),
                     },
                 },
+            });
+        }
+
+        private static void AddGitHubFields(JsonNode node)
+        {
+            if (node is JsonArray array)
+            {
+                foreach (var item in array)
+                {
+                    if (item is not null)
+                    {
+                        AddGitHubFields(item);
+                    }
+                }
+
+                return;
+            }
+
+            if (node is not JsonObject value)
+            {
+                return;
+            }
+
+            if (value.ContainsKey("id") && value.ContainsKey("body"))
+            {
+                value["url"] = "https://api.github.com/issues/comments/10";
+                value["node_id"] = "IC_test";
+                value["author_association"] = "MEMBER";
+                value["reactions"] = new JsonObject { ["total_count"] = 0 };
+                if (value["user"] is JsonObject user)
+                {
+                    user["id"] = 100;
+                    user["avatar_url"] = "https://avatars.example.test/100";
+                }
+            }
+            else if (value.ContainsKey("permission"))
+            {
+                value["role_name"] = "write";
+                value["user"] = new JsonObject { ["login"] = "maintainer" };
+            }
+        }
+    }
+
+    private sealed class OversizedControlHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    new string('x', 512 * 1024 + 1),
+                    Encoding.UTF8,
+                    "application/json"),
             });
         }
     }

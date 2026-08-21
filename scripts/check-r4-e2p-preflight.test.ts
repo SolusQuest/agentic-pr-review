@@ -32,8 +32,19 @@ const values = {
 };
 const environment = {
   EVENT_NAME: 'workflow_run',
+  EVENT_ACTION: 'completed',
+  EVENT_CONCLUSION: 'success',
   EVENT_PR_NUMBER: values.prNumber,
   EVENT_HEAD_SHA: values.fixtureHeadSha,
+  EVENT_PULL_REQUESTS_JSON: JSON.stringify([{ number: 147, head: { sha: values.fixtureHeadSha } }]),
+  EVENT_WORKFLOW_ID: '294554742',
+  EVENT_WORKFLOW_NAME: 'CI',
+  EVENT_WORKFLOW_PATH: '.github/workflows/ci.yml',
+  EVENT_TRIGGER_EVENT: 'pull_request',
+  EVENT_REPOSITORY: values.repository,
+  EVENT_REPOSITORY_ID: values.repositoryId,
+  EVENT_HEAD_REPOSITORY: values.repository,
+  EVENT_HEAD_REPOSITORY_ID: values.repositoryId,
   INPUT_PR_NUMBER: '',
   REPOSITORY: values.repository,
   REPOSITORY_ID: values.repositoryId,
@@ -111,6 +122,53 @@ describe('R4 E2P exact inline preflight', () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(result.stdout).toContain('authorized=true\n');
+  });
+
+  it.each([
+    ['unsupported action', { EVENT_ACTION: 'requested' }],
+    ['failed conclusion', { EVENT_CONCLUSION: 'failure' }],
+    ['cancelled conclusion', { EVENT_CONCLUSION: 'cancelled' }],
+    ['neutral conclusion', { EVENT_CONCLUSION: 'neutral' }],
+    ['skipped conclusion', { EVENT_CONCLUSION: 'skipped' }],
+    ['wrong workflow id', { EVENT_WORKFLOW_ID: '294554743' }],
+    ['wrong workflow name', { EVENT_WORKFLOW_NAME: 'Other' }],
+    ['wrong workflow path', { EVENT_WORKFLOW_PATH: '.github/workflows/other.yml' }],
+    ['wrong trigger event', { EVENT_TRIGGER_EVENT: 'push' }],
+    ['wrong event repository', { EVENT_REPOSITORY: 'other/repository' }],
+    ['wrong event repository id', { EVENT_REPOSITORY_ID: '43' }],
+    ['fork event head repository', { EVENT_HEAD_REPOSITORY: 'fork/repository' }],
+    ['fork event head repository id', { EVENT_HEAD_REPOSITORY_ID: '43' }],
+    ['zero associated PRs', { EVENT_PULL_REQUESTS_JSON: '[]' }],
+    [
+      'multiple associated PRs',
+      {
+        EVENT_PULL_REQUESTS_JSON: JSON.stringify([
+          { number: 147, head: { sha: fixtureHeadSha } },
+          { number: 148, head: { sha: fixtureHeadSha } },
+        ]),
+      },
+    ],
+    [
+      'associated PR number mismatch',
+      {
+        EVENT_PULL_REQUESTS_JSON: JSON.stringify([{ number: 148, head: { sha: fixtureHeadSha } }]),
+      },
+    ],
+    [
+      'associated PR head mismatch',
+      {
+        EVENT_PULL_REQUESTS_JSON: JSON.stringify([{ number: 147, head: { sha: '0'.repeat(40) } }]),
+      },
+    ],
+  ])('rejects workflow_run route fact: %s', async (_name, overrides) => {
+    const result = await runExtractedPreflight({
+      source,
+      environment: { ...environment, ...overrides },
+      fetchImpl: vi.fn(async () => response(pull())),
+    });
+
+    expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
+    expect(result.stderr).toContain('workflow-run-route-facts');
   });
 
   const rejections: Array<

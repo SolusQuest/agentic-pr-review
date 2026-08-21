@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -16,6 +17,7 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
         staleSignal ?? TrustedProofNoStaleSignal.Instance;
     private int sequence;
     private bool? continuation;
+    private string? continuationCarrierDigest;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -37,10 +39,13 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
         var requestBytes = await request.Content.ReadAsByteArrayAsync(
             cancellationToken).ConfigureAwait(false);
         var call = Interlocked.Increment(ref sequence);
-        var requestText = Encoding.UTF8.GetString(requestBytes);
-        var markerCount = Count(requestText, ContinuationMarker);
-        continuation ??= markerCount != 0;
-        if (continuation == true && markerCount != 1)
+        if (!TryValidateMessages(requestBytes, call, out var hasContinuation))
+        {
+            return Json(HttpStatusCode.BadRequest, "{\"error\":{}}");
+        }
+
+        continuation ??= hasContinuation;
+        if (continuation != hasContinuation && call == 1)
         {
             return Json(HttpStatusCode.BadRequest, "{\"error\":{}}");
         }
@@ -117,6 +122,196 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                 : "{\"summary\":\"Trusted proof complete.\"," +
                     "\"findings\":[]}",
             sequence);
+    }
+
+    private bool TryValidateMessages(
+        byte[] request,
+        int call,
+        out bool hasContinuation)
+    {
+        hasContinuation = false;
+        try
+        {
+            using var document = JsonDocument.Parse(request);
+            if (!document.RootElement.TryGetProperty(
+                    "messages",
+                    out var messages) ||
+                messages.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var markerCount = Count(
+                Encoding.UTF8.GetString(request),
+                ContinuationMarker);
+            var carriers = messages.EnumerateArray()
+                .Where(message =>
+                    message.TryGetProperty("role", out var role) &&
+                    role.GetString() == "assistant" &&
+                    message.TryGetProperty(
+                        "reasoning_content",
+                        out var reasoning) &&
+                    reasoning.ValueKind == JsonValueKind.String &&
+                    reasoning.GetString()!.Contains(
+                        ContinuationMarker,
+                        StringComparison.Ordinal))
+                .ToArray();
+            if (markerCount == 0)
+            {
+                return continuation is not true && call <= 3;
+            }
+
+            if (markerCount != 1 || carriers.Length != 1 ||
+                !HasExactToolCall(
+                    carriers[0],
+                    "e2p-read-diff",
+                    "read_diff",
+                    "{\"path\":\"src/reviewed.ts\",\"start_hunk\":1," +
+                        "\"hunk_count\":20}"))
+            {
+                return false;
+            }
+
+            var carrierDigest = Convert.ToHexString(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(carriers[0].GetRawText())))
+                .ToLowerInvariant();
+            continuationCarrierDigest ??= carrierDigest;
+            if (!StringComparer.Ordinal.Equals(
+                    carrierDigest,
+                    continuationCarrierDigest))
+            {
+                return false;
+            }
+
+            var requiredBootstrapExchanges = continuation is true || call == 1
+                ? 5
+                : Math.Min(5, call - 1);
+            (string Id, string Name, string Arguments)[] bootstrap =
+            [
+                ("e2p-list-changed", "list_changed_files", "{}"),
+                ("e2p-list-files", "list_files", "{}"),
+                ("e2p-read-diff", "read_diff",
+                    "{\"path\":\"src/reviewed.ts\",\"start_hunk\":1," +
+                    "\"hunk_count\":20}"),
+                ("e2p-read-file", "read_file",
+                    "{\"path\":\"src/reviewed.ts\",\"start_line\":1," +
+                    "\"line_count\":20}"),
+                ("e2p-search", "search_text",
+                    "{\"query\":\"trusted-proof\"," +
+                    "\"path\":\"src/reviewed.ts\"}"),
+            ];
+            for (var index = 0; index < requiredBootstrapExchanges; index++)
+            {
+                var exchange = bootstrap[index];
+                if (!HasExactToolExchange(
+                        messages,
+                        exchange.Id,
+                        exchange.Name,
+                        exchange.Arguments))
+                {
+                    return false;
+                }
+            }
+
+            if (continuation is true && call >= 2 &&
+                !HasExactToolExchange(
+                    messages,
+                    "e2p-continuation-read-file",
+                    "read_file",
+                    "{\"path\":\"src/reviewed.ts\",\"start_line\":1," +
+                        "\"line_count\":20}"))
+            {
+                return false;
+            }
+
+            if (continuation is true && call >= 3 &&
+                !HasExactToolExchange(
+                    messages,
+                    "e2p-continuation-search",
+                    "search_text",
+                    "{\"query\":\"trusted-proof\"," +
+                        "\"path\":\"src/reviewed.ts\"}"))
+            {
+                return false;
+            }
+
+            hasContinuation = continuation is true || call == 1;
+            return continuation is not false || call >= 4;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasExactToolExchange(
+        JsonElement messages,
+        string callId,
+        string name,
+        string arguments)
+    {
+        var callIndex = -1;
+        var resultIndex = -1;
+        var index = 0;
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (HasExactToolCall(message, callId, name, arguments))
+            {
+                if (callIndex >= 0)
+                {
+                    return false;
+                }
+
+                callIndex = index;
+            }
+
+            if (message.TryGetProperty("role", out var role) &&
+                role.GetString() == "tool" &&
+                message.TryGetProperty("tool_call_id", out var resultId) &&
+                resultId.GetString() == callId &&
+                message.TryGetProperty("content", out var content) &&
+                content.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(content.GetString()))
+            {
+                if (resultIndex >= 0)
+                {
+                    return false;
+                }
+
+                resultIndex = index;
+            }
+
+            index++;
+        }
+
+        return callIndex >= 0 && resultIndex > callIndex;
+    }
+
+    private static bool HasExactToolCall(
+        JsonElement message,
+        string callId,
+        string name,
+        string arguments)
+    {
+        if (!message.TryGetProperty("role", out var role) ||
+            role.GetString() != "assistant" ||
+            !message.TryGetProperty("tool_calls", out var calls) ||
+            calls.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var matches = calls.EnumerateArray().Where(call =>
+            call.TryGetProperty("id", out var id) &&
+            id.GetString() == callId &&
+            call.TryGetProperty("type", out var type) &&
+            type.GetString() == "function" &&
+            call.TryGetProperty("function", out var function) &&
+            function.TryGetProperty("name", out var functionName) &&
+            functionName.GetString() == name &&
+            function.TryGetProperty("arguments", out var functionArguments) &&
+            functionArguments.GetString() == arguments).Count();
+        return matches == 1;
     }
 
     private static int Count(string value, string match)
