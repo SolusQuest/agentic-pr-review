@@ -1744,6 +1744,7 @@ internal static class FrameworkSupervisor
         var derived = TextArray(scan, "derived_bundle_paths")
             .ToHashSet(StringComparer.Ordinal);
         if (!evidence.SetEquals([
+                "src/r4-migration-cutover-audit.test.ts",
                 "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
                 "runtime/tests/fixtures/action-host/framework/replacement-record.json",
@@ -2138,6 +2139,7 @@ internal static class FrameworkSupervisor
                 "CanonicalJsonInputError", "CanonicalJsonByteCapError",
             ]) ||
             !evidence.SetEquals([
+                "src/r4-migration-cutover-audit.test.ts",
                 "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
                 "runtime/tests/fixtures/action-host/framework/replacement-record.json",
@@ -2399,6 +2401,7 @@ internal static class FrameworkSupervisor
             ], StringComparer.Ordinal),
             "deletion_evidence_paths" => new HashSet<string>([
                 "src/residual-reference-allowlist.ts",
+                "src/r4-migration-cutover-audit.test.ts",
                 "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
                 "runtime/tests/fixtures/action-host/framework/replacement-record.json"

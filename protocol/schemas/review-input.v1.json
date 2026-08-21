@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://agentic-pr-review/protocol/schemas/review-input.v1.json",
   "title": "ReviewInputV1",
-  "description": "Sanitized runtime input contract written by the TypeScript host for a future review runtime. Canonical source of truth; TypeScript interfaces are convenience only. See issue #14 and docs/20_architecture/runtime-protocol.md.",
+  "description": "Sanitized direct-runtime input contract consumed by the C# RuntimeApplication through SchemaContracts. Canonical source of truth for current C# serialization and validation. See issue #14 and docs/20_architecture/runtime-protocol.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [

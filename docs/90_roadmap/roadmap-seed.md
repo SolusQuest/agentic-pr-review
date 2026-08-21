@@ -100,9 +100,9 @@ The current implementation on `main` includes:
 - the project-owned DeepSeek thinking adapter with exact provider continuation and a protected no-publication official-endpoint proof;
 - authenticated encrypted local STATE with same-head/verified-ahead admission and two-fresh-process continuation;
 - framework-dependent and Linux x64 Native AOT product validation;
-- retained TypeScript state only as named R4 replacement evidence; R4-W3 removed the invocation families and obsolete live-context schema, R4-W5 removed the StateV2 family, schema, opaque sidecar fixture corpora, and generators after mapped C# state/publisher evidence passed, R4-W6 removed the Git-ref state-acceptance family and dedicated schemas after mapped C# state/publisher evidence passed, R4-W7 removed the ledger coordinator, R4-W8 removed the sticky publisher after mapped P1/P2/P5/P6/E1 proof, R4-W9 independently removed the inline/target publisher after mapped H2/H5/P3/P4/P6/E1 proof, R4-W10 removed the duplicate TypeScript review protocol/structured-result family while retaining the embedded Input/Result/Trace schemas and complete C#-owned fixture corpus, R4-W11 removed the prefix family and generator after mapped C# and immutable-corpus evidence passed, R4-W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus after C# DeepSeek/ActionHost proof, R4-W14 removed the TypeScript canonicalization family after closing the retained C# behavior map, and R4-W15 removed the consumerless root DTO/utility modules after exact symbol and historical-consumer closure. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence. Direct-runtime protocol ownership remains distinct from ActionHost supersession.
+- a closed TypeScript migration record: R4-W3 through W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families after mapped C# evidence or reviewed-obsolete dispositions passed. No current TypeScript state reader, publisher, business protocol adapter, or compatibility route remains. Direct-runtime schemas and fixtures remain C#-owned, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
-R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper now exists for repository-controlled prepared-payload proof; downstream artifact-backed encrypted state, complete C# publication, supported release payload delivery, and the public default remain later R4/R7 work as allocated below.
+R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path now exist for repository-controlled prepared-payload proof. W13 closes the migration inventory; exact-tree E1/E2 evidence, the maintainer-authorized trusted proof, supported release payload delivery, and the public default remain at their named later gates.
 
 ## Historical Milestones
 
@@ -126,7 +126,7 @@ The following is a completed transition record, not current execution instructio
 - issue #54 is closed as `not planned`;
 - M4 is closed with no open issues;
 - R1, R2, and R3 are closed with no open issues;
-- R4 is open with refinement parent #138 and no implementation leaves before the R4 docs gate merges.
+- R4 is open; its docs gate and implementation leaves through W15 are merged, and W13 owns the final migration-cutover audit before E2.
 
 The earlier plan to create R1/R2 immediately and defer R3-R7 refinement was executed through R3. It no longer instructs agents to create, close, or defer those completed milestones. R6 may reuse ideas or tests from #54 or PR #74 only after real resumed Agent traffic exists and a new issue proves they fit the actual thinking, tool, session, telemetry, and cost model. Existing implementation effort is not a reason to merge an obsolete ordering or contract dependency.
 
@@ -334,7 +334,7 @@ Exit criteria:
 
 Goal: converge on one C# business implementation and remove cross-language duplication.
 
-Planning status: milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10) and refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138) own the design gate. The prospective decision-complete contract is [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md). No implementation issue is published until that docs contract is merged and remotely activated.
+Planning status: milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10) and refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138) own the activated design contract in [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md). The implementation graph has reached W13 migration closure; [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md) controls the exact-tree E1 handoff to E2.
 
 In scope:
 
@@ -372,7 +372,7 @@ Exit criteria:
 - both supported credential-bearing routes use the same verified authoritative repository/PR workflow concurrency group, while exact-head barriers, immutable receipts, unique-successor selection, and explicit conflict still fail closed on stale or externally introduced records;
 - sticky, inline, duplicate, artifact, cancellation, and partial-failure behavior have end-to-end coverage;
 - two independent GitHub Actions workflow runs prove bootstrap/select, continuation, state acceptance, stale-writer protection, and deterministic publication;
-- TypeScript canonicalization, prefix, provider metadata, state-v2, state-acceptance, and runtime business modules are removed or have a named final deletion issue;
+- TypeScript canonicalization, prefix, provider metadata, state-v2, state-acceptance, publisher, protocol, and runtime business modules are removed; the thin wrapper/bridge, conformance guards, and permanent S2 vectors are the classified survivors;
 - automatic release-asset download and default payload resolution remain deferred to R7.
 
 ### R5: Quality Evaluation, Replay, And Session Growth
@@ -453,7 +453,7 @@ Exit criteria:
 - The historical R1/R2 parent-creation gate is complete; do not replay it as current work.
 - Do not create an R0 GitHub milestone.
 - The two parent issues may split into multiple focused implementation issues or PRs after live-tree refinement; do not assume one parent equals one PR.
-- Do not create R4 implementation or deletion issues until the R4 docs contract merges; apply the same evidence-before-refinement rule to R5-R7.
+- The R4 docs gate is complete; do not recreate its implementation graph. Apply the same evidence-before-refinement rule to R5-R7.
 - At each milestone entry, re-inventory live references and refine that milestone's migration and retirement issues before implementation.
 - Each issue must identify its target owner: wrapper, C# Host, Agent, tools, provider adapter, state, publisher, migration deletion, or validation.
 - Transitional code requires a named removal gate.

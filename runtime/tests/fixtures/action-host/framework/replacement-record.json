@@ -507,6 +507,7 @@
           "unsupported_legacy_v1"
         ],
         "deletion_evidence_paths": [
+          "src/r4-migration-cutover-audit.test.ts",
           "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
           "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
           "runtime/tests/fixtures/action-host/framework/replacement-record.json"
@@ -976,6 +977,7 @@
         ],
         "deletion_evidence_paths": [
           "src/residual-reference-allowlist.ts",
+          "src/r4-migration-cutover-audit.test.ts",
           "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
           "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
           "runtime/tests/fixtures/action-host/framework/replacement-record.json"
@@ -1312,7 +1314,7 @@
         ],
         "fixture_root": "protocol/fixtures/v1/",
         "file_count": 148,
-        "aggregate_sha256": "c66e3194f27d902add70f950a4cfdfeaff67221aa1e7ad82527d9bdf6a5a1680",
+        "aggregate_sha256": "4d16450ff1c50d785308002c0bfdb1995c043b34a1ad7c8ff98f422945c3800f",
         "framing": "ordinal path + NUL + lowercase file sha256 + LF"
       },
       "legacy_assertion_dispositions": [
@@ -1842,6 +1844,7 @@
           "CanonicalJsonByteCapError"
         ],
         "deletion_evidence_paths": [
+          "src/r4-migration-cutover-audit.test.ts",
           "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
           "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
           "runtime/tests/fixtures/action-host/framework/replacement-record.json"
