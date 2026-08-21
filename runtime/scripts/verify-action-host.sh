@@ -161,24 +161,37 @@ verify_aot_warning_audit() {
     injected="$root/warning-injected-$case_id.log"
     cp "$good" "$injected"
     printf '%s\n' "${injections[case_id]}" >> "$injected"
-    ! audit_aot_warnings "$injected" no >/dev/null 2>&1
+    if audit_aot_warnings "$injected" no >/dev/null 2>&1; then
+      echo "APR_R4_E2_AOT_WARNING_SELF_TEST_ACCEPTED_INJECTION_$case_id" >&2
+      return 1
+    fi
   done
   mutated="$root/warning-mutated.log"
   printf '%s [%s] appended-diagnostic\n%s [%s]\n' "$prefix" \
     "$runtime_project" "$prefix" "$project" > "$mutated"
-  ! audit_aot_warnings "$mutated" no >/dev/null 2>&1
+  if audit_aot_warnings "$mutated" no >/dev/null 2>&1; then
+    echo APR_R4_E2_AOT_WARNING_SELF_TEST_ACCEPTED_MUTATION >&2
+    return 1
+  fi
   mutated="$root/warning-duplicate.log"
   cp "$good" "$mutated"
   printf '%s [%s]\n' "$prefix" "$project" >> "$mutated"
-  ! audit_aot_warnings "$mutated" no >/dev/null 2>&1
+  if audit_aot_warnings "$mutated" no >/dev/null 2>&1; then
+    echo APR_R4_E2_AOT_WARNING_SELF_TEST_ACCEPTED_DUPLICATE >&2
+    return 1
+  fi
   mutated="$root/warning-missing.log"
   printf '%s [%s]\n' "$prefix" "$runtime_project" > "$mutated"
-  ! audit_aot_warnings "$mutated" no >/dev/null 2>&1
+  if audit_aot_warnings "$mutated" no >/dev/null 2>&1; then
+    echo APR_R4_E2_AOT_WARNING_SELF_TEST_ACCEPTED_MISSING >&2
+    return 1
+  fi
 }
 
 execute_action_host_proof() {
   cd "$repo_root"
   local checked_bundle_sha256 generated_bundle_sha256 intermediate
+  local runtime_intermediate
   checked_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
   npm run build:action
   generated_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
@@ -213,20 +226,23 @@ execute_action_host_proof() {
   test ! -e "$payload.runtimeconfig.json"
   local -a aot_arguments=()
   if [[ "$mode" == aot ]]; then
-    mapfile -t intermediates < <(find "$intermediate_root" -maxdepth 1 \
-      -type f -name '*.dll' -print | sort)
-    [[ "${#intermediates[@]}" -eq 1 ]]
-    intermediate="${intermediates[0]}"
-    local payload_sha intermediate_sha pair_sha
+    intermediate="$intermediate_root/AgenticPrReview.Runtime.ActionHostVerifierFixture.dll"
+    runtime_intermediate="$intermediate_root/AgenticPrReview.Runtime.dll"
+    [[ -f "$intermediate" && -f "$runtime_intermediate" ]]
+    [[ "$(find "$intermediate_root" -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 2 ]]
+    local payload_sha intermediate_sha runtime_intermediate_sha pair_sha
     payload_sha="$(sha256sum "$payload" | cut -d ' ' -f 1)"
     intermediate_sha="$(sha256sum "$intermediate" | cut -d ' ' -f 1)"
-    pair_sha="$(printf '%s\n%s\n%s\n%s\n' \
+    runtime_intermediate_sha="$(sha256sum "$runtime_intermediate" | cut -d ' ' -f 1)"
+    pair_sha="$(printf '%s\n%s\n%s\n%s\n%s\n' \
       apr-r4-e2-action-host-build-pair-v1 native-aot "$payload_sha" \
-      "$intermediate_sha" | sha256sum | cut -d ' ' -f 1)"
-    printf '{"kind":"apr-r4-e2-action-host-build-pair-v1","execution_kind":"native-aot","payload_sha256":"%s","managed_intermediate_sha256":"%s","build_pair_sha256":"%s"}\n' \
-      "$payload_sha" "$intermediate_sha" "$pair_sha" > "$build_pair"
+      "$intermediate_sha" "$runtime_intermediate_sha" | sha256sum | cut -d ' ' -f 1)"
+    printf '{"kind":"apr-r4-e2-action-host-build-pair-v1","execution_kind":"native-aot","payload_sha256":"%s","managed_intermediate_sha256":"%s","runtime_intermediate_sha256":"%s","build_pair_sha256":"%s"}\n' \
+      "$payload_sha" "$intermediate_sha" "$runtime_intermediate_sha" \
+      "$pair_sha" > "$build_pair"
     aot_arguments=(
       --execution-kind native-aot --intermediate "$intermediate"
+      --runtime-intermediate "$runtime_intermediate"
       --build-pair "$build_pair" --identity-output "$identity_output"
     )
   fi

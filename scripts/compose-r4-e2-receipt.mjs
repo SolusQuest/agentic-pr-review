@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
+const migrationBaseCommit = '2337e8ae9d3ca0db88f8a38f36c2f17e46a868fc';
+const migrationBaseTree = '17bbdc8e1cb6591112a7c871ffba9108ecf3680f';
+
 function fail(message) {
   process.stderr.write(`APR_R4_E2_RECEIPT_INVALID ${message}\n`);
   process.exit(1);
@@ -58,6 +61,8 @@ const identityKeys = [
   'wrapper_build_discriminator',
   'payload_sha256',
   'managed_intermediate_sha256',
+  'runtime_intermediate_sha256',
+  'managed_architecture_sha256',
   'build_pair_sha256',
   'e1_normalized_evidence_sha256',
   'source_inventory_digest',
@@ -92,8 +97,8 @@ exactKeys(contract, contractKeys, 'contract');
 if (
   contract.kind !== 'apr-r4-e2-action-host-receipt-contract-v1' ||
   contract.receipt_kind !== 'apr-r4-e2-action-host-receipt-v1' ||
-  !lowerHex(contract.migration_base_commit, 40) ||
-  !lowerHex(contract.migration_base_tree, 40) ||
+  contract.migration_base_commit !== migrationBaseCommit ||
+  contract.migration_base_tree !== migrationBaseTree ||
   !Array.isArray(contract.ordered_fields) ||
   new Set(contract.ordered_fields).size !== contract.ordered_fields.length
 ) {
@@ -125,6 +130,8 @@ const receipt = {
   wrapper_build_discriminator: identity.wrapper_build_discriminator,
   payload_sha256: identity.payload_sha256,
   managed_intermediate_sha256: identity.managed_intermediate_sha256,
+  runtime_intermediate_sha256: identity.runtime_intermediate_sha256,
+  managed_architecture_sha256: identity.managed_architecture_sha256,
   executable_sha256: identity.payload_sha256,
   build_pair_sha256: identity.build_pair_sha256,
   aot_warning_policy_sha256: sha256(fs.readFileSync(options.get('--warning-policy'))),

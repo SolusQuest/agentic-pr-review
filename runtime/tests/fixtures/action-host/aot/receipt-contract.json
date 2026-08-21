@@ -15,6 +15,8 @@
     "wrapper_build_discriminator",
     "payload_sha256",
     "managed_intermediate_sha256",
+    "runtime_intermediate_sha256",
+    "managed_architecture_sha256",
     "executable_sha256",
     "build_pair_sha256",
     "aot_warning_policy_sha256",

@@ -32,9 +32,20 @@
            Text="APR_R4_E2_AOT_INTERMEDIATE_MISSING" />
     <Error Condition="'@(ManagedBinary->Count())' != '1'"
            Text="APR_R4_E2_AOT_INTERMEDIATE_AMBIGUOUS" />
+    <ItemGroup>
+      <_ActionHostRuntimeIntermediate Include="@(_ManagedResolvedAssembliesToPublish)"
+                                      Condition="'%(Filename)' == 'AgenticPrReview.Runtime'" />
+    </ItemGroup>
+    <Error Condition="'@(_ActionHostRuntimeIntermediate)' == ''"
+           Text="APR_R4_E2_AOT_RUNTIME_INTERMEDIATE_MISSING" />
+    <Error Condition="'@(_ActionHostRuntimeIntermediate->Count())' != '1'"
+           Text="APR_R4_E2_AOT_RUNTIME_INTERMEDIATE_AMBIGUOUS" />
     <MakeDir Directories="$(ActionHostVerifierAotIntermediateDirectory)" />
     <Copy SourceFiles="@(ManagedBinary)"
           DestinationFiles="@(ManagedBinary->'$(ActionHostVerifierAotIntermediateDirectory)/%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(_ActionHostRuntimeIntermediate)"
+          DestinationFiles="@(_ActionHostRuntimeIntermediate->'$(ActionHostVerifierAotIntermediateDirectory)/%(Filename)%(Extension)')"
           SkipUnchangedFiles="false" />
   </Target>
 </Project>

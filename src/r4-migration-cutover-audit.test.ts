@@ -73,6 +73,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/check-r3-live-proof.mjs',
       'scripts/check-r3-live-proof.test.ts',
       'scripts/compose-r4-e2-receipt.mjs',
+      'scripts/compose-r4-e2-receipt.test.ts',
       'scripts/run-clean-source-proof.mjs',
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-runtime-integration.mjs',

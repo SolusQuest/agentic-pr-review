@@ -1108,6 +1108,10 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("ActionHostVerifierAotIntermediateDirectory", verifier,
             StringComparison.Ordinal);
+        Assert.Contains("AgenticPrReview.Runtime.dll", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("runtime_intermediate_sha256", verifier,
+            StringComparison.Ordinal);
         Assert.Contains("--execution-kind native-aot", verifier,
             StringComparison.Ordinal);
         Assert.Contains("<VerifyReferenceAotCompatibility>true",
@@ -1120,6 +1124,16 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("dynamic_code_supported !== false", composer,
             StringComparison.Ordinal);
+        Assert.Contains("managed_architecture_sha256", composer,
+            StringComparison.Ordinal);
+        Assert.Contains("_ActionHostRuntimeIntermediate", fixtureProject,
+            StringComparison.Ordinal);
+        Assert.Contains("runtime_intermediate_sha256",
+            contract.RootElement.GetProperty("ordered_fields")
+                .EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("managed_architecture_sha256",
+            contract.RootElement.GetProperty("ordered_fields")
+                .EnumerateArray().Select(value => value.GetString()));
         Assert.Equal("2337e8ae9d3ca0db88f8a38f36c2f17e46a868fc",
             contract.RootElement.GetProperty("migration_base_commit")
                 .GetString());
