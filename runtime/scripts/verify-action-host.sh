@@ -28,6 +28,24 @@ cleanup() {
     if [[ "$failed_case_found" == false ]]; then
       echo "APR_ACTION_HOST_FRAMEWORK_SUPERVISOR_FAILED" >&2
     fi
+    if [[ -n "${golden:-}" && -f "$golden" && -f "$evidence_root/normalized-evidence.json" ]]; then
+      node --input-type=module - "$golden" "$evidence_root/normalized-evidence.json" <<'NODE'
+import fs from 'node:fs';
+
+const [expectedPath, actualPath] = process.argv.slice(2);
+const expected = JSON.parse(fs.readFileSync(expectedPath, 'utf8'));
+const actual = JSON.parse(fs.readFileSync(actualPath, 'utf8'));
+const keys = [...new Set([...Object.keys(expected), ...Object.keys(actual)])]
+  .filter((key) => JSON.stringify(expected[key]) !== JSON.stringify(actual[key]))
+  .sort();
+const details = keys.map((key) =>
+  typeof expected[key] !== 'object' && typeof actual[key] !== 'object'
+    ? `${key}:${JSON.stringify(expected[key])}->${JSON.stringify(actual[key])}`
+    : key,
+);
+process.stderr.write(`APR_ACTION_HOST_FRAMEWORK_EVIDENCE_MISMATCH ${details.join(',')}\n`);
+NODE
+    fi
   fi
   chmod -R u+rwX "$temporary_root" 2>/dev/null || true
   rm -rf -- "$temporary_root"

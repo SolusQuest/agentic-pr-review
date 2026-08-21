@@ -86,9 +86,19 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "runtime", "scripts", "verify-action-host.sh"));
         var runner = File.ReadAllText(Path.Join(root,
             "scripts", "run-clean-source-proof.mjs"));
+        var runtimeProject = File.ReadAllText(Path.Join(root,
+            "runtime", "src", "AgenticPrReview.Runtime",
+            "AgenticPrReview.Runtime.csproj"));
 
         Assert.Contains("--artifacts-path \"$artifacts_root\"", verifier,
             StringComparison.Ordinal);
+        Assert.Contains("APR_ACTION_HOST_FRAMEWORK_EVIDENCE_MISMATCH", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("<OutputPath Condition=\"'$(ArtifactsPath)' == ''\">",
+            runtimeProject, StringComparison.Ordinal);
+        Assert.Contains(
+            "<IntermediateOutputPath Condition=\"'$(ArtifactsPath)' == ''\">",
+            runtimeProject, StringComparison.Ordinal);
         Assert.Contains("scripts/run-clean-source-proof.mjs", verifier,
             StringComparison.Ordinal);
         Assert.Contains("-- bash -c execute_framework_proof", verifier,
