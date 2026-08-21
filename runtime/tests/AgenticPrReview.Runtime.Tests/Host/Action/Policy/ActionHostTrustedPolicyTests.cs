@@ -59,7 +59,7 @@ public sealed class ActionHostTrustedPolicyTests
         Assert.Equal(ActionHostTrustedPolicy.SecurityPolicy,
             policy.SecurityPolicyId);
         Assert.Equal(
-            "24e6952e666da75213c6d6d326f3ce91a06279ec675d7dab7b0cd51bfdce992b",
+            "f929757017e1f2078490e08cfd471566f78aa61794d23a0df72ce03e621ad4ed",
             policy.PolicySha256);
         Assert.All(transport.Calls, call => Assert.DoesNotContain(
             ActionHostAuthorizationScenario.HeadSha,
@@ -467,6 +467,15 @@ public sealed class ActionHostTrustedPolicyTests
             scenario.Launch,
             payloadSha256: new string('e', 64),
             buildDiscriminator: "build-identity-variant");
+        var changedWorkflow = Encoding.UTF8.GetBytes(
+            ActionHostTrustedWorkflowContract.Render(
+                ActionHostAuthorizationScenario.ActionSha,
+                new string('e', 64)));
+        scenario.Transport.Source = new ActionHostGitHubWorkflowSourceFact(
+            ActionHostAuthorizationPolicy.PrivilegedWorkflowPath,
+            "r4-trusted-proof.yml",
+            GitBlobSha(changedWorkflow),
+            changedWorkflow);
         var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
             changedLaunch,
             CancellationToken.None);
@@ -714,6 +723,15 @@ public sealed class ActionHostTrustedPolicyTests
                 segmentCount - prefixSegments.Length - 1),
             fileName,
         ]);
+    }
+
+    private static string GitBlobSha(byte[] bytes)
+    {
+        var header = Encoding.ASCII.GetBytes(
+            "blob " + bytes.Length.ToString(
+                System.Globalization.CultureInfo.InvariantCulture) + "\0");
+        return Convert.ToHexString(SHA1.HashData([.. header, .. bytes]))
+            .ToLowerInvariant();
     }
 
     private static ActionHostLaunchContract CloneLaunch(

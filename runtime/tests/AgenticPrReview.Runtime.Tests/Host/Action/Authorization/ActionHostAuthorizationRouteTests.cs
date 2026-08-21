@@ -22,6 +22,7 @@ public sealed class ActionHostAuthorizationRouteTests
             scenario.Transport.Source.Bytes,
             ActionHostAuthorizationPolicy.TrustedProof,
             ActionHostAuthorizationScenario.ActionSha,
+            ActionHostAuthorizationScenario.PayloadSha,
             out _,
             out var workflowFailure), workflowFailure.ToString());
 

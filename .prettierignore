@@ -12,3 +12,7 @@ protocol/fixtures/prefix-contract/**
 
 # Agent-local scratch (never committed)
 .scratch/
+
+# R4 E2P policy and receipt contracts are byte-stable security artifacts.
+.github/agentic-pr-review/trusted-proof.json
+runtime/tests/fixtures/action-host/trusted-proof-payload/**/*.json

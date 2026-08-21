@@ -797,7 +797,7 @@ internal static class FrameworkSupervisor
                 ? ""
                 : FrameworkCanaries.PreviousStateKey;
         info.Environment["INPUT_CONFIG-PATH"] =
-            ".github/agentic-pr-review.json";
+            ".github/agentic-pr-review/trusted-proof.json";
         info.Environment["INPUT_PR-NUMBER"] = spec.WorkflowRun ? "" :
             FrameworkGitHubHandler.PullRequestNumber.ToString(
                 CultureInfo.InvariantCulture);

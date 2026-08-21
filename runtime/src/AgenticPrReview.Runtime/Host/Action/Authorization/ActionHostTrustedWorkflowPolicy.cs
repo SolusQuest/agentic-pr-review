@@ -28,12 +28,14 @@ internal static class ActionHostTrustedWorkflowPolicy
         byte[]? source,
         ActionHostAuthorizationPolicy policy,
         string actionSourceSha,
+        string payloadSha256,
         out ActionHostTrustedWorkflowEvidence? evidence)
     {
         return TryValidate(
             source,
             policy,
             actionSourceSha,
+            payloadSha256,
             out evidence,
             out _);
     }
@@ -42,6 +44,7 @@ internal static class ActionHostTrustedWorkflowPolicy
         byte[]? source,
         ActionHostAuthorizationPolicy policy,
         string actionSourceSha,
+        string payloadSha256,
         out ActionHostTrustedWorkflowEvidence? evidence,
         out ActionHostTrustedWorkflowFailure failure)
     {
@@ -61,33 +64,27 @@ internal static class ActionHostTrustedWorkflowPolicy
         try
         {
             var text = StrictUtf8.GetString(source);
+            var normalizedText = text.Replace(
+                "\r\n",
+                "\n",
+                StringComparison.Ordinal);
+            if (normalizedText.Contains('\r'))
+            {
+                failure = ActionHostTrustedWorkflowFailure.YamlInvalid;
+                return false;
+            }
+
             if (!PolicyYamlParser.TryParse(text, out var root) || root is null)
             {
                 failure = ActionHostTrustedWorkflowFailure.YamlInvalid;
                 return false;
             }
 
-            if (!ValidateTriggers(root))
-            {
-                failure = ActionHostTrustedWorkflowFailure.TriggerInvalid;
-                return false;
-            }
-
-            if (!IsEmptyMap(root.Value("permissions")))
-            {
-                failure = ActionHostTrustedWorkflowFailure.PermissionInvalid;
-                return false;
-            }
-
-            if (!ValidateConcurrency(root.Value("concurrency")))
-            {
-                failure = ActionHostTrustedWorkflowFailure.ConcurrencyInvalid;
-                return false;
-            }
-
-            if (!ValidateJobs(
-                    root.Value("jobs"),
-                    policy.ActionReference(actionSourceSha)))
+            if (!StringComparer.Ordinal.Equals(
+                    normalizedText,
+                    ActionHostTrustedWorkflowContract.Render(
+                        actionSourceSha,
+                        payloadSha256)))
             {
                 failure = ActionHostTrustedWorkflowFailure.JobInvalid;
                 return false;
@@ -108,213 +105,6 @@ internal static class ActionHostTrustedWorkflowPolicy
         }
     }
 
-    private static bool ValidateTriggers(PolicyNode root)
-    {
-        var triggers = root.Value("on");
-        if (triggers?.Map is null ||
-            !triggers.HasOnly("workflow_run", "workflow_dispatch"))
-        {
-            return false;
-        }
-
-        var workflowRun = triggers.Value("workflow_run");
-        var workflows = workflowRun?.Value("workflows")?.Sequence;
-        var types = workflowRun?.Value("types")?.Sequence;
-        if (workflowRun?.Map is null ||
-            !workflowRun.HasOnly("workflows", "types") ||
-            workflows is not { Count: 1 } ||
-            types is not { Count: 1 } ||
-            !IsScalar(workflows[0], ActionHostAuthorizationPolicy
-                .TriggerWorkflowName) ||
-            !IsScalar(types[0], "completed"))
-        {
-            return false;
-        }
-
-        var dispatch = triggers.Value("workflow_dispatch");
-        var inputs = dispatch?.Value("inputs");
-        var pullRequest = inputs?.Value("pr-number");
-        return dispatch?.Map is not null &&
-            dispatch.HasOnly("inputs") &&
-            inputs?.Map is { Count: 1 } &&
-            pullRequest?.Map is not null &&
-            IsScalar(pullRequest.Value("required"), "true") &&
-            IsScalar(pullRequest.Value("type"), "number") &&
-            pullRequest.Value("default") is null &&
-            pullRequest.Map.Keys.All(static key =>
-                key is "description" or "required" or "type");
-    }
-
-    private static bool ValidateConcurrency(PolicyNode? concurrency) =>
-        concurrency?.Map is not null &&
-        concurrency.HasOnly("group", "cancel-in-progress") &&
-        IsScalar(
-            concurrency.Value("group"),
-            ActionHostAuthorizationPolicy.ConcurrencyGroup) &&
-        IsScalar(concurrency.Value("cancel-in-progress"), "false");
-
-    private static bool ValidateJobs(
-        PolicyNode? jobs,
-        string expectedActionReference)
-    {
-        if (jobs?.Map is null ||
-            jobs.Value(ActionHostAuthorizationPolicy.PreflightJobId) is not
-                { } preflight ||
-            jobs.Value(ActionHostAuthorizationPolicy.WorkflowRunJobId) is not
-                { } workflowRun ||
-            jobs.Value(
-                ActionHostAuthorizationPolicy.WorkflowDispatchJobId) is not
-                { } workflowDispatch ||
-            !ValidatePreflight(preflight) ||
-            !ValidatePrivilegedJob(
-                workflowRun,
-                ActionHostAuthorizationPolicy.WorkflowRunGuard,
-                expectedActionReference) ||
-            !ValidatePrivilegedJob(
-                workflowDispatch,
-                ActionHostAuthorizationPolicy.WorkflowDispatchGuard,
-                expectedActionReference))
-        {
-            return false;
-        }
-
-        foreach (var (jobId, job) in jobs.Map)
-        {
-            if (job.Map is null || job.Value("concurrency") is not null)
-            {
-                return false;
-            }
-
-            var isPrivileged = jobId is
-                ActionHostAuthorizationPolicy.WorkflowRunJobId or
-                ActionHostAuthorizationPolicy.WorkflowDispatchJobId;
-            if (!isPrivileged &&
-                !StringComparer.Ordinal.Equals(
-                    jobId,
-                    ActionHostAuthorizationPolicy.PreflightJobId) &&
-                !IsAbsentOrEmptyMap(job.Value("permissions")))
-            {
-                return false;
-            }
-
-            var actionReferences = new List<string>();
-            CollectActionReferences(job, actionReferences);
-            var productReferences = actionReferences.Where(static value =>
-                value.StartsWith(
-                    ActionHostAuthorizationPolicy.ActionPath,
-                    StringComparison.OrdinalIgnoreCase) ||
-                value.StartsWith(
-                    "./.github/actions/agentic-pr-review",
-                    StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (actionReferences.Contains(
-                    "<block-scalar>",
-                    StringComparer.Ordinal))
-            {
-                return false;
-            }
-
-            if (isPrivileged)
-            {
-                if (productReferences.Length != 1 ||
-                    !StringComparer.Ordinal.Equals(
-                        productReferences[0],
-                        expectedActionReference))
-                {
-                    return false;
-                }
-            }
-            else if (productReferences.Length != 0)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool ValidatePreflight(PolicyNode job)
-    {
-        var outputs = job.Value("outputs");
-        return job.Map is not null &&
-            IsEmptyMap(job.Value("permissions")) &&
-            job.Value("concurrency") is null &&
-            outputs?.Map is { Count: 1 } &&
-            IsScalar(
-                outputs.Value("authorized"),
-                ActionHostAuthorizationPolicy.PreflightOutput);
-    }
-
-    private static bool ValidatePrivilegedJob(
-        PolicyNode job,
-        string expectedGuard,
-        string expectedActionReference)
-    {
-        var permissions = job.Value("permissions");
-        if (job.Map is null ||
-            !IsScalar(
-                job.Value("needs"),
-                ActionHostAuthorizationPolicy.PreflightJobId) ||
-            !IsScalar(job.Value("if"), expectedGuard) ||
-            permissions?.Map is null ||
-            !permissions.HasOnly(
-                "actions",
-                "contents",
-                "pull-requests") ||
-            !IsScalar(permissions.Value("actions"), "write") ||
-            !IsScalar(permissions.Value("contents"), "read") ||
-            !IsScalar(permissions.Value("pull-requests"), "write") ||
-            job.Value("concurrency") is not null ||
-            job.Value("strategy") is not null ||
-            job.Value("container") is not null ||
-            job.Value("services") is not null)
-        {
-            return false;
-        }
-
-        var steps = job.Value("steps");
-        return steps?.Sequence is [var step] &&
-            step.Map is not null &&
-            step.HasOnly("uses") &&
-            IsScalar(step.Value("uses"), expectedActionReference);
-    }
-
-    private static void CollectActionReferences(
-        PolicyNode node,
-        ICollection<string> references)
-    {
-        if (node.Map is not null)
-        {
-            foreach (var (key, child) in node.Map)
-            {
-                if (StringComparer.Ordinal.Equals(key, "uses") &&
-                    child.Scalar is not null)
-                {
-                    references.Add(child.Scalar);
-                }
-
-                CollectActionReferences(child, references);
-            }
-        }
-
-        if (node.Sequence is not null)
-        {
-            foreach (var child in node.Sequence)
-            {
-                CollectActionReferences(child, references);
-            }
-        }
-    }
-
-    private static bool IsScalar(PolicyNode? node, string expected) =>
-        node?.Scalar is { } scalar &&
-        StringComparer.Ordinal.Equals(scalar, expected);
-
-    private static bool IsEmptyMap(PolicyNode? node) =>
-        node?.Scalar == "{}";
-
-    private static bool IsAbsentOrEmptyMap(PolicyNode? node) =>
-        node is null || IsEmptyMap(node);
-
     private sealed class PolicyNode
     {
         internal Dictionary<string, PolicyNode>? Map { get; init; }
@@ -323,15 +113,6 @@ internal static class ActionHostTrustedWorkflowPolicy
 
         internal string? Scalar { get; init; }
 
-        internal PolicyNode? Value(string key) =>
-            Map is not null && Map.TryGetValue(key, out var value)
-                ? value
-                : null;
-
-        internal bool HasOnly(params string[] keys) =>
-            Map is not null &&
-            Map.Count == keys.Length &&
-            keys.All(Map.ContainsKey);
     }
 
     private static class PolicyYamlParser
@@ -350,9 +131,9 @@ internal static class ActionHostTrustedWorkflowPolicy
 
             var rawLines = normalizedText.Split('\n');
             var lines = new List<PolicyLine>(rawLines.Length);
-            var blockIndent = -1;
-            foreach (var rawLine in rawLines)
+            for (var rawIndex = 0; rawIndex < rawLines.Length; rawIndex++)
             {
+                var rawLine = rawLines[rawIndex];
                 if (rawLine.Length >
                         ActionHostAuthorizationBounds.MaximumYamlLineCharacters ||
                     rawLine.Contains('\t'))
@@ -362,12 +143,6 @@ internal static class ActionHostTrustedWorkflowPolicy
 
                 var indent = rawLine.TakeWhile(static character =>
                     character == ' ').Count();
-                if (blockIndent >= 0 && indent > blockIndent)
-                {
-                    continue;
-                }
-
-                blockIndent = -1;
                 var content = StripComment(rawLine[indent..]).TrimEnd();
                 if (content.Length == 0)
                 {
@@ -379,12 +154,46 @@ internal static class ActionHostTrustedWorkflowPolicy
                     return false;
                 }
 
+                string? blockScalar = null;
                 if (IsBlockScalarDeclaration(content))
                 {
-                    blockIndent = indent;
+                    var body = new StringBuilder();
+                    var bodyIndent = indent + 2;
+                    var bodyIndex = rawIndex + 1;
+                    for (; bodyIndex < rawLines.Length; bodyIndex++)
+                    {
+                        var bodyLine = rawLines[bodyIndex];
+                        var actualIndent = bodyLine.TakeWhile(
+                            static character => character == ' ').Count();
+                        if (bodyLine.Length != 0 && actualIndent <= indent)
+                        {
+                            break;
+                        }
+
+                        if (bodyLine.Length != 0 && actualIndent < bodyIndent ||
+                            bodyLine.Contains('\t') ||
+                            bodyLine.Length > ActionHostAuthorizationBounds
+                                .MaximumYamlLineCharacters)
+                        {
+                            return false;
+                        }
+
+                        body.Append(bodyLine.Length == 0
+                            ? string.Empty
+                            : bodyLine[Math.Min(bodyIndent, bodyLine.Length)..]);
+                        body.Append('\n');
+                    }
+
+                    if (body.Length == 0)
+                    {
+                        return false;
+                    }
+
+                    blockScalar = body.ToString();
+                    rawIndex = bodyIndex - 1;
                 }
 
-                lines.Add(new(indent, content));
+                lines.Add(new(indent, content, blockScalar));
             }
 
             if (lines.Count == 0 ||
@@ -434,8 +243,9 @@ internal static class ActionHostTrustedWorkflowPolicy
             while (index < lines.Count && lines[index].Indent == indent &&
                 !lines[index].Content.StartsWith("- ", StringComparison.Ordinal))
             {
+                var current = lines[index];
                 if (!TrySplitMapping(
-                        lines[index].Content,
+                        current.Content,
                         out var key,
                         out var value) ||
                     !map.TryAdd(key!, new PolicyNode()))
@@ -445,7 +255,11 @@ internal static class ActionHostTrustedWorkflowPolicy
 
                 index++;
                 PolicyNode? child;
-                if (value is not null)
+                if (current.BlockScalar is not null)
+                {
+                    child = new PolicyNode { Scalar = current.BlockScalar };
+                }
+                else if (value is not null)
                 {
                     if (!TryScalar(value, out child))
                     {
@@ -488,7 +302,8 @@ internal static class ActionHostTrustedWorkflowPolicy
                 lines[index].Indent == indent &&
                 lines[index].Content.StartsWith("- ", StringComparison.Ordinal))
             {
-                var content = lines[index].Content[2..].Trim();
+                var current = lines[index];
+                var content = current.Content[2..].Trim();
                 if (content.Length == 0)
                 {
                     return false;
@@ -499,12 +314,14 @@ internal static class ActionHostTrustedWorkflowPolicy
                 {
                     var map = new Dictionary<string, PolicyNode>(
                         StringComparer.Ordinal);
-                    if (!TryScalarOrNested(
-                            lines,
-                            ref index,
-                            indent,
-                            value,
-                            out var first) ||
+                    if (!(current.BlockScalar is not null
+                            ? AssignScalar(current.BlockScalar, out var first)
+                            : TryScalarOrNested(
+                                lines,
+                                ref index,
+                                indent,
+                                value,
+                                out first)) ||
                         !map.TryAdd(key!, first!))
                     {
                         return false;
@@ -516,8 +333,9 @@ internal static class ActionHostTrustedWorkflowPolicy
                             "- ",
                             StringComparison.Ordinal))
                     {
+                        var continuationLine = lines[index];
                         if (!TrySplitMapping(
-                                lines[index].Content,
+                                continuationLine.Content,
                                 out var continuationKey,
                                 out var continuationValue) ||
                             map.ContainsKey(continuationKey!))
@@ -526,12 +344,16 @@ internal static class ActionHostTrustedWorkflowPolicy
                         }
 
                         index++;
-                        if (!TryScalarOrNested(
-                                lines,
-                                ref index,
-                                indent + 2,
-                                continuationValue,
-                                out var continuation))
+                        if (!(continuationLine.BlockScalar is not null
+                                ? AssignScalar(
+                                    continuationLine.BlockScalar,
+                                    out var continuation)
+                                : TryScalarOrNested(
+                                    lines,
+                                    ref index,
+                                    indent + 2,
+                                    continuationValue,
+                                    out continuation)))
                         {
                             return false;
                         }
@@ -618,6 +440,14 @@ internal static class ActionHostTrustedWorkflowPolicy
             }
 
             node = new PolicyNode { Scalar = normalized };
+            return true;
+        }
+
+        private static bool AssignScalar(
+            string value,
+            out PolicyNode? node)
+        {
+            node = new PolicyNode { Scalar = value };
             return true;
         }
 
@@ -710,6 +540,9 @@ internal static class ActionHostTrustedWorkflowPolicy
             return value is "|" or "|-" or "|+" or ">" or ">-" or ">+";
         }
 
-        private readonly record struct PolicyLine(int Indent, string Content);
+        private readonly record struct PolicyLine(
+            int Indent,
+            string Content,
+            string? BlockScalar);
     }
 }

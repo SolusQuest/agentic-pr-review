@@ -7,7 +7,11 @@ using System.Text.Json.Nodes;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
-internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
+using AgenticPrReview.Runtime.ActionHost.Authorization;
+
+internal sealed class FrameworkGitHubHandler(
+    string scenarioRoot,
+    string payloadSha256) :
     HttpMessageHandler
 {
     internal const long RepositoryId = 42;
@@ -35,6 +39,7 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         FrameworkCanaries.Prompt + "\n");
 
     private readonly string scenarioRoot = scenarioRoot;
+    private readonly string payloadSha256 = payloadSha256;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -397,60 +402,23 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
                     ? RepositoryId + 1
                     : RepositoryId))))));
 
-    private static string Workflow(string mode)
+    private string Workflow(string mode)
     {
-        var action = mode == "wrong-action" ? new string('9', 40) : ActionSha;
-        var cancel = mode == "concurrency" ? "true" : "false";
-        return $$$"""
-            name: R4 trusted proof
-            on:
-              workflow_run:
-                workflows:
-                  - CI
-                types:
-                  - completed
-              workflow_dispatch:
-                inputs:
-                  pr-number:
-                    description: Pull request number
-                    required: true
-                    type: number
-            permissions: {}
-            concurrency:
-              group: agentic-pr-review-r4-${{ github.repository_id }}-pr-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr-number }}
-              cancel-in-progress: {{{cancel}}}
-            jobs:
-              authorization-preflight:
-                permissions: {}
-                runs-on: ubuntu-latest
-                outputs:
-                  authorized: ${{ steps.authorization.outputs.authorized }}
-                steps:
-                  - id: authorization
-                    run: |
-                      echo "authorized=false" >> "$GITHUB_OUTPUT"
-              workflow-run-review:
-                needs: authorization-preflight
-                if: ${{ github.event_name == 'workflow_run' && needs.authorization-preflight.outputs.authorized == 'true' }}
-                permissions:
-                  actions: write
-                  contents: read
-                  pull-requests: write
-                runs-on: ubuntu-latest
-                steps:
-                  - uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@{{{action}}}
-              workflow-dispatch-review:
-                needs: authorization-preflight
-                if: ${{ github.event_name == 'workflow_dispatch' && needs.authorization-preflight.outputs.authorized == 'true' }}
-                permissions:
-                  actions: write
-                  contents: read
-                  pull-requests: write
-                runs-on: ubuntu-latest
-                steps:
-                  - uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@{{{action}}}
-            # {{{FrameworkCanaries.Workflow}}}
-            """;
+        var workflow = ActionHostTrustedWorkflowContract.Render(
+            ActionSha,
+            payloadSha256);
+        return mode switch
+        {
+            "wrong-action" => workflow.Replace(
+                ActionSha,
+                new string('9', 40),
+                StringComparison.Ordinal),
+            "concurrency" => workflow.Replace(
+                "cancel-in-progress: false",
+                "cancel-in-progress: true",
+                StringComparison.Ordinal),
+            _ => workflow,
+        };
     }
 
     private string CurrentHead(string mode) =>
@@ -499,13 +467,13 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
                 [TreeEntry(".github", "040000", "tree", GitHubRoot)],
             var value when value == GitHubRoot =>
                 [
-                    TreeEntry("agentic-pr-review.json", "100644", "blob",
+                    TreeEntry("trusted-proof.json", "100644", "blob",
                         GitBlobSha(ConfigBytes(mode)), ConfigBytes(mode).Length),
                     TreeEntry("agentic-pr-review", "040000", "tree",
                         InstructionsRoot),
                 ],
             var value when value == InstructionsRoot =>
-                [TreeEntry("instructions.md", "100644", "blob",
+                [TreeEntry("trusted-proof-instructions.md", "100644", "blob",
                     GitBlobSha(InstructionsBytes), InstructionsBytes.Length)],
             var value when value == BaseRoot => [],
             var value when value == HeadRoot =>
@@ -544,7 +512,7 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
     private static byte[] ConfigBytes(string mode) => Encoding.UTF8.GetBytes(
         "{\"schema\":\"agentic-pr-review.config.v1\"," +
         "\"instructionsPath\":\".github/agentic-pr-review/" +
-        "instructions.md\",\"publication\":{\"mode\":\"" +
+        "trusted-proof-instructions.md\",\"publication\":{\"mode\":\"" +
         (mode is "inline" or "inline-warning" ? "sticky_and_inline" :
             "sticky") + "\"" +
         (mode is "inline" or "inline-warning"

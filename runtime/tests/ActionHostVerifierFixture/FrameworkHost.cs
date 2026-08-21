@@ -117,7 +117,9 @@ internal static class FrameworkHost
         }
 
         Func<HttpMessageHandler> githubHandlers =
-            () => new FrameworkGitHubHandler(scenarioRoot);
+            () => new FrameworkGitHubHandler(
+                scenarioRoot,
+                launch.PayloadSha256);
         var github = new ActionHostGitHubAuthorizationTransportFactory(
             githubHandlers);
         var publisher = new BoundedGitHubPublisherTransportFactory(
