@@ -1,0 +1,29 @@
+{
+  "kind": "apr-r4-e2-action-host-receipt-contract-v1",
+  "receipt_kind": "apr-r4-e2-action-host-receipt-v1",
+  "migration_base_commit": "2337e8ae9d3ca0db88f8a38f36c2f17e46a868fc",
+  "migration_base_tree": "17bbdc8e1cb6591112a7c871ffba9108ecf3680f",
+  "ordered_fields": [
+    "kind",
+    "migration_base_commit",
+    "migration_base_tree",
+    "source_commit",
+    "source_tree",
+    "launch_action_source_sha",
+    "action_metadata_sha256",
+    "wrapper_bundle_sha256",
+    "wrapper_build_discriminator",
+    "payload_sha256",
+    "managed_intermediate_sha256",
+    "executable_sha256",
+    "build_pair_sha256",
+    "aot_warning_policy_sha256",
+    "e1_normalized_evidence_sha256",
+    "source_inventory_digest",
+    "replacement_record_digest",
+    "base_inventory_digest",
+    "canary_table_digest",
+    "receipt_contract_sha256",
+    "result"
+  ]
+}

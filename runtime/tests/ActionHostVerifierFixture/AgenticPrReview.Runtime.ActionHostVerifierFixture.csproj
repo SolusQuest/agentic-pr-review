@@ -4,14 +4,37 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PublishAot>false</PublishAot>
+    <PublishAot Condition="'$(PublishAot)' == ''">false</PublishAot>
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
-    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <SelfContained Condition="'$(PublishAot)' != 'true'">false</SelfContained>
+    <JsonSerializerIsReflectionEnabledByDefault Condition="'$(PublishAot)' != 'true'">true</JsonSerializerIsReflectionEnabledByDefault>
     <AssemblyName>AgenticPrReview.Runtime.ActionHostVerifierFixture</AssemblyName>
   </PropertyGroup>
-  <ItemGroup>
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <IsAotCompatible>true</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PublishAot)' != 'true'">
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
                       AdditionalProperties="ActionHostVerifierFrameworkReference=true" />
   </ItemGroup>
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
+                      AdditionalProperties="ActionHostVerifierAotReference=true" />
+  </ItemGroup>
+  <Target Name="ExportActionHostVerifierAotIntermediate"
+          AfterTargets="ComputeIlcCompileInputs"
+          BeforeTargets="IlcCompile"
+          Condition="'$(PublishAot)' == 'true' and '$(ActionHostVerifierAotIntermediateDirectory)' != ''">
+    <Error Condition="'@(ManagedBinary)' == ''"
+           Text="APR_R4_E2_AOT_INTERMEDIATE_MISSING" />
+    <Error Condition="'@(ManagedBinary->Count())' != '1'"
+           Text="APR_R4_E2_AOT_INTERMEDIATE_AMBIGUOUS" />
+    <MakeDir Directories="$(ActionHostVerifierAotIntermediateDirectory)" />
+    <Copy SourceFiles="@(ManagedBinary)"
+          DestinationFiles="@(ManagedBinary->'$(ActionHostVerifierAotIntermediateDirectory)/%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+  </Target>
 </Project>

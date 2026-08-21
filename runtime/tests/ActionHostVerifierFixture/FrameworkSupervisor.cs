@@ -3,10 +3,12 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
@@ -33,6 +35,7 @@ internal static class FrameworkSupervisor
         var golden = Required(values, "golden");
         var canaries = Required(values, "canaries");
         var node = Required(values, "node");
+        var aotProof = AotProof.TryCreate(values, payload);
 
         var prerequisites = new Dictionary<string, bool>(StringComparer.Ordinal)
         {
@@ -53,6 +56,7 @@ internal static class FrameworkSupervisor
                 File.Exists(inventory) && ValidateInventory(inventory),
             ["canary-table"] = File.Exists(canaries) &&
                 ValidateCanaryTable(canaries),
+            ["execution-profile"] = aotProof.IsValid,
         };
         if (prerequisites.Any(pair => !pair.Value))
         {
@@ -239,88 +243,11 @@ internal static class FrameworkSupervisor
             return 1;
         }
 
-        var normalized = new
-        {
-            schema = "apr.action-host.framework-evidence.v3",
-            source_inventory_digest = SourceInventoryDigest(repository),
-            replacement_record_digest = Sha256(record),
-            base_inventory_digest = JsonProperty(inventory,
-                "aggregate_sha256"),
-            canary_table_digest = Sha256(canaries),
-            scenarios = cases.Select(result => new
-            {
-                name = result.Name,
-                status = result.ActualStatus ?? "wrapper_failure",
-                result.ExitCode,
-                result.ProviderRequests,
-                result.ToolSequence,
-                result.GitHubRequests,
-                result.StateOperations,
-                result.StickyMutations,
-                result.InlineMutations,
-                result.CanarySafe,
-                result.ContinuationObserved,
-            }),
-            continuation = new
-            {
-                second_process_status = cases.Single(result =>
-                    result.Name == "dispatch-continuation").ActualStatus,
-                successor_accepted = cases.Single(result =>
-                    result.Name == "dispatch-continuation").Passed,
-                reviewed_head_advanced = ContinuationHeadAdvanced(root),
-                state_identity_digest = CanonicalizedIdentityDigest(Path.Join(root,
-                    "dispatch-continuation",
-                    "state-operation-identities.tsv")),
-                sticky_lineage_digest = ContinuationStickyDigest(root),
-                prior_marker_first_request_exact = File.Exists(Path.Join(
-                    root, "dispatch-continuation",
-                    "provider-continuation-first-request-exact")),
-                prior_marker_carried_without_reinjection =
-                    File.Exists(Path.Join(root, "dispatch-continuation",
-                        "provider-continuation-carried-history-2")) &&
-                    File.Exists(Path.Join(root, "dispatch-continuation",
-                        "provider-continuation-carried-history-3")),
-                exact_tool_exchange_relations =
-                    File.Exists(Path.Join(root, "dispatch-continuation",
-                        "provider-continuation-relation-2")) &&
-                    File.Exists(Path.Join(root, "dispatch-continuation",
-                        "provider-continuation-relation-3")),
-            },
-            process = new
-            {
-                distinct_host_processes = cases.Select(result => result.HostPid)
-                    .Where(value => value > 0).Distinct().Count() ==
-                    cases.Count(result => result.HostPid > 0),
-                all_process_groups_quiet = cases.All(result =>
-                    result.ProcessGroupQuiet),
-            },
-            official_bridge = new
-            {
-                twirp = ReadInt(root, "official-twirp-count"),
-                blob = ReadInt(root, "official-blob-count"),
-                rest = ReadInt(root, "official-rest-count"),
-                finalize = ReadInt(root, "official-finalize-count"),
-                signed_download = ReadInt(root,
-                    "official-signed-download-count"),
-                delete = ReadInt(root, "official-delete-count"),
-            },
-            exact_child_environment = cases.All(result =>
-                result.ExactEnvironment),
-            output_file_unchanged = cases.All(result =>
-                result.OutputUnchanged),
-            canary_oracle_passed = canaryRoutesPassed,
-            canary_route_coverage_digest = CanaryRouteCoverageDigest(root),
-            canary_negative_injection_count = ReadInt(root,
-                "canary-negative-injection-count"),
-            artifact_metadata_route_probe_count =
-                artifactMetadataRouteProbeCount,
-            normalized_exact_delete_identity_digest =
-                CanonicalizedIdentityDigest(
-                Path.Join(root, "exact-delete-proof")),
-        };
+        var normalized = NormalizedEvidence(root, repository, record,
+            inventory, canaries, cases, canaryRoutesPassed,
+            artifactMetadataRouteProbeCount);
         var normalizedBytes = Encoding.UTF8.GetBytes(
-            JsonSerializer.Serialize(normalized,
-                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+            FrameworkJson.SerializeIndented(normalized) + "\n");
         if (!FrameworkCanaryCapture.AssertPublicSafe(
                 root, "evidence.normalized", normalizedBytes))
         {
@@ -342,6 +269,12 @@ internal static class FrameworkSupervisor
 
         await WriteEvidenceAsync(root, payload, platform, cases, true)
             .ConfigureAwait(false);
+        if (aotProof.Context is { } context)
+        {
+            await WriteAotIdentityAsync(context, root, repository, record,
+                inventory, canaries).ConfigureAwait(false);
+            Console.WriteLine("APR_ACTION_HOST_AOT_VERIFY_OK");
+        }
         Console.WriteLine("APR_ACTION_HOST_FRAMEWORK_VERIFY_OK");
         return 0;
     }
@@ -367,12 +300,14 @@ internal static class FrameworkSupervisor
                     "CreateArtifact");
                 create.Headers.TryAddWithoutValidation("Authorization",
                     "Bearer " + RuntimeToken);
-                create.Content = new StringContent(JsonSerializer.Serialize(new
-                {
-                    workflowRunBackendId = FrameworkCanaries.RunBackendId,
-                    workflowJobRunBackendId = FrameworkCanaries.JobBackendId,
-                    name = FrameworkCanaries.ToolData,
-                }), Encoding.UTF8, "application/json");
+                create.Content = new StringContent(FrameworkJson.Serialize(
+                    FrameworkJson.Object(
+                        ("workflowRunBackendId",
+                            FrameworkCanaries.RunBackendId),
+                        ("workflowJobRunBackendId",
+                            FrameworkCanaries.JobBackendId),
+                        ("name", FrameworkCanaries.ToolData))), Encoding.UTF8,
+                    "application/json");
                 using var createResponse = await client.SendAsync(create)
                     .ConfigureAwait(false);
 
@@ -382,12 +317,14 @@ internal static class FrameworkSupervisor
                     "FinalizeArtifact");
                 finalize.Headers.TryAddWithoutValidation("Authorization",
                     "Bearer " + RuntimeToken);
-                finalize.Content = new StringContent(JsonSerializer.Serialize(new
-                {
-                    workflowRunBackendId = FrameworkCanaries.RunBackendId,
-                    workflowJobRunBackendId = FrameworkCanaries.JobBackendId,
-                    name = FrameworkCanaries.Prompt,
-                }), Encoding.UTF8, "application/json");
+                finalize.Content = new StringContent(FrameworkJson.Serialize(
+                    FrameworkJson.Object(
+                        ("workflowRunBackendId",
+                            FrameworkCanaries.RunBackendId),
+                        ("workflowJobRunBackendId",
+                            FrameworkCanaries.JobBackendId),
+                        ("name", FrameworkCanaries.Prompt))), Encoding.UTF8,
+                    "application/json");
                 using var finalizeResponse = await client.SendAsync(finalize)
                     .ConfigureAwait(false);
 
@@ -466,6 +403,89 @@ internal static class FrameworkSupervisor
                 Directory.Delete(probeRoot, recursive: true);
             }
         }
+    }
+
+    private static JsonObject NormalizedEvidence(
+        string root,
+        string repository,
+        string record,
+        string inventory,
+        string canaries,
+        IReadOnlyList<CaseResult> cases,
+        bool canaryRoutesPassed,
+        int artifactMetadataRouteProbeCount)
+    {
+        var continuation = cases.Single(result =>
+            result.Name == "dispatch-continuation");
+        return FrameworkJson.Object(
+            ("schema", "apr.action-host.framework-evidence.v3"),
+            ("source_inventory_digest", SourceInventoryDigest(repository)),
+            ("replacement_record_digest", Sha256(record)),
+            ("base_inventory_digest", JsonProperty(inventory,
+                "aggregate_sha256")),
+            ("canary_table_digest", Sha256(canaries)),
+            ("scenarios", FrameworkJson.Array(cases.Select(result =>
+                FrameworkJson.Object(
+                    ("name", result.Name),
+                    ("status", result.ActualStatus ?? "wrapper_failure"),
+                    ("ExitCode", result.ExitCode),
+                    ("ProviderRequests", result.ProviderRequests),
+                    ("ToolSequence", result.ToolSequence),
+                    ("GitHubRequests", result.GitHubRequests),
+                    ("StateOperations", result.StateOperations),
+                    ("StickyMutations", result.StickyMutations),
+                    ("InlineMutations", result.InlineMutations),
+                    ("CanarySafe", result.CanarySafe),
+                    ("ContinuationObserved", result.ContinuationObserved))))),
+            ("continuation", FrameworkJson.Object(
+                ("second_process_status", continuation.ActualStatus),
+                ("successor_accepted", continuation.Passed),
+                ("reviewed_head_advanced", ContinuationHeadAdvanced(root)),
+                ("state_identity_digest", CanonicalizedIdentityDigest(
+                    Path.Join(root, "dispatch-continuation",
+                        "state-operation-identities.tsv"))),
+                ("sticky_lineage_digest", ContinuationStickyDigest(root)),
+                ("prior_marker_first_request_exact", File.Exists(Path.Join(
+                    root, "dispatch-continuation",
+                    "provider-continuation-first-request-exact"))),
+                ("prior_marker_carried_without_reinjection", File.Exists(
+                    Path.Join(root, "dispatch-continuation",
+                        "provider-continuation-carried-history-2")) &&
+                    File.Exists(Path.Join(root, "dispatch-continuation",
+                        "provider-continuation-carried-history-3"))),
+                ("exact_tool_exchange_relations", File.Exists(Path.Join(
+                    root, "dispatch-continuation",
+                    "provider-continuation-relation-2")) &&
+                    File.Exists(Path.Join(root, "dispatch-continuation",
+                        "provider-continuation-relation-3"))))),
+            ("process", FrameworkJson.Object(
+                ("distinct_host_processes", cases.Select(result =>
+                    result.HostPid).Where(value => value > 0).Distinct()
+                    .Count() == cases.Count(result => result.HostPid > 0)),
+                ("all_process_groups_quiet", cases.All(result =>
+                    result.ProcessGroupQuiet)))),
+            ("official_bridge", FrameworkJson.Object(
+                ("twirp", ReadInt(root, "official-twirp-count")),
+                ("blob", ReadInt(root, "official-blob-count")),
+                ("rest", ReadInt(root, "official-rest-count")),
+                ("finalize", ReadInt(root, "official-finalize-count")),
+                ("signed_download", ReadInt(root,
+                    "official-signed-download-count")),
+                ("delete", ReadInt(root, "official-delete-count")))),
+            ("exact_child_environment", cases.All(result =>
+                result.ExactEnvironment)),
+            ("output_file_unchanged", cases.All(result =>
+                result.OutputUnchanged)),
+            ("canary_oracle_passed", canaryRoutesPassed),
+            ("canary_route_coverage_digest",
+                CanaryRouteCoverageDigest(root)),
+            ("canary_negative_injection_count", ReadInt(root,
+                "canary-negative-injection-count")),
+            ("artifact_metadata_route_probe_count",
+                artifactMetadataRouteProbeCount),
+            ("normalized_exact_delete_identity_digest",
+                CanonicalizedIdentityDigest(
+                    Path.Join(root, "exact-delete-proof"))));
     }
 
     private static async Task<CaseResult> RunCaseAsync(
@@ -839,59 +859,47 @@ internal static class FrameworkSupervisor
                 """;
         }
 
-        var identity = new
-        {
-            id = 42,
-            full_name = FrameworkCanaries.Repository,
-        };
-        var actor = new { id = 7, login = "maintainer" };
-        var repositoryReference = new
-        {
-            id = 42,
-            url = "https://api.github.com/repos/" +
-                FrameworkCanaries.Repository,
-            name = "apr178-repository-canary",
-        };
-        return JsonSerializer.Serialize(new
-        {
-            action = "completed",
-            workflow_run = new
-            {
-                id = 800,
-                run_attempt = 1,
-                workflow_id = 71,
-                name = "CI",
-                path = ".github/workflows/ci.yml",
-                head_branch = "feature",
-                head_sha = FrameworkGitHubHandler.TriggerSha,
-                @event = "pull_request",
-                conclusion = "success",
-                repository = identity,
-                head_repository = identity,
-                actor,
-                triggering_actor = actor,
-                pull_requests = new[]
-                {
-                    new
-                    {
-                        id = 1000,
-                        number = 147,
-                        @base = new
-                        {
-                            sha = FrameworkGitHubHandler.BaseSha,
-                            repo = repositoryReference,
-                        },
-                        head = new
-                        {
-                            sha = FrameworkGitHubHandler.HeadSha,
-                            repo = repositoryReference,
-                        },
-                    },
-                },
-            },
-            repository = identity,
-            sender = actor,
-        });
+        JsonObject Identity() => FrameworkJson.Object(
+            ("id", 42),
+            ("full_name", FrameworkCanaries.Repository));
+        JsonObject Actor() => FrameworkJson.Object(
+            ("id", 7),
+            ("login", "maintainer"));
+        JsonObject RepositoryReference() => FrameworkJson.Object(
+            ("id", 42),
+            ("url", "https://api.github.com/repos/" +
+                FrameworkCanaries.Repository),
+            ("name", "apr178-repository-canary"));
+        return FrameworkJson.Serialize(FrameworkJson.Object(
+            ("action", "completed"),
+            ("workflow_run", FrameworkJson.Object(
+                ("id", 800),
+                ("run_attempt", 1),
+                ("workflow_id", 71),
+                ("name", "CI"),
+                ("path", ".github/workflows/ci.yml"),
+                ("head_branch", "feature"),
+                ("head_sha", FrameworkGitHubHandler.TriggerSha),
+                ("event", "pull_request"),
+                ("conclusion", "success"),
+                ("repository", Identity()),
+                ("head_repository", Identity()),
+                ("actor", Actor()),
+                ("triggering_actor", Actor()),
+                ("pull_requests", FrameworkJson.Array(
+                [
+                    FrameworkJson.Object(
+                        ("id", 1000),
+                        ("number", 147),
+                        ("base", FrameworkJson.Object(
+                            ("sha", FrameworkGitHubHandler.BaseSha),
+                            ("repo", RepositoryReference()))),
+                        ("head", FrameworkJson.Object(
+                            ("sha", FrameworkGitHubHandler.HeadSha),
+                            ("repo", RepositoryReference())))),
+                ])))),
+            ("repository", Identity()),
+            ("sender", Actor())));
     }
 
     private static string SanitizePrivateMaskCommands(string stdout)
@@ -2860,7 +2868,8 @@ internal static class FrameworkSupervisor
             Encoding.UTF8.GetBytes(value))));
 
     private static byte[] JsonStringCapture(string value) =>
-        JsonSerializer.SerializeToUtf8Bytes(new { value });
+        FrameworkJson.SerializeToUtf8Bytes(FrameworkJson.Object(
+            ("value", value)));
 
     private static byte[] NestedJsonCapture(string value)
     {
@@ -2915,25 +2924,79 @@ internal static class FrameworkSupervisor
         IReadOnlyList<CaseResult> cases,
         bool passed)
     {
-        var evidence = new
-        {
-            passed,
-            payload_sha256 = Sha256(payload),
-            sdk = RuntimeInformation.FrameworkDescription,
-            official_artifacts = new
-            {
-                locator = platform.ArtifactNames.Any(name =>
-                    name == "agentic-pr-review-state-root-v1"),
-                scoped = platform.ArtifactNames.Any(name =>
-                    name.StartsWith("apr-state-", StringComparison.Ordinal)),
-            },
-            cases,
-        };
+        var evidence = FrameworkJson.Object(
+            ("passed", passed),
+            ("payload_sha256", Sha256(payload)),
+            ("sdk", RuntimeInformation.FrameworkDescription),
+            ("official_artifacts", FrameworkJson.Object(
+                ("locator", platform.ArtifactNames.Any(name =>
+                    name == "agentic-pr-review-state-root-v1")),
+                ("scoped", platform.ArtifactNames.Any(name =>
+                    name.StartsWith("apr-state-", StringComparison.Ordinal))))),
+            ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
         await File.WriteAllTextAsync(Path.Join(root, "evidence.json"),
-            JsonSerializer.Serialize(evidence,
-                new JsonSerializerOptions { WriteIndented = true }))
+            FrameworkJson.SerializeIndented(evidence))
             .ConfigureAwait(false);
     }
+
+    private static async Task WriteAotIdentityAsync(
+        AotProofContext context,
+        string root,
+        string repository,
+        string record,
+        string inventory,
+        string canaries)
+    {
+        var normalizedEvidence = Path.Join(root, "normalized-evidence.json");
+        var identity = FrameworkJson.Object(
+            ("kind", "apr-r4-e2-action-host-native-aot-identity-v1"),
+            ("execution_kind", "native-aot"),
+            ("reflection_json_enabled",
+                JsonSerializer.IsReflectionEnabledByDefault),
+            ("dynamic_code_supported", RuntimeFeature.IsDynamicCodeSupported),
+            ("launch_action_source_sha", FrameworkGitHubHandler.ActionSha),
+            ("wrapper_build_discriminator",
+                FrameworkCanaries.BuildDiscriminator),
+            ("payload_sha256", context.PayloadSha256),
+            ("managed_intermediate_sha256",
+                context.ManagedIntermediateSha256),
+            ("build_pair_sha256", context.BuildPairSha256),
+            ("e1_normalized_evidence_sha256", Sha256(normalizedEvidence)),
+            ("source_inventory_digest", SourceInventoryDigest(repository)),
+            ("replacement_record_digest", Sha256(record)),
+            ("base_inventory_digest", JsonProperty(inventory,
+                "aggregate_sha256")),
+            ("canary_table_digest", Sha256(canaries)));
+        var identityBytes = Encoding.UTF8.GetBytes(
+            FrameworkJson.Serialize(identity) + "\n");
+        if (!FrameworkCanaryCapture.AssertPublicSafe(
+                root, "aot.identity", identityBytes))
+        {
+            throw new InvalidDataException("AOT identity is not public-safe.");
+        }
+        await File.WriteAllBytesAsync(context.IdentityOutput, identityBytes)
+            .ConfigureAwait(false);
+    }
+
+    private static JsonObject CaseEvidence(CaseResult result) =>
+        FrameworkJson.Object(
+            ("Name", result.Name),
+            ("ExpectedStatus", result.ExpectedStatus),
+            ("ActualStatus", result.ActualStatus),
+            ("ExitCode", result.ExitCode),
+            ("HostPid", result.HostPid),
+            ("ProviderRequests", result.ProviderRequests),
+            ("ToolSequence", result.ToolSequence),
+            ("GitHubRequests", result.GitHubRequests),
+            ("StateOperations", result.StateOperations),
+            ("StickyMutations", result.StickyMutations),
+            ("InlineMutations", result.InlineMutations),
+            ("ExactEnvironment", result.ExactEnvironment),
+            ("OutputUnchanged", result.OutputUnchanged),
+            ("ProcessGroupQuiet", result.ProcessGroupQuiet),
+            ("CanarySafe", result.CanarySafe),
+            ("ContinuationObserved", result.ContinuationObserved),
+            ("Passed", result.Passed));
 
     private static int ReadInt(string root, string name)
     {

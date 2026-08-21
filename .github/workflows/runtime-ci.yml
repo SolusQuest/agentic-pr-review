@@ -58,6 +58,20 @@ jobs:
       - name: R4 framework ActionHost replacement proof second fresh process
         run: bash runtime/scripts/verify-action-host.sh framework
 
+      - name: R4 Linux x64 Native AOT ActionHost proof first fresh process
+        run: bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-first.log"
+
+      - name: R4 Linux x64 Native AOT ActionHost proof second fresh process
+        run: bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-second.log"
+
+      - name: R4 Native AOT receipts are byte-identical
+        run: |
+          grep '^APR_R4_E2_RECEIPT ' "$RUNNER_TEMP/r4-e2-aot-first.log" > "$RUNNER_TEMP/r4-e2-aot-first.receipt"
+          grep '^APR_R4_E2_RECEIPT ' "$RUNNER_TEMP/r4-e2-aot-second.log" > "$RUNNER_TEMP/r4-e2-aot-second.receipt"
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-first.receipt")" -eq 1
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-second.receipt")" -eq 1
+          cmp "$RUNNER_TEMP/r4-e2-aot-first.receipt" "$RUNNER_TEMP/r4-e2-aot-second.receipt"
+
   integration:
     runs-on: ubuntu-latest
     permissions:

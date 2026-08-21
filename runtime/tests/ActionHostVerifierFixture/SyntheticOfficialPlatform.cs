@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
@@ -237,11 +238,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             FrameworkCanaryCapture.CaptureAll(evidenceRoot,
                 "results.create-response", signed);
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                JsonSerializer.Serialize(new
-                {
-                    ok = true,
-                    signedUploadUrl = signed,
-                })).ConfigureAwait(false);
+                FrameworkJson.Serialize(FrameworkJson.Object(
+                    ("ok", true),
+                    ("signedUploadUrl", signed)))).ConfigureAwait(false);
             return;
         }
 
@@ -310,11 +309,10 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 return;
             }
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                JsonSerializer.Serialize(new
-                {
-                    ok = true,
-                    artifactId = id.ToString(CultureInfo.InvariantCulture),
-                })).ConfigureAwait(false);
+                FrameworkJson.Serialize(FrameworkJson.Object(
+                    ("ok", true),
+                    ("artifactId", id.ToString(
+                        CultureInfo.InvariantCulture))))).ConfigureAwait(false);
             return;
         }
 
@@ -431,11 +429,11 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             {
                 var duplicate = MetadataDocument(values[0]);
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                    JsonSerializer.Serialize(new
-                    {
-                        total_count = 2,
-                        artifacts = new[] { duplicate, duplicate },
-                    })).ConfigureAwait(false);
+                    ArtifactList(2,
+                    [
+                        duplicate,
+                        (JsonObject)duplicate.DeepClone(),
+                    ])).ConfigureAwait(false);
                 return;
             }
 
@@ -448,11 +446,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                         .Select(index => MetadataDocument(values[0],
                             10_000 + index)).ToArray();
                     await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                        JsonSerializer.Serialize(new
-                        {
-                            total_count = 101,
-                            artifacts = firstPage,
-                        })).ConfigureAwait(false);
+                        ArtifactList(101, firstPage)).ConfigureAwait(false);
                     return;
                 }
 
@@ -465,14 +459,10 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 }
 
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                    JsonSerializer.Serialize(new
-                    {
-                        total_count = 102,
-                        artifacts = new[]
-                        {
-                            MetadataDocument(values[0], 10_100),
-                        },
-                    })).ConfigureAwait(false);
+                    ArtifactList(102,
+                    [
+                        MetadataDocument(values[0], 10_100),
+                    ])).ConfigureAwait(false);
                 return;
             }
 
@@ -482,11 +472,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     overrideExpiry: mode == "artifact-expired"))
                 .ToArray();
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                JsonSerializer.Serialize(new
-                {
-                    total_count = values.Length,
-                    artifacts = selected,
-                })).ConfigureAwait(false);
+                ArtifactList(values.Length, selected)).ConfigureAwait(false);
             return;
         }
 
@@ -540,20 +526,18 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     var targetDigest = IdentityDigest([target]);
                     File.WriteAllText(
                         Path.Join(evidenceRoot, "exact-delete-proof"),
-                        JsonSerializer.Serialize(new
-                        {
-                            requested_id = id,
-                            target,
-                            target_identity_digest = targetDigest,
-                            complete_pre_map = before,
-                            complete_pre_map_digest = preDigest,
-                            complete_post_map = after,
-                            complete_post_map_digest = postDigest,
-                            preserved_non_target_count = after.Length,
-                            target_absent = true,
-                            non_targets_byte_identical = true,
-                            operation_response = "no_content",
-                        }, new JsonSerializerOptions { WriteIndented = true }));
+                        FrameworkJson.SerializeIndented(FrameworkJson.Object(
+                            ("requested_id", id),
+                            ("target", ArtifactIdentityDocument(target)),
+                            ("target_identity_digest", targetDigest),
+                            ("complete_pre_map", ArtifactIdentities(before)),
+                            ("complete_pre_map_digest", preDigest),
+                            ("complete_post_map", ArtifactIdentities(after)),
+                            ("complete_post_map_digest", postDigest),
+                            ("preserved_non_target_count", after.Length),
+                            ("target_absent", true),
+                            ("non_targets_byte_identical", true),
+                            ("operation_response", "no_content"))));
                 }
                 if (Mode() == "artifact-delete-outcome-unknown")
                 {
@@ -576,7 +560,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             {
                 var mode = Mode();
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                    JsonSerializer.Serialize(MetadataDocument(artifact!,
+                    FrameworkJson.Serialize(MetadataDocument(artifact!,
                         overrideDigest: mode == "artifact-digest-mismatch",
                         overrideExpiry: mode == "artifact-expired")))
                     .ConfigureAwait(false);
@@ -596,11 +580,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 out var runAttempt))
         {
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                JsonSerializer.Serialize(new
-                {
-                    id = runId,
-                    run_attempt = runAttempt,
-                })).ConfigureAwait(false);
+                FrameworkJson.Serialize(FrameworkJson.Object(
+                    ("id", runId),
+                    ("run_attempt", runAttempt)))).ConfigureAwait(false);
             return;
         }
 
@@ -608,25 +590,31 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
-    private static object MetadataDocument(
+    private static JsonObject MetadataDocument(
         Artifact artifact,
         long? overrideId = null,
         bool overrideDigest = false,
-        bool overrideExpiry = false) => new
-    {
-        id = overrideId ?? artifact.Id,
-        name = artifact.Name,
-        size_in_bytes = artifact.Archive.Length,
-        expired = overrideExpiry,
-        expires_at = (overrideExpiry
-                ? DateTimeOffset.FromUnixTimeSeconds(1_700_000_000)
-                : artifact.ExpiresAt).UtcDateTime.ToString(
-            "O", CultureInfo.InvariantCulture),
-        digest = "sha256:" + (overrideDigest
-            ? new string('0', 64)
-            : artifact.Digest),
-        workflow_run = new { id = artifact.ProducingRunId },
-    };
+        bool overrideExpiry = false) => FrameworkJson.Object(
+            ("id", overrideId ?? artifact.Id),
+            ("name", artifact.Name),
+            ("size_in_bytes", artifact.Archive.Length),
+            ("expired", overrideExpiry),
+            ("expires_at", (overrideExpiry
+                    ? DateTimeOffset.FromUnixTimeSeconds(1_700_000_000)
+                    : artifact.ExpiresAt).UtcDateTime.ToString(
+                "O", CultureInfo.InvariantCulture)),
+            ("digest", "sha256:" + (overrideDigest
+                ? new string('0', 64)
+                : artifact.Digest)),
+            ("workflow_run", FrameworkJson.Object(
+                ("id", artifact.ProducingRunId))));
+
+    private static string ArtifactList(
+        int totalCount,
+        IEnumerable<JsonObject> artifacts) => FrameworkJson.Serialize(
+            FrameworkJson.Object(
+                ("total_count", totalCount),
+                ("artifacts", FrameworkJson.Array(artifacts))));
 
     private static bool TryEnvelopeIdentity(
         byte[] archive,
@@ -703,8 +691,23 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
     private static string IdentityDigest(
         IReadOnlyCollection<ArtifactIdentity> values) => Convert.ToHexString(
-            SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(values)))
+            SHA256.HashData(FrameworkJson.SerializeToUtf8Bytes(
+                ArtifactIdentities(values))))
         .ToLowerInvariant();
+
+    private static JsonArray ArtifactIdentities(
+        IEnumerable<ArtifactIdentity> values) => FrameworkJson.Array(
+            values.Select(ArtifactIdentityDocument));
+
+    private static JsonObject ArtifactIdentityDocument(ArtifactIdentity value) =>
+        FrameworkJson.Object(
+            ("Id", value.Id),
+            ("Name", value.Name),
+            ("ArchiveDigest", value.ArchiveDigest),
+            ("EnvelopeDigest", value.EnvelopeDigest),
+            ("ExpiresAt", value.ExpiresAt),
+            ("ProducingRunId", value.ProducingRunId),
+            ("ProducingRunAttempt", value.ProducingRunAttempt));
 
     private static bool TryTrailingId(
         string path,

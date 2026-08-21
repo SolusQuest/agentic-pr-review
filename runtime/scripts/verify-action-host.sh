@@ -1,35 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${1:-}" != "framework" || "$#" -ne 1 ]]; then
-  echo "usage: runtime/scripts/verify-action-host.sh framework" >&2
+mode="${1:-}"
+if [[ "$#" -ne 1 || ( "$mode" != framework && "$mode" != aot ) ]]; then
+  echo "usage: runtime/scripts/verify-action-host.sh <framework|aot>" >&2
   exit 2
 fi
-
-if [[ "$(uname -s)" != "Linux" ]]; then
-  echo "framework verification requires Linux" >&2
+if [[ "$(uname -s)" != Linux ]]; then
+  echo "$mode verification requires Linux" >&2
+  exit 2
+fi
+if [[ "$mode" == aot ]] &&
+  grep -Eqi '(microsoft|wsl)' /proc/sys/kernel/osrelease 2>/dev/null; then
+  echo "aot verification requires native Linux" >&2
   exit 2
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+project="$repo_root/runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj"
+runtime_project="$repo_root/runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
 golden="$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden"
-temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/apr-action-host-framework.XXXXXXXX")"
+record="$repo_root/runtime/tests/fixtures/action-host/framework/replacement-record.json"
+inventory="$repo_root/runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+canaries="$repo_root/runtime/tests/fixtures/action-host/framework/canary-routes.tsv"
+receipt_contract="$repo_root/runtime/tests/fixtures/action-host/aot/receipt-contract.json"
+warning_policy="$repo_root/runtime/tests/fixtures/action-host/aot/warning-policy.txt"
+temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/apr-action-host-${mode}.XXXXXXXX")"
 cleanup() {
   local exit_code=$?
   trap - EXIT
   if [[ "$exit_code" -ne 0 && -n "${evidence_root:-}" && -d "$evidence_root" ]]; then
     local failed_case_found=false
     while IFS= read -r result_path; do
-      if [[ "$(tr -d '\r\n' < "$result_path")" == "fail" ]]; then
+      if [[ "$(tr -d '\r\n' < "$result_path")" == fail ]]; then
         local relative_result="${result_path#"$evidence_root"/}"
         echo "APR_ACTION_HOST_FRAMEWORK_FAILED_CASE ${relative_result%/case-result.txt}" >&2
         failed_case_found=true
       fi
     done < <(find "$evidence_root" -type f -name case-result.txt -print | sort)
     if [[ "$failed_case_found" == false ]]; then
-      echo "APR_ACTION_HOST_FRAMEWORK_SUPERVISOR_FAILED" >&2
+      echo "APR_ACTION_HOST_${mode^^}_SUPERVISOR_FAILED" >&2
     fi
-    if [[ -n "${golden:-}" && -f "$golden" && -f "$evidence_root/normalized-evidence.json" ]]; then
+    if [[ -f "$golden" && -f "$evidence_root/normalized-evidence.json" ]]; then
       node --input-type=module - "$golden" "$evidence_root/normalized-evidence.json" <<'NODE'
 import fs from 'node:fs';
 
@@ -75,20 +87,98 @@ if git -C "$repo_root" config --local --get-regexp \
 fi
 
 checked_bundle="$repo_root/.github/actions/agentic-pr-review/dist/index.js"
+action_metadata="$repo_root/.github/actions/agentic-pr-review/action.yml"
 publish_root="$temporary_root/payload"
 payload="$publish_root/AgenticPrReview.Runtime.ActionHostVerifierFixture"
 evidence_root="$temporary_root/evidence"
 isolated_home="$temporary_root/home"
 isolated_tmp="$temporary_root/tmp"
 isolated_config="$temporary_root/config"
-mkdir -p "$evidence_root" "$isolated_home" "$isolated_tmp" "$isolated_config"
-node_path="$(command -v node)"
 artifacts_root="$temporary_root/artifacts"
+intermediate_root="$temporary_root/aot-intermediate"
+build_pair="$temporary_root/build-pair.json"
+identity_output="$temporary_root/aot-identity.json"
+publish_log="$temporary_root/publish.log"
+proof_log="$temporary_root/clean-source.log"
+mkdir -p "$evidence_root" "$isolated_home" "$isolated_tmp" \
+  "$isolated_config"
+node_path="$(command -v node)"
 
-execute_framework_proof() {
+audit_aot_warnings() {
+  local log="$1"
+  local announce="${2:-yes}"
+  local prefix expected_runtime expected_fixture line lower warning
+  prefix="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
+  local -a policy_lines=()
+  mapfile -t policy_lines < "$warning_policy"
+  if [[ "${#policy_lines[@]}" -ne 2 ||
+        "${policy_lines[0]}" != "$prefix [runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj]" ||
+        "${policy_lines[1]}" != "$prefix [runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj]" ]]; then
+    echo APR_R4_E2_AOT_WARNING_POLICY_INVALID >&2
+    return 1
+  fi
+  expected_runtime="$prefix [$runtime_project]"
+  expected_fixture="$prefix [$project]"
+  local -a warnings=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    lower="${line,,}"
+    if [[ "$lower" =~ (^|[[:space:]:])warning([[:space:]]+[a-z]+[0-9]+[[:space:]]*:|[[:space:]]*:) ]]; then
+      warnings+=("$line")
+    fi
+  done < "$log"
+  local runtime_count=0 fixture_count=0
+  for warning in "${warnings[@]}"; do
+    case "$warning" in
+      "$expected_runtime") ((runtime_count += 1)) ;;
+      "$expected_fixture") ((fixture_count += 1)) ;;
+      *) echo "APR_R4_E2_AOT_WARNING_UNEXPECTED $warning" >&2; return 1 ;;
+    esac
+  done
+  if [[ "${#warnings[@]}" -ne 2 || "$runtime_count" -ne 1 ||
+        "$fixture_count" -ne 1 ]]; then
+    echo APR_R4_E2_AOT_WARNING_ALLOWLIST_INVALID >&2
+    return 1
+  fi
+  if [[ "$announce" == yes ]]; then
+    printf 'APR_R4_E2_AOT_WARNING_ALLOWLIST count=%s\n' "${#warnings[@]}"
+  fi
+}
+
+verify_aot_warning_audit() {
+  local root="$1" prefix good mutated case_id injected
+  prefix="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
+  good="$root/warning-good.log"
+  printf '%s [%s]\n%s [%s]\n' "$prefix" "$runtime_project" \
+    "$prefix" "$project" > "$good"
+  audit_aot_warnings "$good" no >/dev/null
+  local -a injections=(
+    'clang: warning: synthetic native linker condition'
+    'VerifierTask : warning : synthetic MSBuild task condition'
+    'CSC : warning IL9999: synthetic coded warning [synthetic.csproj]'
+  )
+  for case_id in "${!injections[@]}"; do
+    injected="$root/warning-injected-$case_id.log"
+    cp "$good" "$injected"
+    printf '%s\n' "${injections[case_id]}" >> "$injected"
+    ! audit_aot_warnings "$injected" no >/dev/null 2>&1
+  done
+  mutated="$root/warning-mutated.log"
+  printf '%s [%s] appended-diagnostic\n%s [%s]\n' "$prefix" \
+    "$runtime_project" "$prefix" "$project" > "$mutated"
+  ! audit_aot_warnings "$mutated" no >/dev/null 2>&1
+  mutated="$root/warning-duplicate.log"
+  cp "$good" "$mutated"
+  printf '%s [%s]\n' "$prefix" "$project" >> "$mutated"
+  ! audit_aot_warnings "$mutated" no >/dev/null 2>&1
+  mutated="$root/warning-missing.log"
+  printf '%s [%s]\n' "$prefix" "$runtime_project" > "$mutated"
+  ! audit_aot_warnings "$mutated" no >/dev/null 2>&1
+}
+
+execute_action_host_proof() {
   cd "$repo_root"
-  local checked_bundle_sha256
-  local generated_bundle_sha256
+  local checked_bundle_sha256 generated_bundle_sha256 intermediate
   checked_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
   npm run build:action
   generated_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
@@ -96,48 +186,70 @@ execute_framework_proof() {
     echo "checked action bundle is not reproducible" >&2
     return 1
   fi
-
-  dotnet publish \
-    runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj \
-    --configuration Release \
-    --runtime linux-x64 \
-    --self-contained false \
-    --output "$publish_root" \
-    --artifacts-path "$artifacts_root" \
-    --nologo \
-    -p:PublishAot=false \
-    -p:PublishSingleFile=true \
-    -p:DebugType=None \
-    -p:DebugSymbols=false
-
+  local -a publish_arguments=(
+    "$project" --configuration Release --runtime linux-x64
+    --output "$publish_root" --artifacts-path "$artifacts_root" --nologo
+    -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+  )
+  if [[ "$mode" == framework ]]; then
+    dotnet publish "${publish_arguments[@]}" --self-contained false \
+      -p:PublishAot=false
+  else
+    verify_aot_warning_audit "$temporary_root"
+    if ! dotnet publish "${publish_arguments[@]}" --self-contained true \
+      -p:PublishAot=true \
+      -p:JsonSerializerIsReflectionEnabledByDefault=false \
+      -p:ActionHostVerifierAotIntermediateDirectory="$intermediate_root" \
+      -warnaserror -warnnotaserror:IL3058 > "$publish_log" 2>&1; then
+      tail -n 100 "$publish_log" >&2
+      return 1
+    fi
+    cat "$publish_log"
+    audit_aot_warnings "$publish_log"
+  fi
   test -x "$payload"
   test ! -e "$payload.dll"
   test ! -e "$payload.deps.json"
   test ! -e "$payload.runtimeconfig.json"
-
-  env -i \
-    HOME="$isolated_home" \
-    TMPDIR="$isolated_tmp" \
-    XDG_CONFIG_HOME="$isolated_config" \
-    GIT_CONFIG_NOSYSTEM=1 \
-    GIT_CONFIG_GLOBAL=/dev/null \
-    PATH="$PATH" \
-    CI=true \
+  local -a aot_arguments=()
+  if [[ "$mode" == aot ]]; then
+    mapfile -t intermediates < <(find "$intermediate_root" -maxdepth 1 \
+      -type f -name '*.dll' -print | sort)
+    [[ "${#intermediates[@]}" -eq 1 ]]
+    intermediate="${intermediates[0]}"
+    local payload_sha intermediate_sha pair_sha
+    payload_sha="$(sha256sum "$payload" | cut -d ' ' -f 1)"
+    intermediate_sha="$(sha256sum "$intermediate" | cut -d ' ' -f 1)"
+    pair_sha="$(printf '%s\n%s\n%s\n%s\n' \
+      apr-r4-e2-action-host-build-pair-v1 native-aot "$payload_sha" \
+      "$intermediate_sha" | sha256sum | cut -d ' ' -f 1)"
+    printf '{"kind":"apr-r4-e2-action-host-build-pair-v1","execution_kind":"native-aot","payload_sha256":"%s","managed_intermediate_sha256":"%s","build_pair_sha256":"%s"}\n' \
+      "$payload_sha" "$intermediate_sha" "$pair_sha" > "$build_pair"
+    aot_arguments=(
+      --execution-kind native-aot --intermediate "$intermediate"
+      --build-pair "$build_pair" --identity-output "$identity_output"
+    )
+  fi
+  env -i HOME="$isolated_home" TMPDIR="$isolated_tmp" \
+    XDG_CONFIG_HOME="$isolated_config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null PATH="$PATH" CI=true \
     "$payload" supervise \
-    --root "$evidence_root" \
-    --repo "$repo_root" \
-    --payload "$payload" \
-    --bundle "$checked_bundle" \
-    --record "$repo_root/runtime/tests/fixtures/action-host/framework/replacement-record.json" \
-    --inventory "$repo_root/runtime/tests/fixtures/action-host/framework/e1-base-inventory.json" \
-    --golden "$golden" \
-    --canaries "$repo_root/runtime/tests/fixtures/action-host/framework/canary-routes.tsv" \
-    --node "$node_path"
+    --root "$evidence_root" --repo "$repo_root" --payload "$payload" \
+    --bundle "$checked_bundle" --record "$record" --inventory "$inventory" \
+    --golden "$golden" --canaries "$canaries" --node "$node_path" \
+    "${aot_arguments[@]}"
 }
 
-export golden repo_root checked_bundle publish_root payload evidence_root isolated_home isolated_tmp
-export isolated_config node_path artifacts_root PATH
-export -f execute_framework_proof
-node "$repo_root/scripts/run-clean-source-proof.mjs" \
-  --repo "$repo_root" \
-  -- bash -euo pipefail -c execute_framework_proof
+export mode repo_root project runtime_project golden record inventory canaries
+export receipt_contract warning_policy temporary_root checked_bundle action_metadata
+export publish_root payload evidence_root isolated_home isolated_tmp isolated_config
+export artifacts_root intermediate_root build_pair identity_output publish_log node_path PATH
+export -f audit_aot_warnings verify_aot_warning_audit execute_action_host_proof
+node "$repo_root/scripts/run-clean-source-proof.mjs" --repo "$repo_root" -- \
+  bash -euo pipefail -c execute_action_host_proof | tee "$proof_log"
+if [[ "$mode" == aot ]]; then
+  node "$repo_root/scripts/compose-r4-e2-receipt.mjs" \
+    --identity "$identity_output" --contract "$receipt_contract" \
+    --source-log "$proof_log" --action "$action_metadata" \
+    --bundle "$checked_bundle" --warning-policy "$warning_policy"
+fi
