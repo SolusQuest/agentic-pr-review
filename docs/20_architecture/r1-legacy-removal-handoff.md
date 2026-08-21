@@ -101,21 +101,21 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 ## Residual-reference ownership
 
-`src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts` are lifecycle machinery and are excluded from match discovery to avoid recursive self-matches. The guard enumerates every Git-tracked file, skips only binary or invalid-UTF-8 content plus those two machinery files, and scans all remaining text. It enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
+The guard enumerates cached tracked files plus non-ignored untracked files with `git ls-files --cached --others --exclude-standard`. It skips binary or invalid-UTF-8 content and excludes exactly four paths from match discovery: the W2-owned derived bundle `.github/actions/agentic-pr-review/dist/index.js`, the lifecycle machinery `src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts`, and the W15-owned detector vectors `src/root-shared-module-retirement.test.ts`. It scans all remaining text and enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
-| Rules       | Owned residual                                       | Consumer and deletion gate                                                                |
-| ----------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| RR-001..002 | Exact direct-runtime selector vocabulary             | Permanent narrow C# schema and synthetic-fixture conformance                              |
-| RR-005..006 | Historical provider credential names                 | Generic child-environment canaries; delete with the R2/R4 invocation replacement          |
-| RR-009      | S2 artifact-provenance and provider vocabulary       | Permanent executable negative and transport evidence; preserve equivalent coverage        |
-| RR-010      | Removed TypeScript ledger vocabulary                 | Removed with R4-W7 after P6/S6/E1 replacement evidence passed                             |
-| RR-011..012 | Unsupported-v1 state selection/classifier vocabulary | Rejection and non-replay evidence; delete with R4 state replacement                       |
-| RR-013      | Temporary live-provider vocabulary                   | Internal M4 contract and retained non-executing fixture; delete with the R4 Host boundary |
-| RR-014..030 | Governing or historical documentation                | Permanent path-specific status, owner, interpretation, and supersession records           |
-| RR-031      | Claude provider/model identity fixtures              | Permanent narrow synthetic C# protocol/ledger conformance                                 |
-| RR-034      | Root `CLAUDE.md` entrypoint                          | Supported thin agent instruction entrypoint governed by collaboration policy              |
-| RR-035      | C# integration canary                                | Child-environment privacy evidence; delete with the R4 Host boundary                      |
-| RR-037      | R3 single-shot removal handoff                       | Permanent checked deletion, retained-consumer, and later-owner record                     |
+| Rules       | Owned residual                                 | Consumer and deletion gate                                                            |
+| ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| RR-001..002 | Exact direct-runtime selector vocabulary       | Permanent narrow C# schema and synthetic-fixture conformance                          |
+| RR-009      | S2 artifact-provenance and provider vocabulary | Permanent executable negative and transport evidence; preserve equivalent coverage    |
+| RR-014..030 | Governing or historical documentation          | Permanent path-specific status, owner, interpretation, and supersession records       |
+| RR-031      | Claude provider/model identity fixtures        | Permanent narrow synthetic C# protocol/ledger conformance                             |
+| RR-034      | Root `CLAUDE.md` entrypoint                    | Supported thin agent instruction entrypoint governed by collaboration policy          |
+| RR-037      | R3 single-shot removal handoff                 | Permanent checked deletion, retained-consumer, and later-owner record                 |
+| RR-038      | E1 base inventory and replacement record       | Permanent framework source/deletion evidence; W13 replacement must preserve the proof |
+| RR-039      | E1 architecture assertions                     | Permanent exact W3/W11 reference-set conformance; replace only with equivalent proof  |
+| RR-040      | E1 supervisor deletion assertions              | Permanent W6 absence and replacement evidence; replace only with equivalent proof     |
+
+Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
 
 W13 closes the residual lifecycle with zero temporary rules. The exact selector and provider/model spellings remain only in the narrow embedded direct-runtime schema and synthetic fixture corpus owned by C# conformance tests. RR-009 permanently owns the S2 negative and transport evidence. Permanent documentation matches describe current governing boundaries or are explicitly historical, with their controlling supersession rule in the allowlist.
 

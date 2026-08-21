@@ -114,6 +114,35 @@ describe('R4 W13 closed migration inventory', () => {
     ]);
   });
 
+  test('pins the governing handoff to the exact active residual inventory and scan boundary', async () => {
+    const handoffPaths = trackedFiles('docs/20_architecture/r1-*-removal-handoff.md');
+    expect(handoffPaths).toHaveLength(1);
+    const handoff = await text(handoffPaths[0] ?? '');
+    const section = handoff.split('## Residual-reference ownership\n')[1]?.split('\n## ')[0];
+    expect(section).toBeDefined();
+
+    const documentedIds = [
+      ...(section ?? '').matchAll(/^\| (RR-\d{3}(?:\.\.\d{3})?)\s*\|/gmu),
+    ].flatMap(([, cell]) => {
+      const [first, last = first] = cell
+        .split('..')
+        .map((value) => Number(value.replace('RR-', '')));
+      return Array.from(
+        { length: last - first + 1 },
+        (_, offset) => `RR-${String(first + offset).padStart(3, '0')}`,
+      );
+    });
+    expect(documentedIds).toEqual(residualReferenceRules.map(({ id }) => id));
+
+    expect(section).toContain('git ls-files --cached --others --exclude-standard');
+    expect(section).toContain('cached tracked files plus non-ignored untracked files');
+    expect(section).toContain('binary or invalid-UTF-8 content');
+    expect(section).toContain('.github/actions/agentic-pr-review/dist/index.js');
+    expect(section).toContain('src/residual-reference-allowlist.ts');
+    expect(section).toContain('src/residual-reference-guard.test.ts');
+    expect(section).toContain('src/root-shared-module-retirement.test.ts');
+  });
+
   test('keeps every retired migration family and orphan resolver corpus absent', () => {
     const tracked = trackedFiles();
     const retired = [
