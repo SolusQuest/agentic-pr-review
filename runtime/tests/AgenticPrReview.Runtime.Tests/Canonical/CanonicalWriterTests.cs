@@ -89,4 +89,37 @@ public sealed class CanonicalWriterTests
             () => JsonElementCanonicalizer.Canonicalize(doc.RootElement, 64, 256, 1024, long.MaxValue, out _));
         Assert.Equal(Rfc8785RejectionReason.DuplicateProperty, ex.Reason);
     }
+
+    [Fact]
+    public void CanonicalizationRoundTripsSemanticallyAndIsIdempotent()
+    {
+        (string Input, string Expected)[] cases =
+        [
+            ("{\"object\":{\"b\":2,\"a\":1},\"negativeZero\":-0,\"array\":[null,true,false,1.5,\"x\"]}",
+                "{\"array\":[null,true,false,1.5,\"x\"],\"negativeZero\":0,\"object\":{\"a\":1,\"b\":2}}"),
+            ("[null,true,false,1.5,\"x\"]", "[null,true,false,1.5,\"x\"]"),
+            ("\"é\"", "\"é\""),
+            ("1.5", "1.5"),
+            ("true", "true"),
+            ("null", "null"),
+            ("-0", "0"),
+        ];
+
+        foreach (var (input, expected) in cases)
+        {
+            using var original = JsonDocument.Parse(input);
+            var first = JsonElementCanonicalizer.Canonicalize(
+                original.RootElement, 64, 256, 1024, long.MaxValue, out _);
+            Assert.Equal(expected, Encoding.UTF8.GetString(first.AsSpan()));
+
+            using var reparsed = JsonDocument.Parse(first.AsMemory());
+            using var expectedDocument = JsonDocument.Parse(expected);
+            Assert.True(JsonElement.DeepEquals(
+                expectedDocument.RootElement, reparsed.RootElement));
+
+            var second = JsonElementCanonicalizer.Canonicalize(
+                reparsed.RootElement, 64, 256, 1024, long.MaxValue, out _);
+            Assert.Equal(first.AsSpan().ToArray(), second.AsSpan().ToArray());
+        }
+    }
 }

@@ -119,6 +119,8 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 Temporary matches are not supported public runtime selectors. The exact retired runtime selector remains only in live internal C# protocol conformance evidence and non-active R4 migration/rejection fixtures; W15 removed the root DTO vocabulary and its two temporary residual rules. Unsupported legacy state is retained only to prove rejection; credential names are canaries whose values must not reach the generic child. Permanent documentation matches describe current governing boundaries or are explicitly marked historical, with their controlling supersession rule in the allowlist.
 
+R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
+
 ## Validation ownership
 
 Ordinary CI runs unconditional TypeScript unit, composition, state, publisher, vector, and residual-guard evidence. Runtime CI owns `npm run runtime:integration`, which publishes the framework fixture and executes the coordinator-free framework and Linux Native AOT matrix. Listing the conditionally enabled integration suite in a raw Vitest command would only skip it and is not accepted as evidence.

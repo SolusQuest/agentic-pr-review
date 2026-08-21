@@ -517,7 +517,9 @@ The runtime and metadata validators are self-checking and per-contract; end-to-e
 
 ### Canonical JSON helper (per-language)
 
-- **#48 (TypeScript)** owns the reusable RFC 8785 canonical-JSON helper under `src/canonical-json/`, exported as `canonicalJsonBytes(value): Uint8Array` and `CANONICAL_JSON_VERSION = 1`.
+R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence. The ownership bullets below record the historical cross-language construction boundary and do not describe a surviving TypeScript route.
+
+- **#48 (TypeScript)** historically owned the reusable RFC 8785 canonical-JSON helper under `src/canonical-json/`, exported as `canonicalJsonBytes(value): Uint8Array` and `CANONICAL_JSON_VERSION = 1`.
 - **#51 (TypeScript)** consumes the helper once #48 has landed. Until then it may vendor a metadata-envelope-scoped RFC 8785 producer whose golden bytes must remain unchanged; a follow-up PR replaces the vendored implementation with the shared helper in place.
 - **#49 (C#) and #50 (C#)** own runtime-scoped canonical writers / primitives; they do not import the TypeScript helper. Cross-language equivalence is enforced through shared golden byte / hash vectors, not through source-level sharing.
 

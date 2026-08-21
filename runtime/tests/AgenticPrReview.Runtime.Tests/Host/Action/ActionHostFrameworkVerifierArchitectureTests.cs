@@ -12,9 +12,12 @@ using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Tests.Canonical;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Tests.Ledger;
+using AgenticPrReview.Runtime.Tests.Prefix;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action;
@@ -269,7 +272,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "empty-name-unknown-field.test.ts::closed names and unknown fields:reviewed_obsolete",
             "fixtures.test.ts::byte-identical StateV2 fixture bundles:reviewed_obsolete",
             "import-boundary.test.ts::StateV2 dependency and directory contract:reviewed_obsolete",
-            "import-boundary.test.ts::canonical-json recursive AST filesystem boundary:transferred",
+            "import-boundary.test.ts::canonical-json recursive AST filesystem boundary:retired_by_w14",
             "public-surface.test.ts::StateV2 barrel exports:reviewed_obsolete",
             "resolver-runtime-consequence.test.ts::M4 resolver runtime consequences:reviewed_obsolete",
             "rfc3339.test.ts::accepted-state timestamp grammar:reviewed_obsolete",
@@ -280,14 +283,16 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "strict-json.test.ts::strict JSON byte and duplicate-property rejection:reviewed_obsolete",
         }, w5Groups.Select(value => $"{value.GetProperty("id").GetString()}:{value.GetProperty("disposition").GetString()}")
             .Order(StringComparer.Ordinal).ToArray());
-        Assert.Equal("7a34b1ea484f6e478680338f1ee1c9988bf45f78139071ac3ce4f06fdef5e800",
+        Assert.Equal("1c143510afc05a57af6b7bca8ccaa982329bd3409e77e39b7b72be99346a69c2",
             w5.GetProperty("mapping_digest").GetString());
         var canonicalBoundary = w5Groups.Single(value => value.GetProperty("id")
             .GetString() == "import-boundary.test.ts::canonical-json recursive AST filesystem boundary");
-        Assert.Equal("transferred", canonicalBoundary.GetProperty("disposition").GetString());
+        Assert.Equal("retired_by_w14", canonicalBoundary.GetProperty("disposition").GetString());
         Assert.Equal("W14", canonicalBoundary.GetProperty("owner").GetString());
         Assert.Equal("src/canonical-json/import-boundary.test.ts",
             canonicalBoundary.GetProperty("target_path").GetString());
+        Assert.Equal("runtime/tests/fixtures/action-host/framework/replacement-record.json",
+            canonicalBoundary.GetProperty("evidence_path").GetString());
         Assert.Equal(12, w5.GetProperty("fixture_dispositions").GetArrayLength());
         Assert.Equal(new[]
         {
@@ -689,6 +694,85 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "W5 opaque sidecar bytes descriptors hashes and fixtures were removed by W5 after S5/S6/P5/P6/E1 disposition",
             w12.GetProperty("retained_owner_groups").EnumerateArray()
                 .Select(value => value.GetString()));
+
+        var w14 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W14");
+        Assert.Equal("removed", w14.GetProperty("disposition").GetString());
+        Assert.Equal(new[]
+        {
+            "src/canonical-json/index.ts",
+            "src/canonical-json/index.test.ts",
+            "src/canonical-json/edge-cases.test.ts",
+            "src/canonical-json/import-boundary.test.ts",
+        }, w14.GetProperty("removed_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.False(Directory.Exists(Path.Join(root, "src", "canonical-json")));
+        var w14Dispositions = w14.GetProperty("typescript_test_dispositions")
+            .EnumerateArray().ToArray();
+        Assert.Equal(31, w14Dispositions.Length);
+        Assert.Equal(31, w14Dispositions.Select(value =>
+                value.GetProperty("id").GetString())
+            .Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(16, w14Dispositions.Count(value =>
+            value.GetProperty("disposition").GetString() == "retained"));
+        Assert.Equal(15, w14Dispositions.Count(value =>
+            value.GetProperty("disposition").GetString() == "reviewed_obsolete"));
+        var expectedW14Methods = new HashSet<string>([
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.ObjectKeysSortByUtf16CodeUnits)}",
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.NumberFormattingMatchesEcmaScript)}",
+            $"{nameof(EcmaScriptNumberFormatterCorpusTests)}#{nameof(EcmaScriptNumberFormatterCorpusTests.MatchesNodeCorpus)}",
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.NonFiniteNumbersAreRejected)}",
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.LoneSurrogateIsRejected)}",
+            $"{nameof(PrefixCanonicalBoundaryTests)}#{nameof(PrefixCanonicalBoundaryTests.InvalidPropertyNameAtOpenJsonRoot)}",
+            $"{nameof(PrefixMaterializerTests)}#{nameof(PrefixMaterializerTests.SameInputProducesByteIdenticalOutput)}",
+            $"{nameof(PrefixGoldenVectorTests)}#{nameof(PrefixGoldenVectorTests.FramingVectorsMatch)}",
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.CanonicalizationRoundTripsSemanticallyAndIsIdempotent)}",
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.StringEscapingMatchesRfc8785)}",
+            $"{nameof(PrefixCanonicalBoundaryTests)}#{nameof(PrefixCanonicalBoundaryTests.InvalidPropertyNameUnderUnknownAncestor)}",
+            $"{nameof(LenientJsonObjectEnumeratorTests)}#{nameof(LenientJsonObjectEnumeratorTests.LongCommonPrefixSortingHasLinearDecodedWork)}",
+            $"{nameof(PrefixCanonicalBoundaryTests)}#{nameof(PrefixCanonicalBoundaryTests.OversizeStringValidationAllocationIsBoundedBelowTokenSize)}",
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.DiscardModeRemainsLatchedAfterTheFirstExceededAppend)}",
+            $"{nameof(PrefixCanonicalBoundaryTests)}#{nameof(PrefixCanonicalBoundaryTests.EarlyOversizeStringDoesNotMaskLaterLoneSurrogate)}",
+            $"{nameof(PrefixStagePrecedenceTests)}#{nameof(PrefixStagePrecedenceTests.CanonicalDefectBeatsEnvelopeCap)}",
+            $"{nameof(PrefixGoldenVectorTests)}#{nameof(PrefixGoldenVectorTests.DigestVectorsMatch)}",
+            $"{nameof(PrefixGoldenVectorTests)}#{nameof(PrefixGoldenVectorTests.InteractionVectorsMatch)}",
+            $"{nameof(PrefixFixtureManifestRejectionTests)}#{nameof(PrefixFixtureManifestRejectionTests.SyntheticManifestViolationsReachTheirIntendedBranch)}",
+            $"{nameof(LedgerBuilderTests)}#{nameof(LedgerBuilderTests.CacheContractDigestMatchesIndependentSevenFieldKnownAnswer)}",
+            $"{nameof(ActionHostFrameworkVerifierArchitectureTests)}#{nameof(ReplacementAndInventoryArtifactsAreClosedAndPinned)}",
+        ], StringComparer.Ordinal);
+        var recordedW14Methods = w14Dispositions
+            .Where(value => value.GetProperty("disposition").GetString() == "retained")
+            .SelectMany(value => value.GetProperty("evidence_methods")
+                .EnumerateArray().Select(method => method.GetString()!))
+            .Concat(w14.GetProperty("cap_precedence_difference")
+                .GetProperty("evidence_methods").EnumerateArray()
+                .Select(method => method.GetString()!))
+            .Concat(w14.GetProperty("retained_integration_evidence_methods")
+                .EnumerateArray().Select(method => method.GetString()!))
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.True(recordedW14Methods.SetEquals(expectedW14Methods));
+        var exactRoundTripMethod =
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.CanonicalizationRoundTripsSemanticallyAndIsIdempotent)}";
+        foreach (var id in new[]
+                 {
+                     "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
+                     "edge-cases.test.ts::output parses to an equal JSON value",
+                 })
+        {
+            var disposition = w14Dispositions.Single(value =>
+                value.GetProperty("id").GetString() == id);
+            Assert.Equal(new[] { exactRoundTripMethod },
+                disposition.GetProperty("evidence_methods").EnumerateArray()
+                    .Select(value => value.GetString()).ToArray());
+        }
+        Assert.All(w14Dispositions.Where(value =>
+                value.GetProperty("disposition").GetString() == "reviewed_obsolete"),
+            value => Assert.False(string.IsNullOrWhiteSpace(
+                value.GetProperty("reason").GetString())));
+        Assert.Equal("dispatch-continuation",
+            Assert.Single(w14.GetProperty("framework_scenario_ids")
+                .EnumerateArray()).GetString());
 
         var w10HandoffEntry = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
