@@ -12,6 +12,7 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+golden="$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/apr-action-host-framework.XXXXXXXX")"
 cleanup() {
   local exit_code=$?
@@ -129,12 +130,12 @@ execute_framework_proof() {
     --bundle "$checked_bundle" \
     --record "$repo_root/runtime/tests/fixtures/action-host/framework/replacement-record.json" \
     --inventory "$repo_root/runtime/tests/fixtures/action-host/framework/e1-base-inventory.json" \
-    --golden "$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden" \
+    --golden "$golden" \
     --canaries "$repo_root/runtime/tests/fixtures/action-host/framework/canary-routes.tsv" \
     --node "$node_path"
 }
 
-export repo_root checked_bundle publish_root payload evidence_root isolated_home isolated_tmp
+export golden repo_root checked_bundle publish_root payload evidence_root isolated_home isolated_tmp
 export isolated_config node_path artifacts_root PATH
 export -f execute_framework_proof
 node "$repo_root/scripts/run-clean-source-proof.mjs" \

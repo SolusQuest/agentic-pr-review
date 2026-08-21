@@ -94,6 +94,16 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_ACTION_HOST_FRAMEWORK_EVIDENCE_MISMATCH", verifier,
             StringComparison.Ordinal);
+        var goldenAssignment =
+            "golden=\"$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden\"";
+        Assert.True(verifier.IndexOf(goldenAssignment, StringComparison.Ordinal) <
+            verifier.IndexOf("trap cleanup EXIT", StringComparison.Ordinal));
+        Assert.Contains("--golden \"$golden\"", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("export golden repo_root", verifier,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("--golden \"$repo_root/", verifier,
+            StringComparison.Ordinal);
         Assert.Contains("<OutputPath Condition=\"'$(ArtifactsPath)' == ''\">",
             runtimeProject, StringComparison.Ordinal);
         Assert.Contains(
