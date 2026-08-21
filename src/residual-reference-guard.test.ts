@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -16,12 +17,12 @@ const scanExclusions = new Set([
 ]);
 
 function trackedFiles(root: string): string[] {
-  return execFileSync('git', ['ls-files', '-z'], {
+  return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
     cwd: root,
     encoding: 'utf8',
   })
     .split('\0')
-    .filter((relative) => relative !== '')
+    .filter((relative) => relative !== '' && existsSync(path.join(root, relative)))
     .sort();
 }
 
@@ -73,16 +74,18 @@ describe('R1 residual reference allowlist', () => {
     for (const rule of residualReferenceRules) {
       expect(rule.owner).not.toBe('');
       expect(rule.interpretation).not.toBe('');
-      if ('deletionGate' in rule) {
-        expect(rule.currentConsumer).not.toBe('');
-        expect(rule.deletionGate).not.toBe('');
-        expect(['R2', 'R4']).toContain(rule.milestone);
-      } else {
-        expect(rule.status).not.toBe('');
-        expect(rule.supersessionRule).not.toBe('');
-        expect(['governing', 'historical', 'conformance']).toContain(rule.lifecycleClass);
-      }
+      expect(rule.status).not.toBe('');
+      expect(rule.supersessionRule).not.toBe('');
+      expect(['governing', 'historical', 'conformance']).toContain(rule.lifecycleClass);
     }
+  });
+
+  it('has no temporary lifecycle entries after the R4 cutover audit', () => {
+    expect(
+      residualReferenceRules.filter(({ lifecycleClass }) =>
+        ['protocol-migration', 'state-migration', 'credential-canary'].includes(lifecycleClass),
+      ),
+    ).toEqual([]);
   });
 
   it('discovers human-readable and executable Claude-specific spellings', () => {

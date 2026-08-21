@@ -2,7 +2,7 @@
 
 The development head now contains the replacement nested Action metadata and reproducibly generated Node 24 wrapper for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: automatic payload download, release assets, root alias, stable outputs, and public-default promotion remain R7 work.
 
-See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing and [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the prospective R4 product contract.
+See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
 
 ## Distribution Goals
 
@@ -19,7 +19,7 @@ The distribution must:
 
 ## Target Node.js Action Wrapper
 
-No checked-in Action entrypoint exists during the R1-R3 transition. R4 introduces the replacement wrapper only after the C# Host target, small public configuration surface, and integrated proof are ready.
+The checked-in nested Action metadata and generated Node 24 wrapper are the R4 repository-controlled prepared-payload proof entrypoint. They are not a supported downstream Action, root alias, release-download path, or stable output surface.
 
 The wrapper may:
 

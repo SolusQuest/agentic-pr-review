@@ -55,56 +55,70 @@ if git -C "$repo_root" config --local --get-regexp \
   exit 1
 fi
 
-cd "$repo_root"
 checked_bundle="$repo_root/.github/actions/agentic-pr-review/dist/index.js"
-checked_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
-npm run build:action
-generated_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
-if [[ "$checked_bundle_sha256" != "$generated_bundle_sha256" ]]; then
-  echo "checked action bundle is not reproducible" >&2
-  exit 1
-fi
-
 publish_root="$temporary_root/payload"
-dotnet publish \
-  runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj \
-  --configuration Release \
-  --runtime linux-x64 \
-  --self-contained false \
-  --output "$publish_root" \
-  --nologo \
-  -p:PublishAot=false \
-  -p:PublishSingleFile=true \
-  -p:DebugType=None \
-  -p:DebugSymbols=false
-
 payload="$publish_root/AgenticPrReview.Runtime.ActionHostVerifierFixture"
-test -x "$payload"
-test ! -e "$payload.dll"
-test ! -e "$payload.deps.json"
-test ! -e "$payload.runtimeconfig.json"
-
 evidence_root="$temporary_root/evidence"
 isolated_home="$temporary_root/home"
 isolated_tmp="$temporary_root/tmp"
 isolated_config="$temporary_root/config"
 mkdir -p "$evidence_root" "$isolated_home" "$isolated_tmp" "$isolated_config"
 node_path="$(command -v node)"
-env -i \
-  HOME="$isolated_home" \
-  TMPDIR="$isolated_tmp" \
-  XDG_CONFIG_HOME="$isolated_config" \
-  GIT_CONFIG_NOSYSTEM=1 \
-  GIT_CONFIG_GLOBAL=/dev/null \
-  PATH="$PATH" \
-  CI=true \
-  "$payload" supervise \
-  --root "$evidence_root" \
+artifacts_root="$temporary_root/artifacts"
+
+execute_framework_proof() {
+  cd "$repo_root"
+  local checked_bundle_sha256
+  local generated_bundle_sha256
+  checked_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
+  npm run build:action
+  generated_bundle_sha256="$(sha256sum "$checked_bundle" | cut -d ' ' -f 1)"
+  if [[ "$checked_bundle_sha256" != "$generated_bundle_sha256" ]]; then
+    echo "checked action bundle is not reproducible" >&2
+    return 1
+  fi
+
+  dotnet publish \
+    runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj \
+    --configuration Release \
+    --runtime linux-x64 \
+    --self-contained false \
+    --output "$publish_root" \
+    --artifacts-path "$artifacts_root" \
+    --nologo \
+    -p:PublishAot=false \
+    -p:PublishSingleFile=true \
+    -p:DebugType=None \
+    -p:DebugSymbols=false
+
+  test -x "$payload"
+  test ! -e "$payload.dll"
+  test ! -e "$payload.deps.json"
+  test ! -e "$payload.runtimeconfig.json"
+
+  env -i \
+    HOME="$isolated_home" \
+    TMPDIR="$isolated_tmp" \
+    XDG_CONFIG_HOME="$isolated_config" \
+    GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    PATH="$PATH" \
+    CI=true \
+    "$payload" supervise \
+    --root "$evidence_root" \
+    --repo "$repo_root" \
+    --payload "$payload" \
+    --bundle "$checked_bundle" \
+    --record "$repo_root/runtime/tests/fixtures/action-host/framework/replacement-record.json" \
+    --inventory "$repo_root/runtime/tests/fixtures/action-host/framework/e1-base-inventory.json" \
+    --golden "$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden" \
+    --canaries "$repo_root/runtime/tests/fixtures/action-host/framework/canary-routes.tsv" \
+    --node "$node_path"
+}
+
+export repo_root checked_bundle publish_root payload evidence_root isolated_home isolated_tmp
+export isolated_config node_path artifacts_root PATH
+export -f execute_framework_proof
+node "$repo_root/scripts/run-clean-source-proof.mjs" \
   --repo "$repo_root" \
-  --payload "$payload" \
-  --bundle "$checked_bundle" \
-  --record "$repo_root/runtime/tests/fixtures/action-host/framework/replacement-record.json" \
-  --inventory "$repo_root/runtime/tests/fixtures/action-host/framework/e1-base-inventory.json" \
-  --golden "$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden" \
-  --canaries "$repo_root/runtime/tests/fixtures/action-host/framework/canary-routes.tsv" \
-  --node "$node_path"
+  -- bash -c execute_framework_proof

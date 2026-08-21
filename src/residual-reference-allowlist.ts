@@ -6,20 +6,13 @@ interface ResidualReferenceRuleBase {
   readonly interpretation: string;
 }
 
-export interface TemporaryResidualReferenceRule extends ResidualReferenceRuleBase {
-  readonly lifecycleClass: 'protocol-migration' | 'state-migration' | 'credential-canary';
-  readonly currentConsumer: string;
-  readonly deletionGate: string;
-  readonly milestone: 'R2' | 'R4';
-}
-
 export interface PermanentResidualReferenceRule extends ResidualReferenceRuleBase {
   readonly lifecycleClass: 'governing' | 'historical' | 'conformance';
   readonly status: string;
   readonly supersessionRule: string;
 }
 
-export type ResidualReferenceRule = TemporaryResidualReferenceRule | PermanentResidualReferenceRule;
+export type ResidualReferenceRule = PermanentResidualReferenceRule;
 
 const retiredSelector = /claude-code-cli/u;
 const claudeBrandEvidence = /\bClaude\b(?!-code-cli\b)/iu;
@@ -47,34 +40,46 @@ function permanent(
   };
 }
 
+function narrowConformance(
+  id: string,
+  term: RegExp,
+  path: RegExp,
+  owner: string,
+  status: string,
+  interpretation: string,
+  supersessionRule: string,
+): PermanentResidualReferenceRule {
+  return {
+    id,
+    term,
+    path,
+    lifecycleClass: 'conformance',
+    owner,
+    status,
+    interpretation,
+    supersessionRule,
+  };
+}
+
 export const residualReferenceRules = [
-  {
-    id: 'RR-001',
-    term: retiredSelector,
-    path: /^protocol\/schemas\/review-input\.v1\.json$/u,
-    lifecycleClass: 'protocol-migration',
-    currentConsumer: 'live embedded ReviewInputV1 schema',
-    owner: 'C# RuntimeApplication protocol owner',
-    interpretation:
-      'historical provider vocabulary is inert schema description text, not a public compatibility route',
-    deletionGate:
-      'an accepted change to the live direct-runtime protocol replaces the embedded schema and C# conformance evidence',
-    milestone: 'R4',
-  },
-  {
-    id: 'RR-002',
-    term: retiredSelector,
-    path: /^protocol\/fixtures\/v1\//u,
-    lifecycleClass: 'protocol-migration',
-    currentConsumer:
-      'live mixed ReviewInputV1 ReviewResultV1 ReviewTraceV1 and provider-ledger fixture corpus',
-    owner: 'C# ProtocolFixtureTests and LedgerFixtureTests',
-    interpretation:
-      'historical provider vocabulary is synthetic fixture data validated by current C# owners',
-    deletionGate:
-      'an accepted protocol or ledger contract change replaces the manifest and owning C# tests',
-    milestone: 'R4',
-  },
+  narrowConformance(
+    'RR-001',
+    retiredSelector,
+    /^protocol\/schemas\/review-input\.v1\.json$/u,
+    'C# RuntimeApplication protocol owner',
+    'permanent internal direct-runtime enum conformance',
+    'the accepted enum value is consumed only by the embedded C# direct-runtime contract and is not a public compatibility route',
+    'an accepted direct-runtime protocol contract change must update the embedded schema and owning C# conformance evidence',
+  ),
+  narrowConformance(
+    'RR-002',
+    retiredSelector,
+    /^protocol\/fixtures\/v1\//u,
+    'C# ProtocolFixtureTests and LedgerFixtureTests',
+    'permanent synthetic direct-runtime fixture conformance',
+    'the accepted selector is synthetic fixture vocabulary validated by current C# owners, not an executable TypeScript route',
+    'an accepted protocol or ledger contract change must replace the manifest and owning C# fixture tests',
+  ),
   permanent(
     'RR-009',
     /^src\/artifact-provenance-vectors\.ts$/u,
@@ -237,19 +242,15 @@ export const residualReferenceRules = [
     'Claude references identify the supported thin Claude-specific entrypoint and future agent-specific directory, not a provider/runtime execution path',
     'an accepted collaboration-policy revision supersedes this rule',
   ),
-  {
-    id: 'RR-031',
-    term: claudeBrandEvidence,
-    path: /^protocol\/fixtures\/v1\//u,
-    lifecycleClass: 'protocol-migration',
-    currentConsumer: 'live synthetic protocol and ledger provider-model fixtures',
-    owner: 'C# ProtocolFixtureTests and LedgerFixtureTests',
-    interpretation:
-      'provider and model identity is inert fixture evidence, not an executable Claude runtime route',
-    deletionGate:
-      'an accepted protocol or ledger contract change replaces the manifest and owning C# tests',
-    milestone: 'R4',
-  },
+  narrowConformance(
+    'RR-031',
+    claudeBrandEvidence,
+    /^protocol\/fixtures\/v1\//u,
+    'C# ProtocolFixtureTests and LedgerFixtureTests',
+    'permanent synthetic provider-model fixture conformance',
+    'provider and model identity is inert synthetic fixture evidence, not an executable Claude runtime route',
+    'an accepted protocol or ledger contract change must replace the manifest and owning C# fixture tests',
+  ),
   permanent(
     'RR-034',
     /^CLAUDE\.md$/u,

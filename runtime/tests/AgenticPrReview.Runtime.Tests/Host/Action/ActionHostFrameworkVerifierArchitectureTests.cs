@@ -79,6 +79,40 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     }
 
     [Fact]
+    public void FrameworkProofUsesTheCleanExactSourceRunnerAndIsolatedArtifacts()
+    {
+        var root = FindRepositoryRoot();
+        var verifier = File.ReadAllText(Path.Join(root,
+            "runtime", "scripts", "verify-action-host.sh"));
+        var runner = File.ReadAllText(Path.Join(root,
+            "scripts", "run-clean-source-proof.mjs"));
+
+        Assert.Contains("--artifacts-path \"$artifacts_root\"", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("scripts/run-clean-source-proof.mjs", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("-- bash -c execute_framework_proof", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("git', ['-C', repo, 'diff', '--cached', '--quiet'",
+            runner, StringComparison.Ordinal);
+        Assert.Contains("git', ['-C', repo, 'diff', '--quiet'", runner,
+            StringComparison.Ordinal);
+        Assert.Contains("'ls-files', '--others', '--exclude-standard', '-z'",
+            runner, StringComparison.Ordinal);
+        Assert.Contains("assertClean(repo, 'before command')", runner,
+            StringComparison.Ordinal);
+        Assert.Contains("assertClean(repo, 'after command')", runner,
+            StringComparison.Ordinal);
+        Assert.True(runner.IndexOf("assertClean(repo, 'after command')",
+                StringComparison.Ordinal) <
+            runner.IndexOf("process.stdout.write", StringComparison.Ordinal));
+        Assert.Contains("APR_R4_W13_SOURCE_COMMIT", runner,
+            StringComparison.Ordinal);
+        Assert.Contains("APR_R4_W13_SOURCE_TREE", runner,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReplacementAndInventoryArtifactsAreClosedAndPinned()
     {
         var root = FindRepositoryRoot();
@@ -640,12 +674,15 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             Convert.ToHexString(SHA256.HashData(
                     Encoding.UTF8.GetBytes(corpusFraming.ToString())))
                 .ToLowerInvariant());
-        AssertDescriptionOnlySchemaChange(root,
+        AssertDescriptionOnlySchemaChanges(root,
             "2c6f94dd39941794ff3f59f6663ce0c31113e6c1",
             "protocol/schemas/review-input.v1.json", "repoRelativePath");
-        AssertDescriptionOnlySchemaChange(root,
+        AssertDescriptionOnlySchemaChanges(root,
             "2c6f94dd39941794ff3f59f6663ce0c31113e6c1",
             "protocol/schemas/review-result.v1.json", "safeRelativePath");
+        AssertDescriptionOnlySchemaChanges(root,
+            "2c6f94dd39941794ff3f59f6663ce0c31113e6c1",
+            "protocol/schemas/review-trace.v1.json");
         Assert.Equal("ordinal path + NUL + lowercase file sha256 + LF",
             corpus.GetProperty("framing").GetString());
         Assert.True(File.Exists(Path.Join(fixtureDirectory,
@@ -1032,23 +1069,32 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
                 BaseBlobBytes(repository, revision, path)))
             .ToLowerInvariant();
 
-    private static void AssertDescriptionOnlySchemaChange(
+    private static void AssertDescriptionOnlySchemaChanges(
         string repository,
         string revision,
         string path,
-        string definition)
+        params string[] definitions)
     {
         var prior = JsonNode.Parse(BaseBlobBytes(repository, revision, path))!;
         var current = JsonNode.Parse(File.ReadAllBytes(Path.Join(repository,
             path.Replace('/', Path.DirectorySeparatorChar))))!;
-        var priorDescription = prior["definitions"]![definition]!["description"]!
-            .GetValue<string>();
-        var currentDescription = current["definitions"]![definition]!["description"]!
-            .GetValue<string>();
-        Assert.NotEqual(priorDescription, currentDescription);
-        Assert.Contains("SchemaContracts", currentDescription,
+        var priorRootDescription = prior["description"]!.GetValue<string>();
+        var currentRootDescription = current["description"]!.GetValue<string>();
+        Assert.NotEqual(priorRootDescription, currentRootDescription);
+        Assert.Contains("SchemaContracts", currentRootDescription,
             StringComparison.Ordinal);
-        prior["definitions"]![definition]!["description"] = currentDescription;
+        prior["description"] = currentRootDescription;
+        foreach (var definition in definitions)
+        {
+            var priorDescription = prior["definitions"]![definition]!["description"]!
+                .GetValue<string>();
+            var currentDescription = current["definitions"]![definition]!["description"]!
+                .GetValue<string>();
+            Assert.NotEqual(priorDescription, currentDescription);
+            Assert.Contains("SchemaContracts", currentDescription,
+                StringComparison.Ordinal);
+            prior["definitions"]![definition]!["description"] = currentDescription;
+        }
         Assert.True(JsonNode.DeepEquals(prior, current));
     }
 

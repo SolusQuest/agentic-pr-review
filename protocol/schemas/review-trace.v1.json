@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://agentic-pr-review/protocol/schemas/review-trace.v1.json",
   "title": "ReviewTraceV1",
-  "description": "Minimal sanitized trace contract carrying execution evidence for deterministic validation and future replay. Runtime-produced; the host stores, uploads, and verifies trace files but does not author their content. Canonical source of truth; TS interfaces are convenience only. See issue #16 and docs/20_architecture/runtime-protocol.md.",
+  "description": "Minimal sanitized direct-runtime trace contract produced and validated by the C# RuntimeApplication through SchemaContracts. It carries execution evidence for deterministic validation and future replay. Canonical source of truth for current C# serialization and validation. See issue #16 and docs/20_architecture/runtime-protocol.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [

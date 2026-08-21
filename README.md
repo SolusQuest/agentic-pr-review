@@ -79,11 +79,13 @@ owning roadmap phase records them.
   defines credential, tool, state, and side-effect boundaries.
 - [`docs/20_architecture/distribution.md`](docs/20_architecture/distribution.md)
   defines the target distribution model and transitional state.
+- [`docs/20_architecture/r4-migration-cutover-handoff.md`](docs/20_architecture/r4-migration-cutover-handoff.md)
+  records the closed R4 migration inventory and the exact-tree E1 handoff gate.
 - [`docs/90_roadmap/roadmap-seed.md`](docs/90_roadmap/roadmap-seed.md) defines
   the R0-R7 critical path.
 - [`docs/50_ai/agent-context.md`](docs/50_ai/agent-context.md) is the shared
   agent entrypoint.
 
-Historical M1-M4 contract documents remain implementation and migration evidence
-for the source still present on the development head. They do not re-enable the
-retired legacy Action surface or override the R0-R7 roadmap.
+Historical M1-M4 contract documents remain implementation and migration evidence.
+They do not describe current source ownership, re-enable the retired legacy Action
+surface, or override the R0-R7 roadmap and R4 cutover handoff.
