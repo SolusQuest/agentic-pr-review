@@ -203,6 +203,8 @@ execute_action_host_proof() {
     "$project" --configuration Release --runtime linux-x64
     --output "$publish_root" --artifacts-path "$artifacts_root" --nologo
     -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+    -p:Deterministic=true -p:ContinuousIntegrationBuild=true
+    "-p:PathMap=$temporary_root=/_/apr-action-host"
   )
   if [[ "$mode" == framework ]]; then
     dotnet publish "${publish_arguments[@]}" --self-contained false \

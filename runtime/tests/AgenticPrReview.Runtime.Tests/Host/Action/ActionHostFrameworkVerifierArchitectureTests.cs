@@ -1104,6 +1104,12 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Contains(
             "-p:JsonSerializerIsReflectionEnabledByDefault=false", verifier,
             StringComparison.Ordinal);
+        Assert.Contains("-p:Deterministic=true", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("-p:ContinuousIntegrationBuild=true", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("-p:PathMap=$temporary_root=/_/apr-action-host",
+            verifier, StringComparison.Ordinal);
         Assert.Contains("-warnaserror -warnnotaserror:IL3058", verifier,
             StringComparison.Ordinal);
         Assert.Contains("ActionHostVerifierAotIntermediateDirectory", verifier,
