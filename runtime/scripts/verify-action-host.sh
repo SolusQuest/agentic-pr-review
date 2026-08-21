@@ -139,4 +139,4 @@ export isolated_config node_path artifacts_root PATH
 export -f execute_framework_proof
 node "$repo_root/scripts/run-clean-source-proof.mjs" \
   --repo "$repo_root" \
-  -- bash -c execute_framework_proof
+  -- bash -euo pipefail -c execute_framework_proof

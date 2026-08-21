@@ -101,7 +101,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             runtimeProject, StringComparison.Ordinal);
         Assert.Contains("scripts/run-clean-source-proof.mjs", verifier,
             StringComparison.Ordinal);
-        Assert.Contains("-- bash -c execute_framework_proof", verifier,
+        Assert.Contains("-- bash -euo pipefail -c execute_framework_proof", verifier,
             StringComparison.Ordinal);
         Assert.Contains("git', ['-C', repo, 'diff', '--cached', '--quiet'",
             runner, StringComparison.Ordinal);

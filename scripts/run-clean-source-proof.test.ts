@@ -79,6 +79,22 @@ describe('clean-source proof runner', () => {
     expectNoMarkers(run(root, process.execPath, ['-e', 'process.exit(7)']));
   });
 
+  test.skipIf(process.platform === 'win32')(
+    'strict framework wrapper preserves an early failure before a later success',
+    () => {
+      const root = fixture();
+      const result = run(root, 'bash', [
+        '-euo',
+        'pipefail',
+        '-c',
+        'false; printf "later-command-ran\\n"',
+      ]);
+
+      expectNoMarkers(result);
+      expect(result.stdout).not.toContain('later-command-ran');
+    },
+  );
+
   test('rejects post-command drift without emitting markers', () => {
     const root = fixture();
     const mutation = 'require("node:fs").appendFileSync("tracked.txt", "post\\n")';
