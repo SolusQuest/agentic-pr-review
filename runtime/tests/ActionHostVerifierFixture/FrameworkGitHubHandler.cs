@@ -217,7 +217,7 @@ internal sealed class FrameworkGitHubHandler(
             }
 
             Increment("sticky-create-count");
-            var document = IssueComment(701, commentBody, "proof-bot");
+            var document = IssueComment(701, commentBody);
             WriteStored(mode, "sticky-comment.json", document);
             if (mode is "mutation-crash" or "cancel-outcome-unknown")
             {
@@ -245,7 +245,7 @@ internal sealed class FrameworkGitHubHandler(
             }
             return Json(HttpStatusCode.OK,
                 ReadOptional(mode, "sticky-comment.json") ??
-                IssueComment(701, "", "proof-bot"));
+                IssueComment(701, ""));
         }
 
         if (suffix == "/issues/comments/701" && request.Method == HttpMethod.Patch)
@@ -255,10 +255,7 @@ internal sealed class FrameworkGitHubHandler(
                 Path.Join(scenarioRoot, "sticky-update-comment-id"), "701");
             var body = await request.Content!.ReadAsStringAsync(
                 cancellationToken).ConfigureAwait(false);
-            var document = IssueComment(
-                701,
-                ExtractString(body, "body"),
-                "proof-bot");
+            var document = IssueComment(701, ExtractString(body, "body"));
             if (mode == "continuation")
             {
                 var predecessor = ReadOptional(mode, "sticky-comment.json");
@@ -593,12 +590,15 @@ internal sealed class FrameworkGitHubHandler(
             StringComparison.Ordinal);
         var readyId = stale ? 820L : 810L;
         var releaseId = readyId + 1;
-        var ready = IssueComment(readyId, readyBody, "proof-bot");
+        var ready = ProofControlComment(readyId, readyBody, "proof-bot");
         var releaseBody = CreateReleaseBody(
             readyBody,
             stale ? "stale-release" : "release",
             readyId);
-        var release = IssueComment(releaseId, releaseBody, "maintainer");
+        var release = ProofControlComment(
+            releaseId,
+            releaseBody,
+            "maintainer");
         WriteProofControlComments(mode, [ready, release]);
         if (stale)
         {
@@ -664,7 +664,19 @@ internal sealed class FrameworkGitHubHandler(
         return document.RootElement.GetProperty(property).GetInt64();
     }
 
-    private static string IssueComment(long id, string body, string login) =>
+    private static string IssueComment(long id, string body) =>
+        FrameworkJson.Serialize(FrameworkJson.Object(
+            ("id", id),
+            ("url", "https://api.github.com/repos/" +
+                FrameworkCanaries.Repository + "/issues/comments/" + id),
+            ("html_url", "https://github.com/" +
+                FrameworkCanaries.Repository + "/pull/147#issuecomment-" + id),
+            ("body", body)));
+
+    private static string ProofControlComment(
+        long id,
+        string body,
+        string login) =>
         FrameworkJson.Serialize(FrameworkJson.Object(
             ("id", id),
             ("url", "https://api.github.com/repos/" +
