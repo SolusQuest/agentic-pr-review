@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
@@ -88,16 +89,15 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
             var workflow = Encoding.UTF8.GetBytes(Workflow(mode));
             FrameworkCanaryCapture.CaptureAll(scenarioRoot,
                 "github.workflow-source", workflow);
-            return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new
-            {
-                type = "file",
-                encoding = "base64",
-                size = workflow.Length,
-                name = "r4-trusted-proof.yml",
-                path = ".github/workflows/r4-trusted-proof.yml",
-                sha = GitBlobSha(workflow),
-                content = Convert.ToBase64String(workflow),
-            }));
+            return Json(HttpStatusCode.OK, FrameworkJson.Serialize(
+                FrameworkJson.Object(
+                    ("type", "file"),
+                    ("encoding", "base64"),
+                    ("size", workflow.Length),
+                    ("name", "r4-trusted-proof.yml"),
+                    ("path", ".github/workflows/r4-trusted-proof.yml"),
+                    ("sha", GitBlobSha(workflow)),
+                    ("content", Convert.ToBase64String(workflow)))));
         }
 
         if (request.Method == HttpMethod.Get &&
@@ -143,29 +143,29 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
             var bytes = Blob(sha, mode);
             return bytes is null
                 ? Json(HttpStatusCode.NotFound, "{}")
-                : Json(HttpStatusCode.OK, JsonSerializer.Serialize(new
-                {
-                    sha,
-                    size = bytes.Length,
-                    encoding = "base64",
-                    content = Convert.ToBase64String(bytes),
-                }));
+                : Json(HttpStatusCode.OK, FrameworkJson.Serialize(
+                    FrameworkJson.Object(
+                        ("sha", sha),
+                        ("size", bytes.Length),
+                        ("encoding", "base64"),
+                        ("content", Convert.ToBase64String(bytes)))));
         }
 
         if (request.Method == HttpMethod.Get &&
             suffix == "/pulls/147/files")
         {
-            var response = "[" + JsonSerializer.Serialize(new
-            {
-                sha = GitBlobSha(FileBytes),
-                filename = FrameworkCanaries.ReviewedPath,
-                previous_filename = (string?)null,
-                status = "added",
-                additions = 1,
-                deletions = 0,
-                changes = 1,
-                patch = "@@ -0,0 +1 @@\n+" + FrameworkCanaries.ToolData,
-            }) + "]";
+            var response = FrameworkJson.Serialize(FrameworkJson.Array([
+                FrameworkJson.Object(
+                    ("sha", GitBlobSha(FileBytes)),
+                    ("filename", FrameworkCanaries.ReviewedPath),
+                    ("previous_filename", null),
+                    ("status", "added"),
+                    ("additions", 1),
+                    ("deletions", 0),
+                    ("changes", 1),
+                    ("patch", "@@ -0,0 +1 @@\n+" +
+                        FrameworkCanaries.ToolData)),
+            ]));
             FrameworkCanaryCapture.CaptureAll(scenarioRoot,
                 "github.changed-files", response);
             return Json(HttpStatusCode.OK, response);
@@ -292,125 +292,110 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
     private void StoreInlineComments(string batchBody)
     {
         using var batch = JsonDocument.Parse(batchBody);
-        var comments = new List<object>();
+        var comments = new List<JsonNode>();
         var id = 901L;
         foreach (var source in batch.RootElement.GetProperty("comments")
                      .EnumerateArray())
         {
-            comments.Add(new
-            {
-                id = id++,
-                pull_request_review_id = 801,
-                url = "https://api.github.com/repos/" +
-                    FrameworkCanaries.Repository + "/pulls/comments/901",
-                pull_request_url = "https://api.github.com/repos/" +
-                    FrameworkCanaries.Repository + "/pulls/147",
-                html_url = "https://github.com/" +
-                    FrameworkCanaries.Repository + "/pull/147#discussion_r901",
-                body = source.GetProperty("body").GetString(),
-                path = source.GetProperty("path").GetString(),
-                line = source.GetProperty("line").GetInt32(),
-                side = source.GetProperty("side").GetString(),
-                commit_id = batch.RootElement.GetProperty("commit_id")
-                    .GetString(),
-            });
+            comments.Add(FrameworkJson.Object(
+                ("id", id++),
+                ("pull_request_review_id", 801),
+                ("url", "https://api.github.com/repos/" +
+                    FrameworkCanaries.Repository + "/pulls/comments/901"),
+                ("pull_request_url", "https://api.github.com/repos/" +
+                    FrameworkCanaries.Repository + "/pulls/147"),
+                ("html_url", "https://github.com/" +
+                    FrameworkCanaries.Repository +
+                    "/pull/147#discussion_r901"),
+                ("body", source.GetProperty("body").GetString()),
+                ("path", source.GetProperty("path").GetString()),
+                ("line", source.GetProperty("line").GetInt32()),
+                ("side", source.GetProperty("side").GetString()),
+                ("commit_id", batch.RootElement.GetProperty("commit_id")
+                    .GetString())));
         }
 
         File.WriteAllText(Path.Join(scenarioRoot, "inline-comments.json"),
-            JsonSerializer.Serialize(comments));
+            FrameworkJson.Serialize(FrameworkJson.Array(comments)));
     }
 
-    private string CurrentRun(string mode) => JsonSerializer.Serialize(
-        new
-        {
-            id = ReadCurrentRunId(),
-            run_attempt = ReadCurrentRunAttempt(),
-            workflow_id = 72,
-            name = "R4 trusted proof",
-            path = ".github/workflows/r4-trusted-proof.yml",
-            head_branch = "main",
-            head_sha = WorkflowSha,
-            @event = mode == "workflow-run" ? "workflow_run" :
-                "workflow_dispatch",
-            conclusion = (string?)null,
-            repository = Identity(RepositoryId),
-            head_repository = Identity(RepositoryId),
-            actor = Actor(),
-            triggering_actor = Actor(),
-            pull_requests = Array.Empty<object>(),
-        });
+    private string CurrentRun(string mode) => FrameworkJson.Serialize(
+        FrameworkJson.Object(
+            ("id", ReadCurrentRunId()),
+            ("run_attempt", ReadCurrentRunAttempt()),
+            ("workflow_id", 72),
+            ("name", "R4 trusted proof"),
+            ("path", ".github/workflows/r4-trusted-proof.yml"),
+            ("head_branch", "main"),
+            ("head_sha", WorkflowSha),
+            ("event", mode == "workflow-run" ? "workflow_run" :
+                "workflow_dispatch"),
+            ("conclusion", null),
+            ("repository", Identity(RepositoryId)),
+            ("head_repository", Identity(RepositoryId)),
+            ("actor", Actor()),
+            ("triggering_actor", Actor()),
+            ("pull_requests", FrameworkJson.Array([]))));
 
-    private string TriggerRun(string mode) => JsonSerializer.Serialize(
-        new
-        {
-            id = TriggerRunId,
-            run_attempt = TriggerAttempt,
-            workflow_id = 71,
-            name = "CI",
-            path = ".github/workflows/ci.yml",
-            head_branch = "feature",
-            head_sha = TriggerSha,
-            @event = "pull_request",
-            conclusion = "success",
-            repository = Identity(RepositoryId),
-            head_repository = Identity(RepositoryId),
-            actor = Actor(),
-            triggering_actor = Actor(),
-            pull_requests = new[] { PullReference(mode) },
-        });
+    private string TriggerRun(string mode) => FrameworkJson.Serialize(
+        FrameworkJson.Object(
+            ("id", TriggerRunId),
+            ("run_attempt", TriggerAttempt),
+            ("workflow_id", 71),
+            ("name", "CI"),
+            ("path", ".github/workflows/ci.yml"),
+            ("head_branch", "feature"),
+            ("head_sha", TriggerSha),
+            ("event", "pull_request"),
+            ("conclusion", "success"),
+            ("repository", Identity(RepositoryId)),
+            ("head_repository", Identity(RepositoryId)),
+            ("actor", Actor()),
+            ("triggering_actor", Actor()),
+            ("pull_requests", FrameworkJson.Array([PullReference(mode)]))));
 
-    private static object Identity(long id) => new
-    {
-        id,
-        full_name = FrameworkCanaries.Repository,
-    };
+    private static JsonObject Identity(long id) => FrameworkJson.Object(
+        ("id", id),
+        ("full_name", FrameworkCanaries.Repository));
 
-    private static object Actor() => new { id = 7, login = "maintainer" };
+    private static JsonObject Actor() => FrameworkJson.Object(
+        ("id", 7),
+        ("login", "maintainer"));
 
-    private object PullReference(string mode) => new
-    {
-        id = PullRequestId,
-        number = PullRequestNumber,
-        @base = new
-        {
-            sha = BaseSha,
-            repo = new
-            {
-                id = RepositoryId,
-                url = "https://api.github.com/repos/" +
-                    FrameworkCanaries.Repository,
-                name = "apr178-repository-canary",
-            },
-        },
-        head = new
-        {
-            sha = CurrentHead(mode),
-            repo = new
-            {
-                id = mode == "fork" ? RepositoryId + 1 : RepositoryId,
-                url = "https://api.github.com/repos/" +
-                    FrameworkCanaries.Repository,
-                name = "apr178-repository-canary",
-            },
-        },
-    };
+    private JsonObject PullReference(string mode) => FrameworkJson.Object(
+        ("id", PullRequestId),
+        ("number", PullRequestNumber),
+        ("base", FrameworkJson.Object(
+            ("sha", BaseSha),
+            ("repo", RepositoryIdentity(RepositoryId)))),
+        ("head", FrameworkJson.Object(
+            ("sha", CurrentHead(mode)),
+            ("repo", RepositoryIdentity(mode == "fork"
+                ? RepositoryId + 1
+                : RepositoryId)))));
 
-    private string PullRequest(string mode) => JsonSerializer.Serialize(
-        new
-        {
-            id = PullRequestId,
-            number = PullRequestNumber,
-            state = "open",
-            draft = false,
-            merged_at = (string?)null,
-            @base = new { sha = BaseSha, repo = Identity(RepositoryId) },
-            head = new
-            {
-                sha = CurrentHead(mode),
-                repo = Identity(mode == "fork" ? RepositoryId + 1 :
-                    RepositoryId),
-            },
-        });
+    private static JsonObject RepositoryIdentity(long id) =>
+        FrameworkJson.Object(
+            ("id", id),
+            ("url", "https://api.github.com/repos/" +
+                FrameworkCanaries.Repository),
+            ("name", "apr178-repository-canary"));
+
+    private string PullRequest(string mode) => FrameworkJson.Serialize(
+        FrameworkJson.Object(
+            ("id", PullRequestId),
+            ("number", PullRequestNumber),
+            ("state", "open"),
+            ("draft", false),
+            ("merged_at", null),
+            ("base", FrameworkJson.Object(
+                ("sha", BaseSha),
+                ("repo", Identity(RepositoryId)))),
+            ("head", FrameworkJson.Object(
+                ("sha", CurrentHead(mode)),
+                ("repo", Identity(mode == "fork"
+                    ? RepositoryId + 1
+                    : RepositoryId))))));
 
     private static string Workflow(string mode)
     {
@@ -499,17 +484,16 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         var parents = sha == HeadSha ? new[] { BaseSha } :
             sha == ContinuedHeadSha ? new[] { HeadSha } :
             sha == ConflictHeadSha ? new[] { BaseSha } : Array.Empty<string>();
-        return JsonSerializer.Serialize(new
-        {
-            sha,
-            tree = new { sha = tree },
-            parents = parents.Select(parent => new { sha = parent }),
-        });
+        return FrameworkJson.Serialize(FrameworkJson.Object(
+            ("sha", sha),
+            ("tree", FrameworkJson.Object(("sha", tree))),
+            ("parents", FrameworkJson.Array(parents.Select(parent =>
+                FrameworkJson.Object(("sha", parent)))))));
     }
 
     private static string Tree(string sha, string mode)
     {
-        object[] entries = sha switch
+        JsonObject[] entries = sha switch
         {
             var value when value == WorkflowRoot =>
                 [TreeEntry(".github", "040000", "tree", GitHubRoot)],
@@ -531,20 +515,23 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
                     GitBlobSha(FileBytes), FileBytes.Length)],
             _ => [],
         };
-        return JsonSerializer.Serialize(new
-        {
-            sha,
-            truncated = false,
-            tree = entries,
-        });
+        return FrameworkJson.Serialize(FrameworkJson.Object(
+            ("sha", sha),
+            ("truncated", false),
+            ("tree", FrameworkJson.Array(entries))));
     }
 
-    private static object TreeEntry(
+    private static JsonObject TreeEntry(
         string path,
         string mode,
         string type,
         string sha,
-        int? size = null) => new { path, mode, type, sha, size };
+        int? size = null) => FrameworkJson.Object(
+            ("path", path),
+            ("mode", mode),
+            ("type", type),
+            ("sha", sha),
+            ("size", size));
 
     private static byte[]? Blob(string sha, string mode)
     {
@@ -565,27 +552,25 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
             : string.Empty) + "}}");
 
     private static string IssueComment(long id, string body) =>
-        JsonSerializer.Serialize(new
-        {
-            id,
-            url = "https://api.github.com/repos/" +
-                FrameworkCanaries.Repository + "/issues/comments/" + id,
-            html_url = "https://github.com/" + FrameworkCanaries.Repository +
-                "/pull/147#issuecomment-" + id,
-            body,
-        });
+        FrameworkJson.Serialize(FrameworkJson.Object(
+            ("id", id),
+            ("url", "https://api.github.com/repos/" +
+                FrameworkCanaries.Repository + "/issues/comments/" + id),
+            ("html_url", "https://github.com/" +
+                FrameworkCanaries.Repository + "/pull/147#issuecomment-" + id),
+            ("body", body)));
 
-    private static string Review(long id) => JsonSerializer.Serialize(new
-    {
-        id,
-        url = "https://api.github.com/repos/" + FrameworkCanaries.Repository +
-            "/pulls/147/reviews/" + id,
-        pull_request_url = "https://api.github.com/repos/" +
-            FrameworkCanaries.Repository + "/pulls/147",
-        html_url = "https://github.com/" + FrameworkCanaries.Repository +
-            "/pull/147#pullrequestreview-" + id,
-        commit_id = HeadSha,
-    });
+    private static string Review(long id) => FrameworkJson.Serialize(
+        FrameworkJson.Object(
+            ("id", id),
+            ("url", "https://api.github.com/repos/" +
+                FrameworkCanaries.Repository + "/pulls/147/reviews/" + id),
+            ("pull_request_url", "https://api.github.com/repos/" +
+                FrameworkCanaries.Repository + "/pulls/147"),
+            ("html_url", "https://github.com/" +
+                FrameworkCanaries.Repository +
+                "/pull/147#pullrequestreview-" + id),
+            ("commit_id", HeadSha)));
 
     private static string ExtractString(string json, string property)
     {

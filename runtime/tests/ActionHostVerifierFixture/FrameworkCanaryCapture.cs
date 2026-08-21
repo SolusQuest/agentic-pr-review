@@ -192,7 +192,8 @@ internal static class FrameworkCanaryCapture
             }
 
             envelopeDigest = Convert.ToHexString(SHA256.HashData(
-                    JsonSerializer.SerializeToUtf8Bytes(root)))
+                    FrameworkJson.SerializeToUtf8Bytes(
+                        FrameworkJson.Element(root)!)))
                 .ToLowerInvariant();
             lock (Gate)
             {

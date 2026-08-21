@@ -100,7 +100,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             verifier.IndexOf("trap cleanup EXIT", StringComparison.Ordinal));
         Assert.Contains("--golden \"$golden\"", verifier,
             StringComparison.Ordinal);
-        Assert.Contains("export golden repo_root", verifier,
+        Assert.Contains("export mode repo_root", verifier,
             StringComparison.Ordinal);
         Assert.DoesNotContain("--golden \"$repo_root/", verifier,
             StringComparison.Ordinal);
@@ -111,7 +111,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             runtimeProject, StringComparison.Ordinal);
         Assert.Contains("scripts/run-clean-source-proof.mjs", verifier,
             StringComparison.Ordinal);
-        Assert.Contains("-- bash -euo pipefail -c execute_framework_proof", verifier,
+        Assert.Contains("bash -euo pipefail -c execute_action_host_proof", verifier,
             StringComparison.Ordinal);
         Assert.Contains("git', ['-C', repo, 'diff', '--cached', '--quiet'",
             runner, StringComparison.Ordinal);
@@ -1080,6 +1080,72 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.True(Count(workflow, "persist-credentials: false") >= 2);
         Assert.DoesNotContain("secrets.", workflow,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeAotProofIsReflectionFreeIdentityBoundAndRunsTwice()
+    {
+        var root = FindRepositoryRoot();
+        var verifier = File.ReadAllText(Path.Join(root,
+            "runtime", "scripts", "verify-action-host.sh"));
+        var fixtureProject = File.ReadAllText(Path.Join(root,
+            "runtime", "tests", "ActionHostVerifierFixture",
+            "AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj"));
+        var workflow = File.ReadAllText(Path.Join(root,
+            ".github", "workflows", "runtime-ci.yml"));
+        var composer = File.ReadAllText(Path.Join(root,
+            "scripts", "compose-r4-e2-receipt.mjs"));
+        using var contract = JsonDocument.Parse(File.ReadAllBytes(Path.Join(
+            root, "runtime", "tests", "fixtures", "action-host", "aot",
+            "receipt-contract.json")));
+
+        Assert.Contains("-p:PublishAot=true", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "-p:JsonSerializerIsReflectionEnabledByDefault=false", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("-p:Deterministic=true", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("-p:ContinuousIntegrationBuild=true", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("-p:PathMap=$temporary_root=/_/apr-action-host",
+            verifier, StringComparison.Ordinal);
+        Assert.Contains("-warnaserror -warnnotaserror:IL3058", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("ActionHostVerifierAotIntermediateDirectory", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("AgenticPrReview.Runtime.dll", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("runtime_intermediate_sha256", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("--execution-kind native-aot", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("<VerifyReferenceAotCompatibility>true",
+            fixtureProject, StringComparison.Ordinal);
+        Assert.Equal(2, Count(workflow,
+            "bash runtime/scripts/verify-action-host.sh aot"));
+        Assert.Contains("cmp \"$RUNNER_TEMP/r4-e2-aot-first.receipt\"",
+            workflow, StringComparison.Ordinal);
+        Assert.Contains("reflection_json_enabled !== false", composer,
+            StringComparison.Ordinal);
+        Assert.Contains("dynamic_code_supported !== false", composer,
+            StringComparison.Ordinal);
+        Assert.Contains("managed_architecture_sha256", composer,
+            StringComparison.Ordinal);
+        Assert.Contains("_ActionHostRuntimeIntermediate", fixtureProject,
+            StringComparison.Ordinal);
+        Assert.Contains("runtime_intermediate_sha256",
+            contract.RootElement.GetProperty("ordered_fields")
+                .EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("managed_architecture_sha256",
+            contract.RootElement.GetProperty("ordered_fields")
+                .EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal("2337e8ae9d3ca0db88f8a38f36c2f17e46a868fc",
+            contract.RootElement.GetProperty("migration_base_commit")
+                .GetString());
+        Assert.Equal("17bbdc8e1cb6591112a7c871ffba9108ecf3680f",
+            contract.RootElement.GetProperty("migration_base_tree")
+                .GetString());
     }
 
     private static int Count(string value, string searched)

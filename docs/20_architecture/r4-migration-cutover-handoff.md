@@ -1,6 +1,6 @@
 # R4 migration cutover handoff
 
-Status: W13 closed source inventory and E1 handoff contract for issue [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175). Merge alone does not complete E1: the exact merge commit must pass the `push` Runtime CI proof and its identity must be recorded on #175 before the issue closes or E2 begins.
+Status: W13 and E1 are closed at commit `2337e8ae9d3ca0db88f8a38f36c2f17e46a868fc`, tree `17bbdc8e1cb6591112a7c871ffba9108ecf3680f`, as recorded on issue [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175). E2 issue [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179) consumes that durable identity and adds the final-tree Linux x64 Native AOT gate.
 
 ## Current implementation boundary
 
@@ -63,6 +63,16 @@ The W13 pull request references #175 without an automatic closure keyword. After
 
 If `main` advances later, E2 remains bound to the recorded W13 identity unless E2 deliberately validates a newer exact tree. The known downstream Action pin is read-only audit evidence and is not changed by W13.
 
+## E2 Native AOT receipt
+
+`runtime/scripts/verify-action-host.sh aot` publishes the proof fixture for `linux-x64` as a self-contained Native AOT executable with reflection-based JSON disabled. The fixture runs the complete E1 scenario set from that executable. It additionally requires a domain-separated build-pair record that binds the running executable digest to the exact fixture and production Runtime managed inputs supplied to ILC. A metadata-only audit pins the required source-generated JSON roots and Host seams and rejects closed deleted/fallback assembly and type families before any scenario runs. The verifier rejects dynamic-code or reflection fallback and writes proof identity only after the E1 golden evidence and privacy canaries pass.
+
+The AOT publish treats every warning as an error except the two exact `IL3058` diagnostics for the known `JsonSchema.Net` dependency edge. The verifier self-tests the warning audit against injected, mutated, duplicated, and missing diagnostics before accepting the real publish log. The checked warning policy and receipt contract are versioned under `runtime/tests/fixtures/action-host/aot/`.
+
+Runtime CI invokes the exact AOT command twice in fresh proof roots and requires the two `APR_R4_E2_RECEIPT` lines to be byte-identical. Each bounded public-safe receipt binds the recorded W13 base commit/tree, exact clean-source commit/tree, Action metadata, checked wrapper bundle, launch source identity, wrapper discriminator, native executable, both managed inputs, the managed-architecture audit, build pair, warning policy, E1 normalized evidence, closed source inventory, replacement record, base inventory, canary table, and receipt contract.
+
+Merge alone does not complete E2. After maintainer merge, the exact merge commit must pass the `push` Runtime CI run. Both AOT invocations in that run must produce the same canonical receipt. That complete receipt, merge SHA, run URL, invocation count, and passed result are then recorded in a durable public-safe comment on #179 and read back before #179 closes. E3 [#180](https://github.com/SolusQuest/agentic-pr-review/issues/180) may consume only that recorded receipt; later movement of `main` does not rebind the closed E2 proof.
+
 ## Validation
 
 The cutover gate is:
@@ -73,6 +83,7 @@ npm run dist:check
 npm run runtime:integration
 dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj --configuration Release --nologo
 bash runtime/scripts/verify-action-host.sh framework
+bash runtime/scripts/verify-action-host.sh aot
 ```
 
 The Linux framework verifier is authoritative on the exact PR head and again on the exact merged `main` commit. Pull-request and push validation remain synthetic and provider-secret-free.

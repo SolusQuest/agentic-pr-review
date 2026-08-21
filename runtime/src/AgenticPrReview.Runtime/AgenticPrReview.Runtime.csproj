@@ -19,7 +19,13 @@
     <IntermediateOutputPath Condition="'$(ArtifactsPath)' == ''">obj\$(Configuration)\$(TargetFramework)\action-host-verifier\</IntermediateOutputPath>
     <OutputPath Condition="'$(ArtifactsPath)' == ''">bin\$(Configuration)\$(TargetFramework)\action-host-verifier\</OutputPath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(ActionHostVerifierAotReference)' == 'true'">
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
   <ItemGroup Condition="'$(ActionHostVerifierFrameworkReference)' == 'true'">
+    <Compile Remove="Cli\Program.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(ActionHostVerifierAotReference)' == 'true'">
     <Compile Remove="Cli\Program.cs" />
   </ItemGroup>
   <ItemGroup>
