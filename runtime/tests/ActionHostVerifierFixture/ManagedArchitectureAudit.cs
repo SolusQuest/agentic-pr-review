@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
@@ -13,6 +14,7 @@ internal static class ManagedArchitectureAudit
     private const string FixtureAssemblyName =
         "AgenticPrReview.Runtime.ActionHostVerifierFixture";
     private const string RuntimeAssemblyName = "AgenticPrReview.Runtime";
+    private static readonly MetadataTypeNameProvider TypeNames = new();
 
     private static readonly string[] RequiredFixtureTypes =
     [
@@ -82,35 +84,48 @@ internal static class ManagedArchitectureAudit
     [
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
-            "MoveNext", "200001", RuntimeAssemblyName,
+            "MoveNext", "instance arity=0 System.Void()",
+            RuntimeAssemblyName,
             RequiredFixtureConstructorTargets[0], ".ctor",
-            "20010115126102128145128141", ILOpCode.Newobj),
+            "instance arity=0 System.Void([System.Runtime]System.Func`2<[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential,[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport>)",
+            ILOpCode.Newobj),
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
-            "MoveNext", "200001", RuntimeAssemblyName,
+            "MoveNext", "instance arity=0 System.Void()",
+            RuntimeAssemblyName,
             RequiredFixtureConstructorTargets[1], ".ctor",
-            "20010115128165011280cd", ILOpCode.Newobj),
+            "instance arity=0 System.Void([System.Runtime]System.Func`1<[System.Net.Http]System.Net.Http.HttpMessageHandler>)",
+            ILOpCode.Newobj),
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
-            "MoveNext", "200001", RuntimeAssemblyName,
+            "MoveNext", "instance arity=0 System.Void()",
+            RuntimeAssemblyName,
             RequiredFixtureConstructorTargets[2], ".ctor",
-            "20010115128165011280cd", ILOpCode.Newobj),
+            "instance arity=0 System.Void([System.Runtime]System.Func`1<[System.Net.Http]System.Net.Http.HttpMessageHandler>)",
+            ILOpCode.Newobj),
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkStateDependencies",
-            ".ctor", "2002010e1281e5", RuntimeAssemblyName,
+            ".ctor",
+            "instance arity=0 System.Void(System.String,[AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.GitHub.IActionHostGitObjectTransportFactory)",
+            RuntimeAssemblyName,
             RequiredFixtureConstructorTargets[3], ".ctor",
-            "2001011281e5", ILOpCode.Newobj),
+            "instance arity=0 System.Void([AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.GitHub.IActionHostGitObjectTransportFactory)",
+            ILOpCode.Newobj),
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkStateDependencies",
-            "CreateAncestryTransport", "20011281ed1281f1",
+            "CreateAncestryTransport",
+            "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.GitHub.IActionHostGitObjectTransport([AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostGitHubToken)",
             RuntimeAssemblyName, RequiredFixtureConstructorTargets[3],
-            "CreateAncestryTransport", "20011281ed1281f1",
+            "CreateAncestryTransport",
+            "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.GitHub.IActionHostGitObjectTransport([AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostGitHubToken)",
             ILOpCode.Callvirt),
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkStateDependencies",
-            "CreateArtifactStore", "20011281e9128161",
+            "CreateArtifactStore",
+            "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.Host.State.OpaqueStore.IRestrictedStateStore([AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract)",
             RuntimeAssemblyName, RequiredFixtureConstructorTargets[3],
-            "CreateArtifactStore", "20011281e9128161",
+            "CreateArtifactStore",
+            "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.Host.State.OpaqueStore.IRestrictedStateStore([AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract)",
             ILOpCode.Callvirt),
     ];
 
@@ -316,7 +331,8 @@ internal static class ManagedArchitectureAudit
 
                 var callerType = DefinitionName(metadata, typeHandle);
                 var callerName = metadata.GetString(method.Name);
-                var callerSignature = Signature(metadata, method.Signature);
+                var callerSignature = FormatSignature(
+                    method.DecodeSignature(TypeNames, null));
                 var il = pe.GetMethodBody(method.RelativeVirtualAddress)
                     .GetILBytes() ?? throw new InvalidDataException(
                         "The managed audit found a method without IL bytes.");
@@ -410,7 +426,8 @@ internal static class ManagedArchitectureAudit
             identity.AssemblyName,
             identity.TypeName,
             metadata.GetString(reference.Name),
-            Signature(metadata, reference.Signature),
+            FormatSignature(reference.DecodeMethodSignature(
+                TypeNames, null)),
             opCode);
     }
 
@@ -424,7 +441,8 @@ internal static class ManagedArchitectureAudit
             AssemblyName(metadata),
             DefinitionName(metadata, definition.GetDeclaringType()),
             metadata.GetString(definition.Name),
-            Signature(metadata, definition.Signature),
+            FormatSignature(definition.DecodeSignature(
+                TypeNames, null)),
             opCode);
     }
 
@@ -435,10 +453,12 @@ internal static class ManagedArchitectureAudit
     {
         var specification = metadata.GetMethodSpecification(handle);
         var method = ResolveMethod(metadata, specification.Method, opCode);
+        var arguments = specification.DecodeSignature(
+            TypeNames, null);
         return method with
         {
             Signature = string.Concat(method.Signature, "<",
-                Signature(metadata, specification.Signature), ">"),
+                string.Join(',', arguments), ">"),
         };
     }
 
@@ -456,9 +476,8 @@ internal static class ManagedArchitectureAudit
             ReferenceName(metadata, (TypeReferenceHandle)handle)),
         HandleKind.TypeSpecification => new ManagedTypeIdentity(
             "<type-specification>",
-            string.Concat("<type-specification:", Signature(metadata,
-                metadata.GetTypeSpecification((TypeSpecificationHandle)handle)
-                    .Signature), ">")),
+            metadata.GetTypeSpecification((TypeSpecificationHandle)handle)
+                .DecodeSignature(TypeNames, null)),
         _ => throw new InvalidDataException(
             "The managed audit found an unresolved metadata type."),
     };
@@ -510,10 +529,12 @@ internal static class ManagedArchitectureAudit
             : throw new InvalidDataException(
                 "The managed metadata does not define an assembly.");
 
-    private static string Signature(
-        MetadataReader metadata,
-        BlobHandle handle) => Convert.ToHexString(
-            metadata.GetBlobBytes(handle)).ToLowerInvariant();
+    private static string FormatSignature(
+        MethodSignature<string> signature) => string.Concat(
+            signature.Header.IsInstance ? "instance" : "static",
+            " arity=", signature.GenericParameterCount,
+            " ", signature.ReturnType,
+            "(", string.Join(',', signature.ParameterTypes), ")");
 
     private static ILOpCode ReadOpCode(byte[] il, ref int offset)
     {
@@ -595,6 +616,78 @@ internal static class ManagedArchitectureAudit
         string.IsNullOrEmpty(@namespace)
             ? name
             : string.Concat(@namespace, ".", name);
+
+    private sealed class MetadataTypeNameProvider :
+        ISignatureTypeProvider<string, object?>
+    {
+        public string GetArrayType(
+            string elementType,
+            ArrayShape shape) => string.Concat(
+                elementType, "[", new string(',', shape.Rank - 1), "]");
+
+        public string GetByReferenceType(string elementType) =>
+            string.Concat(elementType, "&");
+
+        public string GetFunctionPointerType(
+            MethodSignature<string> signature) => string.Concat(
+                "<function-pointer:", FormatSignature(signature), ">");
+
+        public string GetGenericInstantiation(
+            string genericType,
+            ImmutableArray<string> typeArguments) => string.Concat(
+                genericType, "<", string.Join(',', typeArguments), ">");
+
+        public string GetGenericMethodParameter(
+            object? context,
+            int index) => string.Concat("!!", index);
+
+        public string GetGenericTypeParameter(
+            object? context,
+            int index) => string.Concat("!", index);
+
+        public string GetModifiedType(
+            string modifier,
+            string unmodifiedType,
+            bool isRequired) => string.Concat(
+                isRequired ? "modreq(" : "modopt(",
+                modifier, ")", unmodifiedType);
+
+        public string GetPinnedType(string elementType) =>
+            string.Concat(elementType, " pinned");
+
+        public string GetPointerType(string elementType) =>
+            string.Concat(elementType, "*");
+
+        public string GetPrimitiveType(PrimitiveTypeCode typeCode) =>
+            string.Concat("System.", typeCode);
+
+        public string GetSZArrayType(string elementType) =>
+            string.Concat(elementType, "[]");
+
+        public string GetTypeFromDefinition(
+            MetadataReader reader,
+            TypeDefinitionHandle handle,
+            byte rawTypeKind) => Qualify(
+                AssemblyName(reader), DefinitionName(reader, handle));
+
+        public string GetTypeFromReference(
+            MetadataReader reader,
+            TypeReferenceHandle handle,
+            byte rawTypeKind) => Qualify(
+                ResolutionAssembly(reader,
+                    reader.GetTypeReference(handle).ResolutionScope),
+                ReferenceName(reader, handle));
+
+        public string GetTypeFromSpecification(
+            MetadataReader reader,
+            object? context,
+            TypeSpecificationHandle handle,
+            byte rawTypeKind) => reader.GetTypeSpecification(handle)
+                .DecodeSignature(this, context);
+
+        private static string Qualify(string assembly, string type) =>
+            string.Concat("[", assembly, "]", type);
+    }
 
     private sealed record ManagedAssemblyMetadata(
         string AssemblyName,
