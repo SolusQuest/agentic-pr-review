@@ -78,6 +78,18 @@ internal static class FrameworkSupervisor
         }
 
         await using var platform = SyntheticOfficialPlatform.Start(root);
+        if (values.TryGetValue("trusted-proof-only", out var trustedOnly) &&
+            trustedOnly == "true")
+        {
+            return await RunTrustedProofPayloadAsync(
+                root,
+                repository,
+                payload,
+                bundle,
+                node,
+                platform).ConfigureAwait(false);
+        }
+
         var cases = new List<CaseResult>();
 
         cases.Add(await RunCaseAsync(new CaseSpec("dispatch-bootstrap",
@@ -498,10 +510,16 @@ internal static class FrameworkSupervisor
         SyntheticOfficialPlatform platform)
     {
         var scenario = Path.Join(root, spec.Name);
-        platform.BeginScenario(spec.Mode);
         Directory.CreateDirectory(scenario);
+        platform.BeginScenario(spec.Mode, scenario, Sha256(payload));
         await File.WriteAllTextAsync(Path.Join(scenario, "mode"), spec.Mode)
             .ConfigureAwait(false);
+        if (spec.TrustedProofPayload)
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(scenario, "trusted-proof-payload"),
+                "1").ConfigureAwait(false);
+        }
         await File.WriteAllTextAsync(Path.Join(scenario, "run-id"),
             RunId(spec).ToString(CultureInfo.InvariantCulture))
             .ConfigureAwait(false);
@@ -544,6 +562,17 @@ internal static class FrameworkSupervisor
         await File.WriteAllTextAsync(outputPath,
             FrameworkCanaries.OutputSentinel, new UTF8Encoding(false))
             .ConfigureAwait(false);
+
+        if (spec.BarrierBefore is not null &&
+            !await RunBarrierAsync(
+                payload,
+                spec,
+                platform,
+                scenario,
+                spec.BarrierBefore).ConfigureAwait(false))
+        {
+            return FailedCase(spec);
+        }
 
         using var process = StartWrapper(spec, repository, payload, bundle,
             node, scenario, eventPath, summaryPath, outputPath, platform);
@@ -601,6 +630,13 @@ internal static class FrameworkSupervisor
 
         var stdout = await standardOutput.ConfigureAwait(false);
         var stderr = await standardError.ConfigureAwait(false);
+        var barrierAfterPassed = spec.BarrierAfter is null ||
+            await RunBarrierAsync(
+                payload,
+                spec,
+                platform,
+                scenario,
+                spec.BarrierAfter).ConfigureAwait(false);
         await File.WriteAllTextAsync(
             Path.Join(scenario, "wrapper-stdout.redacted.txt"),
             RedactCanaries(SanitizePrivateMaskCommands(stdout)))
@@ -629,6 +665,10 @@ internal static class FrameworkSupervisor
                 ReadOptionalText(scenario, "host-environment.keys"));
         var closedEnvironment = hostPid < 1 ||
             File.Exists(Path.Join(scenario, "host-environment.keys"));
+        var reorderedHistoryRejected = !spec.TrustedProofPayload ||
+            File.Exists(Path.Join(
+                scenario,
+                "provider-reordered-history-rejected"));
         var outputUnchanged = output == FrameworkCanaries.OutputSentinel;
         var groupQuiet = !(spec.CrashHost ||
                 spec.CrashAfterProviderCheckpoint ||
@@ -648,9 +688,23 @@ internal static class FrameworkSupervisor
                 process.ExitCode == (spec.ExpectedStatus is "reviewed" or
                     "reviewed_with_inline_warnings" or
                     "skipped_untrusted_event" or "skipped_fork" ? 0 : 1);
-        var continuation = !spec.ExpectContinuation || File.Exists(
+        var continuation = !spec.ExpectContinuation || spec.TrustedProofPayload ||
+            File.Exists(
             Path.Join(scenario, "provider-continuation-observed"));
+        var trustedContinuation = spec.TrustedProofPayload &&
+            ReadInt(scenario, "sticky-create-count") == 0 &&
+            ReadInt(scenario, "sticky-update-count") == 1 &&
+            summary.Contains("| State disposition | accepted |",
+                StringComparison.Ordinal) &&
+            ReadOptionalJsonString(
+                scenario,
+                "sticky-successor-comment.json",
+                "body")
+                .Contains("Trusted continuation complete&#x2E;",
+                    StringComparison.Ordinal) &&
+            ValidateContinuationStateTrace(scenario);
         var successfulContinuation = !spec.RequireSuccessfulContinuation ||
+            trustedContinuation ||
             File.Exists(Path.Join(scenario,
                 "provider-continuation-first-request-exact")) &&
             File.Exists(Path.Join(scenario,
@@ -671,11 +725,14 @@ internal static class FrameworkSupervisor
                 StringComparison.Ordinal) &&
             ValidateContinuationStateTrace(scenario) &&
             ContinuationHeadAdvanced(root);
-        var sixTools = spec.ExpectContinuation || spec.ExpectNoProvider ||
+        var sixTools = spec.TrustedProofPayload || spec.ExpectContinuation ||
+            spec.ExpectNoProvider ||
             spec.ExpectedStatus != "reviewed" &&
                 spec.ExpectedStatus != "reviewed_with_inline_warnings" ||
             ReadInt(scenario, "provider-sequence") >= 6;
-        var passed = exited && expected && noLeak && closedEnvironment &&
+        var passed = exited && expected && barrierAfterPassed && noLeak &&
+            closedEnvironment &&
+            reorderedHistoryRejected &&
             outputUnchanged && groupQuiet && platformQuiet && continuation &&
             successfulContinuation &&
             sixTools && signalGateReached &&
@@ -718,9 +775,154 @@ internal static class FrameworkSupervisor
             closedEnvironment,
             outputUnchanged,
             groupQuiet,
+            platformQuiet,
             noLeak,
             continuation,
             passed);
+    }
+
+    private static async Task<bool> RunBarrierAsync(
+        string payload,
+        CaseSpec spec,
+        SyntheticOfficialPlatform platform,
+        string scenario,
+        string mode)
+    {
+        var info = new ProcessStartInfo(payload)
+        {
+            WorkingDirectory = scenario,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        info.ArgumentList.Add("barrier");
+        info.ArgumentList.Add(mode);
+        info.Environment.Clear();
+        info.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin";
+        info.Environment["HOME"] = scenario;
+        info.Environment["TMPDIR"] = scenario;
+        info.Environment["GITHUB_API_URL"] = platform.BaseUrl;
+        info.Environment["GITHUB_TOKEN"] = FrameworkCanaries.GitHubToken;
+        info.Environment["REPOSITORY"] =
+            FrameworkCanaries.ProofControlRepository;
+        info.Environment["REPOSITORY_ID"] =
+            FrameworkGitHubHandler.RepositoryId.ToString(
+                CultureInfo.InvariantCulture);
+        info.Environment["PR_NUMBER"] =
+            FrameworkGitHubHandler.PullRequestNumber.ToString(
+                CultureInfo.InvariantCulture);
+        info.Environment["FIXTURE_HEAD_SHA"] = FrameworkGitHubHandler.HeadSha;
+        info.Environment["OPERATION_ID"] = new string('1', 64);
+        info.Environment["WORKFLOW_SHA"] = FrameworkGitHubHandler.WorkflowSha;
+        info.Environment["ACTION_SOURCE_SHA"] = FrameworkGitHubHandler.ActionSha;
+        info.Environment["PAYLOAD_SHA256"] = Sha256(payload);
+        info.Environment["RUN_ID"] = RunId(spec).ToString(
+            CultureInfo.InvariantCulture);
+        info.Environment["RUN_ATTEMPT"] = "1";
+        using var process = new Process { StartInfo = info };
+        if (!process.Start())
+        {
+            return false;
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!await WaitForExitAsync(process, TimeSpan.FromSeconds(30))
+                .ConfigureAwait(false))
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            return false;
+        }
+
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+        await File.WriteAllTextAsync(
+            Path.Join(scenario, "barrier-" + mode + ".stdout"),
+            stdout).ConfigureAwait(false);
+        await File.WriteAllTextAsync(
+            Path.Join(scenario, "barrier-" + mode + ".stderr"),
+            stderr).ConfigureAwait(false);
+        return process.ExitCode == 0 &&
+            !stdout.Contains(FrameworkCanaries.GitHubToken,
+                StringComparison.Ordinal) &&
+            !stderr.Contains(FrameworkCanaries.GitHubToken,
+                StringComparison.Ordinal) &&
+            (mode != "cleanup" || stdout.Contains(
+                "apr-r4-e2p-proof-control-cleanup-v1",
+                StringComparison.Ordinal));
+    }
+
+    private static CaseResult FailedCase(CaseSpec spec) => new(
+        spec.Name,
+        spec.ExpectedStatus,
+        null,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        false,
+        false,
+        true,
+        true,
+        true,
+        false,
+        false);
+
+    private static async Task<int> RunTrustedProofPayloadAsync(
+        string root,
+        string repository,
+        string payload,
+        string bundle,
+        string node,
+        SyntheticOfficialPlatform platform)
+    {
+        var cases = new List<CaseResult>
+        {
+            await RunCaseAsync(new CaseSpec(
+                "dispatch-bootstrap",
+                "continuation-seed",
+                "reviewed",
+                WorkflowRun: true,
+                ExpectedStickyMutations: 1,
+                TrustedProofPayload: true,
+                BarrierBefore: "hold"),
+                root, repository, payload, bundle, node, platform)
+                .ConfigureAwait(false),
+            await RunCaseAsync(new CaseSpec(
+                "dispatch-continuation",
+                "continuation",
+                "reviewed",
+                ExpectContinuation: true,
+                ExpectedStickyMutations: 1,
+                RequireSuccessfulContinuation: true,
+                TrustedProofPayload: true,
+                BarrierBefore: "verify-completed",
+                BarrierAfter: "cleanup"),
+                root, repository, payload, bundle, node, platform)
+                .ConfigureAwait(false),
+        };
+        platform.ResetArtifacts();
+        cases.Add(await RunCaseAsync(new CaseSpec(
+            "stale-head",
+            "stale",
+            "stale_head",
+            TrustedProofPayload: true),
+            root, repository, payload, bundle, node, platform)
+            .ConfigureAwait(false));
+        var passed = cases.All(result => result.Passed);
+        await File.WriteAllTextAsync(
+            Path.Join(root, "trusted-proof-payload-evidence.json"),
+            FrameworkJson.SerializeIndented(FrameworkJson.Object(
+                ("passed", passed),
+                ("payload_sha256", Sha256(payload)),
+                ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))))))
+            .ConfigureAwait(false);
+        return passed ? 0 : 1;
     }
 
     private static Process StartWrapper(
@@ -797,7 +999,7 @@ internal static class FrameworkSupervisor
                 ? ""
                 : FrameworkCanaries.PreviousStateKey;
         info.Environment["INPUT_CONFIG-PATH"] =
-            ".github/agentic-pr-review.json";
+            ".github/agentic-pr-review/trusted-proof.json";
         info.Environment["INPUT_PR-NUMBER"] = spec.WorkflowRun ? "" :
             FrameworkGitHubHandler.PullRequestNumber.ToString(
                 CultureInfo.InvariantCulture);
@@ -2910,6 +3112,24 @@ internal static class FrameworkSupervisor
         return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
     }
 
+    private static string ReadOptionalJsonString(
+        string root,
+        string name,
+        string property)
+    {
+        var path = Path.Join(root, name);
+        if (!File.Exists(path))
+        {
+            return string.Empty;
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return document.RootElement.TryGetProperty(property, out var value) &&
+            value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? string.Empty
+                : string.Empty;
+    }
+
     private static bool JsonEquivalent(byte[] left, byte[] right)
     {
         using var first = JsonDocument.Parse(left);
@@ -2998,6 +3218,7 @@ internal static class FrameworkSupervisor
             ("ExactEnvironment", result.ExactEnvironment),
             ("OutputUnchanged", result.OutputUnchanged),
             ("ProcessGroupQuiet", result.ProcessGroupQuiet),
+            ("PlatformQuiet", result.PlatformQuiet),
             ("CanarySafe", result.CanarySafe),
             ("ContinuationObserved", result.ContinuationObserved),
             ("Passed", result.Passed));
@@ -3178,7 +3399,10 @@ internal static class FrameworkSupervisor
         bool RequireSuccessfulContinuation = false,
         string? RequiredScenarioEvidence = null,
         string? RequiredStateOperation = null,
-        string? RequiredGlobalEvidence = null);
+        string? RequiredGlobalEvidence = null,
+        bool TrustedProofPayload = false,
+        string? BarrierBefore = null,
+        string? BarrierAfter = null);
 
     private sealed record CaseResult(
         string Name,
@@ -3195,6 +3419,7 @@ internal static class FrameworkSupervisor
         bool ExactEnvironment,
         bool OutputUnchanged,
         bool ProcessGroupQuiet,
+        bool PlatformQuiet,
         bool CanarySafe,
         bool ContinuationObserved,
         bool Passed);

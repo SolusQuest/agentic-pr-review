@@ -17,50 +17,63 @@ public sealed class ActionHostAuthorizationPolicyTests
             source,
             ActionHostAuthorizationPolicy.TrustedProof,
             ActionHostAuthorizationScenario.ActionSha,
+            ActionHostAuthorizationScenario.PayloadSha,
             out var evidence,
             out var failure), failure.ToString());
-        Assert.Equal(ActionHostAuthorizationPolicy.ConcurrencyGroup,
+        Assert.Equal(
+            ActionHostAuthorizationPolicy.ConcurrencyGroup,
             evidence!.ConcurrencyGroup);
+        var canonical = Encoding.UTF8.GetString(source);
+        Assert.Contains("pr-number: ''", canonical, StringComparison.Ordinal);
+        Assert.Contains(
+            "pr-number: ${{ inputs.pr-number }}",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "pr-number: ${{ needs.authorization-preflight.outputs.pr-number }}",
+            canonical,
+            StringComparison.Ordinal);
     }
 
     public static TheoryData<string, string> RejectedMutations => new()
     {
-        {
-            "permissions: {}\nconcurrency:",
-            "permissions:\n  actions: write\nconcurrency:"
-        },
+        { "ubuntu-24.04", "ubuntu-latest" },
         { "cancel-in-progress: false", "cancel-in-progress: true" },
+        { "environment: r4-trusted-proof", "environment: production" },
+        { "persist-credentials: false", "persist-credentials: true" },
         {
-            "needs: authorization-preflight",
-            "needs: unrelated-preflight"
+            "DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-dotnet",
+            "DOTNET_INSTALL_DIR: /usr/share/dotnet"
+        },
+        { "dotnet-version: 10.0.109", "global-json-file: payload-source/global.json" },
+        { "barrier hold", "barrier verify-completed" },
+        { "barrier verify-completed", "barrier hold" },
+        { "state-mode: auto", "state-mode: read-only" },
+        {
+            "config-path: .github/agentic-pr-review/trusted-proof.json",
+            "config-path: .github/agentic-pr-review.json"
         },
         {
-            "github.event_name == 'workflow_run' && needs.authorization-preflight.outputs.authorized == 'true'",
-            "github.event_name == 'workflow_run'"
+            "AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}",
+            "AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ secrets.PAYLOAD_SHA256 }}"
         },
         {
-            "github.event_name == 'workflow_dispatch' && needs.authorization-preflight.outputs.authorized == 'true'",
-            "github.event_name == 'workflow_dispatch' || inputs.pr-number > 0"
+            "provider-api-key: ${{ secrets.DEEPSEEK_API_KEY }}",
+            "provider-api-key: ${{ github.token }}"
         },
         {
-            "permissions: {}\n    runs-on: ubuntu-latest\n    outputs:",
-            "permissions:\n      actions: write\n    runs-on: ubuntu-latest\n    outputs:"
+            "uses: actions/checkout@" +
+                "d23441a48e516b6c34aea4fa41551a30e30af803",
+            "uses: actions/checkout@v6"
         },
         {
-            "@" + ActionHostAuthorizationScenario.ActionSha,
-            "@main"
+            "run: |\n          sudo apt-get update",
+            "run: |\n          echo changed\n          sudo apt-get update"
         },
         {
-            "required: true\n        type: number",
-            "required: true\n        type: number\n        default: 147"
-        },
-        {
-            "actions: write\n      contents: read",
-            "actions: write\n      actions: write\n      contents: read"
-        },
-        {
-            "permissions: {}\n    runs-on: ubuntu-latest",
-            "permissions: &empty {}\n    runs-on: ubuntu-latest"
+            "steps:\n      - id: checkout-control-root",
+            "strategy:\n      matrix: {}\n    steps:\n" +
+                "      - id: checkout-control-root"
         },
     };
 
@@ -73,209 +86,79 @@ public sealed class ActionHostAuthorizationPolicyTests
         var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
             ActionHostAuthorizationScenario.ActionSha);
         Assert.Contains(before, canonical, StringComparison.Ordinal);
-        var mutated = canonical.Replace(
-            before,
-            after,
-            StringComparison.Ordinal);
+        var mutated = canonical.Replace(before, after, StringComparison.Ordinal);
 
         Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
             Encoding.UTF8.GetBytes(mutated),
             ActionHostAuthorizationPolicy.TrustedProof,
             ActionHostAuthorizationScenario.ActionSha,
+            ActionHostAuthorizationScenario.PayloadSha,
             out _,
             out _));
     }
 
     [Fact]
-    public void ActionInvocationOutsidePrivilegedJobsIsRejected()
+    public void ManifestPayloadMustEqualTheLaunchedPayload()
     {
         var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
             ActionHostAuthorizationScenario.ActionSha);
-        var mutated = canonical.Replace(
-            "outputs:\n      authorized:",
-            "steps:\n      - uses: " +
-                ActionHostAuthorizationPolicy.ActionPath +
-                ActionHostAuthorizationScenario.ActionSha +
-                "\n    outputs:\n      authorized:",
-            StringComparison.Ordinal);
 
         Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
-            Encoding.UTF8.GetBytes(mutated),
+            Encoding.UTF8.GetBytes(canonical),
             ActionHostAuthorizationPolicy.TrustedProof,
             ActionHostAuthorizationScenario.ActionSha,
-            out _,
-            out _));
-    }
-
-    [Fact]
-    public void BlockScalarUsesCannotHideAnActionInvocation()
-    {
-        var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
-            ActionHostAuthorizationScenario.ActionSha);
-        var mutated = canonical.Replace(
-            "outputs:\n      authorized:",
-            "steps:\n      - uses: |\n          " +
-                ActionHostAuthorizationPolicy.ActionPath +
-                ActionHostAuthorizationScenario.ActionSha +
-                "\n    outputs:\n      authorized:",
-            StringComparison.Ordinal);
-
-        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
-            Encoding.UTF8.GetBytes(mutated),
-            ActionHostAuthorizationPolicy.TrustedProof,
-            ActionHostAuthorizationScenario.ActionSha,
-            out _,
-            out _));
-    }
-
-    [Fact]
-    public void CaseAliasCannotHideAnActionInvocationOutsidePrivilegedJobs()
-    {
-        var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
-            ActionHostAuthorizationScenario.ActionSha);
-        var mutated = canonical.Replace(
-            "outputs:\n      authorized:",
-            "steps:\n      - uses: solusquest/agentic-pr-review/" +
-                ".github/actions/agentic-pr-review@" +
-                ActionHostAuthorizationScenario.ActionSha +
-                "\n    outputs:\n      authorized:",
-            StringComparison.Ordinal);
-
-        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
-            Encoding.UTF8.GetBytes(mutated),
-            ActionHostAuthorizationPolicy.TrustedProof,
-            ActionHostAuthorizationScenario.ActionSha,
-            out _,
-            out _));
-    }
-
-    public static TheoryData<string> NonStepActionReferenceShapes
-    {
-        get
-        {
-            var reference = ActionHostAuthorizationPolicy.ActionPath +
-                ActionHostAuthorizationScenario.ActionSha;
-            return new()
-            {
-                "env:\n      uses: " + reference +
-                    "\n    steps:\n      - run: echo decoy",
-                "steps:\n      - run: echo decoy\n        with:\n" +
-                    "          uses: " + reference,
-                "outputs:\n      uses: " + reference +
-                    "\n    steps:\n      - run: echo decoy",
-                "uses: " + reference +
-                    "\n    steps:\n      - run: echo decoy",
-                "steps:\n      - run: echo decoy",
-                "steps:\n      - uses: " + reference +
-                    "\n      - uses: " + reference,
-            };
-        }
-    }
-
-    [Theory]
-    [MemberData(nameof(NonStepActionReferenceShapes))]
-    public void OnlyAnImmediateStepUsesCanBindTheActionSource(string replacement)
-    {
-        var reference = ActionHostAuthorizationPolicy.ActionPath +
-            ActionHostAuthorizationScenario.ActionSha;
-        var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
-            ActionHostAuthorizationScenario.ActionSha);
-        var actualStep = "steps:\n      - uses: " + reference;
-        Assert.Contains(actualStep, canonical, StringComparison.Ordinal);
-        var mutated = canonical.Replace(
-            actualStep,
-            replacement,
-            StringComparison.Ordinal);
-
-        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
-            Encoding.UTF8.GetBytes(mutated),
-            ActionHostAuthorizationPolicy.TrustedProof,
-            ActionHostAuthorizationScenario.ActionSha,
-            out _,
-            out _));
-    }
-
-    public static TheoryData<string> ExtraPrivilegedStepShapes => new()
-    {
-        "\n      - run: echo unexpected",
-        "\n      - uses: actions/checkout@" + new string('1', 40),
-        "\n        with:\n          github-token: ${{ secrets.GITHUB_TOKEN }}",
-        "\n        env:\n          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}",
-    };
-
-    [Theory]
-    [MemberData(nameof(ExtraPrivilegedStepShapes))]
-    public void PrivilegedJobStepSequenceIsClosed(string extraStepShape)
-    {
-        var reference = ActionHostAuthorizationPolicy.ActionPath +
-            ActionHostAuthorizationScenario.ActionSha;
-        var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
-            ActionHostAuthorizationScenario.ActionSha);
-        var actualStep = "steps:\n      - uses: " + reference;
-        var index = canonical.IndexOf(actualStep, StringComparison.Ordinal);
-        Assert.True(index >= 0);
-        var mutated = canonical[..index] + actualStep + extraStepShape +
-            canonical[(index + actualStep.Length)..];
-
-        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
-            Encoding.UTF8.GetBytes(mutated),
-            ActionHostAuthorizationPolicy.TrustedProof,
-            ActionHostAuthorizationScenario.ActionSha,
+            new string('1', 64),
             out _,
             out var failure));
         Assert.Equal(ActionHostTrustedWorkflowFailure.JobInvalid, failure);
     }
 
-    public static TheoryData<string> PrivilegedJobExecutionShapes => new()
+    [Fact]
+    public void ActionSourceMustBindCheckoutReferenceActionAndEnvironment()
     {
-        "strategy:\n      matrix:\n        shard:\n          - first\n          - second",
-        "container: ghcr.io/example/job@sha256:" + new string('1', 64),
-        "services:\n      helper:\n        image: ghcr.io/example/helper@sha256:" +
-            new string('2', 64),
-        "services:\n      credential-consumer:\n" +
-            "        image: ghcr.io/example/credential-consumer@sha256:" +
-            new string('3', 64) +
-            "\n        credentials:\n" +
-            "          username: ${{ github.actor }}\n" +
-            "          password: ${{ secrets.GITHUB_TOKEN }}\n" +
-            "        env:\n" +
-            "          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}",
-    };
-
-    [Theory]
-    [MemberData(nameof(PrivilegedJobExecutionShapes))]
-    public void PrivilegedJobExecutionTopologyIsClosed(string executionShape)
-    {
-        var reference = ActionHostAuthorizationPolicy.ActionPath +
-            ActionHostAuthorizationScenario.ActionSha;
         var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
             ActionHostAuthorizationScenario.ActionSha);
-        var actualStep = "steps:\n      - uses: " + reference;
-        var index = canonical.IndexOf(actualStep, StringComparison.Ordinal);
-        Assert.True(index >= 0);
-        var mutated = canonical[..index] + executionShape + "\n    " +
-            canonical[index..];
 
         Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
-            Encoding.UTF8.GetBytes(mutated),
+            Encoding.UTF8.GetBytes(canonical),
+            ActionHostAuthorizationPolicy.TrustedProof,
+            new string('1', 40),
+            ActionHostAuthorizationScenario.PayloadSha,
+            out _,
+            out _));
+    }
+
+    [Fact]
+    public void ObsoleteOneStepWorkflowIsRejected()
+    {
+        var source = Encoding.UTF8.GetBytes("""
+            name: R4 trusted proof
+            on: {}
+            permissions: {}
+            jobs: {}
+            """);
+
+        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
+            source,
             ActionHostAuthorizationPolicy.TrustedProof,
             ActionHostAuthorizationScenario.ActionSha,
+            ActionHostAuthorizationScenario.PayloadSha,
             out _,
-            out var failure));
-        Assert.Equal(ActionHostTrustedWorkflowFailure.JobInvalid, failure);
+            out _));
     }
 
     [Fact]
     public void CrLfCanonicalWorkflowIsAccepted()
     {
         var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
-            ActionHostAuthorizationScenario.ActionSha)
+                ActionHostAuthorizationScenario.ActionSha)
             .Replace("\n", "\r\n", StringComparison.Ordinal);
 
         Assert.True(ActionHostTrustedWorkflowPolicy.TryValidate(
             Encoding.UTF8.GetBytes(canonical),
             ActionHostAuthorizationPolicy.TrustedProof,
             ActionHostAuthorizationScenario.ActionSha,
+            ActionHostAuthorizationScenario.PayloadSha,
             out _,
             out var failure), failure.ToString());
     }
@@ -294,6 +177,7 @@ public sealed class ActionHostAuthorizationPolicyTests
             Encoding.UTF8.GetBytes(mutated),
             ActionHostAuthorizationPolicy.TrustedProof,
             ActionHostAuthorizationScenario.ActionSha,
+            ActionHostAuthorizationScenario.PayloadSha,
             out _,
             out _));
     }

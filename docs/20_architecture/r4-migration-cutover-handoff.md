@@ -1,6 +1,6 @@
 # R4 migration cutover handoff
 
-Status: W13 and E1 are closed at commit `2337e8ae9d3ca0db88f8a38f36c2f17e46a868fc`, tree `17bbdc8e1cb6591112a7c871ffba9108ecf3680f`, as recorded on issue [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175). E2 issue [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179) consumes that durable identity and adds the final-tree Linux x64 Native AOT gate.
+Status: W13 and E1 are closed at commit `2337e8ae9d3ca0db88f8a38f36c2f17e46a868fc`, tree `17bbdc8e1cb6591112a7c871ffba9108ecf3680f`, as recorded on issue [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175). E2 issue [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179) closed the final-tree Linux x64 Native AOT gate. R4-E2P issue [#216](https://github.com/SolusQuest/agentic-pr-review/issues/216) owns the private trusted payload and supplemental receipt required before E3 [#180](https://github.com/SolusQuest/agentic-pr-review/issues/180).
 
 ## Current implementation boundary
 
@@ -71,7 +71,17 @@ The AOT publish treats every warning as an error except the two exact `IL3058` d
 
 Runtime CI invokes the exact AOT command twice in fresh proof roots and requires the two `APR_R4_E2_RECEIPT` lines to be byte-identical. Each bounded public-safe receipt binds the recorded W13 base commit/tree, exact clean-source commit/tree, Action metadata, checked wrapper bundle, launch source identity, wrapper discriminator, native executable, both managed inputs, the managed-architecture audit, build pair, warning policy, E1 normalized evidence, closed source inventory, replacement record, base inventory, canary table, and receipt contract.
 
-Merge alone does not complete E2. After maintainer merge, the exact merge commit must pass the `push` Runtime CI run. Both AOT invocations in that run must produce the same canonical receipt. That complete receipt, merge SHA, run URL, invocation count, and passed result are then recorded in a durable public-safe comment on #179 and read back before #179 closes. E3 [#180](https://github.com/SolusQuest/agentic-pr-review/issues/180) may consume only that recorded receipt; later movement of `main` does not rebind the closed E2 proof.
+Merge alone does not complete E2. After maintainer merge, the exact merge commit must pass the `push` Runtime CI run. Both AOT invocations in that run must produce the same canonical receipt. That complete receipt, merge SHA, run URL, invocation count, and passed result are then recorded in a durable public-safe comment on #179 and read back before #179 closes. R4-E2P [#216](https://github.com/SolusQuest/agentic-pr-review/issues/216) consumes that immutable receipt; later movement of `main` does not rebind the closed E2 proof.
+
+## E2P trusted payload supplemental receipt
+
+R4-E2P freezes the single final E3 topology in the compiled Runtime validator and adds the private proof payload `AgenticPrReview.Runtime.ActionHostTrustedProofPayload`. The payload retains production GitHub authorization, exact-object snapshot, encrypted Actions artifact state, transaction/recovery, sticky and inline publication, and system-time owners. Only the DeepSeek transport is replaced by a deterministic in-process handler. The payload has private proof kind `apr-r4-e2p-trusted-proof-payload-v1` and role `r4-e2p`; the wrapper and payload launch discriminators remain exactly `r4-w2`.
+
+`runtime/scripts/verify-r4-trusted-proof-payload.sh` builds two native `linux-x64` executables from the same exact source. The production payload retains its default production GitHub/state/publisher composition and is executed only through exact fail-before-network framing/entrypoint smoke. The separate proof-only `AgenticPrReview.Runtime.ActionHostTrustedProofVerifier` invokes the actual payload Host stream overload, deterministic provider, proof-control service, and stale coordinator under Native AOT with verifier-owned synthetic outer dependencies. The verifier's managed graph must consume byte-identical payload and Runtime assemblies to the production build. The script audits separate warning/architecture identities, executes the complete provider-secret-free synthetic route, and emits one canonical `APR_R4_E2P_RECEIPT`. A separate parallel Runtime CI job invokes it twice in fresh roots on `ubuntu-24.04` and requires byte-identical receipt lines.
+
+The receipt separately binds production native/managed identity and `production_payload_smoke=passed`, verifier native/managed identity and bounded evidence with `synthetic_native_aot_route=passed`, their shared managed payload/Runtime identities, and `standalone_default_github=not_executed_e4_owned`. Shared fields retain the exact source commit/tree, immutable #179 receipt anchor, Action metadata and bundle, build pair, final topology and public resolver, deterministic provider, proof control/stale coordinator, trusted policy, preparation contract, toolchain, warning policies, and receipt schema. #180 consumes and prepares only the production payload; it neither builds nor invokes the verifier. #181 owns the first separately authorized successful execution of the exact standalone production payload through its default composition against real GitHub.
+
+The final receipt cannot be checked into the commit it identifies. Merge therefore does not complete R4-E2P: the exact merge-SHA `push` Runtime CI must produce two identical receipts, and the canonical JSON bytes plus their SHA-256 must be recorded and read back on #216. E3 [#180](https://github.com/SolusQuest/agentic-pr-review/issues/180) alone copies those exact bytes to `runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt.json` in its control root. Its workflow checks out that exact control root and the separate #216 payload source root, then runs `prepare-r4-trusted-proof-payload.sh`; preparation never fetches an issue comment, mutable branch, release, artifact, or network receipt. The dependency chain is `#179 -> #216 -> #180 -> #181`.
 
 ## Validation
 
@@ -84,6 +94,8 @@ npm run runtime:integration
 dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj --configuration Release --nologo
 bash runtime/scripts/verify-action-host.sh framework
 bash runtime/scripts/verify-action-host.sh aot
+bash runtime/scripts/verify-r4-trusted-proof-payload.sh
+bash runtime/scripts/verify-r4-trusted-proof-payload.sh
 ```
 
 The Linux framework verifier is authoritative on the exact PR head and again on the exact merged `main` commit. Pull-request and push validation remain synthetic and provider-secret-free.

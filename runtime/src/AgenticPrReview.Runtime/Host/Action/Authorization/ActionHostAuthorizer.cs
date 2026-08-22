@@ -157,6 +157,7 @@ internal sealed class ActionHostAuthorizer
                     source.Bytes,
                     _policy,
                     launch.ActionSourceSha,
+                    launch.PayloadSha256,
                     out var workflowEvidence))
             {
                 return RejectGitHubOr(

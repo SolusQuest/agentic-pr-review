@@ -22,6 +22,7 @@ internal sealed class ActionHostAuthorizationScenario
     internal const string RepositoryShortName = "agentic-pr-review";
     internal static readonly string WorkflowSha = new('a', 40);
     internal static readonly string ActionSha = new('b', 40);
+    internal static readonly string PayloadSha = new('f', 64);
     internal static readonly string TriggerSha = new('c', 40);
     internal static readonly string BaseSha = new('d', 40);
     internal static readonly string HeadSha = new('e', 40);
@@ -200,7 +201,7 @@ internal sealed class ActionHostAuthorizationScenario
                 "@refs/heads/main",
             WorkflowSha,
             ActionSha,
-            new string('f', 64),
+            PayloadSha,
             "r4-h2-tests",
             cancellation,
             "C:/runner/bridge.sock",
@@ -208,55 +209,8 @@ internal sealed class ActionHostAuthorizationScenario
         return launch!;
     }
 
-    internal static string ValidWorkflow(string actionSha) => $$$"""
-        name: R4 trusted proof
-        on:
-          workflow_run:
-            workflows:
-              - CI
-            types:
-              - completed
-          workflow_dispatch:
-            inputs:
-              pr-number:
-                description: Pull request number
-                required: true
-                type: number
-        permissions: {}
-        concurrency:
-          group: agentic-pr-review-r4-${{ github.repository_id }}-pr-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr-number }}
-          cancel-in-progress: false
-        jobs:
-          authorization-preflight:
-            permissions: {}
-            runs-on: ubuntu-latest
-            outputs:
-              authorized: ${{ steps.authorization.outputs.authorized }}
-            steps:
-              - id: authorization
-                run: |
-                  echo "authorized=false" >> "$GITHUB_OUTPUT"
-          workflow-run-review:
-            needs: authorization-preflight
-            if: ${{ github.event_name == 'workflow_run' && needs.authorization-preflight.outputs.authorized == 'true' }}
-            permissions:
-              actions: write
-              contents: read
-              pull-requests: write
-            runs-on: ubuntu-latest
-            steps:
-              - uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@{{{actionSha}}}
-          workflow-dispatch-review:
-            needs: authorization-preflight
-            if: ${{ github.event_name == 'workflow_dispatch' && needs.authorization-preflight.outputs.authorized == 'true' }}
-            permissions:
-              actions: write
-              contents: read
-              pull-requests: write
-            runs-on: ubuntu-latest
-            steps:
-              - uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@{{{actionSha}}}
-        """;
+    internal static string ValidWorkflow(string actionSha) =>
+        ActionHostTrustedWorkflowContract.Render(actionSha, PayloadSha);
 
     private static byte[] WorkflowDispatchEventJson(
         ActionHostGitHubActorFact actor) => Encoding.UTF8.GetBytes($$"""

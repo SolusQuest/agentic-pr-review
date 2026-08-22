@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   runtime:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
         with:
@@ -71,6 +71,46 @@ jobs:
           test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-first.receipt")" -eq 1
           test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-second.receipt")" -eq 1
           cmp "$RUNNER_TEMP/r4-e2-aot-first.receipt" "$RUNNER_TEMP/r4-e2-aot-second.receipt"
+
+  trusted-proof-payload:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install E2P Native AOT and network-audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang strace zlib1g-dev
+
+      - name: Set up exact R4 E2P .NET SDK
+        uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-dotnet
+        with:
+          dotnet-version: 10.0.109
+
+      - name: R4 E2P first clean production and verifier Native AOT build
+        run: bash runtime/scripts/verify-r4-trusted-proof-payload.sh > "$RUNNER_TEMP/r4-e2p-first.log"
+
+      - name: R4 E2P second clean production and verifier Native AOT build
+        run: bash runtime/scripts/verify-r4-trusted-proof-payload.sh > "$RUNNER_TEMP/r4-e2p-second.log"
+
+      - name: R4 E2P supplemental receipts are byte-identical
+        run: |
+          grep '^APR_R4_E2P_RECEIPT ' "$RUNNER_TEMP/r4-e2p-first.log" > "$RUNNER_TEMP/r4-e2p-first.receipt"
+          grep '^APR_R4_E2P_RECEIPT ' "$RUNNER_TEMP/r4-e2p-second.log" > "$RUNNER_TEMP/r4-e2p-second.receipt"
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-first.receipt")" -eq 1
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-second.receipt")" -eq 1
+          cmp "$RUNNER_TEMP/r4-e2p-first.receipt" "$RUNNER_TEMP/r4-e2p-second.receipt"
 
   integration:
     runs-on: ubuntu-latest

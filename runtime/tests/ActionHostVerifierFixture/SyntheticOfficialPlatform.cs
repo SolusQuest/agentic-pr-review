@@ -43,6 +43,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private readonly string evidenceRoot;
     private Task? pump;
     private string activeMode = "sticky";
+    private string activeScenarioRoot;
+    private string activePayloadSha256 = new('f', 64);
     private int inFlight;
     private string pendingName = "";
     private DateTimeOffset pendingExpiry;
@@ -51,6 +53,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private SyntheticOfficialPlatform(string evidenceRoot, int port)
     {
         this.evidenceRoot = evidenceRoot;
+        activeScenarioRoot = evidenceRoot;
         BaseUrl = $"http://127.0.0.1:{port}";
         listener.Prefixes.Add(BaseUrl + "/");
     }
@@ -59,11 +62,16 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
     internal int InFlight => Volatile.Read(ref inFlight);
 
-    internal void BeginScenario(string mode)
+    internal void BeginScenario(
+        string mode,
+        string scenarioRoot,
+        string payloadSha256)
     {
         lock (gate)
         {
             activeMode = mode;
+            activeScenarioRoot = scenarioRoot;
+            activePayloadSha256 = payloadSha256;
         }
     }
 
@@ -411,6 +419,15 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         var path = context.Request.Url!.AbsolutePath;
         var prefix = "/repos/" + FrameworkCanaries.Repository +
             "/actions/artifacts";
+        var attemptPrefix = "/repos/" + FrameworkCanaries.Repository +
+            "/actions/runs/";
+        if (!path.StartsWith(prefix, StringComparison.Ordinal) &&
+            !path.StartsWith(attemptPrefix, StringComparison.Ordinal))
+        {
+            await ForwardGitHubAsync(context).ConfigureAwait(false);
+            return;
+        }
+
         if (context.Request.HttpMethod == "GET" && path == prefix)
         {
             var name = context.Request.QueryString["name"] ?? "";
@@ -572,8 +589,6 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             return;
         }
 
-        var attemptPrefix = "/repos/" + FrameworkCanaries.Repository +
-            "/actions/runs/";
         if (context.Request.HttpMethod == "GET" &&
             path.StartsWith(attemptPrefix, StringComparison.Ordinal) &&
             TryRunAttempt(path[attemptPrefix.Length..], out var runId,
@@ -588,6 +603,79 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
         await WriteJsonAsync(context.Response, HttpStatusCode.NotFound, "{}")
             .ConfigureAwait(false);
+    }
+
+    private async Task ForwardGitHubAsync(HttpListenerContext context)
+    {
+        string scenarioRoot;
+        string payloadSha256;
+        lock (gate)
+        {
+            scenarioRoot = activeScenarioRoot;
+            payloadSha256 = activePayloadSha256;
+        }
+
+        using var handler = new FrameworkGitHubHandler(
+            scenarioRoot,
+            payloadSha256);
+        using var invoker = new HttpMessageInvoker(handler);
+        using var request = new HttpRequestMessage(
+            new HttpMethod(context.Request.HttpMethod),
+            new Uri("https://api.github.com" +
+                context.Request.Url!.PathAndQuery));
+        foreach (var key in context.Request.Headers.AllKeys)
+        {
+            var values = key is null
+                ? null
+                : context.Request.Headers.GetValues(key);
+            if (key is not null && values is not null &&
+                !request.Headers.TryAddWithoutValidation(
+                    key,
+                    values))
+            {
+                request.Content ??= new ByteArrayContent([]);
+                request.Content.Headers.TryAddWithoutValidation(
+                    key,
+                    values);
+            }
+        }
+
+        if (context.Request.HasEntityBody)
+        {
+            request.Content = new ByteArrayContent(
+                await ReadBytesAsync(context.Request).ConfigureAwait(false));
+            if (!string.IsNullOrEmpty(context.Request.ContentType))
+            {
+                request.Content.Headers.TryAddWithoutValidation(
+                    "Content-Type",
+                    context.Request.ContentType);
+            }
+        }
+
+        using var response = await invoker.SendAsync(
+            request,
+            shutdown.Token).ConfigureAwait(false);
+        context.Response.StatusCode = (int)response.StatusCode;
+        if (response.StatusCode != HttpStatusCode.NoContent &&
+            response.Content is not null)
+        {
+            var bytes = await response.Content.ReadAsByteArrayAsync(
+                shutdown.Token).ConfigureAwait(false);
+            context.Response.ContentLength64 = bytes.Length;
+            if (response.Content.Headers.ContentType is not null)
+            {
+                context.Response.ContentType =
+                    response.Content.Headers.ContentType.ToString();
+            }
+
+            if (bytes.Length > 0)
+            {
+                await context.Response.OutputStream.WriteAsync(bytes)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        context.Response.Close();
     }
 
     private static JsonObject MetadataDocument(
