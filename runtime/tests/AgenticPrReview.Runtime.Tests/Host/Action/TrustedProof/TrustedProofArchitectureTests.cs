@@ -214,14 +214,52 @@ public sealed class TrustedProofArchitectureTests
                 ".github",
                 "agentic-pr-review",
                 "trusted-proof.json")));
-        Assert.False(File.Exists(Path.Join(
+        const string receiptRelative =
+            "runtime/tests/fixtures/action-host/trusted-proof/" +
+            "trusted-proof-payload-receipt.json";
+        var receiptBytes = File.ReadAllBytes(Path.Join(root, receiptRelative));
+        Assert.NotEmpty(receiptBytes);
+        Assert.Equal((byte)0x0a, receiptBytes[^1]);
+        Assert.DoesNotContain((byte)0x0d, receiptBytes);
+        AssertDigest(
             root,
-            "runtime",
-            "tests",
-            "fixtures",
-            "action-host",
-            "trusted-proof",
-            "trusted-proof-payload-receipt.json")));
+            receiptRelative,
+            "9b95a87e5f40d7b506e25426e3905aaa" +
+            "f0510ad28d79c8a7ca3737a3952a7b34");
+        var receiptLineBytes = Encoding.UTF8.GetBytes(
+                "APR_R4_E2P_RECEIPT ")
+            .Concat(receiptBytes)
+            .ToArray();
+        Assert.Equal(
+            "3fa55211baa43da955a2eb083b2188a1f" +
+            "de193e6684cb129ec99f5f35374ad49",
+            Convert.ToHexString(SHA256.HashData(receiptLineBytes))
+                .ToLowerInvariant());
+        using var receiptDocument = JsonDocument.Parse(receiptBytes);
+        var receipt = receiptDocument.RootElement;
+        Assert.Equal(
+            "5b5769753653bb3fd3e68cf8b7bb88a1bd350613",
+            receipt.GetProperty("source_commit").GetString());
+        Assert.Equal(
+            "5b5769753653bb3fd3e68cf8b7bb88a1bd350613",
+            receipt.GetProperty("action_source_sha").GetString());
+        Assert.Equal(
+            "97af2b7b0160e333862e74e5e421b2e8" +
+            "02f3962d1bb6405c909301971a0130fc",
+            receipt.GetProperty("payload_sha256").GetString());
+        using var receiptContract = JsonDocument.Parse(File.ReadAllBytes(
+            Path.Join(
+                root,
+                "runtime/tests/fixtures/action-host/trusted-proof-payload/" +
+                "aot/receipt-contract.json")));
+        Assert.Equal(
+            receiptContract.RootElement.GetProperty("ordered_fields")
+                .EnumerateArray()
+                .Select(value => value.GetString())
+                .ToArray(),
+            receipt.EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray());
 
         using var immutableDocument = JsonDocument.Parse(File.ReadAllBytes(
             Path.Join(
