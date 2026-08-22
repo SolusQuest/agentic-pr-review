@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -17,6 +18,18 @@ const publicSchema = JSON.parse(
 );
 const validateHost = ajv.compile(hostSchema);
 const validatePublic = ajv.compile(publicSchema);
+const stateFamilies = [
+  'locator_root',
+  'lineage_head',
+  'candidate',
+  'publication_intent',
+  'acceptance',
+  'publication_failure',
+  'abandonment',
+  'reset',
+  'expiry_transition',
+  'cleanup',
+];
 
 function reject(code) {
   throw new Error(`APR_R4_E3_EVIDENCE_INVALID ${code}`);
@@ -36,6 +49,52 @@ function comparePositiveIds(left, right) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function commentIdFromUrl(value) {
+  return /^https:\/\/github\.com\/SolusQuest\/agentic-pr-review\/pull\/[1-9][0-9]*#issuecomment-([1-9][0-9]*)$/u.exec(
+    value,
+  )?.[1];
+}
+
+function isEmptyInventory(state) {
+  return stateFamilies.every((family) => state.families[family].length === 0);
+}
+
+function manifestBytes(manifest) {
+  return JSON.stringify({
+    kind: manifest.kind,
+    repository_id: manifest.repository_id,
+    repository: manifest.repository,
+    pr_number: manifest.pr_number,
+    fixture_head_sha: manifest.fixture_head_sha,
+    operation_id: manifest.operation_id,
+    workflow_sha: manifest.workflow_sha,
+    action_source_sha: manifest.action_source_sha,
+    payload_sha256: manifest.payload_sha256,
+  });
+}
+
+function exactProofComment(record, kind, run) {
+  return (
+    record.kind === kind &&
+    record.body_sha256 === record.readback_body_sha256 &&
+    record.producing_run_id === run.run_id &&
+    record.producing_run_attempt === run.run_attempt
+  );
+}
+
+function exactArtifact(records, physicalId, objectClass, objectIdentity) {
+  return records.some(
+    (record) =>
+      record.physical_artifact_id === physicalId &&
+      record.object_class === objectClass &&
+      record.object_identity === objectIdentity,
+  );
+}
+
 export function assertPublicSafeEvidence(value) {
   if (!validatePublic(value)) reject('public-schema');
   const serialized = JSON.stringify(value);
@@ -43,6 +102,7 @@ export function assertPublicSafeEvidence(value) {
     'artifact_id',
     'artifact_name',
     'artifact_digest',
+    'object_identity',
     'candidate',
     'acceptance_receipt',
     'predecessor',
@@ -62,76 +122,276 @@ export function assertPublicSafeEvidence(value) {
 
 export function projectTrustedProofEvidence(input) {
   if (!validateHost(input)) reject('host-schema');
-  const { identities, fixture, runs, observation, product, state, cleanup, canaries } = input;
+  const {
+    identities,
+    fixture,
+    authorization,
+    protected_environment: environment,
+    proof_control: proofControl,
+    runs,
+    observation,
+    product,
+    state,
+    cleanup,
+    canaries,
+  } = input;
+
   if (
     runs.bootstrap.run_id === runs.continuation.run_id ||
+    runs.bootstrap.workflow_sha !== identities.workflow_sha ||
+    runs.continuation.workflow_sha !== identities.workflow_sha ||
     runs.bootstrap.reviewed_head_sha !== identities.normal_head_sha ||
     runs.continuation.reviewed_head_sha !== identities.normal_head_sha ||
     runs.bootstrap.concurrency_group !== runs.continuation.concurrency_group ||
     observation.equal_evaluated_group !== true ||
     !(
+      runs.bootstrap.protected_job_started_at < runs.bootstrap.barrier_ready_at &&
       runs.bootstrap.barrier_ready_at <= runs.continuation.created_at &&
       runs.continuation.created_at <= observation.observed_at &&
-      observation.observed_at < runs.bootstrap.completed_at &&
+      observation.observed_at < proofControl.normal.barrier_released_at &&
+      proofControl.normal.barrier_released_at < runs.bootstrap.completed_at &&
       runs.bootstrap.completed_at < runs.continuation.protected_job_started_at &&
       runs.continuation.protected_job_started_at < runs.continuation.completed_at
     )
   ) {
     reject('serialization');
   }
+
   if (
-    new Set([
-      identities.reviewed_base_sha,
-      identities.normal_head_sha,
-      identities.stale_admitted_head_sha,
-      identities.stale_advanced_head_sha,
-    ]).size !== 4 ||
+    identities.reviewed_base_sha !== identities.workflow_sha ||
+    fixture.normal_parent_sha !== identities.reviewed_base_sha ||
+    fixture.stale_initial_parent_sha !== identities.reviewed_base_sha ||
+    fixture.stale_advanced_parent_sha !== identities.stale_admitted_head_sha ||
     fixture.normal_operation_id === fixture.stale_operation_id ||
-    fixture.normal_pr_number === fixture.stale_pr_number ||
-    product.bootstrap.accepted_head_sha !== identities.normal_head_sha ||
-    product.continuation.accepted_head_sha !== identities.normal_head_sha ||
-    product.bootstrap.sticky_comment_id !== product.continuation.sticky_comment_id ||
-    product.continuation.predecessor_acceptance_receipt_id !==
-      product.bootstrap.acceptance_receipt_id ||
-    !product.bootstrap.sticky_comment_url.includes(`/pull/${fixture.normal_pr_number}#`) ||
-    !product.bootstrap.sticky_marker.endsWith(`head_sha=${identities.normal_head_sha} -->`)
+    fixture.normal_pr_number === fixture.stale_pr_number
   ) {
-    reject('fixture-product-lineage');
+    reject('fixture-commit-graph');
   }
-  const createdIds = state.created.map(({ artifact_id }) => artifact_id);
-  const createdNames = state.created.map(({ artifact_name }) => artifact_name);
-  const createdDigests = state.created.map(({ artifact_digest }) => artifact_digest);
+
+  const manifest = authorization.manifest;
+  const manifestSha256 = sha256(manifestBytes(manifest));
+  const staleManifest = authorization.stale_manifest;
+  const staleManifestSha256 = sha256(manifestBytes(staleManifest));
+  const approvedSecrets = [
+    'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
+    'AGENTIC_PR_REVIEW_STATE_KEY',
+    'DEEPSEEK_API_KEY',
+  ];
+  if (
+    manifestSha256 !== authorization.manifest_sha256 ||
+    manifestSha256 !== authorization.repository_variable_readback_sha256 ||
+    manifest.repository_id !== identities.repository_id ||
+    manifest.repository !== identities.repository ||
+    manifest.pr_number !== fixture.normal_pr_number ||
+    manifest.fixture_head_sha !== identities.normal_head_sha ||
+    manifest.operation_id !== fixture.normal_operation_id ||
+    manifest.workflow_sha !== identities.workflow_sha ||
+    manifest.action_source_sha !== identities.action_source_sha ||
+    manifest.payload_sha256 !== identities.payload_sha256 ||
+    authorization.read_back_at > authorization.first_privileged_job_started_at ||
+    authorization.first_privileged_job_started_at !== runs.bootstrap.protected_job_started_at ||
+    staleManifestSha256 !== authorization.stale_manifest_sha256 ||
+    staleManifestSha256 !== authorization.stale_repository_variable_readback_sha256 ||
+    staleManifest.repository_id !== identities.repository_id ||
+    staleManifest.repository !== identities.repository ||
+    staleManifest.pr_number !== fixture.stale_pr_number ||
+    staleManifest.fixture_head_sha !== identities.stale_admitted_head_sha ||
+    staleManifest.operation_id !== fixture.stale_operation_id ||
+    staleManifest.workflow_sha !== identities.workflow_sha ||
+    staleManifest.action_source_sha !== identities.action_source_sha ||
+    staleManifest.payload_sha256 !== identities.payload_sha256 ||
+    authorization.stale_read_back_at > authorization.stale_first_privileged_job_started_at ||
+    authorization.stale_first_privileged_job_started_at !==
+      product.stale.authorized_stale_run.protected_job_started_at ||
+    environment.read_back_at > environment.first_privileged_job_started_at ||
+    environment.first_privileged_job_started_at !== runs.bootstrap.protected_job_started_at ||
+    environment.repository !== identities.repository ||
+    JSON.stringify([...environment.secret_names].sort()) !== JSON.stringify(approvedSecrets)
+  ) {
+    reject('authorization-environment');
+  }
+
+  if (
+    !exactProofComment(proofControl.normal.ready, 'ready', runs.bootstrap) ||
+    !exactProofComment(proofControl.normal.release, 'release', runs.bootstrap) ||
+    proofControl.normal.ready.observed_at !== runs.bootstrap.barrier_ready_at ||
+    proofControl.normal.release.observed_at !== proofControl.normal.barrier_released_at ||
+    proofControl.normal.dispatch_verify_completed.bootstrap_run_id !== runs.bootstrap.run_id ||
+    proofControl.normal.dispatch_verify_completed.continuation_run_id !==
+      runs.continuation.run_id ||
+    proofControl.normal.cleanup_receipt.body_sha256 !==
+      proofControl.normal.cleanup_receipt.readback_body_sha256 ||
+    proofControl.stale.cleanup_receipt.body_sha256 !==
+      proofControl.stale.cleanup_receipt.readback_body_sha256
+  ) {
+    reject('proof-control');
+  }
+
+  const bootstrap = product.bootstrap;
+  const continuation = product.continuation;
+  if (
+    bootstrap.accepted_head_sha !== identities.normal_head_sha ||
+    continuation.accepted_head_sha !== identities.normal_head_sha ||
+    bootstrap.sticky_comment_id !== continuation.sticky_comment_id ||
+    bootstrap.sticky_comment_url !== continuation.sticky_comment_url ||
+    commentIdFromUrl(bootstrap.sticky_comment_url) !== bootstrap.sticky_comment_id ||
+    bootstrap.sticky_body_sha256 !== bootstrap.sticky_readback_body_sha256 ||
+    bootstrap.sticky_marker !== bootstrap.sticky_readback_marker ||
+    continuation.sticky_body_sha256 !== continuation.sticky_readback_body_sha256 ||
+    continuation.sticky_marker !== continuation.sticky_readback_marker ||
+    !bootstrap.sticky_marker.includes(`body_sha256=${bootstrap.sticky_body_sha256}`) ||
+    !continuation.sticky_marker.includes(`body_sha256=${continuation.sticky_body_sha256}`) ||
+    !bootstrap.sticky_marker.endsWith(`head_sha=${identities.normal_head_sha} -->`) ||
+    !continuation.sticky_marker.endsWith(`head_sha=${identities.normal_head_sha} -->`) ||
+    continuation.predecessor_acceptance_object_identity !== bootstrap.acceptance_object_identity ||
+    cleanup.terminal_resources.product_sticky.comment_id !== continuation.sticky_comment_id ||
+    cleanup.terminal_resources.product_sticky.comment_url !== continuation.sticky_comment_url ||
+    cleanup.terminal_resources.product_sticky.body_sha256 !== continuation.sticky_body_sha256 ||
+    cleanup.terminal_resources.product_sticky.marker !== continuation.sticky_marker
+  ) {
+    reject('sticky-publication');
+  }
+
+  const stale = product.stale;
+  const staleRun = stale.authorized_stale_run;
+  const followOn = stale.unauthorized_follow_on_run;
+  if (
+    new Set([runs.bootstrap.run_id, runs.continuation.run_id, staleRun.run_id, followOn.run_id])
+      .size !== 4 ||
+    staleRun.workflow_sha !== identities.workflow_sha ||
+    followOn.workflow_sha !== identities.workflow_sha ||
+    staleRun.reviewed_head_sha !== identities.stale_admitted_head_sha ||
+    followOn.reviewed_head_sha !== identities.stale_advanced_head_sha ||
+    !exactProofComment(proofControl.stale.ready, 'stale-ready', staleRun) ||
+    !exactProofComment(proofControl.stale.release, 'stale-release', staleRun) ||
+    proofControl.stale.ready.observed_at !== staleRun.stale_ready_at ||
+    proofControl.stale.release.observed_at !== staleRun.stale_release_at ||
+    proofControl.stale.barrier_released_at !== staleRun.stale_release_at ||
+    !(
+      staleRun.protected_job_started_at < staleRun.stale_ready_at &&
+      staleRun.stale_ready_at < staleRun.head_advanced_at &&
+      staleRun.head_advanced_at <= followOn.created_at &&
+      followOn.created_at < followOn.completed_at &&
+      staleRun.head_advanced_at < staleRun.stale_release_at &&
+      staleRun.stale_release_at < staleRun.provider_completed_at &&
+      staleRun.provider_completed_at < staleRun.host_revalidated_at &&
+      staleRun.host_revalidated_at <= staleRun.completed_at
+    )
+  ) {
+    reject('stale-sequence');
+  }
+
+  const createdIds = state.created.map(({ physical_artifact_id }) => physical_artifact_id);
+  const objectIdentities = state.created.map(({ object_identity }) => object_identity);
   if (
     createdIds.length !== new Set(createdIds).size ||
-    createdNames.length !== new Set(createdNames).size ||
-    createdDigests.length !== new Set(createdDigests).size ||
-    !exactSet(createdIds, cleanup.deleted_state_ids) ||
-    !createdIds.includes(product.bootstrap.candidate_artifact_id) ||
-    !createdIds.includes(product.bootstrap.acceptance_receipt_id) ||
-    !createdIds.includes(product.continuation.candidate_artifact_id) ||
-    !createdIds.includes(product.continuation.acceptance_receipt_id)
+    objectIdentities.length !== new Set(objectIdentities).size ||
+    !exactSet(createdIds, cleanup.deleted_physical_artifact_ids) ||
+    !isEmptyInventory(state.pre_state) ||
+    !isEmptyInventory(state.final_state) ||
+    cleanup.state_key_removed_after_final_readback !== true
   ) {
     reject('state-inventory');
   }
-  const requiredClasses = [
-    'locator-root',
-    'lineage-head',
-    'candidate',
-    'publication-intent',
-    'acceptance',
-    'cleanup',
-    'transaction',
-  ];
+
+  const phaseRuns = new Map([
+    ['bootstrap', runs.bootstrap],
+    ['continuation', runs.continuation],
+    ['stale-setup', staleRun],
+  ]);
   if (
-    !requiredClasses.every((value) =>
-      state.created.some(({ artifact_class }) => artifact_class === value),
-    ) ||
-    state.pre_state.inventory.length !== 0 ||
-    state.final_state.inventory.length !== 0 ||
-    cleanup.state_key_removed_after_final_readback !== true
+    state.created.some((record) => {
+      const owner = phaseRuns.get(record.creation_phase);
+      return (
+        !owner ||
+        record.producing_run_id !== owner.run_id ||
+        record.producing_run_attempt !== owner.run_attempt
+      );
+    })
   ) {
-    reject('state-cleanup');
+    reject('state-producer');
   }
+
+  const staleSetupIds = state.created
+    .filter(({ creation_phase }) => creation_phase === 'stale-setup')
+    .map(({ physical_artifact_id }) => physical_artifact_id);
+  if (!exactSet(staleSetupIds, staleRun.state_setup_physical_artifact_ids)) {
+    reject('stale-state-setup');
+  }
+
+  if (
+    !exactArtifact(
+      state.created,
+      bootstrap.candidate_physical_artifact_id,
+      'candidate',
+      bootstrap.candidate_object_identity,
+    ) ||
+    !exactArtifact(
+      state.created,
+      bootstrap.acceptance_physical_artifact_id,
+      'acceptance',
+      bootstrap.acceptance_object_identity,
+    ) ||
+    !exactArtifact(
+      state.created,
+      continuation.candidate_physical_artifact_id,
+      'candidate',
+      continuation.candidate_object_identity,
+    ) ||
+    !exactArtifact(
+      state.created,
+      continuation.acceptance_physical_artifact_id,
+      'acceptance',
+      continuation.acceptance_object_identity,
+    )
+  ) {
+    reject('product-state-binding');
+  }
+
+  const predecessorHead = state.created.find(
+    ({ object_class, object_identity }) =>
+      object_class === 'lineage_head' &&
+      object_identity === continuation.lineage_predecessor_identity,
+  );
+  const currentHead = state.created.find(
+    ({ object_class, object_identity }) =>
+      object_class === 'lineage_head' && object_identity === continuation.lineage_current_identity,
+  );
+  const predecessorAcceptance = state.created.find(
+    ({ object_class, object_identity }) =>
+      object_class === 'acceptance' && object_identity === bootstrap.acceptance_object_identity,
+  );
+  const currentAcceptance = state.created.find(
+    ({ object_class, object_identity }) =>
+      object_class === 'acceptance' && object_identity === continuation.acceptance_object_identity,
+  );
+  if (
+    !predecessorHead ||
+    !currentHead ||
+    !predecessorAcceptance ||
+    !currentAcceptance ||
+    predecessorHead.successor_identity !== currentHead.object_identity ||
+    currentHead.predecessor_identity !== predecessorHead.object_identity ||
+    currentHead.epoch !== continuation.lineage_epoch ||
+    currentHead.generation !== continuation.lineage_generation ||
+    predecessorAcceptance.successor_identity !== currentAcceptance.object_identity ||
+    currentAcceptance.predecessor_identity !== predecessorAcceptance.object_identity
+  ) {
+    reject('lineage-binding');
+  }
+
+  for (const objectClass of stateFamilies) {
+    const normalRecords = state.created.filter(
+      (record) => record.object_class === objectClass && record.creation_phase !== 'stale-setup',
+    );
+    if (
+      normalRecords.length > 1 &&
+      new Set(normalRecords.map(({ opaque_name }) => opaque_name)).size !== 1
+    ) {
+      reject('opaque-name-family');
+    }
+  }
+
   const publicEvidence = {
     kind: 'apr-r4-e3-public-safe-evidence-v1',
     identities: {
@@ -165,24 +425,29 @@ export function projectTrustedProofEvidence(input) {
       encrypted_state_record_count: state.created.length,
     },
     publication: {
-      comment_url: product.bootstrap.sticky_comment_url,
-      marker: product.bootstrap.sticky_marker,
+      comment_url: continuation.sticky_comment_url,
+      marker: continuation.sticky_marker,
       reviewed_head_sha: identities.normal_head_sha,
     },
     cleanup: {
       complete: true,
-      final_state_inventory_count: state.final_state.inventory.length,
-      deleted_state_record_count: cleanup.deleted_state_ids.length,
+      final_state_inventory_count: 0,
+      deleted_state_record_count: cleanup.deleted_physical_artifact_ids.length,
       authorization_absent: true,
       operation_created_secrets_absent: true,
       environment_restored: true,
       fixture_branches_absent: true,
       fixture_prs_closed: true,
       all_runs_terminal: true,
-      no_follow_on_runs: true,
+      all_follow_on_runs_terminal: true,
     },
     canaries: {
-      secret_material: canaries.secret_material_absent ? 'absent' : 'present',
+      github: canaries.github_secret_absent ? 'absent' : 'present',
+      actions: canaries.actions_secret_absent ? 'absent' : 'present',
+      provider: canaries.provider_secret_absent ? 'absent' : 'present',
+      current_state: canaries.current_state_secret_absent ? 'absent' : 'present',
+      previous_state: canaries.previous_state_secret_absent ? 'absent' : 'present',
+      unrelated_credentials: canaries.unrelated_credentials_absent ? 'absent' : 'present',
       plaintext_session: canaries.plaintext_session_absent ? 'absent' : 'present',
       provider_content: canaries.provider_content_absent ? 'absent' : 'present',
       tool_data: canaries.tool_data_absent ? 'absent' : 'present',

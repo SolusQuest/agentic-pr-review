@@ -56,10 +56,10 @@ describe('R4 E3 public-safe evidence projection', () => {
     });
     expect(output).toBe(`${JSON.stringify(expectedPublic)}\n`);
     for (const protectedValue of [
-      'candidate-bootstrap',
-      'acceptance-bootstrap',
-      'apr-r4-root',
-      'transaction-continuation',
+      'candidate-bootstrap-physical',
+      'acceptance-bootstrap-physical',
+      'opaque-locator-normal',
+      'lineage-object-v2',
     ]) {
       expect(output).not.toContain(protectedValue);
     }
@@ -101,19 +101,71 @@ describe('R4 E3 public-safe evidence projection', () => {
     [
       'predecessor-mismatch',
       (value: any) =>
-        (value.product.continuation.predecessor_acceptance_receipt_id = 'other-acceptance'),
+        (value.product.continuation.predecessor_acceptance_object_identity = 'other-acceptance'),
     ],
-    ['preexisting-root', (value: any) => value.state.pre_state.inventory.push('existing-root')],
+    [
+      'workflow-base-mismatch',
+      (value: any) => (value.identities.reviewed_base_sha = 'e'.repeat(40)),
+    ],
+    ['normal-parent-mismatch', (value: any) => (value.fixture.normal_parent_sha = 'e'.repeat(40))],
+    [
+      'authorization-digest-mismatch',
+      (value: any) => (value.authorization.manifest_sha256 = 'e'.repeat(64)),
+    ],
+    ['authorization-readback-after-start', (value: any) => (value.authorization.read_back_at = 51)],
+    [
+      'stale-authorization-head-mismatch',
+      (value: any) => (value.authorization.stale_manifest.fixture_head_sha = 'e'.repeat(40)),
+    ],
+    ['environment-secret-omitted', (value: any) => value.protected_environment.secret_names.pop()],
+    [
+      'proof-ready-readback-mismatch',
+      (value: any) => (value.proof_control.normal.ready.readback_body_sha256 = 'e'.repeat(64)),
+    ],
+    [
+      'barrier-release-before-observation',
+      (value: any) => (value.proof_control.normal.barrier_released_at = 199),
+    ],
+    [
+      'preexisting-root',
+      (value: any) => value.state.pre_state.families.locator_root.push('existing-root'),
+    ],
     [
       'incomplete-root-pagination',
       (value: any) => (value.state.pre_state.root_pagination_complete = false),
     ],
-    ['missing-deletion', (value: any) => value.cleanup.deleted_state_ids.pop()],
+    ['missing-deletion', (value: any) => value.cleanup.deleted_physical_artifact_ids.pop()],
     [
       'duplicate-created-id',
-      (value: any) => (value.state.created[1].artifact_id = value.state.created[0].artifact_id),
+      (value: any) =>
+        (value.state.created[1].physical_artifact_id = value.state.created[0].physical_artifact_id),
     ],
-    ['surviving-root', (value: any) => value.state.final_state.inventory.push('state-root')],
+    [
+      'surviving-root',
+      (value: any) => value.state.final_state.families.locator_root.push('state-root'),
+    ],
+    [
+      'nonproduction-transaction-class',
+      (value: any) => (value.state.created[0].object_class = 'transaction'),
+    ],
+    [
+      'lineage-current-mismatch',
+      (value: any) => (value.product.continuation.lineage_current_identity = 'other-lineage'),
+    ],
+    [
+      'stale-release-before-head-advance',
+      (value: any) => (value.product.stale.authorized_stale_run.stale_release_at = 860),
+    ],
+    [
+      'stale-follow-on-authorized',
+      (value: any) => (value.product.stale.unauthorized_follow_on_run.authorization_matches = true),
+    ],
+    [
+      'bootstrap-marker-retained',
+      (value: any) =>
+        (value.cleanup.terminal_resources.product_sticky.marker =
+          value.product.bootstrap.sticky_marker),
+    ],
     [
       'key-removed-before-readback',
       (value: any) => (value.cleanup.state_key_removed_after_final_readback = false),
@@ -125,15 +177,34 @@ describe('R4 E3 public-safe evidence projection', () => {
     ],
     [
       'follow-on-still-running',
-      (value: any) => (value.cleanup.terminal_resources.workflow_runs.all_terminal = false),
+      (value: any) =>
+        (value.cleanup.terminal_resources.workflow_runs.all_follow_on_runs_terminal = false),
     ],
-    ['stale-state-mutation', (value: any) => (value.product.stale.state_mutated = true)],
-    ['stale-sticky-mutation', (value: any) => (value.product.stale.sticky_mutated = true)],
+    [
+      'stale-state-mutation',
+      (value: any) =>
+        (value.product.stale.authorized_stale_run.candidate_persisted_after_revalidation = true),
+    ],
+    [
+      'stale-sticky-mutation',
+      (value: any) =>
+        (value.product.stale.authorized_stale_run.sticky_mutated_after_revalidation = true),
+    ],
+    ['provider-canary-missing', (value: any) => (value.canaries.provider_secret_absent = false)],
     ['unreviewed-narrative', (value: any) => (value.product.narrative = 'run 9002 accepted state')],
   ])('rejects host evidence mutation: %s', (_name, mutate) => {
     const candidate = clone(hostTemplate);
     mutate(candidate);
     expect(() => projectTrustedProofEvidence(candidate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+  });
+
+  test('admits repeated exact-name families and repeated digests with unique physical IDs', () => {
+    const candidate = clone(hostTemplate);
+    expect(candidate.state.created[2].opaque_name).toBe(candidate.state.created[6].opaque_name);
+    expect(candidate.state.created[2].artifact_digest).toBe(
+      candidate.state.created[6].artifact_digest,
+    );
+    expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });
 
   test.each([

@@ -130,4 +130,13 @@ describe('R4 E3 trusted proof policy', () => {
     );
     expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
   });
+
+  test('rejects a proof-scoped github.token route injected into an existing workflow', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.appendFileSync(
+      path.join(workflowsRoot, 'ci.yml'),
+      `  alternate-proof-control:\n    runs-on: ubuntu-24.04\n    permissions:\n      pull-requests: write\n    steps:\n      - env:\n          GITHUB_TOKEN: \${{ github.token }}\n          R4_TRUSTED_PROOF_AUTHORIZATION: \${{ vars.R4_TRUSTED_PROOF_AUTHORIZATION }}\n        run: echo blocked\n`,
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-proof-route-owner/u);
+  });
 });

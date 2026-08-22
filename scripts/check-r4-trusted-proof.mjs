@@ -36,32 +36,32 @@ const fixtureInventory = [
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    'd0971e9458d6383c7b77a23a083db00c50cff929c1d7efe0671d8bb560ddfa6e',
+    '344e1f6a4c7ab1ea446c3343102a4a92cf06e5a16b7bfab64a5d9cfd59771e9f',
   ],
-  ['cleanup-contract.json', '507a5bc42524cff403f465485bc76beb0bb87f1cbe73cc9fdb3d25e84634a61b'],
-  ['fixture-pr-contract.json', '04300f82f29b8f14aec1d9458f44d09680abd90faceef08aafad50b48ced3912'],
+  ['cleanup-contract.json', '2458949e77631d001360dbe9405cc5566360a9fd6e0557a916e61f1fdf5c4459'],
+  ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '9bf41bbfd780b868ffd098b2417fac83757026c8bca5bf7710eed2d12dd583c7',
+    '1223884566151e03d94ebf54df0a83e9dbde1caa2ad733f0d1fbfb2f56efa4e5',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
-    '8b1cf642f8a44354f177fcf7a6c6b37a61e10e71733f5e2d284450a42a5624f7',
+    'cfd733c71312ddd9e4d6539f512eef2c3c631b6d785e8c610d16f90aeac3f47d',
   ],
   [
     'templates/host-restricted-evidence.json',
-    '4b2404a4fcb8281915fc6045aba3fe1ae33d12ef3e0342179b2c1baaee92e21e',
+    '6797d23f4960bc91f6dea7a7a9787278b8272c4c4ccc544585ef76942ee404dc',
   ],
   [
     'templates/public-safe-evidence.json',
-    '4e99054dfda705c366de6a816db47535cfab9f5fff1fad6b8deace0a5daaf890',
+    'd80500fdee7f553933345222101477b284e8ce8e0f34507a1de18ab455bb48e7',
   ],
   [
     'traces/normal-two-run.json',
-    'ba3c06f2cbd169b474465c4382b3402d04e1aef6b02752a5c5a40ebc2bfee060',
+    '8a55feff519e885c33101b08ef011edd1a97b1caee2f284b4963df342ad6b94e',
   ],
-  ['traces/stale-head.json', '3b73595e98ff08c10c5f43bec36a31d7d23c22e5bc93d15d8f6d31b0a78f77ae'],
+  ['traces/stale-head.json', 'd2057b969ad255ef0773029ea78376845ab14bfbdd754d3e92d6af3cb121c47d'],
   ['trusted-proof-payload-receipt.json', receiptJsonSha256],
 ]);
 
@@ -207,7 +207,10 @@ function validateFixtureContracts(fixtureRoot) {
     cleanup.pre_state?.required !== 'empty' ||
     cleanup.pre_state?.complete_pagination !== true ||
     cleanup.operation_state?.reject_unowned_addition !== true ||
-    cleanup.public_projection_gate !== 'exact-empty-final-state-and-complete-resource-readback' ||
+    cleanup.pre_state?.families?.length !== 10 ||
+    cleanup.operation_state?.creation_phases?.includes('stale-setup') !== true ||
+    cleanup.public_projection_gate !==
+      'exact-empty-final-state-complete-resource-readback-and-proof-control-cleanup' ||
     cleanup.invalid_terminal_states?.includes('delete-or-retain') !== true
   ) {
     fail('cleanup-contract');
@@ -218,9 +221,13 @@ function validateFixtureContracts(fixtureRoot) {
     normalTrace.run_one?.run_attempt < 1 ||
     normalTrace.run_two?.run_attempt < 1 ||
     !(
+      normalTrace.workflow_sha === normalTrace.reviewed_base_sha &&
+      normalTrace.normal_parent_sha === normalTrace.reviewed_base_sha &&
+      normalTrace.run_one.protected_job_started_at < normalTrace.run_one.barrier_ready_at &&
       normalTrace.run_one.barrier_ready_at <= normalTrace.run_two.created_at &&
       normalTrace.run_two.created_at <= normalTrace.observation.observed_at &&
-      normalTrace.observation.observed_at < normalTrace.run_one.completed_at &&
+      normalTrace.observation.observed_at < normalTrace.run_one.barrier_released_at &&
+      normalTrace.run_one.barrier_released_at < normalTrace.run_one.completed_at &&
       normalTrace.run_one.completed_at < normalTrace.run_two.protected_job_started_at
     ) ||
     normalTrace.run_two.privileged_job_allocated_at_observation !== false ||
@@ -232,14 +239,21 @@ function validateFixtureContracts(fixtureRoot) {
   const staleTrace = documents.get('traces/stale-head.json').value;
   if (
     staleTrace.operation_id !== '7'.repeat(64) ||
+    staleTrace.workflow_sha !== staleTrace.reviewed_base_sha ||
+    staleTrace.admitted_parent_sha !== staleTrace.reviewed_base_sha ||
     staleTrace.advanced_parent_sha !== staleTrace.admitted_head_sha ||
     staleTrace.changed_paths?.length !== 1 ||
     staleTrace.changed_paths[0] !== 'proof/apr178-path-canary.txt' ||
     staleTrace.advanced_content_sha256 !== staleCanarySha256 ||
-    staleTrace.old_authorization_matches !== false ||
-    staleTrace.privileged_job_allocated !== false ||
-    staleTrace.state_mutated !== false ||
-    staleTrace.follow_on_status !== 'completed-inert'
+    staleTrace.authorized_stale_run?.privileged_job_allocated !== true ||
+    staleTrace.authorized_stale_run?.provider_constructed !== true ||
+    staleTrace.authorized_stale_run?.value_free_signal_count !== 1 ||
+    staleTrace.authorized_stale_run?.host_exact_head_result !== 'stale-head-rejected' ||
+    staleTrace.unauthorized_follow_on_run?.old_authorization_matches !== false ||
+    staleTrace.unauthorized_follow_on_run?.privileged_job_allocated !== false ||
+    staleTrace.unauthorized_follow_on_run?.state_mutated !== false ||
+    staleTrace.unauthorized_follow_on_run?.status !== 'completed-inert' ||
+    staleTrace.all_follow_on_runs_terminal !== true
   ) {
     fail('stale-trace');
   }
@@ -266,9 +280,24 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     .sort();
   const observed = [];
   let allSource = '';
+  const proofAnchors = [
+    'R4_TRUSTED_PROOF_AUTHORIZATION',
+    'environment: r4-trusted-proof',
+    'prepare-r4-trusted-proof-payload.sh',
+    'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+    'AGENTIC_PR_REVIEW_PREPARED_',
+    'AGENTIC_PR_REVIEW_ACTION_SOURCE_SHA',
+    'AGENTIC_PR_REVIEW_PAYLOAD_BUILD_DISCRIMINATOR',
+    'barrier hold',
+    'barrier verify-completed',
+    'barrier cleanup',
+  ];
   for (const name of workflowFiles) {
     const { source, value } = parseWorkflow(path.join(workflowsRoot, name));
     allSource += `${source}\n`;
+    if (name !== 'r4-trusted-proof.yml' && proofAnchors.some((anchor) => source.includes(anchor))) {
+      fail('repository-proof-route-owner');
+    }
     const expressions = [];
     collectSecretExpressions(value, expressions);
     for (const expression of expressions) observed.push(`${name}\0${expression}`);

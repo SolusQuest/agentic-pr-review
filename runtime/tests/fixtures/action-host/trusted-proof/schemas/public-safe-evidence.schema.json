@@ -128,7 +128,7 @@
         "fixture_branches_absent",
         "fixture_prs_closed",
         "all_runs_terminal",
-        "no_follow_on_runs"
+        "all_follow_on_runs_terminal"
       ],
       "properties": {
         "complete": { "const": true },
@@ -140,21 +140,31 @@
         "fixture_branches_absent": { "const": true },
         "fixture_prs_closed": { "const": true },
         "all_runs_terminal": { "const": true },
-        "no_follow_on_runs": { "const": true }
+        "all_follow_on_runs_terminal": { "const": true }
       }
     },
     "canaries": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "secret_material",
+        "github",
+        "actions",
+        "provider",
+        "current_state",
+        "previous_state",
+        "unrelated_credentials",
         "plaintext_session",
         "provider_content",
         "tool_data",
         "permission_set"
       ],
       "properties": {
-        "secret_material": { "const": "absent" },
+        "github": { "const": "absent" },
+        "actions": { "const": "absent" },
+        "provider": { "const": "absent" },
+        "current_state": { "const": "absent" },
+        "previous_state": { "const": "absent" },
+        "unrelated_credentials": { "const": "absent" },
         "plaintext_session": { "const": "absent" },
         "provider_content": { "const": "absent" },
         "tool_data": { "const": "absent" },
