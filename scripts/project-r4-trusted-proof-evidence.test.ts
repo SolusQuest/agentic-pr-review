@@ -112,12 +112,27 @@ describe('R4 E3 public-safe evidence projection', () => {
       'authorization-digest-mismatch',
       (value: any) => (value.authorization.manifest_sha256 = 'e'.repeat(64)),
     ],
-    ['authorization-readback-after-start', (value: any) => (value.authorization.read_back_at = 51)],
+    [
+      'authorization-readback-after-start',
+      (value: any) => (value.authorization.normal_read_back_at = 51),
+    ],
+    [
+      'authorization-manifest-discriminator',
+      (value: any) => (value.authorization.manifest.kind = 'apr-r4-e3-authorization-manifest-v1'),
+    ],
+    [
+      'authorization-not-removed-between-phases',
+      (value: any) => (value.authorization.normal_absent_read_back_at = 721),
+    ],
     [
       'stale-authorization-head-mismatch',
       (value: any) => (value.authorization.stale_manifest.fixture_head_sha = 'e'.repeat(40)),
     ],
     ['environment-secret-omitted', (value: any) => value.protected_environment.secret_names.pop()],
+    [
+      'environment-snapshot-unverified',
+      (value: any) => (value.protected_environment.snapshot_sha256 = 'e'.repeat(64)),
+    ],
     [
       'proof-ready-readback-mismatch',
       (value: any) => (value.proof_control.normal.ready.readback_body_sha256 = 'e'.repeat(64)),
@@ -128,11 +143,11 @@ describe('R4 E3 public-safe evidence projection', () => {
     ],
     [
       'preexisting-root',
-      (value: any) => value.state.pre_state.families.locator_root.push('existing-root'),
+      (value: any) => value.state.pre_state.repository_root.locator_root.push('existing-root'),
     ],
     [
       'incomplete-root-pagination',
-      (value: any) => (value.state.pre_state.root_pagination_complete = false),
+      (value: any) => (value.state.pre_state.repository_root.pagination_complete = false),
     ],
     ['missing-deletion', (value: any) => value.cleanup.deleted_physical_artifact_ids.pop()],
     [
@@ -142,16 +157,56 @@ describe('R4 E3 public-safe evidence projection', () => {
     ],
     [
       'surviving-root',
-      (value: any) => value.state.final_state.families.locator_root.push('state-root'),
+      (value: any) => value.state.final_state.repository_root.locator_root.push('state-root'),
     ],
     [
       'nonproduction-transaction-class',
       (value: any) => (value.state.created[0].object_class = 'transaction'),
     ],
     [
-      'lineage-current-mismatch',
-      (value: any) => (value.product.continuation.lineage_current_identity = 'other-lineage'),
+      'lineage-head-mismatch',
+      (value: any) => (value.product.continuation.lineage_head_object_identity = 'other-lineage'),
     ],
+    [
+      'base-scope-mismatch',
+      (value: any) => (value.product.continuation.base_scope_digest = 'e'.repeat(64)),
+    ],
+    [
+      'candidate-to-candidate-predecessor',
+      (value: any) => {
+        const record = value.state.created.find(
+          ({ physical_artifact_id }: any) =>
+            physical_artifact_id === 'candidate-continuation-physical',
+        );
+        record.predecessor_identity = 'candidate-object-v1';
+      },
+    ],
+    [
+      'intent-to-intent-predecessor',
+      (value: any) => {
+        const record = value.state.created.find(
+          ({ physical_artifact_id }: any) =>
+            physical_artifact_id === 'intent-continuation-physical',
+        );
+        record.predecessor_identity = 'intent-object-v1';
+      },
+    ],
+    [
+      'fabricated-second-normal-lineage-head',
+      (value: any) => {
+        const record = clone(
+          value.state.created.find(
+            ({ physical_artifact_id }: any) =>
+              physical_artifact_id === 'lineage-head-bootstrap-physical',
+          ),
+        );
+        record.physical_artifact_id = 'lineage-head-fabricated-physical';
+        record.object_identity = 'lineage-object-fabricated';
+        value.state.created.push(record);
+        value.cleanup.deleted_physical_artifact_ids.push(record.physical_artifact_id);
+      },
+    ],
+    ['stale-scope-not-enumerated', (value: any) => delete value.state.final_state.stale],
     [
       'stale-release-before-head-advance',
       (value: any) => (value.product.stale.authorized_stale_run.stale_release_at = 860),
@@ -159,6 +214,34 @@ describe('R4 E3 public-safe evidence projection', () => {
     [
       'stale-follow-on-authorized',
       (value: any) => (value.product.stale.unauthorized_follow_on_run.authorization_matches = true),
+    ],
+    [
+      'stale-follow-on-completes-before-owner',
+      (value: any) => {
+        value.product.stale.unauthorized_follow_on_run.workflow_started_at = 900;
+        value.product.stale.unauthorized_follow_on_run.completed_at = 910;
+      },
+    ],
+    [
+      'proof-marker-arbitrary-digest',
+      (value: any) => {
+        value.proof_control.normal.ready.body_sha256 = 'e'.repeat(64);
+        value.proof_control.normal.ready.readback_body_sha256 = 'e'.repeat(64);
+      },
+    ],
+    [
+      'proof-marker-coordinate-mismatch',
+      (value: any) => (value.proof_control.normal.ready.pr_number = '1002'),
+    ],
+    [
+      'proof-release-predecessor-mismatch',
+      (value: any) => (value.proof_control.normal.release.predecessor_comment_id = '8101'),
+    ],
+    [
+      'proof-cleanup-comment-mismatch',
+      (value: any) =>
+        (value.proof_control.normal.cleanup_receipt.receipt.comment_outcomes[1].comment_id =
+          '8102'),
     ],
     [
       'bootstrap-marker-retained',
@@ -190,7 +273,24 @@ describe('R4 E3 public-safe evidence projection', () => {
       (value: any) =>
         (value.product.stale.authorized_stale_run.sticky_mutated_after_revalidation = true),
     ],
-    ['provider-canary-missing', (value: any) => (value.canaries.provider_secret_absent = false)],
+    [
+      'provider-canary-missing',
+      (value: any) => {
+        const provider = value.canaries.credential_by_sink.find(
+          ({ sink }: any) => sink === 'provider',
+        );
+        provider.observed_present = false;
+      },
+    ],
+    [
+      'canary-sink-credential-mismatch',
+      (value: any) => {
+        const provider = value.canaries.credential_by_sink.find(
+          ({ sink }: any) => sink === 'provider',
+        );
+        provider.authorized_credential = 'AGENTIC_PR_REVIEW_STATE_KEY';
+      },
+    ],
     ['unreviewed-narrative', (value: any) => (value.product.narrative = 'run 9002 accepted state')],
   ])('rejects host evidence mutation: %s', (_name, mutate) => {
     const candidate = clone(hostTemplate);
@@ -200,10 +300,11 @@ describe('R4 E3 public-safe evidence projection', () => {
 
   test('admits repeated exact-name families and repeated digests with unique physical IDs', () => {
     const candidate = clone(hostTemplate);
-    expect(candidate.state.created[2].opaque_name).toBe(candidate.state.created[6].opaque_name);
-    expect(candidate.state.created[2].artifact_digest).toBe(
-      candidate.state.created[6].artifact_digest,
+    const candidates = candidate.state.created.filter(
+      ({ object_class }: any) => object_class === 'candidate',
     );
+    expect(candidates[0].opaque_name).toBe(candidates[1].opaque_name);
+    expect(candidates[0].artifact_digest).toBe(candidates[1].artifact_digest);
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });
 

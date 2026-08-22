@@ -91,19 +91,29 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "pre_enable_absent_read_back_at",
         "manifest",
         "manifest_sha256",
         "repository_variable_name",
         "repository_variable_readback_sha256",
-        "read_back_at",
-        "first_privileged_job_started_at",
+        "normal_set_at",
+        "normal_read_back_at",
+        "normal_first_privileged_job_started_at",
+        "normal_pair_terminal_at",
+        "normal_removed_at",
+        "normal_absent_read_back_at",
         "stale_manifest",
         "stale_manifest_sha256",
         "stale_repository_variable_readback_sha256",
+        "stale_set_at",
         "stale_read_back_at",
-        "stale_first_privileged_job_started_at"
+        "stale_first_privileged_job_started_at",
+        "stale_operation_terminal_at",
+        "stale_removed_at",
+        "post_operation_absent_read_back_at"
       ],
       "properties": {
+        "pre_enable_absent_read_back_at": { "$ref": "#/$defs/timestamp" },
         "manifest": {
           "type": "object",
           "additionalProperties": false,
@@ -119,7 +129,7 @@
             "payload_sha256"
           ],
           "properties": {
-            "kind": { "const": "apr-r4-e3-authorization-manifest-v1" },
+            "kind": { "const": "apr-r4-e2p-authorization-manifest-v1" },
             "repository_id": { "$ref": "#/$defs/positiveId" },
             "repository": { "const": "SolusQuest/agentic-pr-review" },
             "pr_number": { "$ref": "#/$defs/positiveId" },
@@ -137,13 +147,21 @@
         "manifest_sha256": { "$ref": "#/$defs/sha256" },
         "repository_variable_name": { "const": "R4_TRUSTED_PROOF_AUTHORIZATION" },
         "repository_variable_readback_sha256": { "$ref": "#/$defs/sha256" },
-        "read_back_at": { "$ref": "#/$defs/timestamp" },
-        "first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" },
+        "normal_set_at": { "$ref": "#/$defs/timestamp" },
+        "normal_read_back_at": { "$ref": "#/$defs/timestamp" },
+        "normal_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" },
+        "normal_pair_terminal_at": { "$ref": "#/$defs/timestamp" },
+        "normal_removed_at": { "$ref": "#/$defs/timestamp" },
+        "normal_absent_read_back_at": { "$ref": "#/$defs/timestamp" },
         "stale_manifest": { "$ref": "#/$defs/authorizationManifest" },
         "stale_manifest_sha256": { "$ref": "#/$defs/sha256" },
         "stale_repository_variable_readback_sha256": { "$ref": "#/$defs/sha256" },
+        "stale_set_at": { "$ref": "#/$defs/timestamp" },
         "stale_read_back_at": { "$ref": "#/$defs/timestamp" },
-        "stale_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" }
+        "stale_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" },
+        "stale_operation_terminal_at": { "$ref": "#/$defs/timestamp" },
+        "stale_removed_at": { "$ref": "#/$defs/timestamp" },
+        "post_operation_absent_read_back_at": { "$ref": "#/$defs/timestamp" }
       }
     },
     "protected_environment": {
@@ -160,8 +178,13 @@
         "administrator_bypass",
         "secret_names",
         "token_permissions",
-        "read_back_at",
-        "first_privileged_job_started_at"
+        "snapshot_sha256",
+        "normal_snapshot_readback_sha256",
+        "normal_read_back_at",
+        "normal_first_privileged_job_started_at",
+        "stale_snapshot_readback_sha256",
+        "stale_read_back_at",
+        "stale_first_privileged_job_started_at"
       ],
       "properties": {
         "repository": { "const": "SolusQuest/agentic-pr-review" },
@@ -195,8 +218,13 @@
             "pull_requests": { "const": "write" }
           }
         },
-        "read_back_at": { "$ref": "#/$defs/timestamp" },
-        "first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" }
+        "snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "normal_snapshot_readback_sha256": { "$ref": "#/$defs/sha256" },
+        "normal_read_back_at": { "$ref": "#/$defs/timestamp" },
+        "normal_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" },
+        "stale_snapshot_readback_sha256": { "$ref": "#/$defs/sha256" },
+        "stale_read_back_at": { "$ref": "#/$defs/timestamp" },
+        "stale_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" }
       }
     },
     "proof_control": {
@@ -347,12 +375,13 @@
             "acceptance_physical_artifact_id",
             "acceptance_object_identity",
             "predecessor_acceptance_object_identity",
+            "acceptance_receipt",
             "accepted_head_sha",
             "acceptance_after_sticky_readback",
             "prior_only",
             "verified_ahead",
-            "lineage_predecessor_identity",
-            "lineage_current_identity",
+            "base_scope_digest",
+            "lineage_head_object_identity",
             "lineage_epoch",
             "lineage_generation"
           ],
@@ -370,12 +399,13 @@
             "acceptance_physical_artifact_id": { "$ref": "#/$defs/artifactId" },
             "acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
             "predecessor_acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
+            "acceptance_receipt": { "$ref": "#/$defs/acceptanceReceipt" },
             "accepted_head_sha": { "$ref": "#/$defs/sha40" },
             "acceptance_after_sticky_readback": { "const": true },
             "prior_only": { "const": true },
             "verified_ahead": { "const": true },
-            "lineage_predecessor_identity": { "$ref": "#/$defs/objectIdentity" },
-            "lineage_current_identity": { "$ref": "#/$defs/objectIdentity" },
+            "base_scope_digest": { "$ref": "#/$defs/sha256" },
+            "lineage_head_object_identity": { "$ref": "#/$defs/objectIdentity" },
             "lineage_epoch": { "$ref": "#/$defs/nonnegativeInteger" },
             "lineage_generation": { "type": "integer", "minimum": 2, "maximum": 2147483647 }
           }
@@ -445,6 +475,8 @@
                 "workflow_sha",
                 "reviewed_head_sha",
                 "created_at",
+                "pending_observation",
+                "workflow_started_at",
                 "completed_at",
                 "authorization_matches",
                 "privileged_job_allocated",
@@ -462,6 +494,17 @@
                 "workflow_sha": { "$ref": "#/$defs/sha40" },
                 "reviewed_head_sha": { "$ref": "#/$defs/sha40" },
                 "created_at": { "$ref": "#/$defs/timestamp" },
+                "pending_observation": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["observed_at", "status", "job_allocated"],
+                  "properties": {
+                    "observed_at": { "$ref": "#/$defs/timestamp" },
+                    "status": { "enum": ["queued", "pending"] },
+                    "job_allocated": { "const": false }
+                  }
+                },
+                "workflow_started_at": { "$ref": "#/$defs/timestamp" },
                 "completed_at": { "$ref": "#/$defs/timestamp" },
                 "authorization_matches": { "const": false },
                 "privileged_job_allocated": { "const": false },
@@ -481,9 +524,19 @@
     "state": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pre_state", "created", "final_state"],
+      "required": ["scopes", "pre_state", "created", "final_state"],
       "properties": {
-        "pre_state": { "$ref": "#/$defs/emptyState" },
+        "scopes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository_root", "normal", "stale"],
+          "properties": {
+            "repository_root": { "$ref": "#/$defs/repositoryScope" },
+            "normal": { "$ref": "#/$defs/lineageScope" },
+            "stale": { "$ref": "#/$defs/lineageScope" }
+          }
+        },
+        "pre_state": { "$ref": "#/$defs/emptyScopedState" },
         "created": {
           "type": "array",
           "minItems": 1,
@@ -491,7 +544,7 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/stateArtifact" }
         },
-        "final_state": { "$ref": "#/$defs/emptyState" }
+        "final_state": { "$ref": "#/$defs/emptyScopedState" }
       }
     },
     "cleanup": {
@@ -593,10 +646,17 @@
             "host_restricted_evidence": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["terminal_class", "approved_destination"],
+              "required": [
+                "terminal_class",
+                "approved_destination_kind",
+                "approved_destination_identity_sha256"
+              ],
               "properties": {
                 "terminal_class": { "const": "restricted-retained" },
-                "approved_destination": { "const": true }
+                "approved_destination_kind": {
+                  "const": "maintainer-approved-host-restricted-location"
+                },
+                "approved_destination_identity_sha256": { "$ref": "#/$defs/sha256" }
               }
             }
           }
@@ -607,24 +667,20 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "github_secret_absent",
-        "actions_secret_absent",
-        "provider_secret_absent",
-        "current_state_secret_absent",
-        "previous_state_secret_absent",
-        "unrelated_credentials_absent",
+        "credential_by_sink",
         "plaintext_session_absent",
         "provider_content_absent",
         "tool_data_absent",
         "permission_set_exact"
       ],
       "properties": {
-        "github_secret_absent": { "const": true },
-        "actions_secret_absent": { "const": true },
-        "provider_secret_absent": { "const": true },
-        "current_state_secret_absent": { "const": true },
-        "previous_state_secret_absent": { "const": true },
-        "unrelated_credentials_absent": { "const": true },
+        "credential_by_sink": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/credentialSinkObservation" }
+        },
         "plaintext_session_absent": { "const": true },
         "provider_content_absent": { "const": true },
         "tool_data_absent": { "const": true },
@@ -665,7 +721,7 @@
         "payload_sha256"
       ],
       "properties": {
-        "kind": { "const": "apr-r4-e3-authorization-manifest-v1" },
+        "kind": { "const": "apr-r4-e2p-authorization-manifest-v1" },
         "repository_id": { "$ref": "#/$defs/positiveId" },
         "repository": { "const": "SolusQuest/agentic-pr-review" },
         "pr_number": { "$ref": "#/$defs/positiveId" },
@@ -682,47 +738,116 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "contract",
         "kind",
         "comment_id",
+        "operation_id",
+        "repository_id",
+        "repository",
+        "pr_number",
+        "fixture_head_sha",
+        "workflow_sha",
+        "action_source_sha",
+        "payload_sha256",
         "body_sha256",
         "readback_body_sha256",
         "producing_run_id",
         "producing_run_attempt",
+        "predecessor_comment_id",
         "actor_id",
         "actor_permission",
         "observed_at"
       ],
       "properties": {
+        "contract": { "const": "apr-r4-e2p-proof-control-v1" },
         "kind": { "enum": ["ready", "release", "stale-ready", "stale-release"] },
         "comment_id": { "$ref": "#/$defs/positiveId" },
+        "operation_id": { "$ref": "#/$defs/sha256" },
+        "repository_id": { "$ref": "#/$defs/positiveId" },
+        "repository": { "const": "SolusQuest/agentic-pr-review" },
+        "pr_number": { "$ref": "#/$defs/positiveId" },
+        "fixture_head_sha": { "$ref": "#/$defs/sha40" },
+        "workflow_sha": { "$ref": "#/$defs/sha40" },
+        "action_source_sha": {
+          "const": "5b5769753653bb3fd3e68cf8b7bb88a1bd350613"
+        },
+        "payload_sha256": {
+          "const": "97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc"
+        },
         "body_sha256": { "$ref": "#/$defs/sha256" },
         "readback_body_sha256": { "$ref": "#/$defs/sha256" },
         "producing_run_id": { "$ref": "#/$defs/positiveId" },
         "producing_run_attempt": { "$ref": "#/$defs/runAttempt" },
+        "predecessor_comment_id": {
+          "oneOf": [{ "$ref": "#/$defs/positiveId" }, { "type": "null" }]
+        },
         "actor_id": { "$ref": "#/$defs/positiveId" },
-        "actor_permission": { "enum": ["write", "admin"] },
+        "actor_permission": {
+          "oneOf": [{ "enum": ["write", "admin"] }, { "type": "null" }]
+        },
         "observed_at": { "$ref": "#/$defs/timestamp" }
       }
     },
     "dispatchVerification": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bootstrap_run_id", "continuation_run_id", "complete"],
+      "required": [
+        "operation_id",
+        "ready_comment_id",
+        "release_comment_id",
+        "bootstrap_run_id",
+        "continuation_run_id",
+        "observed_at",
+        "complete"
+      ],
       "properties": {
+        "operation_id": { "$ref": "#/$defs/sha256" },
+        "ready_comment_id": { "$ref": "#/$defs/positiveId" },
+        "release_comment_id": { "$ref": "#/$defs/positiveId" },
         "bootstrap_run_id": { "$ref": "#/$defs/positiveId" },
         "continuation_run_id": { "$ref": "#/$defs/positiveId" },
+        "observed_at": { "$ref": "#/$defs/timestamp" },
         "complete": { "const": true }
       }
     },
     "cleanupReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "body_sha256", "readback_body_sha256", "complete"],
+      "required": ["receipt", "final_absence_read_back_at"],
       "properties": {
-        "kind": { "const": "apr-r4-e2p-proof-control-cleanup-v1" },
-        "body_sha256": { "$ref": "#/$defs/sha256" },
-        "readback_body_sha256": { "$ref": "#/$defs/sha256" },
-        "complete": { "const": true }
+        "receipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "operation_id", "comment_outcomes", "result"],
+          "properties": {
+            "kind": { "const": "apr-r4-e2p-proof-control-cleanup-v1" },
+            "operation_id": { "$ref": "#/$defs/sha256" },
+            "comment_outcomes": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["comment_id", "outcome"],
+                "properties": {
+                  "comment_id": { "$ref": "#/$defs/positiveId" },
+                  "outcome": {
+                    "enum": [
+                      "committed",
+                      "missing-idempotent",
+                      "reconciled-committed",
+                      "reconciled-missing"
+                    ]
+                  }
+                }
+              }
+            },
+            "result": { "const": "passed" }
+          }
+        },
+        "final_absence_read_back_at": { "$ref": "#/$defs/timestamp" }
       }
     },
     "publicationTransition": {
@@ -741,8 +866,13 @@
         "candidate_object_identity",
         "acceptance_physical_artifact_id",
         "acceptance_object_identity",
+        "acceptance_receipt",
         "accepted_head_sha",
-        "acceptance_after_sticky_readback"
+        "acceptance_after_sticky_readback",
+        "base_scope_digest",
+        "lineage_head_object_identity",
+        "lineage_epoch",
+        "lineage_generation"
       ],
       "properties": {
         "summary": { "const": "Trusted proof complete." },
@@ -757,8 +887,41 @@
         "candidate_object_identity": { "$ref": "#/$defs/objectIdentity" },
         "acceptance_physical_artifact_id": { "$ref": "#/$defs/artifactId" },
         "acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
+        "acceptance_receipt": { "$ref": "#/$defs/acceptanceReceipt" },
         "accepted_head_sha": { "$ref": "#/$defs/sha40" },
-        "acceptance_after_sticky_readback": { "const": true }
+        "acceptance_after_sticky_readback": { "const": true },
+        "base_scope_digest": { "$ref": "#/$defs/sha256" },
+        "lineage_head_object_identity": { "$ref": "#/$defs/objectIdentity" },
+        "lineage_epoch": { "$ref": "#/$defs/nonnegativeInteger" },
+        "lineage_generation": { "const": 1 }
+      }
+    },
+    "acceptanceReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acceptance_object_identity",
+        "candidate_object_identity",
+        "predecessor_acceptance_object_identity",
+        "publication_comment_id",
+        "publication_comment_url",
+        "publication_body_sha256",
+        "accepted_generation"
+      ],
+      "properties": {
+        "acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
+        "candidate_object_identity": { "$ref": "#/$defs/objectIdentity" },
+        "predecessor_acceptance_object_identity": {
+          "oneOf": [{ "$ref": "#/$defs/objectIdentity" }, { "type": "null" }]
+        },
+        "publication_comment_id": { "$ref": "#/$defs/positiveId" },
+        "publication_comment_url": { "$ref": "#/$defs/commentUrl" },
+        "publication_body_sha256": { "$ref": "#/$defs/sha256" },
+        "accepted_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
       }
     },
     "stateArtifact": {
@@ -766,6 +929,8 @@
       "additionalProperties": false,
       "required": [
         "physical_artifact_id",
+        "scope",
+        "scope_digest",
         "opaque_name",
         "artifact_digest",
         "object_class",
@@ -780,6 +945,8 @@
       ],
       "properties": {
         "physical_artifact_id": { "$ref": "#/$defs/artifactId" },
+        "scope": { "enum": ["repository_root", "normal", "stale"] },
+        "scope_digest": { "$ref": "#/$defs/sha256" },
         "opaque_name": { "type": "string", "minLength": 1, "maxLength": 256 },
         "artifact_digest": { "$ref": "#/$defs/sha256" },
         "object_class": {
@@ -810,13 +977,78 @@
         "creation_phase": { "enum": ["bootstrap", "continuation", "stale-setup"] }
       }
     },
-    "emptyState": {
+    "repositoryScope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root_pagination_complete", "scoped_pagination_complete", "families"],
+      "required": ["scope_digest", "locator_root_opaque_name"],
       "properties": {
-        "root_pagination_complete": { "const": true },
-        "scoped_pagination_complete": { "const": true },
+        "scope_digest": { "$ref": "#/$defs/sha256" },
+        "locator_root_opaque_name": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "lineageScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_scope_digest", "family_opaque_names"],
+      "properties": {
+        "base_scope_digest": { "$ref": "#/$defs/sha256" },
+        "family_opaque_names": { "$ref": "#/$defs/familyOpaqueNames" }
+      }
+    },
+    "familyOpaqueNames": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "locator_root",
+        "lineage_head",
+        "candidate",
+        "publication_intent",
+        "acceptance",
+        "publication_failure",
+        "abandonment",
+        "reset",
+        "expiry_transition",
+        "cleanup"
+      ],
+      "properties": {
+        "locator_root": { "$ref": "#/$defs/opaqueName" },
+        "lineage_head": { "$ref": "#/$defs/opaqueName" },
+        "candidate": { "$ref": "#/$defs/opaqueName" },
+        "publication_intent": { "$ref": "#/$defs/opaqueName" },
+        "acceptance": { "$ref": "#/$defs/opaqueName" },
+        "publication_failure": { "$ref": "#/$defs/opaqueName" },
+        "abandonment": { "$ref": "#/$defs/opaqueName" },
+        "reset": { "$ref": "#/$defs/opaqueName" },
+        "expiry_transition": { "$ref": "#/$defs/opaqueName" },
+        "cleanup": { "$ref": "#/$defs/opaqueName" }
+      }
+    },
+    "emptyScopedState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_root", "normal", "stale"],
+      "properties": {
+        "repository_root": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope_digest", "pagination_complete", "locator_root"],
+          "properties": {
+            "scope_digest": { "$ref": "#/$defs/sha256" },
+            "pagination_complete": { "const": true },
+            "locator_root": { "$ref": "#/$defs/emptyArray" }
+          }
+        },
+        "normal": { "$ref": "#/$defs/emptyLineageInventory" },
+        "stale": { "$ref": "#/$defs/emptyLineageInventory" }
+      }
+    },
+    "emptyLineageInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_scope_digest", "pagination_complete", "families"],
+      "properties": {
+        "base_scope_digest": { "$ref": "#/$defs/sha256" },
+        "pagination_complete": { "const": true },
         "families": {
           "type": "object",
           "additionalProperties": false,
@@ -845,6 +1077,43 @@
             "cleanup": { "$ref": "#/$defs/emptyArray" }
           }
         }
+      }
+    },
+    "opaqueName": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "credentialSinkObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sink",
+        "authorized_credential",
+        "expected_present",
+        "observed_present",
+        "forbidden_credentials_absent"
+      ],
+      "properties": {
+        "sink": {
+          "enum": [
+            "github",
+            "actions",
+            "provider",
+            "current_state",
+            "previous_state",
+            "unrelated_credentials"
+          ]
+        },
+        "authorized_credential": {
+          "enum": [
+            "github-token:pull-requests-write",
+            "github-token:actions-write",
+            "DEEPSEEK_API_KEY",
+            "AGENTIC_PR_REVIEW_STATE_KEY",
+            "AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY",
+            "none"
+          ]
+        },
+        "expected_present": { "type": "boolean" },
+        "observed_present": { "type": "boolean" },
+        "forbidden_credentials_absent": { "const": true }
       }
     },
     "emptyArray": { "type": "array", "maxItems": 0 },

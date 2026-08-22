@@ -36,14 +36,14 @@ const fixtureInventory = [
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    '344e1f6a4c7ab1ea446c3343102a4a92cf06e5a16b7bfab64a5d9cfd59771e9f',
+    'c8c48f0e1e171b4de4946e4c3467a00d742a10923ed507740a2582173b4c631a',
   ],
-  ['cleanup-contract.json', '2458949e77631d001360dbe9405cc5566360a9fd6e0557a916e61f1fdf5c4459'],
+  ['cleanup-contract.json', '92a370d70a83348506efad6b0945779ba453ecece3e89d35d902c3414d34ee6f'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '1223884566151e03d94ebf54df0a83e9dbde1caa2ad733f0d1fbfb2f56efa4e5',
+    '0f6ec11d39ce99e4b6ce30c155d79c420942538cc865e824dbaa9a219bfe4f93',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,7 +51,7 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    '6797d23f4960bc91f6dea7a7a9787278b8272c4c4ccc544585ef76942ee404dc',
+    'dc300386f75b53a036944609a794846adf43ef9fac20ca2c451219094db4110b',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -61,7 +61,7 @@ const fixtureDigests = new Map([
     'traces/normal-two-run.json',
     '8a55feff519e885c33101b08ef011edd1a97b1caee2f284b4963df342ad6b94e',
   ],
-  ['traces/stale-head.json', 'd2057b969ad255ef0773029ea78376845ab14bfbdd754d3e92d6af3cb121c47d'],
+  ['traces/stale-head.json', '6a00d64b85553ad282bccf22861f1817423e88b4f81e8c63d3d4c26fc8230e82'],
   ['trusted-proof-payload-receipt.json', receiptJsonSha256],
 ]);
 
@@ -196,8 +196,14 @@ function validateFixtureContracts(fixtureRoot) {
   if (
     authorization.authorization_variable?.name !== 'R4_TRUSTED_PROOF_AUTHORIZATION' ||
     authorization.authorization_variable?.default !== 'absent' ||
+    authorization.authorization_variable?.manifest_kind !==
+      'apr-r4-e2p-authorization-manifest-v1' ||
+    authorization.authorization_variable?.normal_and_stale_phases_independently_observed !== true ||
     authorization.environment?.name !== 'r4-trusted-proof' ||
     authorization.environment?.must_preexist !== true ||
+    authorization.environment?.normal_and_stale_phases_independently_observed !== true ||
+    authorization.canary_matrix_requires_exact_authorized_credential_per_sink !== true ||
+    authorization.host_restricted_destination_requires_kind_and_identity_sha256 !== true ||
     authorization.live_mutation_owner !== 'issue-181'
   ) {
     fail('authorization-environment-contract');
@@ -206,9 +212,15 @@ function validateFixtureContracts(fixtureRoot) {
   if (
     cleanup.pre_state?.required !== 'empty' ||
     cleanup.pre_state?.complete_pagination !== true ||
+    cleanup.pre_state?.required_scopes?.length !== 3 ||
+    cleanup.pre_state?.scope_digests_must_be_distinct !== true ||
     cleanup.operation_state?.reject_unowned_addition !== true ||
     cleanup.pre_state?.families?.length !== 10 ||
     cleanup.operation_state?.creation_phases?.includes('stale-setup') !== true ||
+    cleanup.operation_state?.record_exact_fields?.includes('scope') !== true ||
+    cleanup.operation_state?.record_exact_fields?.includes('scope_digest') !== true ||
+    cleanup.operation_state?.normal_lineage_head_rule !==
+      'single-initialized-head-reused-across-accepted-generations-unless-reset-or-expiry' ||
     cleanup.public_projection_gate !==
       'exact-empty-final-state-complete-resource-readback-and-proof-control-cleanup' ||
     cleanup.invalid_terminal_states?.includes('delete-or-retain') !== true
@@ -251,6 +263,17 @@ function validateFixtureContracts(fixtureRoot) {
     staleTrace.authorized_stale_run?.host_exact_head_result !== 'stale-head-rejected' ||
     staleTrace.unauthorized_follow_on_run?.old_authorization_matches !== false ||
     staleTrace.unauthorized_follow_on_run?.privileged_job_allocated !== false ||
+    staleTrace.unauthorized_follow_on_run?.pending_observation?.job_allocated !== false ||
+    !(
+      staleTrace.unauthorized_follow_on_run?.created_at <=
+        staleTrace.unauthorized_follow_on_run?.pending_observation?.observed_at &&
+      staleTrace.unauthorized_follow_on_run?.pending_observation?.observed_at <
+        staleTrace.authorized_stale_run?.completed_at &&
+      staleTrace.authorized_stale_run?.completed_at <
+        staleTrace.unauthorized_follow_on_run?.workflow_started_at &&
+      staleTrace.unauthorized_follow_on_run?.workflow_started_at <=
+        staleTrace.unauthorized_follow_on_run?.completed_at
+    ) ||
     staleTrace.unauthorized_follow_on_run?.state_mutated !== false ||
     staleTrace.unauthorized_follow_on_run?.status !== 'completed-inert' ||
     staleTrace.all_follow_on_runs_terminal !== true

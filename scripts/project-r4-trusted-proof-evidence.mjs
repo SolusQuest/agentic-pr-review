@@ -60,7 +60,16 @@ function commentIdFromUrl(value) {
 }
 
 function isEmptyInventory(state) {
-  return stateFamilies.every((family) => state.families[family].length === 0);
+  return (
+    state.repository_root.pagination_complete === true &&
+    state.repository_root.locator_root.length === 0 &&
+    state.normal.pagination_complete === true &&
+    state.stale.pagination_complete === true &&
+    stateFamilies.every(
+      (family) =>
+        state.normal.families[family].length === 0 && state.stale.families[family].length === 0,
+    )
+  );
 }
 
 function manifestBytes(manifest) {
@@ -77,9 +86,59 @@ function manifestBytes(manifest) {
   });
 }
 
-function exactProofComment(record, kind, run) {
+function environmentSnapshotBytes(environment) {
+  return JSON.stringify({
+    repository: environment.repository,
+    name: environment.name,
+    exists: environment.exists,
+    deployment_branch: environment.deployment_branch,
+    designated_reviewer_id: environment.designated_reviewer_id,
+    reviewer_permission: environment.reviewer_permission,
+    prevent_self_review: environment.prevent_self_review,
+    administrator_bypass: environment.administrator_bypass,
+    secret_names: environment.secret_names,
+    token_permissions: environment.token_permissions,
+  });
+}
+
+function proofCommentPreimage(record) {
+  const field = (name, value) => `\"${name}\":${JSON.stringify(value)}`;
+  const numeric = (name, value) => `\"${name}\":${value}`;
+  return `{${[
+    field('contract', record.contract),
+    field('kind', record.kind),
+    field('operation_id', record.operation_id),
+    numeric('repository_id', record.repository_id),
+    field('repository', record.repository),
+    numeric('pr_number', record.pr_number),
+    field('fixture_head_sha', record.fixture_head_sha),
+    field('workflow_sha', record.workflow_sha),
+    field('action_source_sha', record.action_source_sha),
+    field('payload_sha256', record.payload_sha256),
+    numeric('run_id', record.producing_run_id),
+    numeric('run_attempt', record.producing_run_attempt),
+    record.predecessor_comment_id === null
+      ? '\"predecessor_comment_id\":null'
+      : numeric('predecessor_comment_id', record.predecessor_comment_id),
+    field('body_sha256', ''),
+  ].join(',')}}`;
+}
+
+function exactProofComment(record, kind, run, coordinates, predecessorCommentId, permission) {
   return (
     record.kind === kind &&
+    record.operation_id === coordinates.operationId &&
+    record.repository_id === coordinates.repositoryId &&
+    record.repository === coordinates.repository &&
+    record.pr_number === coordinates.prNumber &&
+    record.fixture_head_sha === coordinates.headSha &&
+    record.workflow_sha === coordinates.workflowSha &&
+    record.action_source_sha === coordinates.actionSourceSha &&
+    record.payload_sha256 === coordinates.payloadSha256 &&
+    record.predecessor_comment_id === predecessorCommentId &&
+    record.actor_permission === permission &&
+    record.actor_id === coordinates.reviewerId &&
+    record.body_sha256 === sha256(proofCommentPreimage(record)) &&
     record.body_sha256 === record.readback_body_sha256 &&
     record.producing_run_id === run.run_id &&
     record.producing_run_attempt === run.run_attempt
@@ -92,6 +151,25 @@ function exactArtifact(records, physicalId, objectClass, objectIdentity) {
       record.physical_artifact_id === physicalId &&
       record.object_class === objectClass &&
       record.object_identity === objectIdentity,
+  );
+}
+
+function findArtifact(records, objectClass, objectIdentity) {
+  return records.find(
+    (record) => record.object_class === objectClass && record.object_identity === objectIdentity,
+  );
+}
+
+function exactAcceptanceReceipt(transition, predecessorIdentity) {
+  const receipt = transition.acceptance_receipt;
+  return (
+    receipt.acceptance_object_identity === transition.acceptance_object_identity &&
+    receipt.candidate_object_identity === transition.candidate_object_identity &&
+    receipt.predecessor_acceptance_object_identity === predecessorIdentity &&
+    receipt.publication_comment_id === transition.sticky_comment_id &&
+    receipt.publication_comment_url === transition.sticky_comment_url &&
+    receipt.publication_body_sha256 === transition.sticky_body_sha256 &&
+    receipt.accepted_generation === transition.lineage_generation
   );
 }
 
@@ -177,6 +255,7 @@ export function projectTrustedProofEvidence(input) {
     'AGENTIC_PR_REVIEW_STATE_KEY',
     'DEEPSEEK_API_KEY',
   ];
+  const environmentSha256 = sha256(environmentSnapshotBytes(environment));
   if (
     manifestSha256 !== authorization.manifest_sha256 ||
     manifestSha256 !== authorization.repository_variable_readback_sha256 ||
@@ -188,8 +267,28 @@ export function projectTrustedProofEvidence(input) {
     manifest.workflow_sha !== identities.workflow_sha ||
     manifest.action_source_sha !== identities.action_source_sha ||
     manifest.payload_sha256 !== identities.payload_sha256 ||
-    authorization.read_back_at > authorization.first_privileged_job_started_at ||
-    authorization.first_privileged_job_started_at !== runs.bootstrap.protected_job_started_at ||
+    !(
+      authorization.pre_enable_absent_read_back_at < authorization.normal_set_at &&
+      authorization.normal_set_at <= authorization.normal_read_back_at &&
+      authorization.normal_read_back_at < authorization.normal_first_privileged_job_started_at &&
+      authorization.normal_first_privileged_job_started_at ===
+        runs.bootstrap.protected_job_started_at &&
+      authorization.normal_pair_terminal_at >= runs.continuation.completed_at &&
+      authorization.normal_pair_terminal_at < authorization.normal_removed_at &&
+      authorization.normal_removed_at <= authorization.normal_absent_read_back_at &&
+      authorization.normal_absent_read_back_at < authorization.stale_set_at &&
+      authorization.stale_set_at <= authorization.stale_read_back_at &&
+      authorization.stale_read_back_at < authorization.stale_first_privileged_job_started_at &&
+      authorization.stale_first_privileged_job_started_at ===
+        product.stale.authorized_stale_run.protected_job_started_at &&
+      authorization.stale_operation_terminal_at >=
+        Math.max(
+          product.stale.authorized_stale_run.completed_at,
+          product.stale.unauthorized_follow_on_run.completed_at,
+        ) &&
+      authorization.stale_operation_terminal_at < authorization.stale_removed_at &&
+      authorization.stale_removed_at <= authorization.post_operation_absent_read_back_at
+    ) ||
     staleManifestSha256 !== authorization.stale_manifest_sha256 ||
     staleManifestSha256 !== authorization.stale_repository_variable_readback_sha256 ||
     staleManifest.repository_id !== identities.repository_id ||
@@ -200,29 +299,109 @@ export function projectTrustedProofEvidence(input) {
     staleManifest.workflow_sha !== identities.workflow_sha ||
     staleManifest.action_source_sha !== identities.action_source_sha ||
     staleManifest.payload_sha256 !== identities.payload_sha256 ||
-    authorization.stale_read_back_at > authorization.stale_first_privileged_job_started_at ||
-    authorization.stale_first_privileged_job_started_at !==
+    environmentSha256 !== environment.snapshot_sha256 ||
+    environmentSha256 !== environment.normal_snapshot_readback_sha256 ||
+    environmentSha256 !== environment.stale_snapshot_readback_sha256 ||
+    environment.normal_read_back_at >= environment.normal_first_privileged_job_started_at ||
+    environment.normal_first_privileged_job_started_at !==
+      runs.bootstrap.protected_job_started_at ||
+    environment.stale_read_back_at >= environment.stale_first_privileged_job_started_at ||
+    environment.stale_first_privileged_job_started_at !==
       product.stale.authorized_stale_run.protected_job_started_at ||
-    environment.read_back_at > environment.first_privileged_job_started_at ||
-    environment.first_privileged_job_started_at !== runs.bootstrap.protected_job_started_at ||
     environment.repository !== identities.repository ||
     JSON.stringify([...environment.secret_names].sort()) !== JSON.stringify(approvedSecrets)
   ) {
     reject('authorization-environment');
   }
 
+  const normalCoordinates = {
+    operationId: fixture.normal_operation_id,
+    repositoryId: identities.repository_id,
+    repository: identities.repository,
+    prNumber: fixture.normal_pr_number,
+    headSha: identities.normal_head_sha,
+    workflowSha: identities.workflow_sha,
+    actionSourceSha: identities.action_source_sha,
+    payloadSha256: identities.payload_sha256,
+    reviewerId: environment.designated_reviewer_id,
+  };
+  const staleCoordinates = {
+    ...normalCoordinates,
+    operationId: fixture.stale_operation_id,
+    prNumber: fixture.stale_pr_number,
+    headSha: identities.stale_admitted_head_sha,
+  };
+  const normalCommentIds = [
+    proofControl.normal.ready.comment_id,
+    proofControl.normal.release.comment_id,
+  ];
+  const staleCommentIds = [
+    proofControl.stale.ready.comment_id,
+    proofControl.stale.release.comment_id,
+  ];
   if (
-    !exactProofComment(proofControl.normal.ready, 'ready', runs.bootstrap) ||
-    !exactProofComment(proofControl.normal.release, 'release', runs.bootstrap) ||
+    !exactProofComment(
+      proofControl.normal.ready,
+      'ready',
+      runs.bootstrap,
+      normalCoordinates,
+      null,
+      null,
+    ) ||
+    !exactProofComment(
+      proofControl.normal.release,
+      'release',
+      runs.bootstrap,
+      normalCoordinates,
+      proofControl.normal.ready.comment_id,
+      environment.reviewer_permission,
+    ) ||
     proofControl.normal.ready.observed_at !== runs.bootstrap.barrier_ready_at ||
     proofControl.normal.release.observed_at !== proofControl.normal.barrier_released_at ||
+    proofControl.normal.dispatch_verify_completed.operation_id !== fixture.normal_operation_id ||
+    proofControl.normal.dispatch_verify_completed.ready_comment_id !==
+      proofControl.normal.ready.comment_id ||
+    proofControl.normal.dispatch_verify_completed.release_comment_id !==
+      proofControl.normal.release.comment_id ||
     proofControl.normal.dispatch_verify_completed.bootstrap_run_id !== runs.bootstrap.run_id ||
     proofControl.normal.dispatch_verify_completed.continuation_run_id !==
       runs.continuation.run_id ||
-    proofControl.normal.cleanup_receipt.body_sha256 !==
-      proofControl.normal.cleanup_receipt.readback_body_sha256 ||
-    proofControl.stale.cleanup_receipt.body_sha256 !==
-      proofControl.stale.cleanup_receipt.readback_body_sha256
+    proofControl.normal.dispatch_verify_completed.observed_at < runs.continuation.completed_at ||
+    proofControl.normal.cleanup_receipt.receipt.operation_id !== fixture.normal_operation_id ||
+    !exactSet(
+      proofControl.normal.cleanup_receipt.receipt.comment_outcomes.map(
+        ({ comment_id }) => comment_id,
+      ),
+      normalCommentIds,
+    ) ||
+    proofControl.normal.cleanup_receipt.final_absence_read_back_at <=
+      proofControl.normal.dispatch_verify_completed.observed_at ||
+    !exactProofComment(
+      proofControl.stale.ready,
+      'stale-ready',
+      product.stale.authorized_stale_run,
+      staleCoordinates,
+      null,
+      null,
+    ) ||
+    !exactProofComment(
+      proofControl.stale.release,
+      'stale-release',
+      product.stale.authorized_stale_run,
+      staleCoordinates,
+      proofControl.stale.ready.comment_id,
+      environment.reviewer_permission,
+    ) ||
+    proofControl.stale.cleanup_receipt.receipt.operation_id !== fixture.stale_operation_id ||
+    !exactSet(
+      proofControl.stale.cleanup_receipt.receipt.comment_outcomes.map(
+        ({ comment_id }) => comment_id,
+      ),
+      staleCommentIds,
+    ) ||
+    proofControl.stale.cleanup_receipt.final_absence_read_back_at <=
+      product.stale.authorized_stale_run.completed_at ||
+    new Set([...normalCommentIds, ...staleCommentIds]).size !== 4
   ) {
     reject('proof-control');
   }
@@ -244,6 +423,13 @@ export function projectTrustedProofEvidence(input) {
     !bootstrap.sticky_marker.endsWith(`head_sha=${identities.normal_head_sha} -->`) ||
     !continuation.sticky_marker.endsWith(`head_sha=${identities.normal_head_sha} -->`) ||
     continuation.predecessor_acceptance_object_identity !== bootstrap.acceptance_object_identity ||
+    !exactAcceptanceReceipt(bootstrap, null) ||
+    !exactAcceptanceReceipt(continuation, bootstrap.acceptance_object_identity) ||
+    bootstrap.base_scope_digest !== continuation.base_scope_digest ||
+    bootstrap.lineage_head_object_identity !== continuation.lineage_head_object_identity ||
+    bootstrap.lineage_epoch !== continuation.lineage_epoch ||
+    bootstrap.lineage_generation !== 1 ||
+    continuation.lineage_generation !== 2 ||
     cleanup.terminal_resources.product_sticky.comment_id !== continuation.sticky_comment_id ||
     cleanup.terminal_resources.product_sticky.comment_url !== continuation.sticky_comment_url ||
     cleanup.terminal_resources.product_sticky.body_sha256 !== continuation.sticky_body_sha256 ||
@@ -262,8 +448,6 @@ export function projectTrustedProofEvidence(input) {
     followOn.workflow_sha !== identities.workflow_sha ||
     staleRun.reviewed_head_sha !== identities.stale_admitted_head_sha ||
     followOn.reviewed_head_sha !== identities.stale_advanced_head_sha ||
-    !exactProofComment(proofControl.stale.ready, 'stale-ready', staleRun) ||
-    !exactProofComment(proofControl.stale.release, 'stale-release', staleRun) ||
     proofControl.stale.ready.observed_at !== staleRun.stale_ready_at ||
     proofControl.stale.release.observed_at !== staleRun.stale_release_at ||
     proofControl.stale.barrier_released_at !== staleRun.stale_release_at ||
@@ -271,7 +455,10 @@ export function projectTrustedProofEvidence(input) {
       staleRun.protected_job_started_at < staleRun.stale_ready_at &&
       staleRun.stale_ready_at < staleRun.head_advanced_at &&
       staleRun.head_advanced_at <= followOn.created_at &&
-      followOn.created_at < followOn.completed_at &&
+      followOn.created_at <= followOn.pending_observation.observed_at &&
+      followOn.pending_observation.observed_at < staleRun.completed_at &&
+      staleRun.completed_at < followOn.workflow_started_at &&
+      followOn.workflow_started_at <= followOn.completed_at &&
       staleRun.head_advanced_at < staleRun.stale_release_at &&
       staleRun.stale_release_at < staleRun.provider_completed_at &&
       staleRun.provider_completed_at < staleRun.host_revalidated_at &&
@@ -283,12 +470,26 @@ export function projectTrustedProofEvidence(input) {
 
   const createdIds = state.created.map(({ physical_artifact_id }) => physical_artifact_id);
   const objectIdentities = state.created.map(({ object_identity }) => object_identity);
+  const scopes = state.scopes;
+  const scopeDigests = [
+    scopes.repository_root.scope_digest,
+    scopes.normal.base_scope_digest,
+    scopes.stale.base_scope_digest,
+  ];
   if (
     createdIds.length !== new Set(createdIds).size ||
     objectIdentities.length !== new Set(objectIdentities).size ||
     !exactSet(createdIds, cleanup.deleted_physical_artifact_ids) ||
     !isEmptyInventory(state.pre_state) ||
     !isEmptyInventory(state.final_state) ||
+    new Set(scopeDigests).size !== 3 ||
+    state.pre_state.repository_root.scope_digest !== scopes.repository_root.scope_digest ||
+    state.final_state.repository_root.scope_digest !== scopes.repository_root.scope_digest ||
+    state.pre_state.normal.base_scope_digest !== scopes.normal.base_scope_digest ||
+    state.final_state.normal.base_scope_digest !== scopes.normal.base_scope_digest ||
+    state.pre_state.stale.base_scope_digest !== scopes.stale.base_scope_digest ||
+    state.final_state.stale.base_scope_digest !== scopes.stale.base_scope_digest ||
+    bootstrap.base_scope_digest !== scopes.normal.base_scope_digest ||
     cleanup.state_key_removed_after_final_readback !== true
   ) {
     reject('state-inventory');
@@ -302,10 +503,27 @@ export function projectTrustedProofEvidence(input) {
   if (
     state.created.some((record) => {
       const owner = phaseRuns.get(record.creation_phase);
+      const expectedScope =
+        record.object_class === 'locator_root'
+          ? 'repository_root'
+          : record.creation_phase === 'stale-setup'
+            ? 'stale'
+            : 'normal';
+      const expectedDigest =
+        expectedScope === 'repository_root'
+          ? scopes.repository_root.scope_digest
+          : scopes[expectedScope].base_scope_digest;
+      const expectedOpaqueName =
+        expectedScope === 'repository_root'
+          ? scopes.repository_root.locator_root_opaque_name
+          : scopes[expectedScope].family_opaque_names[record.object_class];
       return (
         !owner ||
         record.producing_run_id !== owner.run_id ||
-        record.producing_run_attempt !== owner.run_attempt
+        record.producing_run_attempt !== owner.run_attempt ||
+        record.scope !== expectedScope ||
+        record.scope_digest !== expectedDigest ||
+        record.opaque_name !== expectedOpaqueName
       );
     })
   ) {
@@ -348,48 +566,95 @@ export function projectTrustedProofEvidence(input) {
     reject('product-state-binding');
   }
 
-  const predecessorHead = state.created.find(
-    ({ object_class, object_identity }) =>
-      object_class === 'lineage_head' &&
-      object_identity === continuation.lineage_predecessor_identity,
+  const normalHeads = state.created.filter(
+    ({ object_class, scope }) => object_class === 'lineage_head' && scope === 'normal',
   );
-  const currentHead = state.created.find(
-    ({ object_class, object_identity }) =>
-      object_class === 'lineage_head' && object_identity === continuation.lineage_current_identity,
+  const normalHead = normalHeads[0];
+  const bootstrapCandidate = findArtifact(
+    state.created,
+    'candidate',
+    bootstrap.candidate_object_identity,
   );
-  const predecessorAcceptance = state.created.find(
-    ({ object_class, object_identity }) =>
-      object_class === 'acceptance' && object_identity === bootstrap.acceptance_object_identity,
+  const bootstrapIntent = state.created.find(
+    ({ object_class, generation, scope }) =>
+      object_class === 'publication_intent' && generation === 1 && scope === 'normal',
   );
-  const currentAcceptance = state.created.find(
-    ({ object_class, object_identity }) =>
-      object_class === 'acceptance' && object_identity === continuation.acceptance_object_identity,
+  const predecessorAcceptance = findArtifact(
+    state.created,
+    'acceptance',
+    bootstrap.acceptance_object_identity,
+  );
+  const continuationCandidate = findArtifact(
+    state.created,
+    'candidate',
+    continuation.candidate_object_identity,
+  );
+  const continuationIntent = state.created.find(
+    ({ object_class, generation, scope }) =>
+      object_class === 'publication_intent' && generation === 2 && scope === 'normal',
+  );
+  const currentAcceptance = findArtifact(
+    state.created,
+    'acceptance',
+    continuation.acceptance_object_identity,
+  );
+  const normalCleanup = state.created.find(
+    ({ object_class, scope }) => object_class === 'cleanup' && scope === 'normal',
   );
   if (
-    !predecessorHead ||
-    !currentHead ||
+    normalHeads.length !== 1 ||
+    !normalHead ||
+    normalHead.object_identity !== bootstrap.lineage_head_object_identity ||
+    normalHead.object_identity !== continuation.lineage_head_object_identity ||
+    normalHead.predecessor_identity !== null ||
+    normalHead.successor_identity !== null ||
+    normalHead.epoch !== bootstrap.lineage_epoch ||
+    normalHead.generation !== 1 ||
+    !bootstrapCandidate ||
+    !bootstrapIntent ||
     !predecessorAcceptance ||
+    !continuationCandidate ||
+    !continuationIntent ||
     !currentAcceptance ||
-    predecessorHead.successor_identity !== currentHead.object_identity ||
-    currentHead.predecessor_identity !== predecessorHead.object_identity ||
-    currentHead.epoch !== continuation.lineage_epoch ||
-    currentHead.generation !== continuation.lineage_generation ||
-    predecessorAcceptance.successor_identity !== currentAcceptance.object_identity ||
-    currentAcceptance.predecessor_identity !== predecessorAcceptance.object_identity
+    !normalCleanup ||
+    bootstrapCandidate.predecessor_identity !== null ||
+    bootstrapIntent.predecessor_identity !== bootstrapCandidate.object_identity ||
+    predecessorAcceptance.predecessor_identity !== null ||
+    continuationCandidate.predecessor_identity !== predecessorAcceptance.object_identity ||
+    continuationIntent.predecessor_identity !== continuationCandidate.object_identity ||
+    currentAcceptance.predecessor_identity !== predecessorAcceptance.object_identity ||
+    normalCleanup.predecessor_identity !== currentAcceptance.object_identity
   ) {
     reject('lineage-binding');
   }
 
-  for (const objectClass of stateFamilies) {
-    const normalRecords = state.created.filter(
-      (record) => record.object_class === objectClass && record.creation_phase !== 'stale-setup',
-    );
-    if (
-      normalRecords.length > 1 &&
-      new Set(normalRecords.map(({ opaque_name }) => opaque_name)).size !== 1
-    ) {
-      reject('opaque-name-family');
-    }
+  if (staleSetupIds.length === 0) reject('stale-state-setup');
+
+  const expectedCredentialBySink = new Map([
+    ['github', ['github-token:pull-requests-write', true]],
+    ['actions', ['github-token:actions-write', true]],
+    ['provider', ['DEEPSEEK_API_KEY', true]],
+    ['current_state', ['AGENTIC_PR_REVIEW_STATE_KEY', true]],
+    ['previous_state', ['AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY', true]],
+    ['unrelated_credentials', ['none', false]],
+  ]);
+  const credentialBySink = new Map(canaries.credential_by_sink.map((entry) => [entry.sink, entry]));
+  if (
+    credentialBySink.size !== expectedCredentialBySink.size ||
+    [...expectedCredentialBySink].some(([sink, [credential, expectedPresent]]) => {
+      const observed = credentialBySink.get(sink);
+      return (
+        !observed ||
+        observed.authorized_credential !== credential ||
+        observed.expected_present !== expectedPresent ||
+        observed.observed_present !== expectedPresent ||
+        observed.forbidden_credentials_absent !== true
+      );
+    }) ||
+    cleanup.terminal_resources.host_restricted_evidence.approved_destination_kind !==
+      'maintainer-approved-host-restricted-location'
+  ) {
+    reject('credential-destination');
   }
 
   const publicEvidence = {
@@ -442,12 +707,21 @@ export function projectTrustedProofEvidence(input) {
       all_follow_on_runs_terminal: true,
     },
     canaries: {
-      github: canaries.github_secret_absent ? 'absent' : 'present',
-      actions: canaries.actions_secret_absent ? 'absent' : 'present',
-      provider: canaries.provider_secret_absent ? 'absent' : 'present',
-      current_state: canaries.current_state_secret_absent ? 'absent' : 'present',
-      previous_state: canaries.previous_state_secret_absent ? 'absent' : 'present',
-      unrelated_credentials: canaries.unrelated_credentials_absent ? 'absent' : 'present',
+      github: credentialBySink.get('github').forbidden_credentials_absent ? 'absent' : 'present',
+      actions: credentialBySink.get('actions').forbidden_credentials_absent ? 'absent' : 'present',
+      provider: credentialBySink.get('provider').forbidden_credentials_absent
+        ? 'absent'
+        : 'present',
+      current_state: credentialBySink.get('current_state').forbidden_credentials_absent
+        ? 'absent'
+        : 'present',
+      previous_state: credentialBySink.get('previous_state').forbidden_credentials_absent
+        ? 'absent'
+        : 'present',
+      unrelated_credentials: credentialBySink.get('unrelated_credentials')
+        .forbidden_credentials_absent
+        ? 'absent'
+        : 'present',
       plaintext_session: canaries.plaintext_session_absent ? 'absent' : 'present',
       provider_content: canaries.provider_content_absent ? 'absent' : 'present',
       tool_data: canaries.tool_data_absent ? 'absent' : 'present',
