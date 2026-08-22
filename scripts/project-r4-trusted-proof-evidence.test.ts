@@ -216,6 +216,16 @@ describe('R4 E3 public-safe evidence projection', () => {
       (value: any) => (value.product.stale.unauthorized_follow_on_run.authorization_matches = true),
     ],
     [
+      'stale-run-pr-mismatch',
+      (value: any) => (value.product.stale.authorized_stale_run.pr_number = '1001'),
+    ],
+    [
+      'stale-follow-on-group-mismatch',
+      (value: any) =>
+        (value.product.stale.unauthorized_follow_on_run.concurrency_group =
+          'agentic-pr-review-r4-42-pr-1001'),
+    ],
+    [
       'stale-follow-on-completes-before-owner',
       (value: any) => {
         value.product.stale.unauthorized_follow_on_run.workflow_started_at = 900;
@@ -236,6 +246,14 @@ describe('R4 E3 public-safe evidence projection', () => {
     [
       'proof-release-predecessor-mismatch',
       (value: any) => (value.proof_control.normal.release.predecessor_comment_id = '8101'),
+    ],
+    [
+      'proof-ready-claims-permission',
+      (value: any) => (value.proof_control.normal.ready.actor_permission = 'write'),
+    ],
+    [
+      'proof-release-read-only-actor',
+      (value: any) => (value.proof_control.normal.release.actor_permission = 'read'),
     ],
     [
       'proof-cleanup-comment-mismatch',
@@ -267,6 +285,20 @@ describe('R4 E3 public-safe evidence projection', () => {
       'stale-state-mutation',
       (value: any) =>
         (value.product.stale.authorized_stale_run.candidate_persisted_after_revalidation = true),
+    ],
+    ['numeric-placeholder-epoch', (value: any) => (value.state.created[1].epoch = 0)],
+    [
+      'one-based-bootstrap-session-generation',
+      (value: any) => (value.state.created[2].decoded_record.session_generation = 1),
+    ],
+    [
+      'locator-root-in-scoped-family-map',
+      (value: any) =>
+        (value.state.scopes.normal.family_opaque_names.locator_root = 'opaque-normal-locator-root'),
+    ],
+    [
+      'incomplete-acceptance-receipt',
+      (value: any) => delete value.product.bootstrap.acceptance_receipt.logical_generation_identity,
     ],
     [
       'stale-sticky-mutation',
@@ -305,6 +337,16 @@ describe('R4 E3 public-safe evidence projection', () => {
     );
     expect(candidates[0].opaque_name).toBe(candidates[1].opaque_name);
     expect(candidates[0].artifact_digest).toBe(candidates[1].artifact_digest);
+    expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
+  });
+
+  test('keeps environment approval, ready authorship, and write-authorized release distinct', () => {
+    const candidate = clone(hostTemplate);
+    expect(candidate.protected_environment.environment_approver_id).toBe('43');
+    expect(candidate.proof_control.normal.ready.actor_id).toBe('99');
+    expect(candidate.proof_control.normal.ready.actor_permission).toBeNull();
+    expect(candidate.proof_control.normal.release.actor_id).toBe('44');
+    expect(candidate.proof_control.normal.release.actor_permission).toBe('write');
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });
 

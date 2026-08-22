@@ -36,14 +36,14 @@ const fixtureInventory = [
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    'c8c48f0e1e171b4de4946e4c3467a00d742a10923ed507740a2582173b4c631a',
+    'b0b5502d055ba42284647e6e8cca8103478edccb00ac499689e2ef31a32b2d96',
   ],
-  ['cleanup-contract.json', '92a370d70a83348506efad6b0945779ba453ecece3e89d35d902c3414d34ee6f'],
+  ['cleanup-contract.json', 'e7758912a633f399a98b95b4970694274a53d35b5b88ebe3afbecbd029c2c82d'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '0f6ec11d39ce99e4b6ce30c155d79c420942538cc865e824dbaa9a219bfe4f93',
+    'cf95726c0a8720cc31cfdb4c4b6a0cdd1b08b644523e7b62704645bcf1c699de',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,7 +51,7 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    'dc300386f75b53a036944609a794846adf43ef9fac20ca2c451219094db4110b',
+    '8c7ee6b21078912adac6bca76858689d21418406695ca8804835fb01c2af3469',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -61,7 +61,7 @@ const fixtureDigests = new Map([
     'traces/normal-two-run.json',
     '8a55feff519e885c33101b08ef011edd1a97b1caee2f284b4963df342ad6b94e',
   ],
-  ['traces/stale-head.json', '6a00d64b85553ad282bccf22861f1817423e88b4f81e8c63d3d4c26fc8230e82'],
+  ['traces/stale-head.json', '8a2a34659c0c9593bf48132d7728c98340019b85d4bad20d8bf58579b58b7a40'],
   ['trusted-proof-payload-receipt.json', receiptJsonSha256],
 ]);
 
@@ -202,6 +202,9 @@ function validateFixtureContracts(fixtureRoot) {
     authorization.environment?.name !== 'r4-trusted-proof' ||
     authorization.environment?.must_preexist !== true ||
     authorization.environment?.normal_and_stale_phases_independently_observed !== true ||
+    authorization.environment?.required_evidence?.includes('environment_approver_id') !== true ||
+    authorization.environment?.required_evidence?.includes('environment_approver_permission') !==
+      true ||
     authorization.canary_matrix_requires_exact_authorized_credential_per_sink !== true ||
     authorization.host_restricted_destination_requires_kind_and_identity_sha256 !== true ||
     authorization.live_mutation_owner !== 'issue-181'
@@ -215,10 +218,17 @@ function validateFixtureContracts(fixtureRoot) {
     cleanup.pre_state?.required_scopes?.length !== 3 ||
     cleanup.pre_state?.scope_digests_must_be_distinct !== true ||
     cleanup.operation_state?.reject_unowned_addition !== true ||
-    cleanup.pre_state?.families?.length !== 10 ||
+    cleanup.pre_state?.repository_root_family !== 'locator_root' ||
+    cleanup.pre_state?.scoped_families?.length !== 9 ||
+    cleanup.pre_state?.scoped_families?.includes('locator_root') !== false ||
     cleanup.operation_state?.creation_phases?.includes('stale-setup') !== true ||
-    cleanup.operation_state?.record_exact_fields?.includes('scope') !== true ||
-    cleanup.operation_state?.record_exact_fields?.includes('scope_digest') !== true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('scope') !== true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('scope_digest') !== true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('decoded_record') !== true ||
+    cleanup.operation_state?.scoped_header_exact_fields?.includes('epoch') !== true ||
+    cleanup.operation_state?.scoped_header_exact_fields?.includes('session_id') !== true ||
+    cleanup.operation_state?.decoded_record_contract !==
+      'exact-class-specific-production-fields-with-session-generation-zero-then-one' ||
     cleanup.operation_state?.normal_lineage_head_rule !==
       'single-initialized-head-reused-across-accepted-generations-unless-reset-or-expiry' ||
     cleanup.public_projection_gate !==
@@ -259,6 +269,11 @@ function validateFixtureContracts(fixtureRoot) {
     staleTrace.advanced_content_sha256 !== staleCanarySha256 ||
     staleTrace.authorized_stale_run?.privileged_job_allocated !== true ||
     staleTrace.authorized_stale_run?.provider_constructed !== true ||
+    staleTrace.authorized_stale_run?.pr_number !== '1002' ||
+    staleTrace.unauthorized_follow_on_run?.pr_number !== '1002' ||
+    staleTrace.authorized_stale_run?.concurrency_group !== 'agentic-pr-review-r4-42-pr-1002' ||
+    staleTrace.unauthorized_follow_on_run?.concurrency_group !==
+      'agentic-pr-review-r4-42-pr-1002' ||
     staleTrace.authorized_stale_run?.value_free_signal_count !== 1 ||
     staleTrace.authorized_stale_run?.host_exact_head_result !== 'stale-head-rejected' ||
     staleTrace.unauthorized_follow_on_run?.old_authorization_matches !== false ||

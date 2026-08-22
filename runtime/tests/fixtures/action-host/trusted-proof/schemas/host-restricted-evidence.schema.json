@@ -19,7 +19,9 @@
     "canaries"
   ],
   "properties": {
-    "kind": { "const": "apr-r4-e3-host-restricted-evidence-v1" },
+    "kind": {
+      "const": "apr-r4-e3-host-restricted-evidence-v1"
+    },
     "identities": {
       "type": "object",
       "additionalProperties": false,
@@ -35,17 +37,33 @@
         "stale_advanced_head_sha"
       ],
       "properties": {
-        "repository_id": { "$ref": "#/$defs/positiveId" },
-        "repository": { "const": "SolusQuest/agentic-pr-review" },
-        "workflow_sha": { "$ref": "#/$defs/sha40" },
-        "action_source_sha": { "const": "5b5769753653bb3fd3e68cf8b7bb88a1bd350613" },
+        "repository_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "repository": {
+          "const": "SolusQuest/agentic-pr-review"
+        },
+        "workflow_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "action_source_sha": {
+          "const": "5b5769753653bb3fd3e68cf8b7bb88a1bd350613"
+        },
         "payload_sha256": {
           "const": "97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc"
         },
-        "reviewed_base_sha": { "$ref": "#/$defs/sha40" },
-        "normal_head_sha": { "$ref": "#/$defs/sha40" },
-        "stale_admitted_head_sha": { "$ref": "#/$defs/sha40" },
-        "stale_advanced_head_sha": { "$ref": "#/$defs/sha40" }
+        "reviewed_base_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "normal_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "stale_admitted_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "stale_advanced_head_sha": {
+          "$ref": "#/$defs/sha40"
+        }
       }
     },
     "fixture": {
@@ -65,20 +83,36 @@
         "stale_content_sha256"
       ],
       "properties": {
-        "normal_pr_number": { "$ref": "#/$defs/positiveId" },
-        "stale_pr_number": { "$ref": "#/$defs/positiveId" },
+        "normal_pr_number": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "stale_pr_number": {
+          "$ref": "#/$defs/positiveId"
+        },
         "normal_operation_id": {
           "$ref": "#/$defs/sha256",
-          "not": { "const": "7777777777777777777777777777777777777777777777777777777777777777" }
+          "not": {
+            "const": "7777777777777777777777777777777777777777777777777777777777777777"
+          }
         },
         "stale_operation_id": {
           "const": "7777777777777777777777777777777777777777777777777777777777777777"
         },
-        "base_canary_absent": { "const": true },
-        "normal_parent_sha": { "$ref": "#/$defs/sha40" },
-        "stale_initial_parent_sha": { "$ref": "#/$defs/sha40" },
-        "stale_advanced_parent_sha": { "$ref": "#/$defs/sha40" },
-        "only_changed_path": { "const": "proof/apr178-path-canary.txt" },
+        "base_canary_absent": {
+          "const": true
+        },
+        "normal_parent_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "stale_initial_parent_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "stale_advanced_parent_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "only_changed_path": {
+          "const": "proof/apr178-path-canary.txt"
+        },
         "normal_content_sha256": {
           "const": "bc58613e9f389b973f1e44de64021a7acc748fafd857b7fa99466493670db446"
         },
@@ -113,7 +147,9 @@
         "post_operation_absent_read_back_at"
       ],
       "properties": {
-        "pre_enable_absent_read_back_at": { "$ref": "#/$defs/timestamp" },
+        "pre_enable_absent_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
         "manifest": {
           "type": "object",
           "additionalProperties": false,
@@ -129,13 +165,27 @@
             "payload_sha256"
           ],
           "properties": {
-            "kind": { "const": "apr-r4-e2p-authorization-manifest-v1" },
-            "repository_id": { "$ref": "#/$defs/positiveId" },
-            "repository": { "const": "SolusQuest/agentic-pr-review" },
-            "pr_number": { "$ref": "#/$defs/positiveId" },
-            "fixture_head_sha": { "$ref": "#/$defs/sha40" },
-            "operation_id": { "$ref": "#/$defs/sha256" },
-            "workflow_sha": { "$ref": "#/$defs/sha40" },
+            "kind": {
+              "const": "apr-r4-e2p-authorization-manifest-v1"
+            },
+            "repository_id": {
+              "$ref": "#/$defs/positiveId"
+            },
+            "repository": {
+              "const": "SolusQuest/agentic-pr-review"
+            },
+            "pr_number": {
+              "$ref": "#/$defs/positiveId"
+            },
+            "fixture_head_sha": {
+              "$ref": "#/$defs/sha40"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/sha256"
+            },
+            "workflow_sha": {
+              "$ref": "#/$defs/sha40"
+            },
             "action_source_sha": {
               "const": "5b5769753653bb3fd3e68cf8b7bb88a1bd350613"
             },
@@ -144,24 +194,60 @@
             }
           }
         },
-        "manifest_sha256": { "$ref": "#/$defs/sha256" },
-        "repository_variable_name": { "const": "R4_TRUSTED_PROOF_AUTHORIZATION" },
-        "repository_variable_readback_sha256": { "$ref": "#/$defs/sha256" },
-        "normal_set_at": { "$ref": "#/$defs/timestamp" },
-        "normal_read_back_at": { "$ref": "#/$defs/timestamp" },
-        "normal_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" },
-        "normal_pair_terminal_at": { "$ref": "#/$defs/timestamp" },
-        "normal_removed_at": { "$ref": "#/$defs/timestamp" },
-        "normal_absent_read_back_at": { "$ref": "#/$defs/timestamp" },
-        "stale_manifest": { "$ref": "#/$defs/authorizationManifest" },
-        "stale_manifest_sha256": { "$ref": "#/$defs/sha256" },
-        "stale_repository_variable_readback_sha256": { "$ref": "#/$defs/sha256" },
-        "stale_set_at": { "$ref": "#/$defs/timestamp" },
-        "stale_read_back_at": { "$ref": "#/$defs/timestamp" },
-        "stale_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" },
-        "stale_operation_terminal_at": { "$ref": "#/$defs/timestamp" },
-        "stale_removed_at": { "$ref": "#/$defs/timestamp" },
-        "post_operation_absent_read_back_at": { "$ref": "#/$defs/timestamp" }
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repository_variable_name": {
+          "const": "R4_TRUSTED_PROOF_AUTHORIZATION"
+        },
+        "repository_variable_readback_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "normal_set_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "normal_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "normal_first_privileged_job_started_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "normal_pair_terminal_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "normal_removed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "normal_absent_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stale_manifest": {
+          "$ref": "#/$defs/authorizationManifest"
+        },
+        "stale_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "stale_repository_variable_readback_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "stale_set_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stale_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stale_first_privileged_job_started_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stale_operation_terminal_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stale_removed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "post_operation_absent_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
     "protected_environment": {
@@ -172,8 +258,6 @@
         "name",
         "exists",
         "deployment_branch",
-        "designated_reviewer_id",
-        "reviewer_permission",
         "prevent_self_review",
         "administrator_bypass",
         "secret_names",
@@ -184,17 +268,29 @@
         "normal_first_privileged_job_started_at",
         "stale_snapshot_readback_sha256",
         "stale_read_back_at",
-        "stale_first_privileged_job_started_at"
+        "stale_first_privileged_job_started_at",
+        "environment_approver_id",
+        "environment_approver_permission"
       ],
       "properties": {
-        "repository": { "const": "SolusQuest/agentic-pr-review" },
-        "name": { "const": "r4-trusted-proof" },
-        "exists": { "const": true },
-        "deployment_branch": { "const": "main-only" },
-        "designated_reviewer_id": { "$ref": "#/$defs/positiveId" },
-        "reviewer_permission": { "enum": ["write", "admin"] },
-        "prevent_self_review": { "const": true },
-        "administrator_bypass": { "const": false },
+        "repository": {
+          "const": "SolusQuest/agentic-pr-review"
+        },
+        "name": {
+          "const": "r4-trusted-proof"
+        },
+        "exists": {
+          "const": true
+        },
+        "deployment_branch": {
+          "const": "main-only"
+        },
+        "prevent_self_review": {
+          "const": true
+        },
+        "administrator_bypass": {
+          "const": false
+        },
         "secret_names": {
           "type": "array",
           "minItems": 3,
@@ -213,18 +309,44 @@
           "additionalProperties": false,
           "required": ["actions", "contents", "pull_requests"],
           "properties": {
-            "actions": { "const": "write" },
-            "contents": { "const": "read" },
-            "pull_requests": { "const": "write" }
+            "actions": {
+              "const": "write"
+            },
+            "contents": {
+              "const": "read"
+            },
+            "pull_requests": {
+              "const": "write"
+            }
           }
         },
-        "snapshot_sha256": { "$ref": "#/$defs/sha256" },
-        "normal_snapshot_readback_sha256": { "$ref": "#/$defs/sha256" },
-        "normal_read_back_at": { "$ref": "#/$defs/timestamp" },
-        "normal_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" },
-        "stale_snapshot_readback_sha256": { "$ref": "#/$defs/sha256" },
-        "stale_read_back_at": { "$ref": "#/$defs/timestamp" },
-        "stale_first_privileged_job_started_at": { "$ref": "#/$defs/timestamp" }
+        "snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "normal_snapshot_readback_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "normal_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "normal_first_privileged_job_started_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stale_snapshot_readback_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "stale_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stale_first_privileged_job_started_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "environment_approver_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "environment_approver_permission": {
+          "enum": ["write", "admin"]
+        }
       }
     },
     "proof_control": {
@@ -244,12 +366,24 @@
             "cleanup_receipt"
           ],
           "properties": {
-            "ready": { "$ref": "#/$defs/proofComment" },
-            "release": { "$ref": "#/$defs/proofComment" },
-            "run_one_held_at_observation": { "const": true },
-            "barrier_released_at": { "$ref": "#/$defs/timestamp" },
-            "dispatch_verify_completed": { "$ref": "#/$defs/dispatchVerification" },
-            "cleanup_receipt": { "$ref": "#/$defs/cleanupReceipt" }
+            "ready": {
+              "$ref": "#/$defs/proofComment"
+            },
+            "release": {
+              "$ref": "#/$defs/proofComment"
+            },
+            "run_one_held_at_observation": {
+              "const": true
+            },
+            "barrier_released_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "dispatch_verify_completed": {
+              "$ref": "#/$defs/dispatchVerification"
+            },
+            "cleanup_receipt": {
+              "$ref": "#/$defs/cleanupReceipt"
+            }
           }
         },
         "stale": {
@@ -257,10 +391,18 @@
           "additionalProperties": false,
           "required": ["ready", "release", "barrier_released_at", "cleanup_receipt"],
           "properties": {
-            "ready": { "$ref": "#/$defs/proofComment" },
-            "release": { "$ref": "#/$defs/proofComment" },
-            "barrier_released_at": { "$ref": "#/$defs/timestamp" },
-            "cleanup_receipt": { "$ref": "#/$defs/cleanupReceipt" }
+            "ready": {
+              "$ref": "#/$defs/proofComment"
+            },
+            "release": {
+              "$ref": "#/$defs/proofComment"
+            },
+            "barrier_released_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "cleanup_receipt": {
+              "$ref": "#/$defs/cleanupReceipt"
+            }
           }
         }
       }
@@ -286,16 +428,36 @@
             "cancelled"
           ],
           "properties": {
-            "route": { "const": "workflow_run" },
-            "run_id": { "$ref": "#/$defs/positiveId" },
-            "run_attempt": { "$ref": "#/$defs/runAttempt" },
-            "workflow_sha": { "$ref": "#/$defs/sha40" },
-            "reviewed_head_sha": { "$ref": "#/$defs/sha40" },
-            "concurrency_group": { "$ref": "#/$defs/concurrencyGroup" },
-            "protected_job_started_at": { "$ref": "#/$defs/timestamp" },
-            "barrier_ready_at": { "$ref": "#/$defs/timestamp" },
-            "completed_at": { "$ref": "#/$defs/timestamp" },
-            "cancelled": { "const": false }
+            "route": {
+              "const": "workflow_run"
+            },
+            "run_id": {
+              "$ref": "#/$defs/positiveId"
+            },
+            "run_attempt": {
+              "$ref": "#/$defs/runAttempt"
+            },
+            "workflow_sha": {
+              "$ref": "#/$defs/sha40"
+            },
+            "reviewed_head_sha": {
+              "$ref": "#/$defs/sha40"
+            },
+            "concurrency_group": {
+              "$ref": "#/$defs/concurrencyGroup"
+            },
+            "protected_job_started_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "barrier_ready_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "completed_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "cancelled": {
+              "const": false
+            }
           }
         },
         "continuation": {
@@ -313,15 +475,33 @@
             "completed_at"
           ],
           "properties": {
-            "route": { "const": "workflow_dispatch" },
-            "run_id": { "$ref": "#/$defs/positiveId" },
-            "run_attempt": { "$ref": "#/$defs/runAttempt" },
-            "workflow_sha": { "$ref": "#/$defs/sha40" },
-            "reviewed_head_sha": { "$ref": "#/$defs/sha40" },
-            "concurrency_group": { "$ref": "#/$defs/concurrencyGroup" },
-            "created_at": { "$ref": "#/$defs/timestamp" },
-            "protected_job_started_at": { "$ref": "#/$defs/timestamp" },
-            "completed_at": { "$ref": "#/$defs/timestamp" }
+            "route": {
+              "const": "workflow_dispatch"
+            },
+            "run_id": {
+              "$ref": "#/$defs/positiveId"
+            },
+            "run_attempt": {
+              "$ref": "#/$defs/runAttempt"
+            },
+            "workflow_sha": {
+              "$ref": "#/$defs/sha40"
+            },
+            "reviewed_head_sha": {
+              "$ref": "#/$defs/sha40"
+            },
+            "concurrency_group": {
+              "$ref": "#/$defs/concurrencyGroup"
+            },
+            "created_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "protected_job_started_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "completed_at": {
+              "$ref": "#/$defs/timestamp"
+            }
           }
         }
       }
@@ -341,15 +521,33 @@
         "protected_step_started_at"
       ],
       "properties": {
-        "observed_at": { "$ref": "#/$defs/timestamp" },
-        "run_one_status": { "const": "in_progress" },
-        "run_one_uncancelled": { "const": true },
-        "run_two_status": { "enum": ["queued", "pending"] },
-        "equal_evaluated_group": { "const": true },
-        "privileged_job_allocated": { "const": false },
-        "environment_admission_started": { "const": false },
-        "preparation_started": { "const": false },
-        "protected_step_started_at": { "type": "null" }
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "run_one_status": {
+          "const": "in_progress"
+        },
+        "run_one_uncancelled": {
+          "const": true
+        },
+        "run_two_status": {
+          "enum": ["queued", "pending"]
+        },
+        "equal_evaluated_group": {
+          "const": true
+        },
+        "privileged_job_allocated": {
+          "const": false
+        },
+        "environment_admission_started": {
+          "const": false
+        },
+        "preparation_started": {
+          "const": false
+        },
+        "protected_step_started_at": {
+          "type": "null"
+        }
       }
     },
     "product": {
@@ -357,7 +555,9 @@
       "additionalProperties": false,
       "required": ["bootstrap", "continuation", "stale"],
       "properties": {
-        "bootstrap": { "$ref": "#/$defs/publicationTransition" },
+        "bootstrap": {
+          "$ref": "#/$defs/publicationTransition"
+        },
         "continuation": {
           "type": "object",
           "additionalProperties": false,
@@ -383,31 +583,87 @@
             "base_scope_digest",
             "lineage_head_object_identity",
             "lineage_epoch",
-            "lineage_generation"
+            "lineage_session_id",
+            "lineage_transition",
+            "lineage_ordinal",
+            "session_generation"
           ],
           "properties": {
-            "summary": { "const": "Trusted continuation complete." },
-            "sticky_comment_id": { "$ref": "#/$defs/positiveId" },
-            "sticky_comment_url": { "$ref": "#/$defs/commentUrl" },
-            "sticky_body_sha256": { "$ref": "#/$defs/sha256" },
-            "sticky_marker": { "$ref": "#/$defs/stickyMarker" },
-            "sticky_mutation": { "const": "update" },
-            "sticky_readback_body_sha256": { "$ref": "#/$defs/sha256" },
-            "sticky_readback_marker": { "$ref": "#/$defs/stickyMarker" },
-            "candidate_physical_artifact_id": { "$ref": "#/$defs/artifactId" },
-            "candidate_object_identity": { "$ref": "#/$defs/objectIdentity" },
-            "acceptance_physical_artifact_id": { "$ref": "#/$defs/artifactId" },
-            "acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
-            "predecessor_acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
-            "acceptance_receipt": { "$ref": "#/$defs/acceptanceReceipt" },
-            "accepted_head_sha": { "$ref": "#/$defs/sha40" },
-            "acceptance_after_sticky_readback": { "const": true },
-            "prior_only": { "const": true },
-            "verified_ahead": { "const": true },
-            "base_scope_digest": { "$ref": "#/$defs/sha256" },
-            "lineage_head_object_identity": { "$ref": "#/$defs/objectIdentity" },
-            "lineage_epoch": { "$ref": "#/$defs/nonnegativeInteger" },
-            "lineage_generation": { "type": "integer", "minimum": 2, "maximum": 2147483647 }
+            "summary": {
+              "const": "Trusted continuation complete."
+            },
+            "sticky_comment_id": {
+              "$ref": "#/$defs/positiveId"
+            },
+            "sticky_comment_url": {
+              "$ref": "#/$defs/commentUrl"
+            },
+            "sticky_body_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sticky_marker": {
+              "$ref": "#/$defs/stickyMarker"
+            },
+            "sticky_mutation": {
+              "const": "update"
+            },
+            "sticky_readback_body_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sticky_readback_marker": {
+              "$ref": "#/$defs/stickyMarker"
+            },
+            "candidate_physical_artifact_id": {
+              "$ref": "#/$defs/artifactId"
+            },
+            "candidate_object_identity": {
+              "$ref": "#/$defs/sha256"
+            },
+            "acceptance_physical_artifact_id": {
+              "$ref": "#/$defs/artifactId"
+            },
+            "acceptance_object_identity": {
+              "$ref": "#/$defs/sha256"
+            },
+            "predecessor_acceptance_object_identity": {
+              "$ref": "#/$defs/sha256"
+            },
+            "acceptance_receipt": {
+              "$ref": "#/$defs/acceptanceReceipt"
+            },
+            "accepted_head_sha": {
+              "$ref": "#/$defs/sha40"
+            },
+            "acceptance_after_sticky_readback": {
+              "const": true
+            },
+            "prior_only": {
+              "const": true
+            },
+            "verified_ahead": {
+              "const": true
+            },
+            "base_scope_digest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "lineage_head_object_identity": {
+              "$ref": "#/$defs/sha256"
+            },
+            "lineage_epoch": {
+              "$ref": "#/$defs/sha256"
+            },
+            "lineage_session_id": {
+              "$ref": "#/$defs/sha256"
+            },
+            "lineage_transition": {
+              "const": "initial"
+            },
+            "lineage_ordinal": {
+              "const": 0
+            },
+            "session_generation": {
+              "const": 1
+            }
           }
         },
         "stale": {
@@ -421,6 +677,8 @@
               "required": [
                 "run_id",
                 "run_attempt",
+                "pr_number",
+                "concurrency_group",
                 "workflow_sha",
                 "reviewed_head_sha",
                 "protected_job_started_at",
@@ -440,30 +698,74 @@
                 "completed_at"
               ],
               "properties": {
-                "run_id": { "$ref": "#/$defs/positiveId" },
-                "run_attempt": { "$ref": "#/$defs/runAttempt" },
-                "workflow_sha": { "$ref": "#/$defs/sha40" },
-                "reviewed_head_sha": { "$ref": "#/$defs/sha40" },
-                "protected_job_started_at": { "$ref": "#/$defs/timestamp" },
-                "privileged_job_allocated": { "const": true },
-                "provider_constructed": { "const": true },
-                "provider_signal_count": { "const": 1 },
+                "run_id": {
+                  "$ref": "#/$defs/positiveId"
+                },
+                "run_attempt": {
+                  "$ref": "#/$defs/runAttempt"
+                },
+                "workflow_sha": {
+                  "$ref": "#/$defs/sha40"
+                },
+                "reviewed_head_sha": {
+                  "$ref": "#/$defs/sha40"
+                },
+                "protected_job_started_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "privileged_job_allocated": {
+                  "const": true
+                },
+                "provider_constructed": {
+                  "const": true
+                },
+                "provider_signal_count": {
+                  "const": 1
+                },
                 "state_setup_physical_artifact_ids": {
                   "type": "array",
                   "maxItems": 64,
                   "uniqueItems": true,
-                  "items": { "$ref": "#/$defs/artifactId" }
+                  "items": {
+                    "$ref": "#/$defs/artifactId"
+                  }
                 },
-                "stale_ready_at": { "$ref": "#/$defs/timestamp" },
-                "head_advanced_at": { "$ref": "#/$defs/timestamp" },
-                "stale_release_at": { "$ref": "#/$defs/timestamp" },
-                "provider_completed_at": { "$ref": "#/$defs/timestamp" },
-                "host_revalidated_at": { "$ref": "#/$defs/timestamp" },
-                "host_exact_head_result": { "const": "stale-head-rejected" },
-                "candidate_persisted_after_revalidation": { "const": false },
-                "sticky_mutated_after_revalidation": { "const": false },
-                "acceptance_persisted_after_revalidation": { "const": false },
-                "completed_at": { "$ref": "#/$defs/timestamp" }
+                "stale_ready_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "head_advanced_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "stale_release_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "provider_completed_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "host_revalidated_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "host_exact_head_result": {
+                  "const": "stale-head-rejected"
+                },
+                "candidate_persisted_after_revalidation": {
+                  "const": false
+                },
+                "sticky_mutated_after_revalidation": {
+                  "const": false
+                },
+                "acceptance_persisted_after_revalidation": {
+                  "const": false
+                },
+                "completed_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "pr_number": {
+                  "$ref": "#/$defs/positiveId"
+                },
+                "concurrency_group": {
+                  "$ref": "#/$defs/concurrencyGroup"
+                }
               }
             },
             "unauthorized_follow_on_run": {
@@ -472,6 +774,8 @@
               "required": [
                 "run_id",
                 "run_attempt",
+                "pr_number",
+                "concurrency_group",
                 "workflow_sha",
                 "reviewed_head_sha",
                 "created_at",
@@ -489,32 +793,76 @@
                 "terminal"
               ],
               "properties": {
-                "run_id": { "$ref": "#/$defs/positiveId" },
-                "run_attempt": { "$ref": "#/$defs/runAttempt" },
-                "workflow_sha": { "$ref": "#/$defs/sha40" },
-                "reviewed_head_sha": { "$ref": "#/$defs/sha40" },
-                "created_at": { "$ref": "#/$defs/timestamp" },
+                "run_id": {
+                  "$ref": "#/$defs/positiveId"
+                },
+                "run_attempt": {
+                  "$ref": "#/$defs/runAttempt"
+                },
+                "workflow_sha": {
+                  "$ref": "#/$defs/sha40"
+                },
+                "reviewed_head_sha": {
+                  "$ref": "#/$defs/sha40"
+                },
+                "created_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
                 "pending_observation": {
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["observed_at", "status", "job_allocated"],
                   "properties": {
-                    "observed_at": { "$ref": "#/$defs/timestamp" },
-                    "status": { "enum": ["queued", "pending"] },
-                    "job_allocated": { "const": false }
+                    "observed_at": {
+                      "$ref": "#/$defs/timestamp"
+                    },
+                    "status": {
+                      "enum": ["queued", "pending"]
+                    },
+                    "job_allocated": {
+                      "const": false
+                    }
                   }
                 },
-                "workflow_started_at": { "$ref": "#/$defs/timestamp" },
-                "completed_at": { "$ref": "#/$defs/timestamp" },
-                "authorization_matches": { "const": false },
-                "privileged_job_allocated": { "const": false },
-                "environment_admission_started": { "const": false },
-                "provider_constructed": { "const": false },
-                "state_mutated": { "const": false },
-                "sticky_mutated": { "const": false },
-                "accepted_lineage": { "const": false },
-                "status": { "const": "completed-inert" },
-                "terminal": { "const": true }
+                "workflow_started_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "completed_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "authorization_matches": {
+                  "const": false
+                },
+                "privileged_job_allocated": {
+                  "const": false
+                },
+                "environment_admission_started": {
+                  "const": false
+                },
+                "provider_constructed": {
+                  "const": false
+                },
+                "state_mutated": {
+                  "const": false
+                },
+                "sticky_mutated": {
+                  "const": false
+                },
+                "accepted_lineage": {
+                  "const": false
+                },
+                "status": {
+                  "const": "completed-inert"
+                },
+                "terminal": {
+                  "const": true
+                },
+                "pr_number": {
+                  "$ref": "#/$defs/positiveId"
+                },
+                "concurrency_group": {
+                  "$ref": "#/$defs/concurrencyGroup"
+                }
               }
             }
           }
@@ -531,20 +879,32 @@
           "additionalProperties": false,
           "required": ["repository_root", "normal", "stale"],
           "properties": {
-            "repository_root": { "$ref": "#/$defs/repositoryScope" },
-            "normal": { "$ref": "#/$defs/lineageScope" },
-            "stale": { "$ref": "#/$defs/lineageScope" }
+            "repository_root": {
+              "$ref": "#/$defs/repositoryScope"
+            },
+            "normal": {
+              "$ref": "#/$defs/lineageScope"
+            },
+            "stale": {
+              "$ref": "#/$defs/lineageScope"
+            }
           }
         },
-        "pre_state": { "$ref": "#/$defs/emptyScopedState" },
+        "pre_state": {
+          "$ref": "#/$defs/emptyScopedState"
+        },
         "created": {
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/stateArtifact" }
+          "items": {
+            "$ref": "#/$defs/stateArtifact"
+          }
         },
-        "final_state": { "$ref": "#/$defs/emptyScopedState" }
+        "final_state": {
+          "$ref": "#/$defs/emptyScopedState"
+        }
       }
     },
     "cleanup": {
@@ -558,16 +918,24 @@
         "terminal_resources"
       ],
       "properties": {
-        "barrier_cleanup_passed": { "const": true },
+        "barrier_cleanup_passed": {
+          "const": true
+        },
         "deleted_physical_artifact_ids": {
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/artifactId" }
+          "items": {
+            "$ref": "#/$defs/artifactId"
+          }
         },
-        "no_unowned_artifacts": { "const": true },
-        "state_key_removed_after_final_readback": { "const": true },
+        "no_unowned_artifacts": {
+          "const": true
+        },
+        "state_key_removed_after_final_readback": {
+          "const": true
+        },
         "terminal_resources": {
           "type": "object",
           "additionalProperties": false,
@@ -583,25 +951,39 @@
             "host_restricted_evidence"
           ],
           "properties": {
-            "control_comments": { "$ref": "#/$defs/deletedResource" },
-            "authorization_variable": { "$ref": "#/$defs/deletedResource" },
+            "control_comments": {
+              "$ref": "#/$defs/deletedResource"
+            },
+            "authorization_variable": {
+              "$ref": "#/$defs/deletedResource"
+            },
             "environment_settings": {
               "type": "object",
               "additionalProperties": false,
               "required": ["terminal_class", "exact_snapshot_readback"],
               "properties": {
-                "terminal_class": { "const": "restored" },
-                "exact_snapshot_readback": { "const": true }
+                "terminal_class": {
+                  "const": "restored"
+                },
+                "exact_snapshot_readback": {
+                  "const": true
+                }
               }
             },
-            "operation_created_secrets": { "$ref": "#/$defs/deletedResource" },
+            "operation_created_secrets": {
+              "$ref": "#/$defs/deletedResource"
+            },
             "fixture_branches": {
               "type": "object",
               "additionalProperties": false,
               "required": ["normal", "stale"],
               "properties": {
-                "normal": { "$ref": "#/$defs/deletedResource" },
-                "stale": { "$ref": "#/$defs/deletedResource" }
+                "normal": {
+                  "$ref": "#/$defs/deletedResource"
+                },
+                "stale": {
+                  "$ref": "#/$defs/deletedResource"
+                }
               }
             },
             "fixture_prs": {
@@ -609,8 +991,12 @@
               "additionalProperties": false,
               "required": ["normal", "stale"],
               "properties": {
-                "normal": { "$ref": "#/$defs/closedPr" },
-                "stale": { "$ref": "#/$defs/closedPr" }
+                "normal": {
+                  "$ref": "#/$defs/closedPr"
+                },
+                "stale": {
+                  "$ref": "#/$defs/closedPr"
+                }
               }
             },
             "product_sticky": {
@@ -625,12 +1011,24 @@
                 "exact_readback"
               ],
               "properties": {
-                "terminal_class": { "const": "retained-public-evidence" },
-                "comment_id": { "$ref": "#/$defs/positiveId" },
-                "comment_url": { "$ref": "#/$defs/commentUrl" },
-                "body_sha256": { "$ref": "#/$defs/sha256" },
-                "marker": { "$ref": "#/$defs/stickyMarker" },
-                "exact_readback": { "const": true }
+                "terminal_class": {
+                  "const": "retained-public-evidence"
+                },
+                "comment_id": {
+                  "$ref": "#/$defs/positiveId"
+                },
+                "comment_url": {
+                  "$ref": "#/$defs/commentUrl"
+                },
+                "body_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "marker": {
+                  "$ref": "#/$defs/stickyMarker"
+                },
+                "exact_readback": {
+                  "const": true
+                }
               }
             },
             "workflow_runs": {
@@ -638,9 +1036,15 @@
               "additionalProperties": false,
               "required": ["terminal_class", "all_terminal", "all_follow_on_runs_terminal"],
               "properties": {
-                "terminal_class": { "const": "platform-retained-terminal" },
-                "all_terminal": { "const": true },
-                "all_follow_on_runs_terminal": { "const": true }
+                "terminal_class": {
+                  "const": "platform-retained-terminal"
+                },
+                "all_terminal": {
+                  "const": true
+                },
+                "all_follow_on_runs_terminal": {
+                  "const": true
+                }
               }
             },
             "host_restricted_evidence": {
@@ -652,11 +1056,15 @@
                 "approved_destination_identity_sha256"
               ],
               "properties": {
-                "terminal_class": { "const": "restricted-retained" },
+                "terminal_class": {
+                  "const": "restricted-retained"
+                },
                 "approved_destination_kind": {
                   "const": "maintainer-approved-host-restricted-location"
                 },
-                "approved_destination_identity_sha256": { "$ref": "#/$defs/sha256" }
+                "approved_destination_identity_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
               }
             }
           }
@@ -679,25 +1087,68 @@
           "minItems": 6,
           "maxItems": 6,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/credentialSinkObservation" }
+          "items": {
+            "$ref": "#/$defs/credentialSinkObservation"
+          }
         },
-        "plaintext_session_absent": { "const": true },
-        "provider_content_absent": { "const": true },
-        "tool_data_absent": { "const": true },
-        "permission_set_exact": { "const": true }
+        "plaintext_session_absent": {
+          "const": true
+        },
+        "provider_content_absent": {
+          "const": true
+        },
+        "tool_data_absent": {
+          "const": true
+        },
+        "permission_set_exact": {
+          "const": true
+        }
       }
     }
   },
   "$defs": {
-    "sha40": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "positiveId": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
-    "timestamp": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-    "nonnegativeInteger": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
-    "runAttempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
-    "artifactId": { "type": "string", "minLength": 1, "maxLength": 128 },
-    "objectIdentity": { "type": "string", "minLength": 1, "maxLength": 256 },
-    "concurrencyGroup": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sha40": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "positiveId": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,18}$"
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "nonnegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "runAttempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "artifactId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "objectIdentity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "concurrencyGroup": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
     "commentUrl": {
       "type": "string",
       "pattern": "^https://github\\.com/SolusQuest/agentic-pr-review/pull/[1-9][0-9]*#issuecomment-[1-9][0-9]*$"
@@ -721,14 +1172,30 @@
         "payload_sha256"
       ],
       "properties": {
-        "kind": { "const": "apr-r4-e2p-authorization-manifest-v1" },
-        "repository_id": { "$ref": "#/$defs/positiveId" },
-        "repository": { "const": "SolusQuest/agentic-pr-review" },
-        "pr_number": { "$ref": "#/$defs/positiveId" },
-        "fixture_head_sha": { "$ref": "#/$defs/sha40" },
-        "operation_id": { "$ref": "#/$defs/sha256" },
-        "workflow_sha": { "$ref": "#/$defs/sha40" },
-        "action_source_sha": { "const": "5b5769753653bb3fd3e68cf8b7bb88a1bd350613" },
+        "kind": {
+          "const": "apr-r4-e2p-authorization-manifest-v1"
+        },
+        "repository_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "repository": {
+          "const": "SolusQuest/agentic-pr-review"
+        },
+        "pr_number": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "fixture_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "workflow_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "action_source_sha": {
+          "const": "5b5769753653bb3fd3e68cf8b7bb88a1bd350613"
+        },
         "payload_sha256": {
           "const": "97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc"
         }
@@ -759,33 +1226,77 @@
         "observed_at"
       ],
       "properties": {
-        "contract": { "const": "apr-r4-e2p-proof-control-v1" },
-        "kind": { "enum": ["ready", "release", "stale-ready", "stale-release"] },
-        "comment_id": { "$ref": "#/$defs/positiveId" },
-        "operation_id": { "$ref": "#/$defs/sha256" },
-        "repository_id": { "$ref": "#/$defs/positiveId" },
-        "repository": { "const": "SolusQuest/agentic-pr-review" },
-        "pr_number": { "$ref": "#/$defs/positiveId" },
-        "fixture_head_sha": { "$ref": "#/$defs/sha40" },
-        "workflow_sha": { "$ref": "#/$defs/sha40" },
+        "contract": {
+          "const": "apr-r4-e2p-proof-control-v1"
+        },
+        "kind": {
+          "enum": ["ready", "release", "stale-ready", "stale-release"]
+        },
+        "comment_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repository_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "repository": {
+          "const": "SolusQuest/agentic-pr-review"
+        },
+        "pr_number": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "fixture_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "workflow_sha": {
+          "$ref": "#/$defs/sha40"
+        },
         "action_source_sha": {
           "const": "5b5769753653bb3fd3e68cf8b7bb88a1bd350613"
         },
         "payload_sha256": {
           "const": "97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc"
         },
-        "body_sha256": { "$ref": "#/$defs/sha256" },
-        "readback_body_sha256": { "$ref": "#/$defs/sha256" },
-        "producing_run_id": { "$ref": "#/$defs/positiveId" },
-        "producing_run_attempt": { "$ref": "#/$defs/runAttempt" },
+        "body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "readback_body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "producing_run_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "producing_run_attempt": {
+          "$ref": "#/$defs/runAttempt"
+        },
         "predecessor_comment_id": {
-          "oneOf": [{ "$ref": "#/$defs/positiveId" }, { "type": "null" }]
+          "oneOf": [
+            {
+              "$ref": "#/$defs/positiveId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        "actor_id": { "$ref": "#/$defs/positiveId" },
+        "actor_id": {
+          "$ref": "#/$defs/positiveId"
+        },
         "actor_permission": {
-          "oneOf": [{ "enum": ["write", "admin"] }, { "type": "null" }]
+          "oneOf": [
+            {
+              "enum": ["write", "admin"]
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        "observed_at": { "$ref": "#/$defs/timestamp" }
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
     "dispatchVerification": {
@@ -801,13 +1312,27 @@
         "complete"
       ],
       "properties": {
-        "operation_id": { "$ref": "#/$defs/sha256" },
-        "ready_comment_id": { "$ref": "#/$defs/positiveId" },
-        "release_comment_id": { "$ref": "#/$defs/positiveId" },
-        "bootstrap_run_id": { "$ref": "#/$defs/positiveId" },
-        "continuation_run_id": { "$ref": "#/$defs/positiveId" },
-        "observed_at": { "$ref": "#/$defs/timestamp" },
-        "complete": { "const": true }
+        "operation_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ready_comment_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "release_comment_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "bootstrap_run_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "continuation_run_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "complete": {
+          "const": true
+        }
       }
     },
     "cleanupReceipt": {
@@ -820,8 +1345,12 @@
           "additionalProperties": false,
           "required": ["kind", "operation_id", "comment_outcomes", "result"],
           "properties": {
-            "kind": { "const": "apr-r4-e2p-proof-control-cleanup-v1" },
-            "operation_id": { "$ref": "#/$defs/sha256" },
+            "kind": {
+              "const": "apr-r4-e2p-proof-control-cleanup-v1"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/sha256"
+            },
             "comment_outcomes": {
               "type": "array",
               "minItems": 2,
@@ -832,7 +1361,9 @@
                 "additionalProperties": false,
                 "required": ["comment_id", "outcome"],
                 "properties": {
-                  "comment_id": { "$ref": "#/$defs/positiveId" },
+                  "comment_id": {
+                    "$ref": "#/$defs/positiveId"
+                  },
                   "outcome": {
                     "enum": [
                       "committed",
@@ -844,10 +1375,14 @@
                 }
               }
             },
-            "result": { "const": "passed" }
+            "result": {
+              "const": "passed"
+            }
           }
         },
-        "final_absence_read_back_at": { "$ref": "#/$defs/timestamp" }
+        "final_absence_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
     "publicationTransition": {
@@ -872,118 +1407,374 @@
         "base_scope_digest",
         "lineage_head_object_identity",
         "lineage_epoch",
-        "lineage_generation"
+        "lineage_session_id",
+        "lineage_transition",
+        "lineage_ordinal",
+        "session_generation"
       ],
       "properties": {
-        "summary": { "const": "Trusted proof complete." },
-        "sticky_comment_id": { "$ref": "#/$defs/positiveId" },
-        "sticky_comment_url": { "$ref": "#/$defs/commentUrl" },
-        "sticky_body_sha256": { "$ref": "#/$defs/sha256" },
-        "sticky_marker": { "$ref": "#/$defs/stickyMarker" },
-        "sticky_mutation": { "const": "create" },
-        "sticky_readback_body_sha256": { "$ref": "#/$defs/sha256" },
-        "sticky_readback_marker": { "$ref": "#/$defs/stickyMarker" },
-        "candidate_physical_artifact_id": { "$ref": "#/$defs/artifactId" },
-        "candidate_object_identity": { "$ref": "#/$defs/objectIdentity" },
-        "acceptance_physical_artifact_id": { "$ref": "#/$defs/artifactId" },
-        "acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
-        "acceptance_receipt": { "$ref": "#/$defs/acceptanceReceipt" },
-        "accepted_head_sha": { "$ref": "#/$defs/sha40" },
-        "acceptance_after_sticky_readback": { "const": true },
-        "base_scope_digest": { "$ref": "#/$defs/sha256" },
-        "lineage_head_object_identity": { "$ref": "#/$defs/objectIdentity" },
-        "lineage_epoch": { "$ref": "#/$defs/nonnegativeInteger" },
-        "lineage_generation": { "const": 1 }
+        "summary": {
+          "const": "Trusted proof complete."
+        },
+        "sticky_comment_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "sticky_comment_url": {
+          "$ref": "#/$defs/commentUrl"
+        },
+        "sticky_body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sticky_marker": {
+          "$ref": "#/$defs/stickyMarker"
+        },
+        "sticky_mutation": {
+          "const": "create"
+        },
+        "sticky_readback_body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sticky_readback_marker": {
+          "$ref": "#/$defs/stickyMarker"
+        },
+        "candidate_physical_artifact_id": {
+          "$ref": "#/$defs/artifactId"
+        },
+        "candidate_object_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "acceptance_physical_artifact_id": {
+          "$ref": "#/$defs/artifactId"
+        },
+        "acceptance_object_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "acceptance_receipt": {
+          "$ref": "#/$defs/acceptanceReceipt"
+        },
+        "accepted_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "acceptance_after_sticky_readback": {
+          "const": true
+        },
+        "base_scope_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "lineage_head_object_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "lineage_epoch": {
+          "$ref": "#/$defs/sha256"
+        },
+        "lineage_session_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "lineage_transition": {
+          "const": "initial"
+        },
+        "lineage_ordinal": {
+          "const": 0
+        },
+        "session_generation": {
+          "const": 0
+        }
       }
     },
     "acceptanceReceipt": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "acceptance_object_identity",
-        "candidate_object_identity",
-        "predecessor_acceptance_object_identity",
-        "publication_comment_id",
-        "publication_comment_url",
-        "publication_body_sha256",
-        "accepted_generation"
+        "logical_generation_identity",
+        "original_candidate_object_identity",
+        "previous_logical_generation_identity",
+        "previous_acceptance_receipt_identity",
+        "reviewed_head_sha",
+        "publication_operation",
+        "repository_id",
+        "pull_request_number",
+        "comment_id",
+        "comment_url",
+        "scope_sha256",
+        "body_sha256",
+        "publication_payload_sha256",
+        "producing_run_identity",
+        "producing_run_attempt",
+        "accepted_at_unix_seconds",
+        "logical_expires_at_unix_seconds"
       ],
       "properties": {
-        "acceptance_object_identity": { "$ref": "#/$defs/objectIdentity" },
-        "candidate_object_identity": { "$ref": "#/$defs/objectIdentity" },
-        "predecessor_acceptance_object_identity": {
-          "oneOf": [{ "$ref": "#/$defs/objectIdentity" }, { "type": "null" }]
+        "logical_generation_identity": {
+          "$ref": "#/$defs/sha256"
         },
-        "publication_comment_id": { "$ref": "#/$defs/positiveId" },
-        "publication_comment_url": { "$ref": "#/$defs/commentUrl" },
-        "publication_body_sha256": { "$ref": "#/$defs/sha256" },
-        "accepted_generation": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 2147483647
+        "original_candidate_object_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "previous_logical_generation_identity": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_acceptance_receipt_identity": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewed_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "publication_operation": {
+          "enum": [1, 2]
+        },
+        "repository_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "pull_request_number": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "comment_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "comment_url": {
+          "$ref": "#/$defs/commentUrl"
+        },
+        "scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "publication_payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "producing_run_identity": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "producing_run_attempt": {
+          "$ref": "#/$defs/runAttempt"
+        },
+        "accepted_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "logical_expires_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
         }
       }
     },
     "stateArtifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "physical_artifact_id",
-        "scope",
-        "scope_digest",
-        "opaque_name",
-        "artifact_digest",
-        "object_class",
-        "object_identity",
-        "predecessor_identity",
-        "successor_identity",
-        "epoch",
-        "generation",
-        "producing_run_id",
-        "producing_run_attempt",
-        "creation_phase"
-      ],
-      "properties": {
-        "physical_artifact_id": { "$ref": "#/$defs/artifactId" },
-        "scope": { "enum": ["repository_root", "normal", "stale"] },
-        "scope_digest": { "$ref": "#/$defs/sha256" },
-        "opaque_name": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "artifact_digest": { "$ref": "#/$defs/sha256" },
-        "object_class": {
-          "enum": [
-            "locator_root",
-            "lineage_head",
-            "candidate",
-            "publication_intent",
-            "acceptance",
-            "publication_failure",
-            "abandonment",
-            "reset",
-            "expiry_transition",
-            "cleanup"
-          ]
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "physical_artifact_id",
+            "scope_digest",
+            "opaque_name",
+            "artifact_digest",
+            "object_identity",
+            "producing_run_id",
+            "producing_run_attempt",
+            "creation_phase",
+            "scope",
+            "object_class",
+            "decoded_record"
+          ],
+          "properties": {
+            "physical_artifact_id": {
+              "$ref": "#/$defs/artifactId"
+            },
+            "scope_digest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "opaque_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "artifact_digest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "object_identity": {
+              "$ref": "#/$defs/sha256"
+            },
+            "producing_run_id": {
+              "$ref": "#/$defs/positiveId"
+            },
+            "producing_run_attempt": {
+              "$ref": "#/$defs/runAttempt"
+            },
+            "creation_phase": {
+              "enum": ["bootstrap", "continuation", "stale-setup"]
+            },
+            "scope": {
+              "const": "repository_root"
+            },
+            "object_class": {
+              "const": "locator_root"
+            },
+            "decoded_record": {
+              "$ref": "#/$defs/locatorRootRecord"
+            }
+          }
         },
-        "object_identity": { "$ref": "#/$defs/objectIdentity" },
-        "predecessor_identity": {
-          "oneOf": [{ "$ref": "#/$defs/objectIdentity" }, { "type": "null" }]
-        },
-        "successor_identity": {
-          "oneOf": [{ "$ref": "#/$defs/objectIdentity" }, { "type": "null" }]
-        },
-        "epoch": { "$ref": "#/$defs/nonnegativeInteger" },
-        "generation": { "$ref": "#/$defs/nonnegativeInteger" },
-        "producing_run_id": { "$ref": "#/$defs/positiveId" },
-        "producing_run_attempt": { "$ref": "#/$defs/runAttempt" },
-        "creation_phase": { "enum": ["bootstrap", "continuation", "stale-setup"] }
-      }
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "physical_artifact_id",
+            "scope_digest",
+            "opaque_name",
+            "artifact_digest",
+            "object_identity",
+            "producing_run_id",
+            "producing_run_attempt",
+            "creation_phase",
+            "scope",
+            "object_class",
+            "key_id",
+            "epoch",
+            "session_id",
+            "predecessor_identity",
+            "successor_identity",
+            "created_at_unix_seconds",
+            "logical_expires_at_unix_seconds",
+            "required_platform_expires_at_unix_seconds",
+            "decoded_record"
+          ],
+          "properties": {
+            "physical_artifact_id": {
+              "$ref": "#/$defs/artifactId"
+            },
+            "scope_digest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "opaque_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "artifact_digest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "object_identity": {
+              "$ref": "#/$defs/sha256"
+            },
+            "producing_run_id": {
+              "$ref": "#/$defs/positiveId"
+            },
+            "producing_run_attempt": {
+              "$ref": "#/$defs/runAttempt"
+            },
+            "creation_phase": {
+              "enum": ["bootstrap", "continuation", "stale-setup"]
+            },
+            "scope": {
+              "enum": ["normal", "stale"]
+            },
+            "object_class": {
+              "enum": [
+                "lineage_head",
+                "candidate",
+                "publication_intent",
+                "acceptance",
+                "publication_failure",
+                "abandonment",
+                "reset",
+                "expiry_transition",
+                "cleanup"
+              ]
+            },
+            "key_id": { "$ref": "#/$defs/sha256" },
+            "epoch": {
+              "$ref": "#/$defs/sha256"
+            },
+            "session_id": {
+              "$ref": "#/$defs/sha256"
+            },
+            "predecessor_identity": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "successor_identity": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "created_at_unix_seconds": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "logical_expires_at_unix_seconds": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "required_platform_expires_at_unix_seconds": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "decoded_record": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/lineageHeadRecord"
+                },
+                {
+                  "$ref": "#/$defs/candidateRecord"
+                },
+                {
+                  "$ref": "#/$defs/publicationIntentRecord"
+                },
+                {
+                  "$ref": "#/$defs/acceptanceReceipt"
+                },
+                {
+                  "$ref": "#/$defs/publicationFailureRecord"
+                },
+                {
+                  "$ref": "#/$defs/abandonmentRecord"
+                },
+                {
+                  "$ref": "#/$defs/transitionIntentRecord"
+                },
+                {
+                  "$ref": "#/$defs/cleanupRecord"
+                }
+              ]
+            }
+          }
+        }
+      ]
     },
     "repositoryScope": {
       "type": "object",
       "additionalProperties": false,
       "required": ["scope_digest", "locator_root_opaque_name"],
       "properties": {
-        "scope_digest": { "$ref": "#/$defs/sha256" },
-        "locator_root_opaque_name": { "type": "string", "minLength": 1, "maxLength": 256 }
+        "scope_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "locator_root_opaque_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
       }
     },
     "lineageScope": {
@@ -991,15 +1782,18 @@
       "additionalProperties": false,
       "required": ["base_scope_digest", "family_opaque_names"],
       "properties": {
-        "base_scope_digest": { "$ref": "#/$defs/sha256" },
-        "family_opaque_names": { "$ref": "#/$defs/familyOpaqueNames" }
+        "base_scope_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "family_opaque_names": {
+          "$ref": "#/$defs/familyOpaqueNames"
+        }
       }
     },
     "familyOpaqueNames": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "locator_root",
         "lineage_head",
         "candidate",
         "publication_intent",
@@ -1011,16 +1805,33 @@
         "cleanup"
       ],
       "properties": {
-        "locator_root": { "$ref": "#/$defs/opaqueName" },
-        "lineage_head": { "$ref": "#/$defs/opaqueName" },
-        "candidate": { "$ref": "#/$defs/opaqueName" },
-        "publication_intent": { "$ref": "#/$defs/opaqueName" },
-        "acceptance": { "$ref": "#/$defs/opaqueName" },
-        "publication_failure": { "$ref": "#/$defs/opaqueName" },
-        "abandonment": { "$ref": "#/$defs/opaqueName" },
-        "reset": { "$ref": "#/$defs/opaqueName" },
-        "expiry_transition": { "$ref": "#/$defs/opaqueName" },
-        "cleanup": { "$ref": "#/$defs/opaqueName" }
+        "lineage_head": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "candidate": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "publication_intent": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "acceptance": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "publication_failure": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "abandonment": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "reset": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "expiry_transition": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "cleanup": {
+          "$ref": "#/$defs/opaqueName"
+        }
       }
     },
     "emptyScopedState": {
@@ -1033,13 +1844,23 @@
           "additionalProperties": false,
           "required": ["scope_digest", "pagination_complete", "locator_root"],
           "properties": {
-            "scope_digest": { "$ref": "#/$defs/sha256" },
-            "pagination_complete": { "const": true },
-            "locator_root": { "$ref": "#/$defs/emptyArray" }
+            "scope_digest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "pagination_complete": {
+              "const": true
+            },
+            "locator_root": {
+              "$ref": "#/$defs/emptyArray"
+            }
           }
         },
-        "normal": { "$ref": "#/$defs/emptyLineageInventory" },
-        "stale": { "$ref": "#/$defs/emptyLineageInventory" }
+        "normal": {
+          "$ref": "#/$defs/emptyLineageInventory"
+        },
+        "stale": {
+          "$ref": "#/$defs/emptyLineageInventory"
+        }
       }
     },
     "emptyLineageInventory": {
@@ -1047,13 +1868,16 @@
       "additionalProperties": false,
       "required": ["base_scope_digest", "pagination_complete", "families"],
       "properties": {
-        "base_scope_digest": { "$ref": "#/$defs/sha256" },
-        "pagination_complete": { "const": true },
+        "base_scope_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "pagination_complete": {
+          "const": true
+        },
         "families": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "locator_root",
             "lineage_head",
             "candidate",
             "publication_intent",
@@ -1065,21 +1889,42 @@
             "cleanup"
           ],
           "properties": {
-            "locator_root": { "$ref": "#/$defs/emptyArray" },
-            "lineage_head": { "$ref": "#/$defs/emptyArray" },
-            "candidate": { "$ref": "#/$defs/emptyArray" },
-            "publication_intent": { "$ref": "#/$defs/emptyArray" },
-            "acceptance": { "$ref": "#/$defs/emptyArray" },
-            "publication_failure": { "$ref": "#/$defs/emptyArray" },
-            "abandonment": { "$ref": "#/$defs/emptyArray" },
-            "reset": { "$ref": "#/$defs/emptyArray" },
-            "expiry_transition": { "$ref": "#/$defs/emptyArray" },
-            "cleanup": { "$ref": "#/$defs/emptyArray" }
+            "lineage_head": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "candidate": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "publication_intent": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "acceptance": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "publication_failure": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "abandonment": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "reset": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "expiry_transition": {
+              "$ref": "#/$defs/emptyArray"
+            },
+            "cleanup": {
+              "$ref": "#/$defs/emptyArray"
+            }
           }
         }
       }
     },
-    "opaqueName": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "opaqueName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
     "credentialSinkObservation": {
       "type": "object",
       "additionalProperties": false,
@@ -1111,19 +1956,32 @@
             "none"
           ]
         },
-        "expected_present": { "type": "boolean" },
-        "observed_present": { "type": "boolean" },
-        "forbidden_credentials_absent": { "const": true }
+        "expected_present": {
+          "type": "boolean"
+        },
+        "observed_present": {
+          "type": "boolean"
+        },
+        "forbidden_credentials_absent": {
+          "const": true
+        }
       }
     },
-    "emptyArray": { "type": "array", "maxItems": 0 },
+    "emptyArray": {
+      "type": "array",
+      "maxItems": 0
+    },
     "deletedResource": {
       "type": "object",
       "additionalProperties": false,
       "required": ["terminal_class", "absence_readback"],
       "properties": {
-        "terminal_class": { "const": "deleted" },
-        "absence_readback": { "const": true }
+        "terminal_class": {
+          "const": "deleted"
+        },
+        "absence_readback": {
+          "const": true
+        }
       }
     },
     "closedPr": {
@@ -1131,9 +1989,478 @@
       "additionalProperties": false,
       "required": ["terminal_class", "state", "exact_readback"],
       "properties": {
-        "terminal_class": { "const": "platform-retained-terminal" },
-        "state": { "const": "closed" },
-        "exact_readback": { "const": true }
+        "terminal_class": {
+          "const": "platform-retained-terminal"
+        },
+        "state": {
+          "const": "closed"
+        },
+        "exact_readback": {
+          "const": true
+        }
+      }
+    },
+    "locatorArtifactIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "archive_sha256", "envelope_sha256"],
+      "properties": {
+        "object_id": { "$ref": "#/$defs/artifactId" },
+        "archive_sha256": { "$ref": "#/$defs/sha256" },
+        "envelope_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "lineageArtifactEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "object_id",
+        "producing_run_identity",
+        "producing_run_attempt",
+        "archive_sha256",
+        "encrypted_object_sha256",
+        "expires_at_unix_seconds",
+        "size"
+      ],
+      "properties": {
+        "name": { "$ref": "#/$defs/opaqueName" },
+        "object_id": { "$ref": "#/$defs/artifactId" },
+        "producing_run_identity": { "$ref": "#/$defs/positiveId" },
+        "producing_run_attempt": { "$ref": "#/$defs/runAttempt" },
+        "archive_sha256": { "$ref": "#/$defs/sha256" },
+        "encrypted_object_sha256": { "$ref": "#/$defs/sha256" },
+        "expires_at_unix_seconds": { "$ref": "#/$defs/timestamp" },
+        "size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "opaqueStoreObjectMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "object_id",
+        "producing_run_identity",
+        "producing_run_attempt",
+        "archive_sha256",
+        "encrypted_object_sha256",
+        "expires_at_unix_seconds",
+        "size"
+      ],
+      "properties": {
+        "name": { "$ref": "#/$defs/opaqueName" },
+        "object_id": { "$ref": "#/$defs/artifactId" },
+        "producing_run_identity": { "$ref": "#/$defs/positiveId" },
+        "producing_run_attempt": { "$ref": "#/$defs/runAttempt" },
+        "archive_sha256": { "$ref": "#/$defs/sha256" },
+        "encrypted_object_sha256": { "$ref": "#/$defs/sha256" },
+        "expires_at_unix_seconds": { "$ref": "#/$defs/timestamp" },
+        "size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "lineageHeadRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transition",
+        "ordinal",
+        "reviewed_base_sha",
+        "reviewed_head_sha",
+        "previous_epoch",
+        "previous_head_identity",
+        "transition_evidence_identity",
+        "expiry_boundary",
+        "physical_predecessors",
+        "physical_superseded",
+        "superseded",
+        "completed_cleanup",
+        "reset_authority_run_identity",
+        "reset_authority_run_attempt"
+      ],
+      "properties": {
+        "transition": {
+          "enum": ["initial", "reset", "expiry"]
+        },
+        "ordinal": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "reviewed_base_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "reviewed_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "previous_epoch": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_head_identity": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transition_evidence_identity": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiry_boundary": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "physical_predecessors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lineageArtifactEvidence" }
+        },
+        "physical_superseded": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lineageArtifactEvidence" }
+        },
+        "superseded": { "type": "array", "items": { "$ref": "#/$defs/lineageArtifactEvidence" } },
+        "completed_cleanup": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lineageArtifactEvidence" }
+        },
+        "reset_authority_run_identity": {
+          "oneOf": [{ "$ref": "#/$defs/positiveId" }, { "type": "null" }]
+        },
+        "reset_authority_run_attempt": {
+          "oneOf": [{ "$ref": "#/$defs/runAttempt" }, { "type": "null" }]
+        }
+      }
+    },
+    "candidateRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logical_generation_identity",
+        "state_envelope_sha256",
+        "session_sha256",
+        "producer_base_sha",
+        "producer_head_sha",
+        "session_generation",
+        "predecessor_envelope_sha256",
+        "previous_logical_generation_identity",
+        "prepared_at_unix_seconds",
+        "prepared_expires_at_unix_seconds",
+        "publication_payload_sha256",
+        "policy_identity_sha256",
+        "config_sha256",
+        "instructions_sha256",
+        "payload_sha256",
+        "build_discriminator"
+      ],
+      "properties": {
+        "logical_generation_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state_envelope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "session_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "producer_base_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "producer_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "session_generation": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "predecessor_envelope_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_logical_generation_identity": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publication_payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "prepared_at_unix_seconds": { "$ref": "#/$defs/timestamp" },
+        "prepared_expires_at_unix_seconds": { "$ref": "#/$defs/timestamp" },
+        "policy_identity_sha256": { "$ref": "#/$defs/sha256" },
+        "config_sha256": { "$ref": "#/$defs/sha256" },
+        "instructions_sha256": { "$ref": "#/$defs/sha256" },
+        "payload_sha256": { "$ref": "#/$defs/sha256" },
+        "build_discriminator": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "publicationIntentRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewed_head_sha",
+        "scope_sha256",
+        "body_sha256",
+        "created_at_unix_seconds",
+        "record_identity"
+      ],
+      "properties": {
+        "reviewed_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "created_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "record_identity": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "publicationFailureRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewed_head_sha",
+        "scope_sha256",
+        "body_sha256",
+        "attempt_intent_record_identity",
+        "outcome",
+        "reason",
+        "failed_at_unix_seconds",
+        "record_identity"
+      ],
+      "properties": {
+        "reviewed_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "attempt_intent_record_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "outcome": { "enum": [1, 2, 3, 4, 5] },
+        "reason": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "failed_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "record_identity": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "abandonmentRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewed_head_sha",
+        "scope_sha256",
+        "body_sha256",
+        "complete_marker_absence_evidence_identity",
+        "abandoned_at_unix_seconds",
+        "record_identity"
+      ],
+      "properties": {
+        "reviewed_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "body_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "complete_marker_absence_evidence_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "abandoned_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "record_identity": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "transitionIntentRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transition",
+        "prior_head_identity",
+        "prior_epoch",
+        "transition_evidence_identity",
+        "expiry_boundary",
+        "reviewed_base_sha",
+        "reviewed_head_sha",
+        "inventory_sha256",
+        "targets",
+        "reset_authority_run_identity",
+        "reset_authority_run_attempt"
+      ],
+      "properties": {
+        "transition": {
+          "enum": ["reset", "expiry"]
+        },
+        "prior_head_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "prior_epoch": {
+          "$ref": "#/$defs/sha256"
+        },
+        "transition_evidence_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expiry_boundary": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewed_base_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "reviewed_head_sha": {
+          "$ref": "#/$defs/sha40"
+        },
+        "inventory_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/lineageArtifactEvidence"
+          }
+        },
+        "reset_authority_run_identity": {
+          "oneOf": [{ "$ref": "#/$defs/positiveId" }, { "type": "null" }]
+        },
+        "reset_authority_run_attempt": {
+          "oneOf": [{ "$ref": "#/$defs/runAttempt" }, { "type": "null" }]
+        }
+      }
+    },
+    "cleanupRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "terminal_acceptance_identity",
+        "base_scope_digest",
+        "epoch",
+        "session_id",
+        "pre_cleanup_inventory_digest",
+        "targets",
+        "operation_identity"
+      ],
+      "properties": {
+        "terminal_acceptance_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "base_scope_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "epoch": {
+          "$ref": "#/$defs/sha256"
+        },
+        "session_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "pre_cleanup_inventory_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueStoreObjectMetadata"
+          }
+        },
+        "operation_identity": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "locatorRootRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_sha256",
+        "generation",
+        "writer_key_id",
+        "created_at_unix_seconds",
+        "required_expires_at_unix_seconds",
+        "predecessors",
+        "superseded"
+      ],
+      "properties": {
+        "root_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "generation": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "writer_key_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "required_expires_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "predecessors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/locatorArtifactIdentity"
+          }
+        },
+        "superseded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/locatorArtifactIdentity"
+          }
+        }
       }
     }
   }

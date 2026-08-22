@@ -18,8 +18,7 @@ const publicSchema = JSON.parse(
 );
 const validateHost = ajv.compile(hostSchema);
 const validatePublic = ajv.compile(publicSchema);
-const stateFamilies = [
-  'locator_root',
+const scopedStateFamilies = [
   'lineage_head',
   'candidate',
   'publication_intent',
@@ -65,7 +64,7 @@ function isEmptyInventory(state) {
     state.repository_root.locator_root.length === 0 &&
     state.normal.pagination_complete === true &&
     state.stale.pagination_complete === true &&
-    stateFamilies.every(
+    scopedStateFamilies.every(
       (family) =>
         state.normal.families[family].length === 0 && state.stale.families[family].length === 0,
     )
@@ -92,8 +91,8 @@ function environmentSnapshotBytes(environment) {
     name: environment.name,
     exists: environment.exists,
     deployment_branch: environment.deployment_branch,
-    designated_reviewer_id: environment.designated_reviewer_id,
-    reviewer_permission: environment.reviewer_permission,
+    environment_approver_id: environment.environment_approver_id,
+    environment_approver_permission: environment.environment_approver_permission,
     prevent_self_review: environment.prevent_self_review,
     administrator_bypass: environment.administrator_bypass,
     secret_names: environment.secret_names,
@@ -124,7 +123,7 @@ function proofCommentPreimage(record) {
   ].join(',')}}`;
 }
 
-function exactProofComment(record, kind, run, coordinates, predecessorCommentId, permission) {
+function exactProofComment(record, kind, run, coordinates, predecessorCommentId, release) {
   return (
     record.kind === kind &&
     record.operation_id === coordinates.operationId &&
@@ -136,8 +135,9 @@ function exactProofComment(record, kind, run, coordinates, predecessorCommentId,
     record.action_source_sha === coordinates.actionSourceSha &&
     record.payload_sha256 === coordinates.payloadSha256 &&
     record.predecessor_comment_id === predecessorCommentId &&
-    record.actor_permission === permission &&
-    record.actor_id === coordinates.reviewerId &&
+    (release
+      ? record.actor_permission === 'write' || record.actor_permission === 'admin'
+      : record.actor_permission === null) &&
     record.body_sha256 === sha256(proofCommentPreimage(record)) &&
     record.body_sha256 === record.readback_body_sha256 &&
     record.producing_run_id === run.run_id &&
@@ -163,13 +163,14 @@ function findArtifact(records, objectClass, objectIdentity) {
 function exactAcceptanceReceipt(transition, predecessorIdentity) {
   const receipt = transition.acceptance_receipt;
   return (
-    receipt.acceptance_object_identity === transition.acceptance_object_identity &&
-    receipt.candidate_object_identity === transition.candidate_object_identity &&
-    receipt.predecessor_acceptance_object_identity === predecessorIdentity &&
-    receipt.publication_comment_id === transition.sticky_comment_id &&
-    receipt.publication_comment_url === transition.sticky_comment_url &&
-    receipt.publication_body_sha256 === transition.sticky_body_sha256 &&
-    receipt.accepted_generation === transition.lineage_generation
+    receipt.original_candidate_object_identity === transition.candidate_object_identity &&
+    receipt.previous_acceptance_receipt_identity === predecessorIdentity &&
+    receipt.reviewed_head_sha === transition.accepted_head_sha &&
+    receipt.comment_id === transition.sticky_comment_id &&
+    receipt.comment_url === transition.sticky_comment_url &&
+    receipt.body_sha256 === transition.sticky_body_sha256 &&
+    receipt.producing_run_attempt === 1 &&
+    receipt.logical_expires_at_unix_seconds > receipt.accepted_at_unix_seconds
   );
 }
 
@@ -323,7 +324,6 @@ export function projectTrustedProofEvidence(input) {
     workflowSha: identities.workflow_sha,
     actionSourceSha: identities.action_source_sha,
     payloadSha256: identities.payload_sha256,
-    reviewerId: environment.designated_reviewer_id,
   };
   const staleCoordinates = {
     ...normalCoordinates,
@@ -354,7 +354,7 @@ export function projectTrustedProofEvidence(input) {
       runs.bootstrap,
       normalCoordinates,
       proofControl.normal.ready.comment_id,
-      environment.reviewer_permission,
+      true,
     ) ||
     proofControl.normal.ready.observed_at !== runs.bootstrap.barrier_ready_at ||
     proofControl.normal.release.observed_at !== proofControl.normal.barrier_released_at ||
@@ -390,7 +390,7 @@ export function projectTrustedProofEvidence(input) {
       product.stale.authorized_stale_run,
       staleCoordinates,
       proofControl.stale.ready.comment_id,
-      environment.reviewer_permission,
+      true,
     ) ||
     proofControl.stale.cleanup_receipt.receipt.operation_id !== fixture.stale_operation_id ||
     !exactSet(
@@ -428,8 +428,13 @@ export function projectTrustedProofEvidence(input) {
     bootstrap.base_scope_digest !== continuation.base_scope_digest ||
     bootstrap.lineage_head_object_identity !== continuation.lineage_head_object_identity ||
     bootstrap.lineage_epoch !== continuation.lineage_epoch ||
-    bootstrap.lineage_generation !== 1 ||
-    continuation.lineage_generation !== 2 ||
+    bootstrap.lineage_session_id !== continuation.lineage_session_id ||
+    bootstrap.lineage_transition !== 'initial' ||
+    continuation.lineage_transition !== 'initial' ||
+    bootstrap.lineage_ordinal !== 0 ||
+    continuation.lineage_ordinal !== 0 ||
+    bootstrap.session_generation !== 0 ||
+    continuation.session_generation !== 1 ||
     cleanup.terminal_resources.product_sticky.comment_id !== continuation.sticky_comment_id ||
     cleanup.terminal_resources.product_sticky.comment_url !== continuation.sticky_comment_url ||
     cleanup.terminal_resources.product_sticky.body_sha256 !== continuation.sticky_body_sha256 ||
@@ -441,11 +446,16 @@ export function projectTrustedProofEvidence(input) {
   const stale = product.stale;
   const staleRun = stale.authorized_stale_run;
   const followOn = stale.unauthorized_follow_on_run;
+  const staleConcurrencyGroup = `agentic-pr-review-r4-${identities.repository_id}-pr-${fixture.stale_pr_number}`;
   if (
     new Set([runs.bootstrap.run_id, runs.continuation.run_id, staleRun.run_id, followOn.run_id])
       .size !== 4 ||
     staleRun.workflow_sha !== identities.workflow_sha ||
     followOn.workflow_sha !== identities.workflow_sha ||
+    staleRun.pr_number !== fixture.stale_pr_number ||
+    followOn.pr_number !== fixture.stale_pr_number ||
+    staleRun.concurrency_group !== staleConcurrencyGroup ||
+    followOn.concurrency_group !== staleConcurrencyGroup ||
     staleRun.reviewed_head_sha !== identities.stale_admitted_head_sha ||
     followOn.reviewed_head_sha !== identities.stale_advanced_head_sha ||
     proofControl.stale.ready.observed_at !== staleRun.stale_ready_at ||
@@ -500,6 +510,33 @@ export function projectTrustedProofEvidence(input) {
     ['continuation', runs.continuation],
     ['stale-setup', staleRun],
   ]);
+  const decodedMatchesClass = (record) => {
+    const decoded = record.decoded_record;
+    switch (record.object_class) {
+      case 'locator_root':
+        return Number.isInteger(decoded.generation) && decoded.root_sha256 !== undefined;
+      case 'lineage_head':
+        return decoded.transition !== undefined && decoded.ordinal !== undefined;
+      case 'candidate':
+        return decoded.session_generation !== undefined;
+      case 'publication_intent':
+        return decoded.created_at_unix_seconds !== undefined;
+      case 'acceptance':
+        return decoded.logical_generation_identity !== undefined;
+      case 'publication_failure':
+        return decoded.failed_at_unix_seconds !== undefined;
+      case 'abandonment':
+        return decoded.abandoned_at_unix_seconds !== undefined;
+      case 'reset':
+        return decoded.transition === 'reset';
+      case 'expiry_transition':
+        return decoded.transition === 'expiry';
+      case 'cleanup':
+        return decoded.terminal_acceptance_identity !== undefined;
+      default:
+        return false;
+    }
+  };
   if (
     state.created.some((record) => {
       const owner = phaseRuns.get(record.creation_phase);
@@ -523,7 +560,14 @@ export function projectTrustedProofEvidence(input) {
         record.producing_run_attempt !== owner.run_attempt ||
         record.scope !== expectedScope ||
         record.scope_digest !== expectedDigest ||
-        record.opaque_name !== expectedOpaqueName
+        record.opaque_name !== expectedOpaqueName ||
+        !decodedMatchesClass(record) ||
+        (record.object_class !== 'locator_root' &&
+          !(
+            record.created_at_unix_seconds < record.logical_expires_at_unix_seconds &&
+            record.logical_expires_at_unix_seconds <=
+              record.required_platform_expires_at_unix_seconds
+          ))
       );
     })
   ) {
@@ -576,8 +620,8 @@ export function projectTrustedProofEvidence(input) {
     bootstrap.candidate_object_identity,
   );
   const bootstrapIntent = state.created.find(
-    ({ object_class, generation, scope }) =>
-      object_class === 'publication_intent' && generation === 1 && scope === 'normal',
+    ({ object_class, creation_phase, scope }) =>
+      object_class === 'publication_intent' && creation_phase === 'bootstrap' && scope === 'normal',
   );
   const predecessorAcceptance = findArtifact(
     state.created,
@@ -590,8 +634,10 @@ export function projectTrustedProofEvidence(input) {
     continuation.candidate_object_identity,
   );
   const continuationIntent = state.created.find(
-    ({ object_class, generation, scope }) =>
-      object_class === 'publication_intent' && generation === 2 && scope === 'normal',
+    ({ object_class, creation_phase, scope }) =>
+      object_class === 'publication_intent' &&
+      creation_phase === 'continuation' &&
+      scope === 'normal',
   );
   const currentAcceptance = findArtifact(
     state.created,
@@ -601,6 +647,14 @@ export function projectTrustedProofEvidence(input) {
   const normalCleanup = state.created.find(
     ({ object_class, scope }) => object_class === 'cleanup' && scope === 'normal',
   );
+  const staleHead = state.created.find(
+    ({ object_class, scope }) => object_class === 'lineage_head' && scope === 'stale',
+  );
+  const bootstrapReceipt = bootstrap.acceptance_receipt;
+  const continuationReceipt = continuation.acceptance_receipt;
+  const expectedCleanupTargets = state.created
+    .filter(({ scope, object_class }) => scope === 'normal' && object_class !== 'cleanup')
+    .map(({ physical_artifact_id }) => physical_artifact_id);
   if (
     normalHeads.length !== 1 ||
     !normalHead ||
@@ -609,7 +663,21 @@ export function projectTrustedProofEvidence(input) {
     normalHead.predecessor_identity !== null ||
     normalHead.successor_identity !== null ||
     normalHead.epoch !== bootstrap.lineage_epoch ||
-    normalHead.generation !== 1 ||
+    normalHead.session_id !== bootstrap.lineage_session_id ||
+    normalHead.decoded_record.transition !== 'initial' ||
+    normalHead.decoded_record.ordinal !== 0 ||
+    normalHead.decoded_record.reviewed_base_sha !== identities.reviewed_base_sha ||
+    normalHead.decoded_record.reviewed_head_sha !== identities.normal_head_sha ||
+    normalHead.decoded_record.previous_epoch !== null ||
+    normalHead.decoded_record.previous_head_identity !== null ||
+    normalHead.decoded_record.transition_evidence_identity !== null ||
+    normalHead.decoded_record.expiry_boundary !== null ||
+    normalHead.decoded_record.physical_predecessors.length !== 0 ||
+    normalHead.decoded_record.physical_superseded.length !== 0 ||
+    normalHead.decoded_record.superseded.length !== 0 ||
+    normalHead.decoded_record.completed_cleanup.length !== 0 ||
+    normalHead.decoded_record.reset_authority_run_identity !== null ||
+    normalHead.decoded_record.reset_authority_run_attempt !== null ||
     !bootstrapCandidate ||
     !bootstrapIntent ||
     !predecessorAcceptance ||
@@ -626,6 +694,80 @@ export function projectTrustedProofEvidence(input) {
     normalCleanup.predecessor_identity !== currentAcceptance.object_identity
   ) {
     reject('lineage-binding');
+  }
+
+  if (
+    bootstrapCandidate.decoded_record.session_generation !== 0 ||
+    bootstrapCandidate.decoded_record.previous_logical_generation_identity !== null ||
+    bootstrapCandidate.decoded_record.predecessor_envelope_sha256 !== null ||
+    bootstrapCandidate.decoded_record.producer_base_sha !== identities.reviewed_base_sha ||
+    bootstrapCandidate.decoded_record.producer_head_sha !== identities.normal_head_sha ||
+    bootstrapCandidate.decoded_record.payload_sha256 !== identities.payload_sha256 ||
+    bootstrapCandidate.decoded_record.prepared_at_unix_seconds >=
+      bootstrapCandidate.decoded_record.prepared_expires_at_unix_seconds ||
+    continuationCandidate.decoded_record.session_generation !== 1 ||
+    continuationCandidate.decoded_record.previous_logical_generation_identity !==
+      bootstrapCandidate.decoded_record.logical_generation_identity ||
+    continuationCandidate.decoded_record.predecessor_envelope_sha256 !==
+      bootstrapCandidate.decoded_record.state_envelope_sha256 ||
+    continuationCandidate.decoded_record.session_sha256 !==
+      bootstrapCandidate.decoded_record.session_sha256 ||
+    continuationCandidate.decoded_record.payload_sha256 !== identities.payload_sha256 ||
+    continuationCandidate.decoded_record.prepared_at_unix_seconds >=
+      continuationCandidate.decoded_record.prepared_expires_at_unix_seconds ||
+    bootstrapReceipt.logical_generation_identity !==
+      bootstrapCandidate.decoded_record.logical_generation_identity ||
+    continuationReceipt.logical_generation_identity !==
+      continuationCandidate.decoded_record.logical_generation_identity ||
+    bootstrapReceipt.previous_logical_generation_identity !== null ||
+    continuationReceipt.previous_logical_generation_identity !==
+      bootstrapReceipt.logical_generation_identity ||
+    bootstrapReceipt.publication_operation !== 1 ||
+    continuationReceipt.publication_operation !== 2 ||
+    bootstrapReceipt.producing_run_identity !== runs.bootstrap.run_id ||
+    continuationReceipt.producing_run_identity !== runs.continuation.run_id ||
+    bootstrapReceipt.repository_id !== identities.repository_id ||
+    continuationReceipt.repository_id !== identities.repository_id ||
+    bootstrapReceipt.pull_request_number !== fixture.normal_pr_number ||
+    continuationReceipt.pull_request_number !== fixture.normal_pr_number ||
+    bootstrapIntent.decoded_record.record_identity !== bootstrapIntent.object_identity ||
+    continuationIntent.decoded_record.record_identity !== continuationIntent.object_identity ||
+    bootstrapIntent.decoded_record.reviewed_head_sha !== identities.normal_head_sha ||
+    continuationIntent.decoded_record.reviewed_head_sha !== identities.normal_head_sha ||
+    bootstrapIntent.decoded_record.scope_sha256 !== scopes.repository_root.scope_digest ||
+    continuationIntent.decoded_record.scope_sha256 !== scopes.repository_root.scope_digest ||
+    JSON.stringify(predecessorAcceptance.decoded_record) !== JSON.stringify(bootstrapReceipt) ||
+    JSON.stringify(currentAcceptance.decoded_record) !== JSON.stringify(continuationReceipt) ||
+    normalCleanup.decoded_record.terminal_acceptance_identity !==
+      continuation.acceptance_object_identity ||
+    normalCleanup.decoded_record.base_scope_digest !== scopes.normal.base_scope_digest ||
+    normalCleanup.decoded_record.epoch !== bootstrap.lineage_epoch ||
+    normalCleanup.decoded_record.session_id !== bootstrap.lineage_session_id ||
+    normalCleanup.decoded_record.operation_identity !== fixture.normal_operation_id ||
+    !exactSet(
+      normalCleanup.decoded_record.targets.map(({ object_id }) => object_id),
+      expectedCleanupTargets,
+    ) ||
+    normalCleanup.decoded_record.targets.some((target) => {
+      const record = state.created.find(
+        ({ physical_artifact_id }) => physical_artifact_id === target.object_id,
+      );
+      return (
+        !record ||
+        target.name !== record.opaque_name ||
+        target.producing_run_identity !== record.producing_run_id ||
+        target.producing_run_attempt !== record.producing_run_attempt ||
+        target.archive_sha256 !== record.artifact_digest ||
+        target.encrypted_object_sha256 !== record.artifact_digest ||
+        target.expires_at_unix_seconds !== record.required_platform_expires_at_unix_seconds
+      );
+    }) ||
+    !staleHead ||
+    staleHead.decoded_record.transition !== 'initial' ||
+    staleHead.decoded_record.ordinal !== 0 ||
+    staleHead.decoded_record.reviewed_head_sha !== identities.stale_admitted_head_sha
+  ) {
+    reject('decoded-state-contract');
   }
 
   if (staleSetupIds.length === 0) reject('stale-state-setup');
