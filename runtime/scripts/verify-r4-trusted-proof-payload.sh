@@ -126,6 +126,7 @@ execute_proof() {
   dotnet build "$supervisor_project" --configuration Release --nologo \
     -p:PublishAot=false
   mkdir -p "$proof_evidence"
+  set +e
   dotnet "$supervisor" supervise \
     --root "$proof_evidence" --repo "$repo_root" --payload "$payload" \
     --bundle "$repo_root/.github/actions/agentic-pr-review/dist/index.js" \
@@ -134,6 +135,12 @@ execute_proof() {
     --golden "$framework_fixture_root/expected-evidence.json.golden" \
     --canaries "$framework_fixture_root/canary-routes.tsv" \
     --node "$(command -v node)" --trusted-proof-only true
+  supervisor_status=$?
+  set -e
+  if [[ -f "$proof_evidence/trusted-proof-payload-evidence.json" ]]; then
+    cat "$proof_evidence/trusted-proof-payload-evidence.json"
+  fi
+  [[ "$supervisor_status" -eq 0 ]] || return "$supervisor_status"
   [[ -f "$proof_evidence/trusted-proof-payload-evidence.json" ]] || return 1
   payload_sha="$(sha256sum "$payload" | cut -d ' ' -f 1)"
   proof_sha="$(sha256sum "$proof_intermediate" | cut -d ' ' -f 1)"

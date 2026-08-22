@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using Xunit;
 
@@ -7,6 +8,36 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
 public sealed class TrustedProofVerifierFixtureTests
 {
+    [Fact]
+    public async Task ProofControlBarrierCompletesAcrossFreshProofScenarios()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-control-barrier-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var seed = Path.Join(root, "dispatch-bootstrap");
+            await PrepareProofScenarioAsync(seed, "continuation-seed", 900);
+            Assert.Equal(0, await RunControlAsync(seed, 900, "hold"));
+
+            var continuation = Path.Join(root, "dispatch-continuation");
+            await PrepareProofScenarioAsync(continuation, "continuation", 901);
+            Assert.Equal(0, await RunControlAsync(
+                continuation,
+                901,
+                "verify-completed"));
+            Assert.Equal(0, await RunControlAsync(
+                continuation,
+                901,
+                "cleanup"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ProofControlUsesItsFrozenRepositoryCoordinateOnlyInProofCases()
     {
@@ -104,6 +135,47 @@ public sealed class TrustedProofVerifierFixtureTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static async Task PrepareProofScenarioAsync(
+        string scenario,
+        string mode,
+        long runId)
+    {
+        Directory.CreateDirectory(scenario);
+        await File.WriteAllTextAsync(Path.Join(scenario, "mode"), mode);
+        await File.WriteAllTextAsync(
+            Path.Join(scenario, "trusted-proof-payload"), "1");
+        await File.WriteAllTextAsync(
+            Path.Join(scenario, "run-id"), runId.ToString());
+        await File.WriteAllTextAsync(Path.Join(scenario, "run-attempt"), "1");
+    }
+
+    private static Task<int> RunControlAsync(
+        string scenario,
+        long runId,
+        string command)
+    {
+        var payloadSha256 = new string('f', 64);
+        var coordinates = new TrustedProofControlCoordinates(
+            FrameworkCanaries.ProofControlRepository,
+            FrameworkGitHubHandler.RepositoryId,
+            FrameworkGitHubHandler.PullRequestNumber,
+            FrameworkGitHubHandler.HeadSha,
+            new string('1', 64),
+            FrameworkGitHubHandler.WorkflowSha,
+            FrameworkGitHubHandler.ActionSha,
+            payloadSha256,
+            runId,
+            1);
+        return TrustedProofControlService.RunAsync(
+            [command],
+            coordinates,
+            TrustedProofControlTransport.Create(
+                coordinates,
+                FrameworkCanaries.GitHubToken,
+                new FrameworkGitHubHandler(scenario, payloadSha256)),
+            CancellationToken.None);
     }
 
     private static async Task<JsonElement[]> GetTreeAsync(
