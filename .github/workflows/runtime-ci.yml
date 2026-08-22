@@ -72,11 +72,22 @@ jobs:
           test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-second.receipt")" -eq 1
           cmp "$RUNNER_TEMP/r4-e2-aot-first.receipt" "$RUNNER_TEMP/r4-e2-aot-second.receipt"
 
+      - name: Set up exact R4 E2P .NET SDK
+        uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-dotnet
+        with:
+          dotnet-version: 10.0.109
+
       - name: R4 E2P trusted proof payload first clean Native AOT build
-        run: bash runtime/scripts/verify-r4-trusted-proof-payload.sh | tee "$RUNNER_TEMP/r4-e2p-first.log"
+        run: |
+          set -o pipefail
+          bash runtime/scripts/verify-r4-trusted-proof-payload.sh | tee "$RUNNER_TEMP/r4-e2p-first.log"
 
       - name: R4 E2P trusted proof payload second clean Native AOT build
-        run: bash runtime/scripts/verify-r4-trusted-proof-payload.sh | tee "$RUNNER_TEMP/r4-e2p-second.log"
+        run: |
+          set -o pipefail
+          bash runtime/scripts/verify-r4-trusted-proof-payload.sh | tee "$RUNNER_TEMP/r4-e2p-second.log"
 
       - name: R4 E2P supplemental receipts are byte-identical
         run: |

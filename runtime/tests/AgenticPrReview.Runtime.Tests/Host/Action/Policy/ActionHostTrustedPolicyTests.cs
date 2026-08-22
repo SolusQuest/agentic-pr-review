@@ -59,7 +59,7 @@ public sealed class ActionHostTrustedPolicyTests
         Assert.Equal(ActionHostTrustedPolicy.SecurityPolicy,
             policy.SecurityPolicyId);
         Assert.Equal(
-            "8939a844728cd43f71807ac9ddce6f0973b2413e08d2ec3619b122860e14dc9a",
+            "0b8da22450401fb26cc219dc8c6c5af771dbd8f6f7c02c27409d313468c792f5",
             policy.PolicySha256);
         Assert.All(transport.Calls, call => Assert.DoesNotContain(
             ActionHostAuthorizationScenario.HeadSha,

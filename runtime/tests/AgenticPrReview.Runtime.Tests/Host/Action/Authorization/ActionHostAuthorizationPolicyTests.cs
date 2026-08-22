@@ -41,6 +41,10 @@ public sealed class ActionHostAuthorizationPolicyTests
         { "cancel-in-progress: false", "cancel-in-progress: true" },
         { "environment: r4-trusted-proof", "environment: production" },
         { "persist-credentials: false", "persist-credentials: true" },
+        {
+            "DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-dotnet",
+            "DOTNET_INSTALL_DIR: /usr/share/dotnet"
+        },
         { "dotnet-version: 10.0.109", "global-json-file: payload-source/global.json" },
         { "barrier hold", "barrier verify-completed" },
         { "barrier verify-completed", "barrier hold" },
