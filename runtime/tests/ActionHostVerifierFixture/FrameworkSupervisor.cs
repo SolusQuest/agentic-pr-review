@@ -794,7 +794,8 @@ internal static class FrameworkSupervisor
         info.Environment["TMPDIR"] = scenario;
         info.Environment["GITHUB_API_URL"] = platform.BaseUrl;
         info.Environment["GITHUB_TOKEN"] = FrameworkCanaries.GitHubToken;
-        info.Environment["REPOSITORY"] = FrameworkCanaries.Repository;
+        info.Environment["REPOSITORY"] =
+            FrameworkCanaries.ProofControlRepository;
         info.Environment["REPOSITORY_ID"] =
             FrameworkGitHubHandler.RepositoryId.ToString(
                 CultureInfo.InvariantCulture);

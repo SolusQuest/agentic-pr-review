@@ -61,6 +61,13 @@ internal sealed class FrameworkGitHubHandler(
         var query = request.RequestUri.Query;
         var mode = ReadMode();
         var prefix = "/repos/" + FrameworkCanaries.Repository;
+        var proofControlPrefix =
+            "/repos/" + FrameworkCanaries.ProofControlRepository;
+        if (IsTrustedProofPayload() &&
+            path.StartsWith(proofControlPrefix, StringComparison.Ordinal))
+        {
+            prefix = proofControlPrefix;
+        }
         if (!path.StartsWith(prefix, StringComparison.Ordinal))
         {
             return Json(HttpStatusCode.NotFound, "{}");

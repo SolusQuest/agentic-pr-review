@@ -12,6 +12,8 @@ internal static class FrameworkCanaries
         "QVBSMTc4X1BSRVZJT1VTX0tFWV9DQU5BUllfMTIzNDU=";
     internal const string Repository =
         "proof-owner/apr178-repository-canary";
+    internal const string ProofControlRepository =
+        "SolusQuest/agentic-pr-review";
     internal const string ReviewedPath =
         "proof/apr178-path-canary.txt";
     internal const string Workflow =

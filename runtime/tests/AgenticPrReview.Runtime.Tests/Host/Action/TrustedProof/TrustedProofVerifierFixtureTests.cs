@@ -8,6 +8,49 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 public sealed class TrustedProofVerifierFixtureTests
 {
     [Fact]
+    public async Task ProofControlUsesItsFrozenRepositoryCoordinateOnlyInProofCases()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-control-fixture-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "mode"),
+                "continuation-seed");
+            await File.WriteAllTextAsync(
+                Path.Join(root, "trusted-proof-payload"), "1");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "900");
+            await File.WriteAllTextAsync(Path.Join(root, "run-attempt"), "1");
+            using var handler = new FrameworkGitHubHandler(
+                root,
+                new string('f', 64));
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            using var proofResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.ProofControlRepository +
+                "/issues/147/comments");
+            proofResponse.EnsureSuccessStatusCode();
+            Assert.Equal("[]", await proofResponse.Content.ReadAsStringAsync());
+
+            using var productResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository);
+            productResponse.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FinalWorkflowAndNestedTrustedPolicyShareOneSyntheticTree()
     {
         var root = Path.Join(
