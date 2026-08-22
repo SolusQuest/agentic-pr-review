@@ -293,9 +293,14 @@ export function checkTrustedLivePolicy() {
   for (const { value: workflowValue } of allWorkflowDocuments) {
     collectSecretExpressions(workflowValue, secretExpressions);
   }
+  const r3SecretExpressions = secretExpressions.filter(
+    (expression) =>
+      expression.includes('R3_LIVE_PROOF_DEEPSEEK_API_KEY') ||
+      expression.includes('AGENTIC_REVIEW_DEEPSEEK_API_KEY'),
+  );
   if (
-    secretExpressions.length !== 1 ||
-    secretExpressions[0] !== '${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}' ||
+    r3SecretExpressions.length !== 1 ||
+    r3SecretExpressions[0] !== '${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}' ||
     allWorkflowSource.includes(retiredSecret) ||
     /secrets\s*:\s*inherit/u.test(allWorkflowSource) ||
     /probe-deepseek-request|DeepSeekCompatibilityProbe/u.test(allWorkflowSource)

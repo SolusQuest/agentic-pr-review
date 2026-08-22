@@ -128,6 +128,13 @@ describe('trusted live workflow policy', () => {
     expect(() => run(candidate)).toThrow();
   });
 
+  test('permits a separately owned R4 secret family', () => {
+    const candidate = withAdditionalWorkflow(
+      `name: additional\non:\n  workflow_dispatch:\njobs:\n  extra:\n    runs-on: ubuntu-24.04\n    steps:\n      - env:\n          KEY: \${{ secrets.DEEPSEEK_API_KEY }}\n        run: echo separately-checked\n`,
+    );
+    expect(run(candidate)).toBe('APR_R3_LIVE_POLICY_OK\n');
+  });
+
   test.each([
     [
       'exec "${supervisor}" "${live_arguments[@]}"',
