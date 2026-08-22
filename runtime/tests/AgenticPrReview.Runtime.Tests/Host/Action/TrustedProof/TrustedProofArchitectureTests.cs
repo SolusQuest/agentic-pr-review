@@ -55,6 +55,11 @@ public sealed class TrustedProofArchitectureTests
         var composition = File.ReadAllText(Path.Join(
             proofRoot,
             "TrustedProofPayloadComposition.cs"));
+        var productionSources = string.Join(
+            '\n',
+            Directory.EnumerateFiles(proofRoot, "*.cs")
+                .Order(StringComparer.Ordinal)
+                .Select(File.ReadAllText));
 
         Assert.DoesNotContain("Task.Delay", handler, StringComparison.Ordinal);
         Assert.Contains("proof/apr178-path-canary.txt", handler,
@@ -79,6 +84,15 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("ActionHostTrustedProofVerifier", composition,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("GITHUB_API_URL", productionSources,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("\"http://", productionSources,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            2,
+            productionSources.Split(
+                "new Uri(\"https://api.github.com/\")",
+                StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
@@ -175,6 +189,14 @@ public sealed class TrustedProofArchitectureTests
         Assert.DoesNotContain(
             "TrustedProofVerifierAotIntermediateDirectory",
             verification,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("| tee \"$proof_log\"", verification,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("tail -n 100", verification,
+            StringComparison.Ordinal);
+        Assert.Contains("project-r4-e2p-diagnostics.mjs", verification,
+            StringComparison.Ordinal);
+        Assert.Contains("> \"$proof_log\" 2>&1", verification,
             StringComparison.Ordinal);
     }
 

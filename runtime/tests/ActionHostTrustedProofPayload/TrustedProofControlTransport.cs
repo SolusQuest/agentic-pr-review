@@ -51,7 +51,7 @@ internal sealed class TrustedProofControlTransport : IDisposable
         };
         var client = new HttpClient(handler, disposeHandler: true)
         {
-            BaseAddress = ResolveApiBaseAddress(),
+            BaseAddress = new Uri("https://api.github.com/"),
             Timeout = TimeSpan.FromSeconds(30),
         };
         client.DefaultRequestHeaders.Clear();
@@ -230,26 +230,6 @@ internal sealed class TrustedProofControlTransport : IDisposable
     }
 
     public void Dispose() => client.Dispose();
-
-    private static Uri ResolveApiBaseAddress()
-    {
-        var configured = Environment.GetEnvironmentVariable("GITHUB_API_URL");
-        if (string.IsNullOrEmpty(configured))
-        {
-            return new Uri("https://api.github.com/");
-        }
-
-        if (!Uri.TryCreate(configured, UriKind.Absolute, out var value) ||
-            value.Scheme is not ("http" or "https") ||
-            !string.IsNullOrEmpty(value.UserInfo) ||
-            !string.IsNullOrEmpty(value.Query) ||
-            !string.IsNullOrEmpty(value.Fragment))
-        {
-            throw new InvalidOperationException("The GitHub API URL is invalid.");
-        }
-
-        return new Uri(value.AbsoluteUri.TrimEnd('/') + "/");
-    }
 
     private static bool IsValid(TrustedProofIssueComment comment) =>
         comment.Id > 0 &&

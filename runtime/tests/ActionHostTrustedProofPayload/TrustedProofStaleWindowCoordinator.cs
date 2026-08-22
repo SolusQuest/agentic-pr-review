@@ -63,7 +63,7 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
         };
         using var client = new HttpClient(handler, disposeHandler: false)
         {
-            BaseAddress = ResolveApiBaseAddress(),
+            BaseAddress = new Uri("https://api.github.com/"),
             Timeout = TimeSpan.FromSeconds(30),
         };
         client.DefaultRequestHeaders.Authorization =
@@ -351,26 +351,6 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
         return pullRequests.GetArrayLength() == 1
             ? pullRequests[0].GetProperty("number").GetInt64()
             : 0;
-    }
-
-    private static Uri ResolveApiBaseAddress()
-    {
-        var configured = Environment.GetEnvironmentVariable("GITHUB_API_URL");
-        if (string.IsNullOrEmpty(configured))
-        {
-            return new Uri("https://api.github.com/");
-        }
-
-        if (!Uri.TryCreate(configured, UriKind.Absolute, out var value) ||
-            value.Scheme is not ("http" or "https") ||
-            !string.IsNullOrEmpty(value.UserInfo) ||
-            !string.IsNullOrEmpty(value.Query) ||
-            !string.IsNullOrEmpty(value.Fragment))
-        {
-            throw new InvalidOperationException("The GitHub API URL is invalid.");
-        }
-
-        return new Uri(value.AbsoluteUri.TrimEnd('/') + "/");
     }
 
     private static async Task<byte[]?> ReadBoundedAsync(

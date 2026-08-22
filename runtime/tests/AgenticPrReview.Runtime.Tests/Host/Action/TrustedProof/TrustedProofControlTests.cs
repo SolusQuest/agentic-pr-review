@@ -211,6 +211,113 @@ public sealed class TrustedProofControlTests
             request.Path.EndsWith("/99", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(
+        (int)TrustedProofMutationOutcome.OutcomeUnknown,
+        (int)TrustedProofMutationOutcome.MissingIdempotent,
+        false,
+        "reconciled-committed")]
+    [InlineData(
+        (int)TrustedProofMutationOutcome.OutcomeUnknown,
+        (int)TrustedProofMutationOutcome.Committed,
+        false,
+        "reconciled-committed")]
+    [InlineData(
+        (int)TrustedProofMutationOutcome.OutcomeUnknown,
+        (int)TrustedProofMutationOutcome.OutcomeUnknown,
+        false,
+        "reconciled-committed")]
+    [InlineData(
+        (int)TrustedProofMutationOutcome.KnownNotSent,
+        (int)TrustedProofMutationOutcome.MissingIdempotent,
+        false,
+        "reconciled-missing")]
+    [InlineData(
+        (int)TrustedProofMutationOutcome.KnownNotSent,
+        (int)TrustedProofMutationOutcome.Committed,
+        false,
+        "reconciled-committed")]
+    [InlineData(
+        (int)TrustedProofMutationOutcome.OutcomeUnknown,
+        (int)TrustedProofMutationOutcome.OutcomeUnknown,
+        true,
+        null)]
+    public void CleanupClassificationRetainsInitialRetryAndFinalPresence(
+        int initialOutcome,
+        int retryOutcome,
+        bool finalPresence,
+        string? expected)
+    {
+        Assert.Equal(expected, TrustedProofControlService.ClassifyCleanupOutcome(
+            (TrustedProofMutationOutcome)initialOutcome,
+            (TrustedProofMutationOutcome)retryOutcome,
+            finalPresence));
+    }
+
+    [Fact]
+    public async Task CleanupReconcilesUnknownThenMissingAfterFinalAbsence()
+    {
+        var owned = Comment(
+            10,
+            TrustedProofControlMarker.CreateBody(
+                "ready",
+                Coordinates,
+                predecessorCommentId: null),
+            "proof-bot");
+        var handler = new ControlHandler(
+            [owned],
+            [
+                new(HttpStatusCode.InternalServerError, Remove: true),
+                new(HttpStatusCode.NotFound, Remove: false),
+            ]);
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler);
+
+        var exit = await TrustedProofControlService.RunAsync(
+            ["cleanup"],
+            Coordinates,
+            transport,
+            CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(2, handler.Requests.Count(request =>
+            request.Method == HttpMethod.Delete));
+    }
+
+    [Fact]
+    public async Task CleanupFailsWhenTwoUnknownDeletesLeaveCommentPresent()
+    {
+        var owned = Comment(
+            10,
+            TrustedProofControlMarker.CreateBody(
+                "ready",
+                Coordinates,
+                predecessorCommentId: null),
+            "proof-bot");
+        var handler = new ControlHandler(
+            [owned],
+            [
+                new(HttpStatusCode.InternalServerError, Remove: false),
+                new(HttpStatusCode.InternalServerError, Remove: false),
+            ]);
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler);
+
+        var exit = await TrustedProofControlService.RunAsync(
+            ["cleanup"],
+            Coordinates,
+            transport,
+            CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.Equal(2, handler.Requests.Count(request =>
+            request.Method == HttpMethod.Delete));
+    }
+
     private static TrustedProofIssueComment Comment(
         long id,
         string body,
@@ -221,11 +328,20 @@ public sealed class TrustedProofControlTests
         return new(id, body, new(login), timestamp, timestamp);
     }
 
-    private sealed class ControlHandler(
-        IEnumerable<TrustedProofIssueComment> initial) : HttpMessageHandler
+    private sealed record DeleteStep(HttpStatusCode Status, bool Remove);
+
+    private sealed class ControlHandler : HttpMessageHandler
     {
-        private readonly Dictionary<long, TrustedProofIssueComment> comments =
-            initial.ToDictionary(comment => comment.Id);
+        private readonly Dictionary<long, TrustedProofIssueComment> comments;
+        private readonly Queue<DeleteStep> deleteSteps;
+
+        internal ControlHandler(
+            IEnumerable<TrustedProofIssueComment> initial,
+            IEnumerable<DeleteStep>? deleteSteps = null)
+        {
+            comments = initial.ToDictionary(comment => comment.Id);
+            this.deleteSteps = new Queue<DeleteStep>(deleteSteps ?? []);
+        }
 
         internal List<(HttpMethod Method, string Path)> Requests { get; } = [];
 
@@ -258,9 +374,16 @@ public sealed class TrustedProofControlTests
             if (request.Method == HttpMethod.Delete &&
                 long.TryParse(path.Split('/').Last(), out var deleteId))
             {
-                comments.Remove(deleteId);
+                var step = deleteSteps.Count == 0
+                    ? new DeleteStep(HttpStatusCode.NoContent, Remove: true)
+                    : deleteSteps.Dequeue();
+                if (step.Remove)
+                {
+                    comments.Remove(deleteId);
+                }
+
                 return Task.FromResult(new HttpResponseMessage(
-                    HttpStatusCode.NoContent));
+                    step.Status));
             }
 
             return Task.FromResult(new HttpResponseMessage(

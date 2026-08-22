@@ -274,34 +274,30 @@ internal static class TrustedProofControlService
                 return 1;
             }
 
-            var outcome = await transport.DeleteAsync(
+            var initialOutcome = await transport.DeleteAsync(
                 comment.Id,
                 cancellationToken).ConfigureAwait(false);
-            if (outcome is TrustedProofMutationOutcome.KnownNotSent or
+            TrustedProofMutationOutcome? retryOutcome = null;
+            if (initialOutcome is TrustedProofMutationOutcome.KnownNotSent or
                 TrustedProofMutationOutcome.OutcomeUnknown)
             {
-                outcome = await transport.DeleteAsync(
+                retryOutcome = await transport.DeleteAsync(
                     comment.Id,
                     cancellationToken).ConfigureAwait(false);
             }
 
             var reconciled = await transport.ListAsync(cancellationToken)
                 .ConfigureAwait(false);
-            if (reconciled is null ||
-                reconciled.Any(candidate => candidate.Id == comment.Id))
+            var finalPresence = reconciled?.Any(
+                candidate => candidate.Id == comment.Id);
+            var outcomeName = ClassifyCleanupOutcome(
+                initialOutcome,
+                retryOutcome,
+                finalPresence);
+            if (outcomeName is null)
             {
                 return 1;
             }
-
-            var outcomeName = outcome switch
-            {
-                TrustedProofMutationOutcome.Committed => "committed",
-                TrustedProofMutationOutcome.MissingIdempotent =>
-                    "missing-idempotent",
-                TrustedProofMutationOutcome.OutcomeUnknown =>
-                    "reconciled-committed",
-                _ => "reconciled-missing",
-            };
             outcomes.Add(new(comment.Id, outcomeName));
         }
 
@@ -326,6 +322,31 @@ internal static class TrustedProofControlService
             receipt,
             TrustedProofControlJsonContext.Default.TrustedProofCleanupReceipt));
         return 0;
+    }
+
+    internal static string? ClassifyCleanupOutcome(
+        TrustedProofMutationOutcome initialOutcome,
+        TrustedProofMutationOutcome? retryOutcome,
+        bool? finalPresence)
+    {
+        if (finalPresence is not false)
+        {
+            return null;
+        }
+
+        return initialOutcome switch
+        {
+            TrustedProofMutationOutcome.Committed => "committed",
+            TrustedProofMutationOutcome.MissingIdempotent =>
+                "missing-idempotent",
+            TrustedProofMutationOutcome.OutcomeUnknown =>
+                "reconciled-committed",
+            TrustedProofMutationOutcome.KnownNotSent
+                when retryOutcome is TrustedProofMutationOutcome.Committed or
+                    TrustedProofMutationOutcome.OutcomeUnknown =>
+                "reconciled-committed",
+            _ => "reconciled-missing",
+        };
     }
 
     private static bool TrySelectCurrent(

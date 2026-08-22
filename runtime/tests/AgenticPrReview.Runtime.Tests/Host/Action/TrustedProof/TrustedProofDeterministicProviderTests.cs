@@ -99,6 +99,26 @@ public sealed class TrustedProofDeterministicProviderTests
         Assert.Equal(HttpStatusCode.BadRequest, missingResponse.StatusCode);
     }
 
+    [Theory]
+    [InlineData("swapped-exchanges")]
+    [InlineData("late-result")]
+    [InlineData("extra-exchange")]
+    [InlineData("duplicate-call")]
+    [InlineData("duplicate-result")]
+    public async Task ContinuationRejectsNonExactGlobalExchangeOrder(
+        string mutation)
+    {
+        const string credential = "provider-canary-value";
+        var messages = await BootstrapHistoryAsync(credential);
+        MutateHistory(messages, mutation);
+        using var invoker = new HttpMessageInvoker(
+            new TrustedProofDeterministicDeepSeekHandler(credential));
+
+        using var response = await SendRawAsync(invoker, credential, messages);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task ContinuationCarriesPriorHistoryAcrossItsOwnToolExchanges()
     {
@@ -174,7 +194,7 @@ public sealed class TrustedProofDeterministicProviderTests
         using var invoker = new HttpMessageInvoker(
             new TrustedProofDeterministicDeepSeekHandler(credential));
         var messages = new JsonArray();
-        for (var ordinal = 0; ordinal < 5; ordinal++)
+        for (var ordinal = 0; ordinal < 6; ordinal++)
         {
             var response = await SendAsync(invoker, credential, messages);
             AppendExchange(messages, response);
@@ -205,6 +225,62 @@ public sealed class TrustedProofDeterministicProviderTests
             ["tool_call_id"] = callId,
             ["content"] = "{\"result\":\"accepted\"}",
         });
+    }
+
+    private static void MutateHistory(JsonArray messages, string mutation)
+    {
+        switch (mutation)
+        {
+            case "swapped-exchanges":
+                Swap(messages, 0, 2);
+                Swap(messages, 1, 3);
+                break;
+            case "late-result":
+            {
+                var result = messages[1]!.DeepClone();
+                messages.RemoveAt(1);
+                messages.Insert(3, result);
+                break;
+            }
+            case "extra-exchange":
+                messages.Add(new JsonObject
+                {
+                    ["role"] = "assistant",
+                    ["tool_calls"] = new JsonArray(new JsonObject
+                    {
+                        ["id"] = "unexpected",
+                        ["type"] = "function",
+                        ["function"] = new JsonObject
+                        {
+                            ["name"] = "read_file",
+                            ["arguments"] = "{}",
+                        },
+                    }),
+                });
+                messages.Add(new JsonObject
+                {
+                    ["role"] = "tool",
+                    ["tool_call_id"] = "unexpected",
+                    ["content"] = "{}",
+                });
+                break;
+            case "duplicate-call":
+                messages.Insert(1, messages[0]!.DeepClone());
+                break;
+            case "duplicate-result":
+                messages.Insert(2, messages[1]!.DeepClone());
+                break;
+            default:
+                throw new InvalidOperationException();
+        }
+    }
+
+    private static void Swap(JsonArray messages, int left, int right)
+    {
+        var leftValue = messages[left]!.DeepClone();
+        var rightValue = messages[right]!.DeepClone();
+        messages[left] = rightValue;
+        messages[right] = leftValue;
     }
 
     private static HttpRequestMessage Request(string credential, string body)

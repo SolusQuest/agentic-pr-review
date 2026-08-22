@@ -665,6 +665,10 @@ internal static class FrameworkSupervisor
                 ReadOptionalText(scenario, "host-environment.keys"));
         var closedEnvironment = hostPid < 1 ||
             File.Exists(Path.Join(scenario, "host-environment.keys"));
+        var reorderedHistoryRejected = !spec.TrustedProofPayload ||
+            File.Exists(Path.Join(
+                scenario,
+                "provider-reordered-history-rejected"));
         var outputUnchanged = output == FrameworkCanaries.OutputSentinel;
         var groupQuiet = !(spec.CrashHost ||
                 spec.CrashAfterProviderCheckpoint ||
@@ -728,6 +732,7 @@ internal static class FrameworkSupervisor
             ReadInt(scenario, "provider-sequence") >= 6;
         var passed = exited && expected && barrierAfterPassed && noLeak &&
             closedEnvironment &&
+            reorderedHistoryRejected &&
             outputUnchanged && groupQuiet && platformQuiet && continuation &&
             successfulContinuation &&
             sixTools && signalGateReached &&

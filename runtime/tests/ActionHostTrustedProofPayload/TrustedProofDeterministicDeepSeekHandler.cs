@@ -159,10 +159,12 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                 .ToArray();
             if (markerCount == 0)
             {
-                return continuation is not true && call <= 3;
+                if (continuation is true || call > 3)
+                {
+                    return false;
+                }
             }
-
-            if (markerCount != 1 || carriers.Length != 1 ||
+            else if (markerCount != 1 || carriers.Length != 1 ||
                 !HasExactToolCall(
                     carriers[0],
                     "e2p-read-diff",
@@ -172,21 +174,25 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
             {
                 return false;
             }
-
-            var carrierDigest = Convert.ToHexString(SHA256.HashData(
-                    Encoding.UTF8.GetBytes(carriers[0].GetRawText())))
-                .ToLowerInvariant();
-            continuationCarrierDigest ??= carrierDigest;
-            if (!StringComparer.Ordinal.Equals(
-                    carrierDigest,
-                    continuationCarrierDigest))
+            else
             {
-                return false;
+                var carrierDigest = Convert.ToHexString(SHA256.HashData(
+                        Encoding.UTF8.GetBytes(carriers[0].GetRawText())))
+                    .ToLowerInvariant();
+                continuationCarrierDigest ??= carrierDigest;
+                if (!StringComparer.Ordinal.Equals(
+                        carrierDigest,
+                        continuationCarrierDigest))
+                {
+                    return false;
+                }
             }
 
-            var requiredBootstrapExchanges = continuation is true || call == 1
-                ? 5
-                : Math.Min(5, call - 1);
+            var requiredBootstrapExchanges = markerCount == 0
+                ? call - 1
+                : continuation is true || call == 1
+                    ? 6
+                    : Math.Min(5, call - 1);
             (string Id, string Name, string Arguments)[] bootstrap =
             [
                 ("e2p-list-changed", "list_changed_files",
@@ -198,44 +204,47 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                     "\"hunk_count\":20}"),
                 ("e2p-read-file", "read_file",
                     "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
-                    "\"line_count\":20}"),
+                        "\"line_count\":20}"),
                 ("e2p-search", "search_text",
                     "{\"query\":\"trusted-proof\"," +
                     "\"path\":\"proof/apr178-path-canary.txt\"}"),
+                ("e2p-finish", "finish_review",
+                    "{\"summary\":\"Trusted proof complete.\"," +
+                    "\"findings\":[]}"),
             ];
+            var expected = new List<(string Id, string Name, string Arguments)>(
+                requiredBootstrapExchanges + 2);
             for (var index = 0; index < requiredBootstrapExchanges; index++)
             {
-                var exchange = bootstrap[index];
-                if (!HasExactToolExchange(
-                        messages,
-                        exchange.Id,
-                        exchange.Name,
-                        exchange.Arguments))
-                {
-                    return false;
-                }
+                expected.Add(bootstrap[index]);
             }
 
-            if (continuation is true && call >= 2 &&
-                !HasExactToolExchange(
-                    messages,
+            if (continuation is true && call >= 2)
+            {
+                expected.Add((
                     "e2p-continuation-read-file",
                     "read_file",
                     "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
-                        "\"line_count\":20}"))
+                        "\"line_count\":20}"));
+            }
+
+            if (continuation is true && call >= 3)
+            {
+                expected.Add((
+                    "e2p-continuation-search",
+                    "search_text",
+                    "{\"query\":\"trusted-proof\"," +
+                        "\"path\":\"proof/apr178-path-canary.txt\"}"));
+            }
+
+            if (!HasExactToolExchangeSequence(messages, expected))
             {
                 return false;
             }
 
-            if (continuation is true && call >= 3 &&
-                !HasExactToolExchange(
-                    messages,
-                    "e2p-continuation-search",
-                    "search_text",
-                    "{\"query\":\"trusted-proof\"," +
-                        "\"path\":\"proof/apr178-path-canary.txt\"}"))
+            if (markerCount == 0)
             {
-                return false;
+                return true;
             }
 
             hasContinuation = continuation is true || call == 1;
@@ -247,48 +256,44 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
         }
     }
 
-    private static bool HasExactToolExchange(
+    private static bool HasExactToolExchangeSequence(
         JsonElement messages,
-        string callId,
-        string name,
-        string arguments)
+        IReadOnlyList<(string Id, string Name, string Arguments)> expected)
     {
-        var callIndex = -1;
-        var resultIndex = -1;
-        var index = 0;
-        foreach (var message in messages.EnumerateArray())
+        var protocol = messages.EnumerateArray().Where(message =>
+            message.TryGetProperty("tool_calls", out _) ||
+            message.TryGetProperty("role", out var role) &&
+            role.GetString() == "tool").ToArray();
+        if (protocol.Length != expected.Count * 2)
         {
-            if (HasExactToolCall(message, callId, name, arguments))
-            {
-                if (callIndex >= 0)
-                {
-                    return false;
-                }
-
-                callIndex = index;
-            }
-
-            if (message.TryGetProperty("role", out var role) &&
-                role.GetString() == "tool" &&
-                message.TryGetProperty("tool_call_id", out var resultId) &&
-                resultId.GetString() == callId &&
-                message.TryGetProperty("content", out var content) &&
-                content.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(content.GetString()))
-            {
-                if (resultIndex >= 0)
-                {
-                    return false;
-                }
-
-                resultIndex = index;
-            }
-
-            index++;
+            return false;
         }
 
-        return callIndex >= 0 && resultIndex > callIndex;
+        for (var index = 0; index < expected.Count; index++)
+        {
+            var exchange = expected[index];
+            if (!HasExactToolCall(
+                    protocol[index * 2],
+                    exchange.Id,
+                    exchange.Name,
+                    exchange.Arguments) ||
+                !HasExactToolResult(protocol[index * 2 + 1], exchange.Id))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
+
+    private static bool HasExactToolResult(JsonElement message, string callId) =>
+        message.TryGetProperty("role", out var role) &&
+        role.GetString() == "tool" &&
+        message.TryGetProperty("tool_call_id", out var resultId) &&
+        resultId.GetString() == callId &&
+        message.TryGetProperty("content", out var content) &&
+        content.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(content.GetString());
 
     private static bool HasExactToolCall(
         JsonElement message,
@@ -299,7 +304,8 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
         if (!message.TryGetProperty("role", out var role) ||
             role.GetString() != "assistant" ||
             !message.TryGetProperty("tool_calls", out var calls) ||
-            calls.ValueKind != JsonValueKind.Array)
+            calls.ValueKind != JsonValueKind.Array ||
+            calls.GetArrayLength() != 1)
         {
             return false;
         }

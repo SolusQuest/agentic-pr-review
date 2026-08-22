@@ -70,6 +70,7 @@ const forbiddenProof = [
   'FrameworkTimeProvider',
   'FrameworkProviderHandler',
   'LiveAgentVerifierFixture',
+  'GITHUB_API_URL',
   'System.Reflection.Emit',
   'Assembly.Load',
 ];

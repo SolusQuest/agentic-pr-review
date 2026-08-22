@@ -2,12 +2,12 @@
 set -euo pipefail
 
 if [[ "$#" -ne 0 ]]; then
-  echo "usage: runtime/scripts/verify-r4-trusted-proof-payload.sh" >&2
+  printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=usage status=failed\n' >&2
   exit 2
 fi
 if [[ "$(uname -s)" != Linux ]] ||
   grep -Eqi '(microsoft|wsl)' /proc/sys/kernel/osrelease 2>/dev/null; then
-  echo "trusted proof payload verification requires native Linux" >&2
+  printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=native-linux-required status=failed\n' >&2
   exit 2
 fi
 
@@ -37,7 +37,7 @@ credential_names=(
 )
 for credential_name in "${credential_names[@]}"; do
   if [[ -n "${!credential_name:-}" ]]; then
-    echo "ambient credential variable is visible: $credential_name" >&2
+    printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=ambient-credential status=failed\n' >&2
     exit 1
   fi
 done
@@ -45,15 +45,17 @@ if git -C "$repo_root" config --local --get-regexp \
     '^(http\..*\.extraheader|credential\..*\.helper)$' >/dev/null 2>&1 ||
   git config --global --get-regexp \
     '^(http\..*\.extraheader|credential\..*\.helper)$' >/dev/null 2>&1; then
-  echo "ambient Git credential configuration is visible" >&2
+  printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=ambient-git-config status=failed\n' >&2
   exit 1
 fi
-[[ "$(node --version)" =~ ^v24\. ]] || {
-  echo APR_R4_E2P_NODE_VERSION_INVALID >&2
+node_version="$(node --version 2>/dev/null || true)"
+[[ "$node_version" =~ ^v24\. ]] || {
+  printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=node-version status=failed\n' >&2
   exit 1
 }
-[[ "$(dotnet --version)" == 10.0.109 ]] || {
-  echo APR_R4_E2P_DOTNET_VERSION_INVALID >&2
+dotnet_version="$(dotnet --version 2>/dev/null || true)"
+[[ "$dotnet_version" == 10.0.109 ]] || {
+  printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=dotnet-version status=failed\n' >&2
   exit 1
 }
 
@@ -199,10 +201,8 @@ execute_proof() {
     -p:ContinuousIntegrationBuild=true \
     "-p:PathMap=$repo_root=/_/apr-r4-e2p%2C$artifacts_root=/_/apr-r4-e2p-artifacts" \
     -warnaserror -warnnotaserror:IL3058 > "$publish_log" 2>&1; then
-    tail -n 100 "$publish_log" >&2
     return 1
   fi
-  cat "$publish_log"
   audit_warnings "$publish_log" "$fixture_root/aot/warning-policy.txt" 2 production || {
     echo APR_R4_E2P_AOT_WARNING_ALLOWLIST_INVALID >&2
     return 1
@@ -233,10 +233,8 @@ execute_proof() {
     -p:ContinuousIntegrationBuild=true \
     "-p:PathMap=$repo_root=/_/apr-r4-e2p%2C$artifacts_root=/_/apr-r4-e2p-artifacts" \
     -warnaserror -warnnotaserror:IL3058 > "$verifier_publish_log" 2>&1; then
-    tail -n 100 "$verifier_publish_log" >&2
     return 1
   fi
-  cat "$verifier_publish_log"
   audit_warnings "$verifier_publish_log" \
     "$fixture_root/aot/verifier-warning-policy.txt" 1 verifier || {
     echo APR_R4_E2P_VERIFIER_AOT_WARNING_ALLOWLIST_INVALID >&2
@@ -476,5 +474,19 @@ export architecture verifier_architecture identity publish_log verifier_publish_
 export proof_evidence receipt_line receipt_json
 export -f audit_warnings write_smoke_frame run_production_smoke
 export -f emit_safe_supervisor_failure verify_two_root_preparation execute_proof
+set +e
 node "$repo_root/scripts/run-clean-source-proof.mjs" --repo "$repo_root" -- \
-  bash -euo pipefail -c execute_proof | tee "$proof_log"
+  bash -euo pipefail -c execute_proof > "$proof_log" 2>&1
+proof_status=$?
+set -e
+if [[ "$proof_status" -ne 0 ]]; then
+  node "$repo_root/scripts/project-r4-e2p-diagnostics.mjs" "$proof_log" >&2
+  exit "$proof_status"
+fi
+if [[ ! -f "$receipt_line" || "$(wc -l < "$receipt_line")" -ne 1 ||
+    "$(wc -c < "$receipt_line")" -gt 32768 ]] ||
+  ! grep -Eq '^APR_R4_E2P_RECEIPT \{.*\}$' "$receipt_line"; then
+  printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=child-failed status=failed\n' >&2
+  exit 1
+fi
+cat "$receipt_line"

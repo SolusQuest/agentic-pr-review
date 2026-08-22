@@ -1,6 +1,10 @@
 using System.Buffers.Binary;
 using System.Collections;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
@@ -48,6 +52,14 @@ internal static class TrustedProofVerifierHost
         {
             return 1;
         }
+
+        if (!await RejectsReorderedContinuationAsync().ConfigureAwait(false))
+        {
+            return 1;
+        }
+        await File.WriteAllTextAsync(
+            Path.Join(scenarioRoot, "provider-reordered-history-rejected"),
+            "1\n").ConfigureAwait(false);
 
         await File.WriteAllTextAsync(
             Path.Join(scenarioRoot, "host.pid"),
@@ -147,7 +159,90 @@ internal static class TrustedProofVerifierHost
             TrustedProofControlTransport.Create(
                 coordinates,
                 launch.Inputs.GitHubToken.ExportForPrivateLaunch(),
-                handlers()));
+            handlers()));
+    }
+
+    private static async Task<bool> RejectsReorderedContinuationAsync()
+    {
+        const string credential = "verifier-private-provider-probe";
+        var messages = new List<string>();
+        using (var bootstrap = new HttpMessageInvoker(
+            new TrustedProofDeterministicDeepSeekHandler(credential)))
+        {
+            for (var ordinal = 0; ordinal < 6; ordinal++)
+            {
+                using var response = await bootstrap.SendAsync(
+                    ProviderRequest(credential, messages),
+                    CancellationToken.None).ConfigureAwait(false);
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    return false;
+                }
+
+                var responseBytes = await response.Content.ReadAsByteArrayAsync()
+                    .ConfigureAwait(false);
+                using var document = JsonDocument.Parse(responseBytes);
+                var message = document.RootElement.GetProperty("choices")[0]
+                    .GetProperty("message");
+                var function = message.GetProperty("tool_calls")[0]
+                    .GetProperty("function");
+                var callId = message.GetProperty("tool_calls")[0]
+                    .GetProperty("id").GetString()!;
+                var name = function.GetProperty("name").GetString();
+                var messageJson = message.GetRawText();
+                if (name == "list_changed_files")
+                {
+                    messageJson = messageJson.Replace(
+                        "\"arguments\":\"{}\"",
+                        "\"arguments\":\"{\\\"after\\\":null}\"",
+                        StringComparison.Ordinal);
+                }
+                else if (name == "list_files")
+                {
+                    messageJson = messageJson.Replace(
+                        "\"arguments\":\"{}\"",
+                        "\"arguments\":\"{\\\"prefix\\\":null," +
+                            "\\\"after\\\":null}\"",
+                        StringComparison.Ordinal);
+                }
+
+                messages.Add(messageJson);
+                messages.Add(
+                    "{\"role\":\"tool\",\"tool_call_id\":\"" + callId +
+                    "\",\"content\":\"{\\\"result\\\":\\\"accepted\\\"}\"}");
+            }
+        }
+
+        var firstCall = messages[0];
+        var firstResult = messages[1];
+        messages[0] = messages[2];
+        messages[1] = messages[3];
+        messages[2] = firstCall;
+        messages[3] = firstResult;
+        using var restored = new HttpMessageInvoker(
+            new TrustedProofDeterministicDeepSeekHandler(credential));
+        using var rejected = await restored.SendAsync(
+            ProviderRequest(credential, messages),
+            CancellationToken.None).ConfigureAwait(false);
+        return rejected.StatusCode == HttpStatusCode.BadRequest;
+    }
+
+    private static HttpRequestMessage ProviderRequest(
+        string credential,
+        IReadOnlyList<string> messages)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "https://api.deepseek.com/chat/completions")
+        {
+            Content = new StringContent(
+                $"{{\"messages\":[{string.Join(',', messages)}]}}",
+                Encoding.UTF8,
+                "application/json"),
+        };
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", credential);
+        return request;
     }
 
     private static PosixSignalRegistration Register(
