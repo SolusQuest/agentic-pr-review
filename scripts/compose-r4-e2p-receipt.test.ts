@@ -30,7 +30,13 @@ function compose() {
       proof_managed_intermediate_sha256: '3'.repeat(64),
       runtime_managed_intermediate_sha256: '4'.repeat(64),
       managed_architecture_sha256: '5'.repeat(64),
-      build_pair_sha256: '6'.repeat(64),
+      verifier_sha256: '6'.repeat(64),
+      verifier_managed_intermediate_sha256: '7'.repeat(64),
+      verifier_payload_managed_intermediate_sha256: '3'.repeat(64),
+      verifier_runtime_managed_intermediate_sha256: '4'.repeat(64),
+      verifier_managed_architecture_sha256: '8'.repeat(64),
+      verifier_evidence_sha256: '9'.repeat(64),
+      build_pair_sha256: 'a'.repeat(64),
     })}\n`,
   );
   const sourceRoot = process.cwd();
@@ -66,6 +72,8 @@ function compose() {
     'runtime/scripts/prepare-r4-trusted-proof-payload.sh',
     '--warning-policy',
     'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/warning-policy.txt',
+    '--verifier-warning-policy',
+    'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/verifier-warning-policy.txt',
   ];
   const result = spawnSync(process.execPath, args, { cwd: sourceRoot, encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);

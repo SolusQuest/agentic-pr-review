@@ -128,9 +128,11 @@ project="$source_root/runtime/tests/ActionHostTrustedProofPayload/AgenticPrRevie
 dotnet publish "$project" --configuration Release --runtime linux-x64 \
   --self-contained true --output "$output_root" --artifacts-path "$artifacts_root" \
   --nologo -p:PublishAot=true -p:PublishSingleFile=true \
+  -p:JsonSerializerIsReflectionEnabledByDefault=false \
   -p:DebugType=None -p:DebugSymbols=false -p:Deterministic=true \
   -p:ContinuousIntegrationBuild=true \
-  "-p:PathMap=$source_root=/_/apr-r4-e2p"
+  "-p:PathMap=$source_root=/_/apr-r4-e2p%2C$artifacts_root=/_/apr-r4-e2p-artifacts" \
+  -warnaserror -warnnotaserror:IL3058
 payload="$output_root/AgenticPrReview.Runtime.ActionHostTrustedProofPayload"
 [[ -x "$payload" && -f "$payload" && ! -L "$payload" ]] || fail payload-file
 [[ "$(realpath -e "$payload")" == "$payload" ]] || fail payload-path

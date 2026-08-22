@@ -63,8 +63,9 @@ internal sealed class FrameworkGitHubHandler(
         var prefix = "/repos/" + FrameworkCanaries.Repository;
         var proofControlPrefix =
             "/repos/" + FrameworkCanaries.ProofControlRepository;
-        if (IsTrustedProofPayload() &&
-            path.StartsWith(proofControlPrefix, StringComparison.Ordinal))
+        var proofControlRequest = IsTrustedProofPayload() &&
+            path.StartsWith(proofControlPrefix, StringComparison.Ordinal);
+        if (proofControlRequest)
         {
             prefix = proofControlPrefix;
         }
@@ -202,7 +203,9 @@ internal sealed class FrameworkGitHubHandler(
 
             if (stored is not null)
             {
-                comments.Add(stored);
+                comments.Add(proofControlRequest
+                    ? ProofControlCompatibleIssueComment(stored)
+                    : stored);
             }
 
             return Json(HttpStatusCode.OK, "[" +
@@ -394,8 +397,10 @@ internal sealed class FrameworkGitHubHandler(
             ("path", ".github/workflows/r4-trusted-proof.yml"),
             ("head_branch", "main"),
             ("head_sha", WorkflowSha),
-            ("event", mode == "workflow-run" ? "workflow_run" :
-                "workflow_dispatch"),
+            ("event", mode == "workflow-run" ||
+                IsTrustedProofPayload() && mode == "continuation-seed"
+                    ? "workflow_run"
+                    : "workflow_dispatch"),
             ("conclusion", null),
             ("repository", Identity(RepositoryId)),
             ("head_repository", Identity(RepositoryId)),
@@ -494,7 +499,7 @@ internal sealed class FrameworkGitHubHandler(
 
     private string CurrentHead(string mode) =>
         mode == "cross-head-conflict" ? ConflictHeadSha :
-        mode == "continuation" && !IsTrustedProofPayload() ||
+        mode == "continuation" ||
             mode == "stale" &&
                 (ReadCounter("provider-sequence") >= 6 ||
                     File.Exists(Path.Join(scenarioRoot, "stale-released")))
@@ -686,6 +691,18 @@ internal sealed class FrameworkGitHubHandler(
             ("html_url", "https://github.com/" +
                 FrameworkCanaries.Repository + "/pull/147#issuecomment-" + id),
             ("body", body)));
+
+    private static string ProofControlCompatibleIssueComment(string source)
+    {
+        var value = JsonNode.Parse(source)!.AsObject();
+        value["user"] = FrameworkJson.Object(
+            ("login", "proof-bot"),
+            ("id", 8));
+        value["created_at"] = Timestamp(701);
+        value["updated_at"] = Timestamp(701);
+        value["author_association"] = "MEMBER";
+        return value.ToJsonString();
+    }
 
     private static string ProofControlComment(
         long id,

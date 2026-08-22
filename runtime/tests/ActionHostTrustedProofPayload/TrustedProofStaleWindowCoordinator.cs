@@ -24,6 +24,15 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
 
     internal TrustedProofStaleSignal Signal { get; }
 
+    internal static TrustedProofStaleWindowCoordinator CreateForVerifier(
+        TrustedProofControlCoordinates coordinates,
+        TrustedProofControlTransport transport)
+    {
+        ArgumentNullException.ThrowIfNull(coordinates);
+        ArgumentNullException.ThrowIfNull(transport);
+        return new(coordinates, transport);
+    }
+
     internal static async Task<TrustedProofStaleWindowCoordinator?> ResolveAsync(
         ActionHostLaunchContract launch,
         CancellationToken cancellationToken)

@@ -692,8 +692,11 @@ internal static class FrameworkSupervisor
             ReadInt(scenario, "sticky-update-count") == 1 &&
             summary.Contains("| State disposition | accepted |",
                 StringComparison.Ordinal) &&
-            ReadOptionalText(scenario, "sticky-successor-comment.json")
-                .Contains("Trusted continuation complete.",
+            ReadOptionalJsonString(
+                scenario,
+                "sticky-successor-comment.json",
+                "body")
+                .Contains("Trusted continuation complete&#x2E;",
                     StringComparison.Ordinal) &&
             ValidateContinuationStateTrace(scenario);
         var successfulContinuation = !spec.RequireSuccessfulContinuation ||
@@ -767,6 +770,7 @@ internal static class FrameworkSupervisor
             closedEnvironment,
             outputUnchanged,
             groupQuiet,
+            platformQuiet,
             noLeak,
             continuation,
             passed);
@@ -858,6 +862,7 @@ internal static class FrameworkSupervisor
         0,
         false,
         false,
+        true,
         true,
         true,
         false,
@@ -3102,6 +3107,24 @@ internal static class FrameworkSupervisor
         return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
     }
 
+    private static string ReadOptionalJsonString(
+        string root,
+        string name,
+        string property)
+    {
+        var path = Path.Join(root, name);
+        if (!File.Exists(path))
+        {
+            return string.Empty;
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return document.RootElement.TryGetProperty(property, out var value) &&
+            value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? string.Empty
+                : string.Empty;
+    }
+
     private static bool JsonEquivalent(byte[] left, byte[] right)
     {
         using var first = JsonDocument.Parse(left);
@@ -3190,6 +3213,7 @@ internal static class FrameworkSupervisor
             ("ExactEnvironment", result.ExactEnvironment),
             ("OutputUnchanged", result.OutputUnchanged),
             ("ProcessGroupQuiet", result.ProcessGroupQuiet),
+            ("PlatformQuiet", result.PlatformQuiet),
             ("CanarySafe", result.CanarySafe),
             ("ContinuationObserved", result.ContinuationObserved),
             ("Passed", result.Passed));
@@ -3390,6 +3414,7 @@ internal static class FrameworkSupervisor
         bool ExactEnvironment,
         bool OutputUnchanged,
         bool ProcessGroupQuiet,
+        bool PlatformQuiet,
         bool CanarySafe,
         bool ContinuationObserved,
         bool Passed);

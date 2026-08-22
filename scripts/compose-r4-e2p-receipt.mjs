@@ -37,6 +37,7 @@ const names = [
   '--preparation-contract',
   '--preparation-script',
   '--warning-policy',
+  '--verifier-warning-policy',
 ];
 if (process.argv.length !== 2 + names.length * 2) fail('usage');
 const options = new Map();
@@ -72,6 +73,22 @@ const receipt = {
   proof_managed_intermediate_sha256: identity.proof_managed_intermediate_sha256,
   runtime_managed_intermediate_sha256: identity.runtime_managed_intermediate_sha256,
   managed_architecture_sha256: identity.managed_architecture_sha256,
+  aot_warning_policy_sha256: sha256(read(options.get('--warning-policy'))),
+  production_payload_smoke: 'passed',
+  verifier_kind: 'apr-r4-e2p-trusted-proof-verifier-v1',
+  verifier_role: 'r4-e2p-verifier',
+  verifier_executable_relative_path: 'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier',
+  verifier_sha256: identity.verifier_sha256,
+  verifier_managed_intermediate_sha256: identity.verifier_managed_intermediate_sha256,
+  verifier_payload_managed_intermediate_sha256:
+    identity.verifier_payload_managed_intermediate_sha256,
+  verifier_runtime_managed_intermediate_sha256:
+    identity.verifier_runtime_managed_intermediate_sha256,
+  verifier_managed_architecture_sha256: identity.verifier_managed_architecture_sha256,
+  verifier_aot_warning_policy_sha256: sha256(read(options.get('--verifier-warning-policy'))),
+  verifier_evidence_sha256: identity.verifier_evidence_sha256,
+  synthetic_native_aot_route: 'passed',
+  standalone_default_github: 'not_executed_e4_owned',
   build_pair_sha256: identity.build_pair_sha256,
   workflow_topology_sha256: sha256(read(options.get('--workflow'))),
   preflight_contract_sha256: sha256(read(options.get('--preflight-contract'))),
@@ -82,7 +99,6 @@ const receipt = {
   trusted_instructions_sha256: sha256(read(options.get('--trusted-instructions'))),
   preparation_contract_sha256: sha256(read(options.get('--preparation-contract'))),
   preparation_script_sha256: sha256(read(options.get('--preparation-script'))),
-  aot_warning_policy_sha256: sha256(read(options.get('--warning-policy'))),
   receipt_contract_sha256: sha256(contractDocument.bytes),
   result: 'passed',
 };

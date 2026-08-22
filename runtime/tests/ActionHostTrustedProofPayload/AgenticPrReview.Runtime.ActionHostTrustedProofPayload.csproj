@@ -16,28 +16,4 @@
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
                       AdditionalProperties="ActionHostTrustedProofPayloadReference=true" />
   </ItemGroup>
-  <Target Name="ExportTrustedProofPayloadAotIntermediate"
-          AfterTargets="ComputeIlcCompileInputs"
-          BeforeTargets="IlcCompile"
-          Condition="'$(PublishAot)' == 'true' and '$(TrustedProofPayloadAotIntermediateDirectory)' != ''">
-    <Error Condition="'@(ManagedBinary)' == ''"
-           Text="APR_R4_E2P_AOT_INTERMEDIATE_MISSING" />
-    <Error Condition="'@(ManagedBinary->Count())' != '1'"
-           Text="APR_R4_E2P_AOT_INTERMEDIATE_AMBIGUOUS" />
-    <ItemGroup>
-      <_TrustedProofRuntimeIntermediate Include="@(_ManagedResolvedAssembliesToPublish)"
-                                        Condition="'%(Filename)' == 'AgenticPrReview.Runtime'" />
-    </ItemGroup>
-    <Error Condition="'@(_TrustedProofRuntimeIntermediate)' == ''"
-           Text="APR_R4_E2P_AOT_RUNTIME_INTERMEDIATE_MISSING" />
-    <Error Condition="'@(_TrustedProofRuntimeIntermediate->Count())' != '1'"
-           Text="APR_R4_E2P_AOT_RUNTIME_INTERMEDIATE_AMBIGUOUS" />
-    <MakeDir Directories="$(TrustedProofPayloadAotIntermediateDirectory)" />
-    <Copy SourceFiles="@(ManagedBinary)"
-          DestinationFiles="@(ManagedBinary->'$(TrustedProofPayloadAotIntermediateDirectory)/%(Filename)%(Extension)')"
-          SkipUnchangedFiles="false" />
-    <Copy SourceFiles="@(_TrustedProofRuntimeIntermediate)"
-          DestinationFiles="@(_TrustedProofRuntimeIntermediate->'$(TrustedProofPayloadAotIntermediateDirectory)/%(Filename)%(Extension)')"
-          SkipUnchangedFiles="false" />
-  </Target>
 </Project>

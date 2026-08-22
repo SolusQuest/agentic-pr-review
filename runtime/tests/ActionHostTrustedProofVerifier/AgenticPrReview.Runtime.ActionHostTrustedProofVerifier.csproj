@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofVerifier</AssemblyName>
+    <PublishAot>true</PublishAot>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IsAotCompatible>true</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
+                      AdditionalProperties="ActionHostTrustedProofPayloadReference=true" />
+    <ProjectReference Include="..\ActionHostTrustedProofPayload\AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\ActionHostVerifierFixture\FrameworkCanaries.cs" Link="Synthetic\FrameworkCanaries.cs" />
+    <Compile Include="..\ActionHostVerifierFixture\FrameworkCanaryCapture.cs" Link="Synthetic\FrameworkCanaryCapture.cs" />
+    <Compile Include="..\ActionHostVerifierFixture\FrameworkGitHubHandler.cs" Link="Synthetic\FrameworkGitHubHandler.cs" />
+    <Compile Include="..\ActionHostVerifierFixture\FrameworkJson.cs" Link="Synthetic\FrameworkJson.cs" />
+    <Compile Include="..\ActionHostVerifierFixture\FrameworkStateDependencies.cs" Link="Synthetic\FrameworkStateDependencies.cs" />
+  </ItemGroup>
+</Project>

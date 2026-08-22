@@ -117,6 +117,11 @@ public sealed class TrustedProofDeterministicProviderTests
         AppendExchange(messages, second);
         var terminal = await SendAsync(invoker, credential, messages);
         Assert.Equal("finish_review", ToolName(terminal));
+        Assert.Equal("e2p-continuation-finish", ToolId(terminal));
+        Assert.DoesNotContain(messages, message =>
+            message?["role"]?.GetValue<string>() == "assistant" &&
+            message?["tool_calls"]?[0]?["id"]?.GetValue<string>() ==
+                ToolId(terminal));
         Assert.Contains("Trusted continuation complete.", terminal);
         Assert.DoesNotContain(
             TrustedProofDeterministicDeepSeekHandler.ContinuationMarker,
@@ -183,6 +188,16 @@ public sealed class TrustedProofDeterministicProviderTests
         var root = JsonNode.Parse(response)!;
         var message = root["choices"]![0]!["message"]!.DeepClone();
         var callId = message["tool_calls"]![0]!["id"]!.GetValue<string>();
+        var function = message["tool_calls"]![0]!["function"]!;
+        var name = function["name"]!.GetValue<string>();
+        if (name == "list_changed_files")
+        {
+            function["arguments"] = "{\"after\":null}";
+        }
+        else if (name == "list_files")
+        {
+            function["arguments"] = "{\"prefix\":null,\"after\":null}";
+        }
         messages.Add(message);
         messages.Add(new JsonObject
         {
@@ -214,6 +229,17 @@ public sealed class TrustedProofDeterministicProviderTests
             .GetProperty("tool_calls")[0]
             .GetProperty("function")
             .GetProperty("name")
+            .GetString()!;
+    }
+
+    private static string ToolId(string response)
+    {
+        using var document = JsonDocument.Parse(response);
+        return document.RootElement
+            .GetProperty("choices")[0]
+            .GetProperty("message")
+            .GetProperty("tool_calls")[0]
+            .GetProperty("id")
             .GetString()!;
     }
 }

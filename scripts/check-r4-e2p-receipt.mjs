@@ -70,6 +70,13 @@ export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
     receipt.executable_relative_path !== 'AgenticPrReview.Runtime.ActionHostTrustedProofPayload' ||
     receipt.wrapper_build_discriminator !== 'r4-w2' ||
     receipt.payload_build_discriminator !== 'r4-w2' ||
+    receipt.production_payload_smoke !== 'passed' ||
+    receipt.verifier_kind !== 'apr-r4-e2p-trusted-proof-verifier-v1' ||
+    receipt.verifier_role !== 'r4-e2p-verifier' ||
+    receipt.verifier_executable_relative_path !==
+      'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier' ||
+    receipt.synthetic_native_aot_route !== 'passed' ||
+    receipt.standalone_default_github !== 'not_executed_e4_owned' ||
     receipt.result !== 'passed' ||
     !lowerHex(receipt.source_commit, 40) ||
     !lowerHex(receipt.source_tree, 40) ||
@@ -79,6 +86,14 @@ export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
       .some((key) => !lowerHex(receipt[key], 64))
   ) {
     fail('values');
+  }
+  if (
+    receipt.proof_managed_intermediate_sha256 !==
+      receipt.verifier_payload_managed_intermediate_sha256 ||
+    receipt.runtime_managed_intermediate_sha256 !==
+      receipt.verifier_runtime_managed_intermediate_sha256
+  ) {
+    fail('shared-managed-identity');
   }
   const fixedFiles = new Map([
     ['action_metadata_sha256', '.github/actions/agentic-pr-review/action.yml'],
@@ -113,6 +128,10 @@ export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
     [
       'aot_warning_policy_sha256',
       'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/warning-policy.txt',
+    ],
+    [
+      'verifier_aot_warning_policy_sha256',
+      'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/verifier-warning-policy.txt',
     ],
   ]);
   for (const [field, relative] of fixedFiles) {

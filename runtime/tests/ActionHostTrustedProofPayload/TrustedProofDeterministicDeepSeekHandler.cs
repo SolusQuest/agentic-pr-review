@@ -62,14 +62,14 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                 1 => Tool(
                     "e2p-continuation-read-file",
                     "read_file",
-                    "{\"path\":\"src/reviewed.ts\",\"start_line\":1," +
+                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
                     "\"line_count\":20}",
                     call),
                 2 => Tool(
                     "e2p-continuation-search",
                     "search_text",
                     "{\"query\":\"trusted-proof\"," +
-                    "\"path\":\"src/reviewed.ts\"}",
+                    "\"path\":\"proof/apr178-path-canary.txt\"}",
                     call),
                 3 => Finish(requestBytes, call, continuation: true),
                 _ => Encoding.UTF8.GetBytes("{\"choices\":[]}"),
@@ -81,20 +81,21 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
             3 => Tool(
                 "e2p-read-diff",
                 "read_diff",
-                "{\"path\":\"src/reviewed.ts\",\"start_hunk\":1," +
+                "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1," +
                 "\"hunk_count\":20}",
                 call,
                 ContinuationMarker),
             4 => Tool(
                 "e2p-read-file",
                 "read_file",
-                "{\"path\":\"src/reviewed.ts\",\"start_line\":1," +
+                "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
                 "\"line_count\":20}",
                 call),
             5 => Tool(
                 "e2p-search",
                 "search_text",
-                "{\"query\":\"trusted-proof\",\"path\":\"src/reviewed.ts\"}",
+                "{\"query\":\"trusted-proof\",\"path\":" +
+                "\"proof/apr178-path-canary.txt\"}",
                 call),
             6 => Finish(requestBytes, call, continuation: false),
             _ => Encoding.UTF8.GetBytes("{\"choices\":[]}"),
@@ -114,7 +115,7 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
         }
 
         return Tool(
-            "e2p-finish",
+            continuation ? "e2p-continuation-finish" : "e2p-finish",
             "finish_review",
             continuation
                 ? "{\"summary\":\"Trusted continuation complete.\"," +
@@ -166,7 +167,7 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                     carriers[0],
                     "e2p-read-diff",
                     "read_diff",
-                    "{\"path\":\"src/reviewed.ts\",\"start_hunk\":1," +
+                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1," +
                         "\"hunk_count\":20}"))
             {
                 return false;
@@ -188,17 +189,19 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                 : Math.Min(5, call - 1);
             (string Id, string Name, string Arguments)[] bootstrap =
             [
-                ("e2p-list-changed", "list_changed_files", "{}"),
-                ("e2p-list-files", "list_files", "{}"),
+                ("e2p-list-changed", "list_changed_files",
+                    "{\"after\":null}"),
+                ("e2p-list-files", "list_files",
+                    "{\"prefix\":null,\"after\":null}"),
                 ("e2p-read-diff", "read_diff",
-                    "{\"path\":\"src/reviewed.ts\",\"start_hunk\":1," +
+                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1," +
                     "\"hunk_count\":20}"),
                 ("e2p-read-file", "read_file",
-                    "{\"path\":\"src/reviewed.ts\",\"start_line\":1," +
+                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
                     "\"line_count\":20}"),
                 ("e2p-search", "search_text",
                     "{\"query\":\"trusted-proof\"," +
-                    "\"path\":\"src/reviewed.ts\"}"),
+                    "\"path\":\"proof/apr178-path-canary.txt\"}"),
             ];
             for (var index = 0; index < requiredBootstrapExchanges; index++)
             {
@@ -218,7 +221,7 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                     messages,
                     "e2p-continuation-read-file",
                     "read_file",
-                    "{\"path\":\"src/reviewed.ts\",\"start_line\":1," +
+                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
                         "\"line_count\":20}"))
             {
                 return false;
@@ -230,7 +233,7 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
                     "e2p-continuation-search",
                     "search_text",
                     "{\"query\":\"trusted-proof\"," +
-                        "\"path\":\"src/reviewed.ts\"}"))
+                        "\"path\":\"proof/apr178-path-canary.txt\"}"))
             {
                 return false;
             }

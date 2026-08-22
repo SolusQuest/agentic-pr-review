@@ -21,6 +21,9 @@ public sealed class TrustedProofArchitectureTests
             "AgenticPrReview.Runtime.ActionHostVerifierFixture",
             references);
         Assert.DoesNotContain(
+            "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier",
+            references);
+        Assert.DoesNotContain(
             "AgenticPrReview.Runtime.LiveAgentVerifierFixture",
             references);
         Assert.NotNull(assembly.GetType(
@@ -54,6 +57,10 @@ public sealed class TrustedProofArchitectureTests
             "TrustedProofPayloadComposition.cs"));
 
         Assert.DoesNotContain("Task.Delay", handler, StringComparison.Ordinal);
+        Assert.Contains("proof/apr178-path-canary.txt", handler,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("src/reviewed.ts", handler,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("GITHUB_TOKEN", handler, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "TrustedProofControlCoordinates",
@@ -68,6 +75,107 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("BoundedGitHubPublisherTransportFactory", composition);
         Assert.Contains("TimeProvider.System", composition);
         Assert.DoesNotContain("Framework", composition, StringComparison.Ordinal);
+        Assert.Contains("CreateForVerifier", coordinator,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("ActionHostTrustedProofVerifier", composition,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeVerifierOwnsOnlyTestSyntheticOuterDependencies()
+    {
+        var root = FindRepositoryRoot();
+        var verifierRoot = Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "ActionHostTrustedProofVerifier");
+        var project = File.ReadAllText(Path.Join(
+            verifierRoot,
+            "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.csproj"));
+        var host = File.ReadAllText(Path.Join(
+            verifierRoot,
+            "TrustedProofVerifierHost.cs"));
+        var control = File.ReadAllText(Path.Join(
+            verifierRoot,
+            "TrustedProofVerifierControl.cs"));
+        var payloadAssemblyInfo = File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "ActionHostTrustedProofPayload",
+            "AssemblyInfo.cs"));
+        var preparation = File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "scripts",
+            "prepare-r4-trusted-proof-payload.sh"));
+        var verification = File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "scripts",
+            "verify-r4-trusted-proof-payload.sh"));
+
+        Assert.Contains("<PublishAot>true</PublishAot>", project,
+            StringComparison.Ordinal);
+        Assert.Contains("ActionHostTrustedProofPayload.csproj", project,
+            StringComparison.Ordinal);
+        Assert.Contains("FrameworkGitHubHandler.cs", project,
+            StringComparison.Ordinal);
+        Assert.Contains("FrameworkStateDependencies.cs", project,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("ActionHostVerifierFixture.csproj", project,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofPayloadHost.RunAsync", host,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofDeterministicDeepSeekHandler", host,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofStaleWindowCoordinator.CreateForVerifier",
+            host, StringComparison.Ordinal);
+        Assert.Contains("FrameworkCanaries.ProofControlRepository",
+            host, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "new TrustedProofControlCoordinates(\n            launch.RepositoryName",
+            host,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofControlService.RunAsync", control,
+            StringComparison.Ordinal);
+        Assert.Contains("new VerifierRecordingHandler", control,
+            StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(
+            verifierRoot,
+            "VerifierRecordingHandler.cs")));
+        Assert.Contains(
+            "InternalsVisibleTo(\"AgenticPrReview.Runtime." +
+            "ActionHostTrustedProofVerifier\")",
+            payloadAssemblyInfo,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("GITHUB_API_URL", host,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("SocketsHttpHandler", host,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "-p:JsonSerializerIsReflectionEnabledByDefault=false",
+            preparation,
+            StringComparison.Ordinal);
+        Assert.Contains("-warnaserror -warnnotaserror:IL3058",
+            preparation, StringComparison.Ordinal);
+        Assert.Contains(
+            "$artifacts_root=/_/apr-r4-e2p-artifacts",
+            preparation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "$artifacts_root=/_/apr-r4-e2p-artifacts",
+            verification,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "TrustedProofPayloadAotIntermediateDirectory",
+            verification,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "TrustedProofVerifierAotIntermediateDirectory",
+            verification,
+            StringComparison.Ordinal);
     }
 
     [Fact]

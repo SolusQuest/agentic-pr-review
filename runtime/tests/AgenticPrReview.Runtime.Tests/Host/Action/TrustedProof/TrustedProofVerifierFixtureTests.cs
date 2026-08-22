@@ -20,6 +20,13 @@ public sealed class TrustedProofVerifierFixtureTests
             var seed = Path.Join(root, "dispatch-bootstrap");
             await PrepareProofScenarioAsync(seed, "continuation-seed", 900);
             Assert.Equal(0, await RunControlAsync(seed, 900, "hold"));
+            var stickyRoot = Path.Join(
+                root,
+                "shared-continuation-github");
+            Directory.CreateDirectory(stickyRoot);
+            await File.WriteAllTextAsync(
+                Path.Join(stickyRoot, "sticky-comment.json"),
+                "{\"id\":701,\"body\":\"ordinary sticky\"}");
 
             var continuation = Path.Join(root, "dispatch-continuation");
             await PrepareProofScenarioAsync(continuation, "continuation", 901);
@@ -74,6 +81,44 @@ public sealed class TrustedProofVerifierFixtureTests
             using var productResponse = await client.GetAsync(
                 "repos/" + FrameworkCanaries.Repository);
             productResponse.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TrustedProofContinuationAdvancesTheReviewedHead()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-continuation-head-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await PrepareProofScenarioAsync(root, "continuation", 901);
+            using var handler = new FrameworkGitHubHandler(
+                root,
+                new string('f', 64));
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            using var response = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/pulls/147");
+            response.EnsureSuccessStatusCode();
+            using var document = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync());
+            Assert.Equal(
+                FrameworkGitHubHandler.ContinuedHeadSha,
+                document.RootElement.GetProperty("head")
+                    .GetProperty("sha").GetString());
         }
         finally
         {
