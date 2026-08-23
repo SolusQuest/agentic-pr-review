@@ -151,4 +151,16 @@ describe('R4 E3 trusted proof policy', () => {
       expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-secret-routes/u);
     },
   );
+
+  test.each(['toJson(github)', 'TOJSON ( github )'])(
+    'rejects an unowned whole github context export via %s',
+    (contextExpression) => {
+      const workflowsRoot = copiedWorkflowsRoot();
+      fs.writeFileSync(
+        path.join(workflowsRoot, 'unexpected.yml'),
+        `name: unexpected\non:\n  workflow_dispatch:\npermissions:\n  pull-requests: write\njobs:\n  route:\n    runs-on: ubuntu-24.04\n    steps:\n      - env:\n          GITHUB_CONTEXT: \${{ ${contextExpression} }}\n        run: node -e "const token = JSON.parse(process.env.GITHUB_CONTEXT).token"\n`,
+      );
+      expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-secret-routes/u);
+    },
+  );
 });

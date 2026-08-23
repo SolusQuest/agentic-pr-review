@@ -144,7 +144,8 @@ function collectCredentialExpressions(value, result) {
   if (typeof value === 'string') {
     if (
       /\$\{\{[\s\S]*\bsecrets\b[\s\S]*\}\}/u.test(value) ||
-      /\$\{\{[\s\S]*\bgithub\s*(?:\.\s*token\b|\[\s*['"]token['"]\s*\])[\s\S]*\}\}/u.test(value)
+      /\$\{\{[\s\S]*\bgithub\s*(?:\.\s*token\b|\[\s*['"]token['"]\s*\])[\s\S]*\}\}/iu.test(value) ||
+      /\$\{\{[\s\S]*\btojson\s*\(\s*github\s*\)[\s\S]*\}\}/iu.test(value)
     ) {
       result.push(value);
     }
