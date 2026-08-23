@@ -84,7 +84,7 @@ function compose() {
 }
 
 describe('R4 E2P supplemental receipt', () => {
-  it('proves the offline two-root handoff without occupying the authoritative path', () => {
+  it('retains the synthetic handoff and admits the exact authoritative E3 receipt', () => {
     const fixtureRoot = path.join(
       process.cwd(),
       'runtime/tests/fixtures/action-host/trusted-proof-payload/two-root-consumer',
@@ -95,14 +95,27 @@ describe('R4 E2P supplemental receipt', () => {
     );
     const payloadPath = path.join(fixtureRoot, 'payload-source/synthetic-payload.bin');
 
-    expect(
-      fs.existsSync(
-        path.join(
-          process.cwd(),
-          'runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt.json',
-        ),
-      ),
-    ).toBe(false);
+    const authoritativePath = path.join(
+      process.cwd(),
+      'runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt.json',
+    );
+    const authoritativeBytes = fs.readFileSync(authoritativePath);
+    expect(authoritativeBytes.at(-1)).toBe(0x0a);
+    expect(authoritativeBytes.includes(0x0d)).toBe(false);
+    expect(sha256(authoritativeBytes)).toBe(
+      '9b95a87e5f40d7b506e25426e3905aaaf0510ad28d79c8a7ca3737a3952a7b34',
+    );
+    expect(sha256(Buffer.concat([Buffer.from('APR_R4_E2P_RECEIPT '), authoritativeBytes]))).toBe(
+      '3fa55211baa43da955a2eb083b2188a1fde193e6684cb129ec99f5f35374ad49',
+    );
+    const authoritative = verifyReceipt({
+      receiptPath: authoritativePath,
+      sourceRoot: process.cwd(),
+    });
+    expect(authoritative.source_commit).toBe('5b5769753653bb3fd3e68cf8b7bb88a1bd350613');
+    expect(authoritative.payload_sha256).toBe(
+      '97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc',
+    );
     expect(verifyReceipt({ receiptPath, payloadPath, sourceRoot: process.cwd() }).result).toBe(
       'passed',
     );

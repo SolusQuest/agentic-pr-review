@@ -16,3 +16,10 @@ protocol/fixtures/prefix-contract/**
 # R4 E2P policy and receipt contracts are byte-stable security artifacts.
 .github/agentic-pr-review/trusted-proof.json
 runtime/tests/fixtures/action-host/trusted-proof-payload/**/*.json
+
+# R4 E3 rendered workflow and canonical fixture instances are byte-stable security artifacts.
+.github/workflows/r4-trusted-proof.yml
+runtime/tests/fixtures/action-host/trusted-proof/*.json
+runtime/tests/fixtures/action-host/trusted-proof/schemas/*.json
+runtime/tests/fixtures/action-host/trusted-proof/templates/*.json
+runtime/tests/fixtures/action-host/trusted-proof/traces/*.json

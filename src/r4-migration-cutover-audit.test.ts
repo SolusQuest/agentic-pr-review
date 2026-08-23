@@ -76,12 +76,16 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/check-r4-e2p-preflight.mjs',
       'scripts/check-r4-e2p-preflight.test.ts',
       'scripts/check-r4-e2p-receipt.mjs',
+      'scripts/check-r4-trusted-proof.mjs',
+      'scripts/check-r4-trusted-proof.test.ts',
       'scripts/compose-r4-e2-receipt.mjs',
       'scripts/compose-r4-e2-receipt.test.ts',
       'scripts/compose-r4-e2p-receipt.mjs',
       'scripts/compose-r4-e2p-receipt.test.ts',
       'scripts/project-r4-e2p-diagnostics.mjs',
       'scripts/project-r4-e2p-diagnostics.test.ts',
+      'scripts/project-r4-trusted-proof-evidence.mjs',
+      'scripts/project-r4-trusted-proof-evidence.test.ts',
       'scripts/run-clean-source-proof.mjs',
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-runtime-integration.mjs',
@@ -89,6 +93,7 @@ describe('R4 W13 closed migration inventory', () => {
     expect(trackedFiles('.github/workflows/*')).toEqual([
       '.github/workflows/ci.yml',
       '.github/workflows/r3-live-proof.yml',
+      '.github/workflows/r4-trusted-proof.yml',
       '.github/workflows/runtime-ci.yml',
     ]);
     expect(trackedFiles('protocol/schemas/*')).toEqual([
