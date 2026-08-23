@@ -140,12 +140,245 @@ function parseWorkflow(pathname) {
   return { source, value };
 }
 
+function workflowExpressions(value) {
+  const expressions = [];
+  let offset = 0;
+  while (offset < value.length) {
+    const opening = value.indexOf('${{', offset);
+    if (opening < 0) break;
+    let cursor = opening + 3;
+    let quote = null;
+    let closed = false;
+    while (cursor < value.length) {
+      const character = value[cursor];
+      if (quote !== null) {
+        if (character === quote) {
+          if (quote === "'" && value[cursor + 1] === "'") {
+            cursor += 2;
+            continue;
+          }
+          quote = null;
+        }
+        cursor += 1;
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        quote = character;
+        cursor += 1;
+        continue;
+      }
+      if (character === '}' && value[cursor + 1] === '}') {
+        expressions.push(value.slice(opening + 3, cursor));
+        offset = cursor + 2;
+        closed = true;
+        break;
+      }
+      cursor += 1;
+    }
+    if (!closed) {
+      expressions.push(value.slice(opening + 3));
+      break;
+    }
+  }
+  return expressions;
+}
+
+function workflowExpressionTokens(source) {
+  const tokens = [];
+  let offset = 0;
+  while (offset < source.length) {
+    const character = source[offset];
+    if (/\s/u.test(character)) {
+      offset += 1;
+      continue;
+    }
+    if (/[A-Za-z_]/u.test(character)) {
+      const start = offset;
+      offset += 1;
+      while (offset < source.length && /[A-Za-z0-9_-]/u.test(source[offset])) offset += 1;
+      tokens.push({ kind: 'identifier', value: source.slice(start, offset).toLowerCase() });
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      const quote = character;
+      let value = '';
+      offset += 1;
+      while (offset < source.length) {
+        const current = source[offset];
+        if (current === quote) {
+          if (quote === "'" && source[offset + 1] === "'") {
+            value += "'";
+            offset += 2;
+            continue;
+          }
+          offset += 1;
+          break;
+        }
+        if (quote === '"' && current === '\\' && offset + 1 < source.length) {
+          value += source[offset + 1];
+          offset += 2;
+          continue;
+        }
+        value += current;
+        offset += 1;
+      }
+      tokens.push({ kind: 'string', value: value.toLowerCase() });
+      continue;
+    }
+    if ('.[](),'.includes(character)) {
+      tokens.push({ kind: character });
+      offset += 1;
+      continue;
+    }
+    tokens.push({ kind: 'operator', value: character });
+    offset += 1;
+  }
+  return tokens;
+}
+
+function unwrapExpression(node) {
+  let current = node;
+  while (
+    current?.kind === 'group' ||
+    (current?.kind === 'sequence' && current.nodes.length === 1)
+  ) {
+    current = current.kind === 'group' ? current.expression : current.nodes[0];
+  }
+  return current;
+}
+
+function staticString(node) {
+  const current = unwrapExpression(node);
+  return current?.kind === 'string' ? current.value : null;
+}
+
+function parseWorkflowExpression(source) {
+  const tokens = workflowExpressionTokens(source);
+  let offset = 0;
+
+  function parseSequence(stops = new Set()) {
+    const nodes = [];
+    while (offset < tokens.length && !stops.has(tokens[offset].kind)) {
+      const before = offset;
+      const node = parsePostfix();
+      if (node !== null) nodes.push(node);
+      if (offset === before) offset += 1;
+    }
+    return { kind: 'sequence', nodes };
+  }
+
+  function parsePrimary() {
+    const token = tokens[offset];
+    if (token?.kind === 'identifier') {
+      offset += 1;
+      return { kind: 'identifier', value: token.value };
+    }
+    if (token?.kind === 'string') {
+      offset += 1;
+      return { kind: 'string', value: token.value };
+    }
+    if (token?.kind === '(') {
+      offset += 1;
+      const expression = parseSequence(new Set([')']));
+      if (tokens[offset]?.kind === ')') offset += 1;
+      return { kind: 'group', expression };
+    }
+    return null;
+  }
+
+  function parsePostfix() {
+    let node = parsePrimary();
+    if (node === null) return null;
+    while (offset < tokens.length) {
+      if (tokens[offset].kind === '.') {
+        offset += 1;
+        const property = tokens[offset]?.kind === 'identifier' ? tokens[offset].value : null;
+        if (property !== null) offset += 1;
+        node = { kind: 'access', base: node, property, key: null };
+        continue;
+      }
+      if (tokens[offset].kind === '[') {
+        offset += 1;
+        const key = parseSequence(new Set([']']));
+        if (tokens[offset]?.kind === ']') offset += 1;
+        node = { kind: 'access', base: node, property: staticString(key), key };
+        continue;
+      }
+      if (tokens[offset].kind === '(') {
+        offset += 1;
+        const argumentsList = [];
+        while (offset < tokens.length && tokens[offset].kind !== ')') {
+          argumentsList.push(parseSequence(new Set([',', ')'])));
+          if (tokens[offset]?.kind === ',') offset += 1;
+        }
+        if (tokens[offset]?.kind === ')') offset += 1;
+        node = { kind: 'call', callee: node, arguments: argumentsList };
+        continue;
+      }
+      break;
+    }
+    return node;
+  }
+
+  return parseSequence();
+}
+
+function isIdentifier(node, value) {
+  const current = unwrapExpression(node);
+  return current?.kind === 'identifier' && current.value === value;
+}
+
+function containsBareGithubRoot(node) {
+  const current = unwrapExpression(node);
+  if (current === undefined || current === null) return false;
+  if (current.kind === 'identifier') return current.value === 'github';
+  if (current.kind === 'access') return containsBareGithubRoot(current.key);
+  if (current.kind === 'call') {
+    return current.arguments.some((argument) => containsBareGithubRoot(argument));
+  }
+  if (current.kind === 'sequence') {
+    return current.nodes.some((item) => containsBareGithubRoot(item));
+  }
+  return false;
+}
+
+function containsCredentialNode(node) {
+  const current = unwrapExpression(node);
+  if (current === undefined || current === null) return false;
+  if (current.kind === 'identifier') return current.value === 'secrets';
+  if (current.kind === 'access') {
+    if (
+      containsBareGithubRoot(current.base) &&
+      (current.property === null || current.property === 'token')
+    ) {
+      return true;
+    }
+    return containsCredentialNode(current.base) || containsCredentialNode(current.key);
+  }
+  if (current.kind === 'call') {
+    if (
+      isIdentifier(current.callee, 'tojson') &&
+      current.arguments.some((argument) => containsBareGithubRoot(argument))
+    ) {
+      return true;
+    }
+    return (
+      containsCredentialNode(current.callee) ||
+      current.arguments.some((argument) => containsCredentialNode(argument))
+    );
+  }
+  if (current.kind === 'sequence') {
+    return current.nodes.some((item) => containsCredentialNode(item));
+  }
+  return false;
+}
+
 function collectCredentialExpressions(value, result) {
   if (typeof value === 'string') {
     if (
-      /\$\{\{[\s\S]*\bsecrets\b[\s\S]*\}\}/u.test(value) ||
-      /\$\{\{[\s\S]*\bgithub\s*(?:\.\s*token\b|\[\s*['"]token['"]\s*\])[\s\S]*\}\}/iu.test(value) ||
-      /\$\{\{[\s\S]*\btojson\s*\(\s*github\s*\)[\s\S]*\}\}/iu.test(value)
+      workflowExpressions(value).some((expression) =>
+        containsCredentialNode(parseWorkflowExpression(expression)),
+      )
     ) {
       result.push(value);
     }

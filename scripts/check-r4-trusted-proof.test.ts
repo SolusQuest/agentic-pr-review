@@ -163,4 +163,29 @@ describe('R4 E3 trusted proof policy', () => {
       expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-secret-routes/u);
     },
   );
+
+  test.each([
+    '(github).token',
+    "((github))['token']",
+    'toJSON((github))',
+    "github[format('{0}', 'token')]",
+    '(github || null).token',
+    'toJSON(github || null)',
+  ])('rejects structurally equivalent credential access via %s', (contextExpression) => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.writeFileSync(
+      path.join(workflowsRoot, 'unexpected.yml'),
+      `name: unexpected\non:\n  workflow_dispatch:\npermissions:\n  pull-requests: write\njobs:\n  route:\n    runs-on: ubuntu-24.04\n    steps:\n      - env:\n          VALUE: \${{ ${contextExpression} }}\n        run: echo blocked\n`,
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-secret-routes/u);
+  });
+
+  test('allows explicit noncredential github context properties', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.writeFileSync(
+      path.join(workflowsRoot, 'context-reader.yml'),
+      `name: context reader\non:\n  workflow_dispatch:\npermissions: {}\njobs:\n  read:\n    runs-on: ubuntu-24.04\n    steps:\n      - env:\n          SHA: \${{ github.sha }}\n          REPOSITORY: \${{ (github).repository }}\n          EVENT_NAME: \${{ github['event_name'] }}\n          SHA_JSON: \${{ toJSON((github.sha)) }}\n        run: echo safe\n`,
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
+  });
 });
