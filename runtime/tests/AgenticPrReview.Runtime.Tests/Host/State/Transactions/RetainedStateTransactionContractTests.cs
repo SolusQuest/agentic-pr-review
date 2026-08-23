@@ -177,6 +177,61 @@ public sealed class RetainedStateTransactionContractTests
         Assert.NotEqual(
             fixture.GetProperty("normal_operation_id").GetString(),
             value.OperationIdentity);
+
+        var internalCleanups = document.RootElement
+            .GetProperty("state")
+            .GetProperty("created")
+            .EnumerateArray()
+            .Where(item => StringComparer.Ordinal.Equals(
+                    item.GetProperty("object_class").GetString(),
+                    "cleanup") &&
+                StringComparer.Ordinal.Equals(
+                    item.GetProperty("decoded_record")
+                        .GetProperty("record_kind").GetString(),
+                    "s6-internal-cleanup"))
+            .ToArray();
+        Assert.Equal(2, internalCleanups.Length);
+        Assert.Equal(
+            new[] { "bootstrap", "continuation" },
+            internalCleanups
+                .Select(item => item.GetProperty("creation_phase").GetString())
+                .Order(StringComparer.Ordinal));
+        Assert.All(internalCleanups, item =>
+        {
+            var decoded = item.GetProperty("decoded_record");
+            var phase = item.GetProperty("creation_phase").GetString();
+            var internalTargets = decoded.GetProperty("targets")
+                .EnumerateArray()
+                .Select(TargetMetadata)
+                .ToImmutableArray();
+            if (StringComparer.Ordinal.Equals(phase, "bootstrap"))
+            {
+                Assert.Empty(internalTargets);
+            }
+            else
+            {
+                Assert.Equal("continuation", phase);
+                Assert.Single(internalTargets);
+                Assert.Equal(
+                    "10028",
+                    internalTargets[0].Reference.ObjectId.Value);
+            }
+
+            Assert.True(RetainedStateCleanupRecordCodec.TryCreate(
+                decoded.GetProperty("terminal_acceptance_identity")
+                    .GetString()!,
+                decoded.GetProperty("base_scope_digest").GetString()!,
+                decoded.GetProperty("epoch").GetString()!,
+                decoded.GetProperty("session_id").GetString()!,
+                decoded.GetProperty("pre_cleanup_inventory_digest")
+                    .GetString()!,
+                internalTargets,
+                out var internalValue));
+            Assert.NotNull(internalValue);
+            Assert.Equal(
+                decoded.GetProperty("operation_identity").GetString(),
+                internalValue!.OperationIdentity);
+        });
     }
 
     [Fact]
@@ -503,8 +558,8 @@ public sealed class RetainedStateTransactionContractTests
                 out var acceptanceName,
                 out var acceptanceEnvelope,
                 out var predecessorCopy));
+            using var predecessorCopyLifetime = predecessorCopy;
             Assert.NotNull(acceptanceName);
-            Assert.Null(predecessorCopy);
             Assert.Equal(
                 acceptance.GetProperty("opaque_name").GetString(),
                 acceptanceName!.Value);
@@ -512,6 +567,44 @@ public sealed class RetainedStateTransactionContractTests
                 Convert.FromBase64String(
                     acceptance.GetProperty("encrypted_envelope_base64")
                         .GetString()!)));
+            if (StringComparer.Ordinal.Equals(phase, "bootstrap"))
+            {
+                Assert.Null(predecessorCopy);
+            }
+            else
+            {
+                Assert.NotNull(predecessorCopy);
+                var copy = records.Single(item =>
+                    StringComparer.Ordinal.Equals(
+                        item.GetProperty("object_class").GetString(),
+                        "candidate") &&
+                    item.GetProperty("decoded_record")
+                        .TryGetProperty("record_kind", out var recordKind) &&
+                    StringComparer.Ordinal.Equals(
+                        recordKind.GetString(),
+                        "accepted_state_physical_copy"));
+                var copyValue = copy.GetProperty("decoded_record");
+                Assert.Equal(
+                    copyValue.GetProperty("logical_generation_identity")
+                        .GetString(),
+                    predecessorCopy!.LogicalGenerationIdentity);
+                Assert.Equal(
+                    copy.GetProperty("logical_expires_at_unix_seconds")
+                        .GetInt64(),
+                    predecessorCopy.RequiredLogicalExpiresAtUnixSeconds);
+                Assert.Equal(
+                    copy.GetProperty(
+                        "required_platform_expires_at_unix_seconds")
+                        .GetInt64(),
+                    predecessorCopy.RequiredPlatformExpiresAtUnixSeconds);
+                Assert.Equal(
+                    copy.GetProperty("opaque_name").GetString(),
+                    predecessorCopy.Name.Value);
+                Assert.True(predecessorCopy.Envelope.AsSpan().SequenceEqual(
+                    Convert.FromBase64String(
+                        copy.GetProperty("encrypted_envelope_base64")
+                            .GetString()!)));
+            }
         }
 
         AssertCanonicalScopedRecords(records, canonicalPayloads);
@@ -813,6 +906,30 @@ public sealed class RetainedStateTransactionContractTests
                         anchor,
                         out canonical));
                 }
+                else if (StringComparer.Ordinal.Equals(
+                    objectClass,
+                    "candidate") &&
+                    StringComparer.Ordinal.Equals(
+                        decoded.GetProperty("record_kind").GetString(),
+                        "accepted_state_physical_copy"))
+                {
+                    var copy = new AcceptedStatePhysicalCopyV1(
+                        ImmutableArray.CreateRange(Convert.FromBase64String(
+                            decoded.GetProperty("canonical_generation_base64")
+                                .GetString()!)),
+                        decoded.GetProperty("logical_generation_identity")
+                            .GetString()!,
+                        decoded.GetProperty(
+                            "original_candidate_object_identity").GetString()!,
+                        decoded.GetProperty("source_artifact_id").GetString()!,
+                        decoded.GetProperty("source_archive_sha256")
+                            .GetString()!,
+                        decoded.GetProperty(
+                            "source_encrypted_envelope_sha256").GetString()!);
+                    Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
+                        copy,
+                        out canonical));
+                }
                 else
                 {
                     var targets = decoded.GetProperty("targets")
@@ -882,7 +999,13 @@ public sealed class RetainedStateTransactionContractTests
             phase) &&
         StringComparer.Ordinal.Equals(
             record.GetProperty("object_class").GetString(),
-            objectClass));
+            objectClass) &&
+        (!StringComparer.Ordinal.Equals(objectClass, "candidate") ||
+            !record.GetProperty("decoded_record")
+                .TryGetProperty("record_kind", out var recordKind) ||
+            !StringComparer.Ordinal.Equals(
+                recordKind.GetString(),
+                "accepted_state_physical_copy")));
 
     private static JsonElement RecoveryRecord(
         JsonElement[] records,

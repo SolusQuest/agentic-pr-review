@@ -1521,6 +1521,109 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
+    public async Task SuccessfulTwoRunCleanupProtectsSelectedPredecessor()
+    {
+        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var first = await AcceptGenerationAsync(fixture, commentId: 1810);
+        Assert.Equal(0, first.Generation);
+
+        var bootstrapObjects = fixture.Store.Objects;
+        var bootstrapUploads = fixture.Store.UploadCalls;
+        var bootstrapDeletes = fixture.Store.DeleteCalls;
+        var bootstrapPlan = await RestrictedStateService
+            .PlanRetainedStateCleanupAsync(
+                fixture.Context,
+                first.Acceptance,
+                CancellationToken.None);
+        using (var bootstrapAuthorization = Assert.IsType<
+            RetainedStateCleanupAuthorization>(bootstrapPlan.Value))
+        {
+            Assert.Empty(bootstrapAuthorization.Targets);
+            var cleanup = await RestrictedStateService
+                .CleanupRetainedStateAsync(
+                    fixture.Context,
+                    new RetainedStateCleanupRequest(
+                        first.Acceptance,
+                        bootstrapAuthorization,
+                        fixture.Time.UnixSeconds +
+                            StateRetentionRequirements
+                                .ScopedPlatformRequestSeconds),
+                    CancellationToken.None);
+            Assert.True(cleanup.Completed, cleanup.Code);
+        }
+
+        Assert.Equal(bootstrapUploads + 1, fixture.Store.UploadCalls);
+        Assert.Equal(bootstrapDeletes + 1, fixture.Store.DeleteCalls);
+        Assert.True(bootstrapObjects.SequenceEqual(fixture.Store.Objects));
+        fixture.Context.Dispose();
+
+        var successor = await RestoreFixtureAsync(
+            fixture,
+            newWorkflowRun: true);
+        using var successorContext = successor.Context;
+        bool? continuationHadPredecessorCopy = null;
+        var second = await AcceptGenerationAsync(
+            successor,
+            commentId: 1811,
+            observePredecessorCopy:
+                value => continuationHadPredecessorCopy = value);
+        Assert.Equal(1, second.Generation);
+        Assert.True(continuationHadPredecessorCopy);
+
+        var continuationObjects = successor.Store.Objects;
+        var continuationUploads = successor.Store.UploadCalls;
+        var continuationDeletes = successor.Store.DeleteCalls;
+        var continuationPlan = await RestrictedStateService
+            .PlanRetainedStateCleanupAsync(
+                successor.Context,
+                second.Acceptance,
+                CancellationToken.None);
+        using (var continuationAuthorization = Assert.IsType<
+            RetainedStateCleanupAuthorization>(continuationPlan.Value))
+        {
+            Assert.DoesNotContain(
+                continuationAuthorization.Targets,
+                target => target.Metadata == first.CandidateMetadata);
+            Assert.DoesNotContain(
+                continuationAuthorization.Targets,
+                target => target.Metadata == first.Acceptance.ReceiptMetadata);
+            Assert.DoesNotContain(
+                continuationAuthorization.Targets,
+                target => target.Metadata == second.CandidateMetadata);
+            Assert.DoesNotContain(
+                continuationAuthorization.Targets,
+                target => target.Metadata == second.Acceptance.ReceiptMetadata);
+            var redundantCopy = Assert.Single(
+                continuationAuthorization.Targets).Metadata;
+            Assert.Contains(first.CandidateMetadata, successor.Store.Objects);
+            Assert.Contains(
+                first.Acceptance.ReceiptMetadata,
+                successor.Store.Objects);
+
+            var cleanup = await RestrictedStateService
+                .CleanupRetainedStateAsync(
+                    successor.Context,
+                    new RetainedStateCleanupRequest(
+                        second.Acceptance,
+                        continuationAuthorization,
+                        successor.Time.UnixSeconds +
+                            StateRetentionRequirements
+                                .ScopedPlatformRequestSeconds),
+                    CancellationToken.None);
+            Assert.True(cleanup.Completed, cleanup.Code);
+            continuationObjects = continuationObjects.Remove(redundantCopy);
+        }
+
+        Assert.Equal(continuationUploads + 1, successor.Store.UploadCalls);
+        Assert.Equal(continuationDeletes + 2, successor.Store.DeleteCalls);
+        Assert.True(continuationObjects.SequenceEqual(successor.Store.Objects));
+        Assert.Contains(first.CandidateMetadata, successor.Store.Objects);
+        Assert.Contains(
+            first.Acceptance.ReceiptMetadata,
+            successor.Store.Objects);
+    }
+
+    [Fact]
     public async Task SuccessorsCopyPredecessorsAndCleanupOldExactTargets()
     {
         var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
@@ -3062,7 +3165,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         TransactionFixture fixture,
         long commentId,
         bool exercisePredecessorCopyPossibleCommit = false,
-        bool persistOutcomeUnknownFailure = false)
+        bool persistOutcomeUnknownFailure = false,
+        Action<bool>? observePredecessorCopy = null)
     {
         var run = await CompleteRunAsync(
             fixture,
@@ -3201,7 +3305,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             sticky!,
             existingP5Records,
             attemptIntentRecordIdentity:
-                attemptIntentRecordIdentity);
+                attemptIntentRecordIdentity,
+            observePredecessorCopy: observePredecessorCopy);
         var accepted = await RestrictedStateService.AcceptRetainedStateAsync(
             fixture.Context,
             evidence,
@@ -3279,7 +3384,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         ImmutableArray<RetainedStateOpaqueRecord> existingP5Records = default,
         ExactHeadRevalidationResult? exactHead = null,
         StickyReadbackRecordV1? existingStickyReadback = null,
-        string? attemptIntentRecordIdentity = null)
+        string? attemptIntentRecordIdentity = null,
+        Action<bool>? observePredecessorCopy = null)
     {
         if (existingP5Records.IsDefault)
         {
@@ -3340,6 +3446,12 @@ public sealed class RetainedStateTransactionEndToEndTests
         using var preparation = Assert.IsType<
             RetainedStateAcceptancePreparation>(preparationResult.Value);
         Assert.True(preparation.TryCreateRecoveryHandoff(out var handoff));
+        Assert.True(RetainedStateAcceptanceRecoveryCodec.TryDecode(
+            handoff!.OpaqueInnerPayload.AsSpan(),
+            out _,
+            out _,
+            out var predecessorCopy));
+        observePredecessorCopy?.Invoke(predecessorCopy is not null);
         Assert.True(PublicationRecoveryPersistence.TryPublication(
             candidate,
             out var recoveryPublication));

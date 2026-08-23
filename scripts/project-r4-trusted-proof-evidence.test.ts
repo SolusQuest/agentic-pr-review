@@ -185,7 +185,7 @@ describe('R4 E3 public-safe evidence projection', () => {
           ({ physical_artifact_id }: any) => physical_artifact_id === '10003',
         );
         const continuation = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
         continuation.predecessor_identity = bootstrap.object_identity;
       },
@@ -199,7 +199,7 @@ describe('R4 E3 public-safe evidence projection', () => {
         );
         const continuation = value.state.created.find(
           ({ physical_artifact_id, decoded_record }: any) =>
-            physical_artifact_id === '10019' && decoded_record.record_kind === 'initial_intent',
+            physical_artifact_id === '10020' && decoded_record.record_kind === 'initial_intent',
         );
         continuation.predecessor_identity = bootstrap.object_identity;
       },
@@ -222,7 +222,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'acceptance-producing-attempt-does-not-match-run',
       (value: any) => {
         const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10027',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10029',
         );
         acceptance.producing_run_attempt = 2;
         acceptance.decoded_record.producing_run_attempt = 2;
@@ -232,7 +232,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'acceptance-logical-window-is-not-seven-days',
       (value: any) => {
         const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10027',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10029',
         );
         acceptance.logical_expires_at_unix_seconds += 1;
         acceptance.decoded_record.logical_expires_at_unix_seconds += 1;
@@ -246,7 +246,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'candidate-config-digest-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
         candidate.decoded_record.config_sha256 = '0'.repeat(64);
       },
@@ -255,7 +255,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'candidate-instructions-digest-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
         candidate.decoded_record.instructions_sha256 = '0'.repeat(64);
       },
@@ -264,7 +264,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'candidate-publication-payload-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
         candidate.decoded_record.publication_payload.finalized_comment += ' drift';
       },
@@ -273,7 +273,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'continuation-producer-base-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
         candidate.decoded_record.producer_base_sha = '0'.repeat(40);
       },
@@ -282,7 +282,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'continuation-producer-head-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
         candidate.decoded_record.producer_head_sha = '0'.repeat(40);
       },
@@ -291,11 +291,11 @@ describe('R4 E3 public-safe evidence projection', () => {
       'successful-transaction-omits-sticky-readback',
       (value: any) => {
         value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10022',
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10023',
         );
         value.cleanup.internally_reconciled_physical_artifact_ids =
           value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10022',
+            (physicalArtifactId: string) => physicalArtifactId !== '10023',
           );
       },
     ],
@@ -303,11 +303,11 @@ describe('R4 E3 public-safe evidence projection', () => {
       'successful-transaction-omits-acceptance-recovery',
       (value: any) => {
         value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10025',
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10026',
         );
         value.cleanup.internally_reconciled_physical_artifact_ids =
           value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10025',
+            (physicalArtifactId: string) => physicalArtifactId !== '10026',
           );
       },
     ],
@@ -345,6 +345,73 @@ describe('R4 E3 public-safe evidence projection', () => {
           value.cleanup.self_deleted_cleanup_record_ids.filter(
             (physicalArtifactId: string) => physicalArtifactId !== '10014',
           );
+      },
+    ],
+    [
+      'successful-transaction-omits-bootstrap-s6-cleanup',
+      (value: any) => {
+        value.state.created = value.state.created.filter(
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10017',
+        );
+        value.cleanup.self_deleted_cleanup_record_ids =
+          value.cleanup.self_deleted_cleanup_record_ids.filter(
+            (physicalArtifactId: string) => physicalArtifactId !== '10017',
+          );
+      },
+    ],
+    [
+      'successful-transaction-omits-predecessor-copy',
+      (value: any) => {
+        value.state.created = value.state.created.filter(
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10028',
+        );
+        value.cleanup.internally_reconciled_physical_artifact_ids =
+          value.cleanup.internally_reconciled_physical_artifact_ids.filter(
+            (physicalArtifactId: string) => physicalArtifactId !== '10028',
+          );
+      },
+    ],
+    [
+      'predecessor-copy-source-digest-mismatch',
+      (value: any) => {
+        const copy = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10028',
+        );
+        copy.decoded_record.source_encrypted_envelope_sha256 = '0'.repeat(64);
+      },
+    ],
+    [
+      's6-cleanup-targets-selected-immediate-predecessor',
+      (value: any) => {
+        const predecessor = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10003',
+        );
+        const cleanup = value.state.created.find(
+          ({ creation_phase, decoded_record }: any) =>
+            creation_phase === 'continuation' &&
+            decoded_record.record_kind === 's6-internal-cleanup',
+        );
+        cleanup.decoded_record.targets = [
+          {
+            name: predecessor.opaque_name,
+            object_id: predecessor.physical_artifact_id,
+            producing_run_identity: predecessor.producing_run_id,
+            producing_run_attempt: predecessor.producing_run_attempt,
+            archive_sha256: predecessor.archive_sha256,
+            encrypted_object_sha256: predecessor.encrypted_object_sha256,
+            expires_at_unix_seconds: predecessor.expires_at_unix_seconds,
+            size: predecessor.size,
+          },
+        ];
+      },
+    ],
+    [
+      'p5-cleanup-has-empty-targets',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ decoded_record }: any) => decoded_record.record_kind === 'p5-anchor-cleanup',
+        );
+        cleanup.decoded_record.targets = [];
       },
     ],
     [
@@ -392,10 +459,10 @@ describe('R4 E3 public-safe evidence projection', () => {
       'logical-generation-graph-relabeling',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
         const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10027',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10029',
         );
         candidate.decoded_record.logical_generation_identity = '7'.repeat(64);
         acceptance.decoded_record.logical_generation_identity = '7'.repeat(64);
@@ -423,7 +490,7 @@ describe('R4 E3 public-safe evidence projection', () => {
           ({ physical_artifact_id }: any) => physical_artifact_id === '10011',
         );
         const continuation = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10025',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10026',
         );
         bootstrap.decoded_record.acceptance_recovery_handoff_base64 =
           continuation.decoded_record.acceptance_recovery_handoff_base64;
@@ -457,12 +524,12 @@ describe('R4 E3 public-safe evidence projection', () => {
       'noncanonical-artifact-id',
       (value: any) => {
         const record = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
         );
-        record.physical_artifact_id = '010017';
+        record.physical_artifact_id = '010018';
         value.cleanup.e4_deleted_physical_artifact_ids =
           value.cleanup.e4_deleted_physical_artifact_ids.map((physicalArtifactId: string) =>
-            physicalArtifactId === '10017' ? '010017' : physicalArtifactId,
+            physicalArtifactId === '10018' ? '010018' : physicalArtifactId,
           );
       },
     ],
@@ -472,13 +539,14 @@ describe('R4 E3 public-safe evidence projection', () => {
         const record = value.state.created.find(
           ({ physical_artifact_id }: any) => physical_artifact_id === '10003',
         );
-        record.terminal_disposition = 'e4-deleted';
-        record.terminal_phase = 'e4-final-cleanup';
-        value.cleanup.internally_reconciled_physical_artifact_ids =
-          value.cleanup.internally_reconciled_physical_artifact_ids.filter(
+        record.terminal_disposition = 'internally-reconciled-deleted';
+        record.terminal_phase = 'continuation-internal-cleanup';
+        record.terminal_at_unix_seconds = 690;
+        value.cleanup.e4_deleted_physical_artifact_ids =
+          value.cleanup.e4_deleted_physical_artifact_ids.filter(
             (physicalArtifactId: string) => physicalArtifactId !== '10003',
           );
-        value.cleanup.e4_deleted_physical_artifact_ids.push('10003');
+        value.cleanup.internally_reconciled_physical_artifact_ids.push('10003');
       },
     ],
     ['stale-scope-not-enumerated', (value: any) => delete value.state.final_state.stale],

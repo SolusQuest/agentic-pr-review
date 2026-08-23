@@ -38,12 +38,12 @@ const fixtureDigests = new Map([
     'authorization-environment-contract.json',
     'b0b5502d055ba42284647e6e8cca8103478edccb00ac499689e2ef31a32b2d96',
   ],
-  ['cleanup-contract.json', '064cd6f929454bd8380343683476cd429dd55cd8ecd01effec8362f8734e40e0'],
+  ['cleanup-contract.json', '5d7a26d40d9e41d3d195e8dfb8496703fd40084c1fd687f22306c51575c4cdce'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '36c20d98c51a6c707f28d2897cb7e82dd320d54a359f3a58d78ff3b4aa78d863',
+    '067eb69a1d74f7b669950941bfff09c54ede4b35d5dbec4b63192a30b015df4a',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,11 +51,11 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    '0eb2d6ec48e3337f539c1215919df4f90a0252ccd6eecdc187d159470792539a',
+    '48ff8d9a5dc95842017d48c7f929b4c6e280d30fa982323fa92d021c6c59493f',
   ],
   [
     'templates/public-safe-evidence.json',
-    '7b6af2e45570ba312cf45cba52e4e13c59be3fa4257b76817b0ea8c95ca50a81',
+    'dd768d3cde2ef180b2ec0f73b41ccf17484d53d089660ba59ed9bb3afb3bb4e3',
   ],
   [
     'traces/normal-two-run.json',
@@ -237,6 +237,16 @@ function validateFixtureContracts(fixtureRoot) {
     cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_at_unix_seconds') !==
       true ||
     cleanup.operation_state?.archive_and_encrypted_digests_independent !== true ||
+    cleanup.operation_state?.complete_created_physical_artifact_count !== 35 ||
+    cleanup.operation_state?.transient_record_contract?.opaque_write_anchors !== 6 ||
+    cleanup.operation_state?.transient_record_contract?.p5_anchor_cleanup_records !== 6 ||
+    cleanup.operation_state?.transient_record_contract?.p5_completed_record_cleanup_records !== 6 ||
+    cleanup.operation_state?.transient_record_contract?.predecessor_copy_candidates !== 1 ||
+    cleanup.operation_state?.transient_record_contract?.s6_internal_cleanup_records !== 2 ||
+    cleanup.operation_state?.transient_record_contract?.s6_final_cleanup_records !== 1 ||
+    cleanup.operation_state?.canonical_scoped_envelope_required !== true ||
+    cleanup.operation_state?.cleanup_inventory_binding !==
+      'exact-active-physical-inventory-before-cleanup-record-creation' ||
     cleanup.operation_state?.scoped_header_exact_fields?.includes('epoch') !== true ||
     cleanup.operation_state?.scoped_header_exact_fields?.includes('session_id') !== true ||
     cleanup.operation_state?.decoded_record_contract !==

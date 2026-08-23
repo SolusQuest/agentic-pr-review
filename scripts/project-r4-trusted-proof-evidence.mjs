@@ -269,6 +269,19 @@ function generationPayloadBytes(value) {
   ]);
 }
 
+function physicalCopyPayloadBytes(value) {
+  return Buffer.concat([
+    lineageString('APRACP01'),
+    uint16LittleEndian(1),
+    lineageBytes(Buffer.from(value.canonical_generation_base64, 'base64')),
+    lineageString(value.logical_generation_identity),
+    lineageString(value.original_candidate_object_identity),
+    lineageString(value.source_artifact_id),
+    lineageString(value.source_archive_sha256),
+    lineageString(value.source_encrypted_envelope_sha256),
+  ]);
+}
+
 function acceptancePayloadBytes(value) {
   return Buffer.concat([
     lineageString('APRACR01'),
@@ -389,7 +402,9 @@ function canonicalPayload(record) {
     case 'lineage_head':
       return lineageHeadPayloadBytes(record.decoded_record);
     case 'candidate':
-      return generationPayloadBytes(record.decoded_record);
+      return record.decoded_record.record_kind === 'accepted_state_physical_copy'
+        ? physicalCopyPayloadBytes(record.decoded_record)
+        : generationPayloadBytes(record.decoded_record);
     case 'publication_intent':
       return publicationIntentPayloadBytes(record.decoded_record);
     case 'acceptance':
@@ -447,13 +462,22 @@ function logicalGenerationIdentity(record, previousAcceptanceIdentity) {
   );
 }
 
-function acceptanceRecoveryHandoff(name, envelope) {
+function acceptanceRecoveryHandoff(name, envelope, predecessorCopy = null) {
   return Buffer.concat([
     lineageString('APRSAR01'),
     uint16LittleEndian(1),
     lineageString(name),
     lineageBytes(envelope),
-    uint16LittleEndian(0),
+    uint16LittleEndian(predecessorCopy === null ? 0 : 1),
+    ...(predecessorCopy === null
+      ? []
+      : [
+          lineageString(predecessorCopy.decoded_record.logical_generation_identity),
+          int64LittleEndian(predecessorCopy.logical_expires_at_unix_seconds),
+          int64LittleEndian(predecessorCopy.required_platform_expires_at_unix_seconds),
+          lineageString(predecessorCopy.opaque_name),
+          lineageBytes(Buffer.from(predecessorCopy.encrypted_envelope_base64, 'base64')),
+        ]),
   ]);
 }
 
@@ -940,7 +964,7 @@ export function projectTrustedProofEvidence(input) {
     ...cleanup.self_deleted_cleanup_record_ids,
   ];
   if (
-    createdIds.length !== 33 ||
+    createdIds.length !== 35 ||
     createdIds.length !== new Set(createdIds).size ||
     createdIds.some((value) => !isCanonicalArtifactId(value)) ||
     objectIdentities.length !== new Set(objectIdentities).size ||
@@ -994,13 +1018,15 @@ export function projectTrustedProofEvidence(input) {
       case 'lineage_head':
         return decoded.transition !== undefined && decoded.ordinal !== undefined;
       case 'candidate':
-        return (
-          decoded.session_generation !== undefined &&
-          stateEnvelopeDigest(Buffer.from(decoded.encrypted_state_envelope_base64, 'base64')) ===
-            decoded.state_envelope_sha256 &&
-          publicationPayloadDigest(decoded.publication_payload) ===
-            decoded.publication_payload_sha256
-        );
+        return decoded.record_kind === 'accepted_state_physical_copy'
+          ? decoded.canonical_generation_base64 !== undefined &&
+              decoded.source_artifact_id !== undefined
+          : decoded.session_generation !== undefined &&
+              stateEnvelopeDigest(
+                Buffer.from(decoded.encrypted_state_envelope_base64, 'base64'),
+              ) === decoded.state_envelope_sha256 &&
+              publicationPayloadDigest(decoded.publication_payload) ===
+                decoded.publication_payload_sha256;
       case 'publication_intent':
         return publicationIntentIdentity(decoded) === decoded.record_identity;
       case 'acceptance':
@@ -1214,13 +1240,21 @@ export function projectTrustedProofEvidence(input) {
       creation_phase === 'bootstrap' && object_class === 'candidate',
   );
   const continuationCandidateRecord = scopedRecords.find(
-    ({ creation_phase, object_class }) =>
-      creation_phase === 'continuation' && object_class === 'candidate',
+    ({ creation_phase, object_class, decoded_record }) =>
+      creation_phase === 'continuation' &&
+      object_class === 'candidate' &&
+      decoded_record.record_kind !== 'accepted_state_physical_copy',
+  );
+  const predecessorCopyRecord = scopedRecords.find(
+    ({ creation_phase, object_class, decoded_record }) =>
+      creation_phase === 'continuation' &&
+      object_class === 'candidate' &&
+      decoded_record.record_kind === 'accepted_state_physical_copy',
   );
   const normalHeadRecord = scopedRecords.find(
     ({ scope, object_class }) => scope === 'normal' && object_class === 'lineage_head',
   );
-  const exactRecoveryHandoff = (phase, acceptance) => {
+  const exactRecoveryHandoff = (phase, acceptance, predecessorCopy = null) => {
     const recovery = p5Records.find(
       ({ creation_phase, decoded_record }) =>
         creation_phase === phase && decoded_record.record_kind === 'acceptance_recovery',
@@ -1231,11 +1265,16 @@ export function projectTrustedProofEvidence(input) {
         acceptanceRecoveryHandoff(
           acceptance.opaque_name,
           Buffer.from(acceptance.encrypted_envelope_base64, 'base64'),
+          predecessorCopy,
         ),
       )
     );
   };
-  const internalCleanup = cleanupKinds.get('s6-internal-cleanup')[0];
+  const internalCleanups = cleanupKinds.get('s6-internal-cleanup');
+  const internalCleanupFor = (phase) =>
+    internalCleanups.find(({ creation_phase }) => creation_phase === phase);
+  const bootstrapInternalCleanup = internalCleanupFor('bootstrap');
+  const continuationInternalCleanup = internalCleanupFor('continuation');
   const finalCleanup = cleanupKinds.get('s6-final-cleanup')[0];
   if (
     !inventoryValid ||
@@ -1244,7 +1283,7 @@ export function projectTrustedProofEvidence(input) {
     p5Records.length !== 6 ||
     cleanupKinds.get('p5-anchor-cleanup').length !== 6 ||
     cleanupKinds.get('p5-record-cleanup').length !== 6 ||
-    cleanupKinds.get('s6-internal-cleanup').length !== 1 ||
+    internalCleanups.length !== 2 ||
     cleanupKinds.get('s6-final-cleanup').length !== 1 ||
     anchorTargets.some((target, index) => !exactAnchor(anchors[index], target)) ||
     new Set(anchorTargets).size !== 6 ||
@@ -1254,18 +1293,39 @@ export function projectTrustedProofEvidence(input) {
     !continuationAcceptanceRecord ||
     !bootstrapCandidateRecord ||
     !continuationCandidateRecord ||
+    !predecessorCopyRecord ||
     !normalHeadRecord ||
+    !bootstrapInternalCleanup ||
+    !continuationInternalCleanup ||
+    bootstrapInternalCleanup.decoded_record.targets.length !== 0 ||
     !exactSet(
-      internalCleanup.decoded_record.targets.map(({ object_id }) => object_id),
-      [
-        bootstrapCandidateRecord.physical_artifact_id,
-        bootstrapAcceptanceRecord.physical_artifact_id,
-      ],
+      continuationInternalCleanup.decoded_record.targets.map(({ object_id }) => object_id),
+      [predecessorCopyRecord.physical_artifact_id],
+    ) ||
+    bootstrapInternalCleanup.decoded_record.terminal_acceptance_identity !==
+      bootstrapAcceptanceRecord.object_identity ||
+    continuationInternalCleanup.decoded_record.terminal_acceptance_identity !==
+      continuationAcceptanceRecord.object_identity ||
+    predecessorCopyRecord.predecessor_identity !== bootstrapCandidateRecord.predecessor_identity ||
+    predecessorCopyRecord.decoded_record.logical_generation_identity !==
+      bootstrapCandidateRecord.decoded_record.logical_generation_identity ||
+    predecessorCopyRecord.decoded_record.original_candidate_object_identity !==
+      bootstrapCandidateRecord.object_identity ||
+    predecessorCopyRecord.decoded_record.source_artifact_id !==
+      bootstrapCandidateRecord.physical_artifact_id ||
+    predecessorCopyRecord.decoded_record.source_archive_sha256 !==
+      bootstrapCandidateRecord.archive_sha256 ||
+    predecessorCopyRecord.decoded_record.source_encrypted_envelope_sha256 !==
+      bootstrapCandidateRecord.encrypted_object_sha256 ||
+    !Buffer.from(predecessorCopyRecord.decoded_record.canonical_generation_base64, 'base64').equals(
+      canonicalPayload(bootstrapCandidateRecord),
     ) ||
     !exactSet(
       finalCleanup.decoded_record.targets.map(({ object_id }) => object_id),
       [
         normalHeadRecord.physical_artifact_id,
+        bootstrapCandidateRecord.physical_artifact_id,
+        bootstrapAcceptanceRecord.physical_artifact_id,
         continuationCandidateRecord.physical_artifact_id,
         continuationAcceptanceRecord.physical_artifact_id,
       ],
@@ -1280,7 +1340,7 @@ export function projectTrustedProofEvidence(input) {
       bootstrapAcceptanceRecord.object_identity,
     ) !== continuationCandidateRecord.decoded_record.logical_generation_identity ||
     !exactRecoveryHandoff('bootstrap', bootstrapAcceptanceRecord) ||
-    !exactRecoveryHandoff('continuation', continuationAcceptanceRecord)
+    !exactRecoveryHandoff('continuation', continuationAcceptanceRecord, predecessorCopyRecord)
   ) {
     reject('complete-physical-lifecycle');
   }
@@ -1571,8 +1631,8 @@ export function projectTrustedProofEvidence(input) {
       continuation,
       continuationReceipt,
     ) ||
-    bootstrapCandidate.terminal_disposition !== 'internally-reconciled-deleted' ||
-    predecessorAcceptance.terminal_disposition !== 'internally-reconciled-deleted' ||
+    bootstrapCandidate.terminal_disposition !== 'e4-deleted' ||
+    predecessorAcceptance.terminal_disposition !== 'e4-deleted' ||
     continuationCandidate.terminal_disposition !== 'e4-deleted' ||
     currentAcceptance.terminal_disposition !== 'e4-deleted' ||
     bootstrapCandidate.decoded_record.session_generation !== 0 ||
