@@ -1,11 +1,15 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
+using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.Transactions;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.Rendering;
 
@@ -168,6 +172,280 @@ public sealed class RetainedStateTransactionContractTests
         Assert.NotEqual(
             fixture.GetProperty("normal_operation_id").GetString(),
             value.OperationIdentity);
+    }
+
+    [Fact]
+    public void TrustedProofSuccessfulTransactionsMatchProductionCodecs()
+    {
+        var root = FindRepositoryRoot();
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof",
+            "templates",
+            "host-restricted-evidence.json")));
+        var evidence = document.RootElement;
+        var records = evidence
+            .GetProperty("state")
+            .GetProperty("created")
+            .EnumerateArray()
+            .ToArray();
+
+        foreach (var phase in new[] { "bootstrap", "continuation" })
+        {
+            var candidate = Record(records, phase, "candidate");
+            var acceptance = Record(records, phase, "acceptance");
+            var initialIntent = RecoveryRecord(
+                records,
+                phase,
+                "initial_intent");
+            var stickyReadback = RecoveryRecord(
+                records,
+                phase,
+                "sticky_readback");
+            var acceptanceRecovery = RecoveryRecord(
+                records,
+                phase,
+                "acceptance_recovery");
+            var candidateValue = candidate.GetProperty("decoded_record");
+            var publicationValue = candidateValue
+                .GetProperty("publication_payload");
+
+            Assert.True(ValidatedPublicationPayloadV1.TryCreate(
+                publicationValue.GetProperty("finalized_comment").GetString(),
+                PositiveId(publicationValue, "repository_id"),
+                publicationValue.GetProperty("repository_name").GetString(),
+                PositiveId(publicationValue, "pull_request_number"),
+                publicationValue
+                    .GetProperty("policy_identity_sha256")
+                    .GetString(),
+                publicationValue.GetProperty("payload_sha256").GetString(),
+                publicationValue
+                    .GetProperty("build_discriminator")
+                    .GetString(),
+                publicationValue.GetProperty("rendering_version").GetString(),
+                out var publication));
+            Assert.NotNull(publication);
+            Assert.Equal(
+                publicationValue.GetProperty("scope_sha256").GetString(),
+                publication!.ScopeSha256);
+            Assert.Equal(
+                publicationValue.GetProperty("body_sha256").GetString(),
+                publication.BodySha256);
+            Assert.Equal(
+                publicationValue.GetProperty("reviewed_head_sha").GetString(),
+                publication.ReviewedHeadSha);
+            Assert.True(AcceptedStatePublicationPayloadCodec.TryEncode(
+                publication,
+                out var publicationBytes));
+            Assert.Equal(
+                candidateValue
+                    .GetProperty("publication_payload_sha256")
+                    .GetString(),
+                AcceptedStateRecordValidation.Sha256(publicationBytes));
+
+            var generation = new StateGenerationRecordV1(
+                ImmutableArray.CreateRange(Convert.FromBase64String(
+                    candidateValue
+                        .GetProperty("encrypted_state_envelope_base64")
+                        .GetString()!)),
+                candidateValue.GetProperty("state_envelope_sha256").GetString()!,
+                candidateValue.GetProperty("session_sha256").GetString()!,
+                candidateValue.GetProperty("producer_base_sha").GetString()!,
+                candidateValue.GetProperty("producer_head_sha").GetString()!,
+                candidateValue.GetProperty("session_generation").GetInt64(),
+                OptionalString(candidateValue, "predecessor_envelope_sha256"),
+                OptionalString(
+                    candidateValue,
+                    "previous_logical_generation_identity"),
+                candidateValue
+                    .GetProperty("prepared_at_unix_seconds")
+                    .GetInt64(),
+                candidateValue
+                    .GetProperty("prepared_expires_at_unix_seconds")
+                    .GetInt64(),
+                ImmutableArray.CreateRange(publicationBytes),
+                candidateValue
+                    .GetProperty("publication_payload_sha256")
+                    .GetString()!,
+                candidateValue
+                    .GetProperty("policy_identity_sha256")
+                    .GetString()!,
+                candidateValue.GetProperty("config_sha256").GetString()!,
+                candidateValue
+                    .GetProperty("instructions_sha256")
+                    .GetString()!,
+                candidateValue.GetProperty("payload_sha256").GetString()!,
+                candidateValue
+                    .GetProperty("build_discriminator")
+                    .GetString()!);
+            Assert.True(RestrictedStateEnvelope.TryParse(
+                generation.EncryptedStateEnvelope.AsSpan(),
+                out _), phase);
+            Assert.Equal(
+                generation.StateEnvelopeSha256,
+                RestrictedStateEnvelope.EnvelopeSha256(
+                    generation.EncryptedStateEnvelope.AsSpan()));
+            Assert.True(AcceptedStatePublicationPayloadCodec.TryDecode(
+                generation.PublicationPayloadBytes.AsSpan(),
+                out _), phase);
+            Assert.True(AcceptedStateRecordValidation.IsValid(generation), phase);
+            Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
+                generation,
+                out var generationBytes));
+            Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(
+                generationBytes,
+                out var decodedGeneration));
+            Assert.NotNull(decodedGeneration);
+            Assert.True(generation.EncryptedStateEnvelope.AsSpan().SequenceEqual(
+                decodedGeneration!.EncryptedStateEnvelope.AsSpan()));
+            Assert.True(generation.PublicationPayloadBytes.AsSpan().SequenceEqual(
+                decodedGeneration.PublicationPayloadBytes.AsSpan()));
+            Assert.Equal(
+                generation.StateEnvelopeSha256,
+                decodedGeneration.StateEnvelopeSha256);
+            Assert.Equal(
+                generation.PublicationPayloadSha256,
+                decodedGeneration.PublicationPayloadSha256);
+            Assert.Equal(
+                generation.BuildDiscriminator,
+                decodedGeneration.BuildDiscriminator);
+
+            var recoveryPublication = new PublicationRecoveryPublicationV1(
+                publication.ReviewedHeadSha,
+                publication.ScopeSha256,
+                publication.BodySha256);
+            var initialIntentValue = initialIntent
+                .GetProperty("decoded_record");
+            Assert.True(PublicationIntentV1Codec.TryCreate(
+                recoveryPublication,
+                initialIntentValue
+                    .GetProperty("created_at_unix_seconds")
+                    .GetInt64(),
+                out var intent));
+            Assert.NotNull(intent);
+            Assert.Equal(
+                initialIntentValue.GetProperty("record_identity").GetString(),
+                intent!.RecordIdentity);
+            Assert.Equal(
+                initialIntent.GetProperty("object_identity").GetString(),
+                intent.RecordIdentity);
+
+            var stickyReadbackValue = stickyReadback
+                .GetProperty("decoded_record");
+            Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+                .TryRehydrate(
+                    (StickyPublicationOperation)stickyReadbackValue
+                        .GetProperty("publication_operation")
+                        .GetInt32(),
+                    PositiveId(stickyReadbackValue, "repository_id"),
+                    PositiveId(stickyReadbackValue, "pull_request_number"),
+                    PositiveId(stickyReadbackValue, "comment_id"),
+                    stickyReadbackValue.GetProperty("comment_url").GetString(),
+                    recoveryPublication.ScopeSha256,
+                    recoveryPublication.BodySha256,
+                    recoveryPublication.ReviewedHeadSha,
+                    out var stickyReceipt));
+            Assert.NotNull(stickyReceipt);
+            Assert.True(StickyReadbackRecordV1Codec.TryCreate(
+                recoveryPublication,
+                stickyReadbackValue
+                    .GetProperty("attempt_intent_record_identity")
+                    .GetString()!,
+                stickyReceipt!,
+                stickyReadbackValue
+                    .GetProperty("observed_at_unix_seconds")
+                    .GetInt64(),
+                out var readback));
+            Assert.NotNull(readback);
+            Assert.Equal(
+                stickyReadbackValue.GetProperty("record_identity").GetString(),
+                readback!.RecordIdentity);
+            Assert.Equal(
+                stickyReadback.GetProperty("object_identity").GetString(),
+                readback.RecordIdentity);
+
+            var acceptanceRecoveryValue = acceptanceRecovery
+                .GetProperty("decoded_record");
+            Assert.True(RecoveryRecordV1Codec.TryCreate(
+                recoveryPublication,
+                readback,
+                ImmutableArray.CreateRange(Convert.FromBase64String(
+                    acceptanceRecoveryValue
+                        .GetProperty("acceptance_recovery_handoff_base64")
+                        .GetString()!)),
+                acceptanceRecoveryValue
+                    .GetProperty("minimum_semantic_expires_at_unix_seconds")
+                    .GetInt64(),
+                out var recovery));
+            Assert.NotNull(recovery);
+            Assert.Equal(
+                acceptanceRecoveryValue
+                    .GetProperty("record_identity")
+                    .GetString(),
+                recovery!.RecordIdentity);
+            Assert.Equal(
+                acceptanceRecovery.GetProperty("object_identity").GetString(),
+                recovery.RecordIdentity);
+
+            var acceptanceValue = acceptance.GetProperty("decoded_record");
+            var receipt = new AcceptanceReceiptV1(
+                acceptanceValue
+                    .GetProperty("logical_generation_identity")
+                    .GetString()!,
+                acceptanceValue
+                    .GetProperty("original_candidate_object_identity")
+                    .GetString()!,
+                OptionalString(
+                    acceptanceValue,
+                    "previous_logical_generation_identity"),
+                OptionalString(
+                    acceptanceValue,
+                    "previous_acceptance_receipt_identity"),
+                acceptanceValue.GetProperty("reviewed_head_sha").GetString()!,
+                (StickyPublicationOperation)acceptanceValue
+                    .GetProperty("publication_operation")
+                    .GetInt32(),
+                PositiveId(acceptanceValue, "repository_id"),
+                PositiveId(acceptanceValue, "pull_request_number"),
+                PositiveId(acceptanceValue, "comment_id"),
+                acceptanceValue.GetProperty("comment_url").GetString()!,
+                acceptanceValue.GetProperty("scope_sha256").GetString()!,
+                acceptanceValue.GetProperty("body_sha256").GetString()!,
+                acceptanceValue
+                    .GetProperty("publication_payload_sha256")
+                    .GetString()!,
+                acceptanceValue
+                    .GetProperty("producing_run_identity")
+                    .GetString()!,
+                acceptanceValue
+                    .GetProperty("producing_run_attempt")
+                    .GetInt64(),
+                acceptanceValue
+                    .GetProperty("accepted_at_unix_seconds")
+                    .GetInt64(),
+                acceptanceValue
+                    .GetProperty("logical_expires_at_unix_seconds")
+                    .GetInt64());
+            Assert.True(AcceptedStateAcceptanceReceiptCodec.TryEncode(
+                receipt,
+                out var acceptanceBytes));
+            Assert.True(AcceptedStateAcceptanceReceiptCodec.TryDecode(
+                acceptanceBytes,
+                out var decodedAcceptance));
+            Assert.Equal(receipt, decodedAcceptance);
+            Assert.Equal(
+                candidate.GetProperty("object_identity").GetString(),
+                receipt.OriginalCandidateObjectIdentity);
+            Assert.Equal(
+                candidateValue
+                    .GetProperty("publication_payload_sha256")
+                    .GetString(),
+                receipt.PublicationPayloadSha256);
+        }
     }
 
     [Fact]
@@ -385,6 +663,50 @@ public sealed class RetainedStateTransactionContractTests
                 target.GetProperty("encrypted_object_sha256").GetString()!),
             target.GetProperty("expires_at_unix_seconds").GetInt64(),
             target.GetProperty("size").GetInt64());
+
+    private static JsonElement Record(
+        JsonElement[] records,
+        string phase,
+        string objectClass) => records.Single(record =>
+        StringComparer.Ordinal.Equals(
+            record.GetProperty("creation_phase").GetString(),
+            phase) &&
+        StringComparer.Ordinal.Equals(
+            record.GetProperty("object_class").GetString(),
+            objectClass));
+
+    private static JsonElement RecoveryRecord(
+        JsonElement[] records,
+        string phase,
+        string recordKind) => records.Single(record =>
+        StringComparer.Ordinal.Equals(
+            record.GetProperty("creation_phase").GetString(),
+            phase) &&
+        StringComparer.Ordinal.Equals(
+            record.GetProperty("object_class").GetString(),
+            "publication_intent") &&
+        StringComparer.Ordinal.Equals(
+            record
+                .GetProperty("decoded_record")
+                .GetProperty("record_kind")
+                .GetString(),
+            recordKind));
+
+    private static long PositiveId(JsonElement value, string propertyName) =>
+        long.Parse(
+            value.GetProperty(propertyName).GetString()!,
+            NumberStyles.None,
+            CultureInfo.InvariantCulture);
+
+    private static string? OptionalString(
+        JsonElement value,
+        string propertyName)
+    {
+        var property = value.GetProperty(propertyName);
+        return property.ValueKind == JsonValueKind.Null
+            ? null
+            : property.GetString();
+    }
 
     private static string FindRepositoryRoot()
     {

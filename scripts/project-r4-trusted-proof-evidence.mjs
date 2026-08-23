@@ -52,6 +52,10 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function stateEnvelopeDigest(envelope) {
+  return sha256(Buffer.concat([Buffer.from('apr.state-envelope.r2\0', 'ascii'), envelope]));
+}
+
 function uint16LittleEndian(value) {
   const bytes = Buffer.allocUnsafe(2);
   bytes.writeUInt16LE(value);
@@ -130,6 +134,91 @@ function cleanupOperationIdentity(record) {
     ...record.targets.map(opaqueMetadataBytes),
   ]);
   return sha256(Buffer.concat([lineageString('apr.state-cleanup.s6'), lineageBytes(core)]));
+}
+
+function publicationRecoveryHeader(kind, record) {
+  return Buffer.concat([
+    lineageString('APR5RC01'),
+    uint16LittleEndian(1),
+    uint16LittleEndian(kind),
+    lineageString(record.reviewed_head_sha),
+    lineageString(record.scope_sha256),
+    lineageString(record.body_sha256),
+  ]);
+}
+
+function publicationRecoveryIdentity(core) {
+  return sha256(
+    Buffer.concat([lineageString('apr.publication-recovery.p5/v1'), lineageBytes(core)]),
+  );
+}
+
+function stickyReadbackFields(record, includeIdentity) {
+  return Buffer.concat([
+    uint16LittleEndian(record.publication_operation),
+    int64LittleEndian(record.repository_id),
+    int64LittleEndian(record.pull_request_number),
+    int64LittleEndian(record.comment_id),
+    lineageString(record.comment_url),
+    int64LittleEndian(record.observed_at_unix_seconds),
+    lineageString(record.attempt_intent_record_identity),
+    ...(includeIdentity ? [lineageString(record.sticky_readback_record_identity)] : []),
+  ]);
+}
+
+function publicationIntentIdentity(record) {
+  switch (record.record_kind) {
+    case 'initial_intent':
+      return publicationRecoveryIdentity(
+        Buffer.concat([
+          publicationRecoveryHeader(1, record),
+          int64LittleEndian(record.created_at_unix_seconds),
+        ]),
+      );
+    case 'sticky_readback':
+      return publicationRecoveryIdentity(
+        Buffer.concat([publicationRecoveryHeader(2, record), stickyReadbackFields(record, false)]),
+      );
+    case 'acceptance_recovery':
+      return publicationRecoveryIdentity(
+        Buffer.concat([
+          publicationRecoveryHeader(5, record),
+          stickyReadbackFields(record, true),
+          lineageBytes(Buffer.from(record.acceptance_recovery_handoff_base64, 'base64')),
+          int64LittleEndian(record.minimum_semantic_expires_at_unix_seconds),
+        ]),
+      );
+    default:
+      return null;
+  }
+}
+
+function publicationPayloadDigest(value) {
+  return sha256(
+    Buffer.concat([
+      lineageString('APRVPP01'),
+      uint16LittleEndian(1),
+      lineageBytes(Buffer.from(value.finalized_comment, 'utf8')),
+      int64LittleEndian(value.repository_id),
+      lineageString(value.repository_name),
+      int64LittleEndian(value.pull_request_number),
+      lineageString(value.scope_sha256),
+      lineageString(value.body_sha256),
+      lineageString(value.reviewed_head_sha),
+      lineageString(value.policy_identity_sha256),
+      lineageString(value.payload_sha256),
+      lineageString(value.build_discriminator),
+      lineageString(value.rendering_version),
+    ]),
+  );
+}
+
+function isCanonicalArtifactId(value) {
+  return (
+    /^[1-9][0-9]{0,15}$/u.test(value) &&
+    BigInt(value) <= 9_007_199_254_740_991n &&
+    BigInt(value).toString() === value
+  );
 }
 
 function commentIdFromUrl(value) {
@@ -240,7 +329,7 @@ function findArtifact(records, objectClass, objectIdentity) {
   );
 }
 
-function exactAcceptanceReceipt(transition, predecessorIdentity) {
+function exactAcceptanceReceipt(transition, predecessorIdentity, run) {
   const receipt = transition.acceptance_receipt;
   return (
     receipt.original_candidate_object_identity === transition.candidate_object_identity &&
@@ -249,8 +338,9 @@ function exactAcceptanceReceipt(transition, predecessorIdentity) {
     receipt.comment_id === transition.sticky_comment_id &&
     receipt.comment_url === transition.sticky_comment_url &&
     receipt.body_sha256 === transition.sticky_body_sha256 &&
-    receipt.producing_run_attempt === 1 &&
-    receipt.logical_expires_at_unix_seconds > receipt.accepted_at_unix_seconds
+    receipt.producing_run_identity === run.run_id &&
+    receipt.producing_run_attempt === run.run_attempt &&
+    receipt.logical_expires_at_unix_seconds === receipt.accepted_at_unix_seconds + 604800
   );
 }
 
@@ -295,13 +385,17 @@ export function projectTrustedProofEvidence(input) {
     canaries,
   } = input;
 
+  const normalConcurrencyGroup = `agentic-pr-review-r4-${identities.repository_id}-pr-${fixture.normal_pr_number}`;
   if (
     runs.bootstrap.run_id === runs.continuation.run_id ||
     runs.bootstrap.workflow_sha !== identities.workflow_sha ||
     runs.continuation.workflow_sha !== identities.workflow_sha ||
     runs.bootstrap.reviewed_head_sha !== identities.normal_head_sha ||
     runs.continuation.reviewed_head_sha !== identities.normal_head_sha ||
-    runs.bootstrap.concurrency_group !== runs.continuation.concurrency_group ||
+    runs.bootstrap.pr_number !== fixture.normal_pr_number ||
+    runs.continuation.pr_number !== fixture.normal_pr_number ||
+    runs.bootstrap.concurrency_group !== normalConcurrencyGroup ||
+    runs.continuation.concurrency_group !== normalConcurrencyGroup ||
     observation.equal_evaluated_group !== true ||
     !(
       runs.bootstrap.protected_job_started_at < runs.bootstrap.barrier_ready_at &&
@@ -503,8 +597,12 @@ export function projectTrustedProofEvidence(input) {
     !bootstrap.sticky_marker.endsWith(`head_sha=${identities.normal_head_sha} -->`) ||
     !continuation.sticky_marker.endsWith(`head_sha=${identities.normal_head_sha} -->`) ||
     continuation.predecessor_acceptance_object_identity !== bootstrap.acceptance_object_identity ||
-    !exactAcceptanceReceipt(bootstrap, null) ||
-    !exactAcceptanceReceipt(continuation, bootstrap.acceptance_object_identity) ||
+    !exactAcceptanceReceipt(bootstrap, null, runs.bootstrap) ||
+    !exactAcceptanceReceipt(
+      continuation,
+      bootstrap.acceptance_object_identity,
+      runs.continuation,
+    ) ||
     bootstrap.base_scope_digest !== continuation.base_scope_digest ||
     bootstrap.lineage_head_object_identity !== continuation.lineage_head_object_identity ||
     bootstrap.lineage_epoch !== continuation.lineage_epoch ||
@@ -566,10 +664,37 @@ export function projectTrustedProofEvidence(input) {
     scopes.normal.base_scope_digest,
     scopes.stale.base_scope_digest,
   ];
+  const terminalIds = [
+    ...cleanup.internally_reconciled_physical_artifact_ids,
+    ...cleanup.e4_deleted_physical_artifact_ids,
+    ...cleanup.self_deleted_cleanup_record_ids,
+  ];
   if (
     createdIds.length !== new Set(createdIds).size ||
+    createdIds.some((value) => !isCanonicalArtifactId(value)) ||
     objectIdentities.length !== new Set(objectIdentities).size ||
-    !exactSet(createdIds, cleanup.deleted_physical_artifact_ids) ||
+    terminalIds.length !== new Set(terminalIds).size ||
+    !exactSet(createdIds, terminalIds) ||
+    !exactSet(
+      cleanup.internally_reconciled_physical_artifact_ids,
+      state.created
+        .filter(
+          ({ terminal_disposition }) => terminal_disposition === 'internally-reconciled-deleted',
+        )
+        .map(({ physical_artifact_id }) => physical_artifact_id),
+    ) ||
+    !exactSet(
+      cleanup.e4_deleted_physical_artifact_ids,
+      state.created
+        .filter(({ terminal_disposition }) => terminal_disposition === 'e4-deleted')
+        .map(({ physical_artifact_id }) => physical_artifact_id),
+    ) ||
+    !exactSet(
+      cleanup.self_deleted_cleanup_record_ids,
+      state.created
+        .filter(({ terminal_disposition }) => terminal_disposition === 'cleanup-self-deleted')
+        .map(({ physical_artifact_id }) => physical_artifact_id),
+    ) ||
     !isEmptyInventory(state.pre_state) ||
     !isEmptyInventory(state.final_state) ||
     new Set(scopeDigests).size !== 3 ||
@@ -598,9 +723,18 @@ export function projectTrustedProofEvidence(input) {
       case 'lineage_head':
         return decoded.transition !== undefined && decoded.ordinal !== undefined;
       case 'candidate':
-        return decoded.session_generation !== undefined;
+        return (
+          decoded.session_generation !== undefined &&
+          stateEnvelopeDigest(Buffer.from(decoded.encrypted_state_envelope_base64, 'base64')) ===
+            decoded.state_envelope_sha256 &&
+          publicationPayloadDigest(decoded.publication_payload) ===
+            decoded.publication_payload_sha256
+        );
       case 'publication_intent':
-        return decoded.created_at_unix_seconds !== undefined;
+        return (
+          publicationIntentIdentity(decoded) === decoded.record_identity &&
+          decoded.record_identity === record.object_identity
+        );
       case 'acceptance':
         return decoded.logical_generation_identity !== undefined;
       case 'publication_failure':
@@ -636,6 +770,17 @@ export function projectTrustedProofEvidence(input) {
           : scopes[expectedScope].family_opaque_names[record.object_class];
       return (
         !owner ||
+        record.terminal_at_unix_seconds < record.created_at_unix_seconds ||
+        (record.terminal_disposition === 'cleanup-self-deleted' &&
+          (record.object_class !== 'cleanup' || record.terminal_phase !== 'e4-final-cleanup')) ||
+        (record.object_class === 'cleanup' &&
+          record.terminal_disposition !== 'cleanup-self-deleted') ||
+        (record.terminal_disposition === 'e4-deleted' &&
+          record.terminal_phase !== 'e4-final-cleanup') ||
+        (record.terminal_disposition === 'internally-reconciled-deleted' &&
+          !['bootstrap-internal-cleanup', 'continuation-internal-cleanup'].includes(
+            record.terminal_phase,
+          )) ||
         record.producing_run_id !== owner.run_id ||
         record.producing_run_attempt !== owner.run_attempt ||
         record.archive_sha256 === record.encrypted_object_sha256 ||
@@ -702,8 +847,25 @@ export function projectTrustedProofEvidence(input) {
     bootstrap.candidate_object_identity,
   );
   const bootstrapIntent = state.created.find(
-    ({ object_class, creation_phase, scope }) =>
-      object_class === 'publication_intent' && creation_phase === 'bootstrap' && scope === 'normal',
+    ({ object_class, creation_phase, scope, decoded_record }) =>
+      object_class === 'publication_intent' &&
+      creation_phase === 'bootstrap' &&
+      scope === 'normal' &&
+      decoded_record.record_kind === 'initial_intent',
+  );
+  const bootstrapReadback = state.created.find(
+    ({ object_class, creation_phase, scope, decoded_record }) =>
+      object_class === 'publication_intent' &&
+      creation_phase === 'bootstrap' &&
+      scope === 'normal' &&
+      decoded_record.record_kind === 'sticky_readback',
+  );
+  const bootstrapRecovery = state.created.find(
+    ({ object_class, creation_phase, scope, decoded_record }) =>
+      object_class === 'publication_intent' &&
+      creation_phase === 'bootstrap' &&
+      scope === 'normal' &&
+      decoded_record.record_kind === 'acceptance_recovery',
   );
   const predecessorAcceptance = findArtifact(
     state.created,
@@ -716,10 +878,25 @@ export function projectTrustedProofEvidence(input) {
     continuation.candidate_object_identity,
   );
   const continuationIntent = state.created.find(
-    ({ object_class, creation_phase, scope }) =>
+    ({ object_class, creation_phase, scope, decoded_record }) =>
       object_class === 'publication_intent' &&
       creation_phase === 'continuation' &&
-      scope === 'normal',
+      scope === 'normal' &&
+      decoded_record.record_kind === 'initial_intent',
+  );
+  const continuationReadback = state.created.find(
+    ({ object_class, creation_phase, scope, decoded_record }) =>
+      object_class === 'publication_intent' &&
+      creation_phase === 'continuation' &&
+      scope === 'normal' &&
+      decoded_record.record_kind === 'sticky_readback',
+  );
+  const continuationRecovery = state.created.find(
+    ({ object_class, creation_phase, scope, decoded_record }) =>
+      object_class === 'publication_intent' &&
+      creation_phase === 'continuation' &&
+      scope === 'normal' &&
+      decoded_record.record_kind === 'acceptance_recovery',
   );
   const currentAcceptance = findArtifact(
     state.created,
@@ -734,10 +911,27 @@ export function projectTrustedProofEvidence(input) {
   );
   const bootstrapReceipt = bootstrap.acceptance_receipt;
   const continuationReceipt = continuation.acceptance_receipt;
+  const normalP5 = state.created.filter(
+    ({ object_class, scope }) => object_class === 'publication_intent' && scope === 'normal',
+  );
+  const exactSuccessfulP5Set = ['bootstrap', 'continuation'].every((phase) => {
+    const records = normalP5.filter(({ creation_phase }) => creation_phase === phase);
+    return (
+      records.length === 3 &&
+      exactSet(
+        records.map(({ decoded_record }) => decoded_record.record_kind),
+        ['initial_intent', 'sticky_readback', 'acceptance_recovery'],
+      )
+    );
+  });
   const expectedCleanupTargets = state.created
-    .filter(({ scope, object_class }) => scope === 'normal' && object_class !== 'cleanup')
+    .filter(
+      ({ scope, object_class, terminal_disposition }) =>
+        scope === 'normal' && object_class !== 'cleanup' && terminal_disposition === 'e4-deleted',
+    )
     .map(({ physical_artifact_id }) => physical_artifact_id);
   if (
+    !exactSuccessfulP5Set ||
     normalHeads.length !== 1 ||
     !normalHead ||
     normalHead.object_identity !== bootstrap.lineage_head_object_identity ||
@@ -762,23 +956,139 @@ export function projectTrustedProofEvidence(input) {
     normalHead.decoded_record.reset_authority_run_attempt !== null ||
     !bootstrapCandidate ||
     !bootstrapIntent ||
+    !bootstrapReadback ||
+    !bootstrapRecovery ||
     !predecessorAcceptance ||
     !continuationCandidate ||
     !continuationIntent ||
+    !continuationReadback ||
+    !continuationRecovery ||
     !currentAcceptance ||
     !normalCleanup ||
     bootstrapCandidate.predecessor_identity !== null ||
     bootstrapIntent.predecessor_identity !== bootstrapCandidate.object_identity ||
+    bootstrapReadback.predecessor_identity !== bootstrapCandidate.object_identity ||
+    bootstrapRecovery.predecessor_identity !== bootstrapCandidate.object_identity ||
     predecessorAcceptance.predecessor_identity !== null ||
     continuationCandidate.predecessor_identity !== predecessorAcceptance.object_identity ||
     continuationIntent.predecessor_identity !== continuationCandidate.object_identity ||
+    continuationReadback.predecessor_identity !== continuationCandidate.object_identity ||
+    continuationRecovery.predecessor_identity !== continuationCandidate.object_identity ||
     currentAcceptance.predecessor_identity !== predecessorAcceptance.object_identity ||
     normalCleanup.predecessor_identity !== currentAcceptance.object_identity
   ) {
     reject('lineage-binding');
   }
 
+  const exactCandidatePublication = (candidate, transition, receipt) => {
+    const decoded = candidate.decoded_record;
+    const publication = decoded.publication_payload;
+    return (
+      publication.finalized_comment === `${transition.summary}\n\n${transition.sticky_marker}` &&
+      publication.repository_id === identities.repository_id &&
+      publication.repository_name === identities.repository &&
+      publication.pull_request_number === fixture.normal_pr_number &&
+      publication.scope_sha256 === receipt.scope_sha256 &&
+      publication.body_sha256 === transition.sticky_body_sha256 &&
+      publication.reviewed_head_sha === identities.normal_head_sha &&
+      publication.policy_identity_sha256 === identities.policy_identity_sha256 &&
+      publication.payload_sha256 === identities.payload_sha256 &&
+      publication.build_discriminator === identities.build_discriminator &&
+      publication.rendering_version === 'r4-sticky-v1' &&
+      publicationPayloadDigest(publication) === decoded.publication_payload_sha256 &&
+      decoded.publication_payload_sha256 === receipt.publication_payload_sha256 &&
+      decoded.policy_identity_sha256 === identities.policy_identity_sha256 &&
+      decoded.config_sha256 === identities.config_sha256 &&
+      decoded.instructions_sha256 === identities.instructions_sha256 &&
+      decoded.payload_sha256 === identities.payload_sha256 &&
+      decoded.build_discriminator === identities.build_discriminator &&
+      decoded.build_discriminator === 'r4-w2' &&
+      decoded.producer_base_sha === identities.reviewed_base_sha &&
+      decoded.producer_head_sha === identities.normal_head_sha &&
+      decoded.prepared_expires_at_unix_seconds === decoded.prepared_at_unix_seconds + 604800 &&
+      candidate.created_at_unix_seconds === decoded.prepared_at_unix_seconds &&
+      candidate.logical_expires_at_unix_seconds === decoded.prepared_expires_at_unix_seconds
+    );
+  };
+  const exactSuccessfulRecoveryChain = (
+    candidate,
+    intent,
+    readback,
+    recovery,
+    acceptance,
+    transition,
+    receipt,
+  ) => {
+    const initial = intent.decoded_record;
+    const sticky = readback.decoded_record;
+    const durable = recovery.decoded_record;
+    const samePublication = (record) =>
+      record.reviewed_head_sha === identities.normal_head_sha &&
+      record.scope_sha256 === receipt.scope_sha256 &&
+      record.body_sha256 === receipt.body_sha256;
+    return (
+      samePublication(initial) &&
+      samePublication(sticky) &&
+      samePublication(durable) &&
+      initial.record_identity === intent.object_identity &&
+      sticky.attempt_intent_record_identity === initial.record_identity &&
+      durable.attempt_intent_record_identity === initial.record_identity &&
+      durable.sticky_readback_record_identity === sticky.record_identity &&
+      sticky.publication_operation === receipt.publication_operation &&
+      durable.publication_operation === receipt.publication_operation &&
+      sticky.repository_id === identities.repository_id &&
+      durable.repository_id === identities.repository_id &&
+      sticky.pull_request_number === fixture.normal_pr_number &&
+      durable.pull_request_number === fixture.normal_pr_number &&
+      sticky.comment_id === transition.sticky_comment_id &&
+      durable.comment_id === transition.sticky_comment_id &&
+      sticky.comment_url === transition.sticky_comment_url &&
+      durable.comment_url === transition.sticky_comment_url &&
+      sticky.observed_at_unix_seconds === durable.observed_at_unix_seconds &&
+      initial.created_at_unix_seconds < sticky.observed_at_unix_seconds &&
+      sticky.observed_at_unix_seconds <= recovery.created_at_unix_seconds &&
+      recovery.created_at_unix_seconds < receipt.accepted_at_unix_seconds &&
+      durable.minimum_semantic_expires_at_unix_seconds ===
+        receipt.logical_expires_at_unix_seconds &&
+      intent.created_at_unix_seconds === initial.created_at_unix_seconds &&
+      readback.created_at_unix_seconds === sticky.observed_at_unix_seconds &&
+      intent.logical_expires_at_unix_seconds ===
+        candidate.decoded_record.prepared_expires_at_unix_seconds + 900 &&
+      readback.logical_expires_at_unix_seconds === intent.logical_expires_at_unix_seconds &&
+      recovery.logical_expires_at_unix_seconds === receipt.logical_expires_at_unix_seconds &&
+      acceptance.created_at_unix_seconds === receipt.accepted_at_unix_seconds &&
+      acceptance.logical_expires_at_unix_seconds === receipt.logical_expires_at_unix_seconds &&
+      intent.terminal_disposition === 'internally-reconciled-deleted' &&
+      readback.terminal_disposition === 'internally-reconciled-deleted' &&
+      recovery.terminal_disposition === 'internally-reconciled-deleted'
+    );
+  };
+
   if (
+    !exactCandidatePublication(bootstrapCandidate, bootstrap, bootstrapReceipt) ||
+    !exactCandidatePublication(continuationCandidate, continuation, continuationReceipt) ||
+    !exactSuccessfulRecoveryChain(
+      bootstrapCandidate,
+      bootstrapIntent,
+      bootstrapReadback,
+      bootstrapRecovery,
+      predecessorAcceptance,
+      bootstrap,
+      bootstrapReceipt,
+    ) ||
+    !exactSuccessfulRecoveryChain(
+      continuationCandidate,
+      continuationIntent,
+      continuationReadback,
+      continuationRecovery,
+      currentAcceptance,
+      continuation,
+      continuationReceipt,
+    ) ||
+    bootstrapCandidate.terminal_disposition !== 'internally-reconciled-deleted' ||
+    predecessorAcceptance.terminal_disposition !== 'internally-reconciled-deleted' ||
+    continuationCandidate.terminal_disposition !== 'e4-deleted' ||
+    currentAcceptance.terminal_disposition !== 'e4-deleted' ||
     bootstrapCandidate.decoded_record.session_generation !== 0 ||
     bootstrapCandidate.decoded_record.previous_logical_generation_identity !== null ||
     bootstrapCandidate.decoded_record.predecessor_envelope_sha256 !== null ||
@@ -794,6 +1104,8 @@ export function projectTrustedProofEvidence(input) {
       bootstrapCandidate.decoded_record.state_envelope_sha256 ||
     continuationCandidate.decoded_record.session_sha256 ===
       bootstrapCandidate.decoded_record.session_sha256 ||
+    continuationCandidate.decoded_record.producer_base_sha !== identities.reviewed_base_sha ||
+    continuationCandidate.decoded_record.producer_head_sha !== identities.normal_head_sha ||
     continuationCandidate.decoded_record.payload_sha256 !== identities.payload_sha256 ||
     continuationCandidate.decoded_record.prepared_at_unix_seconds >=
       continuationCandidate.decoded_record.prepared_expires_at_unix_seconds ||
@@ -808,6 +1120,8 @@ export function projectTrustedProofEvidence(input) {
     continuationReceipt.publication_operation !== 2 ||
     bootstrapReceipt.producing_run_identity !== runs.bootstrap.run_id ||
     continuationReceipt.producing_run_identity !== runs.continuation.run_id ||
+    bootstrapReceipt.producing_run_attempt !== runs.bootstrap.run_attempt ||
+    continuationReceipt.producing_run_attempt !== runs.continuation.run_attempt ||
     bootstrapReceipt.repository_id !== identities.repository_id ||
     continuationReceipt.repository_id !== identities.repository_id ||
     bootstrapReceipt.pull_request_number !== fixture.normal_pr_number ||
@@ -928,7 +1242,7 @@ export function projectTrustedProofEvidence(input) {
     cleanup: {
       complete: true,
       final_state_inventory_count: 0,
-      deleted_state_record_count: cleanup.deleted_physical_artifact_ids.length,
+      deleted_state_record_count: terminalIds.length,
       authorization_absent: true,
       operation_created_secrets_absent: true,
       environment_restored: true,

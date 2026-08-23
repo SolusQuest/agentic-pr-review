@@ -38,12 +38,12 @@ const fixtureDigests = new Map([
     'authorization-environment-contract.json',
     'b0b5502d055ba42284647e6e8cca8103478edccb00ac499689e2ef31a32b2d96',
   ],
-  ['cleanup-contract.json', '4f036b69983a17917e71ea86f00722dfb0672858d29e2942e7f38b25cbc9f9cb'],
+  ['cleanup-contract.json', '735c03cc3b1d1af1bcf5ef3814056dd2d2c0c36c54f871ba6d3984f46e8e01ea'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '9c64e106ce577ed0ac3c0706103c48e27522fa65d39483c66cc461a762f2ed5a',
+    '38693790dbfd2640dc335f65155e675ad3a0f14a949b13e395a70a4b04d0c2c7',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,15 +51,15 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    'f18507087fb17a9b828d081ec607b14e5ca63b2eb08a8cbe38dc3e02e786d809',
+    'f5d55ad445ae6803435dc8505ad0d84a9824a9851b9c4e2406517fcfda4d3661',
   ],
   [
     'templates/public-safe-evidence.json',
-    'd80500fdee7f553933345222101477b284e8ce8e0f34507a1de18ab455bb48e7',
+    '3a15366fac3c38a249a29bef79aa89abf31e0c3b84b416308003a3930d14d201',
   ],
   [
     'traces/normal-two-run.json',
-    '8a55feff519e885c33101b08ef011edd1a97b1caee2f284b4963df342ad6b94e',
+    '7e946753efd19a1483e29306966a8d9f783d4c8b3136ddc8af39c88a898be2a8',
   ],
   ['traces/stale-head.json', '8a2a34659c0c9593bf48132d7728c98340019b85d4bad20d8bf58579b58b7a40'],
   ['trusted-proof-payload-receipt.json', receiptJsonSha256],
@@ -231,6 +231,11 @@ function validateFixtureContracts(fixtureRoot) {
       true ||
     cleanup.operation_state?.physical_record_exact_fields?.includes('size') !== true ||
     cleanup.operation_state?.physical_record_exact_fields?.includes('decoded_record') !== true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_disposition') !==
+      true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_phase') !== true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_at_unix_seconds') !==
+      true ||
     cleanup.operation_state?.archive_and_encrypted_digests_independent !== true ||
     cleanup.operation_state?.scoped_header_exact_fields?.includes('epoch') !== true ||
     cleanup.operation_state?.scoped_header_exact_fields?.includes('session_id') !== true ||
@@ -238,6 +243,12 @@ function validateFixtureContracts(fixtureRoot) {
       'exact-class-specific-production-fields-with-distinct-session-digests-and-content-derived-cleanup-identity' ||
     cleanup.operation_state?.normal_lineage_head_rule !==
       'single-initialized-head-reused-across-accepted-generations-unless-reset-or-expiry' ||
+    JSON.stringify(cleanup.operation_state?.successful_publication_recovery_subtypes) !==
+      JSON.stringify(['initial_intent', 'sticky_readback', 'acceptance_recovery']) ||
+    JSON.stringify(cleanup.operation_state?.terminal_disposition_partition) !==
+      JSON.stringify(['internally-reconciled-deleted', 'e4-deleted', 'cleanup-self-deleted']) ||
+    cleanup.operation_state?.artifact_id_contract !==
+      'canonical-positive-decimal-javascript-safe-github-artifact-id' ||
     cleanup.public_projection_gate !==
       'exact-empty-final-state-complete-resource-readback-and-proof-control-cleanup' ||
     cleanup.invalid_terminal_states?.includes('delete-or-retain') !== true
@@ -249,6 +260,9 @@ function validateFixtureContracts(fixtureRoot) {
     normalTrace.run_one?.run_id === normalTrace.run_two?.run_id ||
     normalTrace.run_one?.run_attempt < 1 ||
     normalTrace.run_two?.run_attempt < 1 ||
+    normalTrace.concurrency_group !== 'agentic-pr-review-r4-42-pr-1001' ||
+    normalTrace.run_one?.pr_number !== '1001' ||
+    normalTrace.run_two?.pr_number !== '1001' ||
     !(
       normalTrace.workflow_sha === normalTrace.reviewed_base_sha &&
       normalTrace.normal_parent_sha === normalTrace.reviewed_base_sha &&
