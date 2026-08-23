@@ -188,4 +188,164 @@ describe('R4 E3 trusted proof policy', () => {
     );
     expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
   });
+
+  test.each(['actions', 'issues', 'pull-requests', 'contents'])(
+    'rejects an action-owned implicit token route with %s write authority',
+    (permission) => {
+      const workflowsRoot = copiedWorkflowsRoot();
+      fs.appendFileSync(
+        path.join(workflowsRoot, 'ci.yml'),
+        `  alternate-comment-route-${permission}:
+    runs-on: ubuntu-24.04
+    permissions:
+      ${permission}: write
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 1001,
+              body: JSON.stringify({ contract: "apr-r4-e2p-proof-control-v1" })
+            })
+`,
+      );
+      expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(
+        /repository-action-token-routes/u,
+      );
+    },
+  );
+
+  test('rejects an action route that inherits workflow-level write authority', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.writeFileSync(
+      path.join(workflowsRoot, 'inherited-write.yml'),
+      `name: inherited write
+on:
+  workflow_dispatch:
+permissions:
+  issues: write
+jobs:
+  route:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: return context.repo.owner
+`,
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-action-token-routes/u);
+  });
+
+  test('rejects an additional action in an otherwise reviewed R4 write job', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const workflowPath = path.join(workflowsRoot, 'r4-trusted-proof.yml');
+    const source = fs.readFileSync(workflowPath, 'utf8');
+    fs.writeFileSync(
+      workflowPath,
+      source.replace(
+        '      - id: setup-node\n        uses:',
+        '      - id: unreviewed-action\n        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3\n        with:\n          script: return context.repo.owner\n      - id: setup-node\n        uses:',
+      ),
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-action-token-routes/u);
+  });
+
+  test('rejects permission expansion in an otherwise reviewed R4 write job', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const workflowPath = path.join(workflowsRoot, 'r4-trusted-proof.yml');
+    const source = fs.readFileSync(workflowPath, 'utf8');
+    fs.writeFileSync(
+      workflowPath,
+      source.replace(
+        '      actions: write\n      contents: read\n      pull-requests: write',
+        '      actions: write\n      contents: read\n      issues: write\n      pull-requests: write',
+      ),
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-action-token-routes/u);
+  });
+
+  test('rejects an action route whose repository-default permissions are unbounded', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.writeFileSync(
+      path.join(workflowsRoot, 'unbounded.yml'),
+      `name: unbounded
+on:
+  workflow_dispatch:
+jobs:
+  route:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: return context.repo.owner
+`,
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-action-token-routes/u);
+  });
+
+  test.each([
+    ['write-all', 'permissions: write-all'],
+    [
+      'reusable workflow',
+      `permissions:
+  pull-requests: write`,
+    ],
+  ])('rejects an implicit token route through %s', (routeKind, permissions) => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const job =
+      routeKind === 'reusable workflow'
+        ? `  route:
+    permissions:
+      pull-requests: write
+    uses: owner/repository/.github/workflows/route.yml@0123456789012345678901234567890123456789
+`
+        : `  route:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: return context.repo.owner
+`;
+    fs.writeFileSync(
+      path.join(workflowsRoot, 'implicit-route.yml'),
+      `name: implicit route
+on:
+  workflow_dispatch:
+${permissions}
+jobs:
+${job}`,
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-action-token-routes/u);
+  });
+
+  test.each([
+    ['read-only workflow', 'permissions:\n  contents: read', ''],
+    [
+      'read-only job override',
+      'permissions:\n  pull-requests: write',
+      '    permissions:\n      contents: read\n',
+    ],
+    ['read-all workflow', 'permissions: read-all', ''],
+    ['non-proof deployment writer', 'permissions:\n  deployments: write', ''],
+  ])('allows an ordinary pinned action in a %s', (_name, workflowPermissions, jobPermissions) => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.writeFileSync(
+      path.join(workflowsRoot, 'read-only.yml'),
+      `name: read only
+on:
+  workflow_dispatch:
+${workflowPermissions}
+jobs:
+  read:
+${jobPermissions}    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: return context.repo.owner
+`,
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
+  });
 });

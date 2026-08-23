@@ -393,6 +393,102 @@ function collectCredentialExpressions(value, result) {
   }
 }
 
+const reviewedWriteActionRoutes = new Map([
+  [
+    'r4-trusted-proof.yml\0workflow-run-review',
+    [
+      'checkout-control-root\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
+      'checkout-payload-source\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
+      'setup-node\0actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+      'setup-dotnet\0actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
+      'review\0SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+    ],
+  ],
+  [
+    'r4-trusted-proof.yml\0workflow-dispatch-review',
+    [
+      'checkout-control-root\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
+      'checkout-payload-source\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
+      'setup-node\0actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+      'setup-dotnet\0actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
+      'review\0SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+    ],
+  ],
+]);
+
+const proofMutationPermissions = new Set(['actions', 'contents', 'issues', 'pull-requests']);
+const reviewedWritePermissionIdentity = JSON.stringify([
+  ['actions', 'write'],
+  ['contents', 'read'],
+  ['pull-requests', 'write'],
+]);
+
+function permissionIdentity(permissions) {
+  if (permissions === null || Array.isArray(permissions) || typeof permissions !== 'object') {
+    return null;
+  }
+  return JSON.stringify(
+    Object.entries(permissions).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function proofTokenAuthority(permissions) {
+  if (permissions === undefined) return 'unbounded';
+  if (permissions === 'write-all') return 'write';
+  if (permissions === 'read-all') return 'read';
+  if (permissions === null || Array.isArray(permissions) || typeof permissions !== 'object') {
+    return 'unbounded';
+  }
+  let authority = 'none';
+  for (const [permission, access] of Object.entries(permissions)) {
+    if (access !== 'none' && access !== 'read' && access !== 'write') return 'unbounded';
+    if (!proofMutationPermissions.has(permission)) continue;
+    if (access === 'write') return 'write';
+    if (access === 'read') authority = 'read';
+  }
+  return authority;
+}
+
+function jobActionInvocations(job) {
+  const invocations = [];
+  if (Object.hasOwn(job, 'uses')) {
+    invocations.push(`<job>\0${typeof job.uses === 'string' ? job.uses : '<dynamic>'}`);
+  }
+  if (Array.isArray(job.steps)) {
+    for (const [index, step] of job.steps.entries()) {
+      if (step === null || Array.isArray(step) || typeof step !== 'object') continue;
+      if (!Object.hasOwn(step, 'uses')) continue;
+      const id = typeof step.id === 'string' ? step.id : `<step:${index}>`;
+      const uses = typeof step.uses === 'string' ? step.uses : '<dynamic>';
+      invocations.push(`${id}\0${uses}`);
+    }
+  }
+  return invocations;
+}
+
+function validateActionTokenRoutes(name, workflow) {
+  if (workflow.jobs === null || Array.isArray(workflow.jobs) || typeof workflow.jobs !== 'object') {
+    fail('repository-action-token-routes');
+  }
+  for (const [jobId, job] of Object.entries(workflow.jobs)) {
+    if (job === null || Array.isArray(job) || typeof job !== 'object') {
+      fail('repository-action-token-routes');
+    }
+    const permissions = Object.hasOwn(job, 'permissions') ? job.permissions : workflow.permissions;
+    const authority = proofTokenAuthority(permissions);
+    const invocations = jobActionInvocations(job);
+    if (invocations.length === 0 || authority === 'none' || authority === 'read') continue;
+    const expected = reviewedWriteActionRoutes.get(`${name}\0${jobId}`);
+    if (
+      expected === undefined ||
+      permissionIdentity(permissions) !== reviewedWritePermissionIdentity ||
+      JSON.stringify(invocations) !== JSON.stringify(expected)
+    ) {
+      fail('repository-action-token-routes');
+    }
+  }
+}
+
 function validateFixtureContracts(fixtureRoot) {
   if (JSON.stringify(listFiles(fixtureRoot)) !== JSON.stringify(fixtureInventory)) {
     fail('fixture-inventory');
@@ -609,6 +705,7 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     const expressions = [];
     collectCredentialExpressions(value, expressions);
     for (const expression of expressions) observed.push(`${name}\0${expression}`);
+    validateActionTokenRoutes(name, value);
   }
   const expected = [
     `r3-live-proof.yml\0\${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}`,
