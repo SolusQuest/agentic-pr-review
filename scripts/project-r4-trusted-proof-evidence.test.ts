@@ -292,6 +292,101 @@ describe('R4 E3 public-safe evidence projection', () => {
       (value: any) => (value.state.created[2].decoded_record.session_generation = 1),
     ],
     [
+      'repeated-bootstrap-continuation-session-digest',
+      (value: any) => {
+        const candidates = value.state.created.filter(
+          ({ object_class }: any) => object_class === 'candidate',
+        );
+        candidates[1].decoded_record.session_sha256 = candidates[0].decoded_record.session_sha256;
+      },
+    ],
+    [
+      'cleanup-identity-replaced-by-fixture-operation',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        cleanup.decoded_record.operation_identity = value.fixture.normal_operation_id;
+      },
+    ],
+    [
+      'cleanup-target-order-not-production-canonical',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        cleanup.decoded_record.targets.reverse();
+      },
+    ],
+    [
+      'cleanup-target-digests-swapped',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        const target = cleanup.decoded_record.targets[0];
+        [target.archive_sha256, target.encrypted_object_sha256] = [
+          target.encrypted_object_sha256,
+          target.archive_sha256,
+        ];
+      },
+    ],
+    [
+      'cleanup-target-digests-collapsed',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        const target = cleanup.decoded_record.targets[0];
+        target.encrypted_object_sha256 = target.archive_sha256;
+      },
+    ],
+    [
+      'outer-metadata-digests-collapsed',
+      (value: any) => {
+        const record = value.state.created.find(
+          ({ object_class }: any) => object_class === 'candidate',
+        );
+        record.encrypted_object_sha256 = record.archive_sha256;
+      },
+    ],
+    [
+      'cleanup-target-expiry-mismatch',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        cleanup.decoded_record.targets[0].expires_at_unix_seconds += 1;
+      },
+    ],
+    [
+      'cleanup-target-size-mismatch',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        cleanup.decoded_record.targets[0].size += 1;
+      },
+    ],
+    [
+      'cleanup-inventory-digest-not-derived-from-targets',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        cleanup.decoded_record.pre_cleanup_inventory_digest = '0'.repeat(64);
+      },
+    ],
+    [
+      'cleanup-operation-identity-not-content-derived',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ object_class }: any) => object_class === 'cleanup',
+        );
+        cleanup.decoded_record.operation_identity = '0'.repeat(64);
+      },
+    ],
+    [
       'locator-root-in-scoped-family-map',
       (value: any) =>
         (value.state.scopes.normal.family_opaque_names.locator_root = 'opaque-normal-locator-root'),
@@ -330,13 +425,15 @@ describe('R4 E3 public-safe evidence projection', () => {
     expect(() => projectTrustedProofEvidence(candidate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
   });
 
-  test('admits repeated exact-name families and repeated digests with unique physical IDs', () => {
+  test('admits repeated exact-name families and independently repeated metadata digests', () => {
     const candidate = clone(hostTemplate);
     const candidates = candidate.state.created.filter(
       ({ object_class }: any) => object_class === 'candidate',
     );
     expect(candidates[0].opaque_name).toBe(candidates[1].opaque_name);
-    expect(candidates[0].artifact_digest).toBe(candidates[1].artifact_digest);
+    expect(candidates[0].archive_sha256).toBe(candidates[1].archive_sha256);
+    expect(candidates[0].encrypted_object_sha256).toBe(candidates[1].encrypted_object_sha256);
+    expect(candidates[0].archive_sha256).not.toBe(candidates[0].encrypted_object_sha256);
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });
 

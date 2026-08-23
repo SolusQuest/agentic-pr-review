@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Reflection;
+using System.Text.Json;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -110,6 +111,63 @@ public sealed class RetainedStateTransactionContractTests
         Assert.False(RetainedStateCleanupRecordCodec.TryDecode(
             tampered,
             out _));
+    }
+
+    [Fact]
+    public void TrustedProofCleanupVectorMatchesProductionCodec()
+    {
+        var root = FindRepositoryRoot();
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof",
+            "templates",
+            "host-restricted-evidence.json")));
+        var fixture = document.RootElement.GetProperty("fixture");
+        var cleanup = document.RootElement
+            .GetProperty("state")
+            .GetProperty("created")
+            .EnumerateArray()
+            .Single(item => StringComparer.Ordinal.Equals(
+                item.GetProperty("object_class").GetString(),
+                "cleanup"))
+            .GetProperty("decoded_record");
+        var targets = cleanup.GetProperty("targets")
+            .EnumerateArray()
+            .Select(TargetMetadata)
+            .ToImmutableArray();
+        var evidence = targets.Select(target =>
+            new LineageArtifactEvidence(
+                target.Reference.Name.Value,
+                target.Reference.ObjectId.Value,
+                target.ProducingRun.Identity,
+                target.ProducingRun.Attempt,
+                target.ArchiveDigest.Sha256,
+                target.EncryptedObjectDigest.Sha256,
+                target.ExpiresAtUnixSeconds,
+                target.Size));
+
+        Assert.Equal(
+            cleanup.GetProperty("pre_cleanup_inventory_digest").GetString(),
+            LineageCryptography.InventoryDigest(evidence));
+        Assert.True(RetainedStateCleanupRecordCodec.TryCreate(
+            cleanup.GetProperty("terminal_acceptance_identity").GetString()!,
+            cleanup.GetProperty("base_scope_digest").GetString()!,
+            cleanup.GetProperty("epoch").GetString()!,
+            cleanup.GetProperty("session_id").GetString()!,
+            cleanup.GetProperty("pre_cleanup_inventory_digest").GetString()!,
+            targets,
+            out var value));
+        Assert.NotNull(value);
+        Assert.Equal(
+            cleanup.GetProperty("operation_identity").GetString(),
+            value!.OperationIdentity);
+        Assert.NotEqual(
+            fixture.GetProperty("normal_operation_id").GetString(),
+            value.OperationIdentity);
     }
 
     [Fact]
@@ -310,6 +368,36 @@ public sealed class RetainedStateTransactionContractTests
             new OpaqueStoreEncryptedObjectDigest(new string('b', 64)),
             1_800_000_000,
             100);
+
+    private static OpaqueStoreObjectMetadata TargetMetadata(
+        JsonElement target) =>
+        new(
+            new OpaqueStoreObjectReference(
+                new OpaqueStoreName(target.GetProperty("name").GetString()!),
+                new OpaqueStoreObjectId(
+                    target.GetProperty("object_id").GetString()!)),
+            new OpaqueStoreProducingRun(
+                target.GetProperty("producing_run_identity").GetString()!,
+                target.GetProperty("producing_run_attempt").GetInt64()),
+            new OpaqueStoreArchiveDigest(
+                target.GetProperty("archive_sha256").GetString()!),
+            new OpaqueStoreEncryptedObjectDigest(
+                target.GetProperty("encrypted_object_sha256").GetString()!),
+            target.GetProperty("expires_at_unix_seconds").GetInt64(),
+            target.GetProperty("size").GetInt64());
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null &&
+            !File.Exists(Path.Join(directory.FullName, "package.json")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ??
+            throw new InvalidOperationException("Repository root not found.");
+    }
 
     private static RetainedStateOpaqueWriteAnchor Anchor(byte[] envelope) =>
         new(

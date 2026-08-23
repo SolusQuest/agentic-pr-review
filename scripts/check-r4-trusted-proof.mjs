@@ -38,12 +38,12 @@ const fixtureDigests = new Map([
     'authorization-environment-contract.json',
     'b0b5502d055ba42284647e6e8cca8103478edccb00ac499689e2ef31a32b2d96',
   ],
-  ['cleanup-contract.json', 'e7758912a633f399a98b95b4970694274a53d35b5b88ebe3afbecbd029c2c82d'],
+  ['cleanup-contract.json', '4f036b69983a17917e71ea86f00722dfb0672858d29e2942e7f38b25cbc9f9cb'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    'cf95726c0a8720cc31cfdb4c4b6a0cdd1b08b644523e7b62704645bcf1c699de',
+    '9c64e106ce577ed0ac3c0706103c48e27522fa65d39483c66cc461a762f2ed5a',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,7 +51,7 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    '8c7ee6b21078912adac6bca76858689d21418406695ca8804835fb01c2af3469',
+    'f18507087fb17a9b828d081ec607b14e5ca63b2eb08a8cbe38dc3e02e786d809',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -224,11 +224,18 @@ function validateFixtureContracts(fixtureRoot) {
     cleanup.operation_state?.creation_phases?.includes('stale-setup') !== true ||
     cleanup.operation_state?.physical_record_exact_fields?.includes('scope') !== true ||
     cleanup.operation_state?.physical_record_exact_fields?.includes('scope_digest') !== true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('archive_sha256') !== true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('encrypted_object_sha256') !==
+      true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('expires_at_unix_seconds') !==
+      true ||
+    cleanup.operation_state?.physical_record_exact_fields?.includes('size') !== true ||
     cleanup.operation_state?.physical_record_exact_fields?.includes('decoded_record') !== true ||
+    cleanup.operation_state?.archive_and_encrypted_digests_independent !== true ||
     cleanup.operation_state?.scoped_header_exact_fields?.includes('epoch') !== true ||
     cleanup.operation_state?.scoped_header_exact_fields?.includes('session_id') !== true ||
     cleanup.operation_state?.decoded_record_contract !==
-      'exact-class-specific-production-fields-with-session-generation-zero-then-one' ||
+      'exact-class-specific-production-fields-with-distinct-session-digests-and-content-derived-cleanup-identity' ||
     cleanup.operation_state?.normal_lineage_head_rule !==
       'single-initialized-head-reused-across-accepted-generations-unless-reset-or-expiry' ||
     cleanup.public_projection_gate !==

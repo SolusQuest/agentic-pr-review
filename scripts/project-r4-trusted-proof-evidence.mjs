@@ -52,6 +52,86 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function uint16LittleEndian(value) {
+  const bytes = Buffer.allocUnsafe(2);
+  bytes.writeUInt16LE(value);
+  return bytes;
+}
+
+function uint32LittleEndian(value) {
+  const bytes = Buffer.allocUnsafe(4);
+  bytes.writeUInt32LE(value);
+  return bytes;
+}
+
+function int64LittleEndian(value) {
+  const bytes = Buffer.allocUnsafe(8);
+  bytes.writeBigInt64LE(BigInt(value));
+  return bytes;
+}
+
+function lineageBytes(value) {
+  const bytes = Buffer.from(value);
+  return Buffer.concat([uint32LittleEndian(bytes.length), bytes]);
+}
+
+function lineageString(value) {
+  return lineageBytes(Buffer.from(value, 'utf8'));
+}
+
+function opaqueMetadataBytes(value) {
+  return Buffer.concat([
+    lineageString(value.name),
+    lineageString(value.object_id),
+    lineageString(value.producing_run_identity),
+    int64LittleEndian(value.producing_run_attempt),
+    lineageString(value.archive_sha256),
+    lineageString(value.encrypted_object_sha256),
+    int64LittleEndian(value.expires_at_unix_seconds),
+    int64LittleEndian(value.size),
+  ]);
+}
+
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function compareCleanupTargets(left, right) {
+  return compareText(left.name, right.name) || compareText(left.object_id, right.object_id);
+}
+
+function compareInventoryEntries(left, right) {
+  return (
+    compareText(left.name, right.name) ||
+    compareText(left.object_id, right.object_id) ||
+    compareText(left.producing_run_identity, right.producing_run_identity) ||
+    left.producing_run_attempt - right.producing_run_attempt ||
+    compareText(left.archive_sha256, right.archive_sha256) ||
+    compareText(left.encrypted_object_sha256, right.encrypted_object_sha256) ||
+    left.expires_at_unix_seconds - right.expires_at_unix_seconds ||
+    left.size - right.size
+  );
+}
+
+function inventoryDigest(targets) {
+  return sha256(Buffer.concat([...targets].sort(compareInventoryEntries).map(opaqueMetadataBytes)));
+}
+
+function cleanupOperationIdentity(record) {
+  const core = Buffer.concat([
+    lineageString('APRSCU01'),
+    uint16LittleEndian(1),
+    lineageString(record.terminal_acceptance_identity),
+    lineageString(record.base_scope_digest),
+    lineageString(record.epoch),
+    lineageString(record.session_id),
+    lineageString(record.pre_cleanup_inventory_digest),
+    uint16LittleEndian(record.targets.length),
+    ...record.targets.map(opaqueMetadataBytes),
+  ]);
+  return sha256(Buffer.concat([lineageString('apr.state-cleanup.s6'), lineageBytes(core)]));
+}
+
 function commentIdFromUrl(value) {
   return /^https:\/\/github\.com\/SolusQuest\/agentic-pr-review\/pull\/[1-9][0-9]*#issuecomment-([1-9][0-9]*)$/u.exec(
     value,
@@ -558,6 +638,7 @@ export function projectTrustedProofEvidence(input) {
         !owner ||
         record.producing_run_id !== owner.run_id ||
         record.producing_run_attempt !== owner.run_attempt ||
+        record.archive_sha256 === record.encrypted_object_sha256 ||
         record.scope !== expectedScope ||
         record.scope_digest !== expectedDigest ||
         record.opaque_name !== expectedOpaqueName ||
@@ -566,7 +647,8 @@ export function projectTrustedProofEvidence(input) {
           !(
             record.created_at_unix_seconds < record.logical_expires_at_unix_seconds &&
             record.logical_expires_at_unix_seconds <=
-              record.required_platform_expires_at_unix_seconds
+              record.required_platform_expires_at_unix_seconds &&
+            record.required_platform_expires_at_unix_seconds <= record.expires_at_unix_seconds
           ))
       );
     })
@@ -710,7 +792,7 @@ export function projectTrustedProofEvidence(input) {
       bootstrapCandidate.decoded_record.logical_generation_identity ||
     continuationCandidate.decoded_record.predecessor_envelope_sha256 !==
       bootstrapCandidate.decoded_record.state_envelope_sha256 ||
-    continuationCandidate.decoded_record.session_sha256 !==
+    continuationCandidate.decoded_record.session_sha256 ===
       bootstrapCandidate.decoded_record.session_sha256 ||
     continuationCandidate.decoded_record.payload_sha256 !== identities.payload_sha256 ||
     continuationCandidate.decoded_record.prepared_at_unix_seconds >=
@@ -743,7 +825,13 @@ export function projectTrustedProofEvidence(input) {
     normalCleanup.decoded_record.base_scope_digest !== scopes.normal.base_scope_digest ||
     normalCleanup.decoded_record.epoch !== bootstrap.lineage_epoch ||
     normalCleanup.decoded_record.session_id !== bootstrap.lineage_session_id ||
-    normalCleanup.decoded_record.operation_identity !== fixture.normal_operation_id ||
+    normalCleanup.decoded_record.operation_identity === fixture.normal_operation_id ||
+    normalCleanup.decoded_record.pre_cleanup_inventory_digest !==
+      inventoryDigest(normalCleanup.decoded_record.targets) ||
+    normalCleanup.decoded_record.operation_identity !==
+      cleanupOperationIdentity(normalCleanup.decoded_record) ||
+    JSON.stringify(normalCleanup.decoded_record.targets) !==
+      JSON.stringify([...normalCleanup.decoded_record.targets].sort(compareCleanupTargets)) ||
     !exactSet(
       normalCleanup.decoded_record.targets.map(({ object_id }) => object_id),
       expectedCleanupTargets,
@@ -757,9 +845,10 @@ export function projectTrustedProofEvidence(input) {
         target.name !== record.opaque_name ||
         target.producing_run_identity !== record.producing_run_id ||
         target.producing_run_attempt !== record.producing_run_attempt ||
-        target.archive_sha256 !== record.artifact_digest ||
-        target.encrypted_object_sha256 !== record.artifact_digest ||
-        target.expires_at_unix_seconds !== record.required_platform_expires_at_unix_seconds
+        target.archive_sha256 !== record.archive_sha256 ||
+        target.encrypted_object_sha256 !== record.encrypted_object_sha256 ||
+        target.expires_at_unix_seconds !== record.expires_at_unix_seconds ||
+        target.size !== record.size
       );
     }) ||
     !staleHead ||

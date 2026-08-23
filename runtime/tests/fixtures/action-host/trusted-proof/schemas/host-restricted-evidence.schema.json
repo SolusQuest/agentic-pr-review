@@ -1580,7 +1580,10 @@
             "physical_artifact_id",
             "scope_digest",
             "opaque_name",
-            "artifact_digest",
+            "archive_sha256",
+            "encrypted_object_sha256",
+            "expires_at_unix_seconds",
+            "size",
             "object_identity",
             "producing_run_id",
             "producing_run_attempt",
@@ -1601,8 +1604,18 @@
               "minLength": 1,
               "maxLength": 256
             },
-            "artifact_digest": {
+            "archive_sha256": {
               "$ref": "#/$defs/sha256"
+            },
+            "encrypted_object_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expires_at_unix_seconds": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1
             },
             "object_identity": {
               "$ref": "#/$defs/sha256"
@@ -1634,7 +1647,10 @@
             "physical_artifact_id",
             "scope_digest",
             "opaque_name",
-            "artifact_digest",
+            "archive_sha256",
+            "encrypted_object_sha256",
+            "expires_at_unix_seconds",
+            "size",
             "object_identity",
             "producing_run_id",
             "producing_run_attempt",
@@ -1663,8 +1679,18 @@
               "minLength": 1,
               "maxLength": 256
             },
-            "artifact_digest": {
+            "archive_sha256": {
               "$ref": "#/$defs/sha256"
+            },
+            "encrypted_object_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expires_at_unix_seconds": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1
             },
             "object_identity": {
               "$ref": "#/$defs/sha256"
@@ -2411,6 +2437,7 @@
         },
         "targets": {
           "type": "array",
+          "maxItems": 72,
           "items": {
             "$ref": "#/$defs/opaqueStoreObjectMetadata"
           }
