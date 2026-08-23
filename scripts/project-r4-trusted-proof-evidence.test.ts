@@ -185,7 +185,7 @@ describe('R4 E3 public-safe evidence projection', () => {
           ({ physical_artifact_id }: any) => physical_artifact_id === '10003',
         );
         const continuation = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10008',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
         );
         continuation.predecessor_identity = bootstrap.object_identity;
       },
@@ -195,11 +195,11 @@ describe('R4 E3 public-safe evidence projection', () => {
       (value: any) => {
         const bootstrap = value.state.created.find(
           ({ physical_artifact_id, decoded_record }: any) =>
-            physical_artifact_id === '10004' && decoded_record.record_kind === 'initial_intent',
+            physical_artifact_id === '10005' && decoded_record.record_kind === 'initial_intent',
         );
         const continuation = value.state.created.find(
           ({ physical_artifact_id, decoded_record }: any) =>
-            physical_artifact_id === '10009' && decoded_record.record_kind === 'initial_intent',
+            physical_artifact_id === '10019' && decoded_record.record_kind === 'initial_intent',
         );
         continuation.predecessor_identity = bootstrap.object_identity;
       },
@@ -222,7 +222,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'acceptance-producing-attempt-does-not-match-run',
       (value: any) => {
         const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10012',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10027',
         );
         acceptance.producing_run_attempt = 2;
         acceptance.decoded_record.producing_run_attempt = 2;
@@ -232,7 +232,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'acceptance-logical-window-is-not-seven-days',
       (value: any) => {
         const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10012',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10027',
         );
         acceptance.logical_expires_at_unix_seconds += 1;
         acceptance.decoded_record.logical_expires_at_unix_seconds += 1;
@@ -246,7 +246,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'candidate-config-digest-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10008',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
         );
         candidate.decoded_record.config_sha256 = '0'.repeat(64);
       },
@@ -255,7 +255,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'candidate-instructions-digest-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10008',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
         );
         candidate.decoded_record.instructions_sha256 = '0'.repeat(64);
       },
@@ -264,7 +264,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'candidate-publication-payload-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10008',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
         );
         candidate.decoded_record.publication_payload.finalized_comment += ' drift';
       },
@@ -273,7 +273,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'continuation-producer-base-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10008',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
         );
         candidate.decoded_record.producer_base_sha = '0'.repeat(40);
       },
@@ -282,7 +282,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'continuation-producer-head-drift',
       (value: any) => {
         const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10008',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
         );
         candidate.decoded_record.producer_head_sha = '0'.repeat(40);
       },
@@ -291,11 +291,11 @@ describe('R4 E3 public-safe evidence projection', () => {
       'successful-transaction-omits-sticky-readback',
       (value: any) => {
         value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10010',
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10022',
         );
         value.cleanup.internally_reconciled_physical_artifact_ids =
           value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10010',
+            (physicalArtifactId: string) => physicalArtifactId !== '10022',
           );
       },
     ],
@@ -303,12 +303,144 @@ describe('R4 E3 public-safe evidence projection', () => {
       'successful-transaction-omits-acceptance-recovery',
       (value: any) => {
         value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10011',
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10025',
         );
         value.cleanup.internally_reconciled_physical_artifact_ids =
           value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10011',
+            (physicalArtifactId: string) => physicalArtifactId !== '10025',
           );
+      },
+    ],
+    [
+      'successful-transaction-omits-write-anchor',
+      (value: any) => {
+        value.state.created = value.state.created.filter(
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10004',
+        );
+        value.cleanup.internally_reconciled_physical_artifact_ids =
+          value.cleanup.internally_reconciled_physical_artifact_ids.filter(
+            (physicalArtifactId: string) => physicalArtifactId !== '10004',
+          );
+      },
+    ],
+    [
+      'successful-transaction-omits-anchor-cleanup',
+      (value: any) => {
+        value.state.created = value.state.created.filter(
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10006',
+        );
+        value.cleanup.self_deleted_cleanup_record_ids =
+          value.cleanup.self_deleted_cleanup_record_ids.filter(
+            (physicalArtifactId: string) => physicalArtifactId !== '10006',
+          );
+      },
+    ],
+    [
+      'successful-transaction-omits-completed-record-cleanup',
+      (value: any) => {
+        value.state.created = value.state.created.filter(
+          ({ physical_artifact_id }: any) => physical_artifact_id !== '10014',
+        );
+        value.cleanup.self_deleted_cleanup_record_ids =
+          value.cleanup.self_deleted_cleanup_record_ids.filter(
+            (physicalArtifactId: string) => physicalArtifactId !== '10014',
+          );
+      },
+    ],
+    [
+      'cleanup-subtype-does-not-match-target-role',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10006',
+        );
+        cleanup.decoded_record.record_kind = 'p5-record-cleanup';
+      },
+    ],
+    [
+      'cleanup-omits-active-inventory-object',
+      (value: any) => {
+        const cleanup = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10006',
+        );
+        cleanup.pre_cleanup_inventory_physical_artifact_ids.pop();
+      },
+    ],
+    [
+      'p5-inner-identity-substituted-for-outer-identity',
+      (value: any) => {
+        const record = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10005',
+        );
+        record.decoded_record.record_identity = record.object_identity;
+      },
+    ],
+    [
+      'outer-identity-graph-relabeling',
+      (value: any) => {
+        const target = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10005',
+        );
+        const anchor = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10004',
+        );
+        target.object_identity = '7'.repeat(64);
+        anchor.successor_identity = target.object_identity;
+        anchor.decoded_record.target_object_identity = target.object_identity;
+      },
+    ],
+    [
+      'logical-generation-graph-relabeling',
+      (value: any) => {
+        const candidate = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
+        );
+        const acceptance = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10027',
+        );
+        candidate.decoded_record.logical_generation_identity = '7'.repeat(64);
+        acceptance.decoded_record.logical_generation_identity = '7'.repeat(64);
+        value.product.continuation.acceptance_receipt.logical_generation_identity = '7'.repeat(64);
+      },
+    ],
+    [
+      'acceptance-recovery-handoff-magic-is-not-canonical',
+      (value: any) => {
+        const recovery = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10011',
+        );
+        const handoff = Buffer.from(
+          recovery.decoded_record.acceptance_recovery_handoff_base64,
+          'base64',
+        );
+        handoff[4] ^= 1;
+        recovery.decoded_record.acceptance_recovery_handoff_base64 = handoff.toString('base64');
+      },
+    ],
+    [
+      'acceptance-recovery-handoff-carries-foreign-acceptance',
+      (value: any) => {
+        const bootstrap = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10011',
+        );
+        const continuation = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10025',
+        );
+        bootstrap.decoded_record.acceptance_recovery_handoff_base64 =
+          continuation.decoded_record.acceptance_recovery_handoff_base64;
+      },
+    ],
+    [
+      'acceptance-recovery-handoff-invents-predecessor-copy',
+      (value: any) => {
+        const recovery = value.state.created.find(
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10011',
+        );
+        const handoff = Buffer.from(
+          recovery.decoded_record.acceptance_recovery_handoff_base64,
+          'base64',
+        );
+        handoff[handoff.length - 2] = 1;
+        recovery.decoded_record.acceptance_recovery_handoff_base64 = handoff.toString('base64');
       },
     ],
     [
@@ -325,12 +457,12 @@ describe('R4 E3 public-safe evidence projection', () => {
       'noncanonical-artifact-id',
       (value: any) => {
         const record = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10008',
+          ({ physical_artifact_id }: any) => physical_artifact_id === '10017',
         );
-        record.physical_artifact_id = '010008';
+        record.physical_artifact_id = '010017';
         value.cleanup.e4_deleted_physical_artifact_ids =
           value.cleanup.e4_deleted_physical_artifact_ids.map((physicalArtifactId: string) =>
-            physicalArtifactId === '10008' ? '010008' : physicalArtifactId,
+            physicalArtifactId === '10017' ? '010017' : physicalArtifactId,
           );
       },
     ],
@@ -447,7 +579,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-identity-replaced-by-fixture-operation',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         cleanup.decoded_record.operation_identity = value.fixture.normal_operation_id;
       },
@@ -456,7 +588,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-target-order-not-production-canonical',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         cleanup.decoded_record.targets.reverse();
       },
@@ -465,7 +597,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-target-digests-swapped',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         const target = cleanup.decoded_record.targets[0];
         [target.archive_sha256, target.encrypted_object_sha256] = [
@@ -478,7 +610,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-target-digests-collapsed',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         const target = cleanup.decoded_record.targets[0];
         target.encrypted_object_sha256 = target.archive_sha256;
@@ -497,7 +629,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-target-expiry-mismatch',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         cleanup.decoded_record.targets[0].expires_at_unix_seconds += 1;
       },
@@ -506,7 +638,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-target-size-mismatch',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         cleanup.decoded_record.targets[0].size += 1;
       },
@@ -515,7 +647,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-inventory-digest-not-derived-from-targets',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         cleanup.decoded_record.pre_cleanup_inventory_digest = '0'.repeat(64);
       },
@@ -524,7 +656,7 @@ describe('R4 E3 public-safe evidence projection', () => {
       'cleanup-operation-identity-not-content-derived',
       (value: any) => {
         const cleanup = value.state.created.find(
-          ({ object_class }: any) => object_class === 'cleanup',
+          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
         );
         cleanup.decoded_record.operation_identity = '0'.repeat(64);
       },
@@ -568,14 +700,14 @@ describe('R4 E3 public-safe evidence projection', () => {
     expect(() => projectTrustedProofEvidence(candidate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
   });
 
-  test('admits repeated exact-name families and independently repeated metadata digests', () => {
+  test('admits repeated exact-name families with independently derived metadata digests', () => {
     const candidate = clone(hostTemplate);
     const candidates = candidate.state.created.filter(
       ({ object_class }: any) => object_class === 'candidate',
     );
     expect(candidates[0].opaque_name).toBe(candidates[1].opaque_name);
-    expect(candidates[0].archive_sha256).toBe(candidates[1].archive_sha256);
-    expect(candidates[0].encrypted_object_sha256).toBe(candidates[1].encrypted_object_sha256);
+    expect(candidates[0].archive_sha256).not.toBe(candidates[1].archive_sha256);
+    expect(candidates[0].encrypted_object_sha256).not.toBe(candidates[1].encrypted_object_sha256);
     expect(candidates[0].archive_sha256).not.toBe(candidates[0].encrypted_object_sha256);
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });

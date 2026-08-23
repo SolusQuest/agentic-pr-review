@@ -323,7 +323,11 @@
         "token_permissions": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["actions", "contents", "pull_requests"],
+          "required": [
+            "actions",
+            "contents",
+            "pull_requests"
+          ],
           "properties": {
             "actions": {
               "const": "write"
@@ -361,14 +365,20 @@
           "$ref": "#/$defs/positiveId"
         },
         "environment_approver_permission": {
-          "enum": ["write", "admin"]
+          "enum": [
+            "write",
+            "admin"
+          ]
         }
       }
     },
     "proof_control": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["normal", "stale"],
+      "required": [
+        "normal",
+        "stale"
+      ],
       "properties": {
         "normal": {
           "type": "object",
@@ -405,7 +415,12 @@
         "stale": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["ready", "release", "barrier_released_at", "cleanup_receipt"],
+          "required": [
+            "ready",
+            "release",
+            "barrier_released_at",
+            "cleanup_receipt"
+          ],
           "properties": {
             "ready": {
               "$ref": "#/$defs/proofComment"
@@ -426,7 +441,10 @@
     "runs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bootstrap", "continuation"],
+      "required": [
+        "bootstrap",
+        "continuation"
+      ],
       "properties": {
         "bootstrap": {
           "type": "object",
@@ -555,7 +573,10 @@
           "const": true
         },
         "run_two_status": {
-          "enum": ["queued", "pending"]
+          "enum": [
+            "queued",
+            "pending"
+          ]
         },
         "equal_evaluated_group": {
           "const": true
@@ -577,7 +598,11 @@
     "product": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bootstrap", "continuation", "stale"],
+      "required": [
+        "bootstrap",
+        "continuation",
+        "stale"
+      ],
       "properties": {
         "bootstrap": {
           "$ref": "#/$defs/publicationTransition"
@@ -693,7 +718,10 @@
         "stale": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["authorized_stale_run", "unauthorized_follow_on_run"],
+          "required": [
+            "authorized_stale_run",
+            "unauthorized_follow_on_run"
+          ],
           "properties": {
             "authorized_stale_run": {
               "type": "object",
@@ -835,13 +863,20 @@
                 "pending_observation": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["observed_at", "status", "job_allocated"],
+                  "required": [
+                    "observed_at",
+                    "status",
+                    "job_allocated"
+                  ],
                   "properties": {
                     "observed_at": {
                       "$ref": "#/$defs/timestamp"
                     },
                     "status": {
-                      "enum": ["queued", "pending"]
+                      "enum": [
+                        "queued",
+                        "pending"
+                      ]
                     },
                     "job_allocated": {
                       "const": false
@@ -896,12 +931,21 @@
     "state": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scopes", "pre_state", "created", "final_state"],
+      "required": [
+        "scopes",
+        "pre_state",
+        "created",
+        "final_state"
+      ],
       "properties": {
         "scopes": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["repository_root", "normal", "stale"],
+          "required": [
+            "repository_root",
+            "normal",
+            "stale"
+          ],
           "properties": {
             "repository_root": {
               "$ref": "#/$defs/repositoryScope"
@@ -977,7 +1021,10 @@
             "environment_settings": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["terminal_class", "exact_snapshot_readback"],
+              "required": [
+                "terminal_class",
+                "exact_snapshot_readback"
+              ],
               "properties": {
                 "terminal_class": {
                   "const": "restored"
@@ -993,7 +1040,10 @@
             "fixture_branches": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["normal", "stale"],
+              "required": [
+                "normal",
+                "stale"
+              ],
               "properties": {
                 "normal": {
                   "$ref": "#/$defs/deletedResource"
@@ -1006,7 +1056,10 @@
             "fixture_prs": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["normal", "stale"],
+              "required": [
+                "normal",
+                "stale"
+              ],
               "properties": {
                 "normal": {
                   "$ref": "#/$defs/closedPr"
@@ -1051,7 +1104,11 @@
             "workflow_runs": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["terminal_class", "all_terminal", "all_follow_on_runs_terminal"],
+              "required": [
+                "terminal_class",
+                "all_terminal",
+                "all_follow_on_runs_terminal"
+              ],
               "properties": {
                 "terminal_class": {
                   "const": "platform-retained-terminal"
@@ -1270,7 +1327,12 @@
           "const": "apr-r4-e2p-proof-control-v1"
         },
         "kind": {
-          "enum": ["ready", "release", "stale-ready", "stale-release"]
+          "enum": [
+            "ready",
+            "release",
+            "stale-ready",
+            "stale-release"
+          ]
         },
         "comment_id": {
           "$ref": "#/$defs/positiveId"
@@ -1327,7 +1389,10 @@
         "actor_permission": {
           "oneOf": [
             {
-              "enum": ["write", "admin"]
+              "enum": [
+                "write",
+                "admin"
+              ]
             },
             {
               "type": "null"
@@ -1378,12 +1443,20 @@
     "cleanupReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["receipt", "final_absence_read_back_at"],
+      "required": [
+        "receipt",
+        "final_absence_read_back_at"
+      ],
       "properties": {
         "receipt": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "operation_id", "comment_outcomes", "result"],
+          "required": [
+            "kind",
+            "operation_id",
+            "comment_outcomes",
+            "result"
+          ],
           "properties": {
             "kind": {
               "const": "apr-r4-e2p-proof-control-cleanup-v1"
@@ -1399,7 +1472,10 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["comment_id", "outcome"],
+                "required": [
+                  "comment_id",
+                  "outcome"
+                ],
                 "properties": {
                   "comment_id": {
                     "$ref": "#/$defs/positiveId"
@@ -1574,7 +1650,10 @@
           "$ref": "#/$defs/sha40"
         },
         "publication_operation": {
-          "enum": [1, 2]
+          "enum": [
+            1,
+            2
+          ]
         },
         "repository_id": {
           "$ref": "#/$defs/positiveId"
@@ -1670,7 +1749,11 @@
               "$ref": "#/$defs/runAttempt"
             },
             "creation_phase": {
-              "enum": ["bootstrap", "continuation", "stale-setup"]
+              "enum": [
+                "bootstrap",
+                "continuation",
+                "stale-setup"
+              ]
             },
             "scope": {
               "const": "repository_root"
@@ -1682,7 +1765,11 @@
               "$ref": "#/$defs/locatorRootRecord"
             },
             "terminal_disposition": {
-              "enum": ["internally-reconciled-deleted", "e4-deleted", "cleanup-self-deleted"]
+              "enum": [
+                "internally-reconciled-deleted",
+                "e4-deleted",
+                "cleanup-self-deleted"
+              ]
             },
             "terminal_phase": {
               "enum": [
@@ -1724,7 +1811,8 @@
             "decoded_record",
             "terminal_disposition",
             "terminal_phase",
-            "terminal_at_unix_seconds"
+            "terminal_at_unix_seconds",
+            "encrypted_envelope_base64"
           ],
           "properties": {
             "physical_artifact_id": {
@@ -1761,10 +1849,17 @@
               "$ref": "#/$defs/runAttempt"
             },
             "creation_phase": {
-              "enum": ["bootstrap", "continuation", "stale-setup"]
+              "enum": [
+                "bootstrap",
+                "continuation",
+                "stale-setup"
+              ]
             },
             "scope": {
-              "enum": ["normal", "stale"]
+              "enum": [
+                "normal",
+                "stale"
+              ]
             },
             "object_class": {
               "enum": [
@@ -1842,11 +1937,18 @@
                 },
                 {
                   "$ref": "#/$defs/cleanupRecord"
+                },
+                {
+                  "$ref": "#/$defs/opaqueWriteAnchorRecord"
                 }
               ]
             },
             "terminal_disposition": {
-              "enum": ["internally-reconciled-deleted", "e4-deleted", "cleanup-self-deleted"]
+              "enum": [
+                "internally-reconciled-deleted",
+                "e4-deleted",
+                "cleanup-self-deleted"
+              ]
             },
             "terminal_phase": {
               "enum": [
@@ -1857,6 +1959,20 @@
             },
             "terminal_at_unix_seconds": {
               "$ref": "#/$defs/timestamp"
+            },
+            "encrypted_envelope_base64": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 2097152,
+              "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+            },
+            "pre_cleanup_inventory_physical_artifact_ids": {
+              "type": "array",
+              "maxItems": 72,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/artifactId"
+              }
             }
           }
         }
@@ -1865,7 +1981,10 @@
     "repositoryScope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope_digest", "locator_root_opaque_name"],
+      "required": [
+        "scope_digest",
+        "locator_root_opaque_name"
+      ],
       "properties": {
         "scope_digest": {
           "$ref": "#/$defs/sha256"
@@ -1880,7 +1999,10 @@
     "lineageScope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["base_scope_digest", "family_opaque_names"],
+      "required": [
+        "base_scope_digest",
+        "family_opaque_names"
+      ],
       "properties": {
         "base_scope_digest": {
           "$ref": "#/$defs/sha256"
@@ -1937,12 +2059,20 @@
     "emptyScopedState": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository_root", "normal", "stale"],
+      "required": [
+        "repository_root",
+        "normal",
+        "stale"
+      ],
       "properties": {
         "repository_root": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["scope_digest", "pagination_complete", "locator_root"],
+          "required": [
+            "scope_digest",
+            "pagination_complete",
+            "locator_root"
+          ],
           "properties": {
             "scope_digest": {
               "$ref": "#/$defs/sha256"
@@ -1966,7 +2096,11 @@
     "emptyLineageInventory": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["base_scope_digest", "pagination_complete", "families"],
+      "required": [
+        "base_scope_digest",
+        "pagination_complete",
+        "families"
+      ],
       "properties": {
         "base_scope_digest": {
           "$ref": "#/$defs/sha256"
@@ -2074,7 +2208,10 @@
     "deletedResource": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["terminal_class", "absence_readback"],
+      "required": [
+        "terminal_class",
+        "absence_readback"
+      ],
       "properties": {
         "terminal_class": {
           "const": "deleted"
@@ -2087,7 +2224,11 @@
     "closedPr": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["terminal_class", "state", "exact_readback"],
+      "required": [
+        "terminal_class",
+        "state",
+        "exact_readback"
+      ],
       "properties": {
         "terminal_class": {
           "const": "platform-retained-terminal"
@@ -2103,7 +2244,11 @@
     "locatorArtifactIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["object_id", "archive_sha256", "envelope_sha256"],
+      "required": [
+        "object_id",
+        "archive_sha256",
+        "envelope_sha256"
+      ],
       "properties": {
         "object_id": {
           "$ref": "#/$defs/artifactId"
@@ -2219,7 +2364,11 @@
       ],
       "properties": {
         "transition": {
-          "enum": ["initial", "reset", "expiry"]
+          "enum": [
+            "initial",
+            "reset",
+            "expiry"
+          ]
         },
         "ordinal": {
           "$ref": "#/$defs/nonnegativeInteger"
@@ -2484,7 +2633,10 @@
               "$ref": "#/$defs/sha256"
             },
             "publication_operation": {
-              "enum": [1, 2]
+              "enum": [
+                1,
+                2
+              ]
             },
             "repository_id": {
               "$ref": "#/$defs/positiveId"
@@ -2543,7 +2695,10 @@
               "$ref": "#/$defs/sha256"
             },
             "publication_operation": {
-              "enum": [1, 2]
+              "enum": [
+                1,
+                2
+              ]
             },
             "repository_id": {
               "$ref": "#/$defs/positiveId"
@@ -2603,7 +2758,13 @@
           "$ref": "#/$defs/sha256"
         },
         "outcome": {
-          "enum": [1, 2, 3, 4, 5]
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
         },
         "reason": {
           "type": "integer",
@@ -2668,7 +2829,10 @@
       ],
       "properties": {
         "transition": {
-          "enum": ["reset", "expiry"]
+          "enum": [
+            "reset",
+            "expiry"
+          ]
         },
         "prior_head_identity": {
           "$ref": "#/$defs/sha256"
@@ -2730,6 +2894,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "record_kind",
         "terminal_acceptance_identity",
         "base_scope_digest",
         "epoch",
@@ -2763,6 +2928,14 @@
         },
         "operation_identity": {
           "$ref": "#/$defs/sha256"
+        },
+        "record_kind": {
+          "enum": [
+            "p5-anchor-cleanup",
+            "p5-record-cleanup",
+            "s6-internal-cleanup",
+            "s6-final-cleanup"
+          ]
         }
       }
     },
@@ -2861,6 +3034,81 @@
         },
         "rendering_version": {
           "const": "r4-sticky-v1"
+        }
+      }
+    },
+    "opaqueWriteAnchorRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_kind",
+        "candidate_object_identity",
+        "operation_identity",
+        "object_class",
+        "predecessor_identity",
+        "successor_identity",
+        "semantic_required_expires_at_unix_seconds",
+        "required_platform_expires_at_unix_seconds",
+        "producing_run_identity",
+        "producing_run_attempt",
+        "target_name",
+        "target_object_identity",
+        "target_envelope_base64",
+        "target_envelope_sha256",
+        "dispatch_phase",
+        "target_payload_sha256"
+      ],
+      "properties": {
+        "record_kind": {
+          "const": "opaque_write_anchor"
+        },
+        "candidate_object_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "operation_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "object_class": {
+          "const": "publication_intent"
+        },
+        "predecessor_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "successor_identity": {
+          "type": "null"
+        },
+        "semantic_required_expires_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "required_platform_expires_at_unix_seconds": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "producing_run_identity": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "producing_run_attempt": {
+          "$ref": "#/$defs/runAttempt"
+        },
+        "target_name": {
+          "$ref": "#/$defs/opaqueName"
+        },
+        "target_object_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "target_envelope_base64": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 2097152,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+        },
+        "target_envelope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "dispatch_phase": {
+          "const": 1
+        },
+        "target_payload_sha256": {
+          "$ref": "#/$defs/sha256"
         }
       }
     }

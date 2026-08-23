@@ -38,12 +38,12 @@ const fixtureDigests = new Map([
     'authorization-environment-contract.json',
     'b0b5502d055ba42284647e6e8cca8103478edccb00ac499689e2ef31a32b2d96',
   ],
-  ['cleanup-contract.json', '735c03cc3b1d1af1bcf5ef3814056dd2d2c0c36c54f871ba6d3984f46e8e01ea'],
+  ['cleanup-contract.json', '064cd6f929454bd8380343683476cd429dd55cd8ecd01effec8362f8734e40e0'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '38693790dbfd2640dc335f65155e675ad3a0f14a949b13e395a70a4b04d0c2c7',
+    '36c20d98c51a6c707f28d2897cb7e82dd320d54a359f3a58d78ff3b4aa78d863',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,11 +51,11 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    'f5d55ad445ae6803435dc8505ad0d84a9824a9851b9c4e2406517fcfda4d3661',
+    '0eb2d6ec48e3337f539c1215919df4f90a0252ccd6eecdc187d159470792539a',
   ],
   [
     'templates/public-safe-evidence.json',
-    '3a15366fac3c38a249a29bef79aa89abf31e0c3b84b416308003a3930d14d201',
+    '7b6af2e45570ba312cf45cba52e4e13c59be3fa4257b76817b0ea8c95ca50a81',
   ],
   [
     'traces/normal-two-run.json',

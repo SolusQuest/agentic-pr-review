@@ -74,6 +74,16 @@ function int64LittleEndian(value) {
   return bytes;
 }
 
+function uint64LittleEndian(value) {
+  const bytes = Buffer.allocUnsafe(8);
+  bytes.writeBigUInt64LE(BigInt(value));
+  return bytes;
+}
+
+function oneByte(value) {
+  return Buffer.from([value]);
+}
+
 function lineageBytes(value) {
   const bytes = Buffer.from(value);
   return Buffer.concat([uint32LittleEndian(bytes.length), bytes]);
@@ -81,6 +91,10 @@ function lineageBytes(value) {
 
 function lineageString(value) {
   return lineageBytes(Buffer.from(value, 'utf8'));
+}
+
+function optionalLineageString(value) {
+  return value === null ? oneByte(0) : Buffer.concat([oneByte(1), lineageString(value)]);
 }
 
 function opaqueMetadataBytes(value) {
@@ -211,6 +225,262 @@ function publicationPayloadDigest(value) {
       lineageString(value.rendering_version),
     ]),
   );
+}
+
+function publicationPayloadBytes(value) {
+  return Buffer.concat([
+    lineageString('APRVPP01'),
+    uint16LittleEndian(1),
+    lineageBytes(Buffer.from(value.finalized_comment, 'utf8')),
+    int64LittleEndian(value.repository_id),
+    lineageString(value.repository_name),
+    int64LittleEndian(value.pull_request_number),
+    lineageString(value.scope_sha256),
+    lineageString(value.body_sha256),
+    lineageString(value.reviewed_head_sha),
+    lineageString(value.policy_identity_sha256),
+    lineageString(value.payload_sha256),
+    lineageString(value.build_discriminator),
+    lineageString(value.rendering_version),
+  ]);
+}
+
+function generationPayloadBytes(value) {
+  return Buffer.concat([
+    lineageString('APRSGR01'),
+    uint16LittleEndian(1),
+    lineageBytes(Buffer.from(value.encrypted_state_envelope_base64, 'base64')),
+    lineageString(value.state_envelope_sha256),
+    lineageString(value.session_sha256),
+    lineageString(value.producer_base_sha),
+    lineageString(value.producer_head_sha),
+    int64LittleEndian(value.session_generation),
+    optionalLineageString(value.predecessor_envelope_sha256),
+    optionalLineageString(value.previous_logical_generation_identity),
+    int64LittleEndian(value.prepared_at_unix_seconds),
+    int64LittleEndian(value.prepared_expires_at_unix_seconds),
+    lineageBytes(publicationPayloadBytes(value.publication_payload)),
+    lineageString(value.publication_payload_sha256),
+    lineageString(value.policy_identity_sha256),
+    lineageString(value.config_sha256),
+    lineageString(value.instructions_sha256),
+    lineageString(value.payload_sha256),
+    lineageString(value.build_discriminator),
+  ]);
+}
+
+function acceptancePayloadBytes(value) {
+  return Buffer.concat([
+    lineageString('APRACR01'),
+    uint16LittleEndian(1),
+    lineageString(value.logical_generation_identity),
+    lineageString(value.original_candidate_object_identity),
+    optionalLineageString(value.previous_logical_generation_identity),
+    optionalLineageString(value.previous_acceptance_receipt_identity),
+    lineageString(value.reviewed_head_sha),
+    oneByte(value.publication_operation),
+    int64LittleEndian(value.repository_id),
+    int64LittleEndian(value.pull_request_number),
+    int64LittleEndian(value.comment_id),
+    lineageString(value.comment_url),
+    lineageString(value.scope_sha256),
+    lineageString(value.body_sha256),
+    lineageString(value.publication_payload_sha256),
+    lineageString(value.producing_run_identity),
+    int64LittleEndian(value.producing_run_attempt),
+    int64LittleEndian(value.accepted_at_unix_seconds),
+    int64LittleEndian(value.logical_expires_at_unix_seconds),
+  ]);
+}
+
+function publicationIntentPayloadBytes(value) {
+  const header = publicationRecoveryHeader(
+    value.record_kind === 'initial_intent' ? 1 : value.record_kind === 'sticky_readback' ? 2 : 5,
+    value,
+  );
+  if (value.record_kind === 'initial_intent') {
+    return Buffer.concat([
+      header,
+      int64LittleEndian(value.created_at_unix_seconds),
+      lineageString(value.record_identity),
+    ]);
+  }
+  return Buffer.concat([
+    header,
+    stickyReadbackFields(value, value.record_kind === 'acceptance_recovery'),
+    ...(value.record_kind === 'acceptance_recovery'
+      ? [
+          lineageBytes(Buffer.from(value.acceptance_recovery_handoff_base64, 'base64')),
+          int64LittleEndian(value.minimum_semantic_expires_at_unix_seconds),
+        ]
+      : []),
+    lineageString(value.record_identity),
+  ]);
+}
+
+function lineageHeadPayloadBytes(value, identityOnly = false) {
+  return Buffer.concat([
+    lineageString('APRSLH01'),
+    uint16LittleEndian(1),
+    oneByte(0),
+    uint64LittleEndian(value.ordinal),
+    lineageString(value.reviewed_base_sha),
+    lineageString(value.reviewed_head_sha),
+    optionalLineageString(value.previous_epoch),
+    optionalLineageString(value.previous_head_identity),
+    optionalLineageString(value.transition_evidence_identity),
+    optionalLineageString(value.reset_authority_run_identity),
+    oneByte(value.reset_authority_run_attempt === null ? 0 : 1),
+    ...(value.reset_authority_run_attempt === null
+      ? []
+      : [int64LittleEndian(value.reset_authority_run_attempt)]),
+    oneByte(value.expiry_boundary === null ? 0 : 1),
+    ...(value.expiry_boundary === null ? [] : [int64LittleEndian(value.expiry_boundary)]),
+    ...(identityOnly
+      ? []
+      : [
+          uint32LittleEndian(value.physical_predecessors.length),
+          uint32LittleEndian(value.physical_superseded.length),
+          uint32LittleEndian(value.superseded.length),
+          uint32LittleEndian(value.completed_cleanup.length),
+        ]),
+  ]);
+}
+
+function anchorPayloadBytes(value) {
+  return Buffer.concat([
+    lineageString('APROWA01'),
+    uint16LittleEndian(1),
+    lineageString(value.candidate_object_identity),
+    lineageString(value.operation_identity),
+    lineageString(value.object_class),
+    optionalLineageString(value.predecessor_identity),
+    optionalLineageString(value.successor_identity),
+    int64LittleEndian(value.semantic_required_expires_at_unix_seconds),
+    int64LittleEndian(value.required_platform_expires_at_unix_seconds),
+    lineageString(value.producing_run_identity),
+    int64LittleEndian(value.producing_run_attempt),
+    lineageString(value.target_name),
+    lineageString(value.target_object_identity),
+    lineageBytes(Buffer.from(value.target_envelope_base64, 'base64')),
+    lineageString(value.target_envelope_sha256),
+    uint16LittleEndian(value.dispatch_phase),
+    lineageString(value.target_payload_sha256),
+  ]);
+}
+
+function cleanupPayloadBytes(value) {
+  return Buffer.concat([
+    lineageString('APRSCU01'),
+    uint16LittleEndian(1),
+    lineageString(value.terminal_acceptance_identity),
+    lineageString(value.base_scope_digest),
+    lineageString(value.epoch),
+    lineageString(value.session_id),
+    lineageString(value.pre_cleanup_inventory_digest),
+    uint16LittleEndian(value.targets.length),
+    ...value.targets.map(opaqueMetadataBytes),
+    lineageString(value.operation_identity),
+  ]);
+}
+
+function canonicalPayload(record) {
+  switch (record.object_class) {
+    case 'lineage_head':
+      return lineageHeadPayloadBytes(record.decoded_record);
+    case 'candidate':
+      return generationPayloadBytes(record.decoded_record);
+    case 'publication_intent':
+      return publicationIntentPayloadBytes(record.decoded_record);
+    case 'acceptance':
+      return acceptancePayloadBytes(record.decoded_record);
+    case 'cleanup':
+      return record.decoded_record.record_kind === 'opaque_write_anchor'
+        ? anchorPayloadBytes(record.decoded_record)
+        : cleanupPayloadBytes(record.decoded_record);
+    default:
+      return null;
+  }
+}
+
+function semanticHeaderBytes(record) {
+  return Buffer.concat([
+    lineageString('APRSCH01'),
+    uint16LittleEndian(1),
+    lineageString(record.scope_digest),
+    lineageString(record.epoch),
+    lineageString(record.session_id),
+    lineageString(record.object_class),
+    optionalLineageString(record.predecessor_identity),
+    optionalLineageString(record.successor_identity),
+    ...(['lineage_head', 'reset', 'expiry_transition'].includes(record.object_class)
+      ? []
+      : [int64LittleEndian(record.logical_expires_at_unix_seconds)]),
+  ]);
+}
+
+function canonicalObjectIdentity(record, payload) {
+  const identityPayload =
+    record.object_class === 'lineage_head'
+      ? lineageHeadPayloadBytes(record.decoded_record, true)
+      : payload;
+  return sha256(
+    Buffer.concat([
+      lineageString('apr.object-identity.s4'),
+      lineageBytes(semanticHeaderBytes(record)),
+      lineageBytes(Buffer.from(sha256(identityPayload), 'hex')),
+    ]),
+  );
+}
+
+function logicalGenerationIdentity(record, previousAcceptanceIdentity) {
+  const generation = generationPayloadBytes(record.decoded_record);
+  return sha256(
+    Buffer.concat([
+      lineageString('apr.logical-generation.s5'),
+      lineageBytes(generation),
+      lineageString(record.scope_digest),
+      lineageString(record.epoch),
+      lineageString(record.session_id),
+      optionalLineageString(previousAcceptanceIdentity),
+    ]),
+  );
+}
+
+function acceptanceRecoveryHandoff(name, envelope) {
+  return Buffer.concat([
+    lineageString('APRSAR01'),
+    uint16LittleEndian(1),
+    lineageString(name),
+    lineageBytes(envelope),
+    uint16LittleEndian(0),
+  ]);
+}
+
+function exactMetadata(target, record) {
+  return (
+    target.name === record.opaque_name &&
+    target.object_id === record.physical_artifact_id &&
+    target.producing_run_identity === record.producing_run_id &&
+    target.producing_run_attempt === record.producing_run_attempt &&
+    target.archive_sha256 === record.archive_sha256 &&
+    target.encrypted_object_sha256 === record.encrypted_object_sha256 &&
+    target.expires_at_unix_seconds === record.expires_at_unix_seconds &&
+    target.size === record.size
+  );
+}
+
+function metadataForRecord(record) {
+  return {
+    name: record.opaque_name,
+    object_id: record.physical_artifact_id,
+    producing_run_identity: record.producing_run_id,
+    producing_run_attempt: record.producing_run_attempt,
+    archive_sha256: record.archive_sha256,
+    encrypted_object_sha256: record.encrypted_object_sha256,
+    expires_at_unix_seconds: record.expires_at_unix_seconds,
+    size: record.size,
+  };
 }
 
 function isCanonicalArtifactId(value) {
@@ -670,6 +940,7 @@ export function projectTrustedProofEvidence(input) {
     ...cleanup.self_deleted_cleanup_record_ids,
   ];
   if (
+    createdIds.length !== 33 ||
     createdIds.length !== new Set(createdIds).size ||
     createdIds.some((value) => !isCanonicalArtifactId(value)) ||
     objectIdentities.length !== new Set(objectIdentities).size ||
@@ -731,10 +1002,7 @@ export function projectTrustedProofEvidence(input) {
             decoded.publication_payload_sha256
         );
       case 'publication_intent':
-        return (
-          publicationIntentIdentity(decoded) === decoded.record_identity &&
-          decoded.record_identity === record.object_identity
-        );
+        return publicationIntentIdentity(decoded) === decoded.record_identity;
       case 'acceptance':
         return decoded.logical_generation_identity !== undefined;
       case 'publication_failure':
@@ -746,7 +1014,10 @@ export function projectTrustedProofEvidence(input) {
       case 'expiry_transition':
         return decoded.transition === 'expiry';
       case 'cleanup':
-        return decoded.terminal_acceptance_identity !== undefined;
+        return decoded.record_kind === 'opaque_write_anchor'
+          ? decoded.target_object_identity !== undefined && decoded.operation_identity !== undefined
+          : decoded.terminal_acceptance_identity !== undefined &&
+              decoded.operation_identity !== undefined;
       default:
         return false;
     }
@@ -772,8 +1043,10 @@ export function projectTrustedProofEvidence(input) {
         !owner ||
         record.terminal_at_unix_seconds < record.created_at_unix_seconds ||
         (record.terminal_disposition === 'cleanup-self-deleted' &&
-          (record.object_class !== 'cleanup' || record.terminal_phase !== 'e4-final-cleanup')) ||
+          (record.object_class !== 'cleanup' ||
+            record.decoded_record.record_kind === 'opaque_write_anchor')) ||
         (record.object_class === 'cleanup' &&
+          record.decoded_record.record_kind !== 'opaque_write_anchor' &&
           record.terminal_disposition !== 'cleanup-self-deleted') ||
         (record.terminal_disposition === 'e4-deleted' &&
           record.terminal_phase !== 'e4-final-cleanup') ||
@@ -784,6 +1057,10 @@ export function projectTrustedProofEvidence(input) {
         record.producing_run_id !== owner.run_id ||
         record.producing_run_attempt !== owner.run_attempt ||
         record.archive_sha256 === record.encrypted_object_sha256 ||
+        (record.object_class !== 'locator_root' &&
+          (sha256(Buffer.from(record.encrypted_envelope_base64, 'base64')) !==
+            record.encrypted_object_sha256 ||
+            Buffer.from(record.encrypted_envelope_base64, 'base64').length !== record.size)) ||
         record.scope !== expectedScope ||
         record.scope_digest !== expectedDigest ||
         record.opaque_name !== expectedOpaqueName ||
@@ -799,6 +1076,213 @@ export function projectTrustedProofEvidence(input) {
     })
   ) {
     reject('state-producer');
+  }
+
+  const scopedRecords = state.created.filter(({ object_class }) => object_class !== 'locator_root');
+  const noncanonicalScoped = scopedRecords.find((record) => {
+    const payload = canonicalPayload(record);
+    return payload === null || canonicalObjectIdentity(record, payload) !== record.object_identity;
+  });
+  if (noncanonicalScoped) {
+    reject('canonical-scoped-identity');
+  }
+
+  const anchors = scopedRecords.filter(
+    ({ object_class, decoded_record }) =>
+      object_class === 'cleanup' && decoded_record.record_kind === 'opaque_write_anchor',
+  );
+  const cleanupRecords = scopedRecords.filter(
+    ({ object_class, decoded_record }) =>
+      object_class === 'cleanup' && decoded_record.record_kind !== 'opaque_write_anchor',
+  );
+  const p5Records = scopedRecords.filter(
+    ({ object_class }) => object_class === 'publication_intent',
+  );
+  const cleanupKinds = new Map(
+    ['p5-anchor-cleanup', 'p5-record-cleanup', 's6-internal-cleanup', 's6-final-cleanup'].map(
+      (kind) => [
+        kind,
+        cleanupRecords.filter(({ decoded_record }) => decoded_record.record_kind === kind),
+      ],
+    ),
+  );
+  const byId = new Map(state.created.map((record) => [record.physical_artifact_id, record]));
+  const activeNormal = [];
+  let inventoryValid = true;
+  for (const record of [...state.created].sort((left, right) =>
+    comparePositiveIds(left.physical_artifact_id, right.physical_artifact_id),
+  )) {
+    if (record.scope !== 'normal') continue;
+    if (
+      record.object_class === 'cleanup' &&
+      record.decoded_record.record_kind !== 'opaque_write_anchor'
+    ) {
+      const inventoryIds = record.pre_cleanup_inventory_physical_artifact_ids;
+      const decoded = record.decoded_record;
+      const targets = decoded.targets.map(({ object_id }) => byId.get(object_id));
+      if (
+        !Array.isArray(inventoryIds) ||
+        !exactSet(
+          inventoryIds,
+          activeNormal.map(({ physical_artifact_id }) => physical_artifact_id),
+        ) ||
+        decoded.pre_cleanup_inventory_digest !==
+          inventoryDigest(activeNormal.map(metadataForRecord)) ||
+        decoded.operation_identity !== cleanupOperationIdentity(decoded) ||
+        decoded.targets.length !== targets.length ||
+        targets.some(
+          (target, index) =>
+            !target ||
+            !activeNormal.includes(target) ||
+            !exactMetadata(decoded.targets[index], target),
+        ) ||
+        JSON.stringify(decoded.targets) !==
+          JSON.stringify([...decoded.targets].sort(compareCleanupTargets)) ||
+        record.predecessor_identity !== decoded.terminal_acceptance_identity ||
+        record.terminal_disposition !== 'cleanup-self-deleted'
+      ) {
+        inventoryValid = false;
+        break;
+      }
+      for (const target of targets) activeNormal.splice(activeNormal.indexOf(target), 1);
+    } else {
+      activeNormal.push(record);
+    }
+  }
+
+  const exactOpaqueOperationIdentity = (anchor, target) =>
+    sha256(
+      Buffer.concat([
+        lineageString('apr.retained-opaque-operation.s6'),
+        lineageString('publication_intent'),
+        lineageBytes(canonicalPayload(target)),
+        lineageString(anchor.predecessor_identity),
+        lineageString(anchor.successor_identity ?? ''),
+        int64LittleEndian(anchor.semantic_required_expires_at_unix_seconds),
+      ]),
+    );
+  const anchorTargets = anchors.map((anchor) =>
+    p5Records.find(
+      (target) =>
+        target.object_identity === anchor.decoded_record.target_object_identity &&
+        target.opaque_name === anchor.decoded_record.target_name,
+    ),
+  );
+  const exactAnchor = (record, target) => {
+    if (!target) return false;
+    const decoded = record.decoded_record;
+    const targetEnvelope = Buffer.from(target.encrypted_envelope_base64, 'base64');
+    return (
+      record.predecessor_identity === decoded.candidate_object_identity &&
+      record.successor_identity === target.object_identity &&
+      decoded.operation_identity === exactOpaqueOperationIdentity(decoded, target) &&
+      decoded.object_class === target.object_class &&
+      decoded.predecessor_identity === target.predecessor_identity &&
+      decoded.successor_identity === target.successor_identity &&
+      decoded.semantic_required_expires_at_unix_seconds ===
+        target.logical_expires_at_unix_seconds &&
+      decoded.required_platform_expires_at_unix_seconds ===
+        target.required_platform_expires_at_unix_seconds &&
+      decoded.producing_run_identity === target.producing_run_id &&
+      decoded.producing_run_attempt === target.producing_run_attempt &&
+      Buffer.from(decoded.target_envelope_base64, 'base64').equals(targetEnvelope) &&
+      decoded.target_envelope_sha256 === sha256(targetEnvelope) &&
+      decoded.target_payload_sha256 === sha256(canonicalPayload(target)) &&
+      record.terminal_disposition === 'internally-reconciled-deleted'
+    );
+  };
+  const cleanupTargetsExact = (records, expectedTargets) =>
+    records.length === expectedTargets.length &&
+    expectedTargets.every(
+      (target) =>
+        records.filter(
+          ({ decoded_record }) =>
+            decoded_record.targets.length === 1 &&
+            decoded_record.targets[0].object_id === target.physical_artifact_id,
+        ).length === 1,
+    );
+  const bootstrapAcceptanceRecord = scopedRecords.find(
+    ({ creation_phase, object_class }) =>
+      creation_phase === 'bootstrap' && object_class === 'acceptance',
+  );
+  const continuationAcceptanceRecord = scopedRecords.find(
+    ({ creation_phase, object_class }) =>
+      creation_phase === 'continuation' && object_class === 'acceptance',
+  );
+  const bootstrapCandidateRecord = scopedRecords.find(
+    ({ creation_phase, object_class }) =>
+      creation_phase === 'bootstrap' && object_class === 'candidate',
+  );
+  const continuationCandidateRecord = scopedRecords.find(
+    ({ creation_phase, object_class }) =>
+      creation_phase === 'continuation' && object_class === 'candidate',
+  );
+  const normalHeadRecord = scopedRecords.find(
+    ({ scope, object_class }) => scope === 'normal' && object_class === 'lineage_head',
+  );
+  const exactRecoveryHandoff = (phase, acceptance) => {
+    const recovery = p5Records.find(
+      ({ creation_phase, decoded_record }) =>
+        creation_phase === phase && decoded_record.record_kind === 'acceptance_recovery',
+    );
+    return (
+      recovery &&
+      Buffer.from(recovery.decoded_record.acceptance_recovery_handoff_base64, 'base64').equals(
+        acceptanceRecoveryHandoff(
+          acceptance.opaque_name,
+          Buffer.from(acceptance.encrypted_envelope_base64, 'base64'),
+        ),
+      )
+    );
+  };
+  const internalCleanup = cleanupKinds.get('s6-internal-cleanup')[0];
+  const finalCleanup = cleanupKinds.get('s6-final-cleanup')[0];
+  if (
+    !inventoryValid ||
+    activeNormal.length !== 0 ||
+    anchors.length !== 6 ||
+    p5Records.length !== 6 ||
+    cleanupKinds.get('p5-anchor-cleanup').length !== 6 ||
+    cleanupKinds.get('p5-record-cleanup').length !== 6 ||
+    cleanupKinds.get('s6-internal-cleanup').length !== 1 ||
+    cleanupKinds.get('s6-final-cleanup').length !== 1 ||
+    anchorTargets.some((target, index) => !exactAnchor(anchors[index], target)) ||
+    new Set(anchorTargets).size !== 6 ||
+    !cleanupTargetsExact(cleanupKinds.get('p5-anchor-cleanup'), anchors) ||
+    !cleanupTargetsExact(cleanupKinds.get('p5-record-cleanup'), p5Records) ||
+    !bootstrapAcceptanceRecord ||
+    !continuationAcceptanceRecord ||
+    !bootstrapCandidateRecord ||
+    !continuationCandidateRecord ||
+    !normalHeadRecord ||
+    !exactSet(
+      internalCleanup.decoded_record.targets.map(({ object_id }) => object_id),
+      [
+        bootstrapCandidateRecord.physical_artifact_id,
+        bootstrapAcceptanceRecord.physical_artifact_id,
+      ],
+    ) ||
+    !exactSet(
+      finalCleanup.decoded_record.targets.map(({ object_id }) => object_id),
+      [
+        normalHeadRecord.physical_artifact_id,
+        continuationCandidateRecord.physical_artifact_id,
+        continuationAcceptanceRecord.physical_artifact_id,
+      ],
+    ) ||
+    p5Records.some(
+      ({ decoded_record, object_identity }) => decoded_record.record_identity === object_identity,
+    ) ||
+    logicalGenerationIdentity(bootstrapCandidateRecord, null) !==
+      bootstrapCandidateRecord.decoded_record.logical_generation_identity ||
+    logicalGenerationIdentity(
+      continuationCandidateRecord,
+      bootstrapAcceptanceRecord.object_identity,
+    ) !== continuationCandidateRecord.decoded_record.logical_generation_identity ||
+    !exactRecoveryHandoff('bootstrap', bootstrapAcceptanceRecord) ||
+    !exactRecoveryHandoff('continuation', continuationAcceptanceRecord)
+  ) {
+    reject('complete-physical-lifecycle');
   }
 
   const staleSetupIds = state.created
@@ -904,7 +1388,10 @@ export function projectTrustedProofEvidence(input) {
     continuation.acceptance_object_identity,
   );
   const normalCleanup = state.created.find(
-    ({ object_class, scope }) => object_class === 'cleanup' && scope === 'normal',
+    ({ object_class, scope, decoded_record }) =>
+      object_class === 'cleanup' &&
+      scope === 'normal' &&
+      decoded_record.record_kind === 's6-final-cleanup',
   );
   const staleHead = state.created.find(
     ({ object_class, scope }) => object_class === 'lineage_head' && scope === 'stale',
@@ -1030,7 +1517,6 @@ export function projectTrustedProofEvidence(input) {
       samePublication(initial) &&
       samePublication(sticky) &&
       samePublication(durable) &&
-      initial.record_identity === intent.object_identity &&
       sticky.attempt_intent_record_identity === initial.record_identity &&
       durable.attempt_intent_record_identity === initial.record_identity &&
       durable.sticky_readback_record_identity === sticky.record_identity &&
@@ -1126,8 +1612,6 @@ export function projectTrustedProofEvidence(input) {
     continuationReceipt.repository_id !== identities.repository_id ||
     bootstrapReceipt.pull_request_number !== fixture.normal_pr_number ||
     continuationReceipt.pull_request_number !== fixture.normal_pr_number ||
-    bootstrapIntent.decoded_record.record_identity !== bootstrapIntent.object_identity ||
-    continuationIntent.decoded_record.record_identity !== continuationIntent.object_identity ||
     bootstrapIntent.decoded_record.reviewed_head_sha !== identities.normal_head_sha ||
     continuationIntent.decoded_record.reviewed_head_sha !== identities.normal_head_sha ||
     bootstrapIntent.decoded_record.scope_sha256 !== scopes.repository_root.scope_digest ||
