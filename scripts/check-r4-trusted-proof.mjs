@@ -140,17 +140,22 @@ function parseWorkflow(pathname) {
   return { source, value };
 }
 
-function collectSecretExpressions(value, result) {
+function collectCredentialExpressions(value, result) {
   if (typeof value === 'string') {
-    if (/\$\{\{[\s\S]*\bsecrets\b[\s\S]*\}\}/u.test(value)) result.push(value);
+    if (
+      /\$\{\{[\s\S]*\bsecrets\b[\s\S]*\}\}/u.test(value) ||
+      /\$\{\{[\s\S]*\bgithub\s*(?:\.\s*token\b|\[\s*['"]token['"]\s*\])[\s\S]*\}\}/u.test(value)
+    ) {
+      result.push(value);
+    }
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) collectSecretExpressions(item, result);
+    for (const item of value) collectCredentialExpressions(item, result);
     return;
   }
   if (value !== null && typeof value === 'object') {
-    for (const item of Object.values(value)) collectSecretExpressions(item, result);
+    for (const item of Object.values(value)) collectCredentialExpressions(item, result);
   }
 }
 
@@ -368,7 +373,7 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       fail('repository-proof-route-owner');
     }
     const expressions = [];
-    collectSecretExpressions(value, expressions);
+    collectCredentialExpressions(value, expressions);
     for (const expression of expressions) observed.push(`${name}\0${expression}`);
   }
   const expected = [

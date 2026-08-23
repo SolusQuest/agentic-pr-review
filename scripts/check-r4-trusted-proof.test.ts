@@ -139,4 +139,16 @@ describe('R4 E3 trusted proof policy', () => {
     );
     expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-proof-route-owner/u);
   });
+
+  test.each(['github.token', "github['token']", 'github["token"]'])(
+    'rejects an unowned %s workflow route without a proof anchor',
+    (tokenExpression) => {
+      const workflowsRoot = copiedWorkflowsRoot();
+      fs.writeFileSync(
+        path.join(workflowsRoot, 'unexpected.yml'),
+        `name: unexpected\non:\n  workflow_dispatch:\npermissions:\n  pull-requests: write\njobs:\n  route:\n    runs-on: ubuntu-24.04\n    steps:\n      - env:\n          GITHUB_TOKEN: \${{ ${tokenExpression} }}\n        run: gh api repos/example/project/issues/1/comments\n`,
+      );
+      expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-secret-routes/u);
+    },
+  );
 });
