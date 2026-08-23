@@ -709,6 +709,7 @@ export function projectTrustedProofEvidence(input) {
     fixture.normal_parent_sha !== identities.reviewed_base_sha ||
     fixture.stale_initial_parent_sha !== identities.reviewed_base_sha ||
     fixture.stale_advanced_parent_sha !== identities.stale_admitted_head_sha ||
+    identities.stale_advanced_head_sha === identities.stale_admitted_head_sha ||
     fixture.normal_operation_id === fixture.stale_operation_id ||
     fixture.normal_pr_number === fixture.stale_pr_number
   ) {

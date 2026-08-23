@@ -551,6 +551,14 @@ describe('R4 E3 public-safe evidence projection', () => {
     ],
     ['stale-scope-not-enumerated', (value: any) => delete value.state.final_state.stale],
     [
+      'stale-head-does-not-advance',
+      (value: any) => {
+        value.identities.stale_advanced_head_sha = value.identities.stale_admitted_head_sha;
+        value.product.stale.unauthorized_follow_on_run.reviewed_head_sha =
+          value.identities.stale_admitted_head_sha;
+      },
+    ],
+    [
       'stale-release-before-head-advance',
       (value: any) => (value.product.stale.authorized_stale_run.stale_release_at = 860),
     ],
