@@ -73,9 +73,14 @@ internal static class TrustedProofVerifierHost
         Func<HttpMessageHandler> handlers = () => new VerifierRecordingHandler(
             scenarioRoot,
             "github",
-            new FrameworkGitHubHandler(
-                scenarioRoot,
-                launch.PayloadSha256));
+            TrustedProofPayloadBuildIdentity.StagedV2
+                ? new FrameworkGitHubHandler(
+                    scenarioRoot,
+                    launch.PayloadSha256,
+                    TrustedProofV2WorkflowAdmission.Render)
+                : new FrameworkGitHubHandler(
+                    scenarioRoot,
+                    launch.PayloadSha256));
         var github = new ActionHostGitHubAuthorizationTransportFactory(handlers);
         var publisher = new BoundedGitHubPublisherTransportFactory(handlers);
 

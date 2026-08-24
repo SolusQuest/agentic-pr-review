@@ -17,7 +17,8 @@
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
     <ProjectReference Include="..\LiveAgentVerifierFixture\AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj" />
     <ProjectReference Include="..\ActionHostVerifierFixture\AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj" />
-    <ProjectReference Include="..\ActionHostTrustedProofPayload\AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj" />
+    <ProjectReference Include="..\ActionHostTrustedProofPayload\AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj"
+                      AdditionalProperties="PayloadSourceCommit=1111111111111111111111111111111111111111;PayloadSourceTree=2222222222222222222222222222222222222222" />
     <None Include="..\..\..\protocol\fixtures\v1\**\*" Link="protocol\fixtures\v1\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\..\protocol\fixtures\prefix-contract\**\*" Link="protocol\fixtures\prefix-contract\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\deterministic\**\*" Link="fixtures\deterministic\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

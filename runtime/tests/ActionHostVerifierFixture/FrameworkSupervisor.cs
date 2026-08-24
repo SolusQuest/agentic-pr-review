@@ -87,7 +87,9 @@ internal static class FrameworkSupervisor
                 payload,
                 bundle,
                 node,
-                platform).ConfigureAwait(false);
+                platform,
+                SyntheticTransactionPartitionBinding.TryCreate(values))
+                .ConfigureAwait(false);
         }
 
         var cases = new List<CaseResult>();
@@ -879,7 +881,8 @@ internal static class FrameworkSupervisor
         string payload,
         string bundle,
         string node,
-        SyntheticOfficialPlatform platform)
+        SyntheticOfficialPlatform platform,
+        SyntheticTransactionPartitionBinding? partitionBinding)
     {
         var cases = new List<CaseResult>
         {
@@ -914,13 +917,22 @@ internal static class FrameworkSupervisor
             TrustedProofPayload: true),
             root, repository, payload, bundle, node, platform)
             .ConfigureAwait(false));
-        var passed = cases.All(result => result.Passed);
+        var partition = partitionBinding is null
+            ? null
+            : SyntheticTransactionPartition.Derive(root, partitionBinding);
+        var passed = cases.All(result => result.Passed) &&
+            (partitionBinding is null || partition is not null);
+        var evidence = FrameworkJson.Object(
+            ("passed", passed),
+            ("payload_sha256", Sha256(payload)),
+            ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
+        if (partition is not null)
+        {
+            evidence.Add("transaction_partition", partition);
+        }
         await File.WriteAllTextAsync(
             Path.Join(root, "trusted-proof-payload-evidence.json"),
-            FrameworkJson.SerializeIndented(FrameworkJson.Object(
-                ("passed", passed),
-                ("payload_sha256", Sha256(payload)),
-                ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))))))
+            FrameworkJson.SerializeIndented(evidence))
             .ConfigureAwait(false);
         return passed ? 0 : 1;
     }

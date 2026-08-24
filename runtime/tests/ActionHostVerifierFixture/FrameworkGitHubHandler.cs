@@ -11,7 +11,8 @@ using AgenticPrReview.Runtime.ActionHost.Authorization;
 
 internal sealed class FrameworkGitHubHandler(
     string scenarioRoot,
-    string payloadSha256) :
+    string payloadSha256,
+    Func<string, string, string>? workflowRenderer = null) :
     HttpMessageHandler
 {
     internal const long RepositoryId = 42;
@@ -40,6 +41,8 @@ internal sealed class FrameworkGitHubHandler(
 
     private readonly string scenarioRoot = scenarioRoot;
     private readonly string payloadSha256 = payloadSha256;
+    private readonly Func<string, string, string> workflowRenderer =
+        workflowRenderer ?? ActionHostTrustedWorkflowContract.Render;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -117,7 +120,8 @@ internal sealed class FrameworkGitHubHandler(
             suffix.StartsWith("/commits/", StringComparison.Ordinal) &&
             suffix.EndsWith("/pulls", StringComparison.Ordinal))
         {
-            return Json(HttpStatusCode.OK, "[" + PullRequest(mode) + "]");
+            return Json(HttpStatusCode.OK,
+                "[" + PullRequest(mode, proofControlRequest) + "]");
         }
 
         if (request.Method == HttpMethod.Get &&
@@ -132,7 +136,8 @@ internal sealed class FrameworkGitHubHandler(
             suffix == "/pulls/147")
         {
             Increment("pull-request-revalidation-count");
-            return Json(HttpStatusCode.OK, PullRequest(mode));
+            return Json(HttpStatusCode.OK,
+                PullRequest(mode, proofControlRequest));
         }
 
         if (request.Method == HttpMethod.Get &&
@@ -425,9 +430,10 @@ internal sealed class FrameworkGitHubHandler(
             ("triggering_actor", Actor()),
             ("pull_requests", FrameworkJson.Array([PullReference(mode)]))));
 
-    private static JsonObject Identity(long id) => FrameworkJson.Object(
+    private static JsonObject Identity(long id, string? fullName = null) =>
+        FrameworkJson.Object(
         ("id", id),
-        ("full_name", FrameworkCanaries.Repository));
+        ("full_name", fullName ?? FrameworkCanaries.Repository));
 
     private static JsonObject Actor() => FrameworkJson.Object(
         ("id", 7),
@@ -452,13 +458,16 @@ internal sealed class FrameworkGitHubHandler(
                 FrameworkCanaries.Repository),
             ("name", "apr178-repository-canary"));
 
-    private string PullRequest(string mode)
+    private string PullRequest(string mode, bool proofControlRequest = false)
     {
+        var repository = proofControlRequest
+            ? FrameworkCanaries.ProofControlRepository
+            : FrameworkCanaries.Repository;
         var head = FrameworkJson.Object(
-            ("sha", CurrentHead(mode)),
+            ("sha", proofControlRequest ? HeadSha : CurrentHead(mode)),
             ("repo", Identity(mode == "fork"
                 ? RepositoryId + 1
-                : RepositoryId)));
+                : RepositoryId, repository)));
         if (IsTrustedProofPayload())
         {
             head.Add("ref", "r4-trusted-proof/" +
@@ -473,14 +482,15 @@ internal sealed class FrameworkGitHubHandler(
             ("draft", false),
             ("merged_at", null),
             ("base", FrameworkJson.Object(
-                ("sha", BaseSha),
-                ("repo", Identity(RepositoryId)))),
+                ("ref", "main"),
+                ("sha", CurrentBaseSha()),
+                ("repo", Identity(RepositoryId, repository)))),
             ("head", head)));
     }
 
     private string Workflow(string mode)
     {
-        var workflow = ActionHostTrustedWorkflowContract.Render(
+        var workflow = workflowRenderer(
             ActionSha,
             payloadSha256);
         return mode switch
@@ -506,6 +516,9 @@ internal sealed class FrameworkGitHubHandler(
             ? ContinuedHeadSha
             : HeadSha;
 
+    private string CurrentBaseSha() =>
+        IsTrustedProofPayload() ? WorkflowSha : BaseSha;
+
     private long ReadCurrentRunId() => long.Parse(
         File.ReadAllText(Path.Join(scenarioRoot, "run-id")),
         CultureInfo.InvariantCulture);
@@ -523,13 +536,15 @@ internal sealed class FrameworkGitHubHandler(
             : 0;
     }
 
-    private static string Commit(string sha)
+    private string Commit(string sha)
     {
-        var tree = sha == WorkflowSha ? WorkflowRoot :
+        var tree = sha == WorkflowSha
+            ? IsTrustedProofPayload() ? BaseRoot : WorkflowRoot :
             sha == BaseSha ? BaseRoot : HeadRoot;
-        var parents = sha == HeadSha ? new[] { BaseSha } :
+        var baseSha = CurrentBaseSha();
+        var parents = sha == HeadSha ? new[] { baseSha } :
             sha == ContinuedHeadSha ? new[] { HeadSha } :
-            sha == ConflictHeadSha ? new[] { BaseSha } : Array.Empty<string>();
+            sha == ConflictHeadSha ? new[] { baseSha } : Array.Empty<string>();
         return FrameworkJson.Serialize(FrameworkJson.Object(
             ("sha", sha),
             ("tree", FrameworkJson.Object(("sha", tree))),

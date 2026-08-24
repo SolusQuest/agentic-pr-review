@@ -246,6 +246,50 @@ internal sealed record TrustedProofCommentUser(
 internal sealed record TrustedProofPermission(
     [property: JsonPropertyName("permission")] string Permission);
 
+internal sealed class TrustedProofPullRequest
+{
+    [JsonPropertyName("number")]
+    public long Number { get; set; }
+
+    [JsonPropertyName("state")]
+    public string? State { get; set; }
+
+    [JsonPropertyName("draft")]
+    [JsonRequired]
+    public bool Draft { get; set; }
+
+    [JsonPropertyName("merged_at")]
+    [JsonRequired]
+    public DateTimeOffset? MergedAt { get; set; }
+
+    [JsonPropertyName("base")]
+    public TrustedProofPullRequestSide? Base { get; set; }
+
+    [JsonPropertyName("head")]
+    public TrustedProofPullRequestSide? Head { get; set; }
+}
+
+internal sealed class TrustedProofPullRequestSide
+{
+    [JsonPropertyName("ref")]
+    public string? Ref { get; set; }
+
+    [JsonPropertyName("sha")]
+    public string? Sha { get; set; }
+
+    [JsonPropertyName("repo")]
+    public TrustedProofRepositoryIdentity? Repository { get; set; }
+}
+
+internal sealed class TrustedProofRepositoryIdentity
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("full_name")]
+    public string? FullName { get; set; }
+}
+
 internal sealed record TrustedProofCreateComment(
     [property: JsonPropertyName("body")] string Body);
 
@@ -279,4 +323,5 @@ internal sealed partial class TrustedProofControlJsonContext : JsonSerializerCon
 [JsonSerializable(typeof(TrustedProofIssueComment))]
 [JsonSerializable(typeof(TrustedProofIssueComment[]))]
 [JsonSerializable(typeof(TrustedProofPermission))]
+[JsonSerializable(typeof(TrustedProofPullRequest))]
 internal sealed partial class TrustedProofGitHubJsonContext : JsonSerializerContext;

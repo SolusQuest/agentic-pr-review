@@ -9,6 +9,129 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 public sealed class TrustedProofArchitectureTests
 {
     [Fact]
+    public void StagedV2IsCompileTimeOnlyAndLeavesTheActiveV1SurfacePinned()
+    {
+        var root = FindRepositoryRoot();
+        var payloadRoot = Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "ActionHostTrustedProofPayload");
+        var project = File.ReadAllText(Path.Join(
+            payloadRoot,
+            "AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj"));
+        var composition = File.ReadAllText(Path.Join(
+            payloadRoot,
+            "TrustedProofPayloadComposition.cs"));
+        var admission = File.ReadAllText(Path.Join(
+            payloadRoot,
+            "TrustedProofV2WorkflowAdmission.cs"));
+        var workflow = File.ReadAllText(Path.Join(
+            root,
+            ".github",
+            "workflows",
+            "runtime-ci.yml"));
+        var preparation = File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "scripts",
+            "prepare-r4-trusted-proof-payload-v2.sh"));
+        var launchSources = string.Join('\n',
+            Directory.EnumerateFiles(
+                    Path.Join(
+                        root,
+                        "runtime",
+                        "src",
+                        "AgenticPrReview.Runtime",
+                        "Host",
+                        "Action",
+                        "Contracts"),
+                    "*.cs")
+                .Select(File.ReadAllText));
+
+        Assert.Contains("PayloadSourceCommit", project,
+            StringComparison.Ordinal);
+        Assert.Contains("PayloadSourceTree", project,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofWorkflowTemplateV2", project,
+            StringComparison.Ordinal);
+        Assert.Contains("r4-trusted-proof-v2.yml.template", project,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofPayloadBuildIdentity.StagedV2",
+            composition, StringComparison.Ordinal);
+        Assert.Contains("ActionHostV1TrustedWorkflowAdmission.Instance",
+            composition, StringComparison.Ordinal);
+        Assert.DoesNotContain("Environment.GetEnvironmentVariable",
+            composition + admission, StringComparison.Ordinal);
+        Assert.DoesNotContain("payload_source_sha", launchSources,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "-p:PayloadSourceCommit=$source_commit",
+            preparation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "action_source_sha=%s\\npayload_source_sha=%s",
+            preparation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"5b5769753653bb3fd3e68cf8b7bb88a1bd350613\"",
+            preparation,
+            StringComparison.Ordinal);
+        Assert.Contains("trusted-proof-payload:\n", workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains("trusted-proof-payload-v2:\n", workflow,
+            StringComparison.Ordinal);
+        Assert.Contains("verify-r4-trusted-proof-payload-v2.sh", workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "node \"$control_checker\"",
+            preparation,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "node \"$source_root/scripts/check-r4-e2p-receipt-v2.mjs\"",
+            preparation,
+            StringComparison.Ordinal);
+
+        using var preflightV2 = JsonDocument.Parse(File.ReadAllBytes(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof-payload",
+            "workflow",
+            "preflight-contract-v2.json")));
+        Assert.Equal("main",
+            preflightV2.RootElement.GetProperty("base_ref").GetString());
+        Assert.Equal("exact-workflow-sha",
+            preflightV2.RootElement.GetProperty("base_sha").GetString());
+        Assert.Equal("exact-compiled-payload-source-commit",
+            preflightV2.RootElement.GetProperty("payload_source_identity")
+                .GetString());
+
+        using var v2Contract = JsonDocument.Parse(File.ReadAllBytes(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof-payload",
+            "aot",
+            "receipt-contract-v2.json")));
+        Assert.Equal("apr-r4-e2p-receipt-contract-v2",
+            v2Contract.RootElement.GetProperty("kind").GetString());
+        var ordered = v2Contract.RootElement.GetProperty("ordered_fields")
+            .EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Contains("compiled_payload_source_commit", ordered);
+        Assert.Contains("compiled_payload_source_tree", ordered);
+        Assert.Contains("transaction_partition", ordered);
+    }
+
+    [Fact]
     public void ProofAssemblyHasNoSyntheticFixtureReference()
     {
         var assembly = typeof(TrustedProofPayloadHost).Assembly;

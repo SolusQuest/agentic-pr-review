@@ -108,7 +108,8 @@ internal sealed record ActionHostGitHubPullRequestFact(
     string BaseSha,
     ActionHostGitHubRepositoryIdentity BaseRepository,
     string HeadSha,
-    ActionHostGitHubRepositoryIdentity HeadRepository);
+    ActionHostGitHubRepositoryIdentity HeadRepository,
+    string BaseRef = "main");
 
 internal sealed record ActionHostGitHubPermissionFact(string Permission);
 

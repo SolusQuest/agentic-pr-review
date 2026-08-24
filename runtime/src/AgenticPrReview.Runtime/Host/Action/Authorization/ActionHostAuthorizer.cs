@@ -12,19 +12,23 @@ internal sealed class ActionHostAuthorizer
     private readonly IActionHostGitHubAuthorizationTransportFactory
         _transportFactory;
     private readonly ActionHostAuthorizationPolicy _policy;
+    private readonly IActionHostTrustedWorkflowAdmission _workflowAdmission;
     private readonly TimeSpan _authorizationTimeout;
 
     internal ActionHostAuthorizer(
         IActionHostEventReader eventReader,
         IActionHostGitHubAuthorizationTransportFactory transportFactory,
         ActionHostAuthorizationPolicy policy,
-        TimeSpan? authorizationTimeout = null)
+        TimeSpan? authorizationTimeout = null,
+        IActionHostTrustedWorkflowAdmission? workflowAdmission = null)
     {
         _eventReader = eventReader ??
             throw new ArgumentNullException(nameof(eventReader));
         _transportFactory = transportFactory ??
             throw new ArgumentNullException(nameof(transportFactory));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+        _workflowAdmission = workflowAdmission ??
+            ActionHostV1TrustedWorkflowAdmission.Instance;
         _authorizationTimeout = authorizationTimeout ??
             ActionHostGitHubAuthorizationPolicy.AuthorizationTimeout;
         if (_authorizationTimeout <= TimeSpan.Zero)
@@ -153,11 +157,10 @@ internal sealed class ActionHostAuthorizer
                 launch.WorkflowSha,
                 authorizationCancellation.Token);
             if (sourceResult.Value is not { } source ||
-                !ActionHostTrustedWorkflowPolicy.TryValidate(
+                !_workflowAdmission.TryValidateWorkflow(
                     source.Bytes,
                     _policy,
-                    launch.ActionSourceSha,
-                    launch.PayloadSha256,
+                    launch,
                     out var workflowEvidence))
             {
                 return RejectGitHubOr(
@@ -236,6 +239,16 @@ internal sealed class ActionHostAuthorizer
                         ActionHostStatus.AuthorizationFailed,
                         eligibility),
                 };
+            }
+
+            if (!_workflowAdmission.IsPullRequestAdmitted(
+                    repository,
+                    pullRequest,
+                    launch))
+            {
+                return Reject(
+                    ActionHostStatus.AuthorizationFailed,
+                    ActionHostAuthorizationFailure.PullRequestInvalid);
             }
 
             var frozen = FrozenPullRequest.Mint(

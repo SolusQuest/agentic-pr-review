@@ -48,9 +48,29 @@ internal static class ActionHostTrustedWorkflowPolicy
         out ActionHostTrustedWorkflowEvidence? evidence,
         out ActionHostTrustedWorkflowFailure failure)
     {
+        return TryValidateExact(
+            source,
+            policy,
+            actionSourceSha,
+            ActionHostTrustedWorkflowContract.Render(
+                actionSourceSha,
+                payloadSha256),
+            out evidence,
+            out failure);
+    }
+
+    internal static bool TryValidateExact(
+        byte[]? source,
+        ActionHostAuthorizationPolicy policy,
+        string actionSourceSha,
+        string expectedRender,
+        out ActionHostTrustedWorkflowEvidence? evidence,
+        out ActionHostTrustedWorkflowFailure failure)
+    {
         evidence = null;
         failure = ActionHostTrustedWorkflowFailure.SourceInvalid;
         ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(expectedRender);
         if (source is null ||
             source.Length is <= 0 or > 256 * 1024 ||
             source.Length >= 3 &&
@@ -82,9 +102,7 @@ internal static class ActionHostTrustedWorkflowPolicy
 
             if (!StringComparer.Ordinal.Equals(
                     normalizedText,
-                    ActionHostTrustedWorkflowContract.Render(
-                        actionSourceSha,
-                        payloadSha256)))
+                    expectedRender))
             {
                 failure = ActionHostTrustedWorkflowFailure.JobInvalid;
                 return false;

@@ -176,18 +176,33 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
                 "stale-ready",
                 coordinates,
                 predecessorCommentId: null);
+            if (!await transport.IsPullRequestCurrentAsync(cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return false;
+            }
             var creation = await transport.CreateAsync(
                 readyBody,
                 cancellationToken).ConfigureAwait(false);
             ready = creation.Comment;
             if (creation.Outcome == TrustedProofMutationOutcome.KnownNotSent)
             {
+                if (!await transport.IsPullRequestCurrentAsync(
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    return false;
+                }
                 creation = await transport.CreateAsync(
                     readyBody,
                     cancellationToken).ConfigureAwait(false);
                 ready = creation.Comment;
             }
 
+            if (!await transport.IsPullRequestCurrentAsync(cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return false;
+            }
             comments = await transport.ListAsync(cancellationToken)
                 .ConfigureAwait(false);
             if (comments is null ||

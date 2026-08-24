@@ -168,6 +168,7 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
                 "draft": false,
                 "merged_at": null,
                 "base": {
+                  "ref": "main",
                   "sha": "dddddddddddddddddddddddddddddddddddddddd",
                   "repo": {
                     "id": 42,
@@ -516,6 +517,28 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
         Assert.Single(handler.Requests);
     }
 
+    [Fact]
+    public async Task PullRequestReadRejectsMissingBaseReference()
+    {
+        var body = PullRequestResponse(
+            "\"draft\": false,\n  \"merged_at\": null,")
+            .Replace("    \"ref\": \"main\",\n", string.Empty,
+                StringComparison.Ordinal);
+        var handler = new CapturingHandler(_ => JsonResponse(body));
+        using var transport =
+            ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                "token-canary",
+                handler);
+
+        var result = await transport.GetPullRequestAsync(
+            "SolusQuest/agentic-pr-review",
+            147,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitHubFailure.InvalidResponse, result.Failure);
+    }
+
     public static TheoryData<string, bool> CompleteMergeStatusMembers => new()
     {
         { "null", false },
@@ -584,6 +607,7 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
           "state": "open",
           {{eligibilityMembers}}
           "base": {
+            "ref": "main",
             "sha": "dddddddddddddddddddddddddddddddddddddddd",
             "repo": {
               "id": 42,

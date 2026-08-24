@@ -79,6 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613
           fetch-depth: 0
           persist-credentials: false
 
@@ -111,6 +112,46 @@ jobs:
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-first.receipt")" -eq 1
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-second.receipt")" -eq 1
           cmp "$RUNNER_TEMP/r4-e2p-first.receipt" "$RUNNER_TEMP/r4-e2p-second.receipt"
+
+  trusted-proof-payload-v2:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install staged E2P Native AOT and network-audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang strace zlib1g-dev
+
+      - name: Set up exact staged R4 E2P .NET SDK
+        uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-v2-dotnet
+        with:
+          dotnet-version: 10.0.109
+
+      - name: Staged R4 E2P first clean production and verifier Native AOT build
+        run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
+
+      - name: Staged R4 E2P second clean production and verifier Native AOT build
+        run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
+
+      - name: Staged R4 E2P receipts are byte-identical
+        run: |
+          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
+          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
+          cmp "$RUNNER_TEMP/r4-e2p-v2-first.receipt" "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
 
   integration:
     runs-on: ubuntu-latest

@@ -83,17 +83,33 @@ internal static class TrustedProofControlService
             return 1;
         }
 
+        if (!await transport.IsPullRequestCurrentAsync(cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return 1;
+        }
+
         var body = TrustedProofControlMarker.CreateBody(
             "ready",
             coordinates,
             predecessorCommentId: null);
         if (ready is null)
         {
+            if (!await transport.IsPullRequestCurrentAsync(cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return 1;
+            }
             var creation = await transport.CreateAsync(body, cancellationToken)
                 .ConfigureAwait(false);
             ready = creation.Comment;
             if (creation.Outcome == TrustedProofMutationOutcome.KnownNotSent)
             {
+                if (!await transport.IsPullRequestCurrentAsync(
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    return 1;
+                }
                 creation = await transport.CreateAsync(body, cancellationToken)
                     .ConfigureAwait(false);
                 ready = creation.Comment;
@@ -101,6 +117,11 @@ internal static class TrustedProofControlService
 
             if (ready is null)
             {
+                if (!await transport.IsPullRequestCurrentAsync(
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    return 1;
+                }
                 comments = await transport.ListAsync(cancellationToken)
                     .ConfigureAwait(false);
                 if (comments is null ||
@@ -229,7 +250,9 @@ internal static class TrustedProofControlService
                 cancellationToken).ConfigureAwait(false) ||
             !await transport.HasWritePermissionAsync(
                 release.User.Login,
-                cancellationToken).ConfigureAwait(false))
+                cancellationToken).ConfigureAwait(false) ||
+            !await transport.IsPullRequestCurrentAsync(cancellationToken)
+                .ConfigureAwait(false))
         {
             return 1;
         }

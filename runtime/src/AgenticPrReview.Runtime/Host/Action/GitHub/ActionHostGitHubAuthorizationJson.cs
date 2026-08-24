@@ -37,6 +37,9 @@ internal sealed class ActionHostGitHubActorDocument
 
 internal sealed class ActionHostGitHubPullRequestSideDocument
 {
+    [JsonPropertyName("ref")]
+    public string? Ref { get; set; }
+
     [JsonPropertyName("sha")]
     public string? Sha { get; set; }
 
@@ -293,6 +296,7 @@ internal static class ActionHostGitHubDocumentMapper
             !TryMapSide(
                 document.Base,
                 out var baseSha,
+                out var baseRef,
                 out var baseRepository) ||
             !TryMapSide(
                 document.Head,
@@ -311,7 +315,8 @@ internal static class ActionHostGitHubDocumentMapper
             baseSha!,
             baseRepository!,
             headSha!,
-            headRepository!);
+            headRepository!,
+            baseRef!);
         return true;
     }
 
@@ -438,6 +443,28 @@ internal static class ActionHostGitHubDocumentMapper
         }
 
         sha = document.Sha;
+        return true;
+    }
+
+    private static bool TryMapSide(
+        ActionHostGitHubPullRequestSideDocument? document,
+        out string? sha,
+        out string? reference,
+        out ActionHostGitHubRepositoryIdentity? repository)
+    {
+        sha = null;
+        reference = null;
+        repository = null;
+        if (document is null ||
+            !IsCommitSha(document.Sha) ||
+            !IsName(document.Ref, 255) ||
+            !TryMap(document.Repository, out repository))
+        {
+            return false;
+        }
+
+        sha = document.Sha;
+        reference = document.Ref;
         return true;
     }
 
