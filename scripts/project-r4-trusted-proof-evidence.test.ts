@@ -1,5 +1,4 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,26 +26,6 @@ afterEach(() => {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
-}
-
-function updateEnvironmentSnapshot(candidate: Record<string, any>) {
-  const environment = candidate.protected_environment;
-  const bytes = JSON.stringify({
-    repository: environment.repository,
-    name: environment.name,
-    exists: environment.exists,
-    deployment_branch: environment.deployment_branch,
-    environment_approver_id: environment.environment_approver_id,
-    environment_approver_permission: environment.environment_approver_permission,
-    prevent_self_review: environment.prevent_self_review,
-    administrator_bypass: environment.administrator_bypass,
-    secret_names: environment.secret_names,
-    token_permissions: environment.token_permissions,
-  });
-  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
-  environment.snapshot_sha256 = digest;
-  environment.normal_snapshot_readback_sha256 = digest;
-  environment.stale_snapshot_readback_sha256 = digest;
 }
 
 function canonicalInput(value: unknown) {
@@ -157,6 +136,67 @@ describe('R4 E3 public-safe evidence projection', () => {
       (value: any) => (value.authorization.stale_manifest.fixture_head_sha = 'e'.repeat(40)),
     ],
     ['environment-secret-omitted', (value: any) => value.protected_environment.secret_names.pop()],
+    [
+      'environment-required-reviewer-rule-disabled',
+      (value: any) => (value.protected_environment.required_reviewer_rule_enabled = false),
+    ],
+    [
+      'environment-required-reviewer-list-empty',
+      (value: any) => (value.protected_environment.required_reviewers = []),
+    ],
+    [
+      'environment-required-reviewer-list-missing',
+      (value: any) => delete value.protected_environment.required_reviewers,
+    ],
+    [
+      'environment-required-reviewer-list-extra',
+      (value: any) =>
+        value.protected_environment.required_reviewers.push({ type: 'User', id: '1' }),
+    ],
+    [
+      'environment-required-reviewer-type-wrong',
+      (value: any) => (value.protected_environment.required_reviewers[0].type = 'Team'),
+    ],
+    [
+      'environment-required-reviewer-id-wrong',
+      (value: any) => (value.protected_environment.required_reviewers[0].id = '1'),
+    ],
+    [
+      'environment-normal-approval-missing',
+      (value: any) => delete value.protected_environment.normal_required_reviewer_approval,
+    ],
+    [
+      'environment-stale-approval-missing',
+      (value: any) => delete value.protected_environment.stale_required_reviewer_approval,
+    ],
+    [
+      'environment-approver-not-configured',
+      (value: any) =>
+        (value.protected_environment.normal_required_reviewer_approval.approver_id = '1'),
+    ],
+    [
+      'environment-stale-approver-not-configured',
+      (value: any) =>
+        (value.protected_environment.stale_required_reviewer_approval.approver_id = '1'),
+    ],
+    [
+      'environment-normal-approval-count-zero',
+      (value: any) => (value.protected_environment.normal_required_reviewer_approval.count = 0),
+    ],
+    [
+      'environment-normal-approval-after-start',
+      (value: any) =>
+        (value.protected_environment.normal_required_reviewer_approval.approved_at = 51),
+    ],
+    [
+      'environment-stale-approval-after-start',
+      (value: any) =>
+        (value.protected_environment.stale_required_reviewer_approval.approved_at = 801),
+    ],
+    [
+      'environment-administrator-bypass-enabled',
+      (value: any) => (value.protected_environment.administrator_bypass = true),
+    ],
     [
       'environment-self-review-enabled',
       (value: any) => (value.protected_environment.prevent_self_review = true),
@@ -821,14 +861,16 @@ describe('R4 E3 public-safe evidence projection', () => {
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });
 
-  test('allows one maintainer to trigger and approve while retaining separate role evidence', () => {
+  test('accepts ordinary approvals from the exact sole configured reviewer in both phases', () => {
     const candidate = clone(hostTemplate);
-    candidate.protected_environment.environment_approver_id =
-      candidate.proof_control.normal.ready.actor_id;
-    updateEnvironmentSnapshot(candidate);
-    expect(candidate.protected_environment.environment_approver_id).toBe('99');
-    expect(candidate.proof_control.normal.ready.actor_id).toBe('99');
-    expect(candidate.proof_control.normal.ready.actor_permission).toBeNull();
+    const reviewer = candidate.protected_environment.required_reviewers[0];
+    expect(reviewer).toEqual({ type: 'User', id: '16307884' });
+    expect(candidate.protected_environment.normal_required_reviewer_approval.approver_id).toBe(
+      reviewer.id,
+    );
+    expect(candidate.protected_environment.stale_required_reviewer_approval.approver_id).toBe(
+      reviewer.id,
+    );
     expect(candidate.proof_control.normal.release.actor_id).toBe('44');
     expect(candidate.proof_control.normal.release.actor_permission).toBe('write');
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);

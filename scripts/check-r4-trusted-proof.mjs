@@ -36,14 +36,14 @@ const fixtureInventory = [
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    'ee9bc6d82efbad32e32acca326668ed191dd9f73f70ca9d448a5b6a9b8e9c105',
+    '0c2071e7ecbe2f5902bd537899fd56df7ab0cd5747a4a3b88ed5eb8f3cef9348',
   ],
   ['cleanup-contract.json', '5d7a26d40d9e41d3d195e8dfb8496703fd40084c1fd687f22306c51575c4cdce'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '6fff6622dc466323c8cb1e4e36866873d73ea2608ae10b76057bea276eec1194',
+    '0d51ae0ee0004186a0d82376e3597602a511d1792a6d6027a8284151b5db0a91',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,7 +51,7 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    'f77e63aaf8010a74cd580d232cf4b87c225734141e178556ca56fc50a10ffefd',
+    '98f998103218a7ca64357eec38a314b5d8e498a24b85f957fd7ec7aa76279db8',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -537,12 +537,23 @@ function validateFixtureContracts(fixtureRoot) {
     authorization.environment?.name !== 'r4-trusted-proof' ||
     authorization.environment?.must_preexist !== true ||
     authorization.environment?.deployment_branch !== 'main-only' ||
+    authorization.environment?.required_reviewer_rule_enabled !== true ||
+    JSON.stringify(authorization.environment?.required_reviewers) !==
+      JSON.stringify([{ type: 'User', id: '16307884' }]) ||
     authorization.environment?.required_maintainer_approvals_minimum !== 1 ||
     authorization.environment?.prevent_self_review !== false ||
     authorization.environment?.administrator_bypass !== false ||
     authorization.environment?.normal_and_stale_phases_independently_observed !== true ||
-    authorization.environment?.required_evidence?.includes('environment_approver_id') !== true ||
-    authorization.environment?.required_evidence?.includes('environment_approver_permission') !==
+    authorization.environment?.required_evidence?.includes('required_reviewer_rule_enabled') !==
+      true ||
+    authorization.environment?.required_evidence?.includes('exact_required_reviewer_set') !==
+      true ||
+    authorization.environment?.required_evidence?.includes(
+      'required_maintainer_approvals_minimum',
+    ) !== true ||
+    authorization.environment?.required_evidence?.includes('normal_required_reviewer_approval') !==
+      true ||
+    authorization.environment?.required_evidence?.includes('stale_required_reviewer_approval') !==
       true ||
     authorization.canary_matrix_requires_exact_authorized_credential_per_sink !== true ||
     authorization.host_restricted_destination_requires_kind_and_identity_sha256 !== true ||

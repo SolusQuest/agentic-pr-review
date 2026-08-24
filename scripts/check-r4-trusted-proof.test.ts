@@ -73,6 +73,8 @@ describe('R4 E3 trusted proof policy', () => {
     ) as {
       environment: {
         deployment_branch: string;
+        required_reviewer_rule_enabled: boolean;
+        required_reviewers: Array<{ type: string; id: string }>;
         required_maintainer_approvals_minimum: number;
         prevent_self_review: boolean;
         administrator_bypass: boolean;
@@ -80,6 +82,8 @@ describe('R4 E3 trusted proof policy', () => {
     };
     expect(contract.environment).toMatchObject({
       deployment_branch: 'main-only',
+      required_reviewer_rule_enabled: true,
+      required_reviewers: [{ type: 'User', id: '16307884' }],
       required_maintainer_approvals_minimum: 1,
       prevent_self_review: false,
       administrator_bypass: false,
