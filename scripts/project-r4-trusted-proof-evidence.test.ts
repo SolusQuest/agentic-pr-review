@@ -137,6 +137,157 @@ describe('R4 E3 public-safe evidence projection', () => {
     ],
     ['environment-secret-omitted', (value: any) => value.protected_environment.secret_names.pop()],
     [
+      'environment-required-reviewer-rule-disabled',
+      (value: any) => (value.protected_environment.required_reviewer_rule_enabled = false),
+    ],
+    [
+      'environment-required-reviewer-list-empty',
+      (value: any) => (value.protected_environment.required_reviewers = []),
+    ],
+    [
+      'environment-required-reviewer-list-missing',
+      (value: any) => delete value.protected_environment.required_reviewers,
+    ],
+    [
+      'environment-required-reviewer-list-extra',
+      (value: any) =>
+        value.protected_environment.required_reviewers.push({ type: 'User', id: '1' }),
+    ],
+    [
+      'environment-required-reviewer-type-wrong',
+      (value: any) => (value.protected_environment.required_reviewers[0].type = 'Team'),
+    ],
+    [
+      'environment-required-reviewer-id-wrong',
+      (value: any) => (value.protected_environment.required_reviewers[0].id = '1'),
+    ],
+    [
+      'environment-bootstrap-approval-missing',
+      (value: any) => delete value.protected_environment.bootstrap_required_reviewer_approval,
+    ],
+    [
+      'environment-continuation-approval-missing',
+      (value: any) => delete value.protected_environment.continuation_required_reviewer_approval,
+    ],
+    [
+      'environment-stale-approval-missing',
+      (value: any) => delete value.protected_environment.stale_required_reviewer_approval,
+    ],
+    [
+      'environment-bootstrap-approver-not-configured',
+      (value: any) =>
+        (value.protected_environment.bootstrap_required_reviewer_approval.approver_id = '1'),
+    ],
+    [
+      'environment-continuation-approver-not-configured',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.approver_id = '1'),
+    ],
+    [
+      'environment-stale-approver-not-configured',
+      (value: any) =>
+        (value.protected_environment.stale_required_reviewer_approval.approver_id = '1'),
+    ],
+    [
+      'environment-continuation-approval-count-zero',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.count = 0),
+    ],
+    [
+      'environment-bootstrap-approval-after-start',
+      (value: any) =>
+        (value.protected_environment.bootstrap_required_reviewer_approval.approved_at = 51),
+    ],
+    [
+      'environment-continuation-approval-after-start',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.approved_at = 501),
+    ],
+    [
+      'environment-stale-approval-after-start',
+      (value: any) =>
+        (value.protected_environment.stale_required_reviewer_approval.approved_at = 801),
+    ],
+    [
+      'environment-continuation-bootstrap-approval-reused',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval = clone(
+          value.protected_environment.bootstrap_required_reviewer_approval,
+        )),
+    ],
+    [
+      'environment-continuation-route-wrong',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.route =
+          'workflow_run'),
+    ],
+    [
+      'environment-continuation-job-wrong',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.job =
+          'workflow-run-review'),
+    ],
+    [
+      'environment-continuation-run-id-wrong',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.run_id = '9001'),
+    ],
+    [
+      'environment-continuation-run-attempt-wrong',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.run_attempt = 2),
+    ],
+    [
+      'environment-continuation-snapshot-wrong',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.snapshot_readback_sha256 =
+          'e'.repeat(64)),
+    ],
+    [
+      'environment-continuation-name-wrong',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.environment_name =
+          'other-environment'),
+    ],
+    [
+      'environment-continuation-permission-insufficient',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.approver_permission =
+          'read'),
+    ],
+    [
+      'environment-continuation-readback-reused',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.snapshot_read_back_at =
+          value.protected_environment.bootstrap_required_reviewer_approval.snapshot_read_back_at),
+    ],
+    [
+      'environment-continuation-readback-after-approval',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.snapshot_read_back_at = 500),
+    ],
+    [
+      'environment-continuation-protected-start-mismatch',
+      (value: any) =>
+        (value.protected_environment.continuation_required_reviewer_approval.protected_job_started_at = 501),
+    ],
+    [
+      'environment-administrator-bypass-enabled',
+      (value: any) => (value.protected_environment.administrator_bypass = true),
+    ],
+    [
+      'environment-self-review-enabled',
+      (value: any) => (value.protected_environment.prevent_self_review = true),
+    ],
+    [
+      'environment-self-review-missing',
+      (value: any) => delete value.protected_environment.prevent_self_review,
+    ],
+    [
+      'environment-self-review-non-boolean',
+      (value: any) => (value.protected_environment.prevent_self_review = 'false'),
+    ],
+    [
       'environment-snapshot-unverified',
       (value: any) => (value.protected_environment.snapshot_sha256 = 'e'.repeat(64)),
     ],
@@ -788,11 +939,26 @@ describe('R4 E3 public-safe evidence projection', () => {
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });
 
-  test('keeps environment approval, ready authorship, and write-authorized release distinct', () => {
+  test('accepts one ordinary approval from the exact sole reviewer for every protected job', () => {
     const candidate = clone(hostTemplate);
-    expect(candidate.protected_environment.environment_approver_id).toBe('43');
-    expect(candidate.proof_control.normal.ready.actor_id).toBe('99');
-    expect(candidate.proof_control.normal.ready.actor_permission).toBeNull();
+    const reviewer = candidate.protected_environment.required_reviewers[0];
+    expect(reviewer).toEqual({ type: 'User', id: '16307884' });
+    const approvals = [
+      candidate.protected_environment.bootstrap_required_reviewer_approval,
+      candidate.protected_environment.continuation_required_reviewer_approval,
+      candidate.protected_environment.stale_required_reviewer_approval,
+    ];
+    expect(approvals.map(({ approver_id }: any) => approver_id)).toEqual([
+      reviewer.id,
+      reviewer.id,
+      reviewer.id,
+    ]);
+    expect(approvals.map(({ run_id }: any) => run_id)).toEqual(['9001', '9002', '9003']);
+    expect(approvals.map(({ job }: any) => job)).toEqual([
+      'workflow-run-review',
+      'workflow-dispatch-review',
+      'workflow-run-review',
+    ]);
     expect(candidate.proof_control.normal.release.actor_id).toBe('44');
     expect(candidate.proof_control.normal.release.actor_permission).toBe('write');
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);

@@ -274,19 +274,17 @@
         "name",
         "exists",
         "deployment_branch",
+        "required_reviewer_rule_enabled",
+        "required_reviewers",
+        "required_maintainer_approvals_minimum",
         "prevent_self_review",
         "administrator_bypass",
         "secret_names",
         "token_permissions",
         "snapshot_sha256",
-        "normal_snapshot_readback_sha256",
-        "normal_read_back_at",
-        "normal_first_privileged_job_started_at",
-        "stale_snapshot_readback_sha256",
-        "stale_read_back_at",
-        "stale_first_privileged_job_started_at",
-        "environment_approver_id",
-        "environment_approver_permission"
+        "bootstrap_required_reviewer_approval",
+        "continuation_required_reviewer_approval",
+        "stale_required_reviewer_approval"
       ],
       "properties": {
         "repository": {
@@ -301,8 +299,36 @@
         "deployment_branch": {
           "const": "main-only"
         },
-        "prevent_self_review": {
+        "required_reviewer_rule_enabled": {
           "const": true
+        },
+        "required_reviewers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "id"
+            ],
+            "properties": {
+              "type": {
+                "const": "User"
+              },
+              "id": {
+                "const": "16307884"
+              }
+            }
+          }
+        },
+        "required_maintainer_approvals_minimum": {
+          "const": 1
+        },
+        "prevent_self_review": {
+          "const": false
         },
         "administrator_bypass": {
           "const": false
@@ -343,32 +369,14 @@
         "snapshot_sha256": {
           "$ref": "#/$defs/sha256"
         },
-        "normal_snapshot_readback_sha256": {
-          "$ref": "#/$defs/sha256"
+        "bootstrap_required_reviewer_approval": {
+          "$ref": "#/$defs/requiredReviewerApproval"
         },
-        "normal_read_back_at": {
-          "$ref": "#/$defs/timestamp"
+        "continuation_required_reviewer_approval": {
+          "$ref": "#/$defs/requiredReviewerApproval"
         },
-        "normal_first_privileged_job_started_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "stale_snapshot_readback_sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "stale_read_back_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "stale_first_privileged_job_started_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "environment_approver_id": {
-          "$ref": "#/$defs/positiveId"
-        },
-        "environment_approver_permission": {
-          "enum": [
-            "write",
-            "admin"
-          ]
+        "stale_required_reviewer_approval": {
+          "$ref": "#/$defs/requiredReviewerApproval"
         }
       }
     },
@@ -1221,6 +1229,71 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "requiredReviewerApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route",
+        "job",
+        "run_id",
+        "run_attempt",
+        "environment_name",
+        "snapshot_readback_sha256",
+        "snapshot_read_back_at",
+        "count",
+        "approver_id",
+        "approver_permission",
+        "approved_at",
+        "protected_job_started_at"
+      ],
+      "properties": {
+        "route": {
+          "enum": [
+            "workflow_run",
+            "workflow_dispatch"
+          ]
+        },
+        "job": {
+          "enum": [
+            "workflow-run-review",
+            "workflow-dispatch-review"
+          ]
+        },
+        "run_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "run_attempt": {
+          "$ref": "#/$defs/runAttempt"
+        },
+        "environment_name": {
+          "const": "r4-trusted-proof"
+        },
+        "snapshot_readback_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "snapshot_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "count": {
+          "const": 1
+        },
+        "approver_id": {
+          "const": "16307884"
+        },
+        "approver_permission": {
+          "enum": [
+            "write",
+            "admin"
+          ]
+        },
+        "approved_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "protected_job_started_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
     },
     "nonnegativeInteger": {
       "type": "integer",

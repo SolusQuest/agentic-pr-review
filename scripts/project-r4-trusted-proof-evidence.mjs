@@ -554,8 +554,9 @@ function environmentSnapshotBytes(environment) {
     name: environment.name,
     exists: environment.exists,
     deployment_branch: environment.deployment_branch,
-    environment_approver_id: environment.environment_approver_id,
-    environment_approver_permission: environment.environment_approver_permission,
+    required_reviewer_rule_enabled: environment.required_reviewer_rule_enabled,
+    required_reviewers: environment.required_reviewers,
+    required_maintainer_approvals_minimum: environment.required_maintainer_approvals_minimum,
     prevent_self_review: environment.prevent_self_review,
     administrator_bypass: environment.administrator_bypass,
     secret_names: environment.secret_names,
@@ -635,6 +636,26 @@ function exactAcceptanceReceipt(transition, predecessorIdentity, run) {
     receipt.producing_run_identity === run.run_id &&
     receipt.producing_run_attempt === run.run_attempt &&
     receipt.logical_expires_at_unix_seconds === receipt.accepted_at_unix_seconds + 604800
+  );
+}
+
+function exactRequiredReviewerApproval(
+  approval,
+  { route, job, run, environmentName, environmentSha256, reviewerIds, minimum, readbackFloor },
+) {
+  return (
+    approval.route === route &&
+    approval.job === job &&
+    approval.run_id === run.run_id &&
+    approval.run_attempt === run.run_attempt &&
+    approval.environment_name === environmentName &&
+    approval.snapshot_readback_sha256 === environmentSha256 &&
+    approval.snapshot_read_back_at >= readbackFloor &&
+    approval.snapshot_read_back_at < approval.approved_at &&
+    approval.count >= minimum &&
+    reviewerIds.has(approval.approver_id) &&
+    approval.approved_at <= approval.protected_job_started_at &&
+    approval.protected_job_started_at === run.protected_job_started_at
   );
 }
 
@@ -726,6 +747,10 @@ export function projectTrustedProofEvidence(input) {
     'DEEPSEEK_API_KEY',
   ];
   const environmentSha256 = sha256(environmentSnapshotBytes(environment));
+  const reviewerIds = new Set(environment.required_reviewers.map((reviewer) => reviewer.id));
+  const bootstrapApproval = environment.bootstrap_required_reviewer_approval;
+  const continuationApproval = environment.continuation_required_reviewer_approval;
+  const staleApproval = environment.stale_required_reviewer_approval;
   if (
     manifestSha256 !== authorization.manifest_sha256 ||
     manifestSha256 !== authorization.repository_variable_readback_sha256 ||
@@ -770,14 +795,39 @@ export function projectTrustedProofEvidence(input) {
     staleManifest.action_source_sha !== identities.action_source_sha ||
     staleManifest.payload_sha256 !== identities.payload_sha256 ||
     environmentSha256 !== environment.snapshot_sha256 ||
-    environmentSha256 !== environment.normal_snapshot_readback_sha256 ||
-    environmentSha256 !== environment.stale_snapshot_readback_sha256 ||
-    environment.normal_read_back_at >= environment.normal_first_privileged_job_started_at ||
-    environment.normal_first_privileged_job_started_at !==
-      runs.bootstrap.protected_job_started_at ||
-    environment.stale_read_back_at >= environment.stale_first_privileged_job_started_at ||
-    environment.stale_first_privileged_job_started_at !==
-      product.stale.authorized_stale_run.protected_job_started_at ||
+    environment.required_reviewer_rule_enabled !== true ||
+    environment.required_maintainer_approvals_minimum !== 1 ||
+    reviewerIds.size !== 1 ||
+    !exactRequiredReviewerApproval(bootstrapApproval, {
+      route: 'workflow_run',
+      job: 'workflow-run-review',
+      run: runs.bootstrap,
+      environmentName: environment.name,
+      environmentSha256,
+      reviewerIds,
+      minimum: environment.required_maintainer_approvals_minimum,
+      readbackFloor: authorization.normal_read_back_at,
+    }) ||
+    !exactRequiredReviewerApproval(continuationApproval, {
+      route: 'workflow_dispatch',
+      job: 'workflow-dispatch-review',
+      run: runs.continuation,
+      environmentName: environment.name,
+      environmentSha256,
+      reviewerIds,
+      minimum: environment.required_maintainer_approvals_minimum,
+      readbackFloor: runs.bootstrap.completed_at,
+    }) ||
+    !exactRequiredReviewerApproval(staleApproval, {
+      route: 'workflow_run',
+      job: 'workflow-run-review',
+      run: product.stale.authorized_stale_run,
+      environmentName: environment.name,
+      environmentSha256,
+      reviewerIds,
+      minimum: environment.required_maintainer_approvals_minimum,
+      readbackFloor: authorization.stale_read_back_at,
+    }) ||
     environment.repository !== identities.repository ||
     JSON.stringify([...environment.secret_names].sort()) !== JSON.stringify(approvedSecrets)
   ) {
