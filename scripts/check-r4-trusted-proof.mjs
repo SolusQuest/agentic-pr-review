@@ -36,14 +36,14 @@ const fixtureInventory = [
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    'b0b5502d055ba42284647e6e8cca8103478edccb00ac499689e2ef31a32b2d96',
+    'ee9bc6d82efbad32e32acca326668ed191dd9f73f70ca9d448a5b6a9b8e9c105',
   ],
   ['cleanup-contract.json', '5d7a26d40d9e41d3d195e8dfb8496703fd40084c1fd687f22306c51575c4cdce'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '067eb69a1d74f7b669950941bfff09c54ede4b35d5dbec4b63192a30b015df4a',
+    '6fff6622dc466323c8cb1e4e36866873d73ea2608ae10b76057bea276eec1194',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,7 +51,7 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    '48ff8d9a5dc95842017d48c7f929b4c6e280d30fa982323fa92d021c6c59493f',
+    'f77e63aaf8010a74cd580d232cf4b87c225734141e178556ca56fc50a10ffefd',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -536,6 +536,10 @@ function validateFixtureContracts(fixtureRoot) {
     authorization.authorization_variable?.normal_and_stale_phases_independently_observed !== true ||
     authorization.environment?.name !== 'r4-trusted-proof' ||
     authorization.environment?.must_preexist !== true ||
+    authorization.environment?.deployment_branch !== 'main-only' ||
+    authorization.environment?.required_maintainer_approvals_minimum !== 1 ||
+    authorization.environment?.prevent_self_review !== false ||
+    authorization.environment?.administrator_bypass !== false ||
     authorization.environment?.normal_and_stale_phases_independently_observed !== true ||
     authorization.environment?.required_evidence?.includes('environment_approver_id') !== true ||
     authorization.environment?.required_evidence?.includes('environment_approver_permission') !==

@@ -67,6 +67,25 @@ describe('R4 E3 trusted proof policy', () => {
     );
   });
 
+  test('pins ordinary sole-maintainer approval without administrator bypass', () => {
+    const contract = JSON.parse(
+      fs.readFileSync(path.join(fixtureRoot, 'authorization-environment-contract.json'), 'utf8'),
+    ) as {
+      environment: {
+        deployment_branch: string;
+        required_maintainer_approvals_minimum: number;
+        prevent_self_review: boolean;
+        administrator_bypass: boolean;
+      };
+    };
+    expect(contract.environment).toMatchObject({
+      deployment_branch: 'main-only',
+      required_maintainer_approvals_minimum: 1,
+      prevent_self_review: false,
+      administrator_bypass: false,
+    });
+  });
+
   test.each([
     ['  workflow_dispatch:\n', '  pull_request_target:\n'],
     ['permissions: {}', 'permissions:\n  contents: write'],

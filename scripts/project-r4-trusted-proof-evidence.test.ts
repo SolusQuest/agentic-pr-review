@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,26 @@ afterEach(() => {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function updateEnvironmentSnapshot(candidate: Record<string, any>) {
+  const environment = candidate.protected_environment;
+  const bytes = JSON.stringify({
+    repository: environment.repository,
+    name: environment.name,
+    exists: environment.exists,
+    deployment_branch: environment.deployment_branch,
+    environment_approver_id: environment.environment_approver_id,
+    environment_approver_permission: environment.environment_approver_permission,
+    prevent_self_review: environment.prevent_self_review,
+    administrator_bypass: environment.administrator_bypass,
+    secret_names: environment.secret_names,
+    token_permissions: environment.token_permissions,
+  });
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  environment.snapshot_sha256 = digest;
+  environment.normal_snapshot_readback_sha256 = digest;
+  environment.stale_snapshot_readback_sha256 = digest;
 }
 
 function canonicalInput(value: unknown) {
@@ -136,6 +157,18 @@ describe('R4 E3 public-safe evidence projection', () => {
       (value: any) => (value.authorization.stale_manifest.fixture_head_sha = 'e'.repeat(40)),
     ],
     ['environment-secret-omitted', (value: any) => value.protected_environment.secret_names.pop()],
+    [
+      'environment-self-review-enabled',
+      (value: any) => (value.protected_environment.prevent_self_review = true),
+    ],
+    [
+      'environment-self-review-missing',
+      (value: any) => delete value.protected_environment.prevent_self_review,
+    ],
+    [
+      'environment-self-review-non-boolean',
+      (value: any) => (value.protected_environment.prevent_self_review = 'false'),
+    ],
     [
       'environment-snapshot-unverified',
       (value: any) => (value.protected_environment.snapshot_sha256 = 'e'.repeat(64)),
@@ -788,9 +821,12 @@ describe('R4 E3 public-safe evidence projection', () => {
     expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
   });
 
-  test('keeps environment approval, ready authorship, and write-authorized release distinct', () => {
+  test('allows one maintainer to trigger and approve while retaining separate role evidence', () => {
     const candidate = clone(hostTemplate);
-    expect(candidate.protected_environment.environment_approver_id).toBe('43');
+    candidate.protected_environment.environment_approver_id =
+      candidate.proof_control.normal.ready.actor_id;
+    updateEnvironmentSnapshot(candidate);
+    expect(candidate.protected_environment.environment_approver_id).toBe('99');
     expect(candidate.proof_control.normal.ready.actor_id).toBe('99');
     expect(candidate.proof_control.normal.ready.actor_permission).toBeNull();
     expect(candidate.proof_control.normal.release.actor_id).toBe('44');

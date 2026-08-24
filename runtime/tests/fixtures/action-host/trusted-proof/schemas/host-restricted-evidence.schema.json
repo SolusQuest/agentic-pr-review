@@ -302,7 +302,7 @@
           "const": "main-only"
         },
         "prevent_self_review": {
-          "const": true
+          "const": false
         },
         "administrator_bypass": {
           "const": false
