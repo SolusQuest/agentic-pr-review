@@ -36,14 +36,14 @@ const fixtureInventory = [
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    '0c2071e7ecbe2f5902bd537899fd56df7ab0cd5747a4a3b88ed5eb8f3cef9348',
+    '87d0050fa7e2171b38eba4035e8c176fcf14299a0152b54efcb5ddde06d7e73e',
   ],
   ['cleanup-contract.json', '5d7a26d40d9e41d3d195e8dfb8496703fd40084c1fd687f22306c51575c4cdce'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '0d51ae0ee0004186a0d82376e3597602a511d1792a6d6027a8284151b5db0a91',
+    '354faff22e2976efa450a9e6a8dc8b6b2ec8bdc07c827026af8775e5540352f5',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -51,7 +51,7 @@ const fixtureDigests = new Map([
   ],
   [
     'templates/host-restricted-evidence.json',
-    '98f998103218a7ca64357eec38a314b5d8e498a24b85f957fd7ec7aa76279db8',
+    'ab71e1e7f8d201bb7af32a3a628391db9058a2402bc87d7b9f45930949050bbd',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -543,6 +543,9 @@ function validateFixtureContracts(fixtureRoot) {
     authorization.environment?.required_maintainer_approvals_minimum !== 1 ||
     authorization.environment?.prevent_self_review !== false ||
     authorization.environment?.administrator_bypass !== false ||
+    authorization.environment?.per_protected_job_approval_required !== true ||
+    authorization.environment?.phase_order !==
+      'exact-snapshot-readback < reviewer-approval <= protected-job-start' ||
     authorization.environment?.normal_and_stale_phases_independently_observed !== true ||
     authorization.environment?.required_evidence?.includes('required_reviewer_rule_enabled') !==
       true ||
@@ -551,8 +554,12 @@ function validateFixtureContracts(fixtureRoot) {
     authorization.environment?.required_evidence?.includes(
       'required_maintainer_approvals_minimum',
     ) !== true ||
-    authorization.environment?.required_evidence?.includes('normal_required_reviewer_approval') !==
-      true ||
+    authorization.environment?.required_evidence?.includes(
+      'bootstrap_required_reviewer_approval',
+    ) !== true ||
+    authorization.environment?.required_evidence?.includes(
+      'continuation_required_reviewer_approval',
+    ) !== true ||
     authorization.environment?.required_evidence?.includes('stale_required_reviewer_approval') !==
       true ||
     authorization.canary_matrix_requires_exact_authorized_credential_per_sink !== true ||

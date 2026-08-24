@@ -78,6 +78,7 @@ describe('R4 E3 trusted proof policy', () => {
         required_maintainer_approvals_minimum: number;
         prevent_self_review: boolean;
         administrator_bypass: boolean;
+        per_protected_job_approval_required: boolean;
       };
     };
     expect(contract.environment).toMatchObject({
@@ -87,6 +88,7 @@ describe('R4 E3 trusted proof policy', () => {
       required_maintainer_approvals_minimum: 1,
       prevent_self_review: false,
       administrator_bypass: false,
+      per_protected_job_approval_required: true,
     });
   });
 

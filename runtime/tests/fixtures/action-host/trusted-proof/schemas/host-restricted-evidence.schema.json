@@ -282,13 +282,8 @@
         "secret_names",
         "token_permissions",
         "snapshot_sha256",
-        "normal_snapshot_readback_sha256",
-        "normal_read_back_at",
-        "normal_first_privileged_job_started_at",
-        "stale_snapshot_readback_sha256",
-        "stale_read_back_at",
-        "stale_first_privileged_job_started_at",
-        "normal_required_reviewer_approval",
+        "bootstrap_required_reviewer_approval",
+        "continuation_required_reviewer_approval",
         "stale_required_reviewer_approval"
       ],
       "properties": {
@@ -374,25 +369,10 @@
         "snapshot_sha256": {
           "$ref": "#/$defs/sha256"
         },
-        "normal_snapshot_readback_sha256": {
-          "$ref": "#/$defs/sha256"
+        "bootstrap_required_reviewer_approval": {
+          "$ref": "#/$defs/requiredReviewerApproval"
         },
-        "normal_read_back_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "normal_first_privileged_job_started_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "stale_snapshot_readback_sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "stale_read_back_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "stale_first_privileged_job_started_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "normal_required_reviewer_approval": {
+        "continuation_required_reviewer_approval": {
           "$ref": "#/$defs/requiredReviewerApproval"
         },
         "stale_required_reviewer_approval": {
@@ -1254,12 +1234,47 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "route",
+        "job",
+        "run_id",
+        "run_attempt",
+        "environment_name",
+        "snapshot_readback_sha256",
+        "snapshot_read_back_at",
         "count",
         "approver_id",
         "approver_permission",
-        "approved_at"
+        "approved_at",
+        "protected_job_started_at"
       ],
       "properties": {
+        "route": {
+          "enum": [
+            "workflow_run",
+            "workflow_dispatch"
+          ]
+        },
+        "job": {
+          "enum": [
+            "workflow-run-review",
+            "workflow-dispatch-review"
+          ]
+        },
+        "run_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "run_attempt": {
+          "$ref": "#/$defs/runAttempt"
+        },
+        "environment_name": {
+          "const": "r4-trusted-proof"
+        },
+        "snapshot_readback_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "snapshot_read_back_at": {
+          "$ref": "#/$defs/timestamp"
+        },
         "count": {
           "const": 1
         },
@@ -1273,6 +1288,9 @@
           ]
         },
         "approved_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "protected_job_started_at": {
           "$ref": "#/$defs/timestamp"
         }
       }
