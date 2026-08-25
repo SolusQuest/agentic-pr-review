@@ -12,6 +12,13 @@ const fixtureRelative = 'runtime/tests/fixtures/action-host/trusted-proof';
 const templateRelative =
   'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof.yml.template';
 const workflowRelative = '.github/workflows/r4-trusted-proof.yml';
+const stagedTemplateRelative =
+  'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template';
+const stagedPreflightRelative =
+  'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/preflight-contract-v2.json';
+const stagedPreparationRelative =
+  'runtime/tests/fixtures/action-host/trusted-proof-payload/preparation-contract-v2.json';
+const stagedPreparationScriptRelative = 'runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh';
 const actionSourceSha = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
 const payloadSha256 = '97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc';
 const templateSha256 = 'fa458399a93c0dc71d0f071eeea3abb7670382c5545f58dae90ca1cf9649c03a';
@@ -830,6 +837,86 @@ export function checkR4TrustedProof(options = {}) {
     provenance.result !== 'passed'
   ) {
     fail('receipt-provenance-values');
+  }
+  const stagedTemplate = readBounded(path.join(root, ...stagedTemplateRelative.split('/')));
+  const stagedSource = stagedTemplate.toString('utf8');
+  const stagedPreflight = parseJsonDocument(
+    path.join(root, ...stagedPreflightRelative.split('/')),
+    16_384,
+  ).value;
+  const stagedInline = extractPreflight(stagedTemplate);
+  if (
+    stagedTemplate.includes(0x0d) ||
+    count(stagedSource, '__ACTION_SOURCE_SHA__') !== 5 ||
+    count(stagedSource, '__PAYLOAD_SOURCE_SHA__') !== 5 ||
+    count(stagedSource, '__PAYLOAD_SHA256__') !== 3 ||
+    !stagedInline.includes("'apr-r4-e2p-authorization-manifest-v2'") ||
+    !stagedInline.includes('pull.merged_at !== null') ||
+    !stagedInline.includes("pull.base?.ref !== 'main'") ||
+    !stagedInline.includes('pull.base?.sha !== workflowSha')
+  ) {
+    fail('staged-v2-preflight');
+  }
+  exactKeys(
+    stagedPreflight,
+    [
+      'kind',
+      'origin',
+      'route',
+      'accept',
+      'api_version',
+      'authentication',
+      'redirect',
+      'timeout_ms',
+      'maximum_response_bytes',
+      'branch_pattern',
+      'base_ref',
+      'base_sha',
+      'payload_source_identity',
+      'workflow_run',
+      'authorization_variable',
+      'authorization_manifest_kind',
+      'authorization_manifest_order',
+      'outputs',
+    ],
+    'staged-v2-preflight-contract-shape',
+  );
+  if (
+    stagedPreflight.kind !== 'apr-r4-e2p-public-pr-preflight-v2' ||
+    stagedPreflight.authentication !== 'none' ||
+    stagedPreflight.redirect !== 'error' ||
+    stagedPreflight.base_ref !== 'main' ||
+    stagedPreflight.base_sha !== 'exact-workflow-sha' ||
+    stagedPreflight.payload_source_identity !== 'exact-compiled-payload-source-commit' ||
+    stagedPreflight.authorization_manifest_kind !== 'apr-r4-e2p-authorization-manifest-v2'
+  ) {
+    fail('staged-v2-preflight-contract');
+  }
+  const stagedPreparation = parseJsonDocument(
+    path.join(root, ...stagedPreparationRelative.split('/')),
+    16_384,
+  ).value;
+  const stagedPreparationScript = readBounded(
+    path.join(root, ...stagedPreparationScriptRelative.split('/')),
+  ).toString('utf8');
+  if (
+    stagedPreparation.kind !== 'apr-r4-e2p-preparation-contract-v2' ||
+    JSON.stringify(stagedPreparation.outputs) !==
+      JSON.stringify([
+        'prepared_root',
+        'prepared_executable',
+        'prepared_payload_sha256',
+        'action_source_sha',
+        'payload_build_discriminator',
+      ]) ||
+    stagedPreparation.action_source_sha !== actionSourceSha ||
+    stagedPreparation.payload_build_discriminator !== 'r4-w2' ||
+    count(stagedPreparationScript, 'payload_source_sha=') !== 0 ||
+    !stagedPreparationScript.includes('-p:PayloadSourceCommit=$source_commit') ||
+    !stagedPreparationScript.includes('-p:PayloadSourceTree=$source_tree') ||
+    !stagedPreparationScript.includes('"$(wc -l < "$output_lines")" -eq 5')
+  ) {
+    fail('staged-v2-preparation-contract');
   }
   validateRepositorySecretRoutes(workflowsRoot);
   return true;

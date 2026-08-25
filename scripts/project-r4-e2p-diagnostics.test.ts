@@ -55,4 +55,14 @@ describe('R4 E2P public diagnostic projection', () => {
     expect(result.stdout).toBe(`${allowed}\n`);
     expect(result.stdout).not.toContain('private tail');
   });
+
+  it('projects an allowlisted v2 warning-policy failure without exposing private logs', () => {
+    const allowed =
+      'APR_R4_E2P_V2_FAILURE stage=proof case=clean-source ' + 'code=warning-policy status=failed';
+    const result = project(`${allowed}\n/private/verifier-publish.log\n`);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`${allowed}\n`);
+    expect(result.stdout).not.toContain('/private/');
+  });
 });

@@ -95,6 +95,53 @@ public sealed class TrustedProofControlTests
     }
 
     [Fact]
+    public async Task BaseDriftBetweenSelectionAndCreateStopsBeforeMutation()
+    {
+        var handler = new ControlHandler(
+            [],
+            pullRequestStates: [true, false]);
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler);
+
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["hold"],
+            Coordinates,
+            transport,
+            CancellationToken.None));
+        Assert.Equal(2, handler.Requests.Count(request =>
+            request.Method == HttpMethod.Get &&
+            request.Path.EndsWith("/pulls/147", StringComparison.Ordinal)));
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task BaseShaDriftBetweenSelectionAndCreateStopsBeforeMutation()
+    {
+        var handler = new ControlHandler(
+            [],
+            pullRequestBaseShas:
+            [Coordinates.WorkflowSha, new string('f', 40)]);
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler);
+
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["hold"],
+            Coordinates,
+            transport,
+            CancellationToken.None));
+        Assert.Equal(2, handler.Requests.Count(request =>
+            request.Method == HttpMethod.Get &&
+            request.Path.EndsWith("/pulls/147", StringComparison.Ordinal)));
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
     public async Task DispatchRejectsCurrentRunAndConflictingOperationFamily()
     {
         var currentReady = Comment(
@@ -334,13 +381,21 @@ public sealed class TrustedProofControlTests
     {
         private readonly Dictionary<long, TrustedProofIssueComment> comments;
         private readonly Queue<DeleteStep> deleteSteps;
+        private readonly Queue<bool> pullRequestStates;
+        private readonly Queue<string> pullRequestBaseShas;
 
         internal ControlHandler(
             IEnumerable<TrustedProofIssueComment> initial,
-            IEnumerable<DeleteStep>? deleteSteps = null)
+            IEnumerable<DeleteStep>? deleteSteps = null,
+            IEnumerable<bool>? pullRequestStates = null,
+            IEnumerable<string>? pullRequestBaseShas = null)
         {
             comments = initial.ToDictionary(comment => comment.Id);
             this.deleteSteps = new Queue<DeleteStep>(deleteSteps ?? []);
+            this.pullRequestStates = new Queue<bool>(
+                pullRequestStates ?? [true]);
+            this.pullRequestBaseShas = new Queue<string>(
+                pullRequestBaseShas ?? [Coordinates.WorkflowSha]);
         }
 
         internal List<(HttpMethod Method, string Path)> Requests { get; } = [];
@@ -352,6 +407,44 @@ public sealed class TrustedProofControlTests
             cancellationToken.ThrowIfCancellationRequested();
             var path = request.RequestUri!.PathAndQuery;
             Requests.Add((request.Method, path));
+            if (request.Method == HttpMethod.Get &&
+                path.EndsWith("/pulls/147", StringComparison.Ordinal))
+            {
+                var current = pullRequestStates.Count > 1
+                    ? pullRequestStates.Dequeue()
+                    : pullRequestStates.Peek();
+                var baseSha = pullRequestBaseShas.Count > 1
+                    ? pullRequestBaseShas.Dequeue()
+                    : pullRequestBaseShas.Peek();
+                return Json(new TrustedProofPullRequest
+                {
+                    Number = Coordinates.PullRequestNumber,
+                    State = "open",
+                    Draft = false,
+                    MergedAt = null,
+                    Base = new()
+                    {
+                        Ref = current ? "main" : "release",
+                        Sha = baseSha,
+                        Repository = new()
+                        {
+                            Id = Coordinates.RepositoryId,
+                            FullName = Coordinates.Repository,
+                        },
+                    },
+                    Head = new()
+                    {
+                        Ref = "r4-trusted-proof/" + Coordinates.OperationId,
+                        Sha = Coordinates.FixtureHeadSha,
+                        Repository = new()
+                        {
+                            Id = Coordinates.RepositoryId,
+                            FullName = Coordinates.Repository,
+                        },
+                    },
+                });
+            }
+
             if (request.Method == HttpMethod.Get &&
                 path.Contains("/comments?", StringComparison.Ordinal))
             {

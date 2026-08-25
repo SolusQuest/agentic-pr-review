@@ -87,7 +87,9 @@ internal static class FrameworkSupervisor
                 payload,
                 bundle,
                 node,
-                platform).ConfigureAwait(false);
+                platform,
+                ReadCompiledPayloadSourceExpectation(values))
+                .ConfigureAwait(false);
         }
 
         var cases = new List<CaseResult>();
@@ -879,7 +881,8 @@ internal static class FrameworkSupervisor
         string payload,
         string bundle,
         string node,
-        SyntheticOfficialPlatform platform)
+        SyntheticOfficialPlatform platform,
+        CompiledPayloadSourceExpectation? sourceExpectation)
     {
         var cases = new List<CaseResult>
         {
@@ -914,15 +917,77 @@ internal static class FrameworkSupervisor
             TrustedProofPayload: true),
             root, repository, payload, bundle, node, platform)
             .ConfigureAwait(false));
-        var passed = cases.All(result => result.Passed);
+        var compiledIdentities = cases
+            .Select(result => ReadCompiledPayloadIdentity(root, result.Name))
+            .ToArray();
+        var compiledIdentity = compiledIdentities.FirstOrDefault();
+        var compiledIdentityValid = sourceExpectation is not null &&
+            compiledIdentity is not null &&
+            compiledIdentities.All(value => value == compiledIdentity) &&
+            StringComparer.Ordinal.Equals(
+                compiledIdentity.ProofKind,
+                "apr-r4-e2p-trusted-proof-payload-v2") &&
+            StringComparer.Ordinal.Equals(
+                compiledIdentity.SourceCommit,
+                sourceExpectation.SourceCommit) &&
+            StringComparer.Ordinal.Equals(
+                compiledIdentity.SourceTree,
+                sourceExpectation.SourceTree);
+        var passed = cases.All(result => result.Passed) &&
+            compiledIdentityValid;
+        var evidence = FrameworkJson.Object(
+            ("passed", passed),
+            ("verifier_executable_sha256", Sha256(payload)),
+            ("compiled_payload_proof_kind", compiledIdentity?.ProofKind),
+            ("compiled_payload_source_commit", compiledIdentity?.SourceCommit),
+            ("compiled_payload_source_tree", compiledIdentity?.SourceTree),
+            ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
         await File.WriteAllTextAsync(
             Path.Join(root, "trusted-proof-payload-evidence.json"),
-            FrameworkJson.SerializeIndented(FrameworkJson.Object(
-                ("passed", passed),
-                ("payload_sha256", Sha256(payload)),
-                ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))))))
+            FrameworkJson.SerializeIndented(evidence))
             .ConfigureAwait(false);
         return passed ? 0 : 1;
+    }
+
+    private static CompiledPayloadSourceExpectation?
+        ReadCompiledPayloadSourceExpectation(
+            IReadOnlyDictionary<string, string> values) =>
+        values.TryGetValue("payload-source-commit", out var commit) &&
+        values.TryGetValue("payload-source-tree", out var tree) &&
+        IsLowerHex(commit, 40) &&
+        IsLowerHex(tree, 40)
+            ? new(commit, tree)
+            : null;
+
+    private static CompiledPayloadIdentity? ReadCompiledPayloadIdentity(
+        string root,
+        string scenario)
+    {
+        var path = Path.Join(
+            root,
+            scenario,
+            "compiled-payload-identity.tsv");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var lines = File.ReadAllLines(path);
+        if (lines.Length != 1 || lines[0].Split('\t') is not
+            [var proofKind, var sourceCommit, var sourceTree] ||
+            !StringComparer.Ordinal.Equals(
+                proofKind,
+                "apr-r4-e2p-trusted-proof-payload-v2") ||
+            !IsLowerHex(sourceCommit, 40) ||
+            !IsLowerHex(sourceTree, 40))
+        {
+            return null;
+        }
+
+        return new CompiledPayloadIdentity(
+            proofKind,
+            sourceCommit,
+            sourceTree);
     }
 
     private static Process StartWrapper(
@@ -1094,7 +1159,8 @@ internal static class FrameworkSupervisor
                         ("id", 1000),
                         ("number", 147),
                         ("base", FrameworkJson.Object(
-                            ("sha", FrameworkGitHubHandler.BaseSha),
+                            ("sha", FrameworkGitHubHandler.PullRequestBaseSha(
+                                spec.TrustedProofPayload)),
                             ("repo", RepositoryReference()))),
                         ("head", FrameworkJson.Object(
                             ("sha", FrameworkGitHubHandler.HeadSha),
@@ -3423,6 +3489,15 @@ internal static class FrameworkSupervisor
         bool CanarySafe,
         bool ContinuationObserved,
         bool Passed);
+
+    private sealed record CompiledPayloadIdentity(
+        string ProofKind,
+        string SourceCommit,
+        string SourceTree);
+
+    private sealed record CompiledPayloadSourceExpectation(
+        string SourceCommit,
+        string SourceTree);
 
     private sealed record CanaryRoute(
         IReadOnlySet<string> AllowedSinks,

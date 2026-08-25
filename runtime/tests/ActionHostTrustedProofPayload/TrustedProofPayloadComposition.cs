@@ -31,6 +31,7 @@ internal static class TrustedProofPayloadComposition
             publisher,
             provider,
             TimeProvider.System,
-            inlineHook: new PostAcceptanceInlinePublisherHook(publisher));
+            inlineHook: new PostAcceptanceInlinePublisherHook(publisher),
+            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance);
     }
 }

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   authorizationDigest,
+  authorizationDigestV2,
   extractPreflight,
   runExtractedPreflight,
 } from './check-r4-e2p-preflight.mjs';
@@ -244,5 +245,162 @@ describe('R4 E2P exact inline preflight', () => {
 
     expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
     expect(result.stderr).toContain('github-response-duplicate-key');
+  });
+});
+
+describe('R4 E2P v2 exact inline preflight', () => {
+  const v2TemplatePath = path.join(
+    process.cwd(),
+    'runtime',
+    'tests',
+    'fixtures',
+    'action-host',
+    'trusted-proof-payload',
+    'workflow',
+    'r4-trusted-proof-v2.yml.template',
+  );
+  const v2Source = extractPreflight(fs.readFileSync(v2TemplatePath));
+  const v2Values = {
+    ...values,
+    payloadSourceSha: '1'.repeat(40),
+  };
+  const v2Environment = {
+    ...environment,
+    PAYLOAD_SOURCE_SHA: v2Values.payloadSourceSha,
+    R4_TRUSTED_PROOF_AUTHORIZATION: authorizationDigestV2(v2Values),
+  };
+  const v2Pull = (overrides: Record<string, unknown> = {}) => ({
+    number: 147,
+    state: 'open',
+    draft: false,
+    merged_at: null,
+    base: {
+      ref: 'main',
+      sha: v2Values.workflowSha,
+      repo: { id: 42, full_name: v2Values.repository },
+    },
+    head: {
+      repo: { id: 42, full_name: v2Values.repository },
+      sha: fixtureHeadSha,
+      ref: `r4-trusted-proof/${operationId}`,
+    },
+    ...overrides,
+  });
+
+  it.each(['workflow_run', 'workflow_dispatch'])(
+    'executes the exact %s v2 route',
+    async (route) => {
+      const fetchImpl = vi.fn(async () => response(v2Pull()));
+      const routeEnvironment =
+        route === 'workflow_dispatch'
+          ? {
+              ...v2Environment,
+              EVENT_NAME: route,
+              EVENT_PR_NUMBER: '',
+              EVENT_HEAD_SHA: '',
+              INPUT_PR_NUMBER: '147',
+            }
+          : v2Environment;
+
+      const result = await runExtractedPreflight({
+        source: v2Source,
+        environment: routeEnvironment,
+        fetchImpl,
+      });
+
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('authorized=true\n');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(fetchImpl.mock.calls[0][1]).toMatchObject({
+        method: 'GET',
+        redirect: 'error',
+      });
+      expect(JSON.stringify(fetchImpl.mock.calls[0][1])).not.toMatch(
+        /authorization|token|secret/iu,
+      );
+    },
+  );
+
+  it.each([
+    ['merged pull request', {}, { merged_at: '2026-08-24T00:00:00Z' }],
+    ['wrong base ref', {}, { base: { ...v2Pull().base, ref: 'release' } }],
+    ['missing base ref', {}, { base: { ...v2Pull().base, ref: null } }],
+    ['wrong base sha', {}, { base: { ...v2Pull().base, sha: '0'.repeat(40) } }],
+    ['missing base sha', {}, { base: { ...v2Pull().base, sha: null } }],
+    [
+      'wrong base repository',
+      {},
+      { base: { ...v2Pull().base, repo: { id: 43, full_name: 'fork/repo' } } },
+    ],
+    [
+      'wrong head repository',
+      {},
+      { head: { ...v2Pull().head, repo: { id: 43, full_name: 'fork/repo' } } },
+    ],
+    ['wrong head sha', { EVENT_HEAD_SHA: '0'.repeat(40) }, {}],
+    ['wrong branch', {}, { head: { ...v2Pull().head, ref: 'renamed' } }],
+    ['draft', {}, { draft: true }],
+    ['closed', {}, { state: 'closed' }],
+    ['wrong payload source', { PAYLOAD_SOURCE_SHA: '2'.repeat(40) }, {}],
+    ['missing payload source', { PAYLOAD_SOURCE_SHA: '' }, {}],
+    ['wrong workflow sha', { WORKFLOW_SHA: '2'.repeat(40) }, {}],
+    ['wrong action source', { ACTION_SOURCE_SHA: '2'.repeat(40) }, {}],
+    ['wrong payload digest', { PAYLOAD_SHA256: '2'.repeat(64) }, {}],
+    ['wrong repository', { REPOSITORY: 'fork/repo' }, {}],
+    ['wrong repository id', { REPOSITORY_ID: '43' }, {}],
+  ])('rejects v2 fact drift: %s', async (_name, environmentOverrides, pullOverrides) => {
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: { ...v2Environment, ...environmentOverrides },
+      fetchImpl: vi.fn(async () => response(v2Pull(pullOverrides))),
+    });
+
+    expect(result.stdout).toBe(
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\n',
+    );
+    expect(result.stdout).not.toContain('authorized=true');
+    expect(result.stderr).toMatch(/^APR_R4_E2P_PREFLIGHT_REJECTED /u);
+  });
+
+  it.each([
+    ['malformed', new Response('{invalid', { status: 200 })],
+    ['oversized', new Response('x'.repeat(65_537), { status: 200 })],
+    ['redirect', new Response('{}', { status: 302 })],
+  ])('rejects %s v2 responses atomically', async (_name, invalidResponse) => {
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: v2Environment,
+      fetchImpl: vi.fn(async () => invalidResponse.clone()),
+    });
+    expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
+    expect(result.stdout).not.toContain('authorized=true');
+  });
+
+  it('rejects duplicate v2 base identity keys', async () => {
+    const body = JSON.stringify(v2Pull()).replace(
+      `"sha":"${v2Values.workflowSha}"`,
+      `"sha":"${'0'.repeat(40)}","sha":"${v2Values.workflowSha}"`,
+    );
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: v2Environment,
+      fetchImpl: vi.fn(async () => new Response(body, { status: 200 })),
+    });
+    expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
+    expect(result.stderr).toContain('github-response-duplicate-key');
+  });
+
+  it('fails closed on v2 transport or timeout failures', async () => {
+    for (const error of [new Error('transport'), new DOMException('timeout', 'AbortError')]) {
+      const result = await runExtractedPreflight({
+        source: v2Source,
+        environment: v2Environment,
+        fetchImpl: vi.fn(async () => {
+          throw error;
+        }),
+      });
+      expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
+      expect(result.stdout).not.toContain('authorized=true');
+    }
   });
 });

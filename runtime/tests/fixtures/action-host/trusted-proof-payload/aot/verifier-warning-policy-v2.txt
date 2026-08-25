@@ -1,0 +1,2 @@
+CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with `true` and may not be compatible with AOT. [runtime/tests/ActionHostTrustedProofPayload/AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj]
+CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with `true` and may not be compatible with AOT. [runtime/tests/ActionHostTrustedProofVerifier/AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.csproj]

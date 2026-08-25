@@ -194,6 +194,45 @@ internal sealed class TrustedProofControlTransport : IDisposable
         return read.Value?.Permission is "write" or "admin";
     }
 
+    internal async Task<bool> IsPullRequestCurrentAsync(
+        CancellationToken cancellationToken)
+    {
+        using var response = await client.GetAsync(
+            $"repos/{coordinates.Repository}/pulls/" +
+            coordinates.PullRequestNumber.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return false;
+        }
+
+        var read = await ReadPlatformAsync(
+            response,
+            TrustedProofGitHubJsonContext.Default.TrustedProofPullRequest,
+            cancellationToken).ConfigureAwait(false);
+        var pull = read.Value;
+        return pull is not null &&
+            pull.Number == coordinates.PullRequestNumber &&
+            StringComparer.Ordinal.Equals(pull.State, "open") &&
+            !pull.Draft &&
+            pull.MergedAt is null &&
+            pull.Base is not null &&
+            StringComparer.Ordinal.Equals(pull.Base.Ref, "main") &&
+            StringComparer.Ordinal.Equals(
+                pull.Base.Sha,
+                coordinates.WorkflowSha) &&
+            MatchesRepository(pull.Base.Repository) &&
+            pull.Head is not null &&
+            StringComparer.Ordinal.Equals(
+                pull.Head.Ref,
+                "r4-trusted-proof/" + coordinates.OperationId) &&
+            StringComparer.Ordinal.Equals(
+                pull.Head.Sha,
+                coordinates.FixtureHeadSha) &&
+            MatchesRepository(pull.Head.Repository);
+    }
+
     internal async Task<TrustedProofMutationOutcome> DeleteAsync(
         long commentId,
         CancellationToken cancellationToken)
@@ -238,6 +277,13 @@ internal sealed class TrustedProofControlTransport : IDisposable
         comment.User.Login.Length <= 100 &&
         comment.CreatedAt != default &&
         comment.UpdatedAt != default;
+
+    private bool MatchesRepository(TrustedProofRepositoryIdentity? repository) =>
+        repository is not null &&
+        repository.Id == coordinates.RepositoryId &&
+        StringComparer.Ordinal.Equals(
+            repository.FullName,
+            coordinates.Repository);
 
     private static async Task<(T? Value, int BytesRead)> ReadPlatformAsync<T>(
         HttpResponseMessage response,

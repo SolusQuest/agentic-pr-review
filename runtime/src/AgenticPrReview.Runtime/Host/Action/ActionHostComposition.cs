@@ -427,7 +427,8 @@ internal sealed class ActionHostCompositionDependencies
         IActionHostProviderRunnerFactory providerFactory,
         TimeProvider timeProvider,
         Func<string>? stagingParentFactory = null,
-        IActionHostPostAcceptanceInlineHook? inlineHook = null)
+        IActionHostPostAcceptanceInlineHook? inlineHook = null,
+        IActionHostTrustedWorkflowAdmission? workflowAdmission = null)
     {
         EventReader = eventReader ??
             throw new ArgumentNullException(nameof(eventReader));
@@ -447,6 +448,8 @@ internal sealed class ActionHostCompositionDependencies
             throw new ArgumentNullException(nameof(timeProvider));
         StagingParentFactory = stagingParentFactory ?? CreateStagingParent;
         InlineHook = inlineHook;
+        WorkflowAdmission = workflowAdmission ??
+            ActionHostV1TrustedWorkflowAdmission.Instance;
     }
 
     internal IActionHostEventReader EventReader { get; }
@@ -463,6 +466,7 @@ internal sealed class ActionHostCompositionDependencies
     internal TimeProvider TimeProvider { get; }
     internal Func<string> StagingParentFactory { get; }
     internal IActionHostPostAcceptanceInlineHook? InlineHook { get; }
+    internal IActionHostTrustedWorkflowAdmission WorkflowAdmission { get; }
 
     internal static ActionHostCompositionDependencies Production()
     {
@@ -522,7 +526,8 @@ internal sealed class ActionHostComposition
             authorization = await new ActionHostAuthorizer(
                     dependencies.EventReader,
                     dependencies.AuthorizationFactory,
-                    ActionHostAuthorizationPolicy.TrustedProof)
+                    ActionHostAuthorizationPolicy.TrustedProof,
+                    workflowAdmission: dependencies.WorkflowAdmission)
                 .AuthorizeAsync(launch, cancellationToken)
                 .ConfigureAwait(false);
         }
