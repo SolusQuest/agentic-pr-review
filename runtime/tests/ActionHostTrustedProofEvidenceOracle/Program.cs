@@ -11,11 +11,26 @@ internal sealed record OracleRecord(
     string ArtifactId,
     string Role,
     string Scope,
+    string BaseScopeDigest,
     string ObjectClass,
     string ObjectIdentity,
     string ProducingRunIdentity,
     string ProducingRunAttempt,
+    string OperationId,
+    string OwnershipEvidenceSha256,
     string PayloadSha256);
+
+internal sealed record OracleOwnershipEvidence(
+    string ArtifactId,
+    string ArtifactName,
+    string Scope,
+    string ObjectClass,
+    string OperationId,
+    string ProducingRunId,
+    string ProducingRunAttempt,
+    string ArchiveSha256,
+    string EncryptedObjectSha256,
+    string EncryptedObjectSize);
 
 internal sealed record OracleDocument(
     string Kind,
@@ -27,6 +42,14 @@ internal sealed record OracleDocument(
     bool ExactSevenSuccess,
     bool RecoveryOnly,
     OracleRecord[] Records);
+
+internal sealed record OracleBuildReceipt(
+    string Kind,
+    string SourceCommit,
+    string SourceTree,
+    string OracleAssemblySha256,
+    string ProductionAssemblySha256,
+    string Result);
 
 internal static class Program
 {
@@ -93,9 +116,19 @@ internal static class Program
                     CryptographicOperations.ZeroMemory(canonical);
                 }
                 if (manifest.Kind != "apr-r4-e3-capture-manifest-v1" ||
-                    manifest.OperationIds.Length != 2 ||
-                    manifest.OperationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
-                    manifest.Sources.Length == 0 ||
+                     manifest.OperationIds.Length != 2 ||
+                     manifest.OperationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
+                     manifest.OperationRuns.Length != 4 ||
+                     manifest.OperationRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() != 4 ||
+                     manifest.OperationRuns.Any(item =>
+                         !manifest.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
+                         !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
+                         !PositiveDecimal(item.RunId) ||
+                         item.RunAttempt != "1") ||
+                     manifest.OperationRuns.GroupBy(item => item.OperationId, StringComparer.Ordinal)
+                         .Any(group => group.Count() != 2 ||
+                             group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
+                     manifest.Sources.Length == 0 ||
                     manifest.Artifacts.Length == 0 ||
                     manifest.Artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() != manifest.Artifacts.Length ||
                     manifest.Artifacts.Select(item => item.ArtifactName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Artifacts.Length)
@@ -182,10 +215,12 @@ internal static class Program
                                 throw new InvalidDataException("capture_object_invalid");
                             }
 
-                            encrypted.Add(new TrustedProofEncryptedArtifact(
-                                artifact.ArtifactId,
-                                artifact.ArtifactName,
-                                encryptedObject.Bytes));
+                             encrypted.Add(new TrustedProofEncryptedArtifact(
+                                 artifact.ArtifactId,
+                                 artifact.ArtifactName,
+                                 artifact.ProducingRunId,
+                                 long.Parse(artifact.ProducingRunAttempt),
+                                 encryptedObject.Bytes));
                             retained = true;
                         }
                         finally
@@ -204,32 +239,47 @@ internal static class Program
                 if (!TrustedProofEvidenceCodecOracle.TryDecode(
                         manifest.RepositoryId,
                         Convert.ToBase64String(current),
-                        previous is null ? null : Convert.ToBase64String(previous),
-                        encrypted,
-                        out var decoded) ||
+                         previous is null ? null : Convert.ToBase64String(previous),
+                         encrypted,
+                         manifest.OperationRuns.Select(item => new TrustedProofOperationRun(
+                             item.OperationId,
+                             item.Scope,
+                             item.RunId,
+                             long.Parse(item.RunAttempt))).ToArray(),
+                         out var decoded) ||
                     decoded is null)
                 {
                     throw new InvalidDataException("codec_oracle_invalid");
                 }
 
+                var oracleAssemblySha256 = AssemblyDigest(oracleAssembly);
+                var productionAssemblySha256 = AssemblyDigest(productionAssembly);
                 var document = new OracleDocument(
                     "apr-r4-e3-production-codec-oracle-result-v1",
                     options["--capture-manifest-sha256"],
                     sourceSha,
                     sourceTree,
-                    AssemblyDigest(oracleAssembly),
-                    AssemblyDigest(productionAssembly),
+                    oracleAssemblySha256,
+                    productionAssemblySha256,
                     decoded.ExactSevenSuccess,
                     decoded.RecoveryOnly,
-                    decoded.Records.Select(record => new OracleRecord(
-                        record.ArtifactId,
-                        record.Role,
-                        record.Scope,
-                        record.ObjectClass,
-                        record.ObjectIdentity,
-                        record.ProducingRunIdentity,
-                        record.ProducingRunAttempt.ToString(),
-                        record.PayloadSha256)).ToArray());
+                     decoded.Records.Select(record =>
+                     {
+                         var artifact = manifest.Artifacts.Single(item =>
+                             StringComparer.Ordinal.Equals(item.ArtifactId, record.ArtifactId));
+                         return new OracleRecord(
+                             record.ArtifactId,
+                             record.Role,
+                             record.Scope,
+                             record.BaseScopeDigest,
+                             record.ObjectClass,
+                             record.ObjectIdentity,
+                             record.ProducingRunIdentity,
+                             record.ProducingRunAttempt.ToString(),
+                             record.OperationId,
+                             OwnershipEvidenceSha256(record, artifact),
+                             record.PayloadSha256);
+                     }).ToArray());
                 var output = CanonicalEvidence.Encode(document, EvidenceJson.Options);
                 try
                 {
@@ -245,6 +295,28 @@ internal static class Program
                     CryptographicOperations.ZeroMemory(output);
                 }
 
+                var buildReceipt = CanonicalEvidence.Encode(
+                    new OracleBuildReceipt(
+                        "apr-r4-e3-production-codec-oracle-build-receipt-v1",
+                        sourceSha,
+                        sourceTree,
+                        oracleAssemblySha256,
+                        productionAssemblySha256,
+                        "passed"),
+                    EvidenceJson.Options);
+                try
+                {
+                    var packagePath = System.IO.Path.GetDirectoryName(manifestPath)!;
+                    CanonicalEvidence.WriteCreateNew(
+                        RestrictedEvidenceRoot.ResolveChildPath(
+                            packagePath,
+                            options["--build-receipt-output"]),
+                        buildReceipt);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(buildReceipt);
+                }
                 root.RemoveCredentialFile(currentCredentialPath);
                 currentCredentialPath = null;
                 if (previousCredentialPath is not null)
@@ -348,6 +420,7 @@ internal static class Program
             "--oracle-source-tree",
             "--current-state-key-file",
             "--output",
+            "--build-receipt-output",
         };
         var allowed = required.Append("--previous-state-key-file").ToHashSet(StringComparer.Ordinal);
         if (args.Length % 2 != 0)
@@ -366,6 +439,10 @@ internal static class Program
 
         if (required.Any(name => !result.ContainsKey(name)) ||
             !RestrictedEvidenceRoot.IsSinglePathSegment(result["--output"]) ||
+            !RestrictedEvidenceRoot.IsSinglePathSegment(result["--build-receipt-output"]) ||
+            StringComparer.OrdinalIgnoreCase.Equals(
+                result["--output"],
+                result["--build-receipt-output"]) ||
             !StringComparer.Ordinal.Equals(
                 result["--current-state-key-file"],
                 "current-state-key") ||
@@ -407,6 +484,38 @@ internal static class Program
     private static bool Sha(string value, int length) =>
         value.Length == length &&
         value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool PositiveDecimal(string value) =>
+        value.Length is > 0 and <= 20 &&
+        value.All(character => character is >= '0' and <= '9') &&
+        (value.Length == 1 || value[0] != '0') &&
+        ulong.TryParse(value, out var parsed) && parsed > 0;
+
+    private static string OwnershipEvidenceSha256(
+        TrustedProofDecodedArtifact record,
+        CaptureManifestArtifact artifact)
+    {
+        var document = new OracleOwnershipEvidence(
+            artifact.ArtifactId,
+            artifact.ArtifactName,
+            record.Scope,
+            record.ObjectClass,
+            record.OperationId,
+            artifact.ProducingRunId,
+            artifact.ProducingRunAttempt,
+            artifact.ArchiveSha256,
+            artifact.EncryptedObjectSha256,
+            artifact.EncryptedObjectSize);
+        var bytes = CanonicalEvidence.Encode(document, EvidenceJson.Options);
+        try
+        {
+            return CanonicalEvidence.Sha256(bytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
 
     private static int Invalid()
     {

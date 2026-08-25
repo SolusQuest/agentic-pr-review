@@ -4,7 +4,10 @@ import path from 'node:path';
 
 import {
   assembleTrustedProofEvidence,
+  assertFinalizedPrivatePackage,
+  buildFinalizedPrivatePackageManifest,
   canonicalJson,
+  projectFinalizedTrustedProofEvidence,
   sha256,
 } from './r4-trusted-proof-contract.mjs';
 
@@ -146,6 +149,7 @@ function resolvePackageFile(restrictedRoot, packageRoot, relative, maximumBytes)
 export function verifyCapturedFiles(restrictedRoot, manifestPath, manifest) {
   const packageRoot = path.dirname(manifestPath);
   const rootDevice = fs.statSync(restrictedRoot, { bigint: true }).dev;
+  const capturedSourceBodies = new Map();
   for (const source of manifest.sources) {
     const pinned = readPinned(
       resolvePackageFile(restrictedRoot, packageRoot, source.body_path, maximumDocumentBytes),
@@ -160,6 +164,17 @@ export function verifyCapturedFiles(restrictedRoot, manifestPath, manifest) {
       pinned.bytes.fill(0);
       invalid();
     }
+    let text;
+    try {
+      text = pinned.bytes.toString('utf8');
+      JSON.parse(text);
+    } catch {
+      pinned.bytes.fill(0);
+      invalid();
+    }
+    capturedSourceBodies.set(source.source_id, {
+      text,
+    });
     pinned.bytes.fill(0);
   }
   for (const artifact of manifest.artifacts) {
@@ -192,6 +207,7 @@ export function verifyCapturedFiles(restrictedRoot, manifestPath, manifest) {
       pinned.bytes.fill(0);
     }
   }
+  return capturedSourceBodies;
 }
 
 function parseArgs(args) {
@@ -203,7 +219,14 @@ function parseArgs(args) {
     '--source-bundle',
     '--capture-manifest',
     '--oracle-result',
+    '--oracle-build-receipt',
+    '--ui-attestation',
+    '--cleanup-plan',
+    '--cleanup-readbacks',
+    '--public-leak-scan',
+    '--restricted-package-readback',
     '--host-output',
+    '--package-manifest-output',
     '--public-output',
   ];
   if (args.length !== names.length * 2) invalid();
@@ -278,9 +301,38 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       resolveExisting(restrictedRoot, options['--oracle-result']),
       rootStat.dev,
     );
+    const uiAttestation = readCanonical(
+      resolveExisting(restrictedRoot, options['--ui-attestation']),
+      rootStat.dev,
+    );
+    const payloadReceipt = readCanonical(
+      resolveExisting(
+        repositoryRoot,
+        path.join(
+          'runtime',
+          'tests',
+          'fixtures',
+          'action-host',
+          'trusted-proof',
+          'trusted-proof-payload-receipt-v2.json',
+        ),
+      ),
+      undefined,
+      false,
+    );
+    const retainedInputs = [
+      ['cleanup-plan', '--cleanup-plan'],
+      ['oracle-build-receipt', '--oracle-build-receipt'],
+      ['cleanup-readbacks', '--cleanup-readbacks'],
+      ['public-leak-scan-result', '--public-leak-scan'],
+      ['restricted-package-readback', '--restricted-package-readback'],
+    ].map(([sourceId, option]) => [
+      sourceId,
+      readCanonical(resolveExisting(restrictedRoot, options[option]), rootStat.dev).value,
+    ]);
     const credentialNames = ['github-token', 'current-state-key', 'previous-state-key'];
     if (credentialNames.some((name) => fs.existsSync(path.join(restrictedRoot, name)))) invalid();
-    verifyCapturedFiles(restrictedRoot, capturePath, capture.value);
+    const capturedSourceBodies = verifyCapturedFiles(restrictedRoot, capturePath, capture.value);
 
     const assembled = assembleTrustedProofEvidence({
       sourceMap: sourceMap.value,
@@ -289,22 +341,60 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       captureManifestSha256: sha256(capture.bytes),
       oracleResult: oracle.value,
       oracleResultSha256: sha256(oracle.bytes),
+      capturedSourceBodies,
+      uiAttestation: uiAttestation.value,
+      uiAttestationSha256: sha256(uiAttestation.bytes),
+      retainedDocuments: new Map([
+        ['trusted-proof-payload-receipt-v2', payloadReceipt.value],
+        ...retainedInputs,
+      ]),
       credentialCopiesAbsent: true,
     });
     const hostOutput = resolveNew(restrictedRoot, options['--host-output']);
-    const publicOutput = resolveNew(worktreeRoot, options['--public-output']);
+    const packageManifestOutput = resolveNew(restrictedRoot, options['--package-manifest-output']);
     fs.writeFileSync(hostOutput, canonicalJson(assembled.host), { flag: 'wx', mode: 0o600 });
+    const privatePackageManifest = buildFinalizedPrivatePackageManifest({
+      host: assembled.host,
+      sourceBundle: sourceBundle.value,
+      captureManifestSha256: sha256(capture.bytes),
+      oracleResultSha256: sha256(oracle.bytes),
+      cleanupPlan: assembled.cleanupPlan,
+    });
+    fs.writeFileSync(packageManifestOutput, canonicalJson(privatePackageManifest), {
+      flag: 'wx',
+      mode: 0o600,
+    });
+    const hostReadback = readCanonical(hostOutput, rootStat.dev);
+    const manifestReadback = readCanonical(packageManifestOutput, rootStat.dev);
+    if (canonicalJson(hostReadback.value) !== canonicalJson(assembled.host)) invalid();
+    assertFinalizedPrivatePackage({
+      host: hostReadback.value,
+      sourceBundle: sourceBundle.value,
+      captureManifestSha256: sha256(capture.bytes),
+      oracleResultSha256: sha256(oracle.bytes),
+      cleanupPlan: assembled.cleanupPlan,
+      privatePackageManifest: manifestReadback.value,
+    });
     if (assembled.recoveryOnly) {
       process.stdout.write(
         `APR_R4_E3_ASSEMBLY_RECOVERY_ONLY ${sha256(canonicalJson(assembled.host))}\n`,
       );
     } else {
-      fs.writeFileSync(publicOutput, canonicalJson(assembled.publicEvidence), {
+      const publicOutput = resolveNew(worktreeRoot, options['--public-output']);
+      const publicEvidence = projectFinalizedTrustedProofEvidence({
+        host: hostReadback.value,
+        sourceBundle: sourceBundle.value,
+        captureManifestSha256: sha256(capture.bytes),
+        oracleResultSha256: sha256(oracle.bytes),
+        cleanupPlan: assembled.cleanupPlan,
+        privatePackageManifest: manifestReadback.value,
+      });
+      fs.writeFileSync(publicOutput, canonicalJson(publicEvidence), {
         flag: 'wx',
         mode: 0o600,
       });
       process.stdout.write(
-        `APR_R4_E3_ASSEMBLY_OK ${sha256(canonicalJson(assembled.host))} ${sha256(canonicalJson(assembled.publicEvidence))}\n`,
+        `APR_R4_E3_ASSEMBLY_OK ${sha256(canonicalJson(assembled.host))} ${sha256(canonicalJson(publicEvidence))}\n`,
       );
     }
   } catch {

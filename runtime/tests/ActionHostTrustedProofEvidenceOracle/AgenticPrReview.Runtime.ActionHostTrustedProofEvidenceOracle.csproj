@@ -5,10 +5,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle</AssemblyName>
-    <TrustedProofOracleSourceSha Condition="'$(TrustedProofOracleSourceSha)' == ''">unbound</TrustedProofOracleSourceSha>
-    <TrustedProofOracleSourceTree Condition="'$(TrustedProofOracleSourceTree)' == ''">unbound</TrustedProofOracleSourceTree>
   </PropertyGroup>
+  <Target Name="ValidateTrustedProofOracleBuildIdentity" BeforeTargets="CoreCompile">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(TrustedProofOracleSourceSha)', '^[0-9a-f]{40}$'))"
+           Text="TrustedProofOracleSourceSha must be an explicit lowercase 40-hex commit." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(TrustedProofOracleSourceTree)', '^[0-9a-f]{40}$'))"
+           Text="TrustedProofOracleSourceTree must be an explicit lowercase 40-hex tree." />
+  </Target>
   <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>TrustedProofOracleBuildReceiptArgument</_Parameter1>
+      <_Parameter2>--build-receipt-output</_Parameter2>
+    </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>TrustedProofOracleSourceSha</_Parameter1>
       <_Parameter2>$(TrustedProofOracleSourceSha)</_Parameter2>

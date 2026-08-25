@@ -99,6 +99,11 @@ internal static class Program
                     plan.RepositoryId,
                     plan.Repository,
                     plan.OperationIds,
+                    plan.OperationRuns.Select(item => new CaptureManifestOperationRun(
+                        item.OperationId,
+                        item.Scope,
+                        item.RunId,
+                        item.RunAttempt)).ToArray(),
                     plan.SourceMapSha256);
                 Console.Out.WriteLine($"APR_R4_E3_CAPTURE_OK {finalized.Sha256}");
                 return 0;

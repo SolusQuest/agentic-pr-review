@@ -63,7 +63,7 @@ const fixtureDigests = new Map([
   ],
   [
     'authorizations/execution.json',
-    '214b7526818879bebbef8604a31ed25ca7009e44b5047f8d5c75e46f4b90fd2b',
+    '93054357c861fab4df4ce9bb47f191f6b0f48a42abba835218816438b31a5809',
   ],
   ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
   ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
@@ -87,16 +87,16 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '92c915c2f39f744d14fd8b5ee44419de098bf98b725d12bf079f468740bc1576',
+    '155dbb1b86c454696b3285577f75cfaf7f4f8fe28b1bf1e7fb5796d61848b7b9',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
     'fab487f9274857335cd976414f070957c812d528f69841caa52c8ab31e836594',
   ],
-  ['source-map.json', 'cd9b5828cdbd42a39b4a528bc1532e74d5317fa8882961429cad5cba96b7e9d4'],
+  ['source-map.json', '6bc836a50bb5b2f55dba1c23bab604bba402ca7b0761ef47a9df4eea9264e0e9'],
   [
     'templates/host-restricted-evidence.json',
-    'db5f2c25316e319ef0ee3b48bd0c629765c32fd0a0bc014c32207733ab173552',
+    'ee54f702d8d2d860158a6047642919528a0668d033246c1e1d989d91b0e794b0',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -779,11 +779,20 @@ export function checkR4TrustedProof(options = {}) {
     path.join(root, 'scripts', 'assemble-r4-trusted-proof-evidence.mjs'),
     'utf8',
   );
+  const assemblerBoundarySource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofEvidenceAssembler', 'Program.cs'),
+    'utf8',
+  );
   if (
     !oracleProject.includes('TrustedProofOracleSourceSha') ||
     !oracleProject.includes('TrustedProofOracleSourceTree') ||
     assemblerSource.includes('--assembly-input') ||
-    !assemblerSource.includes('--source-bundle')
+    !assemblerSource.includes('--source-bundle') ||
+    !assemblerBoundarySource.includes('AcquirePinnedFile') ||
+    !assemblerBoundarySource.includes('lease.Validate()') ||
+    !assemblerBoundarySource.includes('AssertCredentialCopiesAbsent') ||
+    !assemblerBoundarySource.includes('ValidatePrivateManifest') ||
+    !assemblerBoundarySource.includes('assemble-r4-trusted-proof-evidence.mjs')
   ) {
     fail('evidence-authority-chain');
   }

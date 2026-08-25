@@ -1,9 +1,52 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 
 public sealed record PinnedEvidenceFile(byte[] Bytes, string Identity);
+
+public sealed class PinnedEvidenceLease : IDisposable
+{
+    private readonly SafeFileHandle handle;
+    private readonly EvidenceFileIdentity physicalIdentity;
+    private bool disposed;
+
+    internal PinnedEvidenceLease(
+        SafeFileHandle handle,
+        EvidenceFileIdentity physicalIdentity,
+        byte[] bytes,
+        string identity)
+    {
+        this.handle = handle;
+        this.physicalIdentity = physicalIdentity;
+        Bytes = bytes;
+        Identity = identity;
+    }
+
+    public byte[] Bytes { get; }
+    public string Identity { get; }
+
+    public void Validate()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (EvidenceFileHandle.Identity(handle) != physicalIdentity)
+        {
+            throw new InvalidDataException("restricted_file_replaced");
+        }
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+        disposed = true;
+        CryptographicOperations.ZeroMemory(Bytes);
+        handle.Dispose();
+    }
+}
 
 internal readonly record struct EvidenceFileIdentity(
     ulong Device,
@@ -19,10 +62,15 @@ internal readonly record struct EvidenceFileIdentity(
 internal static partial class EvidenceFileHandle
 {
     private const int OpenReadOnly = 0;
+    private const int OpenWriteOnly = 1;
+    private const int OpenCreate = 0x40;
+    private const int OpenExclusive = 0x80;
     private const int OpenNoFollowFlag = 0x20000;
     private const int OpenCloseOnExec = 0x80000;
     private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
     private const uint FileShareRead = 0x00000001;
+    private const uint CreateNew = 1;
     private const uint OpenExisting = 3;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
     private const uint FileFlagRandomAccess = 0x10000000;
@@ -55,6 +103,43 @@ internal static partial class EvidenceFileHandle
             if (descriptor < 0)
             {
                 throw new InvalidDataException("restricted_file_open_invalid");
+            }
+            return new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        }
+
+        throw new InvalidDataException("restricted_platform_unsupported");
+    }
+
+    internal static SafeFileHandle CreateNewNoFollow(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var handle = CreateFile(
+                path,
+                GenericWrite,
+                0,
+                0,
+                CreateNew,
+                FileFlagOpenReparsePoint | FileFlagRandomAccess,
+                0);
+            if (handle.IsInvalid)
+            {
+                handle.Dispose();
+                throw new InvalidDataException("restricted_file_create_invalid");
+            }
+            return handle;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            const uint ownerReadWrite = 0x180;
+            var descriptor = OpenCreateNew(
+                path,
+                OpenWriteOnly | OpenCreate | OpenExclusive | OpenNoFollowFlag | OpenCloseOnExec,
+                ownerReadWrite);
+            if (descriptor < 0)
+            {
+                throw new InvalidDataException("restricted_file_create_invalid");
             }
             return new SafeFileHandle((nint)descriptor, ownsHandle: true);
         }
@@ -96,6 +181,30 @@ internal static partial class EvidenceFileHandle
 
     internal static uint EffectiveUserId() => OperatingSystem.IsLinux() ? GetEffectiveUserId() : 0;
 
+    internal static void CreateDirectoryExclusive(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (!CreateDirectory(path, 0))
+            {
+                throw new InvalidDataException("restricted_directory_create_invalid");
+            }
+            return;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            const uint ownerReadWriteExecute = 0x1c0;
+            if (MakeDirectory(path, ownerReadWriteExecute) != 0)
+            {
+                throw new InvalidDataException("restricted_directory_create_invalid");
+            }
+            return;
+        }
+
+        throw new InvalidDataException("restricted_platform_unsupported");
+    }
+
     [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial SafeFileHandle CreateFile(
         string fileName,
@@ -106,6 +215,10 @@ internal static partial class EvidenceFileHandle
         uint flagsAndAttributes,
         nint templateFile);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateDirectoryW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CreateDirectory(string pathName, nint securityAttributes);
+
     [LibraryImport("kernel32.dll", EntryPoint = "GetFileInformationByHandle", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetFileInformationByHandle(
@@ -115,8 +228,14 @@ internal static partial class EvidenceFileHandle
     [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int Open(string path, int flags);
 
+    [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int OpenCreateNew(string path, int flags, uint mode);
+
     [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static partial int FStat(int fileDescriptor, out LinuxFileInformation information);
+
+    [LibraryImport("libc", EntryPoint = "mkdir", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MakeDirectory(string path, uint mode);
 
     [LibraryImport("libc", EntryPoint = "geteuid")]
     private static partial uint GetEffectiveUserId();

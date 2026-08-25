@@ -35,10 +35,11 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
-    public void CaptureAndOracleHaveDisjointProtectedCapabilities()
+    public void CaptureOracleAndAssemblerHaveDisjointProtectedCapabilities()
     {
         var capture = typeof(TrustedProofCaptureClient).Assembly;
         var oracle = Assembly.Load("AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle");
+        var assembler = Assembly.Load("AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceAssembler");
         Assert.DoesNotContain(
             capture.GetReferencedAssemblies(),
             item => item.Name == "AgenticPrReview.Runtime");
@@ -48,6 +49,12 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.DoesNotContain(
             oracle.GetReferencedAssemblies(),
             item => item.Name == "System.Net.Http");
+        Assert.DoesNotContain(
+            assembler.GetReferencedAssemblies(),
+            item => item.Name == "AgenticPrReview.Runtime");
+        Assert.DoesNotContain(
+            assembler.GetReferencedAssemblies(),
+            item => item.Name == "System.Net.Http");
 
         var captureStrings = Encoding.UTF8.GetString(File.ReadAllBytes(capture.Location));
         var oracleStrings = Encoding.UTF8.GetString(File.ReadAllBytes(oracle.Location));
@@ -55,6 +62,22 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.DoesNotContain("--previous-state-key-file", captureStrings, StringComparison.Ordinal);
         Assert.DoesNotContain("--github-token-file", oracleStrings, StringComparison.Ordinal);
         Assert.DoesNotContain("HttpClient", oracleStrings, StringComparison.Ordinal);
+        Assert.Equal(
+            "--build-receipt-output",
+            oracle.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .Single(item => item.Key == "TrustedProofOracleBuildReceiptArgument").Value);
+        Assert.Equal(
+            "scripts/assemble-r4-trusted-proof-evidence.mjs",
+            assembler.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .Single(item => item.Key == "TrustedProofAssemblerNodeEntryPoint").Value);
+        Assert.Equal(
+            "3333333333333333333333333333333333333333",
+            oracle.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .Single(item => item.Key == "TrustedProofOracleSourceSha").Value);
+        Assert.Equal(
+            "4444444444444444444444444444444444444444",
+            oracle.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .Single(item => item.Key == "TrustedProofOracleSourceTree").Value);
     }
 
     [Theory]
@@ -233,6 +256,26 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public void RestrictedRootWritesCreateNewAndReopensTheSameBytes()
+    {
+        var root = CreateRestrictedRoot();
+        var bytes = Encoding.UTF8.GetBytes("{\"kind\":\"synthetic\"}\n");
+        var identity = root.WritePinnedFileCreateNew("assembled.json", bytes);
+        var readback = root.ReadPinnedFile("assembled.json", EvidenceLimits.MaximumDocumentBytes);
+        try
+        {
+            Assert.Equal(bytes, readback.Bytes);
+            Assert.Equal(identity, readback.Identity);
+            Assert.Throws<InvalidDataException>(() =>
+                root.WritePinnedFileCreateNew("assembled.json", bytes));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(readback.Bytes);
+        }
+    }
+
+    [Fact]
     public void PackageFinalizationRejectsSameBytesAtAReplacementIdentity()
     {
         var root = CreateRestrictedRoot();
@@ -272,6 +315,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "42",
             "SolusQuest/agentic-pr-review",
             [new string('6', 64), new string('8', 64)],
+            OperationRuns(),
             new string('7', 64)));
     }
 
@@ -298,6 +342,49 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             root.Path,
             root.DestinationIdentitySha256,
             []));
+    }
+
+    [Fact]
+    public void WindowsRestrictedRootRejectsBroadReadAclOnPinnedFile()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var root = CreateRestrictedRoot();
+        var path = Path.Join(root.Path, "broad-read");
+        WriteRestrictedText(path, "synthetic-source");
+        var file = new FileInfo(path);
+        var security = file.GetAccessControl(AccessControlSections.Access);
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.ReadData,
+            AccessControlType.Allow));
+        file.SetAccessControl(security);
+
+        Assert.Throws<InvalidDataException>(() =>
+            root.ReadPinnedFile("broad-read", EvidenceLimits.MaximumDocumentBytes));
+    }
+
+    [Fact]
+    public void WindowsPinnedLeaseDeniesReplacementForTheAssemblyWindow()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var root = CreateRestrictedRoot();
+        var path = Path.Join(root.Path, "leased-source");
+        WriteRestrictedText(path, "synthetic-source");
+        using var lease = root.AcquirePinnedFile(
+            "leased-source",
+            EvidenceLimits.MaximumDocumentBytes);
+
+        Assert.Throws<IOException>(() =>
+            File.Move(path, Path.Join(root.Path, "replacement-target")));
+        lease.Validate();
     }
 
     [Fact]
@@ -350,6 +437,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "42",
             "SolusQuest/agentic-pr-review",
             [new string('6', 64), new string('8', 64)],
+            OperationRuns(),
             new string('7', 64));
         Assert.True(File.Exists(finalized.Path));
         Assert.Equal(finalized.Sha256, CanonicalEvidence.Sha256(File.ReadAllBytes(finalized.Path)));
@@ -357,7 +445,18 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "42",
             "SolusQuest/agentic-pr-review",
             [new string('6', 64), new string('8', 64)],
+            OperationRuns(),
             new string('7', 64)));
+    }
+
+    [Fact]
+    public void PackageWriterCreatesItsPackageDirectoryExclusively()
+    {
+        var root = CreateRestrictedRoot();
+        _ = new CapturePackageWriter(root, "exclusive-operation");
+
+        Assert.Throws<InvalidDataException>(() =>
+            new CapturePackageWriter(root, "exclusive-operation"));
     }
 
     [Theory]
@@ -415,6 +514,26 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "/repos/SolusQuest/agentic-pr-review/actions/runs?per_page=100",
             CancellationToken.None));
         Assert.Equal(1, calls);
+        CryptographicOperations.ZeroMemory(token);
+    }
+
+    [Theory]
+    [InlineData("not-a-link")]
+    [InlineData("<https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs?page=2>; rel=\"next\"; type=\"application/json\"")]
+    [InlineData("<https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs?page=2>; rel=next")]
+    public async Task CollectorRejectsMalformedOrExtendedPaginationLinks(string link)
+    {
+        var page = JsonResponse("{\"page\":1}");
+        page.Headers.TryAddWithoutValidation("Link", link);
+        var token = Encoding.UTF8.GetBytes("synthetic-token");
+        using var client = new TrustedProofCaptureClient(
+            token,
+            new RecordingHandler(_ => page),
+            new RecordingHandler(_ => throw new InvalidOperationException()));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetPaginatedAsync(
+            "/repos/SolusQuest/agentic-pr-review/actions/runs?per_page=100",
+            CancellationToken.None));
         CryptographicOperations.ZeroMemory(token);
     }
 
@@ -595,6 +714,14 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         return response;
     }
+
+    private static CaptureManifestOperationRun[] OperationRuns() =>
+    [
+        new(new string('6', 64), "normal", "9001", "1"),
+        new(new string('6', 64), "normal", "9002", "1"),
+        new(new string('8', 64), "stale", "9003", "1"),
+        new(new string('8', 64), "stale", "9004", "1"),
+    ];
 
     private static SafeResponseCapture DownloadCapture(byte[] archive) =>
         new(

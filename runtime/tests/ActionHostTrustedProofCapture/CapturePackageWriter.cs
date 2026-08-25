@@ -31,16 +31,7 @@ public sealed class CapturePackageWriter
             throw new InvalidDataException("capture_package_exists");
         }
 
-        if (OperatingSystem.IsWindows())
-        {
-            Directory.CreateDirectory(packagePath);
-        }
-        else
-        {
-            Directory.CreateDirectory(
-                packagePath,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        packagePath = root.CreateExclusiveDirectory(packageName);
     }
 
     public void AddSource(string sourceId, SafeResponseCapture capture, ReadOnlySpan<byte> body)
@@ -183,6 +174,7 @@ public sealed class CapturePackageWriter
         string repositoryId,
         string repository,
         string[] operationIds,
+        CaptureManifestOperationRun[] operationRuns,
         string sourceMapSha256)
     {
         if (finalized || sources.Count == 0 || artifacts.Count == 0 ||
@@ -191,6 +183,19 @@ public sealed class CapturePackageWriter
             operationIds.Length != 2 ||
             operationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
             operationIds.Any(item => !Sha256(item)) ||
+            operationRuns.Length != 4 ||
+            operationRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() != 4 ||
+            operationRuns.Any(item =>
+                !operationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
+                !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
+                !PositiveDecimal(item.RunId) ||
+                item.RunAttempt != "1") ||
+            operationRuns.GroupBy(item => item.OperationId, StringComparer.Ordinal)
+                .Any(group => group.Count() != 2 ||
+                    group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
+            artifacts.Any(artifact => !operationRuns.Any(run =>
+                StringComparer.Ordinal.Equals(run.RunId, artifact.ProducingRunId) &&
+                StringComparer.Ordinal.Equals(run.RunAttempt, artifact.ProducingRunAttempt))) ||
             !Sha256(sourceMapSha256))
         {
             throw new InvalidDataException("capture_manifest_invalid");
@@ -245,6 +250,7 @@ public sealed class CapturePackageWriter
             repositoryId,
             repository,
             operationIds,
+            operationRuns,
             sourceMapSha256,
             root.DestinationIdentitySha256,
             sources.ToArray(),

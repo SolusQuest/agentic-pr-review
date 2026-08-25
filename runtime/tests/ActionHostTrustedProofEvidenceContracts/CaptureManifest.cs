@@ -22,6 +22,12 @@ public sealed record CaptureManifestArtifact(
     string EncryptedObjectSize,
     string EncryptedObjectFileIdentity);
 
+public sealed record CaptureManifestOperationRun(
+    string OperationId,
+    string Scope,
+    string RunId,
+    string RunAttempt);
+
 public sealed record CaptureManifestSource(
     string SourceId,
     string Route,
@@ -41,6 +47,7 @@ public sealed record CaptureManifestDocument(
     string RepositoryId,
     string Repository,
     string[] OperationIds,
+    CaptureManifestOperationRun[] OperationRuns,
     string SourceMapSha256,
     string DestinationIdentitySha256,
     CaptureManifestSource[] Sources,

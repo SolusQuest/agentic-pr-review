@@ -95,6 +95,10 @@ public sealed class RestrictedEvidenceRoot
         {
             throw new InvalidDataException("restricted_root_marker_invalid");
         }
+        if (OperatingSystem.IsWindows())
+        {
+            ValidateWindowsOwnerAccess(markerFile);
+        }
 
         byte[] markerBytes;
         EvidenceFileIdentity markerPhysicalIdentity;
@@ -188,6 +192,10 @@ public sealed class RestrictedEvidenceRoot
             {
                 throw new InvalidDataException("restricted_file_reparse");
             }
+            if (OperatingSystem.IsWindows())
+            {
+                ValidateWindowsOwnerAccess(current);
+            }
 
             if (StringComparer.OrdinalIgnoreCase.Equals(current.FullName, Path))
             {
@@ -244,33 +252,162 @@ public sealed class RestrictedEvidenceRoot
 
     public PinnedEvidenceFile ReadPinnedFile(string relativePath, int maximumBytes)
     {
+        using var lease = AcquirePinnedFile(relativePath, maximumBytes);
+        return new PinnedEvidenceFile(lease.Bytes.ToArray(), lease.Identity);
+    }
+
+    public PinnedEvidenceLease AcquirePinnedFile(string relativePath, int maximumBytes)
+    {
         var path = ResolveExistingFile(relativePath, maximumBytes);
-        using var handle = EvidenceFileHandle.OpenNoFollow(path);
-        var before = EvidenceFileHandle.Identity(handle);
-        if (before.Device != Device || before.Links != 1 || before.Size is < 1 || before.Size > maximumBytes)
+        var handle = EvidenceFileHandle.OpenNoFollow(path);
+        var retained = false;
+        try
         {
-            throw new InvalidDataException("restricted_file_identity_invalid");
-        }
-        if (!OperatingSystem.IsWindows())
-        {
-            const uint groupOrOtherMask = 0x3f;
-            if ((before.Mode & groupOrOtherMask) != 0 ||
-                before.Owner != EvidenceFileHandle.EffectiveUserId())
+            var before = EvidenceFileHandle.Identity(handle);
+            if (before.Device != Device || before.Links != 1 || before.Size is < 1 || before.Size > maximumBytes)
             {
-                throw new InvalidDataException("restricted_file_permissions_invalid");
+                throw new InvalidDataException("restricted_file_identity_invalid");
+            }
+            if (!OperatingSystem.IsWindows())
+            {
+                const uint groupOrOtherMask = 0x3f;
+                if ((before.Mode & groupOrOtherMask) != 0 ||
+                    before.Owner != EvidenceFileHandle.EffectiveUserId())
+                {
+                    throw new InvalidDataException("restricted_file_permissions_invalid");
+                }
+            }
+            else
+            {
+                ValidateWindowsOwnerAccess(new FileInfo(path));
+                if (EvidenceFileHandle.Identity(handle) != before)
+                {
+                    throw new InvalidDataException("restricted_file_replaced");
+                }
+            }
+
+            var bytes = new byte[checked((int)before.Size)];
+            var offset = 0;
+            while (offset < bytes.Length)
+            {
+                var read = RandomAccess.Read(handle, bytes.AsSpan(offset), offset);
+                if (read == 0)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    throw new InvalidDataException("restricted_file_replaced");
+                }
+                offset += read;
+            }
+            Span<byte> extra = stackalloc byte[1];
+            if (RandomAccess.Read(handle, extra, before.Size) != 0 ||
+                EvidenceFileHandle.Identity(handle) != before)
+            {
+                CryptographicOperations.ZeroMemory(bytes);
+                throw new InvalidDataException("restricted_file_replaced");
+            }
+            var identity = CanonicalEvidence.Sha256(Encoding.UTF8.GetBytes(before.Canonical));
+            retained = true;
+            return new PinnedEvidenceLease(handle, before, bytes, identity);
+        }
+        finally
+        {
+            if (!retained)
+            {
+                handle.Dispose();
             }
         }
+    }
 
-        using var stream = new FileStream(handle, FileAccess.Read, bufferSize: 4_096, isAsync: false);
-        var bytes = new byte[checked((int)before.Size)];
-        stream.ReadExactly(bytes);
-        if (stream.ReadByte() != -1 || EvidenceFileHandle.Identity(stream.SafeFileHandle) != before)
+    public string WritePinnedFileCreateNew(string relativePath, ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length is < 1 or > EvidenceLimits.MaximumDocumentBytes)
         {
-            CryptographicOperations.ZeroMemory(bytes);
-            throw new InvalidDataException("restricted_file_replaced");
+            throw new InvalidDataException("restricted_file_create_invalid");
         }
-        var identity = CanonicalEvidence.Sha256(Encoding.UTF8.GetBytes(before.Canonical));
-        return new PinnedEvidenceFile(bytes, identity);
+        var path = ResolveNewFile(relativePath);
+        CanonicalEvidence.WriteCreateNew(path, bytes);
+        var file = new FileInfo(path);
+        if (OperatingSystem.IsWindows())
+        {
+            ValidateWindowsOwnerAccess(file);
+        }
+        var pinned = ReadPinnedFile(relativePath, bytes.Length);
+        try
+        {
+            if (!pinned.Bytes.AsSpan().SequenceEqual(bytes))
+            {
+                throw new InvalidDataException("restricted_file_create_invalid");
+            }
+            return pinned.Identity;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(pinned.Bytes);
+        }
+    }
+
+    public string CreateExclusiveDirectory(string child)
+    {
+        var path = ResolveChildPath(Path, child);
+        EvidenceFileHandle.CreateDirectoryExclusive(path);
+        var directory = new DirectoryInfo(path);
+        if (!directory.Exists || IsLinkOrReparse(directory))
+        {
+            throw new InvalidDataException("restricted_directory_create_invalid");
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            ValidateWindowsOwnerAccess(directory);
+        }
+        else
+        {
+            const UnixFileMode forbidden =
+                UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+            if ((File.GetUnixFileMode(path) & forbidden) != 0)
+            {
+                throw new InvalidDataException("restricted_directory_permissions_invalid");
+            }
+        }
+        return path;
+    }
+
+    private string ResolveNewFile(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) ||
+            System.IO.Path.IsPathRooted(relativePath) ||
+            Encoding.UTF8.GetByteCount(relativePath) > EvidenceLimits.MaximumRelativePathBytes)
+        {
+            throw new InvalidDataException("restricted_file_create_invalid");
+        }
+        var candidate = System.IO.Path.GetFullPath(System.IO.Path.Join(Path, relativePath));
+        if (!IsWithin(candidate, Path) ||
+            StringComparer.OrdinalIgnoreCase.Equals(candidate, Path) ||
+            File.Exists(candidate) || Directory.Exists(candidate))
+        {
+            throw new InvalidDataException("restricted_file_create_invalid");
+        }
+        var parent = new DirectoryInfo(System.IO.Path.GetDirectoryName(candidate)!);
+        if (!parent.Exists || !IsWithin(parent.FullName, Path))
+        {
+            throw new InvalidDataException("restricted_file_create_invalid");
+        }
+        for (var current = parent; current is not null && IsWithin(current.FullName, Path); current = current.Parent)
+        {
+            if (IsLinkOrReparse(current))
+            {
+                throw new InvalidDataException("restricted_file_reparse");
+            }
+            if (OperatingSystem.IsWindows())
+            {
+                ValidateWindowsOwnerAccess(current);
+            }
+            if (StringComparer.OrdinalIgnoreCase.Equals(current.FullName, Path))
+            {
+                break;
+            }
+        }
+        return candidate;
     }
 
     public void RemoveCredentialFile(string relativePath)
@@ -340,11 +477,18 @@ public sealed class RestrictedEvidenceRoot
         (value.Attributes & FileAttributes.ReparsePoint) != 0;
 
     [SupportedOSPlatform("windows")]
-    private static void ValidateWindowsOwnerAccess(DirectoryInfo root)
+    private static void ValidateWindowsOwnerAccess(FileSystemInfo value)
     {
         var current = WindowsIdentity.GetCurrent().User ??
             throw new InvalidDataException("restricted_root_owner_invalid");
-        var security = root.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+        FileSystemSecurity security = value switch
+        {
+            DirectoryInfo directory => directory.GetAccessControl(
+                AccessControlSections.Owner | AccessControlSections.Access),
+            FileInfo file => file.GetAccessControl(
+                AccessControlSections.Owner | AccessControlSections.Access),
+            _ => throw new InvalidDataException("restricted_owner_invalid"),
+        };
         if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner || owner != current)
         {
             throw new InvalidDataException("restricted_root_owner_invalid");
@@ -355,14 +499,15 @@ public sealed class RestrictedEvidenceRoot
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Value,
             new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null).Value,
         };
-        const FileSystemRights mutationRights =
-            FileSystemRights.Write | FileSystemRights.Delete | FileSystemRights.ChangePermissions |
-            FileSystemRights.TakeOwnership | FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories;
+        const FileSystemRights sensitiveRights =
+            FileSystemRights.Read | FileSystemRights.Write | FileSystemRights.Delete |
+            FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership |
+            FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories;
         foreach (var rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
             .OfType<FileSystemAccessRule>()
             .Where(rule =>
                 rule.AccessControlType == AccessControlType.Allow &&
-                (rule.FileSystemRights & mutationRights) != 0 &&
+                (rule.FileSystemRights & sensitiveRights) != 0 &&
                 rule.IdentityReference is SecurityIdentifier sid &&
                 !allowedPrincipals.Contains(sid.Value)))
         {

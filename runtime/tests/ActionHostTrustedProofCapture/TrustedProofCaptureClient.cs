@@ -259,19 +259,31 @@ public sealed class TrustedProofCaptureClient : IDisposable
         string? next = null;
         foreach (var segments in string.Join(",", values)
             .Split(',')
-            .Select(part => part.Trim().Split(';', 2)))
+            .Select(part => part.Trim().Split(';')))
         {
             if (segments.Length != 2 ||
-                !StringComparer.Ordinal.Equals(segments[1].Trim(), "rel=\"next\"") ||
                 segments[0].Length < 3 ||
                 segments[0][0] != '<' ||
                 segments[0][^1] != '>')
             {
-                continue;
+                throw new InvalidDataException("github_pagination_invalid");
             }
 
             var candidate = segments[0][1..^1];
-            if (next is not null || !ValidApiRoute(candidate))
+            var relation = segments[1].Trim();
+            if (!new[] { "rel=\"next\"", "rel=\"prev\"", "rel=\"first\"", "rel=\"last\"" }
+                    .Contains(relation, StringComparer.Ordinal) ||
+                !ValidApiRoute(candidate))
+            {
+                throw new InvalidDataException("github_pagination_invalid");
+            }
+
+            if (!StringComparer.Ordinal.Equals(relation, "rel=\"next\""))
+            {
+                continue;
+            }
+
+            if (next is not null)
             {
                 throw new InvalidDataException("github_pagination_invalid");
             }

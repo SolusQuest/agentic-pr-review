@@ -21,7 +21,9 @@
                       AdditionalProperties="PayloadSourceCommit=1111111111111111111111111111111111111111;PayloadSourceTree=2222222222222222222222222222222222222222" />
     <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
     <ProjectReference Include="..\ActionHostTrustedProofCapture\AgenticPrReview.Runtime.ActionHostTrustedProofCapture.csproj" />
-    <ProjectReference Include="..\ActionHostTrustedProofEvidenceOracle\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.csproj" />
+    <ProjectReference Include="..\ActionHostTrustedProofEvidenceAssembler\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceAssembler.csproj" />
+    <ProjectReference Include="..\ActionHostTrustedProofEvidenceOracle\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.csproj"
+                      AdditionalProperties="TrustedProofOracleSourceSha=3333333333333333333333333333333333333333;TrustedProofOracleSourceTree=4444444444444444444444444444444444444444" />
     <None Include="..\..\..\protocol\fixtures\v1\**\*" Link="protocol\fixtures\v1\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\..\protocol\fixtures\prefix-contract\**\*" Link="protocol\fixtures\prefix-contract\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\deterministic\**\*" Link="fixtures\deterministic\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

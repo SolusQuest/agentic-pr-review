@@ -11,17 +11,27 @@ namespace AgenticPrReview.Runtime.Host.State.Evidence;
 internal sealed record TrustedProofEncryptedArtifact(
     string ArtifactId,
     string OpaqueName,
+    string ProducingRunIdentity,
+    long ProducingRunAttempt,
     byte[] Envelope);
+
+internal sealed record TrustedProofOperationRun(
+    string OperationId,
+    string Scope,
+    string RunIdentity,
+    long RunAttempt);
 
 internal sealed record TrustedProofDecodedArtifact(
     string ArtifactId,
     string Role,
     string Scope,
+    string BaseScopeDigest,
     string ObjectClass,
     string KeyId,
     string ObjectIdentity,
     string ProducingRunIdentity,
     long ProducingRunAttempt,
+    string OperationId,
     string PayloadSha256);
 
 internal sealed record TrustedProofCodecOracleResult(
@@ -78,15 +88,25 @@ internal static class TrustedProofEvidenceCodecOracle
         string currentKeyBase64,
         string? previousKeyBase64,
         IReadOnlyList<TrustedProofEncryptedArtifact> artifacts,
+        IReadOnlyList<TrustedProofOperationRun> operationRuns,
         out TrustedProofCodecOracleResult? result)
     {
         result = null;
         if (artifacts.Count is < 7 or > 256 ||
             artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() !=
                 artifacts.Count ||
-            artifacts[0].OpaqueName != LocatorRootFormat.StoreName)
+            artifacts[0].OpaqueName != LocatorRootFormat.StoreName ||
+            !TryIndexOperationRuns(operationRuns, out var operationByRun))
         {
             return false;
+        }
+        foreach (var artifact in artifacts)
+        {
+            if (!operationByRun.TryGetValue(artifact.ProducingRunIdentity, out var authority) ||
+                authority.RunAttempt != artifact.ProducingRunAttempt)
+            {
+                return false;
+            }
         }
 
         using var access = AuthorizedLocatorAccess.IssueTrustedProofEvidenceOracle(repositoryId);
@@ -138,15 +158,17 @@ internal static class TrustedProofEvidenceCodecOracle
                     var candidates = new List<TrustedProofCandidateFact>();
                     var acceptances = new List<TrustedProofAcceptanceFact>();
                     records.Add(new TrustedProofDecodedArtifact(
-                        artifacts[0].ArtifactId,
-                        "unclassified",
-                        "unclassified",
-                        "locator_root",
+                         artifacts[0].ArtifactId,
+                         "unclassified",
+                         "unclassified",
+                         string.Empty,
+                         "locator_root",
                         sentinel.WriterKeyId,
                         CanonicalHash(sentinel.Root),
-                        string.Empty,
-                        0,
-                        CanonicalHash(sentinel.Root)));
+                         artifacts[0].ProducingRunIdentity,
+                         artifacts[0].ProducingRunAttempt,
+                         operationByRun[artifacts[0].ProducingRunIdentity].OperationId,
+                         CanonicalHash(sentinel.Root)));
 
                     for (var index = 1; index < artifacts.Count; index++)
                     {
@@ -168,8 +190,12 @@ internal static class TrustedProofEvidenceCodecOracle
 
                         try
                         {
-                            if (!CaptureProductFact(
-                                    artifact.ArtifactId,
+                            if (!StringComparer.Ordinal.Equals(
+                                    header.ProducingRunIdentity,
+                                    artifact.ProducingRunIdentity) ||
+                                header.ProducingRunAttempt != artifact.ProducingRunAttempt ||
+                                !CaptureProductFact(
+                                     artifact.ArtifactId,
                                     header,
                                     payload,
                                     lineages,
@@ -181,14 +207,16 @@ internal static class TrustedProofEvidenceCodecOracle
 
                             records.Add(new TrustedProofDecodedArtifact(
                                 artifact.ArtifactId,
-                                "unclassified",
-                                "unclassified",
-                                StateObjectClasses.ToWireName(header.ObjectClass),
+                                 "unclassified",
+                                 "unclassified",
+                                 header.BaseScopeDigest,
+                                 StateObjectClasses.ToWireName(header.ObjectClass),
                                 header.KeyId,
                                 header.ObjectIdentity,
-                                header.ProducingRunIdentity,
-                                header.ProducingRunAttempt,
-                                CanonicalHash(payload)));
+                                 header.ProducingRunIdentity,
+                                 header.ProducingRunAttempt,
+                                 operationByRun[header.ProducingRunIdentity].OperationId,
+                                 CanonicalHash(payload)));
                         }
                         finally
                         {
@@ -200,17 +228,32 @@ internal static class TrustedProofEvidenceCodecOracle
                     var topologyValid = TryDeriveProductRoles(
                         decoded,
                         lineages,
-                        candidates,
-                        acceptances,
-                        out var derivedRoles);
+                         candidates,
+                         acceptances,
+                         out var derivedRoles,
+                         out var normalBaseScopeDigest,
+                         out var staleBaseScopeDigest);
+                    var ownershipValid = topologyValid;
                     var classified = decoded.Select(record =>
                     {
-                        if (!derivedRoles.TryGetValue(record.ArtifactId, out var derived))
+                        var scope = record.ObjectClass == "locator_root"
+                            ? "repository"
+                            : StringComparer.Ordinal.Equals(record.BaseScopeDigest, normalBaseScopeDigest)
+                                ? "normal"
+                                : StringComparer.Ordinal.Equals(record.BaseScopeDigest, staleBaseScopeDigest)
+                                    ? "stale"
+                                    : "unclassified";
+                        var authority = operationByRun[record.ProducingRunIdentity];
+                        var authorityScope = scope == "repository" ? "normal" : scope;
+                        if (scope == "unclassified" ||
+                            !StringComparer.Ordinal.Equals(authority.Scope, authorityScope))
                         {
-                            return record;
+                            ownershipValid = false;
                         }
-
-                        return record with { Role = derived.Role, Scope = derived.Scope };
+                        var role = derivedRoles.TryGetValue(record.ArtifactId, out var derived)
+                            ? derived.Role
+                            : "internal-record";
+                        return record with { Role = role, Scope = scope };
                     }).ToImmutableArray();
                     var ordinaryTopology = decoded.Count(record => record.ObjectClass == "locator_root") == 1 &&
                         decoded.Count(record => record.ObjectClass == "lineage_head") == 2 &&
@@ -219,6 +262,10 @@ internal static class TrustedProofEvidenceCodecOracle
                         decoded.Count(record => record.ObjectClass == "publication_intent") == 4 &&
                         decoded.Count(record => record.ObjectClass == "cleanup") == 4 &&
                         decoded.Length == 15;
+                    if (!ownershipValid)
+                    {
+                        return false;
+                    }
                     var exact = topologyValid && ordinaryTopology && derivedRoles.Count == ExpectedRoles.Length;
                     result = new TrustedProofCodecOracleResult(
                         exact,
@@ -312,11 +359,15 @@ internal static class TrustedProofEvidenceCodecOracle
     private static bool TryDeriveProductRoles(
         ImmutableArray<TrustedProofDecodedArtifact> decoded,
         IReadOnlyList<TrustedProofLineageFact> lineages,
-        IReadOnlyList<TrustedProofCandidateFact> candidates,
-        IReadOnlyList<TrustedProofAcceptanceFact> acceptances,
-        out Dictionary<string, (string Role, string Scope)> roles)
+         IReadOnlyList<TrustedProofCandidateFact> candidates,
+         IReadOnlyList<TrustedProofAcceptanceFact> acceptances,
+         out Dictionary<string, (string Role, string Scope)> roles,
+         out string normalBaseScopeDigest,
+         out string staleBaseScopeDigest)
     {
         roles = new Dictionary<string, (string Role, string Scope)>(StringComparer.Ordinal);
+        normalBaseScopeDigest = string.Empty;
+        staleBaseScopeDigest = string.Empty;
         var roots = decoded.Where(record => record.ObjectClass == "locator_root").ToArray();
         var bootstrapCandidates = candidates.Where(value =>
             value.Generation == 0 &&
@@ -373,6 +424,8 @@ internal static class TrustedProofEvidenceCodecOracle
 
         var normalHead = normalHeads[0];
         var staleHead = staleHeads[0];
+        normalBaseScopeDigest = normalHead.BaseScopeDigest;
+        staleBaseScopeDigest = staleHead.BaseScopeDigest;
 
         roles.Add(roots[0].ArtifactId, (ExpectedRoles[0], "repository"));
         roles.Add(normalHead.ArtifactId, (ExpectedRoles[1], "normal"));
@@ -383,6 +436,42 @@ internal static class TrustedProofEvidenceCodecOracle
         roles.Add(continuationAcceptance.ArtifactId, (ExpectedRoles[6], "normal"));
         return true;
     }
+
+    private static bool TryIndexOperationRuns(
+        IReadOnlyList<TrustedProofOperationRun> operationRuns,
+        out Dictionary<string, TrustedProofOperationRun> byRun)
+    {
+        var indexed = new Dictionary<string, TrustedProofOperationRun>(StringComparer.Ordinal);
+        if (operationRuns.Count != 4 ||
+            operationRuns.Select(item => item.OperationId).Distinct(StringComparer.Ordinal).Count() != 2 ||
+            operationRuns.Any(item =>
+                !Sha256(item.OperationId) ||
+                !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
+                !PositiveDecimal(item.RunIdentity) ||
+                item.RunAttempt != 1 ||
+                !indexed.TryAdd(item.RunIdentity, item)) ||
+            operationRuns.GroupBy(item => item.OperationId, StringComparer.Ordinal)
+                .Any(group => group.Count() != 2 ||
+                    group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
+            operationRuns.Count(item => item.Scope == "normal") != 2 ||
+            operationRuns.Count(item => item.Scope == "stale") != 2)
+        {
+            byRun = new Dictionary<string, TrustedProofOperationRun>(StringComparer.Ordinal);
+            return false;
+        }
+        byRun = indexed;
+        return true;
+    }
+
+    private static bool PositiveDecimal(string value) =>
+        value.Length is > 0 and <= 20 &&
+        value.All(character => character is >= '0' and <= '9') &&
+        (value.Length == 1 || value[0] != '0') &&
+        ulong.TryParse(value, out var parsed) && parsed > 0;
+
+    private static bool Sha256(string value) =>
+        value.Length == 64 &&
+        value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static string CanonicalHash(ReadOnlySpan<byte> value) =>
         Convert.ToHexStringLower(SHA256.HashData(value));

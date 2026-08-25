@@ -7,10 +7,12 @@ import { pinnedFileIdentity, verifyCapturedFiles } from './assemble-r4-trusted-p
 import {
   assembleTrustedProofEvidence,
   assertPublicSafeEvidence,
+  buildFinalizedPrivatePackageManifest,
   canonicalJson,
   cleanupPhases,
   generateCleanupPlan,
   projectTrustedProofEvidence,
+  projectFinalizedTrustedProofEvidence,
   sha256,
   validateHostEvidence,
 } from './r4-trusted-proof-contract.mjs';
@@ -36,57 +38,293 @@ function projectMutation(mutator: (candidate: any) => void) {
 
 function syntheticAssembly(input = host) {
   const candidate = copy(input);
+  const payloadReceipt = JSON.parse(
+    fs.readFileSync(path.join(fixtureRoot, 'trusted-proof-payload-receipt-v2.json'), 'utf8'),
+  );
+  const payloadReceiptSha256 = sha256(canonicalJson(payloadReceipt));
   const roleById = new Map(
     candidate.inventories.expected_success.map((record: any) => [record.artifact_id, record.role]),
   );
+  for (const record of candidate.inventories.observed_cleanup) {
+    record.ownership_evidence_sha256 = sha256(
+      canonicalJson({
+        artifact_id: record.artifact_id,
+        artifact_name: record.artifact_name,
+        scope: record.scope,
+        object_class: record.object_class,
+        operation_id: record.operation_id,
+        producing_run_id: record.producing_run_id,
+        producing_run_attempt: String(record.producing_run_attempt),
+        archive_sha256: record.archive_sha256,
+        encrypted_object_sha256: record.encrypted_object_sha256,
+        encrypted_object_size: record.encrypted_object_size,
+      }),
+    );
+  }
+  const generatedCleanup = generateCleanupPlan({
+    operation_ids: candidate.identities.operation_ids,
+    proof_control: candidate.proof_control,
+    observed_cleanup: candidate.inventories.observed_cleanup,
+    resources: candidate.cleanup.resources,
+  });
+  candidate.cleanup.plan_sha256 = generatedCleanup.digest;
+  candidate.authorizations.cleanup.plan_sha256 = generatedCleanup.digest;
   const metadataRunIds = [
     ...new Set(
       candidate.inventories.observed_cleanup.map((record: any) => record.producing_run_id),
     ),
   ];
   const sourceDigests = new Map<string, string>();
+  const sourceRoutes = new Map<string, string>();
+  const sourceObservations = new Map<
+    string,
+    { request_started: number; response_received: number }
+  >();
+  const capturedSourceBodies = new Map<string, { text: string }>();
+  const registerCapture = (
+    sourceId: string,
+    route: string,
+    value: any,
+    observation = { request_started: 1, response_received: 2 },
+  ) => {
+    const bytes = Buffer.from(canonicalJson(value), 'utf8');
+    const digest = sha256(bytes);
+    sourceDigests.set(sourceId, digest);
+    sourceRoutes.set(sourceId, route);
+    sourceObservations.set(sourceId, observation);
+    capturedSourceBodies.set(sourceId, { text: bytes.toString('utf8') });
+    return digest;
+  };
   for (const phase of ['cleanup', 'execution', 'setup']) {
-    sourceDigests.set(
-      `authorization-${phase}:page:1`,
-      candidate.authorizations[phase].source.capture_body_sha256,
+    const expected = candidate.authorizations[phase];
+    const { source: oldSource, ...authorization } = expected;
+    const marker = {
+      contract: 'apr-r4-e3-maintainer-authorization-v1',
+      phase,
+      repository: candidate.identities.repository,
+      issue_number: Number(oldSource.issue_number),
+      authorization,
+    };
+    const body = `<!-- apr-r4-e3-authorization ${JSON.stringify(marker)} -->`;
+    const commentSourceId = `authorization-${phase}-comment-${oldSource.comment_id}:page:1`;
+    const permissionSourceId = `authorization-${phase}-permission-maintainer:page:1`;
+    const commentDigest = registerCapture(
+      commentSourceId,
+      `/repos/${candidate.identities.repository}/issues/comments/${oldSource.comment_id}`,
+      {
+        id: Number(oldSource.comment_id),
+        body,
+        user: { id: Number(oldSource.author_id), login: 'maintainer' },
+        created_at: '2026-08-25T00:00:00Z',
+        updated_at: '2026-08-25T00:00:00Z',
+      },
+      oldSource.observation,
+    );
+    registerCapture(
+      permissionSourceId,
+      `/repos/${candidate.identities.repository}/collaborators/maintainer/permission`,
+      {
+        permission: oldSource.author_permission,
+        user: { id: Number(oldSource.author_id), login: 'maintainer' },
+      },
+    );
+    expected.source.capture_body_sha256 = commentDigest;
+    expected.source.body_sha256 = sha256(Buffer.from(body, 'utf8'));
+    expected.source.readback_sha256 = expected.source.body_sha256;
+  }
+  candidate.environment.protection_snapshot.readback_sha256 = registerCapture(
+    'environment-protection:page:1',
+    `/repos/${candidate.identities.repository}/environments/r4-trusted-proof`,
+    {
+      id: Number(candidate.environment.protection_snapshot.environment_id),
+      name: candidate.environment.name,
+      protection_rules: [
+        {
+          type: 'required_reviewers',
+          required_approvals: candidate.environment.protection_snapshot.required_approvals,
+          reviewers: candidate.environment.protection_snapshot.required_reviewer_ids.map(
+            (id: string) => ({ type: 'User', reviewer: { id: Number(id) } }),
+          ),
+        },
+      ],
+      deployment_branch_policy: {
+        protected_branches: false,
+        custom_branch_policies: true,
+      },
+    },
+    candidate.environment.protection_snapshot.observation,
+  );
+  const uiAttestation = {
+    repository: candidate.environment.ui_attestation.repository,
+    environment: candidate.environment.ui_attestation.environment,
+    source_kind: candidate.environment.ui_attestation.source_kind,
+    observation: candidate.environment.ui_attestation.observation,
+    capture_sha256: candidate.environment.ui_attestation.capture_sha256,
+    maintainer_id: candidate.environment.ui_attestation.maintainer_id,
+    prevent_self_review: candidate.environment.prevent_self_review,
+    administrator_bypass: candidate.environment.ui_attestation.administrator_bypass,
+  };
+  const uiAttestationSha256 = sha256(canonicalJson(uiAttestation));
+  for (const [phase, transition] of Object.entries<any>(candidate.approval_transitions)) {
+    const runId = transition.run_id;
+    registerCapture(
+      `transition-${phase}-pending-run-${runId}:page:1`,
+      `/repos/${candidate.identities.repository}/actions/runs/${runId}/pending_deployments`,
+      [
+        {
+          environment: {
+            id: Number(transition.pending.environment_id),
+            name: transition.pending.environment_name,
+          },
+          reviewers: transition.pending.reviewer_ids.map((id: string) => ({
+            type: 'User',
+            reviewer: { id: Number(id) },
+          })),
+        },
+      ],
+      transition.pending.observation,
+    );
+    registerCapture(
+      `transition-${phase}-approvals-run-${runId}:page:1`,
+      `/repos/${candidate.identities.repository}/actions/runs/${runId}/approvals`,
+      [
+        {
+          state: 'approved',
+          user: { id: Number(transition.approval.approving_user_id) },
+          environments: [
+            {
+              id: Number(transition.approval.environment_id),
+              name: transition.approval.environment_name,
+            },
+          ],
+        },
+      ],
+      transition.approval.observation,
+    );
+    registerCapture(
+      `transition-${phase}-jobs-run-${runId}:page:1`,
+      `/repos/${candidate.identities.repository}/actions/runs/${runId}/attempts/1/jobs`,
+      {
+        total_count: 1,
+        jobs: [
+          {
+            id: Number(`91${runId}`),
+            run_id: Number(runId),
+            run_attempt: 1,
+            name: transition.protected_job.name,
+            status: 'completed',
+            conclusion: 'success',
+            started_at: new Date(transition.protected_job.started.value).toISOString(),
+          },
+        ],
+      },
+      {
+        request_started: transition.protected_job.started.value,
+        response_received: transition.protected_job.started.value + 1,
+      },
     );
   }
-  sourceDigests.set(
-    'environment-protection:page:1',
-    candidate.environment.protection_snapshot.readback_sha256,
-  );
-  for (const [phase, transition] of Object.entries<any>(candidate.approval_transitions)) {
-    for (const sourceId of [
-      `${transition.approval.source_id}:page:1`,
-      `${transition.pending.source_id}:page:1`,
-      `${phase}-jobs-attempt-1:page:1`,
+  for (const [scope, concurrency] of Object.entries<any>(candidate.concurrency)) {
+    const holderRunId = concurrency.terminal.holder_run_id;
+    registerCapture(
+      `concurrency-${scope}-run-${holderRunId}:page:1`,
+      `/repos/${candidate.identities.repository}/actions/runs/${holderRunId}/concurrency_group`,
+      {
+        group: concurrency.group,
+        cancel_in_progress: false,
+        ahead_of_run: concurrency.ahead_of_run.map((member: any) => ({
+          run_id: Number(member.run_id),
+          position: member.position,
+          status: member.status,
+        })),
+      },
+      concurrency.observation,
+    );
+    for (const [runId, kind] of [
+      [concurrency.terminal.holder_run_id, 'holder'],
+      [concurrency.terminal.waiter_run_id, 'waiter'],
     ]) {
-      sourceDigests.set(sourceId, sha256(Buffer.from(`capture-${sourceId}`, 'utf8')));
+      const terminal =
+        kind === 'holder'
+          ? {
+              id: Number(runId),
+              status: 'completed',
+              conclusion: 'success',
+              run_started_at: new Date(concurrency.observation.request_started).toISOString(),
+              updated_at: new Date(concurrency.terminal.holder_completed.value).toISOString(),
+            }
+          : {
+              id: Number(runId),
+              status: 'completed',
+              conclusion: scope === 'stale' ? 'failure' : 'success',
+              event: scope === 'stale' ? 'workflow_run' : 'workflow_dispatch',
+              head_sha:
+                scope === 'stale'
+                  ? candidate.identities.unauthorized_follow_on.advanced_head_sha
+                  : candidate.authorizations.execution.fixture_prs[0].head_sha,
+              run_started_at: new Date(concurrency.terminal.waiter_started.value).toISOString(),
+              updated_at: new Date(concurrency.terminal.waiter_started.value + 1).toISOString(),
+            };
+      registerCapture(
+        `run-terminal-${runId}:page:1`,
+        `/repos/${candidate.identities.repository}/actions/runs/${runId}`,
+        terminal,
+      );
     }
-  }
-  for (const sourceId of ['concurrency-normal:page:1', 'concurrency-stale:page:1']) {
-    sourceDigests.set(sourceId, sha256(Buffer.from(`capture-${sourceId}`, 'utf8')));
   }
   for (const family of Object.values<any>(candidate.proof_control)) {
     for (const comment of family.comments) {
-      sourceDigests.set(`proof-control-${comment.comment_id}:page:1`, comment.capture_body_sha256);
+      const marker = JSON.parse(comment.body_preimage);
+      const body = `<!-- apr-r4-e2p-control ${JSON.stringify({
+        ...marker,
+        body_sha256: comment.body_sha256,
+      })} -->`;
+      const readyActor = comment.kind === 'ready' || comment.kind === 'stale-ready';
+      const sourceId = `proof-control-comment-${comment.comment_id}:page:1`;
+      comment.capture_body_sha256 = registerCapture(
+        sourceId,
+        `/repos/${candidate.identities.repository}/issues/comments/${comment.comment_id}`,
+        {
+          id: Number(comment.comment_id),
+          body,
+          user: {
+            id: Number(comment.actor_id),
+            login: readyActor ? 'github-actions[bot]' : 'maintainer',
+          },
+          created_at: '2026-08-25T00:00:00Z',
+          updated_at: '2026-08-25T00:00:00Z',
+        },
+        comment.observation,
+      );
+      if (!readyActor) {
+        registerCapture(
+          `proof-control-permission-${comment.comment_id}-maintainer:page:1`,
+          `/repos/${candidate.identities.repository}/collaborators/maintainer/permission`,
+          {
+            permission: comment.actor_permission,
+            user: { id: Number(comment.actor_id), login: 'maintainer' },
+          },
+          comment.observation,
+        );
+      }
     }
-  }
-  for (const sourceId of ['cleanup-readbacks:page:1', 'live-canaries:page:1']) {
-    sourceDigests.set(sourceId, sha256(Buffer.from(`capture-${sourceId}`, 'utf8')));
   }
   const evidenceSources = [...sourceDigests].map(([sourceId, bodySha256], index) => ({
     source_id: sourceId,
-    route: `/repos/SolusQuest/agentic-pr-review/evidence/${encodeURIComponent(sourceId)}`,
+    route:
+      sourceRoutes.get(sourceId) ??
+      `/repos/SolusQuest/agentic-pr-review/evidence/${encodeURIComponent(sourceId)}`,
     page: 1,
     status: 200,
     body_path: `source-${String(metadataRunIds.length + index + 1).padStart(4, '0')}.json`,
     body_sha256: bodySha256,
-    body_size: '3',
+    body_size: capturedSourceBodies.has(sourceId)
+      ? String(Buffer.byteLength(capturedSourceBodies.get(sourceId)!.text, 'utf8'))
+      : '3',
     body_file_identity: '8'.repeat(64),
     safe_headers_sha256: '2'.repeat(64),
-    request_started_unix_milliseconds: 1,
-    response_received_unix_milliseconds: 2,
+    request_started_unix_milliseconds: sourceObservations.get(sourceId)?.request_started ?? 1,
+    response_received_unix_milliseconds: sourceObservations.get(sourceId)?.response_received ?? 2,
     next_route: null,
   }));
   const captureManifest = {
@@ -94,6 +332,10 @@ function syntheticAssembly(input = host) {
     repository_id: candidate.identities.repository_id,
     repository: candidate.identities.repository,
     operation_ids: candidate.identities.operation_ids,
+    operation_runs: candidate.authorizations.execution.operation_runs.map((run: any) => ({
+      ...run,
+      run_attempt: String(run.run_attempt),
+    })),
     source_map_sha256: sha256(canonicalJson(candidate.source_map)),
     destination_identity_sha256: candidate.restricted_package.destination_identity_sha256,
     sources: [
@@ -149,18 +391,46 @@ function syntheticAssembly(input = host) {
     recovery_only: candidate.inventories.observed_cleanup.some(
       (record: any) => record.disposition === 'recovery-only-delete',
     ),
-    records: candidate.inventories.observed_cleanup.map((record: any) => ({
-      artifact_id: record.artifact_id,
-      role: roleById.get(record.artifact_id) ?? 'internal-record',
-      scope: record.scope,
-      object_class: record.object_class,
-      object_identity: '5'.repeat(64),
-      producing_run_identity: record.producing_run_id,
-      producing_run_attempt: '1',
-      payload_sha256: '6'.repeat(64),
-    })),
+    records: candidate.inventories.observed_cleanup.map((record: any) => {
+      const ownershipEvidenceSha256 = sha256(
+        canonicalJson({
+          artifact_id: record.artifact_id,
+          artifact_name: record.artifact_name,
+          scope: record.scope,
+          object_class: record.object_class,
+          operation_id: record.operation_id,
+          producing_run_id: record.producing_run_id,
+          producing_run_attempt: '1',
+          archive_sha256: record.archive_sha256,
+          encrypted_object_sha256: record.encrypted_object_sha256,
+          encrypted_object_size: record.encrypted_object_size,
+        }),
+      );
+      return {
+        artifact_id: record.artifact_id,
+        role: roleById.get(record.artifact_id) ?? 'internal-record',
+        scope: record.scope,
+        base_scope_digest:
+          record.scope === 'repository' ? '' : (record.scope === 'normal' ? 'd' : 'e').repeat(64),
+        object_class: record.object_class,
+        object_identity: '5'.repeat(64),
+        producing_run_identity: record.producing_run_id,
+        producing_run_attempt: '1',
+        operation_id: record.operation_id,
+        ownership_evidence_sha256: ownershipEvidenceSha256,
+        payload_sha256: '6'.repeat(64),
+      };
+    }),
   };
   const oracleResultSha256 = sha256(canonicalJson(oracleResult));
+  const oracleBuildReceipt = {
+    kind: 'apr-r4-e3-production-codec-oracle-build-receipt-v1',
+    source_commit: oracleResult.oracle_source_sha,
+    source_tree: oracleResult.oracle_source_tree,
+    oracle_assembly_sha256: oracleResult.oracle_assembly_sha256,
+    production_assembly_sha256: oracleResult.production_assembly_sha256,
+    result: 'passed',
+  };
   candidate.restricted_package.capture_manifest_sha256 = captureManifestSha256;
   candidate.restricted_package.oracle_result_sha256 = oracleResultSha256;
   const sourceMap = copy(candidate.source_map);
@@ -173,17 +443,29 @@ function syntheticAssembly(input = host) {
       [
         '/identities',
         [
+          captureReference(
+            `authorization-execution-comment-${candidate.authorizations.execution.source.comment_id}:page:1`,
+          ),
+          { source_id: 'capture-manifest', sha256: captureManifestSha256 },
+          { source_id: 'oracle-build-receipt', sha256: sha256(canonicalJson(oracleBuildReceipt)) },
+          { source_id: 'oracle-result', sha256: oracleResultSha256 },
           {
             source_id: 'trusted-proof-payload-receipt-v2',
-            sha256: '3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1',
+            sha256: payloadReceiptSha256,
           },
-        ],
+        ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
         '/authorizations',
-        ['cleanup', 'execution', 'setup'].map((phase) =>
-          captureReference(`authorization-${phase}:page:1`),
-        ),
+        ['cleanup', 'execution', 'setup']
+          .flatMap((phase) => {
+            const source = candidate.authorizations[phase].source;
+            return [
+              captureReference(`authorization-${phase}-comment-${source.comment_id}:page:1`),
+              captureReference(`authorization-${phase}-permission-maintainer:page:1`),
+            ];
+          })
+          .sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
         '/environment',
@@ -191,7 +473,7 @@ function syntheticAssembly(input = host) {
           captureReference('environment-protection:page:1'),
           {
             source_id: 'environment-ui-attestation',
-            sha256: candidate.environment.ui_attestation.capture_sha256,
+            sha256: uiAttestationSha256,
           },
         ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
@@ -199,24 +481,41 @@ function syntheticAssembly(input = host) {
         '/approval_transitions',
         Object.entries<any>(candidate.approval_transitions)
           .flatMap(([phase, transition]) => [
-            captureReference(`${transition.approval.source_id}:page:1`),
-            captureReference(`${transition.pending.source_id}:page:1`),
-            captureReference(`${phase}-jobs-attempt-1:page:1`),
+            captureReference(`transition-${phase}-approvals-run-${transition.run_id}:page:1`),
+            captureReference(`transition-${phase}-pending-run-${transition.run_id}:page:1`),
+            captureReference(`transition-${phase}-jobs-run-${transition.run_id}:page:1`),
           ])
           .sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
         '/concurrency',
-        [
-          captureReference('concurrency-normal:page:1'),
-          captureReference('concurrency-stale:page:1'),
-        ],
+        Object.entries<any>(candidate.concurrency)
+          .flatMap(([scope, concurrency]) => [
+            captureReference(
+              `concurrency-${scope}-run-${concurrency.terminal.holder_run_id}:page:1`,
+            ),
+            captureReference(`run-terminal-${concurrency.terminal.holder_run_id}:page:1`),
+            captureReference(`run-terminal-${concurrency.terminal.waiter_run_id}:page:1`),
+          ])
+          .sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
         '/proof_control',
         Object.values<any>(candidate.proof_control)
           .flatMap((family) => family.comments)
-          .map((comment) => captureReference(`proof-control-${comment.comment_id}:page:1`))
+          .flatMap((comment) => {
+            const references = [
+              captureReference(`proof-control-comment-${comment.comment_id}:page:1`),
+            ];
+            if (comment.kind === 'release' || comment.kind === 'stale-release') {
+              references.push(
+                captureReference(
+                  `proof-control-permission-${comment.comment_id}-maintainer:page:1`,
+                ),
+              );
+            }
+            return references;
+          })
           .sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
@@ -226,17 +525,29 @@ function syntheticAssembly(input = host) {
       [
         '/cleanup',
         [
-          { source_id: 'cleanup-plan', sha256: candidate.cleanup.plan_sha256 },
-          captureReference('cleanup-readbacks:page:1'),
+          { source_id: 'cleanup-plan', sha256: sha256(canonicalJson(generatedCleanup.plan)) },
+          { source_id: 'cleanup-readbacks', sha256: sha256(canonicalJson(candidate.cleanup)) },
         ],
       ],
-      ['/canaries/live', [captureReference('live-canaries:page:1')]],
+      [
+        '/canaries/live',
+        [
+          { source_id: 'capture-manifest', sha256: captureManifestSha256 },
+          { source_id: 'oracle-result', sha256: oracleResultSha256 },
+          ...Object.values<any>(candidate.proof_control)
+            .flatMap((family) => family.comments)
+            .filter((comment) => comment.kind === 'ready' || comment.kind === 'stale-ready')
+            .map((comment) =>
+              captureReference(`proof-control-comment-${comment.comment_id}:page:1`),
+            ),
+        ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
+      ],
       [
         '/canaries/cross_sink',
         [
           {
             source_id: 'trusted-proof-payload-receipt-v2',
-            sha256: '3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1',
+            sha256: payloadReceiptSha256,
           },
         ],
       ],
@@ -254,6 +565,10 @@ function syntheticAssembly(input = host) {
         [
           { source_id: 'capture-manifest', sha256: captureManifestSha256 },
           { source_id: 'oracle-result', sha256: oracleResultSha256 },
+          {
+            source_id: 'restricted-package-readback',
+            sha256: sha256(canonicalJson(candidate.restricted_package)),
+          },
         ],
       ],
     ]);
@@ -263,10 +578,6 @@ function syntheticAssembly(input = host) {
     kind: 'apr-r4-e3-closed-source-bundle-v1',
     source_map_sha256: sha256(canonicalJson(sourceMap)),
     documents: sourceMap.entries.map((entry: any) => {
-      const value = entry.destination_pointer
-        .split('/')
-        .slice(1)
-        .reduce((current: any, segment: string) => current[segment], candidate);
       const references = evidenceReferences(entry.destination_pointer);
       const evidence = {
         kind: entry.source_kind,
@@ -278,8 +589,6 @@ function syntheticAssembly(input = host) {
         destination_pointer: entry.destination_pointer,
         source_contract_sha256: entry.source_contract_sha256,
         evidence,
-        value_sha256: sha256(canonicalJson(value)),
-        value,
       };
     }),
   };
@@ -290,15 +599,32 @@ function syntheticAssembly(input = host) {
     captureManifestSha256,
     oracleResult,
     oracleResultSha256,
+    capturedSourceBodies,
+    retainedDocuments: new Map([
+      ['trusted-proof-payload-receipt-v2', payloadReceipt],
+      ['oracle-build-receipt', oracleBuildReceipt],
+      ['cleanup-plan', generatedCleanup.plan],
+      ['cleanup-readbacks', candidate.cleanup],
+      ['public-leak-scan-result', candidate.canaries.public_leak_scan],
+      ['restricted-package-readback', candidate.restricted_package],
+    ]),
+    uiAttestation,
+    uiAttestationSha256,
     credentialCopiesAbsent: true,
   };
 }
 
-function refreshSourceDocument(assembly: any, pointer: string) {
+function refreshRetainedDocument(assembly: any, pointer: string, sourceId: string) {
   const document = assembly.sourceBundle.documents.find(
     (candidate: any) => candidate.destination_pointer === pointer,
   );
-  document.value_sha256 = sha256(canonicalJson(document.value));
+  const reference = document.evidence.references.find(
+    (candidate: any) => candidate.source_id === sourceId,
+  );
+  reference.sha256 = sha256(canonicalJson(assembly.retainedDocuments.get(sourceId)));
+  document.evidence.set_sha256 = sha256(
+    canonicalJson({ kind: document.evidence.kind, references: document.evidence.references }),
+  );
 }
 
 describe('R4 E3 executable evidence contract', () => {
@@ -376,8 +702,56 @@ describe('R4 E3 executable evidence contract', () => {
   });
 
   test('assembles a source-bound protected package before projection', () => {
-    const assembled = assembleTrustedProofEvidence(syntheticAssembly());
-    expect(assembled.publicEvidence).toEqual(expectedPublic);
+    const input = syntheticAssembly();
+    expect(
+      input.sourceBundle.documents.every(
+        (document: any) =>
+          !Object.prototype.hasOwnProperty.call(document, 'value') &&
+          !Object.prototype.hasOwnProperty.call(document, 'value_sha256'),
+      ),
+    ).toBe(true);
+    const assembled = assembleTrustedProofEvidence(input);
+    expect(assembled.publicEvidence).toBeNull();
+    const privatePackageManifest = buildFinalizedPrivatePackageManifest({
+      host: assembled.host,
+      sourceBundle: input.sourceBundle,
+      captureManifestSha256: input.captureManifestSha256,
+      oracleResultSha256: input.oracleResultSha256,
+      cleanupPlan: assembled.cleanupPlan,
+    });
+    expect(
+      projectFinalizedTrustedProofEvidence({
+        host: assembled.host,
+        sourceBundle: input.sourceBundle,
+        captureManifestSha256: input.captureManifestSha256,
+        oracleResultSha256: input.oracleResultSha256,
+        cleanupPlan: assembled.cleanupPlan,
+        privatePackageManifest,
+      }),
+    ).toEqual(expectedPublic);
+  });
+
+  test('rejects projection when the finalized private manifest readback drifts', () => {
+    const input = syntheticAssembly();
+    const assembled = assembleTrustedProofEvidence(input);
+    const privatePackageManifest = buildFinalizedPrivatePackageManifest({
+      host: assembled.host,
+      sourceBundle: input.sourceBundle,
+      captureManifestSha256: input.captureManifestSha256,
+      oracleResultSha256: input.oracleResultSha256,
+      cleanupPlan: assembled.cleanupPlan,
+    });
+    privatePackageManifest.host_evidence_sha256 = 'f'.repeat(64);
+    expect(() =>
+      projectFinalizedTrustedProofEvidence({
+        host: assembled.host,
+        sourceBundle: input.sourceBundle,
+        captureManifestSha256: input.captureManifestSha256,
+        oracleResultSha256: input.oracleResultSha256,
+        cleanupPlan: assembled.cleanupPlan,
+        privatePackageManifest,
+      }),
+    ).toThrow(/private-package-finalized-readback/u);
   });
 
   test('keeps a fully assembled recovery package private when an authenticated extra exists', () => {
@@ -430,14 +804,12 @@ describe('R4 E3 executable evidence contract', () => {
       (value: any) => {
         value.captureManifest.artifacts.pop();
         value.captureManifestSha256 = sha256(canonicalJson(value.captureManifest));
-        const restricted = value.sourceBundle.documents.find(
-          (candidate: any) => candidate.destination_pointer === '/restricted_package',
-        ).value;
+        const restricted = value.retainedDocuments.get('restricted-package-readback');
         restricted.capture_manifest_sha256 = value.captureManifestSha256;
         value.oracleResult.capture_manifest_sha256 = value.captureManifestSha256;
         value.oracleResultSha256 = sha256(canonicalJson(value.oracleResult));
         restricted.oracle_result_sha256 = value.oracleResultSha256;
-        refreshSourceDocument(value, '/restricted_package');
+        refreshRetainedDocument(value, '/restricted_package', 'restricted-package-readback');
       },
     ],
     [
@@ -445,17 +817,22 @@ describe('R4 E3 executable evidence contract', () => {
       (value: any) => {
         value.oracleResult.records[0].role = 'normal-lineage-head';
         value.oracleResultSha256 = sha256(canonicalJson(value.oracleResult));
-        const restricted = value.sourceBundle.documents.find(
-          (candidate: any) => candidate.destination_pointer === '/restricted_package',
-        ).value;
+        const restricted = value.retainedDocuments.get('restricted-package-readback');
         restricted.oracle_result_sha256 = value.oracleResultSha256;
-        refreshSourceDocument(value, '/restricted_package');
+        refreshRetainedDocument(value, '/restricted_package', 'restricted-package-readback');
       },
     ],
     [
       'capture digest mismatch',
       (value: any) => {
         value.captureManifestSha256 = '9'.repeat(64);
+      },
+    ],
+    [
+      'oracle build receipt assembly mismatch',
+      (value: any) => {
+        value.retainedDocuments.get('oracle-build-receipt').oracle_assembly_sha256 = 'f'.repeat(64);
+        refreshRetainedDocument(value, '/identities', 'oracle-build-receipt');
       },
     ],
     [
@@ -467,7 +844,10 @@ describe('R4 E3 executable evidence contract', () => {
     [
       'unbound source document',
       (value: any) => {
-        value.sourceBundle.documents[0].value.payload_sha256 = 'f'.repeat(64);
+        value.retainedDocuments.get('trusted-proof-payload-receipt-v2').payload_sha256 = 'f'.repeat(
+          64,
+        );
+        refreshRetainedDocument(value, '/identities', 'trusted-proof-payload-receipt-v2');
       },
     ],
     [
@@ -497,13 +877,13 @@ describe('R4 E3 executable evidence contract', () => {
     );
   });
 
-  test('allows approval-history readback after the protected job source timestamp', () => {
+  test('rejects approval-history readback after the protected job source timestamp', () => {
     const candidate = copy(host);
     candidate.approval_transitions.bootstrap.approval.observation = {
       request_started: 15,
       response_received: 16,
     };
-    expect(validateHostEvidence(candidate).projectionEligible).toBe(true);
+    expect(() => validateHostEvidence(candidate)).toThrow();
   });
 
   test('recursively closes both schemas against nested extra properties', () => {

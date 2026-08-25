@@ -1627,7 +1627,10 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task TrustedProofProductionLifecycleSealsExactlySevenAnchors()
     {
-        var normal = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var normal = await CreateFixtureAsync(
+            extraRetentionSeconds: 0,
+            runId: 900,
+            runAttempt: 1);
         var bootstrap = await AcceptGenerationAsync(normal, commentId: 2220);
         await ExecuteCleanupAsync(normal, bootstrap.Acceptance);
         normal.Context.Dispose();
@@ -1652,7 +1655,9 @@ public sealed class RetainedStateTransactionEndToEndTests
             route: ActionHostAuthorizationRoute.WorkflowDispatch,
             scenario: staleScenario,
             store: continuation.Store,
-            time: continuation.Time);
+            time: continuation.Time,
+            runId: 902,
+            runAttempt: 1);
         var staleRun = await CompleteRunAsync(stale, "stale generation");
         Assert.True(R4PreparedPublication.TryCreate(
             staleRun.Outcome,
@@ -1853,12 +1858,25 @@ public sealed class RetainedStateTransactionEndToEndTests
                 out var receipt));
             return receipt!.PreviousLogicalGenerationIdentity is null ? 0 : 1;
         }).ToArray();
-        TrustedProofEncryptedArtifact Input(
-            OpaqueStoreObjectMetadata metadata) =>
-            new(
+        var authenticatedById = normalObjects.Concat(staleObjects).ToDictionary(
+            item => item.Metadata.Reference.ObjectId.Value,
+            StringComparer.Ordinal);
+        TrustedProofEncryptedArtifact Input(OpaqueStoreObjectMetadata metadata)
+        {
+            var runIdentity = normalHead.Header.ProducingRunIdentity;
+            var runAttempt = normalHead.Header.ProducingRunAttempt;
+            if (authenticatedById.TryGetValue(metadata.Reference.ObjectId.Value, out var authenticated))
+            {
+                runIdentity = authenticated.Header.ProducingRunIdentity;
+                runAttempt = authenticated.Header.ProducingRunAttempt;
+            }
+            return new TrustedProofEncryptedArtifact(
                 metadata.Reference.ObjectId.Value,
                 metadata.Reference.Name.Value,
+                runIdentity,
+                runAttempt,
                 continuation.Store.Bytes(metadata));
+        }
         var oracleInputs = new List<TrustedProofEncryptedArtifact>
         {
             Input(locator),
@@ -1873,16 +1891,60 @@ public sealed class RetainedStateTransactionEndToEndTests
             Input(item.Metadata)));
         oracleInputs.AddRange(cleanupRecords.Select(item =>
             Input(item.Metadata)));
+        var normalOperation = new string('6', 64);
+        var staleOperation = new string('7', 64);
+        var operationRuns = new[]
+        {
+            new TrustedProofOperationRun(
+                normalOperation,
+                "normal",
+                normal.Launch.RunId.ToString(CultureInfo.InvariantCulture),
+                normal.Launch.RunAttempt),
+            new TrustedProofOperationRun(
+                normalOperation,
+                "normal",
+                continuation.Launch.RunId.ToString(CultureInfo.InvariantCulture),
+                continuation.Launch.RunAttempt),
+            new TrustedProofOperationRun(
+                staleOperation,
+                "stale",
+                stale.Launch.RunId.ToString(CultureInfo.InvariantCulture),
+                stale.Launch.RunAttempt),
+            new TrustedProofOperationRun(
+                staleOperation,
+                "stale",
+                staleCurrent.Launch.RunId.ToString(CultureInfo.InvariantCulture),
+                staleCurrent.Launch.RunAttempt),
+        };
+        Assert.Equal(4, operationRuns.Select(item => item.RunIdentity).Distinct().Count());
+        Assert.All(authenticatedById.Values, item => Assert.Contains(
+            operationRuns,
+            run => run.RunIdentity == item.Header.ProducingRunIdentity &&
+                run.RunAttempt == item.Header.ProducingRunAttempt));
         Assert.True(TrustedProofEvidenceCodecOracle.TryDecode(
             continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
             continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
             continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
             oracleInputs,
+            operationRuns,
             out var oracleResult));
         var decodedOracle = Assert.IsType<TrustedProofCodecOracleResult>(oracleResult);
         Assert.True(decodedOracle.ExactSevenSuccess);
         Assert.False(decodedOracle.RecoveryOnly);
         Assert.Equal(15, decodedOracle.Records.Length);
+        Assert.All(decodedOracle.Records, record =>
+        {
+            Assert.NotEqual("unclassified", record.Role);
+            Assert.Contains(record.Scope, new[] { "repository", "normal", "stale" });
+            Assert.Contains(record.OperationId, new[] { normalOperation, staleOperation });
+            Assert.Equal(1, record.ProducingRunAttempt);
+        });
+        Assert.All(
+            decodedOracle.Records.Where(record => record.Scope == "stale"),
+            record => Assert.Equal(staleOperation, record.OperationId));
+        Assert.All(
+            decodedOracle.Records.Where(record => record.Scope is "normal" or "repository"),
+            record => Assert.Equal(normalOperation, record.OperationId));
         Assert.Equal(
             7,
             decodedOracle.Records.Count(item => successMetadata.Any(metadata =>
@@ -1898,6 +1960,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
             continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
             recoveryInputs,
+            operationRuns,
             out var recoveryResult));
         Assert.False(Assert.IsType<TrustedProofCodecOracleResult>(recoveryResult).ExactSevenSuccess);
         Assert.True(recoveryResult!.RecoveryOnly);
@@ -1905,6 +1968,25 @@ public sealed class RetainedStateTransactionEndToEndTests
             "bootstrap-candidate",
             decodedOracle.Records.Single(item =>
                 item.ArtifactId == orderedCandidates[0].Metadata.Reference.ObjectId.Value).Role);
+        var crossOperationRuns = operationRuns.Select(run =>
+        {
+            if (run.RunIdentity == normal.Launch.RunId.ToString(CultureInfo.InvariantCulture))
+            {
+                return run with { OperationId = staleOperation, Scope = "stale" };
+            }
+            if (run.RunIdentity == stale.Launch.RunId.ToString(CultureInfo.InvariantCulture))
+            {
+                return run with { OperationId = normalOperation, Scope = "normal" };
+            }
+            return run;
+        }).ToArray();
+        Assert.False(TrustedProofEvidenceCodecOracle.TryDecode(
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            oracleInputs,
+            crossOperationRuns,
+            out _));
         foreach (var input in oracleInputs)
         {
             CryptographicOperations.ZeroMemory(input.Envelope);
@@ -3287,10 +3369,24 @@ public sealed class RetainedStateTransactionEndToEndTests
             ActionHostAuthorizationRoute.WorkflowRun,
         ActionHostAuthorizationScenario? scenario = null,
         ScriptedLocatorStore? store = null,
-        MutableLineageTimeProvider? time = null)
+        MutableLineageTimeProvider? time = null,
+        long? runId = null,
+        int? runAttempt = null)
     {
         scenario ??= ActionHostAuthorizationScenario.Valid(route);
-        var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
+        var launch = StateLaunch(
+            scenario.Launch,
+            currentKeyByte: 0x42,
+            runId: runId,
+            runAttempt: runAttempt);
+        if (runId is not null || runAttempt is not null)
+        {
+            scenario.Transport.CurrentRun = scenario.Transport.CurrentRun with
+            {
+                Id = launch.RunId,
+                Attempt = launch.RunAttempt,
+            };
+        }
         var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
             launch,
             CancellationToken.None);
