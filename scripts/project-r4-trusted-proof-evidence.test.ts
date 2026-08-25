@@ -1,1024 +1,588 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
+import { verifyCapturedFiles } from './assemble-r4-trusted-proof-evidence.mjs';
 import {
+  assembleTrustedProofEvidence,
   assertPublicSafeEvidence,
+  canonicalJson,
+  cleanupPhases,
+  generateCleanupPlan,
   projectTrustedProofEvidence,
-} from './project-r4-trusted-proof-evidence.mjs';
+  sha256,
+  validateHostEvidence,
+} from './r4-trusted-proof-contract.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-const script = path.join(root, 'scripts', 'project-r4-trusted-proof-evidence.mjs');
 const fixtureRoot = path.join(root, 'runtime', 'tests', 'fixtures', 'action-host', 'trusted-proof');
-const hostTemplatePath = path.join(fixtureRoot, 'templates', 'host-restricted-evidence.json');
-const hostTemplate = JSON.parse(fs.readFileSync(hostTemplatePath, 'utf8')) as Record<string, any>;
+const host = JSON.parse(
+  fs.readFileSync(path.join(fixtureRoot, 'templates', 'host-restricted-evidence.json'), 'utf8'),
+);
 const expectedPublic = JSON.parse(
   fs.readFileSync(path.join(fixtureRoot, 'templates', 'public-safe-evidence.json'), 'utf8'),
-) as Record<string, any>;
-const temporaryRoots: string[] = [];
+);
 
-afterEach(() => {
-  for (const directory of temporaryRoots.splice(0)) {
-    fs.rmSync(directory, { force: true, recursive: true });
-  }
-});
-
-function clone<T>(value: T): T {
+function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
-function canonicalInput(value: unknown) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-e3-evidence-'));
-  temporaryRoots.push(directory);
-  const pathname = path.join(directory, 'host.json');
-  fs.writeFileSync(pathname, `${JSON.stringify(value)}\n`);
-  return pathname;
+function projectMutation(mutator: (candidate: any) => void) {
+  const candidate = copy(host);
+  mutator(candidate);
+  return () => projectTrustedProofEvidence(candidate);
 }
 
-describe('R4 E3 public-safe evidence projection', () => {
-  test('projects the exact closed public template from complete host-restricted evidence', () => {
-    expect(projectTrustedProofEvidence(clone(hostTemplate))).toEqual(expectedPublic);
-    expect(assertPublicSafeEvidence(clone(expectedPublic))).toBe(true);
+function syntheticAssembly() {
+  const candidate = copy(host);
+  const roleById = new Map(
+    candidate.inventories.expected_success.map((record: any) => [record.artifact_id, record.role]),
+  );
+  const captureManifest = {
+    kind: 'apr-r4-e3-capture-manifest-v1',
+    repository_id: candidate.identities.repository_id,
+    repository: candidate.identities.repository,
+    operation_ids: candidate.identities.operation_ids,
+    source_map_sha256: sha256(canonicalJson(candidate.source_map)),
+    destination_identity_sha256: candidate.restricted_package.destination_identity_sha256,
+    sources: [
+      {
+        source_id: 'runs:page:1',
+        route: '/repos/SolusQuest/agentic-pr-review/actions/runs?per_page=100',
+        page: 1,
+        status: 200,
+        body_path: 'source-0001.json',
+        body_sha256: '1'.repeat(64),
+        body_size: '3',
+        safe_headers_sha256: '2'.repeat(64),
+        request_started_unix_milliseconds: 1,
+        response_received_unix_milliseconds: 2,
+        next_route: null,
+      },
+    ],
+    artifacts: candidate.inventories.observed_cleanup.map((record: any) => ({
+      artifact_id: record.artifact_id,
+      artifact_name: `artifact-${record.artifact_id}`,
+      expected_role: roleById.get(record.artifact_id) ?? 'internal-record',
+      scope: record.scope,
+      opaque_name: `opaque-${record.artifact_id}`,
+      producing_run_id: '9001',
+      producing_run_attempt: '1',
+      download_route: `/repos/SolusQuest/agentic-pr-review/actions/artifacts/${record.artifact_id}/zip`,
+      download_safe_headers_sha256: '7'.repeat(64),
+      download_request_started_unix_milliseconds: 3,
+      download_response_received_unix_milliseconds: 4,
+      archive_path: `artifact-${record.artifact_id}.zip`,
+      archive_sha256: '3'.repeat(64),
+      archive_size: '100',
+      encrypted_object_path: `artifact-${record.artifact_id}.bin`,
+      encrypted_object_sha256: '4'.repeat(64),
+      encrypted_object_size: '50',
+    })),
+    finalized: true,
+  };
+  const captureManifestSha256 = sha256(canonicalJson(captureManifest));
+  const oracleResult = {
+    kind: 'apr-r4-e3-production-codec-oracle-result-v1',
+    capture_manifest_sha256: captureManifestSha256,
+    exact_seven_success: true,
+    recovery_only: false,
+    records: candidate.inventories.observed_cleanup.map((record: any) => ({
+      artifact_id: record.artifact_id,
+      role: roleById.get(record.artifact_id) ?? 'internal-record',
+      scope: record.scope,
+      object_class: record.object_class,
+      object_identity: '5'.repeat(64),
+      producing_run_identity: '9001',
+      producing_run_attempt: '1',
+      payload_sha256: '6'.repeat(64),
+    })),
+  };
+  const oracleResultSha256 = sha256(canonicalJson(oracleResult));
+  candidate.restricted_package.capture_manifest_sha256 = captureManifestSha256;
+  candidate.restricted_package.oracle_result_sha256 = oracleResultSha256;
+  return {
+    host: candidate,
+    captureManifest,
+    captureManifestSha256,
+    oracleResult,
+    oracleResultSha256,
+    credentialCopiesAbsent: true,
+  };
+}
+
+describe('R4 E3 executable evidence contract', () => {
+  test('reopens every captured source, archive, and encrypted object at final assembly', () => {
+    const restrictedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'r4-assembly-'));
+    const packageRoot = path.join(restrictedRoot, 'package');
+    fs.mkdirSync(packageRoot);
+    const source = Buffer.from('{}');
+    const archive = Buffer.from('archive');
+    const encrypted = Buffer.from('encrypted-object');
+    const sourcePath = path.join(packageRoot, 'source-0001.json');
+    const archivePath = path.join(packageRoot, 'artifact-1001.zip');
+    const objectPath = path.join(packageRoot, 'artifact-1001.bin');
+    fs.writeFileSync(sourcePath, source);
+    fs.writeFileSync(archivePath, archive);
+    fs.writeFileSync(objectPath, encrypted);
+    const manifest = {
+      sources: [
+        {
+          body_path: path.basename(sourcePath),
+          body_size: String(source.length),
+          body_sha256: sha256(source),
+        },
+      ],
+      artifacts: [
+        {
+          archive_path: path.basename(archivePath),
+          archive_size: String(archive.length),
+          archive_sha256: sha256(archive),
+          encrypted_object_path: path.basename(objectPath),
+          encrypted_object_size: String(encrypted.length),
+          encrypted_object_sha256: sha256(encrypted),
+        },
+      ],
+    };
+    try {
+      expect(() =>
+        verifyCapturedFiles(
+          restrictedRoot,
+          path.join(packageRoot, 'capture-manifest.json'),
+          manifest,
+        ),
+      ).not.toThrow();
+      fs.appendFileSync(sourcePath, 'tampered');
+      expect(() =>
+        verifyCapturedFiles(
+          restrictedRoot,
+          path.join(packageRoot, 'capture-manifest.json'),
+          manifest,
+        ),
+      ).toThrow();
+    } finally {
+      fs.rmSync(restrictedRoot, { recursive: true, force: true });
+    }
   });
 
-  test('allows both independent runs to have attempt one', () => {
-    const candidate = clone(hostTemplate);
-    candidate.runs.bootstrap.run_attempt = 1;
-    candidate.runs.continuation.run_attempt = 1;
-    expect(projectTrustedProofEvidence(candidate).participating_run_ids).toEqual(['9001', '9002']);
+  test('keeps assembler, cleanup generator, and projector offline and mutation-free', () => {
+    const offlineSources = [
+      'assemble-r4-trusted-proof-evidence.mjs',
+      'generate-r4-trusted-proof-cleanup-plan.mjs',
+      'project-r4-trusted-proof-evidence.mjs',
+    ].map((name) => fs.readFileSync(path.join(root, 'scripts', name), 'utf8'));
+    for (const source of offlineSources) {
+      expect(source).not.toMatch(/node:https?|child_process|\bfetch\s*\(|\bexec(?:File)?\s*\(/u);
+    }
+    expect(offlineSources[1]).not.toContain('writeFile');
   });
 
-  test('the CLI prints only canonical public-safe evidence', () => {
-    const output = execFileSync(process.execPath, [script, hostTemplatePath], {
-      cwd: root,
-      encoding: 'utf8',
+  test('assembles a source-bound protected package before projection', () => {
+    const assembled = assembleTrustedProofEvidence(syntheticAssembly());
+    expect(assembled.publicEvidence).toEqual(expectedPublic);
+  });
+
+  test.each([
+    [
+      'missing captured object',
+      (value: any) => {
+        value.captureManifest.artifacts.pop();
+        value.captureManifestSha256 = sha256(canonicalJson(value.captureManifest));
+        value.host.restricted_package.capture_manifest_sha256 = value.captureManifestSha256;
+        value.oracleResult.capture_manifest_sha256 = value.captureManifestSha256;
+        value.oracleResultSha256 = sha256(canonicalJson(value.oracleResult));
+        value.host.restricted_package.oracle_result_sha256 = value.oracleResultSha256;
+      },
+    ],
+    [
+      'swapped oracle role',
+      (value: any) => {
+        value.oracleResult.records[0].role = 'normal-lineage-head';
+        value.oracleResultSha256 = sha256(canonicalJson(value.oracleResult));
+        value.host.restricted_package.oracle_result_sha256 = value.oracleResultSha256;
+      },
+    ],
+    [
+      'capture digest mismatch',
+      (value: any) => {
+        value.captureManifestSha256 = '9'.repeat(64);
+      },
+    ],
+    [
+      'retained credential copy',
+      (value: any) => {
+        value.credentialCopiesAbsent = false;
+      },
+    ],
+  ])('rejects assembly with %s', (_name, mutate) => {
+    const value = syntheticAssembly();
+    mutate(value);
+    expect(() => assembleTrustedProofEvidence(value)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+  });
+
+  test('projects the canonical exact-seven evidence byte-stably', () => {
+    expect(validateHostEvidence(host).inventory.successIds.size).toBe(7);
+    expect(projectTrustedProofEvidence(host)).toEqual(expectedPublic);
+    expect(assertPublicSafeEvidence(expectedPublic)).toBe(true);
+    expect(canonicalJson(projectTrustedProofEvidence(host))).toBe(
+      fs.readFileSync(path.join(fixtureRoot, 'templates', 'public-safe-evidence.json'), 'utf8'),
+    );
+  });
+
+  test.each([
+    ['missing stale comment', (value: any) => value.proof_control.stale.comments.pop()],
+    [
+      'duplicate stale comment',
+      (value: any) => {
+        value.proof_control.stale.comments[3] = copy(value.proof_control.stale.comments[2]);
+      },
+    ],
+    [
+      'reordered stale comments',
+      (value: any) => {
+        [value.proof_control.stale.comments[1], value.proof_control.stale.comments[2]] = [
+          value.proof_control.stale.comments[2],
+          value.proof_control.stale.comments[1],
+        ];
+      },
+    ],
+    [
+      'wrong stale predecessor',
+      (value: any) => {
+        value.proof_control.stale.comments[3].predecessor_comment_id = '8101';
+      },
+    ],
+    [
+      'retained stale control',
+      (value: any) => {
+        value.proof_control.stale.cleanup_outcomes[3].outcome = 'retained';
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(projectMutation(mutate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+  });
+
+  test.each([
+    [
+      'invented approved time',
+      (value: any) => {
+        value.approval_transitions.bootstrap.approval.approved_at = 15;
+      },
+    ],
+    [
+      'rerun',
+      (value: any) => {
+        value.approval_transitions.continuation.run_attempt = 2;
+      },
+    ],
+    [
+      'cross-run approval',
+      (value: any) => {
+        value.approval_transitions.stale.approval.run_id = '9002';
+      },
+    ],
+    [
+      'cross-environment approval',
+      (value: any) => {
+        value.approval_transitions.bootstrap.approval.environment_id = '7002';
+      },
+    ],
+    [
+      'approval observed after job start',
+      (value: any) => {
+        value.approval_transitions.bootstrap.approval.observation.response_received = 99;
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(projectMutation(mutate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+  });
+
+  test.each([
+    [
+      'old concurrency API',
+      (value: any) => {
+        value.concurrency.normal.api_version = '2022-11-28';
+      },
+    ],
+    [
+      'incomplete group pagination',
+      (value: any) => {
+        value.concurrency.stale.pagination_complete = false;
+      },
+    ],
+    [
+      'bare status without ahead_of_run',
+      (value: any) => {
+        value.concurrency.normal.ahead_of_run = [];
+      },
+    ],
+    [
+      'cross-group member',
+      (value: any) => {
+        value.concurrency.stale.ahead_of_run[1].run_id = '9002';
+      },
+    ],
+    [
+      'cancelled holder',
+      (value: any) => {
+        value.concurrency.normal.terminal.holder_cancelled = true;
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(projectMutation(mutate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+  });
+
+  test.each([
+    [
+      'missing product anchor',
+      (value: any) => {
+        value.inventories.expected_success.pop();
+      },
+    ],
+    [
+      'duplicate product anchor id',
+      (value: any) => {
+        value.inventories.expected_success[6].artifact_id = '1006';
+      },
+    ],
+    [
+      'synthetic role',
+      (value: any) => {
+        value.inventories.expected_success[0].role = 'synthetic-reset';
+      },
+    ],
+    [
+      'role and codec-class mismatch',
+      (value: any) => {
+        value.inventories.expected_success[3].object_class = 'acceptance';
+      },
+    ],
+    [
+      'unauthenticated cleanup target',
+      (value: any) => {
+        value.inventories.observed_cleanup[0].authenticated = false;
+      },
+    ],
+    [
+      'unexpected ordinary cleanup target',
+      (value: any) => {
+        value.inventories.observed_cleanup.push({
+          artifact_id: '1016',
+          object_class: 'publication_failure',
+          scope: 'stale',
+          operation_id: value.identities.operation_ids[1],
+          authenticated: true,
+          operation_owned: true,
+          disposition: 'delete',
+        });
+      },
+    ],
+    [
+      'cross-operation cleanup target',
+      (value: any) => {
+        value.inventories.observed_cleanup[0].operation_id = '8'.repeat(64);
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(projectMutation(mutate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+  });
+
+  test('includes an authenticated recovery-only extra in cleanup but prohibits projection', () => {
+    const candidate = copy(host);
+    candidate.inventories.observed_cleanup.push({
+      artifact_id: '1016',
+      object_class: 'publication_failure',
+      scope: 'stale',
+      operation_id: candidate.identities.operation_ids[1],
+      authenticated: true,
+      operation_owned: true,
+      disposition: 'recovery-only-delete',
     });
-    expect(output).toBe(`${JSON.stringify(expectedPublic)}\n`);
-    for (const protectedValue of [
-      'candidate-bootstrap-physical',
-      'acceptance-bootstrap-physical',
-      'opaque-locator-normal',
-      'lineage-object-v2',
-    ]) {
-      expect(output).not.toContain(protectedValue);
-    }
+    const generated = generateCleanupPlan({
+      operation_ids: candidate.identities.operation_ids,
+      proof_control: candidate.proof_control,
+      observed_cleanup: candidate.inventories.observed_cleanup,
+      resources: candidate.cleanup.resources,
+    });
+    expect(generated.plan.targets.state_artifact_ids).toContain('1016');
+    candidate.cleanup.plan_sha256 = generated.digest;
+    candidate.authorizations.cleanup.plan_sha256 = generated.digest;
+    expect(() => projectTrustedProofEvidence(candidate)).toThrow(/recovery-only-no-projection/u);
+  });
+
+  test('generates the checked cleanup plan deterministically with all 15 observed resources', () => {
+    const input = {
+      operation_ids: host.identities.operation_ids,
+      proof_control: host.proof_control,
+      observed_cleanup: host.inventories.observed_cleanup,
+      resources: host.cleanup.resources,
+    };
+    const first = generateCleanupPlan(input);
+    const second = generateCleanupPlan(copy(input));
+    expect(first).toEqual(second);
+    expect(first.plan.phases.map((item) => item.phase)).toEqual(cleanupPhases);
+    expect(first.plan.targets.state_artifact_ids).toHaveLength(15);
+    expect(first.canonical).toBe(
+      fs.readFileSync(path.join(fixtureRoot, 'cleanup-plan.json'), 'utf8'),
+    );
   });
 
   test.each([
-    ['same-run-id', (value: any) => (value.runs.continuation.run_id = value.runs.bootstrap.run_id)],
-    ['nonpositive-attempt', (value: any) => (value.runs.continuation.run_attempt = 0)],
     [
-      'dispatch-after-run-one',
-      (value: any) => (value.runs.continuation.created_at = value.runs.bootstrap.completed_at + 1),
-    ],
-    [
-      'observation-after-completion',
-      (value: any) => (value.observation.observed_at = value.runs.bootstrap.completed_at),
-    ],
-    [
-      'protected-start-before-completion',
-      (value: any) =>
-        (value.runs.continuation.protected_job_started_at = value.runs.bootstrap.completed_at),
-    ],
-    [
-      'protected-allocation-at-observation',
-      (value: any) => (value.observation.privileged_job_allocated = true),
-    ],
-    [
-      'environment-admission-at-observation',
-      (value: any) => (value.observation.environment_admission_started = true),
-    ],
-    ['group-mismatch', (value: any) => (value.runs.continuation.concurrency_group = 'other')],
-    [
-      'both-normal-groups-share-the-same-nonauthoritative-value',
+      'a duplicated observed artifact',
       (value: any) => {
-        value.runs.bootstrap.concurrency_group = 'same-but-wrong';
-        value.runs.continuation.concurrency_group = 'same-but-wrong';
+        value.observed_cleanup[1].artifact_id = value.observed_cleanup[0].artifact_id;
       },
     ],
     [
-      'normal-head-mismatch',
-      (value: any) => (value.runs.continuation.reviewed_head_sha = 'f'.repeat(40)),
-    ],
-    [
-      'sticky-lineage-mismatch',
-      (value: any) => (value.product.continuation.sticky_comment_id = '7002'),
-    ],
-    [
-      'predecessor-mismatch',
-      (value: any) =>
-        (value.product.continuation.predecessor_acceptance_object_identity = 'other-acceptance'),
-    ],
-    [
-      'workflow-base-mismatch',
-      (value: any) => (value.identities.reviewed_base_sha = 'e'.repeat(40)),
-    ],
-    ['normal-parent-mismatch', (value: any) => (value.fixture.normal_parent_sha = 'e'.repeat(40))],
-    [
-      'authorization-digest-mismatch',
-      (value: any) => (value.authorization.manifest_sha256 = 'e'.repeat(64)),
-    ],
-    [
-      'authorization-readback-after-start',
-      (value: any) => (value.authorization.normal_read_back_at = 51),
-    ],
-    [
-      'authorization-manifest-discriminator',
-      (value: any) => (value.authorization.manifest.kind = 'apr-r4-e3-authorization-manifest-v1'),
-    ],
-    [
-      'authorization-not-removed-between-phases',
-      (value: any) => (value.authorization.normal_absent_read_back_at = 721),
-    ],
-    [
-      'stale-authorization-head-mismatch',
-      (value: any) => (value.authorization.stale_manifest.fixture_head_sha = 'e'.repeat(40)),
-    ],
-    ['environment-secret-omitted', (value: any) => value.protected_environment.secret_names.pop()],
-    [
-      'environment-required-reviewer-rule-disabled',
-      (value: any) => (value.protected_environment.required_reviewer_rule_enabled = false),
-    ],
-    [
-      'environment-required-reviewer-list-empty',
-      (value: any) => (value.protected_environment.required_reviewers = []),
-    ],
-    [
-      'environment-required-reviewer-list-missing',
-      (value: any) => delete value.protected_environment.required_reviewers,
-    ],
-    [
-      'environment-required-reviewer-list-extra',
-      (value: any) =>
-        value.protected_environment.required_reviewers.push({ type: 'User', id: '1' }),
-    ],
-    [
-      'environment-required-reviewer-type-wrong',
-      (value: any) => (value.protected_environment.required_reviewers[0].type = 'Team'),
-    ],
-    [
-      'environment-required-reviewer-id-wrong',
-      (value: any) => (value.protected_environment.required_reviewers[0].id = '1'),
-    ],
-    [
-      'environment-bootstrap-approval-missing',
-      (value: any) => delete value.protected_environment.bootstrap_required_reviewer_approval,
-    ],
-    [
-      'environment-continuation-approval-missing',
-      (value: any) => delete value.protected_environment.continuation_required_reviewer_approval,
-    ],
-    [
-      'environment-stale-approval-missing',
-      (value: any) => delete value.protected_environment.stale_required_reviewer_approval,
-    ],
-    [
-      'environment-bootstrap-approver-not-configured',
-      (value: any) =>
-        (value.protected_environment.bootstrap_required_reviewer_approval.approver_id = '1'),
-    ],
-    [
-      'environment-continuation-approver-not-configured',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.approver_id = '1'),
-    ],
-    [
-      'environment-stale-approver-not-configured',
-      (value: any) =>
-        (value.protected_environment.stale_required_reviewer_approval.approver_id = '1'),
-    ],
-    [
-      'environment-continuation-approval-count-zero',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.count = 0),
-    ],
-    [
-      'environment-bootstrap-approval-after-start',
-      (value: any) =>
-        (value.protected_environment.bootstrap_required_reviewer_approval.approved_at = 51),
-    ],
-    [
-      'environment-continuation-approval-after-start',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.approved_at = 501),
-    ],
-    [
-      'environment-stale-approval-after-start',
-      (value: any) =>
-        (value.protected_environment.stale_required_reviewer_approval.approved_at = 801),
-    ],
-    [
-      'environment-continuation-bootstrap-approval-reused',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval = clone(
-          value.protected_environment.bootstrap_required_reviewer_approval,
-        )),
-    ],
-    [
-      'environment-continuation-route-wrong',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.route =
-          'workflow_run'),
-    ],
-    [
-      'environment-continuation-job-wrong',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.job =
-          'workflow-run-review'),
-    ],
-    [
-      'environment-continuation-run-id-wrong',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.run_id = '9001'),
-    ],
-    [
-      'environment-continuation-run-attempt-wrong',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.run_attempt = 2),
-    ],
-    [
-      'environment-continuation-snapshot-wrong',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.snapshot_readback_sha256 =
-          'e'.repeat(64)),
-    ],
-    [
-      'environment-continuation-name-wrong',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.environment_name =
-          'other-environment'),
-    ],
-    [
-      'environment-continuation-permission-insufficient',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.approver_permission =
-          'read'),
-    ],
-    [
-      'environment-continuation-readback-reused',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.snapshot_read_back_at =
-          value.protected_environment.bootstrap_required_reviewer_approval.snapshot_read_back_at),
-    ],
-    [
-      'environment-continuation-readback-after-approval',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.snapshot_read_back_at = 500),
-    ],
-    [
-      'environment-continuation-protected-start-mismatch',
-      (value: any) =>
-        (value.protected_environment.continuation_required_reviewer_approval.protected_job_started_at = 501),
-    ],
-    [
-      'environment-administrator-bypass-enabled',
-      (value: any) => (value.protected_environment.administrator_bypass = true),
-    ],
-    [
-      'environment-self-review-enabled',
-      (value: any) => (value.protected_environment.prevent_self_review = true),
-    ],
-    [
-      'environment-self-review-missing',
-      (value: any) => delete value.protected_environment.prevent_self_review,
-    ],
-    [
-      'environment-self-review-non-boolean',
-      (value: any) => (value.protected_environment.prevent_self_review = 'false'),
-    ],
-    [
-      'environment-snapshot-unverified',
-      (value: any) => (value.protected_environment.snapshot_sha256 = 'e'.repeat(64)),
-    ],
-    [
-      'proof-ready-readback-mismatch',
-      (value: any) => (value.proof_control.normal.ready.readback_body_sha256 = 'e'.repeat(64)),
-    ],
-    [
-      'barrier-release-before-observation',
-      (value: any) => (value.proof_control.normal.barrier_released_at = 199),
-    ],
-    [
-      'preexisting-root',
-      (value: any) => value.state.pre_state.repository_root.locator_root.push('existing-root'),
-    ],
-    [
-      'incomplete-root-pagination',
-      (value: any) => (value.state.pre_state.repository_root.pagination_complete = false),
-    ],
-    ['missing-deletion', (value: any) => value.cleanup.e4_deleted_physical_artifact_ids.pop()],
-    [
-      'duplicate-created-id',
-      (value: any) =>
-        (value.state.created[1].physical_artifact_id = value.state.created[0].physical_artifact_id),
-    ],
-    [
-      'surviving-root',
-      (value: any) => value.state.final_state.repository_root.locator_root.push('state-root'),
-    ],
-    [
-      'nonproduction-transaction-class',
-      (value: any) => (value.state.created[0].object_class = 'transaction'),
-    ],
-    [
-      'lineage-head-mismatch',
-      (value: any) => (value.product.continuation.lineage_head_object_identity = 'other-lineage'),
-    ],
-    [
-      'base-scope-mismatch',
-      (value: any) => (value.product.continuation.base_scope_digest = 'e'.repeat(64)),
-    ],
-    [
-      'candidate-to-candidate-predecessor',
+      'reordered control targets',
       (value: any) => {
-        const bootstrap = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10003',
-        );
-        const continuation = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        continuation.predecessor_identity = bootstrap.object_identity;
-      },
-    ],
-    [
-      'intent-to-intent-predecessor',
-      (value: any) => {
-        const bootstrap = value.state.created.find(
-          ({ physical_artifact_id, decoded_record }: any) =>
-            physical_artifact_id === '10005' && decoded_record.record_kind === 'initial_intent',
-        );
-        const continuation = value.state.created.find(
-          ({ physical_artifact_id, decoded_record }: any) =>
-            physical_artifact_id === '10020' && decoded_record.record_kind === 'initial_intent',
-        );
-        continuation.predecessor_identity = bootstrap.object_identity;
-      },
-    ],
-    [
-      'fabricated-second-normal-lineage-head',
-      (value: any) => {
-        const record = clone(
-          value.state.created.find(
-            ({ physical_artifact_id }: any) => physical_artifact_id === '10002',
-          ),
-        );
-        record.physical_artifact_id = '900000';
-        record.object_identity = '9'.repeat(64);
-        value.state.created.push(record);
-        value.cleanup.e4_deleted_physical_artifact_ids.push(record.physical_artifact_id);
-      },
-    ],
-    [
-      'acceptance-producing-attempt-does-not-match-run',
-      (value: any) => {
-        const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10029',
-        );
-        acceptance.producing_run_attempt = 2;
-        acceptance.decoded_record.producing_run_attempt = 2;
-      },
-    ],
-    [
-      'acceptance-logical-window-is-not-seven-days',
-      (value: any) => {
-        const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10029',
-        );
-        acceptance.logical_expires_at_unix_seconds += 1;
-        acceptance.decoded_record.logical_expires_at_unix_seconds += 1;
-      },
-    ],
-    [
-      'non-r4-w2-build-discriminator',
-      (value: any) => (value.identities.build_discriminator = 'r4-w1'),
-    ],
-    [
-      'candidate-config-digest-drift',
-      (value: any) => {
-        const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        candidate.decoded_record.config_sha256 = '0'.repeat(64);
-      },
-    ],
-    [
-      'candidate-instructions-digest-drift',
-      (value: any) => {
-        const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        candidate.decoded_record.instructions_sha256 = '0'.repeat(64);
-      },
-    ],
-    [
-      'candidate-publication-payload-drift',
-      (value: any) => {
-        const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        candidate.decoded_record.publication_payload.finalized_comment += ' drift';
-      },
-    ],
-    [
-      'continuation-producer-base-drift',
-      (value: any) => {
-        const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        candidate.decoded_record.producer_base_sha = '0'.repeat(40);
-      },
-    ],
-    [
-      'continuation-producer-head-drift',
-      (value: any) => {
-        const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        candidate.decoded_record.producer_head_sha = '0'.repeat(40);
-      },
-    ],
-    [
-      'successful-transaction-omits-sticky-readback',
-      (value: any) => {
-        value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10023',
-        );
-        value.cleanup.internally_reconciled_physical_artifact_ids =
-          value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10023',
-          );
-      },
-    ],
-    [
-      'successful-transaction-omits-acceptance-recovery',
-      (value: any) => {
-        value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10026',
-        );
-        value.cleanup.internally_reconciled_physical_artifact_ids =
-          value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10026',
-          );
-      },
-    ],
-    [
-      'successful-transaction-omits-write-anchor',
-      (value: any) => {
-        value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10004',
-        );
-        value.cleanup.internally_reconciled_physical_artifact_ids =
-          value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10004',
-          );
-      },
-    ],
-    [
-      'successful-transaction-omits-anchor-cleanup',
-      (value: any) => {
-        value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10006',
-        );
-        value.cleanup.self_deleted_cleanup_record_ids =
-          value.cleanup.self_deleted_cleanup_record_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10006',
-          );
-      },
-    ],
-    [
-      'successful-transaction-omits-completed-record-cleanup',
-      (value: any) => {
-        value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10014',
-        );
-        value.cleanup.self_deleted_cleanup_record_ids =
-          value.cleanup.self_deleted_cleanup_record_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10014',
-          );
-      },
-    ],
-    [
-      'successful-transaction-omits-bootstrap-s6-cleanup',
-      (value: any) => {
-        value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10017',
-        );
-        value.cleanup.self_deleted_cleanup_record_ids =
-          value.cleanup.self_deleted_cleanup_record_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10017',
-          );
-      },
-    ],
-    [
-      'successful-transaction-omits-predecessor-copy',
-      (value: any) => {
-        value.state.created = value.state.created.filter(
-          ({ physical_artifact_id }: any) => physical_artifact_id !== '10028',
-        );
-        value.cleanup.internally_reconciled_physical_artifact_ids =
-          value.cleanup.internally_reconciled_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10028',
-          );
-      },
-    ],
-    [
-      'predecessor-copy-source-digest-mismatch',
-      (value: any) => {
-        const copy = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10028',
-        );
-        copy.decoded_record.source_encrypted_envelope_sha256 = '0'.repeat(64);
-      },
-    ],
-    [
-      's6-cleanup-targets-selected-immediate-predecessor',
-      (value: any) => {
-        const predecessor = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10003',
-        );
-        const cleanup = value.state.created.find(
-          ({ creation_phase, decoded_record }: any) =>
-            creation_phase === 'continuation' &&
-            decoded_record.record_kind === 's6-internal-cleanup',
-        );
-        cleanup.decoded_record.targets = [
-          {
-            name: predecessor.opaque_name,
-            object_id: predecessor.physical_artifact_id,
-            producing_run_identity: predecessor.producing_run_id,
-            producing_run_attempt: predecessor.producing_run_attempt,
-            archive_sha256: predecessor.archive_sha256,
-            encrypted_object_sha256: predecessor.encrypted_object_sha256,
-            expires_at_unix_seconds: predecessor.expires_at_unix_seconds,
-            size: predecessor.size,
-          },
+        [value.proof_control.stale.comments[1], value.proof_control.stale.comments[2]] = [
+          value.proof_control.stale.comments[2],
+          value.proof_control.stale.comments[1],
         ];
       },
     ],
     [
-      'p5-cleanup-has-empty-targets',
+      'a broadened secret target set',
       (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 'p5-anchor-cleanup',
-        );
-        cleanup.decoded_record.targets = [];
+        value.resources.secret_names.push('UNRELATED_SECRET');
       },
     ],
-    [
-      'cleanup-subtype-does-not-match-target-role',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10006',
-        );
-        cleanup.decoded_record.record_kind = 'p5-record-cleanup';
-      },
-    ],
-    [
-      'cleanup-omits-active-inventory-object',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10006',
-        );
-        cleanup.pre_cleanup_inventory_physical_artifact_ids.pop();
-      },
-    ],
-    [
-      'p5-inner-identity-substituted-for-outer-identity',
-      (value: any) => {
-        const record = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10005',
-        );
-        record.decoded_record.record_identity = record.object_identity;
-      },
-    ],
-    [
-      'outer-identity-graph-relabeling',
-      (value: any) => {
-        const target = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10005',
-        );
-        const anchor = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10004',
-        );
-        target.object_identity = '7'.repeat(64);
-        anchor.successor_identity = target.object_identity;
-        anchor.decoded_record.target_object_identity = target.object_identity;
-      },
-    ],
-    [
-      'logical-generation-graph-relabeling',
-      (value: any) => {
-        const candidate = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        const acceptance = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10029',
-        );
-        candidate.decoded_record.logical_generation_identity = '7'.repeat(64);
-        acceptance.decoded_record.logical_generation_identity = '7'.repeat(64);
-        value.product.continuation.acceptance_receipt.logical_generation_identity = '7'.repeat(64);
-      },
-    ],
-    [
-      'acceptance-recovery-handoff-magic-is-not-canonical',
-      (value: any) => {
-        const recovery = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10011',
-        );
-        const handoff = Buffer.from(
-          recovery.decoded_record.acceptance_recovery_handoff_base64,
-          'base64',
-        );
-        handoff[4] ^= 1;
-        recovery.decoded_record.acceptance_recovery_handoff_base64 = handoff.toString('base64');
-      },
-    ],
-    [
-      'acceptance-recovery-handoff-carries-foreign-acceptance',
-      (value: any) => {
-        const bootstrap = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10011',
-        );
-        const continuation = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10026',
-        );
-        bootstrap.decoded_record.acceptance_recovery_handoff_base64 =
-          continuation.decoded_record.acceptance_recovery_handoff_base64;
-      },
-    ],
-    [
-      'acceptance-recovery-handoff-invents-predecessor-copy',
-      (value: any) => {
-        const recovery = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10011',
-        );
-        const handoff = Buffer.from(
-          recovery.decoded_record.acceptance_recovery_handoff_base64,
-          'base64',
-        );
-        handoff[handoff.length - 2] = 1;
-        recovery.decoded_record.acceptance_recovery_handoff_base64 = handoff.toString('base64');
-      },
-    ],
-    [
-      'extra-unowned-record',
-      (value: any) => {
-        const record = clone(value.state.created[0]);
-        record.physical_artifact_id = '900001';
-        record.object_identity = '8'.repeat(64);
-        value.state.created.push(record);
-        value.cleanup.e4_deleted_physical_artifact_ids.push(record.physical_artifact_id);
-      },
-    ],
-    [
-      'noncanonical-artifact-id',
-      (value: any) => {
-        const record = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10018',
-        );
-        record.physical_artifact_id = '010018';
-        value.cleanup.e4_deleted_physical_artifact_ids =
-          value.cleanup.e4_deleted_physical_artifact_ids.map((physicalArtifactId: string) =>
-            physicalArtifactId === '10018' ? '010018' : physicalArtifactId,
-          );
-      },
-    ],
-    [
-      'wrong-terminal-disposition',
-      (value: any) => {
-        const record = value.state.created.find(
-          ({ physical_artifact_id }: any) => physical_artifact_id === '10003',
-        );
-        record.terminal_disposition = 'internally-reconciled-deleted';
-        record.terminal_phase = 'continuation-internal-cleanup';
-        record.terminal_at_unix_seconds = 690;
-        value.cleanup.e4_deleted_physical_artifact_ids =
-          value.cleanup.e4_deleted_physical_artifact_ids.filter(
-            (physicalArtifactId: string) => physicalArtifactId !== '10003',
-          );
-        value.cleanup.internally_reconciled_physical_artifact_ids.push('10003');
-      },
-    ],
-    ['stale-scope-not-enumerated', (value: any) => delete value.state.final_state.stale],
-    [
-      'stale-head-does-not-advance',
-      (value: any) => {
-        value.identities.stale_advanced_head_sha = value.identities.stale_admitted_head_sha;
-        value.product.stale.unauthorized_follow_on_run.reviewed_head_sha =
-          value.identities.stale_admitted_head_sha;
-      },
-    ],
-    [
-      'stale-release-before-head-advance',
-      (value: any) => (value.product.stale.authorized_stale_run.stale_release_at = 860),
-    ],
-    [
-      'stale-follow-on-authorized',
-      (value: any) => (value.product.stale.unauthorized_follow_on_run.authorization_matches = true),
-    ],
-    [
-      'stale-run-pr-mismatch',
-      (value: any) => (value.product.stale.authorized_stale_run.pr_number = '1001'),
-    ],
-    [
-      'stale-follow-on-group-mismatch',
-      (value: any) =>
-        (value.product.stale.unauthorized_follow_on_run.concurrency_group =
-          'agentic-pr-review-r4-42-pr-1001'),
-    ],
-    [
-      'stale-follow-on-completes-before-owner',
-      (value: any) => {
-        value.product.stale.unauthorized_follow_on_run.workflow_started_at = 900;
-        value.product.stale.unauthorized_follow_on_run.completed_at = 910;
-      },
-    ],
-    [
-      'proof-marker-arbitrary-digest',
-      (value: any) => {
-        value.proof_control.normal.ready.body_sha256 = 'e'.repeat(64);
-        value.proof_control.normal.ready.readback_body_sha256 = 'e'.repeat(64);
-      },
-    ],
-    [
-      'proof-marker-coordinate-mismatch',
-      (value: any) => (value.proof_control.normal.ready.pr_number = '1002'),
-    ],
-    [
-      'proof-release-predecessor-mismatch',
-      (value: any) => (value.proof_control.normal.release.predecessor_comment_id = '8101'),
-    ],
-    [
-      'proof-ready-claims-permission',
-      (value: any) => (value.proof_control.normal.ready.actor_permission = 'write'),
-    ],
-    [
-      'proof-release-read-only-actor',
-      (value: any) => (value.proof_control.normal.release.actor_permission = 'read'),
-    ],
-    [
-      'proof-cleanup-comment-mismatch',
-      (value: any) =>
-        (value.proof_control.normal.cleanup_receipt.receipt.comment_outcomes[1].comment_id =
-          '8102'),
-    ],
-    [
-      'bootstrap-marker-retained',
-      (value: any) =>
-        (value.cleanup.terminal_resources.product_sticky.marker =
-          value.product.bootstrap.sticky_marker),
-    ],
-    [
-      'key-removed-before-readback',
-      (value: any) => (value.cleanup.state_key_removed_after_final_readback = false),
-    ],
-    [
-      'unknown-delete-outcome',
-      (value: any) =>
-        (value.cleanup.terminal_resources.authorization_variable.terminal_class = 'unknown'),
-    ],
-    [
-      'follow-on-still-running',
-      (value: any) =>
-        (value.cleanup.terminal_resources.workflow_runs.all_follow_on_runs_terminal = false),
-    ],
-    [
-      'stale-state-mutation',
-      (value: any) =>
-        (value.product.stale.authorized_stale_run.candidate_persisted_after_revalidation = true),
-    ],
-    ['numeric-placeholder-epoch', (value: any) => (value.state.created[1].epoch = 0)],
-    [
-      'one-based-bootstrap-session-generation',
-      (value: any) => (value.state.created[2].decoded_record.session_generation = 1),
-    ],
-    [
-      'repeated-bootstrap-continuation-session-digest',
-      (value: any) => {
-        const candidates = value.state.created.filter(
-          ({ object_class }: any) => object_class === 'candidate',
-        );
-        candidates[1].decoded_record.session_sha256 = candidates[0].decoded_record.session_sha256;
-      },
-    ],
-    [
-      'cleanup-identity-replaced-by-fixture-operation',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        cleanup.decoded_record.operation_identity = value.fixture.normal_operation_id;
-      },
-    ],
-    [
-      'cleanup-target-order-not-production-canonical',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        cleanup.decoded_record.targets.reverse();
-      },
-    ],
-    [
-      'cleanup-target-digests-swapped',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        const target = cleanup.decoded_record.targets[0];
-        [target.archive_sha256, target.encrypted_object_sha256] = [
-          target.encrypted_object_sha256,
-          target.archive_sha256,
-        ];
-      },
-    ],
-    [
-      'cleanup-target-digests-collapsed',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        const target = cleanup.decoded_record.targets[0];
-        target.encrypted_object_sha256 = target.archive_sha256;
-      },
-    ],
-    [
-      'outer-metadata-digests-collapsed',
-      (value: any) => {
-        const record = value.state.created.find(
-          ({ object_class }: any) => object_class === 'candidate',
-        );
-        record.encrypted_object_sha256 = record.archive_sha256;
-      },
-    ],
-    [
-      'cleanup-target-expiry-mismatch',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        cleanup.decoded_record.targets[0].expires_at_unix_seconds += 1;
-      },
-    ],
-    [
-      'cleanup-target-size-mismatch',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        cleanup.decoded_record.targets[0].size += 1;
-      },
-    ],
-    [
-      'cleanup-inventory-digest-not-derived-from-targets',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        cleanup.decoded_record.pre_cleanup_inventory_digest = '0'.repeat(64);
-      },
-    ],
-    [
-      'cleanup-operation-identity-not-content-derived',
-      (value: any) => {
-        const cleanup = value.state.created.find(
-          ({ decoded_record }: any) => decoded_record.record_kind === 's6-final-cleanup',
-        );
-        cleanup.decoded_record.operation_identity = '0'.repeat(64);
-      },
-    ],
-    [
-      'locator-root-in-scoped-family-map',
-      (value: any) =>
-        (value.state.scopes.normal.family_opaque_names.locator_root = 'opaque-normal-locator-root'),
-    ],
-    [
-      'incomplete-acceptance-receipt',
-      (value: any) => delete value.product.bootstrap.acceptance_receipt.logical_generation_identity,
-    ],
-    [
-      'stale-sticky-mutation',
-      (value: any) =>
-        (value.product.stale.authorized_stale_run.sticky_mutated_after_revalidation = true),
-    ],
-    [
-      'provider-canary-missing',
-      (value: any) => {
-        const provider = value.canaries.credential_by_sink.find(
-          ({ sink }: any) => sink === 'provider',
-        );
-        provider.observed_present = false;
-      },
-    ],
-    [
-      'canary-sink-credential-mismatch',
-      (value: any) => {
-        const provider = value.canaries.credential_by_sink.find(
-          ({ sink }: any) => sink === 'provider',
-        );
-        provider.authorized_credential = 'AGENTIC_PR_REVIEW_STATE_KEY';
-      },
-    ],
-    ['unreviewed-narrative', (value: any) => (value.product.narrative = 'run 9002 accepted state')],
-  ])('rejects host evidence mutation: %s', (_name, mutate) => {
-    const candidate = clone(hostTemplate);
-    mutate(candidate);
-    expect(() => projectTrustedProofEvidence(candidate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
-  });
-
-  test('admits repeated exact-name families with independently derived metadata digests', () => {
-    const candidate = clone(hostTemplate);
-    const candidates = candidate.state.created.filter(
-      ({ object_class }: any) => object_class === 'candidate',
-    );
-    expect(candidates[0].opaque_name).toBe(candidates[1].opaque_name);
-    expect(candidates[0].archive_sha256).not.toBe(candidates[1].archive_sha256);
-    expect(candidates[0].encrypted_object_sha256).not.toBe(candidates[1].encrypted_object_sha256);
-    expect(candidates[0].archive_sha256).not.toBe(candidates[0].encrypted_object_sha256);
-    expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
-  });
-
-  test('accepts one ordinary approval from the exact sole reviewer for every protected job', () => {
-    const candidate = clone(hostTemplate);
-    const reviewer = candidate.protected_environment.required_reviewers[0];
-    expect(reviewer).toEqual({ type: 'User', id: '16307884' });
-    const approvals = [
-      candidate.protected_environment.bootstrap_required_reviewer_approval,
-      candidate.protected_environment.continuation_required_reviewer_approval,
-      candidate.protected_environment.stale_required_reviewer_approval,
-    ];
-    expect(approvals.map(({ approver_id }: any) => approver_id)).toEqual([
-      reviewer.id,
-      reviewer.id,
-      reviewer.id,
-    ]);
-    expect(approvals.map(({ run_id }: any) => run_id)).toEqual(['9001', '9002', '9003']);
-    expect(approvals.map(({ job }: any) => job)).toEqual([
-      'workflow-run-review',
-      'workflow-dispatch-review',
-      'workflow-run-review',
-    ]);
-    expect(candidate.proof_control.normal.release.actor_id).toBe('44');
-    expect(candidate.proof_control.normal.release.actor_permission).toBe('write');
-    expect(projectTrustedProofEvidence(candidate)).toEqual(expectedPublic);
+  ])('cleanup generator rejects %s', (_name, mutate) => {
+    const input = {
+      operation_ids: copy(host.identities.operation_ids),
+      proof_control: copy(host.proof_control),
+      observed_cleanup: copy(host.inventories.observed_cleanup),
+      resources: copy(host.cleanup.resources),
+    };
+    mutate(input);
+    expect(() => generateCleanupPlan(input)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
   });
 
   test.each([
-    ['direct-artifact-link', (value: any) => (value.state_outcomes.artifact_id = 'artifact-1')],
-    ['run-acceptance-link', (value: any) => (value.state_outcomes.run_id = '9001')],
     [
-      'shared-timestamp',
-      (value: any) =>
-        (value.state_outcomes.observed_at = value.scheduling.barrier_to_queue_delay_ms),
+      'setup authorization broadened',
+      (value: any) => value.authorizations.setup.capabilities.push('place-secret'),
     ],
-    ['phase-key', (value: any) => (value.cleanup.phase_key = 'continuation')],
-    ['ordinal', (value: any) => (value.publication.ordinal = 2)],
-    ['narrative', (value: any) => (value.publication.narrative = 'run 9002 accepted successor')],
-    ['producing-run', (value: any) => (value.publication.producing_run_id = '9002')],
-    ['ciphertext', (value: any) => (value.cleanup.ciphertext_sha256 = '1'.repeat(64))],
-  ])('rejects relational or protected public data: %s', (_name, mutate) => {
-    const candidate = clone(expectedPublic);
-    mutate(candidate);
-    expect(() => assertPublicSafeEvidence(candidate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+    [
+      'future PR coordinate in setup',
+      (value: any) => {
+        value.authorizations.setup.branches[0].pr_number = '1001';
+      },
+    ],
+    [
+      'missing execution credential identity',
+      (value: any) => value.authorizations.execution.credential_files.pop(),
+    ],
+    [
+      'cleanup authorization reused',
+      (value: any) => {
+        value.authorizations.cleanup.phase = 'execution';
+      },
+    ],
+    [
+      'wrong cleanup plan digest',
+      (value: any) => {
+        value.authorizations.cleanup.plan_sha256 = '0'.repeat(64);
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(projectMutation(mutate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
   });
 
-  test('rejects noncanonical, duplicate-key, and oversized host input without echoing it', () => {
-    const noncanonical = canonicalInput(hostTemplate);
-    fs.writeFileSync(noncanonical, `${JSON.stringify(hostTemplate, null, 2)}\n`);
-    const duplicate = canonicalInput(hostTemplate);
-    fs.writeFileSync(
-      duplicate,
-      `${JSON.stringify(hostTemplate).replace('{', '{"kind":"duplicate",')}\n`,
-    );
-    const oversized = canonicalInput(hostTemplate);
-    fs.writeFileSync(oversized, `${'x'.repeat(1024 * 1024 + 1)}\n`);
-    for (const pathname of [noncanonical, duplicate, oversized]) {
-      const result = spawnSync(process.execPath, [script, pathname], {
-        cwd: root,
-        encoding: 'utf8',
-      });
-      expect(result.status).not.toBe(0);
-      expect(result.stdout).toBe('');
-      expect(result.stderr).toMatch(/^APR_R4_E3_EVIDENCE_INVALID /u);
-      expect(result.stderr).not.toContain('candidate-bootstrap');
-    }
+  test.each([
+    [
+      'early cleanup entry',
+      (value: any) => {
+        value.cleanup.entry_gate.all_runs_terminal = false;
+      },
+    ],
+    [
+      'reordered cleanup',
+      (value: any) => {
+        value.cleanup.ordered_readbacks.reverse();
+      },
+    ],
+    [
+      'incomplete cleanup readback',
+      (value: any) => {
+        value.cleanup.ordered_readbacks[2].complete = false;
+      },
+    ],
+    [
+      'premature projection',
+      (value: any) => {
+        value.cleanup.projection_gate.state_empty_complete = false;
+      },
+    ],
+    [
+      'credential copy retained',
+      (value: any) => {
+        value.restricted_package.current_key_copy_absent = false;
+      },
+    ],
+    [
+      'unfinalized private manifest',
+      (value: any) => {
+        value.restricted_package.manifest_finalized = false;
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(projectMutation(mutate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
   });
 
-  test('keeps the projector offline and mutation-free', () => {
-    const source = fs.readFileSync(script, 'utf8');
+  test.each([
+    [
+      'missing source mapping',
+      (value: any) => {
+        value.source_map.entries.pop();
+      },
+    ],
+    [
+      'publicly sourced UI fact',
+      (value: any) => {
+        value.environment.ui_attestation.source_kind = 'public-projection';
+      },
+    ],
+    [
+      'cross-environment UI attestation',
+      (value: any) => {
+        value.environment.ui_attestation.environment = 'other';
+      },
+    ],
+    [
+      'administrator bypass',
+      (value: any) => {
+        value.environment.ui_attestation.administrator_bypass = true;
+      },
+    ],
+    [
+      'failed leak scan',
+      (value: any) => {
+        value.canaries.public_leak_scan.results.state_keys = 'present';
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(projectMutation(mutate)).toThrow(/APR_R4_E3_EVIDENCE_INVALID/u);
+  });
+
+  test('public output contains no protected joins or recovery facts', () => {
+    const serialized = JSON.stringify(expectedPublic);
     for (const forbidden of [
-      'node:child_process',
-      'node:http',
-      'node:https',
-      'fetch(',
-      'gh api',
-      'git push',
-      'writeFile',
-      'unlink',
-      'rmSync',
+      'comment_id',
+      'operation_id',
+      'environment_id',
+      'approval',
+      'manifest_sha256',
+      'plan_sha256',
+      'recovery-only',
+      'artifact_id',
+      'archive',
+      'encrypted',
+      'lineage',
     ]) {
-      expect(source).not.toContain(forbidden);
+      expect(serialized).not.toContain(forbidden);
     }
   });
 });

@@ -1,0 +1,1 @@
+{"kind":"apr-r4-e3-expected-success-role-contract-v1","exact_count":7,"roles":["repository-locator-root","normal-lineage-head","stale-lineage-head","bootstrap-candidate","continuation-candidate","bootstrap-acceptance","continuation-acceptance"],"synthetic_fixture_authority":false}

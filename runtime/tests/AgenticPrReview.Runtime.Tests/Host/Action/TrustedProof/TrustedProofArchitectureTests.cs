@@ -437,7 +437,7 @@ public sealed class TrustedProofArchitectureTests
                 "agentic-pr-review",
                 "trusted-proof.json")));
         const string receiptRelative =
-            "runtime/tests/fixtures/action-host/trusted-proof/" +
+            "runtime/tests/fixtures/action-host/trusted-proof/historical/v1/" +
             "trusted-proof-payload-receipt.json";
         var receiptBytes = File.ReadAllBytes(Path.Join(root, receiptRelative));
         Assert.NotEmpty(receiptBytes);

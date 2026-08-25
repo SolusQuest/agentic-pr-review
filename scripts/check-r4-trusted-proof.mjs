@@ -7,6 +7,7 @@ import { parseDocument } from 'yaml';
 import { extractPreflight } from './check-r4-e2p-preflight.mjs';
 import { verifyReceipt } from './check-r4-e2p-receipt.mjs';
 import { verifyReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
+import { generateCleanupPlan, projectTrustedProofEvidence } from './r4-trusted-proof-contract.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const fixtureRelative = 'runtime/tests/fixtures/action-host/trusted-proof';
@@ -32,13 +33,19 @@ const normalCanarySha256 = 'bc58613e9f389b973f1e44de64021a7acc748fafd857b7fa9946
 const staleCanarySha256 = '20580dc6193f607a3a1d1b6949013796f8a8c9714d3e5586e4e509a473f1382a';
 const fixtureInventory = [
   'authorization-environment-contract.json',
+  'authorizations/cleanup.json',
+  'authorizations/execution.json',
+  'authorizations/setup.json',
   'cleanup-contract.json',
+  'cleanup-plan.json',
+  'expected-success-role-contract.json',
   'fixture-pr-contract.json',
   'historical/v1/receipt-provenance.json',
   'historical/v1/trusted-proof-payload-receipt.json',
   'receipt-provenance-v2.json',
   'schemas/host-restricted-evidence.schema.json',
   'schemas/public-safe-evidence.schema.json',
+  'source-map.json',
   'templates/host-restricted-evidence.json',
   'templates/public-safe-evidence.json',
   'traces/normal-two-run.json',
@@ -48,9 +55,23 @@ const fixtureInventory = [
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    '87d0050fa7e2171b38eba4035e8c176fcf14299a0152b54efcb5ddde06d7e73e',
+    '0eabf9d8f706ea54ac28e901d3810839ed1dd70ab98688958db85d535c8bceb4',
   ],
-  ['cleanup-contract.json', '5d7a26d40d9e41d3d195e8dfb8496703fd40084c1fd687f22306c51575c4cdce'],
+  [
+    'authorizations/cleanup.json',
+    'fb8889834d7990cd20acfbd61cf0e4a905c939aa4abecf9a858a4d125288d39f',
+  ],
+  [
+    'authorizations/execution.json',
+    'b55dfc5f5d8e8d5cf89da8270b7e64ed3748251590c67f5875e66a6b681d58e0',
+  ],
+  ['authorizations/setup.json', '87471de3e4e748a3a954d7582484e4758c472b18b0cc3c4f7ee42697233cd5f9'],
+  ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
+  ['cleanup-plan.json', '48c21893e7b5cad2bd28fdfd609ff5ae35d621f14ac259819933c8901e31c208'],
+  [
+    'expected-success-role-contract.json',
+    '8d601c863d184f8f8cf3cdae5e1b447eb9fa7aea25fd94d00390a3ac786a92ba',
+  ],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
   [
     'historical/v1/receipt-provenance.json',
@@ -66,26 +87,30 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '354faff22e2976efa450a9e6a8dc8b6b2ec8bdc07c827026af8775e5540352f5',
+    'baefa3c52806afa331e5555d0a62547f7d2e6321de54b7ac589f18e6a12f77d0',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
-    'cfd733c71312ddd9e4d6539f512eef2c3c631b6d785e8c610d16f90aeac3f47d',
+    'df81fc4363a48b786548ba0636d5bdb5ccd49c33f6ef15f20efdfcbcda624c7e',
   ],
+  ['source-map.json', '332d4df879cbf0f6cacf57d7f13adec8246c01c8761787ae5f3d5294cf5a2683'],
   [
     'templates/host-restricted-evidence.json',
-    'ab71e1e7f8d201bb7af32a3a628391db9058a2402bc87d7b9f45930949050bbd',
+    '10b856e64192e0fae6f3936af08e845461d0703b0a1d574092e2ed12a268b13d',
   ],
   [
     'templates/public-safe-evidence.json',
-    'dd768d3cde2ef180b2ec0f73b41ccf17484d53d089660ba59ed9bb3afb3bb4e3',
+    '1e92721e6d49168f114a9313cb369e6c562c6ae7ac322c5ecb86929a08e32956',
   ],
   [
     'traces/normal-two-run.json',
-    '7e946753efd19a1483e29306966a8d9f783d4c8b3136ddc8af39c88a898be2a8',
+    '802c3c3392455babd7a54236eb1fca531c40fa81e5ad695a1ed519343c12c28c',
   ],
-  ['traces/stale-head.json', '8a2a34659c0c9593bf48132d7728c98340019b85d4bad20d8bf58579b58b7a40'],
-  ['trusted-proof-payload-receipt-v2.json', receiptJsonSha256],
+  ['traces/stale-head.json', '7f8b47b419df4a2a134a703e40bc8b966ba7e15fa5d789b734a389f61b51d539'],
+  [
+    'trusted-proof-payload-receipt-v2.json',
+    '3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1',
+  ],
 ]);
 
 function fail(code) {
@@ -527,6 +552,7 @@ function validateFixtureContracts(fixtureRoot) {
   for (const [relative, expected] of fixtureDigests) {
     if (sha256(documents.get(relative).bytes) !== expected) fail('fixture-digest');
   }
+
   const fixture = documents.get('fixture-pr-contract.json').value;
   const normalBytes = Buffer.concat([
     Buffer.from(fixture.normal.content_utf8, 'utf8'),
@@ -539,173 +565,93 @@ function validateFixtureContracts(fixtureRoot) {
   if (
     fixture.base_source !== 'exact-authorized-default-branch-workflow-commit' ||
     fixture.base_requires_canary_absent !== true ||
-    fixture.inherited_repository_tree !== 'unchanged' ||
     fixture.only_changed_path !== 'proof/apr178-path-canary.txt' ||
     fixture.normal.terminator_hex !== '0a' ||
     fixture.stale.advanced_terminator_hex !== '0a' ||
     sha256(normalBytes) !== normalCanarySha256 ||
-    fixture.normal.content_sha256 !== normalCanarySha256 ||
-    sha256(staleBytes) !== staleCanarySha256 ||
-    fixture.stale.advanced_content_sha256 !== staleCanarySha256
+    sha256(staleBytes) !== staleCanarySha256
   ) {
     fail('fixture-byte-identity');
   }
+
   const authorization = documents.get('authorization-environment-contract.json').value;
   if (
-    authorization.authorization_variable?.name !== 'R4_TRUSTED_PROOF_AUTHORIZATION' ||
-    authorization.authorization_variable?.default !== 'absent' ||
-    authorization.authorization_variable?.manifest_kind !==
-      'apr-r4-e2p-authorization-manifest-v1' ||
-    authorization.authorization_variable?.normal_and_stale_phases_independently_observed !== true ||
-    authorization.environment?.name !== 'r4-trusted-proof' ||
-    authorization.environment?.must_preexist !== true ||
-    authorization.environment?.deployment_branch !== 'main-only' ||
-    authorization.environment?.required_reviewer_rule_enabled !== true ||
-    JSON.stringify(authorization.environment?.required_reviewers) !==
-      JSON.stringify([{ type: 'User', id: '16307884' }]) ||
-    authorization.environment?.required_maintainer_approvals_minimum !== 1 ||
+    authorization.checkpoints?.map((item) => item.phase).join(',') !== 'setup,execution,cleanup' ||
     authorization.environment?.prevent_self_review !== false ||
-    authorization.environment?.administrator_bypass !== false ||
-    authorization.environment?.per_protected_job_approval_required !== true ||
-    authorization.environment?.phase_order !==
-      'exact-snapshot-readback < reviewer-approval <= protected-job-start' ||
-    authorization.environment?.normal_and_stale_phases_independently_observed !== true ||
-    authorization.environment?.required_evidence?.includes('required_reviewer_rule_enabled') !==
-      true ||
-    authorization.environment?.required_evidence?.includes('exact_required_reviewer_set') !==
-      true ||
-    authorization.environment?.required_evidence?.includes(
-      'required_maintainer_approvals_minimum',
-    ) !== true ||
-    authorization.environment?.required_evidence?.includes(
-      'bootstrap_required_reviewer_approval',
-    ) !== true ||
-    authorization.environment?.required_evidence?.includes(
-      'continuation_required_reviewer_approval',
-    ) !== true ||
-    authorization.environment?.required_evidence?.includes('stale_required_reviewer_approval') !==
-      true ||
-    authorization.canary_matrix_requires_exact_authorized_credential_per_sink !== true ||
-    authorization.host_restricted_destination_requires_kind_and_identity_sha256 !== true ||
+    authorization.environment?.administrator_bypass_source !== 'closed-ui-attestation' ||
+    authorization.approval_transition?.run_attempt !== 1 ||
+    authorization.approval_transition?.approved_at_available !== false ||
+    authorization.concurrency?.api_version !== '2026-03-10' ||
     authorization.live_mutation_owner !== 'issue-181'
   ) {
     fail('authorization-environment-contract');
   }
   const cleanup = documents.get('cleanup-contract.json').value;
   if (
-    cleanup.pre_state?.required !== 'empty' ||
-    cleanup.pre_state?.complete_pagination !== true ||
-    cleanup.pre_state?.required_scopes?.length !== 3 ||
-    cleanup.pre_state?.scope_digests_must_be_distinct !== true ||
-    cleanup.operation_state?.reject_unowned_addition !== true ||
-    cleanup.pre_state?.repository_root_family !== 'locator_root' ||
-    cleanup.pre_state?.scoped_families?.length !== 9 ||
-    cleanup.pre_state?.scoped_families?.includes('locator_root') !== false ||
-    cleanup.operation_state?.creation_phases?.includes('stale-setup') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('scope') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('scope_digest') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('archive_sha256') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('encrypted_object_sha256') !==
-      true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('expires_at_unix_seconds') !==
-      true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('size') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('decoded_record') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_disposition') !==
-      true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_phase') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_at_unix_seconds') !==
-      true ||
-    cleanup.operation_state?.archive_and_encrypted_digests_independent !== true ||
-    cleanup.operation_state?.complete_created_physical_artifact_count !== 35 ||
-    cleanup.operation_state?.transient_record_contract?.opaque_write_anchors !== 6 ||
-    cleanup.operation_state?.transient_record_contract?.p5_anchor_cleanup_records !== 6 ||
-    cleanup.operation_state?.transient_record_contract?.p5_completed_record_cleanup_records !== 6 ||
-    cleanup.operation_state?.transient_record_contract?.predecessor_copy_candidates !== 1 ||
-    cleanup.operation_state?.transient_record_contract?.s6_internal_cleanup_records !== 2 ||
-    cleanup.operation_state?.transient_record_contract?.s6_final_cleanup_records !== 1 ||
-    cleanup.operation_state?.canonical_scoped_envelope_required !== true ||
-    cleanup.operation_state?.cleanup_inventory_binding !==
-      'exact-active-physical-inventory-before-cleanup-record-creation' ||
-    cleanup.operation_state?.scoped_header_exact_fields?.includes('epoch') !== true ||
-    cleanup.operation_state?.scoped_header_exact_fields?.includes('session_id') !== true ||
-    cleanup.operation_state?.decoded_record_contract !==
-      'exact-class-specific-production-fields-with-distinct-session-digests-and-content-derived-cleanup-identity' ||
-    cleanup.operation_state?.normal_lineage_head_rule !==
-      'single-initialized-head-reused-across-accepted-generations-unless-reset-or-expiry' ||
-    JSON.stringify(cleanup.operation_state?.successful_publication_recovery_subtypes) !==
-      JSON.stringify(['initial_intent', 'sticky_readback', 'acceptance_recovery']) ||
-    JSON.stringify(cleanup.operation_state?.terminal_disposition_partition) !==
-      JSON.stringify(['internally-reconciled-deleted', 'e4-deleted', 'cleanup-self-deleted']) ||
-    cleanup.operation_state?.artifact_id_contract !==
-      'canonical-positive-decimal-javascript-safe-github-artifact-id' ||
-    cleanup.public_projection_gate !==
-      'exact-empty-final-state-complete-resource-readback-and-proof-control-cleanup' ||
-    cleanup.invalid_terminal_states?.includes('delete-or-retain') !== true
+    cleanup.successful_inventory?.exact_product_anchor_count !== 7 ||
+    cleanup.successful_inventory?.synthetic_inventory_is_authority !== false ||
+    cleanup.observed_cleanup_inventory?.authenticated_operation_owned_extra !==
+      'recovery-only-delete' ||
+    cleanup.observed_cleanup_inventory?.ambiguous_or_cross_operation !==
+      'non-deletable-maintainer-handoff' ||
+    cleanup.recovery_only_public_projection !== false ||
+    cleanup.execution_capability !== 'none'
   ) {
     fail('cleanup-contract');
   }
-  const normalTrace = documents.get('traces/normal-two-run.json').value;
+
+  const host = documents.get('templates/host-restricted-evidence.json').value;
+  const expectedPublic = documents.get('templates/public-safe-evidence.json').value;
   if (
-    normalTrace.run_one?.run_id === normalTrace.run_two?.run_id ||
-    normalTrace.run_one?.run_attempt < 1 ||
-    normalTrace.run_two?.run_attempt < 1 ||
-    normalTrace.concurrency_group !== 'agentic-pr-review-r4-42-pr-1001' ||
-    normalTrace.run_one?.pr_number !== '1001' ||
-    normalTrace.run_two?.pr_number !== '1001' ||
-    !(
-      normalTrace.workflow_sha === normalTrace.reviewed_base_sha &&
-      normalTrace.normal_parent_sha === normalTrace.reviewed_base_sha &&
-      normalTrace.run_one.protected_job_started_at < normalTrace.run_one.barrier_ready_at &&
-      normalTrace.run_one.barrier_ready_at <= normalTrace.run_two.created_at &&
-      normalTrace.run_two.created_at <= normalTrace.observation.observed_at &&
-      normalTrace.observation.observed_at < normalTrace.run_one.barrier_released_at &&
-      normalTrace.run_one.barrier_released_at < normalTrace.run_one.completed_at &&
-      normalTrace.run_one.completed_at < normalTrace.run_two.protected_job_started_at
-    ) ||
-    normalTrace.run_two.privileged_job_allocated_at_observation !== false ||
-    normalTrace.run_two.environment_admission_started_at_observation !== false ||
-    normalTrace.run_two.protected_step_started_at_observation !== null
+    JSON.stringify(documents.get('source-map.json').value) !== JSON.stringify(host.source_map) ||
+    JSON.stringify(documents.get('authorizations/setup.json').value) !==
+      JSON.stringify(host.authorizations.setup) ||
+    JSON.stringify(documents.get('authorizations/execution.json').value) !==
+      JSON.stringify(host.authorizations.execution) ||
+    JSON.stringify(documents.get('authorizations/cleanup.json').value) !==
+      JSON.stringify(host.authorizations.cleanup)
   ) {
-    fail('normal-trace');
+    fail('fixture-cross-binding');
   }
+  const roleContract = documents.get('expected-success-role-contract.json').value;
+  if (
+    roleContract.exact_count !== 7 ||
+    roleContract.synthetic_fixture_authority !== false ||
+    JSON.stringify(roleContract.roles) !==
+      JSON.stringify(host.inventories.expected_success.map((item) => item.role))
+  ) {
+    fail('success-role-contract');
+  }
+  const generated = generateCleanupPlan({
+    operation_ids: host.identities.operation_ids,
+    proof_control: host.proof_control,
+    observed_cleanup: host.inventories.observed_cleanup,
+    resources: host.cleanup.resources,
+  });
+  if (
+    generated.digest !== host.cleanup.plan_sha256 ||
+    generated.canonical !== documents.get('cleanup-plan.json').bytes.toString('utf8')
+  ) {
+    fail('cleanup-plan-contract');
+  }
+  if (JSON.stringify(host).includes('approved_at')) fail('unobservable-approval-time');
+
+  const normalTrace = documents.get('traces/normal-two-run.json').value;
   const staleTrace = documents.get('traces/stale-head.json').value;
   if (
-    staleTrace.operation_id !== '7'.repeat(64) ||
-    staleTrace.workflow_sha !== staleTrace.reviewed_base_sha ||
-    staleTrace.admitted_parent_sha !== staleTrace.reviewed_base_sha ||
-    staleTrace.advanced_parent_sha !== staleTrace.admitted_head_sha ||
-    staleTrace.changed_paths?.length !== 1 ||
-    staleTrace.changed_paths[0] !== 'proof/apr178-path-canary.txt' ||
-    staleTrace.advanced_content_sha256 !== staleCanarySha256 ||
-    staleTrace.authorized_stale_run?.privileged_job_allocated !== true ||
-    staleTrace.authorized_stale_run?.provider_constructed !== true ||
-    staleTrace.authorized_stale_run?.pr_number !== '1002' ||
-    staleTrace.unauthorized_follow_on_run?.pr_number !== '1002' ||
-    staleTrace.authorized_stale_run?.concurrency_group !== 'agentic-pr-review-r4-42-pr-1002' ||
-    staleTrace.unauthorized_follow_on_run?.concurrency_group !==
-      'agentic-pr-review-r4-42-pr-1002' ||
-    staleTrace.authorized_stale_run?.value_free_signal_count !== 1 ||
-    staleTrace.authorized_stale_run?.host_exact_head_result !== 'stale-head-rejected' ||
-    staleTrace.unauthorized_follow_on_run?.old_authorization_matches !== false ||
-    staleTrace.unauthorized_follow_on_run?.privileged_job_allocated !== false ||
-    staleTrace.unauthorized_follow_on_run?.pending_observation?.job_allocated !== false ||
-    !(
-      staleTrace.unauthorized_follow_on_run?.created_at <=
-        staleTrace.unauthorized_follow_on_run?.pending_observation?.observed_at &&
-      staleTrace.unauthorized_follow_on_run?.pending_observation?.observed_at <
-        staleTrace.authorized_stale_run?.completed_at &&
-      staleTrace.authorized_stale_run?.completed_at <
-        staleTrace.unauthorized_follow_on_run?.workflow_started_at &&
-      staleTrace.unauthorized_follow_on_run?.workflow_started_at <=
-        staleTrace.unauthorized_follow_on_run?.completed_at
-    ) ||
-    staleTrace.unauthorized_follow_on_run?.state_mutated !== false ||
-    staleTrace.unauthorized_follow_on_run?.status !== 'completed-inert' ||
-    staleTrace.all_follow_on_runs_terminal !== true
+    normalTrace.api_version !== '2026-03-10' ||
+    normalTrace.pagination_complete !== true ||
+    JSON.stringify(normalTrace.ahead_of_run) !==
+      JSON.stringify(host.concurrency.normal.ahead_of_run) ||
+    staleTrace.api_version !== '2026-03-10' ||
+    staleTrace.pagination_complete !== true ||
+    staleTrace.proof_control.comments.length !== 4 ||
+    staleTrace.follow_on_terminal_inert !== true ||
+    JSON.stringify(staleTrace.ahead_of_run) !== JSON.stringify(host.concurrency.stale.ahead_of_run)
   ) {
-    fail('stale-trace');
+    fail('trace-contract');
   }
+
   const ajv = new Ajv({ allErrors: true, strict: true });
   const validateHost = ajv.compile(
     documents.get('schemas/host-restricted-evidence.schema.json').value,
@@ -713,15 +659,18 @@ function validateFixtureContracts(fixtureRoot) {
   const validatePublic = ajv.compile(
     documents.get('schemas/public-safe-evidence.schema.json').value,
   );
-  if (!validateHost(documents.get('templates/host-restricted-evidence.json').value)) {
-    fail('host-template-schema');
+  if (!validateHost(host)) fail('host-template-schema');
+  let projected;
+  try {
+    projected = projectTrustedProofEvidence(host);
+  } catch {
+    fail('host-template-contract');
   }
-  if (!validatePublic(documents.get('templates/public-safe-evidence.json').value)) {
-    fail('public-template-schema');
+  if (!validatePublic(projected) || JSON.stringify(projected) !== JSON.stringify(expectedPublic)) {
+    fail('public-template-contract');
   }
   return documents;
 }
-
 function validateRepositorySecretRoutes(workflowsRoot) {
   const workflowFiles = fs
     .readdirSync(workflowsRoot)

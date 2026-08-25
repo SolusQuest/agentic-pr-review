@@ -68,6 +68,7 @@ describe('R4 W13 closed migration inventory', () => {
       test: 'vitest run',
     });
     expect(trackedFiles('scripts/*')).toEqual([
+      'scripts/assemble-r4-trusted-proof-evidence.mjs',
       'scripts/build-action.mjs',
       'scripts/check-action-distribution.mjs',
       'scripts/check-r3-live-proof.mjs',
@@ -85,10 +86,12 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/compose-r4-e2p-receipt-v2.mjs',
       'scripts/compose-r4-e2p-receipt.mjs',
       'scripts/compose-r4-e2p-receipt.test.ts',
+      'scripts/generate-r4-trusted-proof-cleanup-plan.mjs',
       'scripts/project-r4-e2p-diagnostics.mjs',
       'scripts/project-r4-e2p-diagnostics.test.ts',
       'scripts/project-r4-trusted-proof-evidence.mjs',
       'scripts/project-r4-trusted-proof-evidence.test.ts',
+      'scripts/r4-trusted-proof-contract.mjs',
       'scripts/run-clean-source-proof.mjs',
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-runtime-integration.mjs',
