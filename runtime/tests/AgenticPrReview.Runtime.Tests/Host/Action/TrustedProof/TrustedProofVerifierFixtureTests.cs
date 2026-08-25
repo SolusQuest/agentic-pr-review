@@ -127,6 +127,89 @@ public sealed class TrustedProofVerifierFixtureTests
     }
 
     [Fact]
+    public async Task TrustedProofGitFactsShareTheWorkflowBaseAndPolicyTree()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-base-facts-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await PrepareProofScenarioAsync(root, "continuation-seed", 900);
+            using var handler = new FrameworkGitHubHandler(
+                root,
+                new string('f', 64));
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            Assert.Equal(
+                FrameworkGitHubHandler.WorkflowSha,
+                FrameworkGitHubHandler.PullRequestBaseSha(
+                    trustedProofPayload: true));
+            Assert.Equal(
+                FrameworkGitHubHandler.BaseSha,
+                FrameworkGitHubHandler.PullRequestBaseSha(
+                    trustedProofPayload: false));
+
+            using var triggerResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository +
+                "/actions/runs/800/attempts/1");
+            triggerResponse.EnsureSuccessStatusCode();
+            using var trigger = JsonDocument.Parse(
+                await triggerResponse.Content.ReadAsStringAsync());
+            Assert.Equal(
+                FrameworkGitHubHandler.WorkflowSha,
+                trigger.RootElement.GetProperty("pull_requests")[0]
+                    .GetProperty("base").GetProperty("sha").GetString());
+
+            using var associatedResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/commits/" +
+                FrameworkGitHubHandler.TriggerSha + "/pulls");
+            associatedResponse.EnsureSuccessStatusCode();
+            using var associated = JsonDocument.Parse(
+                await associatedResponse.Content.ReadAsStringAsync());
+            Assert.Equal(
+                FrameworkGitHubHandler.WorkflowSha,
+                associated.RootElement[0].GetProperty("base")
+                    .GetProperty("sha").GetString());
+
+            using var pullResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/pulls/147");
+            pullResponse.EnsureSuccessStatusCode();
+            using var pull = JsonDocument.Parse(
+                await pullResponse.Content.ReadAsStringAsync());
+            Assert.Equal(
+                FrameworkGitHubHandler.WorkflowSha,
+                pull.RootElement.GetProperty("base")
+                    .GetProperty("sha").GetString());
+
+            using var commitResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/git/commits/" +
+                FrameworkGitHubHandler.WorkflowSha);
+            commitResponse.EnsureSuccessStatusCode();
+            using var commit = JsonDocument.Parse(
+                await commitResponse.Content.ReadAsStringAsync());
+            var workflowTree = await GetTreeAsync(
+                client,
+                commit.RootElement.GetProperty("tree")
+                    .GetProperty("sha").GetString()!);
+            Assert.Contains(workflowTree, entry =>
+                entry.GetProperty("path").GetString() == ".github" &&
+                entry.GetProperty("type").GetString() == "tree");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FinalWorkflowAndNestedTrustedPolicyShareOneSyntheticTree()
     {
         var root = Path.Join(

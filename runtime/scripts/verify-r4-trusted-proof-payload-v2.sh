@@ -245,8 +245,8 @@ execute_proof() {
     return 1
   fi
   audit_warnings "$verifier_publish_log" \
-    "$fixture_root/aot/verifier-warning-policy.txt" 1 verifier || {
-    echo APR_R4_E2P_VERIFIER_AOT_WARNING_ALLOWLIST_INVALID >&2
+    "$fixture_root/aot/verifier-warning-policy-v2.txt" 2 verifier || {
+    echo 'APR_R4_E2P_V2_FAILURE stage=proof case=clean-source code=warning-policy status=failed' >&2
     return 1
   }
   [[ -x "$verifier" && ! -e "$verifier.dll" &&
@@ -413,7 +413,7 @@ NODE
     --preparation-contract "$fixture_root/preparation-contract-v2.json" \
     --preparation-script runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh \
     --warning-policy "$fixture_root/aot/warning-policy.txt" \
-    --verifier-warning-policy "$fixture_root/aot/verifier-warning-policy.txt" \
+    --verifier-warning-policy "$fixture_root/aot/verifier-warning-policy-v2.txt" \
     > "$receipt_line"
   sed 's/^APR_R4_E2P_RECEIPT_V2 //' "$receipt_line" > "$receipt_json"
   verify_two_root_preparation

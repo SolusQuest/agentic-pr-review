@@ -443,7 +443,7 @@ internal sealed class FrameworkGitHubHandler(
         ("id", PullRequestId),
         ("number", PullRequestNumber),
         ("base", FrameworkJson.Object(
-            ("sha", BaseSha),
+            ("sha", CurrentBaseSha()),
             ("repo", RepositoryIdentity(RepositoryId)))),
         ("head", FrameworkJson.Object(
             ("sha", CurrentHead(mode)),
@@ -516,8 +516,11 @@ internal sealed class FrameworkGitHubHandler(
             ? ContinuedHeadSha
             : HeadSha;
 
+    internal static string PullRequestBaseSha(bool trustedProofPayload) =>
+        trustedProofPayload ? WorkflowSha : BaseSha;
+
     private string CurrentBaseSha() =>
-        IsTrustedProofPayload() ? WorkflowSha : BaseSha;
+        PullRequestBaseSha(IsTrustedProofPayload());
 
     private long ReadCurrentRunId() => long.Parse(
         File.ReadAllText(Path.Join(scenarioRoot, "run-id")),
@@ -538,8 +541,7 @@ internal sealed class FrameworkGitHubHandler(
 
     private string Commit(string sha)
     {
-        var tree = sha == WorkflowSha
-            ? IsTrustedProofPayload() ? BaseRoot : WorkflowRoot :
+        var tree = sha == WorkflowSha ? WorkflowRoot :
             sha == BaseSha ? BaseRoot : HeadRoot;
         var baseSha = CurrentBaseSha();
         var parents = sha == HeadSha ? new[] { baseSha } :

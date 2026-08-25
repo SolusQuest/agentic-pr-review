@@ -69,38 +69,51 @@ function exactIdentitySet(value, length, label) {
 }
 
 function expectedRoleIdentities() {
-  const scenarios = ['dispatch-bootstrap', 'dispatch-continuation'];
   const publicationKinds = ['initial-intent', 'sticky-readback', 'acceptance-recovery'];
   const identity = (role) => sha256(`apr-r4-e4-synthetic-role-v1\0${role}`);
   const live = [
     'dispatch-bootstrap/acceptance/receipt',
     'dispatch-bootstrap/candidate/generation',
-    'dispatch-bootstrap/lineage-head',
-    'dispatch-bootstrap/locator-root',
     'dispatch-continuation/acceptance/receipt',
     'dispatch-continuation/candidate/generation',
+    'dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/acceptance-recovery',
+    'dispatch-continuation/lineage-head',
+    'dispatch-continuation/locator-root/generation-3',
+    'dispatch-continuation/publication-intent/acceptance-recovery',
+    'dispatch-continuation/publication-intent/initial-intent',
+    'dispatch-continuation/publication-intent/sticky-readback',
     'stale-head/lineage-head',
+    'stale-head/locator-root/generation-0',
   ];
-  const internallyReconciled = [];
-  const cleanupSelfDeleted = [];
-  for (const scenario of scenarios) {
-    for (const kind of publicationKinds) {
-      internallyReconciled.push(
-        `${scenario}/publication-intent/${kind}`,
-        `${scenario}/cleanup/opaque-write-anchor/publication-intent/${kind}`,
-      );
-      cleanupSelfDeleted.push(
-        `${scenario}/cleanup/p5-anchor/publication-intent/${kind}`,
-        `${scenario}/cleanup/p5-record/publication-intent/${kind}`,
-      );
-    }
+  const internallyReconciled = [
+    'dispatch-bootstrap/lineage-head',
+    'dispatch-bootstrap/locator-root/generation-0',
+    'dispatch-bootstrap/locator-root/generation-1',
+    'dispatch-continuation/candidate/physical-copy',
+    'dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/initial-intent',
+    'dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/sticky-readback',
+    'dispatch-continuation/locator-root/generation-2',
+  ];
+  for (const kind of publicationKinds) {
+    internallyReconciled.push(
+      `dispatch-bootstrap/publication-intent/${kind}`,
+      `dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/${kind}`,
+    );
   }
-  internallyReconciled.push('dispatch-continuation/candidate/physical-copy');
-  cleanupSelfDeleted.push(
+  const cleanupSelfDeleted = [
+    'dispatch-bootstrap/cleanup/p5-anchor/dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/initial-intent',
+    'dispatch-bootstrap/cleanup/p5-anchor/dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/sticky-readback',
     'dispatch-bootstrap/cleanup/s6-internal/empty',
+    'dispatch-continuation/cleanup/p5-anchor/dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/acceptance-recovery',
+    'dispatch-continuation/cleanup/p5-anchor/dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/initial-intent',
+    'dispatch-continuation/cleanup/p5-anchor/dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/sticky-readback',
     'dispatch-continuation/cleanup/s6-internal/candidate/physical-copy',
-    'dispatch-continuation/cleanup/s6-final',
-  );
+  ];
+  for (const kind of publicationKinds) {
+    cleanupSelfDeleted.push(
+      `dispatch-continuation/cleanup/p5-record/dispatch-bootstrap/publication-intent/${kind}`,
+    );
+  }
   const identities = (roles) => roles.map(identity).sort();
   return {
     live: identities(live),
@@ -115,16 +128,16 @@ function verifyPartition(receipt) {
   if (
     value.kind !== 'apr-r4-e4-synthetic-transaction-partition-v1' ||
     value.total_record_count !== 35 ||
-    value.live_anchor_count !== 7 ||
-    value.transient_record_count !== 28 ||
+    value.live_anchor_count !== 12 ||
+    value.transient_record_count !== 23 ||
     value.internally_reconciled_count !== 13 ||
-    value.cleanup_self_deleted_count !== 15 ||
+    value.cleanup_self_deleted_count !== 10 ||
     value.total_record_count !== value.live_anchor_count + value.transient_record_count ||
     value.transient_record_count !==
       value.internally_reconciled_count + value.cleanup_self_deleted_count
   )
     fail('partition-counts');
-  exactIdentitySet(value.live_anchor_object_identities, 7, 'partition-live');
+  exactIdentitySet(value.live_anchor_object_identities, 12, 'partition-live');
   exactIdentitySet(
     value.internally_reconciled_object_identities,
     13,
@@ -141,7 +154,7 @@ function verifyPartition(receipt) {
     fail('partition-semantic-membership');
   exactIdentitySet(
     value.cleanup_self_deleted_object_identities,
-    15,
+    10,
     'partition-cleanup-self-deleted',
   );
   const union = [
@@ -282,7 +295,7 @@ export function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
     ],
     [
       'verifier_aot_warning_policy_sha256',
-      'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/verifier-warning-policy.txt',
+      'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/verifier-warning-policy-v2.txt',
     ],
   ]);
   for (const [field, relative] of fixedFiles) {

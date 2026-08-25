@@ -1159,7 +1159,8 @@ internal static class FrameworkSupervisor
                         ("id", 1000),
                         ("number", 147),
                         ("base", FrameworkJson.Object(
-                            ("sha", FrameworkGitHubHandler.BaseSha),
+                            ("sha", FrameworkGitHubHandler.PullRequestBaseSha(
+                                spec.TrustedProofPayload)),
                             ("repo", RepositoryReference()))),
                         ("head", FrameworkJson.Object(
                             ("sha", FrameworkGitHubHandler.HeadSha),

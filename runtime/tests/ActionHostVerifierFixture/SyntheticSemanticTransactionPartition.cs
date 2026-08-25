@@ -24,22 +24,44 @@ internal static class SyntheticSemanticTransactionPartition
     internal static JsonObject? Derive(
         string root,
         SyntheticTransactionPartitionBinding binding) =>
-        Derive(root, binding, FrameworkCanaries.StateKey);
+        Derive(root, binding, static scenario =>
+            StringComparer.Ordinal.Equals(
+                scenario,
+                "dispatch-bootstrap")
+                ? FrameworkCanaries.PreviousStateKey
+                : FrameworkCanaries.StateKey,
+            requireCurrentProofProfile: true);
 
     internal static JsonObject? Derive(
         string root,
         SyntheticTransactionPartitionBinding binding,
-        string stateKey)
+        string stateKey) =>
+        Derive(
+            root,
+            binding,
+            _ => stateKey,
+            requireCurrentProofProfile: false);
+
+    private static JsonObject? Derive(
+        string root,
+        SyntheticTransactionPartitionBinding binding,
+        Func<string, string> stateKeyForScenario,
+        bool requireCurrentProofProfile)
     {
         var records = new Dictionary<string, SemanticRecord>(StringComparer.Ordinal);
         var deleted = new HashSet<string>(StringComparer.Ordinal);
         foreach (var scenario in Scenarios)
         {
-            if (!ReadScenario(root, scenario, stateKey, records, deleted))
+            if (!ReadScenario(
+                    root,
+                    scenario,
+                    stateKeyForScenario(scenario),
+                    records,
+                    deleted))
                 return null;
         }
 
-        if (records.Count != 35 || deleted.Count != 28 ||
+        if (records.Count != 35 ||
             !deleted.IsSubsetOf(records.Keys)) return null;
 
         var resolved = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -64,11 +86,18 @@ internal static class SyntheticSemanticTransactionPartition
             value => deleted.Contains(value.ObjectId) && !value.IsCleanup);
         var cleanupSelfDeletedRoles = Roles(records, deleted, resolved,
             value => deleted.Contains(value.ObjectId) && value.IsCleanup);
-        if (!ExactRoles(liveRoles, ExpectedLiveRoles()) ||
-            !ExactRoles(internallyReconciledRoles,
-                ExpectedInternallyReconciledRoles()) ||
-            !ExactRoles(cleanupSelfDeletedRoles,
-                ExpectedCleanupSelfDeletedRoles())) return null;
+        if (requireCurrentProofProfile &&
+            (!ExactRoles(liveRoles, ExpectedLiveRoles()) ||
+                !ExactRoles(internallyReconciledRoles,
+                    ExpectedInternallyReconciledRoles()) ||
+                !ExactRoles(cleanupSelfDeletedRoles,
+                    ExpectedCleanupSelfDeletedRoles()))) return null;
+
+        var allRoles = liveRoles.Concat(internallyReconciledRoles)
+            .Concat(cleanupSelfDeletedRoles).ToArray();
+        if (allRoles.Length != records.Count ||
+            allRoles.Distinct(StringComparer.Ordinal).Count() != records.Count)
+            return null;
 
         var live = Identities(liveRoles);
         var internallyReconciled = Identities(internallyReconciledRoles);
@@ -198,7 +227,8 @@ internal static class SyntheticSemanticTransactionPartition
             CryptographicOperations.ZeroMemory(sentinel.Root);
             record = new(
                 fields[6], name, fields[8], scenario,
-                $"{scenario}/locator-root", false, []);
+                $"{scenario}/locator-root/generation-{sentinel.Generation}",
+                false, []);
             return true;
         }
         if (!StateControlEnvelopeV1Codec.TryDecryptForSyntheticEvidence(
@@ -354,17 +384,16 @@ internal static class SyntheticSemanticTransactionPartition
             return true;
         }
         if (targets.Length != 1 || targets[0] is not { } target) return false;
-        var anchorPrefix = scenario + "/cleanup/opaque-write-anchor/";
-        var recordPrefix = scenario + "/publication-intent/";
-        if (target.StartsWith(anchorPrefix, StringComparison.Ordinal))
+        if (target.Contains(
+                "/cleanup/opaque-write-anchor/",
+                StringComparison.Ordinal))
         {
-            role = scenario + "/cleanup/p5-anchor/" + target[anchorPrefix.Length..];
+            role = scenario + "/cleanup/p5-anchor/" + target;
             return true;
         }
-        if (target.StartsWith(recordPrefix, StringComparison.Ordinal))
+        if (target.Contains("/publication-intent/", StringComparison.Ordinal))
         {
-            role = scenario + "/cleanup/p5-record/publication-intent/" +
-                target[recordPrefix.Length..];
+            role = scenario + "/cleanup/p5-record/" + target;
             return true;
         }
         if (StringComparer.Ordinal.Equals(target,
@@ -380,38 +409,64 @@ internal static class SyntheticSemanticTransactionPartition
     [
         "dispatch-bootstrap/acceptance/receipt",
         "dispatch-bootstrap/candidate/generation",
-        "dispatch-bootstrap/lineage-head",
-        "dispatch-bootstrap/locator-root",
         "dispatch-continuation/acceptance/receipt",
         "dispatch-continuation/candidate/generation",
+        "dispatch-continuation/cleanup/opaque-write-anchor/" +
+            "publication-intent/acceptance-recovery",
+        "dispatch-continuation/lineage-head",
+        "dispatch-continuation/locator-root/generation-3",
+        "dispatch-continuation/publication-intent/acceptance-recovery",
+        "dispatch-continuation/publication-intent/initial-intent",
+        "dispatch-continuation/publication-intent/sticky-readback",
         "stale-head/lineage-head",
+        "stale-head/locator-root/generation-0",
     ];
 
     private static IEnumerable<string> ExpectedInternallyReconciledRoles()
     {
-        foreach (var scenario in Scenarios[..2])
         foreach (var kind in new[]
                  { "initial-intent", "sticky-readback", "acceptance-recovery" })
         {
-            yield return $"{scenario}/publication-intent/{kind}";
-            yield return $"{scenario}/cleanup/opaque-write-anchor/" +
+            yield return $"dispatch-bootstrap/publication-intent/{kind}";
+            yield return "dispatch-bootstrap/cleanup/opaque-write-anchor/" +
                 $"publication-intent/{kind}";
         }
+        yield return "dispatch-bootstrap/lineage-head";
+        yield return "dispatch-bootstrap/locator-root/generation-0";
+        yield return "dispatch-bootstrap/locator-root/generation-1";
         yield return "dispatch-continuation/candidate/physical-copy";
+        yield return "dispatch-continuation/cleanup/opaque-write-anchor/" +
+            "publication-intent/initial-intent";
+        yield return "dispatch-continuation/cleanup/opaque-write-anchor/" +
+            "publication-intent/sticky-readback";
+        yield return "dispatch-continuation/locator-root/generation-2";
     }
 
     private static IEnumerable<string> ExpectedCleanupSelfDeletedRoles()
     {
-        foreach (var scenario in Scenarios[..2])
+        yield return "dispatch-bootstrap/cleanup/p5-anchor/" +
+            "dispatch-bootstrap/cleanup/opaque-write-anchor/" +
+            "publication-intent/initial-intent";
+        yield return "dispatch-bootstrap/cleanup/p5-anchor/" +
+            "dispatch-bootstrap/cleanup/opaque-write-anchor/" +
+            "publication-intent/sticky-readback";
+        yield return "dispatch-bootstrap/cleanup/s6-internal/empty";
         foreach (var kind in new[]
                  { "initial-intent", "sticky-readback", "acceptance-recovery" })
         {
-            yield return $"{scenario}/cleanup/p5-anchor/publication-intent/{kind}";
-            yield return $"{scenario}/cleanup/p5-record/publication-intent/{kind}";
+            yield return "dispatch-continuation/cleanup/p5-record/" +
+                $"dispatch-bootstrap/publication-intent/{kind}";
         }
-        yield return "dispatch-bootstrap/cleanup/s6-internal/empty";
+        yield return "dispatch-continuation/cleanup/p5-anchor/" +
+            "dispatch-bootstrap/cleanup/opaque-write-anchor/" +
+            "publication-intent/acceptance-recovery";
+        yield return "dispatch-continuation/cleanup/p5-anchor/" +
+            "dispatch-continuation/cleanup/opaque-write-anchor/" +
+            "publication-intent/initial-intent";
+        yield return "dispatch-continuation/cleanup/p5-anchor/" +
+            "dispatch-continuation/cleanup/opaque-write-anchor/" +
+            "publication-intent/sticky-readback";
         yield return "dispatch-continuation/cleanup/s6-internal/candidate/physical-copy";
-        yield return "dispatch-continuation/cleanup/s6-final";
     }
 
     private static bool ExactRoles(

@@ -12,7 +12,14 @@ const allowed = {
     'unknown',
     'clean-source',
   ]),
-  code: new Set(['smoke-failed', 'no-evidence', 'invalid-evidence', 'case-failed', 'child-failed']),
+  code: new Set([
+    'smoke-failed',
+    'no-evidence',
+    'invalid-evidence',
+    'case-failed',
+    'warning-policy',
+    'child-failed',
+  ]),
   status: new Set([
     'failed',
     'reviewed',
@@ -30,7 +37,7 @@ const allowed = {
 function project(path) {
   if (!path || !fs.existsSync(path) || fs.statSync(path).size > 8 * 1024 * 1024) return [];
   const pattern =
-    /^APR_R4_E2P_FAILURE stage=([a-z-]+) case=([a-z-]+) code=([a-z-]+) status=([a-z_]+)$/u;
+    /^APR_R4_E2P(?:_V2)?_FAILURE stage=([a-z-]+) case=([a-z-]+) code=([a-z-]+) status=([a-z_]+)$/u;
   const projected = [];
   for (const line of fs.readFileSync(path, 'utf8').split(/\r?\n/u)) {
     const match = pattern.exec(line);

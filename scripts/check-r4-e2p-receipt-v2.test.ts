@@ -16,46 +16,59 @@ function sha256(value: crypto.BinaryLike) {
 }
 
 function partition(payloadSha256: string, verifierSha256: string) {
-  const scenarios = ['dispatch-bootstrap', 'dispatch-continuation'];
   const kinds = ['initial-intent', 'sticky-readback', 'acceptance-recovery'];
   const roleIdentity = (role: string) => sha256(`apr-r4-e4-synthetic-role-v1\0${role}`);
   const live = [
     'dispatch-bootstrap/acceptance/receipt',
     'dispatch-bootstrap/candidate/generation',
-    'dispatch-bootstrap/lineage-head',
-    'dispatch-bootstrap/locator-root',
     'dispatch-continuation/acceptance/receipt',
     'dispatch-continuation/candidate/generation',
+    'dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/acceptance-recovery',
+    'dispatch-continuation/lineage-head',
+    'dispatch-continuation/locator-root/generation-3',
+    'dispatch-continuation/publication-intent/acceptance-recovery',
+    'dispatch-continuation/publication-intent/initial-intent',
+    'dispatch-continuation/publication-intent/sticky-readback',
     'stale-head/lineage-head',
+    'stale-head/locator-root/generation-0',
   ];
-  const internallyReconciled: string[] = [];
-  const cleanupSelfDeleted: string[] = [];
-  for (const scenario of scenarios) {
-    for (const kind of kinds) {
-      internallyReconciled.push(
-        `${scenario}/publication-intent/${kind}`,
-        `${scenario}/cleanup/opaque-write-anchor/publication-intent/${kind}`,
-      );
-      cleanupSelfDeleted.push(
-        `${scenario}/cleanup/p5-anchor/publication-intent/${kind}`,
-        `${scenario}/cleanup/p5-record/publication-intent/${kind}`,
-      );
-    }
+  const internallyReconciled = [
+    'dispatch-bootstrap/lineage-head',
+    'dispatch-bootstrap/locator-root/generation-0',
+    'dispatch-bootstrap/locator-root/generation-1',
+    'dispatch-continuation/candidate/physical-copy',
+    'dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/initial-intent',
+    'dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/sticky-readback',
+    'dispatch-continuation/locator-root/generation-2',
+  ];
+  for (const kind of kinds) {
+    internallyReconciled.push(
+      `dispatch-bootstrap/publication-intent/${kind}`,
+      `dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/${kind}`,
+    );
   }
-  internallyReconciled.push('dispatch-continuation/candidate/physical-copy');
-  cleanupSelfDeleted.push(
+  const cleanupSelfDeleted = [
+    'dispatch-bootstrap/cleanup/p5-anchor/dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/initial-intent',
+    'dispatch-bootstrap/cleanup/p5-anchor/dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/sticky-readback',
     'dispatch-bootstrap/cleanup/s6-internal/empty',
+    'dispatch-continuation/cleanup/p5-anchor/dispatch-bootstrap/cleanup/opaque-write-anchor/publication-intent/acceptance-recovery',
+    'dispatch-continuation/cleanup/p5-anchor/dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/initial-intent',
+    'dispatch-continuation/cleanup/p5-anchor/dispatch-continuation/cleanup/opaque-write-anchor/publication-intent/sticky-readback',
     'dispatch-continuation/cleanup/s6-internal/candidate/physical-copy',
-    'dispatch-continuation/cleanup/s6-final',
-  );
+  ];
+  for (const kind of kinds) {
+    cleanupSelfDeleted.push(
+      `dispatch-continuation/cleanup/p5-record/dispatch-bootstrap/publication-intent/${kind}`,
+    );
+  }
   const identities = (roles: string[]) => roles.map(roleIdentity).sort();
   const value = {
     kind: 'apr-r4-e4-synthetic-transaction-partition-v1',
     total_record_count: 35,
-    live_anchor_count: 7,
-    transient_record_count: 28,
+    live_anchor_count: 12,
+    transient_record_count: 23,
     internally_reconciled_count: 13,
-    cleanup_self_deleted_count: 15,
+    cleanup_self_deleted_count: 10,
     live_anchor_object_identities: identities(live),
     internally_reconciled_object_identities: identities(internallyReconciled),
     cleanup_self_deleted_object_identities: identities(cleanupSelfDeleted),
@@ -158,7 +171,7 @@ function compose(identityOverrides: Record<string, unknown> = {}) {
     '--warning-policy',
     'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/warning-policy.txt',
     '--verifier-warning-policy',
-    'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/verifier-warning-policy.txt',
+    'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/verifier-warning-policy-v2.txt',
   ];
   const result = spawnSync(process.execPath, args, {
     cwd: process.cwd(),
