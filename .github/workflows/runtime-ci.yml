@@ -59,10 +59,14 @@ jobs:
         run: bash runtime/scripts/verify-action-host.sh framework
 
       - name: R4 Linux x64 Native AOT ActionHost proof first fresh process
-        run: bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-first.log"
+        run: |
+          set -o pipefail
+          bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-first.log"
 
       - name: R4 Linux x64 Native AOT ActionHost proof second fresh process
-        run: bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-second.log"
+        run: |
+          set -o pipefail
+          bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-second.log"
 
       - name: R4 Native AOT receipts are byte-identical
         run: |

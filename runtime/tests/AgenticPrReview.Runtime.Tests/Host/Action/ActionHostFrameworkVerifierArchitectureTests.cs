@@ -94,6 +94,8 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_ACTION_HOST_FRAMEWORK_EVIDENCE_MISMATCH", verifier,
             StringComparison.Ordinal);
+        Assert.Contains("APR_ACTION_HOST_FRAMEWORK_FAILED_DIAGNOSTIC", verifier,
+            StringComparison.Ordinal);
         var goldenAssignment =
             "golden=\"$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden\"";
         Assert.True(verifier.IndexOf(goldenAssignment, StringComparison.Ordinal) <
@@ -130,6 +132,25 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_R4_W13_SOURCE_TREE", runner,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SyntheticPlatformCountsAcceptedRequestsBeforeSchedulingHandlers()
+    {
+        var root = FindRepositoryRoot();
+        var platform = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "SyntheticOfficialPlatform.cs"));
+        var pumpStart = platform.IndexOf("private async Task PumpAsync()",
+            StringComparison.Ordinal);
+        var handlerStart = platform.IndexOf("private async Task HandleAsync(",
+            StringComparison.Ordinal);
+        Assert.True(pumpStart >= 0 && handlerStart > pumpStart);
+        var pump = platform[pumpStart..handlerStart];
+
+        Assert.True(pump.IndexOf("Interlocked.Increment(ref inFlight);",
+                StringComparison.Ordinal) <
+            pump.IndexOf("Task.Run(() => HandleAsync(context)",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1124,6 +1145,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             fixtureProject, StringComparison.Ordinal);
         Assert.Equal(2, Count(workflow,
             "bash runtime/scripts/verify-action-host.sh aot"));
+        Assert.Equal(2, Count(workflow, "set -o pipefail"));
         Assert.Contains("cmp \"$RUNNER_TEMP/r4-e2-aot-first.receipt\"",
             workflow, StringComparison.Ordinal);
         Assert.Contains("reflection_json_enabled !== false", composer,

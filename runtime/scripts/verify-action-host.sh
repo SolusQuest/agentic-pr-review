@@ -35,6 +35,10 @@ cleanup() {
       if [[ "$(tr -d '\r\n' < "$result_path")" == fail ]]; then
         local relative_result="${result_path#"$evidence_root"/}"
         echo "APR_ACTION_HOST_FRAMEWORK_FAILED_CASE ${relative_result%/case-result.txt}" >&2
+        local diagnostic_path="${result_path%/case-result.txt}/case-diagnostic.json"
+        if [[ -f "$diagnostic_path" ]]; then
+          echo "APR_ACTION_HOST_FRAMEWORK_FAILED_DIAGNOSTIC $(tr -d '\r\n' < "$diagnostic_path")" >&2
+        fi
         failed_case_found=true
       fi
     done < <(find "$evidence_root" -type f -name case-result.txt -print | sort)

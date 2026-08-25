@@ -732,30 +732,65 @@ internal static class FrameworkSupervisor
             spec.ExpectedStatus != "reviewed" &&
                 spec.ExpectedStatus != "reviewed_with_inline_warnings" ||
             ReadInt(scenario, "provider-sequence") >= 6;
+        var providerRequests = ReadInt(scenario, "provider-request-count");
+        var stickyMutations = ReadInt(scenario, "sticky-create-count") +
+            ReadInt(scenario, "sticky-update-count");
+        var noProviderSatisfied = !spec.ExpectNoProvider ||
+            providerRequests == 0;
+        var providerCountSatisfied = spec.ExpectedProviderRequests is null ||
+            providerRequests == spec.ExpectedProviderRequests;
+        var stickyCountSatisfied = spec.ExpectedStickyMutations is null ||
+            stickyMutations == spec.ExpectedStickyMutations;
+        var scenarioEvidenceSatisfied = spec.RequiredScenarioEvidence is null ||
+            File.Exists(Path.Join(scenario, spec.RequiredScenarioEvidence));
+        var stateOperationSatisfied = spec.RequiredStateOperation is null ||
+            File.Exists(Path.Join(scenario, "state-operations.tsv")) &&
+            File.ReadAllText(Path.Join(scenario, "state-operations.tsv"))
+                .Contains(spec.RequiredStateOperation, StringComparison.Ordinal);
+        var globalEvidenceSatisfied = spec.RequiredGlobalEvidence is null ||
+            File.Exists(Path.Join(root, spec.RequiredGlobalEvidence));
+        var noUnexpectedGitHubRequest = !File.Exists(
+            Path.Join(scenario, "unexpected-github-request"));
         var passed = exited && expected && barrierAfterPassed && noLeak &&
-            closedEnvironment &&
-            reorderedHistoryRejected &&
-            outputUnchanged && groupQuiet && platformQuiet && continuation &&
-            successfulContinuation &&
-            sixTools && signalGateReached &&
-            (!spec.ExpectNoProvider || ReadInt(
-                scenario, "provider-request-count") == 0) &&
-            (spec.ExpectedProviderRequests is null || ReadInt(scenario,
-                "provider-request-count") == spec.ExpectedProviderRequests) &&
-            (spec.ExpectedStickyMutations is null ||
-                ReadInt(scenario, "sticky-create-count") +
-                    ReadInt(scenario, "sticky-update-count") ==
-                    spec.ExpectedStickyMutations) &&
-            (spec.RequiredScenarioEvidence is null || File.Exists(
-                Path.Join(scenario, spec.RequiredScenarioEvidence))) &&
-            (spec.RequiredStateOperation is null || File.Exists(
-                    Path.Join(scenario, "state-operations.tsv")) &&
-                File.ReadAllText(Path.Join(scenario, "state-operations.tsv"))
-                    .Contains(spec.RequiredStateOperation,
-                        StringComparison.Ordinal)) &&
-            (spec.RequiredGlobalEvidence is null || File.Exists(
-                Path.Join(root, spec.RequiredGlobalEvidence))) &&
-            !File.Exists(Path.Join(scenario, "unexpected-github-request"));
+            closedEnvironment && reorderedHistoryRejected && outputUnchanged &&
+            groupQuiet && platformQuiet && continuation &&
+            successfulContinuation && sixTools && signalGateReached &&
+            noProviderSatisfied && providerCountSatisfied &&
+            stickyCountSatisfied && scenarioEvidenceSatisfied &&
+            stateOperationSatisfied && globalEvidenceSatisfied &&
+            noUnexpectedGitHubRequest;
+        if (!passed)
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(scenario, "case-diagnostic.json"),
+                FrameworkJson.Serialize(FrameworkJson.Object(
+                    ("case", spec.Name),
+                    ("expected_status", spec.ExpectedStatus),
+                    ("actual_status", status),
+                    ("exited", exited),
+                    ("exit_code", process.ExitCode),
+                    ("expected_outcome", expected),
+                    ("barrier_after", barrierAfterPassed),
+                    ("canary_safe", noLeak),
+                    ("environment_recorded", closedEnvironment),
+                    ("reordered_history_rejected", reorderedHistoryRejected),
+                    ("output_unchanged", outputUnchanged),
+                    ("process_group_quiet", groupQuiet),
+                    ("platform_quiet", platformQuiet),
+                    ("continuation_observed", continuation),
+                    ("successful_continuation", successfulContinuation),
+                    ("tool_sequence_satisfied", sixTools),
+                    ("signal_gate_reached", signalGateReached),
+                    ("no_provider_satisfied", noProviderSatisfied),
+                    ("provider_count_satisfied", providerCountSatisfied),
+                    ("sticky_count_satisfied", stickyCountSatisfied),
+                    ("scenario_evidence_satisfied", scenarioEvidenceSatisfied),
+                    ("state_operation_satisfied", stateOperationSatisfied),
+                    ("global_evidence_satisfied", globalEvidenceSatisfied),
+                    ("no_unexpected_github_request",
+                        noUnexpectedGitHubRequest))) + "\n")
+                .ConfigureAwait(false);
+        }
         await File.WriteAllTextAsync(Path.Join(scenario, "case-result.txt"),
             passed ? "pass\n" : "fail\n").ConfigureAwait(false);
         return new CaseResult(
@@ -764,15 +799,14 @@ internal static class FrameworkSupervisor
             status,
             process.ExitCode,
             hostPid,
-            ReadInt(scenario, "provider-request-count"),
+            providerRequests,
             ReadInt(scenario, "provider-sequence"),
             ReadInt(scenario, "github-request-count"),
             File.Exists(Path.Join(scenario, "state-operations.tsv"))
                 ? File.ReadLines(Path.Join(scenario, "state-operations.tsv"))
                     .Count()
                 : 0,
-            ReadInt(scenario, "sticky-create-count") +
-                ReadInt(scenario, "sticky-update-count"),
+            stickyMutations,
             ReadInt(scenario, "inline-batch-count"),
             closedEnvironment,
             outputUnchanged,
