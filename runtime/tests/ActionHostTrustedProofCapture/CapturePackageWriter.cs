@@ -19,13 +19,12 @@ public sealed class CapturePackageWriter
     {
         this.root = root;
         if (!BoundedText(packageName, EvidenceLimits.MaximumNameBytes) ||
-            packageName.IndexOfAny(['/', '\\', ':']) >= 0)
+            !RestrictedEvidenceRoot.IsSinglePathSegment(packageName))
         {
             throw new InvalidDataException("capture_package_name_invalid");
         }
 
-        packagePath = System.IO.Path.GetFullPath(
-            System.IO.Path.Combine(root.Path, packageName));
+        packagePath = RestrictedEvidenceRoot.ResolveChildPath(root.Path, packageName);
         if (!RestrictedEvidenceRoot.IsWithin(packagePath, root.Path) ||
             Directory.Exists(packagePath) || File.Exists(packagePath))
         {
@@ -60,7 +59,7 @@ public sealed class CapturePackageWriter
         }
 
         var bodyName = $"source-{sources.Count + 1:D4}.json";
-        var bodyPath = System.IO.Path.Combine(packagePath, bodyName);
+        var bodyPath = RestrictedEvidenceRoot.ResolveChildPath(packagePath, bodyName);
         CanonicalEvidence.WriteCreateNew(bodyPath, body);
         var reopened = File.ReadAllBytes(bodyPath);
         try
@@ -131,8 +130,8 @@ public sealed class CapturePackageWriter
         {
             var archiveName = $"artifact-{artifactId}.zip";
             var objectName = $"artifact-{artifactId}.bin";
-            var archivePath = System.IO.Path.Combine(packagePath, archiveName);
-            var objectPath = System.IO.Path.Combine(packagePath, objectName);
+            var archivePath = RestrictedEvidenceRoot.ResolveChildPath(packagePath, archiveName);
+            var objectPath = RestrictedEvidenceRoot.ResolveChildPath(packagePath, objectName);
             CanonicalEvidence.WriteCreateNew(archivePath, archive);
             CanonicalEvidence.WriteCreateNew(objectPath, admitted.EncryptedObject);
             if (!ReopenedDigestEquals(archivePath, admitted.ArchiveSha256) ||
@@ -185,8 +184,12 @@ public sealed class CapturePackageWriter
 
         foreach (var artifact in artifacts)
         {
-            var archivePath = System.IO.Path.Combine(packagePath, artifact.ArchivePath);
-            var objectPath = System.IO.Path.Combine(packagePath, artifact.EncryptedObjectPath);
+            var archivePath = RestrictedEvidenceRoot.ResolveChildPath(
+                packagePath,
+                artifact.ArchivePath);
+            var objectPath = RestrictedEvidenceRoot.ResolveChildPath(
+                packagePath,
+                artifact.EncryptedObjectPath);
             if (!File.Exists(archivePath) || !File.Exists(objectPath) ||
                 !ReopenedDigestEquals(archivePath, artifact.ArchiveSha256) ||
                 !ReopenedDigestEquals(objectPath, artifact.EncryptedObjectSha256))
@@ -208,7 +211,9 @@ public sealed class CapturePackageWriter
         var bytes = CanonicalEvidence.Encode(document, EvidenceJson.Options);
         try
         {
-            var manifestPath = System.IO.Path.Combine(packagePath, "capture-manifest.json");
+            var manifestPath = RestrictedEvidenceRoot.ResolveChildPath(
+                packagePath,
+                "capture-manifest.json");
             CanonicalEvidence.WriteCreateNew(manifestPath, bytes);
             var digest = CanonicalEvidence.Sha256(bytes);
             if (!ReopenedDigestEquals(manifestPath, digest))

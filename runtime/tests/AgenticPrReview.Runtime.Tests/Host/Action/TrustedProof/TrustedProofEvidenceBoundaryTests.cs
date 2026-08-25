@@ -259,6 +259,25 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             new string('7', 64)));
     }
 
+    [Theory]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("../escape")]
+    [InlineData("nested/path")]
+    [InlineData("nested\\path")]
+    [InlineData("C:\\escape")]
+    [InlineData("ambiguous.")]
+    [InlineData(" padded")]
+    [InlineData("padded ")]
+    [InlineData("control\u0001character")]
+    public void PackageWriterRejectsEscapingOrAmbiguousPackageNames(string packageName)
+    {
+        var root = CreateRestrictedRoot();
+
+        Assert.Throws<InvalidDataException>(() =>
+            new CapturePackageWriter(root, packageName));
+    }
+
     [Fact]
     public void CredentialCopyRemovalIsBoundedToTheApprovedRoot()
     {
@@ -284,10 +303,11 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "<https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs?per_page=100&page=2>; rel=\"next\"");
         apiResponses.Enqueue(pageOne);
         apiResponses.Enqueue(JsonResponse("{\"page\":2}"));
-        apiResponses.Enqueue(new HttpResponseMessage(HttpStatusCode.Found)
+        using var redirectResponse = new HttpResponseMessage(HttpStatusCode.Found)
         {
             Headers = { Location = new Uri("https://evidence.blob.core.windows.net/container/file?sig=private") },
-        });
+        };
+        apiResponses.Enqueue(redirectResponse);
         var apiHandler = new RecordingHandler(request =>
         {
             Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
@@ -339,13 +359,11 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
 
     public void Dispose()
     {
-        foreach (var root in roots)
+        foreach (var root in roots.Where(root =>
+            Directory.Exists(root) &&
+            RestrictedEvidenceRoot.IsWithin(root, Directory.GetCurrentDirectory())))
         {
-            if (Directory.Exists(root) &&
-                RestrictedEvidenceRoot.IsWithin(root, Directory.GetCurrentDirectory()))
-            {
-                Directory.Delete(root, recursive: true);
-            }
+            Directory.Delete(root, recursive: true);
         }
     }
 

@@ -87,10 +87,29 @@ internal static class Program
                 credentialPath = null;
             }
         }
-        catch
+        catch (InvalidDataException)
         {
-            Console.Error.WriteLine("APR_R4_E3_CAPTURE_INVALID");
-            return 1;
+            return Invalid();
+        }
+        catch (HttpRequestException)
+        {
+            return Invalid();
+        }
+        catch (OperationCanceledException)
+        {
+            return Invalid();
+        }
+        catch (CryptographicException)
+        {
+            return Invalid();
+        }
+        catch (IOException)
+        {
+            return Invalid();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Invalid();
         }
         finally
         {
@@ -100,7 +119,15 @@ internal static class Program
                 {
                     root.RemoveCredentialFile(credentialPath);
                 }
-                catch
+                catch (InvalidDataException)
+                {
+                    // Failure is already terminal; preserve the stable non-leaking marker.
+                }
+                catch (IOException)
+                {
+                    // Failure is already terminal; preserve the stable non-leaking marker.
+                }
+                catch (UnauthorizedAccessException)
                 {
                     // Failure is already terminal; preserve the stable non-leaking marker.
                 }
@@ -140,5 +167,11 @@ internal static class Program
         }
 
         return result;
+    }
+
+    private static int Invalid()
+    {
+        Console.Error.WriteLine("APR_R4_E3_CAPTURE_INVALID");
+        return 1;
     }
 }

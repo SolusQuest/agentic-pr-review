@@ -155,9 +155,10 @@ internal static class Program
                 var output = CanonicalEvidence.Encode(document, EvidenceJson.Options);
                 try
                 {
+                    var packagePath = System.IO.Path.GetDirectoryName(manifestPath)!;
                     CanonicalEvidence.WriteCreateNew(
-                        System.IO.Path.Combine(
-                            System.IO.Path.GetDirectoryName(manifestPath)!,
+                        RestrictedEvidenceRoot.ResolveChildPath(
+                            packagePath,
                             options["--output"]),
                         output);
                 }
@@ -185,10 +186,25 @@ internal static class Program
                 }
             }
         }
-        catch
+        catch (InvalidDataException)
         {
-            Console.Error.WriteLine("APR_R4_E3_CODEC_ORACLE_INVALID");
-            return 1;
+            return Invalid();
+        }
+        catch (JsonException)
+        {
+            return Invalid();
+        }
+        catch (CryptographicException)
+        {
+            return Invalid();
+        }
+        catch (IOException)
+        {
+            return Invalid();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Invalid();
         }
         finally
         {
@@ -214,7 +230,15 @@ internal static class Program
         {
             root.RemoveCredentialFile(relativePath);
         }
-        catch
+        catch (InvalidDataException)
+        {
+            // Failure is already terminal; do not replace the stable non-leaking error marker.
+        }
+        catch (IOException)
+        {
+            // Failure is already terminal; do not replace the stable non-leaking error marker.
+        }
+        catch (UnauthorizedAccessException)
         {
             // Failure is already terminal; do not replace the stable non-leaking error marker.
         }
@@ -225,18 +249,8 @@ internal static class Program
         string manifestPath,
         string relativePath)
     {
-        if (System.IO.Path.IsPathFullyQualified(relativePath))
-        {
-            throw new InvalidDataException("capture_object_path_invalid");
-        }
-
-        var candidate = System.IO.Path.GetFullPath(
-            System.IO.Path.Combine(System.IO.Path.GetDirectoryName(manifestPath)!, relativePath));
         var packagePath = System.IO.Path.GetDirectoryName(manifestPath)!;
-        if (!RestrictedEvidenceRoot.IsWithin(candidate, packagePath))
-        {
-            throw new InvalidDataException("capture_object_path_invalid");
-        }
+        var candidate = RestrictedEvidenceRoot.ResolveChildPath(packagePath, relativePath);
         var rootRelative = System.IO.Path.GetRelativePath(root.Path, candidate);
         return root.ResolveExistingFile(rootRelative, EvidenceLimits.MaximumEncryptedObjectBytes);
     }
@@ -270,7 +284,7 @@ internal static class Program
         }
 
         if (required.Any(name => !result.ContainsKey(name)) ||
-            result["--output"].IndexOfAny(['/', '\\', ':']) >= 0 ||
+            !RestrictedEvidenceRoot.IsSinglePathSegment(result["--output"]) ||
             !StringComparer.Ordinal.Equals(
                 result["--current-state-key-file"],
                 "current-state-key") ||
@@ -281,5 +295,11 @@ internal static class Program
         }
 
         return result;
+    }
+
+    private static int Invalid()
+    {
+        Console.Error.WriteLine("APR_R4_E3_CODEC_ORACLE_INVALID");
+        return 1;
     }
 }

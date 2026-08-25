@@ -217,6 +217,49 @@ public sealed class RestrictedEvidenceRoot
             !relative.StartsWith($"..{System.IO.Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
     }
 
+    public static bool IsSinglePathSegment(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !StringComparer.Ordinal.Equals(value, value.Trim()) ||
+            StringComparer.Ordinal.Equals(value, ".") ||
+            StringComparer.Ordinal.Equals(value, "..") ||
+            value.EndsWith(".", StringComparison.Ordinal) ||
+            System.IO.Path.IsPathFullyQualified(value) ||
+            value.IndexOfAny(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) >= 0 ||
+            value.Any(character => char.IsControl(character)))
+        {
+            return false;
+        }
+
+        try
+        {
+            return StrictUtf8.GetByteCount(value) <= EvidenceLimits.MaximumNameBytes;
+        }
+        catch (EncoderFallbackException)
+        {
+            return false;
+        }
+    }
+
+    public static string ResolveChildPath(string parent, string child)
+    {
+        if (!System.IO.Path.IsPathFullyQualified(parent) || !IsSinglePathSegment(child))
+        {
+            throw new InvalidDataException("restricted_child_path_invalid");
+        }
+
+        var fullParent = System.IO.Path.TrimEndingDirectorySeparator(
+            System.IO.Path.GetFullPath(parent));
+        var candidate = System.IO.Path.GetFullPath(System.IO.Path.Join(fullParent, child));
+        if (!IsWithin(candidate, fullParent) ||
+            StringComparer.OrdinalIgnoreCase.Equals(candidate, fullParent))
+        {
+            throw new InvalidDataException("restricted_child_path_invalid");
+        }
+
+        return candidate;
+    }
+
     private static bool IsLinkOrReparse(FileSystemInfo value) =>
         value.LinkTarget is not null ||
         (value.Attributes & FileAttributes.ReparsePoint) != 0;

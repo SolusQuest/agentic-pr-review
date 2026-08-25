@@ -51,7 +51,7 @@ public static class CapturePlan
                     value.OperationIds.Any(item => !Sha256(item)) ||
                     !Sha256(value.SourceMapSha256) ||
                     !BoundedText(value.PackageName, EvidenceLimits.MaximumNameBytes) ||
-                    value.PackageName.IndexOfAny(['/', '\\', ':']) >= 0 ||
+                    !RestrictedEvidenceRoot.IsSinglePathSegment(value.PackageName) ||
                     value.Sources.Length == 0 ||
                     value.Sources.Length > EvidenceLimits.MaximumRecords ||
                     value.Artifacts.Length == 0 ||

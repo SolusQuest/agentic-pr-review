@@ -238,9 +238,10 @@ public sealed class TrustedProofCaptureClient : IDisposable
         }
 
         string? next = null;
-        foreach (var part in string.Join(",", values).Split(','))
+        foreach (var segments in string.Join(",", values)
+            .Split(',')
+            .Select(part => part.Trim().Split(';', 2)))
         {
-            var segments = part.Trim().Split(';', 2);
             if (segments.Length != 2 ||
                 !StringComparer.Ordinal.Equals(segments[1].Trim(), "rel=\"next\"") ||
                 segments[0].Length < 3 ||
