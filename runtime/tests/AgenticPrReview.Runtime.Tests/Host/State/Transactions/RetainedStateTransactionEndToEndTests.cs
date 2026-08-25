@@ -1624,6 +1624,222 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
+    public async Task TrustedProofProductionLifecycleSealsExactlySevenAnchors()
+    {
+        var normal = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var bootstrap = await AcceptGenerationAsync(normal, commentId: 2220);
+        await ExecuteCleanupAsync(normal, bootstrap.Acceptance);
+        normal.Context.Dispose();
+
+        var continuation = await RestoreFixtureAsync(
+            normal,
+            newWorkflowRun: true);
+        using var continuationContext = continuation.Context;
+        var continued = await AcceptGenerationAsync(
+            continuation,
+            commentId: 2221);
+        await ExecuteCleanupAsync(continuation, continued.Acceptance);
+
+        var staleScenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch,
+            pullRequestId:
+                ActionHostAuthorizationScenario.PullRequestId + 1,
+            pullRequestNumber:
+                ActionHostAuthorizationScenario.PullRequestNumber + 1);
+        var stale = await CreateFixtureAsync(
+            extraRetentionSeconds: 0,
+            route: ActionHostAuthorizationRoute.WorkflowDispatch,
+            scenario: staleScenario,
+            store: continuation.Store,
+            time: continuation.Time);
+        var staleRun = await CompleteRunAsync(stale, "stale generation");
+        Assert.True(R4PreparedPublication.TryCreate(
+            staleRun.Outcome,
+            stale.PublicationScope,
+            out var stalePublication));
+        var stalePreparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                stale.Context,
+                staleRun.Run,
+                stalePublication!,
+                CancellationToken.None);
+        using var stalePrepared = Assert.IsType<
+            RetainedStatePreparedCandidate>(stalePreparedResult.Value);
+        var stalePersistedResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                stale.Context,
+                stalePrepared,
+                CancellationToken.None);
+        var staleCandidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            stalePersistedResult.Value);
+        var staleCandidateMetadata = staleCandidate.Metadata;
+        stale.Context.Dispose();
+
+        var staleCurrent = await RestoreFixtureAsync(
+            stale,
+            newWorkflowRun: true,
+            reviewedHeadSha: new string('f', 40));
+        using var staleContext = staleCurrent.Context;
+        var publisherFactory = new FakePublisherTransportFactory();
+        publisherFactory.Transport.Enqueue();
+        publisherFactory.Transport.Enqueue();
+        var recovery = new PublicationRecoveryService(
+            new StickyCommentPublisher(publisherFactory));
+        using (var evaluation = await recovery.ClassifyBeforeProviderAsync(
+            staleCurrent.Launch.Inputs.GitHubToken!,
+            staleCurrent.Invocation,
+            staleCurrent.PublicationScope,
+            staleCurrent.Context,
+            CancellationToken.None))
+        {
+            Assert.Equal(
+                PublicationRecoveryAction.AbandonStaleCandidate,
+                evaluation.Decision.Action);
+            var abandoned = await recovery
+                .AbandonAndCleanupStaleCandidateAsync(
+                    staleCurrent.Launch.Inputs.GitHubToken!,
+                    staleCurrent.Invocation,
+                    staleCurrent.PublicationScope,
+                    staleCurrent.Context,
+                    evaluation,
+                    CancellationToken.None);
+            Assert.True(abandoned.Completed, abandoned.Code);
+        }
+
+        Assert.DoesNotContain(
+            staleCandidateMetadata,
+            continuation.Store.Objects);
+        using var normalInventory = await ReadProductionInventoryAsync(
+            continuation);
+        using var staleInventory = await ReadProductionInventoryAsync(
+            staleCurrent);
+        var normalObjects = normalInventory.Snapshot.Authenticated;
+        var staleObjects = staleInventory.Snapshot.Authenticated;
+        Assert.Empty(normalInventory.Snapshot.UnderRetained);
+        Assert.Empty(normalInventory.Snapshot.Unknown);
+        Assert.Empty(staleInventory.Snapshot.UnderRetained);
+        Assert.Empty(staleInventory.Snapshot.Unknown);
+
+        var normalHead = Assert.Single(normalObjects.Where(
+            item => item.Header.ObjectClass == StateObjectClass.LineageHead));
+        var staleHead = Assert.Single(staleObjects.Where(
+            item => item.Header.ObjectClass == StateObjectClass.LineageHead));
+        Assert.True(LineageHeadCodec.TryDecode(normalHead.Payload, out _));
+        Assert.True(LineageHeadCodec.TryDecode(staleHead.Payload, out _));
+
+        var candidates = normalObjects.Where(
+            item => item.Header.ObjectClass == StateObjectClass.Candidate)
+            .ToArray();
+        Assert.Equal(2, candidates.Length);
+        var generations = candidates.Select(item =>
+        {
+            Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(
+                item.Payload,
+                out var generation));
+            return generation!.Generation;
+        }).Order().ToArray();
+        Assert.Equal([0L, 1L], generations);
+
+        var acceptances = normalObjects.Where(
+            item => item.Header.ObjectClass == StateObjectClass.Acceptance)
+            .ToArray();
+        Assert.Equal(2, acceptances.Length);
+        foreach (var acceptance in acceptances)
+        {
+            Assert.True(AcceptedStateAcceptanceReceiptCodec.TryDecode(
+                acceptance.Payload,
+                out _));
+        }
+
+        Assert.DoesNotContain(
+            staleObjects,
+            item => item.Header.ObjectClass is
+                StateObjectClass.Candidate or StateObjectClass.Acceptance);
+        Assert.Equal(
+            continuation.Selected.LineageHeadIdentity,
+            normalHead.Header.ObjectIdentity);
+        Assert.Equal(
+            staleCurrent.Selected.LineageHeadIdentity,
+            staleHead.Header.ObjectIdentity);
+
+        var publicationRecords = normalObjects.Where(
+            item => item.Header.ObjectClass ==
+                StateObjectClass.PublicationIntent).ToArray();
+        Assert.Equal(4, publicationRecords.Length);
+        var stickyReadbacks = 0;
+        var acceptanceRecoveries = 0;
+        foreach (var record in publicationRecords)
+        {
+            if (StickyReadbackRecordV1Codec.TryDecode(
+                record.Payload,
+                out _))
+            {
+                stickyReadbacks++;
+                continue;
+            }
+
+            Assert.True(RecoveryRecordV1Codec.TryDecode(
+                record.Payload,
+                out _,
+                out var handoffOffset,
+                out var handoffLength));
+            Assert.True(RetainedStateAcceptanceRecoveryCodec.TryDecode(
+                record.Payload.AsSpan(handoffOffset, handoffLength),
+                out _,
+                out var recoveryEnvelope,
+                out var predecessorCopy));
+            CryptographicOperations.ZeroMemory(recoveryEnvelope);
+            predecessorCopy?.Dispose();
+            acceptanceRecoveries++;
+        }
+        Assert.Equal(2, stickyReadbacks);
+        Assert.Equal(2, acceptanceRecoveries);
+
+        var cleanupRecords = normalObjects.Where(
+            item => item.Header.ObjectClass == StateObjectClass.Cleanup)
+            .ToArray();
+        Assert.Equal(4, cleanupRecords.Length);
+        Assert.All(cleanupRecords, record => Assert.True(
+            RetainedStateOpaqueWriteAnchorCodec.TryDecode(
+                record.Payload,
+                out _)));
+        Assert.Equal(13, normalInventory.Snapshot.PhysicalCount);
+        Assert.Equal(1, staleInventory.Snapshot.PhysicalCount);
+
+        var locator = Assert.Single(continuation.Store.Objects.Where(
+            item => StringComparer.Ordinal.Equals(
+                item.Reference.Name.Value,
+                LocatorRootFormat.StoreName)));
+        var successMetadata = candidates.Select(item => item.Metadata)
+            .Concat(acceptances.Select(item => item.Metadata))
+            .Append(normalHead.Metadata)
+            .Append(staleHead.Metadata)
+            .Append(locator)
+            .ToHashSet();
+        Assert.Equal(7, successMetadata.Count);
+        Assert.Contains(bootstrap.CandidateMetadata, successMetadata);
+        Assert.Contains(
+            bootstrap.Acceptance.ReceiptMetadata,
+            successMetadata);
+        Assert.Contains(continued.CandidateMetadata, successMetadata);
+        Assert.Contains(
+            continued.Acceptance.ReceiptMetadata,
+            successMetadata);
+
+        var cleanupMetadata = normalObjects.Select(item => item.Metadata)
+            .Concat(staleObjects.Select(item => item.Metadata))
+            .Append(locator)
+            .ToHashSet();
+        Assert.Equal(15, cleanupMetadata.Count);
+        Assert.Equal(15, continuation.Store.Objects.Length);
+        Assert.True(cleanupMetadata.SetEquals(continuation.Store.Objects));
+        Assert.True(successMetadata.IsSubsetOf(cleanupMetadata));
+        Assert.Empty(successMetadata.Intersect(
+            publicationRecords.Select(item => item.Metadata)
+                .Concat(cleanupRecords.Select(item => item.Metadata))));
+    }
+
+    [Fact]
     public async Task SuccessorsCopyPredecessorsAndCleanupOldExactTargets()
     {
         var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
@@ -2996,10 +3212,12 @@ public sealed class RetainedStateTransactionEndToEndTests
     internal static async Task<TransactionFixture> CreateFixtureAsync(
         long extraRetentionSeconds = 3_600,
         ActionHostAuthorizationRoute route =
-            ActionHostAuthorizationRoute.WorkflowRun)
+            ActionHostAuthorizationRoute.WorkflowRun,
+        ActionHostAuthorizationScenario? scenario = null,
+        ScriptedLocatorStore? store = null,
+        MutableLineageTimeProvider? time = null)
     {
-        var scenario = ActionHostAuthorizationScenario.Valid(
-            route);
+        scenario ??= ActionHostAuthorizationScenario.Valid(route);
         var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
         var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
             launch,
@@ -3024,16 +3242,18 @@ public sealed class RetainedStateTransactionEndToEndTests
             CancellationToken.None);
         var policy = Assert.IsType<ActionHostTrustedPolicy>(
             materialized.Policy);
-        var time = new MutableLineageTimeProvider(1_700_000_000);
-        var store = new ScriptedLocatorStore
+        time ??= new MutableLineageTimeProvider(1_700_000_000);
+        store ??= new ScriptedLocatorStore
         {
             FilterListsByName = true,
             UseNumericObjectIds = true,
-            ProducingRunIdentity = launch.RunId.ToString(
-                CultureInfo.InvariantCulture),
-            ProducingRunAttempt = launch.RunAttempt,
-            ExtraRetentionSeconds = extraRetentionSeconds,
         };
+        store.FilterListsByName = true;
+        store.UseNumericObjectIds = true;
+        store.ProducingRunIdentity = launch.RunId.ToString(
+            CultureInfo.InvariantCulture);
+        store.ProducingRunAttempt = launch.RunAttempt;
+        store.ExtraRetentionSeconds = extraRetentionSeconds;
         var currentReview = User("current review context");
         var request = new ArtifactStateRestoreRequest(
             launch,
@@ -3079,6 +3299,90 @@ public sealed class RetainedStateTransactionEndToEndTests
             currentReview,
             selected!,
             publicationScope);
+    }
+
+    private static async Task ExecuteCleanupAsync(
+        TransactionFixture fixture,
+        VerifiedRetainedStateAcceptance acceptance)
+    {
+        var plan = await RestrictedStateService.PlanRetainedStateCleanupAsync(
+            fixture.Context,
+            acceptance,
+            CancellationToken.None);
+        using var authorization = Assert.IsType<
+            RetainedStateCleanupAuthorization>(plan.Value);
+        var cleanup = await RestrictedStateService.CleanupRetainedStateAsync(
+            fixture.Context,
+            new RetainedStateCleanupRequest(
+                acceptance,
+                authorization,
+                fixture.Time.UnixSeconds +
+                    StateRetentionRequirements.ScopedPlatformRequestSeconds),
+            CancellationToken.None);
+        Assert.True(cleanup.Completed, cleanup.Code);
+    }
+
+    private static async Task<ProductionInventoryRead>
+        ReadProductionInventoryAsync(TransactionFixture fixture)
+    {
+        var request = new ArtifactStateRestoreRequest(
+            fixture.Launch,
+            fixture.Invocation,
+            fixture.Policy,
+            fixture.CurrentReview,
+            DeepSeekReasoningContinuationCodec.Instance,
+            new TestDependencies(fixture.Store),
+            fixture.Time);
+        Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
+            request,
+            out var production));
+        var authorization = Assert.IsType<
+            AcceptedStateProductionAuthorization>(production);
+        var repositoryId = fixture.Launch.RepositoryId.ToString(
+            CultureInfo.InvariantCulture);
+        using var access = Assert.IsType<AuthorizedLocatorAccess>(
+            AuthorizedLocatorAccess.Issue(authorization, repositoryId));
+        var currentKey = fixture.Launch.Inputs.StateKey!
+            .ExportForPrivateLaunch();
+        var previousKey = fixture.Launch.Inputs.PreviousStateKey?
+            .ExportForPrivateLaunch();
+        Assert.True(LocatorStateKeyRing.TryCreate(
+            access,
+            repositoryId,
+            currentKey,
+            previousKey,
+            out var keyRing,
+            out var keyCode), keyCode);
+        using var keys = Assert.IsType<LocatorStateKeyRing>(keyRing);
+        var logicalExpiry = checked(
+            fixture.Time.UnixSeconds +
+                AcceptedStateFormat.LogicalWindowSeconds);
+        var requiredPlatformExpiry = Math.Max(
+            checked(fixture.Time.UnixSeconds +
+                StateRetentionRequirements.ScopedPlatformRequestSeconds),
+            checked(logicalExpiry +
+                StateRetentionRequirements.SentinelDependentMarginSeconds));
+        var locatorResult = await new LocatorRootService(
+            fixture.Store,
+            keys,
+            fixture.Time).ResolveAsync(
+                access,
+                requiredPlatformExpiry,
+                CancellationToken.None);
+        Assert.True(locatorResult.Succeeded, locatorResult.Code);
+        using var locator = Assert.IsType<LocatorContext>(
+            locatorResult.Context);
+        var inventoryResult = await new ScopedStateInventory(fixture.Store)
+            .ReadAsync(
+                locator,
+                access,
+                AuthorizedAcceptedStateComposer.BaseScope(authorization),
+                fixture.Selected.BaseScopeDigest,
+                CancellationToken.None);
+        Assert.True(inventoryResult.Succeeded, inventoryResult.Code);
+        return new ProductionInventoryRead(
+            Assert.IsType<ScopedStateInventorySnapshot>(
+                inventoryResult.Snapshot));
     }
 
     internal static async Task<TransactionFixture> RestoreFixtureAsync(
@@ -4146,6 +4450,14 @@ public sealed class RetainedStateTransactionEndToEndTests
         OpaqueStoreObjectMetadata CandidateMetadata,
         VerifiedRetainedStateAcceptance Acceptance,
         ValidatedPublicationPayloadV1 Publication);
+
+    private sealed class ProductionInventoryRead(
+        ScopedStateInventorySnapshot snapshot) : IDisposable
+    {
+        internal ScopedStateInventorySnapshot Snapshot { get; } = snapshot;
+
+        public void Dispose() => ScopedStateInventory.Clear(Snapshot);
+    }
 
     private sealed class TestDependencies(
         IRestrictedStateStore store,
