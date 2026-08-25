@@ -67,7 +67,7 @@ public sealed class RestrictedEvidenceRoot
             }
         }
 
-        var markerPath = System.IO.Path.Combine(full, MarkerName);
+        var markerPath = System.IO.Path.Join(full, MarkerName);
         var markerFile = new FileInfo(markerPath);
         if (!markerFile.Exists || IsLinkOrReparse(markerFile) ||
             markerFile.Length is < 1 or > 4_096)
@@ -117,14 +117,14 @@ public sealed class RestrictedEvidenceRoot
     public string ResolveExistingFile(string relativePath, int maximumBytes)
     {
         if (string.IsNullOrWhiteSpace(relativePath) ||
-            System.IO.Path.IsPathFullyQualified(relativePath) ||
+            System.IO.Path.IsPathRooted(relativePath) ||
             Encoding.UTF8.GetByteCount(relativePath) > EvidenceLimits.MaximumRelativePathBytes)
         {
             throw new InvalidDataException("restricted_file_invalid");
         }
 
         var candidate = System.IO.Path.GetFullPath(
-            System.IO.Path.Combine(Path, relativePath));
+            System.IO.Path.Join(Path, relativePath));
         if (!IsWithin(candidate, Path) ||
             StringComparer.OrdinalIgnoreCase.Equals(candidate, Path))
         {

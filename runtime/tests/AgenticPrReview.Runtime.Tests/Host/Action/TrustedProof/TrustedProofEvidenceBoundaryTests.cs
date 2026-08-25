@@ -172,9 +172,9 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     public void RestrictedRootRequiresMarkerAndCanonicalCredentialFiles()
     {
         var root = CreateRestrictedRoot();
-        File.WriteAllText(Path.Combine(root.Path, "token"), "synthetic-token", new UTF8Encoding(false));
+        File.WriteAllText(Path.Join(root.Path, "token"), "synthetic-token", new UTF8Encoding(false));
         File.WriteAllText(
-            Path.Combine(root.Path, "current-key"),
+            Path.Join(root.Path, "current-key"),
             Convert.ToBase64String(new byte[32]),
             new UTF8Encoding(false));
         var token = root.ReadCredentialFile("token", base64Key: false);
@@ -190,11 +190,15 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             CryptographicOperations.ZeroMemory(key);
         }
 
-        File.WriteAllText(Path.Combine(root.Path, "bad-token"), "synthetic-token\n");
+        File.WriteAllText(Path.Join(root.Path, "bad-token"), "synthetic-token\n");
         Assert.Throws<InvalidDataException>(() =>
             root.ReadCredentialFile("bad-token", base64Key: false));
         Assert.Throws<InvalidDataException>(() =>
             root.ResolveExistingFile("../outside", EvidenceLimits.MaximumDocumentBytes));
+        Assert.Throws<InvalidDataException>(() =>
+            root.ResolveExistingFile(
+                $"{Path.DirectorySeparatorChar}outside",
+                EvidenceLimits.MaximumDocumentBytes));
     }
 
     [Fact]
@@ -229,7 +233,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "1",
             DownloadCapture(malformed)));
         Assert.DoesNotContain(
-            Directory.EnumerateFiles(Path.Combine(root.Path, "operation")),
+            Directory.EnumerateFiles(Path.Join(root.Path, "operation")),
             path => Path.GetFileName(path).StartsWith("artifact-", StringComparison.Ordinal));
 
         var encrypted = Encoding.UTF8.GetBytes("synthetic-encrypted-object");
@@ -282,7 +286,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     public void CredentialCopyRemovalIsBoundedToTheApprovedRoot()
     {
         var root = CreateRestrictedRoot();
-        var path = Path.Combine(root.Path, "operation-token");
+        var path = Path.Join(root.Path, "operation-token");
         File.WriteAllText(path, "synthetic-token", new UTF8Encoding(false));
 
         root.RemoveCredentialFile("operation-token");
@@ -369,7 +373,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
 
     private RestrictedEvidenceRoot CreateRestrictedRoot()
     {
-        var path = Path.Combine(
+        var path = Path.Join(
             Directory.GetCurrentDirectory(),
             $".apr-r4-e3-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);
@@ -379,7 +383,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             RestrictedEvidenceRoot.MarkerKind,
             identity);
         File.WriteAllBytes(
-            Path.Combine(path, RestrictedEvidenceRoot.MarkerName),
+            Path.Join(path, RestrictedEvidenceRoot.MarkerName),
             CanonicalEvidence.Encode(marker, EvidenceJson.Options));
         return RestrictedEvidenceRoot.Open(path, identity, []);
     }
