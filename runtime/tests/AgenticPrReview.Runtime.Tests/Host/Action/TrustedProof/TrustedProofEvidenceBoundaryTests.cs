@@ -264,7 +264,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "1",
             DownloadCapture(archive));
         var sourcePath = Path.Join(root.Path, "identity-replacement", "source-0001.json");
-        File.Delete(sourcePath);
+        var displacedPath = Path.Join(root.Path, "identity-replacement", "source-0001.displaced");
+        File.Move(sourcePath, displacedPath);
         CanonicalEvidence.WriteCreateNew(sourcePath, sourceBody);
 
         Assert.Throws<InvalidDataException>(() => writer.Finalize(

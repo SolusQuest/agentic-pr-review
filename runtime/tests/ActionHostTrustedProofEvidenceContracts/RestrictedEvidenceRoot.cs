@@ -359,15 +359,14 @@ public sealed class RestrictedEvidenceRoot
             FileSystemRights.Write | FileSystemRights.Delete | FileSystemRights.ChangePermissions |
             FileSystemRights.TakeOwnership | FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories;
         foreach (var rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
-            .OfType<FileSystemAccessRule>())
-        {
-            if (rule.AccessControlType == AccessControlType.Allow &&
+            .OfType<FileSystemAccessRule>()
+            .Where(rule =>
+                rule.AccessControlType == AccessControlType.Allow &&
                 (rule.FileSystemRights & mutationRights) != 0 &&
                 rule.IdentityReference is SecurityIdentifier sid &&
-                !allowedPrincipals.Contains(sid.Value))
-            {
-                throw new InvalidDataException("restricted_root_permissions_invalid");
-            }
+                !allowedPrincipals.Contains(sid.Value)))
+        {
+            throw new InvalidDataException("restricted_root_permissions_invalid");
         }
     }
 
