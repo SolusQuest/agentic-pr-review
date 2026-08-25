@@ -59,15 +59,15 @@ const fixtureDigests = new Map([
   ],
   [
     'authorizations/cleanup.json',
-    'fb8889834d7990cd20acfbd61cf0e4a905c939aa4abecf9a858a4d125288d39f',
+    'e74589c1312eb16217cf25e715f958debdf529aea03ef2d6aef09e43c5af9163',
   ],
   [
     'authorizations/execution.json',
-    'b55dfc5f5d8e8d5cf89da8270b7e64ed3748251590c67f5875e66a6b681d58e0',
+    '214b7526818879bebbef8604a31ed25ca7009e44b5047f8d5c75e46f4b90fd2b',
   ],
-  ['authorizations/setup.json', '87471de3e4e748a3a954d7582484e4758c472b18b0cc3c4f7ee42697233cd5f9'],
+  ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
   ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
-  ['cleanup-plan.json', '48c21893e7b5cad2bd28fdfd609ff5ae35d621f14ac259819933c8901e31c208'],
+  ['cleanup-plan.json', '0c10481d6edd7638f0bec869c968ff1614206618aa3dca07fd52b4119960643f'],
   [
     'expected-success-role-contract.json',
     '8d601c863d184f8f8cf3cdae5e1b447eb9fa7aea25fd94d00390a3ac786a92ba',
@@ -87,16 +87,16 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    'baefa3c52806afa331e5555d0a62547f7d2e6321de54b7ac589f18e6a12f77d0',
+    '92c915c2f39f744d14fd8b5ee44419de098bf98b725d12bf079f468740bc1576',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
-    'df81fc4363a48b786548ba0636d5bdb5ccd49c33f6ef15f20efdfcbcda624c7e',
+    'fab487f9274857335cd976414f070957c812d528f69841caa52c8ab31e836594',
   ],
-  ['source-map.json', '332d4df879cbf0f6cacf57d7f13adec8246c01c8761787ae5f3d5294cf5a2683'],
+  ['source-map.json', 'cd9b5828cdbd42a39b4a528bc1532e74d5317fa8882961429cad5cba96b7e9d4'],
   [
     'templates/host-restricted-evidence.json',
-    '10b856e64192e0fae6f3936af08e845461d0703b0a1d574092e2ed12a268b13d',
+    'db5f2c25316e319ef0ee3b48bd0c629765c32fd0a0bc014c32207733ab173552',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -758,6 +758,35 @@ export function checkR4TrustedProof(options = {}) {
   }
   parseWorkflow(workflowPath);
   const documents = validateFixtureContracts(fixtureRoot);
+  const capturePlanSource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofCapture', 'CapturePlan.cs'),
+    'utf8',
+  );
+  if (!capturePlanSource.includes(fixtureDigests.get('source-map.json'))) {
+    fail('capture-plan-source-map-identity');
+  }
+  const oracleProject = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofEvidenceOracle',
+      'AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.csproj',
+    ),
+    'utf8',
+  );
+  const assemblerSource = fs.readFileSync(
+    path.join(root, 'scripts', 'assemble-r4-trusted-proof-evidence.mjs'),
+    'utf8',
+  );
+  if (
+    !oracleProject.includes('TrustedProofOracleSourceSha') ||
+    !oracleProject.includes('TrustedProofOracleSourceTree') ||
+    assemblerSource.includes('--assembly-input') ||
+    !assemblerSource.includes('--source-bundle')
+  ) {
+    fail('evidence-authority-chain');
+  }
   const historicalReceiptPath = path.join(
     fixtureRoot,
     'historical',

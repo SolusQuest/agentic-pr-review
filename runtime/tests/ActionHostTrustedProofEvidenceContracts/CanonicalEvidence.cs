@@ -26,13 +26,19 @@ public static class CanonicalEvidence
 
     public static void WriteCreateNew(string path, ReadOnlySpan<byte> bytes)
     {
-        using var stream = new FileStream(
-            path,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            4_096,
-            FileOptions.WriteThrough);
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+            BufferSize = 4_096,
+            Options = FileOptions.WriteThrough,
+        };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+        using var stream = new FileStream(path, options);
         stream.Write(bytes);
         stream.Flush(flushToDisk: true);
     }

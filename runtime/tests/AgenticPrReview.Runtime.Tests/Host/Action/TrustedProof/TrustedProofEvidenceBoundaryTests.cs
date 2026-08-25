@@ -2,7 +2,10 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHostTrustedProofCapture;
@@ -172,11 +175,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     public void RestrictedRootRequiresMarkerAndCanonicalCredentialFiles()
     {
         var root = CreateRestrictedRoot();
-        File.WriteAllText(Path.Join(root.Path, "token"), "synthetic-token", new UTF8Encoding(false));
-        File.WriteAllText(
+        WriteRestrictedText(Path.Join(root.Path, "token"), "synthetic-token");
+        WriteRestrictedText(
             Path.Join(root.Path, "current-key"),
-            Convert.ToBase64String(new byte[32]),
-            new UTF8Encoding(false));
+            Convert.ToBase64String(new byte[32]));
         var token = root.ReadCredentialFile("token", base64Key: false);
         var key = root.ReadCredentialFile("current-key", base64Key: true);
         try
@@ -190,7 +192,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             CryptographicOperations.ZeroMemory(key);
         }
 
-        File.WriteAllText(Path.Join(root.Path, "bad-token"), "synthetic-token\n");
+        WriteRestrictedText(Path.Join(root.Path, "bad-token"), "synthetic-token\n");
         Assert.Throws<InvalidDataException>(() =>
             root.ReadCredentialFile("bad-token", base64Key: false));
         Assert.Throws<InvalidDataException>(() =>
@@ -199,6 +201,102 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             root.ResolveExistingFile(
                 $"{Path.DirectorySeparatorChar}outside",
                 EvidenceLimits.MaximumDocumentBytes));
+    }
+
+    [Fact]
+    public void RestrictedRootRejectsEitherDirectionOfProhibitedOverlap()
+    {
+        var root = CreateRestrictedRoot();
+        var identity = root.DestinationIdentitySha256;
+
+        Assert.Throws<InvalidDataException>(() => RestrictedEvidenceRoot.Open(
+            root.Path,
+            identity,
+            [Directory.GetParent(root.Path)!.FullName]));
+        Assert.Throws<InvalidDataException>(() => RestrictedEvidenceRoot.Open(
+            root.Path,
+            identity,
+            [Path.Join(root.Path, "nested-prohibited-root")]));
+    }
+
+    [Fact]
+    public void RestrictedRootRejectsHardLinkedEvidenceFiles()
+    {
+        var root = CreateRestrictedRoot();
+        var original = Path.Join(root.Path, "hard-linked-source");
+        var alias = Path.Join(root.Path, "hard-linked-alias");
+        WriteRestrictedText(original, "synthetic-source");
+        HardLinkTestPlatform.Create(alias, original);
+
+        Assert.Throws<InvalidDataException>(() =>
+            root.ReadPinnedFile("hard-linked-source", EvidenceLimits.MaximumDocumentBytes));
+    }
+
+    [Fact]
+    public void PackageFinalizationRejectsSameBytesAtAReplacementIdentity()
+    {
+        var root = CreateRestrictedRoot();
+        var writer = new CapturePackageWriter(root, "identity-replacement");
+        var sourceBody = Encoding.UTF8.GetBytes("{}\n");
+        writer.AddSource(
+            "runs:page:1",
+            new SafeResponseCapture(
+                "/repos/SolusQuest/agentic-pr-review/actions/runs?per_page=100",
+                1,
+                200,
+                CanonicalEvidence.Sha256(sourceBody),
+                sourceBody.Length,
+                new string('4', 64),
+                1,
+                2,
+                null),
+            sourceBody);
+        var encrypted = Encoding.UTF8.GetBytes("synthetic-encrypted-object");
+        var archive = CreateArchive(encrypted);
+        writer.AddArtifact(
+            "1",
+            "root",
+            "runs:page:1",
+            CanonicalEvidence.Sha256(sourceBody),
+            archive,
+            CanonicalEvidence.Sha256(archive),
+            "9001",
+            "1",
+            DownloadCapture(archive));
+        var sourcePath = Path.Join(root.Path, "identity-replacement", "source-0001.json");
+        File.Delete(sourcePath);
+        CanonicalEvidence.WriteCreateNew(sourcePath, sourceBody);
+
+        Assert.Throws<InvalidDataException>(() => writer.Finalize(
+            "42",
+            "SolusQuest/agentic-pr-review",
+            [new string('6', 64), new string('8', 64)],
+            new string('7', 64)));
+    }
+
+    [Fact]
+    public void WindowsRestrictedRootRejectsBroadMutationAcl()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var root = CreateRestrictedRoot();
+        var directory = new DirectoryInfo(root.Path);
+        var security = directory.GetAccessControl(AccessControlSections.Access);
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        directory.SetAccessControl(security);
+
+        Assert.Throws<InvalidDataException>(() => RestrictedEvidenceRoot.Open(
+            root.Path,
+            root.DestinationIdentitySha256,
+            []));
     }
 
     [Fact]
@@ -224,9 +322,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.ThrowsAny<Exception>(() => writer.AddArtifact(
             "1",
             "root",
-            "repository-locator-root",
-            "repository",
-            "agentic-pr-review-state-root-v1",
+            "runs",
+            CanonicalEvidence.Sha256(sourceBody),
             malformed,
             CanonicalEvidence.Sha256(malformed),
             "9001",
@@ -241,9 +338,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         writer.AddArtifact(
             "1",
             "root",
-            "repository-locator-root",
-            "repository",
-            "agentic-pr-review-state-root-v1",
+            "runs",
+            CanonicalEvidence.Sha256(sourceBody),
             archive,
             CanonicalEvidence.Sha256(archive),
             "9001",
@@ -287,12 +383,38 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     {
         var root = CreateRestrictedRoot();
         var path = Path.Join(root.Path, "operation-token");
-        File.WriteAllText(path, "synthetic-token", new UTF8Encoding(false));
+        WriteRestrictedText(path, "synthetic-token");
 
         root.RemoveCredentialFile("operation-token");
 
         Assert.False(File.Exists(path));
         Assert.Throws<InvalidDataException>(() => root.RemoveCredentialFile("../outside-token"));
+    }
+
+    [Fact]
+    public async Task CollectorRejectsPaginationOutsideTheOriginalEndpointFamily()
+    {
+        var page = JsonResponse("{\"page\":1}");
+        page.Headers.TryAddWithoutValidation(
+            "Link",
+            "<https://api.github.com/repos/SolusQuest/agentic-pr-review/issues?per_page=100&page=2>; rel=\"next\"");
+        var calls = 0;
+        var apiHandler = new RecordingHandler(_ =>
+        {
+            calls++;
+            return page;
+        });
+        var token = Encoding.UTF8.GetBytes("synthetic-token");
+        using var client = new TrustedProofCaptureClient(
+            token,
+            apiHandler,
+            new RecordingHandler(_ => throw new InvalidOperationException()));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetPaginatedAsync(
+            "/repos/SolusQuest/agentic-pr-review/actions/runs?per_page=100",
+            CancellationToken.None));
+        Assert.Equal(1, calls);
+        CryptographicOperations.ZeroMemory(token);
     }
 
     [Fact]
@@ -377,6 +499,25 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             Directory.GetCurrentDirectory(),
             $".apr-r4-e3-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);
+        if (OperatingSystem.IsWindows())
+        {
+            var current = WindowsIdentity.GetCurrent().User!;
+            var security = new DirectorySecurity();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(
+                current,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            new DirectoryInfo(path).SetAccessControl(security);
+        }
+        else
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
         roots.Add(path);
         var identity = new string('5', 64);
         var marker = new RestrictedRootMarker(
@@ -385,7 +526,22 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         File.WriteAllBytes(
             Path.Join(path, RestrictedEvidenceRoot.MarkerName),
             CanonicalEvidence.Encode(marker, EvidenceJson.Options));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                Path.Join(path, RestrictedEvidenceRoot.MarkerName),
+                UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
         return RestrictedEvidenceRoot.Open(path, identity, []);
+    }
+
+    private static void WriteRestrictedText(string path, string value)
+    {
+        File.WriteAllText(path, value, new UTF8Encoding(false));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     private static byte[] CreateArchive(
@@ -458,4 +614,28 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             HttpRequestMessage request,
             CancellationToken cancellationToken) => Task.FromResult(respond(request));
     }
+}
+
+internal static partial class HardLinkTestPlatform
+{
+    internal static void Create(string linkPath, string existingPath)
+    {
+        var created = OperatingSystem.IsWindows()
+            ? CreateHardLink(linkPath, existingPath, 0)
+            : Link(existingPath, linkPath) == 0;
+        if (!created)
+        {
+            throw new IOException($"hard_link_test_setup_failed:{Marshal.GetLastPInvokeError()}");
+        }
+    }
+
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateHardLinkW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CreateHardLink(
+        string fileName,
+        string existingFileName,
+        nint securityAttributes);
+
+    [LibraryImport("libc", EntryPoint = "link", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Link(string existingPath, string linkPath);
 }

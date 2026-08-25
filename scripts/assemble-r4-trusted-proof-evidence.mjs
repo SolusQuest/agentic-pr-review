@@ -63,8 +63,60 @@ function resolveNew(root, relative) {
   return candidate;
 }
 
-function readCanonical(pathname) {
-  const bytes = fs.readFileSync(pathname);
+function physicalIdentity(stat) {
+  const mode = process.platform === 'win32' ? 0n : stat.mode;
+  const owner = process.platform === 'win32' ? 0n : stat.uid;
+  const canonical = `${stat.dev.toString(16).padStart(16, '0')}:${stat.ino
+    .toString(16)
+    .padStart(16, '0')}:${stat.nlink}:${stat.size}:${mode.toString(16).padStart(8, '0')}:${owner}`;
+  return { canonical, digest: sha256(Buffer.from(canonical, 'utf8')) };
+}
+
+function readPinned(pathname, maximumBytes, expectedDevice, requireOwnerOnly = true) {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  const descriptor = fs.openSync(pathname, flags);
+  try {
+    const before = fs.fstatSync(descriptor, { bigint: true });
+    if (
+      !before.isFile() ||
+      before.nlink !== 1n ||
+      before.size < 1n ||
+      before.size > BigInt(maximumBytes) ||
+      (expectedDevice !== undefined && before.dev !== expectedDevice) ||
+      (requireOwnerOnly &&
+        process.platform !== 'win32' &&
+        ((before.mode & 0x3fn) !== 0n || before.uid !== BigInt(process.geteuid())))
+    ) {
+      invalid();
+    }
+    const identity = physicalIdentity(before);
+    const bytes = fs.readFileSync(descriptor);
+    const after = fs.fstatSync(descriptor, { bigint: true });
+    if (
+      bytes.length !== Number(before.size) ||
+      physicalIdentity(after).canonical !== identity.canonical
+    ) {
+      bytes.fill(0);
+      invalid();
+    }
+    return { bytes, identity: identity.digest };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+export function pinnedFileIdentity(pathname) {
+  const pinned = readPinned(pathname, maximumDocumentBytes * 16);
+  try {
+    return pinned.identity;
+  } finally {
+    pinned.bytes.fill(0);
+  }
+}
+
+function readCanonical(pathname, expectedDevice, requireOwnerOnly = true) {
+  const pinned = readPinned(pathname, maximumDocumentBytes, expectedDevice, requireOwnerOnly);
+  const { bytes } = pinned;
   if (
     bytes.length < 2 ||
     bytes.length > maximumDocumentBytes ||
@@ -76,7 +128,7 @@ function readCanonical(pathname) {
   const text = bytes.toString('utf8');
   const value = JSON.parse(text);
   if (canonicalJson(value) !== text) invalid();
-  return { value, bytes };
+  return { value, bytes, identity: pinned.identity };
 }
 
 function resolvePackageFile(restrictedRoot, packageRoot, relative, maximumBytes) {
@@ -93,13 +145,22 @@ function resolvePackageFile(restrictedRoot, packageRoot, relative, maximumBytes)
 
 export function verifyCapturedFiles(restrictedRoot, manifestPath, manifest) {
   const packageRoot = path.dirname(manifestPath);
+  const rootDevice = fs.statSync(restrictedRoot, { bigint: true }).dev;
   for (const source of manifest.sources) {
-    const bytes = fs.readFileSync(
+    const pinned = readPinned(
       resolvePackageFile(restrictedRoot, packageRoot, source.body_path, maximumDocumentBytes),
+      maximumDocumentBytes,
+      rootDevice,
     );
-    if (String(bytes.length) !== source.body_size || sha256(bytes) !== source.body_sha256) {
+    if (
+      String(pinned.bytes.length) !== source.body_size ||
+      sha256(pinned.bytes) !== source.body_sha256 ||
+      pinned.identity !== source.body_file_identity
+    ) {
+      pinned.bytes.fill(0);
       invalid();
     }
+    pinned.bytes.fill(0);
   }
   for (const artifact of manifest.artifacts) {
     for (const [relative, maximum, size, digest] of [
@@ -111,10 +172,24 @@ export function verifyCapturedFiles(restrictedRoot, manifestPath, manifest) {
         artifact.encrypted_object_sha256,
       ],
     ]) {
-      const bytes = fs.readFileSync(
+      const pinned = readPinned(
         resolvePackageFile(restrictedRoot, packageRoot, relative, maximum),
+        maximum,
+        rootDevice,
       );
-      if (String(bytes.length) !== size || sha256(bytes) !== digest) invalid();
+      const expectedIdentity =
+        relative === artifact.archive_path
+          ? artifact.archive_file_identity
+          : artifact.encrypted_object_file_identity;
+      if (
+        String(pinned.bytes.length) !== size ||
+        sha256(pinned.bytes) !== digest ||
+        pinned.identity !== expectedIdentity
+      ) {
+        pinned.bytes.fill(0);
+        invalid();
+      }
+      pinned.bytes.fill(0);
     }
   }
 }
@@ -125,7 +200,7 @@ function parseArgs(args) {
     '--destination-identity',
     '--repository-root',
     '--worktree-root',
-    '--assembly-input',
+    '--source-bundle',
     '--capture-manifest',
     '--oracle-result',
     '--host-output',
@@ -152,13 +227,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       !path.isAbsolute(options['--restricted-root']) ||
       !fs.statSync(restrictedRoot).isDirectory() ||
       within(restrictedRoot, repositoryRoot) ||
+      within(repositoryRoot, restrictedRoot) ||
       within(restrictedRoot, worktreeRoot) ||
-      within(restrictedRoot, temporaryRoot)
+      within(worktreeRoot, restrictedRoot) ||
+      within(restrictedRoot, temporaryRoot) ||
+      within(temporaryRoot, restrictedRoot)
     ) {
       invalid();
     }
     assertNoLinks(restrictedRoot, restrictedRoot);
-    const marker = readCanonical(resolveExisting(restrictedRoot, markerName)).value;
+    const rootStat = fs.statSync(restrictedRoot, { bigint: true });
+    if (
+      process.platform !== 'win32' &&
+      ((rootStat.mode & 0x3fn) !== 0n || rootStat.uid !== BigInt(process.geteuid()))
+    ) {
+      invalid();
+    }
+    const marker = readCanonical(resolveExisting(restrictedRoot, markerName), rootStat.dev).value;
     if (
       JSON.stringify(Object.keys(marker)) !==
         JSON.stringify(['kind', 'destination_identity_sha256']) ||
@@ -168,16 +253,38 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       invalid();
     }
 
-    const hostInput = readCanonical(resolveExisting(restrictedRoot, options['--assembly-input']));
+    const sourceMap = readCanonical(
+      resolveExisting(
+        repositoryRoot,
+        path.join(
+          'runtime',
+          'tests',
+          'fixtures',
+          'action-host',
+          'trusted-proof',
+          'source-map.json',
+        ),
+      ),
+      undefined,
+      false,
+    );
+    const sourceBundle = readCanonical(
+      resolveExisting(restrictedRoot, options['--source-bundle']),
+      rootStat.dev,
+    );
     const capturePath = resolveExisting(restrictedRoot, options['--capture-manifest']);
-    const capture = readCanonical(capturePath);
-    const oracle = readCanonical(resolveExisting(restrictedRoot, options['--oracle-result']));
+    const capture = readCanonical(capturePath, rootStat.dev);
+    const oracle = readCanonical(
+      resolveExisting(restrictedRoot, options['--oracle-result']),
+      rootStat.dev,
+    );
     const credentialNames = ['github-token', 'current-state-key', 'previous-state-key'];
     if (credentialNames.some((name) => fs.existsSync(path.join(restrictedRoot, name)))) invalid();
     verifyCapturedFiles(restrictedRoot, capturePath, capture.value);
 
     const assembled = assembleTrustedProofEvidence({
-      host: hostInput.value,
+      sourceMap: sourceMap.value,
+      sourceBundle: sourceBundle.value,
       captureManifest: capture.value,
       captureManifestSha256: sha256(capture.bytes),
       oracleResult: oracle.value,
@@ -187,13 +294,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     const hostOutput = resolveNew(restrictedRoot, options['--host-output']);
     const publicOutput = resolveNew(worktreeRoot, options['--public-output']);
     fs.writeFileSync(hostOutput, canonicalJson(assembled.host), { flag: 'wx', mode: 0o600 });
-    fs.writeFileSync(publicOutput, canonicalJson(assembled.publicEvidence), {
-      flag: 'wx',
-      mode: 0o600,
-    });
-    process.stdout.write(
-      `APR_R4_E3_ASSEMBLY_OK ${sha256(canonicalJson(assembled.host))} ${sha256(canonicalJson(assembled.publicEvidence))}\n`,
-    );
+    if (assembled.recoveryOnly) {
+      process.stdout.write(
+        `APR_R4_E3_ASSEMBLY_RECOVERY_ONLY ${sha256(canonicalJson(assembled.host))}\n`,
+      );
+    } else {
+      fs.writeFileSync(publicOutput, canonicalJson(assembled.publicEvidence), {
+        flag: 'wx',
+        mode: 0o600,
+      });
+      process.stdout.write(
+        `APR_R4_E3_ASSEMBLY_OK ${sha256(canonicalJson(assembled.host))} ${sha256(canonicalJson(assembled.publicEvidence))}\n`,
+      );
+    }
   } catch {
     process.stderr.write('APR_R4_E3_ASSEMBLY_INVALID\n');
     process.exitCode = 1;

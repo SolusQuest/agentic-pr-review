@@ -1,4 +1,7 @@
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 
@@ -16,14 +19,17 @@ public sealed class RestrictedEvidenceRoot
 
     private RestrictedEvidenceRoot(
         string path,
-        string destinationIdentitySha256)
+        string destinationIdentitySha256,
+        ulong device)
     {
         Path = path;
         DestinationIdentitySha256 = destinationIdentitySha256;
+        Device = device;
     }
 
     public string Path { get; }
     public string DestinationIdentitySha256 { get; }
+    private ulong Device { get; }
 
     public static RestrictedEvidenceRoot Open(
         string rootPath,
@@ -53,7 +59,7 @@ public sealed class RestrictedEvidenceRoot
 
             var blocked = System.IO.Path.TrimEndingDirectorySeparator(
                 System.IO.Path.GetFullPath(prohibited));
-            if (IsWithin(full, blocked))
+            if (IsWithin(full, blocked) || IsWithin(blocked, full))
             {
                 throw new InvalidDataException("restricted_root_prohibited");
             }
@@ -67,6 +73,21 @@ public sealed class RestrictedEvidenceRoot
             }
         }
 
+        if (!OperatingSystem.IsWindows())
+        {
+            const UnixFileMode forbidden =
+                UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+            if ((File.GetUnixFileMode(full) & forbidden) != 0)
+            {
+                throw new InvalidDataException("restricted_root_permissions_invalid");
+            }
+        }
+        else
+        {
+            ValidateWindowsOwnerAccess(root);
+        }
+
         var markerPath = System.IO.Path.Join(full, MarkerName);
         var markerFile = new FileInfo(markerPath);
         if (!markerFile.Exists || IsLinkOrReparse(markerFile) ||
@@ -75,7 +96,30 @@ public sealed class RestrictedEvidenceRoot
             throw new InvalidDataException("restricted_root_marker_invalid");
         }
 
-        var markerBytes = File.ReadAllBytes(markerPath);
+        byte[] markerBytes;
+        EvidenceFileIdentity markerPhysicalIdentity;
+        using (var markerHandle = EvidenceFileHandle.OpenNoFollow(markerPath))
+        {
+            var markerIdentity = EvidenceFileHandle.Identity(markerHandle);
+            markerPhysicalIdentity = markerIdentity;
+            if (markerIdentity.Links != 1 || markerIdentity.Size is < 1 or > 4_096)
+            {
+                throw new InvalidDataException("restricted_root_marker_invalid");
+            }
+            using var markerStream = new FileStream(
+                markerHandle,
+                FileAccess.Read,
+                bufferSize: 4_096,
+                isAsync: false);
+            markerBytes = new byte[checked((int)markerIdentity.Size)];
+            markerStream.ReadExactly(markerBytes);
+            if (markerStream.ReadByte() != -1 ||
+                EvidenceFileHandle.Identity(markerStream.SafeFileHandle) != markerIdentity)
+            {
+                CryptographicOperations.ZeroMemory(markerBytes);
+                throw new InvalidDataException("restricted_root_marker_invalid");
+            }
+        }
         try
         {
             var marker = JsonSerializer.Deserialize<RestrictedRootMarker>(
@@ -111,7 +155,7 @@ public sealed class RestrictedEvidenceRoot
             CryptographicOperations.ZeroMemory(markerBytes);
         }
 
-        return new RestrictedEvidenceRoot(full, expectedDestinationIdentitySha256);
+        return new RestrictedEvidenceRoot(full, expectedDestinationIdentitySha256, markerPhysicalIdentity.Device);
     }
 
     public string ResolveExistingFile(string relativePath, int maximumBytes)
@@ -156,8 +200,8 @@ public sealed class RestrictedEvidenceRoot
 
     public byte[] ReadCredentialFile(string relativePath, bool base64Key)
     {
-        var path = ResolveExistingFile(relativePath, EvidenceLimits.MaximumCredentialBytes);
-        var bytes = File.ReadAllBytes(path);
+        var pinned = ReadPinnedFile(relativePath, EvidenceLimits.MaximumCredentialBytes);
+        var bytes = pinned.Bytes;
         try
         {
             var text = StrictUtf8.GetString(bytes);
@@ -196,6 +240,37 @@ public sealed class RestrictedEvidenceRoot
         {
             CryptographicOperations.ZeroMemory(bytes);
         }
+    }
+
+    public PinnedEvidenceFile ReadPinnedFile(string relativePath, int maximumBytes)
+    {
+        var path = ResolveExistingFile(relativePath, maximumBytes);
+        using var handle = EvidenceFileHandle.OpenNoFollow(path);
+        var before = EvidenceFileHandle.Identity(handle);
+        if (before.Device != Device || before.Links != 1 || before.Size is < 1 || before.Size > maximumBytes)
+        {
+            throw new InvalidDataException("restricted_file_identity_invalid");
+        }
+        if (!OperatingSystem.IsWindows())
+        {
+            const uint groupOrOtherMask = 0x3f;
+            if ((before.Mode & groupOrOtherMask) != 0 ||
+                before.Owner != EvidenceFileHandle.EffectiveUserId())
+            {
+                throw new InvalidDataException("restricted_file_permissions_invalid");
+            }
+        }
+
+        using var stream = new FileStream(handle, FileAccess.Read, bufferSize: 4_096, isAsync: false);
+        var bytes = new byte[checked((int)before.Size)];
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1 || EvidenceFileHandle.Identity(stream.SafeFileHandle) != before)
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            throw new InvalidDataException("restricted_file_replaced");
+        }
+        var identity = CanonicalEvidence.Sha256(Encoding.UTF8.GetBytes(before.Canonical));
+        return new PinnedEvidenceFile(bytes, identity);
     }
 
     public void RemoveCredentialFile(string relativePath)
@@ -263,6 +338,38 @@ public sealed class RestrictedEvidenceRoot
     private static bool IsLinkOrReparse(FileSystemInfo value) =>
         value.LinkTarget is not null ||
         (value.Attributes & FileAttributes.ReparsePoint) != 0;
+
+    [SupportedOSPlatform("windows")]
+    private static void ValidateWindowsOwnerAccess(DirectoryInfo root)
+    {
+        var current = WindowsIdentity.GetCurrent().User ??
+            throw new InvalidDataException("restricted_root_owner_invalid");
+        var security = root.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner || owner != current)
+        {
+            throw new InvalidDataException("restricted_root_owner_invalid");
+        }
+        var allowedPrincipals = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            current.Value,
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Value,
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null).Value,
+        };
+        const FileSystemRights mutationRights =
+            FileSystemRights.Write | FileSystemRights.Delete | FileSystemRights.ChangePermissions |
+            FileSystemRights.TakeOwnership | FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories;
+        foreach (var rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
+            .OfType<FileSystemAccessRule>())
+        {
+            if (rule.AccessControlType == AccessControlType.Allow &&
+                (rule.FileSystemRights & mutationRights) != 0 &&
+                rule.IdentityReference is SecurityIdentifier sid &&
+                !allowedPrincipals.Contains(sid.Value))
+            {
+                throw new InvalidDataException("restricted_root_permissions_invalid");
+            }
+        }
+    }
 
     private static bool IsSha256(string value) =>
         value.Length == 64 &&

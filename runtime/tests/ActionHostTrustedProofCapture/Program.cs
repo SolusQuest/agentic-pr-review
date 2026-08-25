@@ -1,10 +1,18 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofCapture;
 
 internal static class Program
 {
+    private sealed record CapturedArtifactMetadata(
+        string ArtifactId,
+        string ArtifactName,
+        string ProducingRunId,
+        string SourceId,
+        string BodySha256);
+
     private static async Task<int> Main(string[] args)
     {
         RestrictedEvidenceRoot? root = null;
@@ -25,9 +33,13 @@ internal static class Program
                 using var timeout = new CancellationTokenSource(
                     EvidenceLimits.LogicalOperationTimeout);
                 var writer = new CapturePackageWriter(root, plan.PackageName);
+                var artifactMetadata = new Dictionary<string, CapturedArtifactMetadata>(StringComparer.Ordinal);
                 foreach (var source in plan.Sources)
                 {
-                    var pages = await client.GetPaginatedAsync(source.Route, timeout.Token);
+                    var pages = await client.GetPaginatedAsync(
+                        source.Route,
+                        source.EndpointFamily,
+                        timeout.Token);
                     try
                     {
                         for (var index = 0; index < pages.Captures.Length; index++)
@@ -36,6 +48,11 @@ internal static class Program
                                 $"{source.SourceId}:page:{index + 1}",
                                 pages.Captures[index],
                                 pages.Bodies[index]);
+                        }
+                        if (plan.Artifacts.Any(item =>
+                                StringComparer.Ordinal.Equals(item.MetadataSourceId, source.SourceId)))
+                        {
+                            IndexArtifactMetadata(source, pages, artifactMetadata);
                         }
                     }
                     finally
@@ -49,6 +66,13 @@ internal static class Program
 
                 foreach (var artifact in plan.Artifacts)
                 {
+                    if (!artifactMetadata.TryGetValue(artifact.ArtifactId, out var metadata) ||
+                        !StringComparer.Ordinal.Equals(metadata.ArtifactName, artifact.ArtifactName) ||
+                        !StringComparer.Ordinal.Equals(metadata.ProducingRunId, artifact.ProducingRunId) ||
+                        !StringComparer.Ordinal.Equals(metadata.SourceId, artifact.MetadataSourceId))
+                    {
+                        throw new InvalidDataException("artifact_metadata_invalid");
+                    }
                     var downloaded = await client.DownloadArtifactAsync(
                         artifact.DownloadRoute,
                         timeout.Token);
@@ -56,10 +80,9 @@ internal static class Program
                     {
                         writer.AddArtifact(
                             artifact.ArtifactId,
-                            artifact.ArtifactName,
-                            artifact.ExpectedRole,
-                            artifact.Scope,
-                            artifact.OpaqueName,
+                            metadata.ArtifactName,
+                            metadata.SourceId,
+                            metadata.BodySha256,
                             downloaded.Archive,
                             CanonicalEvidence.Sha256(downloaded.Archive),
                             artifact.ProducingRunId,
@@ -167,6 +190,64 @@ internal static class Program
         }
 
         return result;
+    }
+
+    private static void IndexArtifactMetadata(
+        CapturePlanSource source,
+        CapturePageSet pages,
+        Dictionary<string, CapturedArtifactMetadata> destination)
+    {
+        for (var page = 0; page < pages.Bodies.Length; page++)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(pages.Bodies[page], new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = 32,
+                });
+                if (!document.RootElement.TryGetProperty("artifacts", out var artifacts) ||
+                    artifacts.ValueKind != JsonValueKind.Array)
+                {
+                    throw new InvalidDataException("artifact_metadata_invalid");
+                }
+                foreach (var artifact in artifacts.EnumerateArray())
+                {
+                    var id = DecimalString(artifact, "id");
+                    var name = artifact.GetProperty("name").GetString();
+                    var run = DecimalString(artifact.GetProperty("workflow_run"), "id");
+                    if (string.IsNullOrWhiteSpace(name) ||
+                        !destination.TryAdd(
+                            id,
+                            new CapturedArtifactMetadata(
+                                id,
+                                name,
+                                run,
+                                source.SourceId,
+                                pages.Captures[page].BodySha256)))
+                    {
+                        throw new InvalidDataException("artifact_metadata_invalid");
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                throw new InvalidDataException("artifact_metadata_invalid");
+            }
+        }
+    }
+
+    private static string DecimalString(JsonElement value, string property)
+    {
+        var raw = value.GetProperty(property).GetRawText();
+        if (raw.Length is < 1 or > 20 ||
+            raw.Any(character => character is < '0' or > '9') ||
+            (raw.Length > 1 && raw[0] == '0'))
+        {
+            throw new InvalidDataException("artifact_metadata_invalid");
+        }
+        return raw;
     }
 
     private static int Invalid()

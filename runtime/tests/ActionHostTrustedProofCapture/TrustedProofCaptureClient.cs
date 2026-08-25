@@ -70,58 +70,77 @@ public sealed class TrustedProofCaptureClient : IDisposable
     public async Task<CapturePageSet> GetPaginatedAsync(
         string firstRoute,
         CancellationToken cancellationToken)
+        => await GetPaginatedAsync(firstRoute, firstRoute.Split('?', 2)[0], cancellationToken);
+
+    public async Task<CapturePageSet> GetPaginatedAsync(
+        string firstRoute,
+        string endpointFamily,
+        CancellationToken cancellationToken)
     {
         var captures = ImmutableArray.CreateBuilder<SafeResponseCapture>();
         var bodies = ImmutableArray.CreateBuilder<byte[]>();
-        string? route = firstRoute;
-        for (var page = 1; route is not null; page++)
+        try
         {
-            if (page > EvidenceLimits.MaximumPages || !ValidApiRoute(route))
+            string? route = firstRoute;
+            for (var page = 1; route is not null; page++)
+            {
+                if (page > EvidenceLimits.MaximumPages ||
+                    !ValidApiRoute(route) ||
+                    !(route == endpointFamily || route.StartsWith($"{endpointFamily}?", StringComparison.Ordinal)))
+                {
+                    throw new InvalidDataException("github_pagination_invalid");
+                }
+
+                using var request = CreateApiRequest(route);
+                var started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                using var response = await api.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    throw new InvalidDataException("github_response_invalid");
+                }
+
+                var body = await ReadBoundedAsync(
+                    response.Content,
+                    EvidenceLimits.MaximumDocumentBytes,
+                    cancellationToken);
+                var received = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                route = NextRoute(response.Headers);
+                var safeHeadersSha256 = SafeHeadersSha256(response, route);
+                captures.Add(new SafeResponseCapture(
+                    request.RequestUri!.PathAndQuery,
+                    page,
+                    (int)response.StatusCode,
+                    CanonicalEvidence.Sha256(body),
+                    body.Length,
+                    safeHeadersSha256,
+                    started,
+                    received,
+                    route));
+                bodies.Add(body);
+                if (bodies.Count > EvidenceLimits.MaximumRecords)
+                {
+                    throw new InvalidDataException("github_pagination_invalid");
+                }
+            }
+
+            if (captures.Count == 0)
             {
                 throw new InvalidDataException("github_pagination_invalid");
             }
 
-            using var request = CreateApiRequest(route);
-            var started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            using var response = await api.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-            if (response.StatusCode != HttpStatusCode.OK)
-            {
-                throw new InvalidDataException("github_response_invalid");
-            }
-
-            var body = await ReadBoundedAsync(
-                response.Content,
-                EvidenceLimits.MaximumDocumentBytes,
-                cancellationToken);
-            var received = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            route = NextRoute(response.Headers);
-            var safeHeadersSha256 = SafeHeadersSha256(response, route);
-            captures.Add(new SafeResponseCapture(
-                request.RequestUri!.PathAndQuery,
-                page,
-                (int)response.StatusCode,
-                CanonicalEvidence.Sha256(body),
-                body.Length,
-                safeHeadersSha256,
-                started,
-                received,
-                route));
-            bodies.Add(body);
-            if (bodies.Count > EvidenceLimits.MaximumRecords)
-            {
-                throw new InvalidDataException("github_pagination_invalid");
-            }
+            return new CapturePageSet(captures.ToImmutable(), bodies.ToImmutable());
         }
-
-        if (captures.Count == 0)
+        catch
         {
-            throw new InvalidDataException("github_pagination_invalid");
+            foreach (var body in bodies)
+            {
+                CryptographicOperations.ZeroMemory(body);
+            }
+            throw;
         }
-
-        return new CapturePageSet(captures.ToImmutable(), bodies.ToImmutable());
     }
 
     public async Task<(byte[] Archive, SafeResponseCapture Capture)> DownloadArtifactAsync(

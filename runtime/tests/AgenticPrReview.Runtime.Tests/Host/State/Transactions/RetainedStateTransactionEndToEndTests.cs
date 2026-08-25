@@ -1854,29 +1854,25 @@ public sealed class RetainedStateTransactionEndToEndTests
             return receipt!.PreviousLogicalGenerationIdentity is null ? 0 : 1;
         }).ToArray();
         TrustedProofEncryptedArtifact Input(
-            OpaqueStoreObjectMetadata metadata,
-            string role,
-            string scope) =>
+            OpaqueStoreObjectMetadata metadata) =>
             new(
                 metadata.Reference.ObjectId.Value,
-                role,
-                scope,
                 metadata.Reference.Name.Value,
                 continuation.Store.Bytes(metadata));
         var oracleInputs = new List<TrustedProofEncryptedArtifact>
         {
-            Input(locator, "repository-locator-root", "repository"),
-            Input(normalHead.Metadata, "normal-lineage-head", "normal"),
-            Input(staleHead.Metadata, "stale-lineage-head", "stale"),
-            Input(orderedCandidates[0].Metadata, "bootstrap-candidate", "normal"),
-            Input(orderedCandidates[1].Metadata, "continuation-candidate", "normal"),
-            Input(orderedAcceptances[0].Metadata, "bootstrap-acceptance", "normal"),
-            Input(orderedAcceptances[1].Metadata, "continuation-acceptance", "normal"),
+            Input(locator),
+            Input(normalHead.Metadata),
+            Input(staleHead.Metadata),
+            Input(orderedCandidates[0].Metadata),
+            Input(orderedCandidates[1].Metadata),
+            Input(orderedAcceptances[0].Metadata),
+            Input(orderedAcceptances[1].Metadata),
         };
         oracleInputs.AddRange(publicationRecords.Select(item =>
-            Input(item.Metadata, "internal-publication-intent", "normal")));
+            Input(item.Metadata)));
         oracleInputs.AddRange(cleanupRecords.Select(item =>
-            Input(item.Metadata, "internal-cleanup", "normal")));
+            Input(item.Metadata)));
         Assert.True(TrustedProofEvidenceCodecOracle.TryDecode(
             continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
             continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
@@ -1893,26 +1889,21 @@ public sealed class RetainedStateTransactionEndToEndTests
                 StringComparer.Ordinal.Equals(
                     metadata.Reference.ObjectId.Value,
                     item.ArtifactId))));
-        var swappedCandidateLabels = oracleInputs.Select(input => input with
+        var recoveryInputs = oracleInputs.Append(oracleInputs[^1] with
         {
-            Role = input.Role switch
-            {
-                "bootstrap-candidate" => "continuation-candidate",
-                "continuation-candidate" => "bootstrap-candidate",
-                _ => input.Role,
-            },
+            ArtifactId = "999999",
         }).ToArray();
         Assert.True(TrustedProofEvidenceCodecOracle.TryDecode(
             continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
             continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
             continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
-            swappedCandidateLabels,
-            out var swappedResult));
-        Assert.False(Assert.IsType<TrustedProofCodecOracleResult>(swappedResult).ExactSevenSuccess);
-        Assert.True(swappedResult!.RecoveryOnly);
+            recoveryInputs,
+            out var recoveryResult));
+        Assert.False(Assert.IsType<TrustedProofCodecOracleResult>(recoveryResult).ExactSevenSuccess);
+        Assert.True(recoveryResult!.RecoveryOnly);
         Assert.Equal(
             "bootstrap-candidate",
-            swappedResult.Records.Single(item =>
+            decodedOracle.Records.Single(item =>
                 item.ArtifactId == orderedCandidates[0].Metadata.Reference.ObjectId.Value).Role);
         foreach (var input in oracleInputs)
         {

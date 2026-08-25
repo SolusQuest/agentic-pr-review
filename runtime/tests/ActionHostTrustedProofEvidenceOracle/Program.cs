@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
@@ -19,6 +20,10 @@ internal sealed record OracleRecord(
 internal sealed record OracleDocument(
     string Kind,
     string CaptureManifestSha256,
+    string OracleSourceSha,
+    string OracleSourceTree,
+    string OracleAssemblySha256,
+    string ProductionAssemblySha256,
     bool ExactSevenSuccess,
     bool RecoveryOnly,
     OracleRecord[] Records);
@@ -35,6 +40,17 @@ internal static class Program
         try
         {
             var options = Parse(args);
+            var oracleAssembly = Assembly.GetExecutingAssembly();
+            var productionAssembly = typeof(TrustedProofEvidenceCodecOracle).Assembly;
+            var sourceSha = AssemblyMetadata(oracleAssembly, "TrustedProofOracleSourceSha");
+            var sourceTree = AssemblyMetadata(oracleAssembly, "TrustedProofOracleSourceTree");
+            if (!Sha(options["--oracle-source-sha"], 40) ||
+                !Sha(options["--oracle-source-tree"], 40) ||
+                !StringComparer.Ordinal.Equals(sourceSha, options["--oracle-source-sha"]) ||
+                !StringComparer.Ordinal.Equals(sourceTree, options["--oracle-source-tree"]))
+            {
+                throw new InvalidDataException("oracle_source_identity_invalid");
+            }
             root = RestrictedEvidenceRoot.Open(
                 options["--restricted-root"],
                 options["--destination-identity"],
@@ -42,7 +58,10 @@ internal static class Program
             var manifestPath = root.ResolveExistingFile(
                 options["--capture-manifest"],
                 EvidenceLimits.MaximumDocumentBytes);
-            var manifestBytes = File.ReadAllBytes(manifestPath);
+            var pinnedManifest = root.ReadPinnedFile(
+                System.IO.Path.GetRelativePath(root.Path, manifestPath),
+                EvidenceLimits.MaximumDocumentBytes);
+            var manifestBytes = pinnedManifest.Bytes;
             CaptureManifestDocument manifest;
             try
             {
@@ -104,29 +123,84 @@ internal static class Program
             }
 
             var encrypted = new List<TrustedProofEncryptedArtifact>(manifest.Artifacts.Length);
-            foreach (var artifact in manifest.Artifacts)
-            {
-                var objectPath = ResolvePackageFile(root, manifestPath, artifact.EncryptedObjectPath);
-                var bytes = File.ReadAllBytes(objectPath);
-                if (!StringComparer.Ordinal.Equals(
-                        CanonicalEvidence.Sha256(bytes),
-                        artifact.EncryptedObjectSha256) ||
-                    !StringComparer.Ordinal.Equals(bytes.Length.ToString(), artifact.EncryptedObjectSize))
-                {
-                    CryptographicOperations.ZeroMemory(bytes);
-                    throw new InvalidDataException("capture_object_invalid");
-                }
-
-                encrypted.Add(new TrustedProofEncryptedArtifact(
-                    artifact.ArtifactId,
-                    artifact.ExpectedRole,
-                    artifact.Scope,
-                    artifact.OpaqueName,
-                    bytes));
-            }
-
             try
             {
+                foreach (var source in manifest.Sources)
+                {
+                    var sourcePath = ResolvePackageFile(
+                        root,
+                        manifestPath,
+                        source.BodyPath,
+                        EvidenceLimits.MaximumDocumentBytes);
+                    var pinnedSource = root.ReadPinnedFile(
+                        System.IO.Path.GetRelativePath(root.Path, sourcePath),
+                        EvidenceLimits.MaximumDocumentBytes);
+                    try
+                    {
+                        if (!StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(pinnedSource.Bytes), source.BodySha256) ||
+                            !StringComparer.Ordinal.Equals(pinnedSource.Bytes.Length.ToString(), source.BodySize) ||
+                            !StringComparer.Ordinal.Equals(pinnedSource.Identity, source.BodyFileIdentity))
+                        {
+                            throw new InvalidDataException("capture_source_invalid");
+                        }
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(pinnedSource.Bytes);
+                    }
+                }
+                foreach (var artifact in manifest.Artifacts)
+                {
+                    var archivePath = ResolvePackageFile(
+                        root,
+                        manifestPath,
+                        artifact.ArchivePath,
+                        EvidenceLimits.MaximumArchiveBytes);
+                    var objectPath = ResolvePackageFile(
+                        root,
+                        manifestPath,
+                        artifact.EncryptedObjectPath,
+                        EvidenceLimits.MaximumEncryptedObjectBytes);
+                    var archive = root.ReadPinnedFile(
+                        System.IO.Path.GetRelativePath(root.Path, archivePath),
+                        EvidenceLimits.MaximumArchiveBytes);
+                    try
+                    {
+                        var encryptedObject = root.ReadPinnedFile(
+                            System.IO.Path.GetRelativePath(root.Path, objectPath),
+                            EvidenceLimits.MaximumEncryptedObjectBytes);
+                        var retained = false;
+                        try
+                        {
+                            if (!StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(archive.Bytes), artifact.ArchiveSha256) ||
+                                !StringComparer.Ordinal.Equals(archive.Bytes.Length.ToString(), artifact.ArchiveSize) ||
+                                !StringComparer.Ordinal.Equals(archive.Identity, artifact.ArchiveFileIdentity) ||
+                                !StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(encryptedObject.Bytes), artifact.EncryptedObjectSha256) ||
+                                !StringComparer.Ordinal.Equals(encryptedObject.Bytes.Length.ToString(), artifact.EncryptedObjectSize) ||
+                                !StringComparer.Ordinal.Equals(encryptedObject.Identity, artifact.EncryptedObjectFileIdentity))
+                            {
+                                throw new InvalidDataException("capture_object_invalid");
+                            }
+
+                            encrypted.Add(new TrustedProofEncryptedArtifact(
+                                artifact.ArtifactId,
+                                artifact.ArtifactName,
+                                encryptedObject.Bytes));
+                            retained = true;
+                        }
+                        finally
+                        {
+                            if (!retained)
+                            {
+                                CryptographicOperations.ZeroMemory(encryptedObject.Bytes);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(archive.Bytes);
+                    }
+                }
                 if (!TrustedProofEvidenceCodecOracle.TryDecode(
                         manifest.RepositoryId,
                         Convert.ToBase64String(current),
@@ -141,6 +215,10 @@ internal static class Program
                 var document = new OracleDocument(
                     "apr-r4-e3-production-codec-oracle-result-v1",
                     options["--capture-manifest-sha256"],
+                    sourceSha,
+                    sourceTree,
+                    AssemblyDigest(oracleAssembly),
+                    AssemblyDigest(productionAssembly),
                     decoded.ExactSevenSuccess,
                     decoded.RecoveryOnly,
                     decoded.Records.Select(record => new OracleRecord(
@@ -247,12 +325,13 @@ internal static class Program
     private static string ResolvePackageFile(
         RestrictedEvidenceRoot root,
         string manifestPath,
-        string relativePath)
+        string relativePath,
+        int maximumBytes)
     {
         var packagePath = System.IO.Path.GetDirectoryName(manifestPath)!;
         var candidate = RestrictedEvidenceRoot.ResolveChildPath(packagePath, relativePath);
         var rootRelative = System.IO.Path.GetRelativePath(root.Path, candidate);
-        return root.ResolveExistingFile(rootRelative, EvidenceLimits.MaximumEncryptedObjectBytes);
+        return root.ResolveExistingFile(rootRelative, maximumBytes);
     }
 
     private static Dictionary<string, string> Parse(string[] args)
@@ -265,6 +344,8 @@ internal static class Program
             "--worktree-root",
             "--capture-manifest",
             "--capture-manifest-sha256",
+            "--oracle-source-sha",
+            "--oracle-source-tree",
             "--current-state-key-file",
             "--output",
         };
@@ -296,6 +377,36 @@ internal static class Program
 
         return result;
     }
+
+    private static string AssemblyMetadata(Assembly assembly, string key)
+    {
+        var matches = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Where(attribute => StringComparer.Ordinal.Equals(attribute.Key, key))
+            .ToArray();
+        if (matches.Length != 1 || matches[0].Value is not { } value)
+        {
+            throw new InvalidDataException("oracle_source_identity_invalid");
+        }
+        return value;
+    }
+
+    private static string AssemblyDigest(Assembly assembly)
+    {
+        if (string.IsNullOrEmpty(assembly.Location))
+        {
+            throw new InvalidDataException("oracle_assembly_identity_invalid");
+        }
+        using var stream = new FileStream(
+            assembly.Location,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
+
+    private static bool Sha(string value, int length) =>
+        value.Length == length &&
+        value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static int Invalid()
     {

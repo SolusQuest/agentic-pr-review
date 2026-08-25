@@ -31,10 +31,13 @@ public sealed class CapturePackageWriter
             throw new InvalidDataException("capture_package_exists");
         }
 
-        Directory.CreateDirectory(packagePath);
-        if (!OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(
+            Directory.CreateDirectory(packagePath);
+        }
+        else
+        {
+            Directory.CreateDirectory(
                 packagePath,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
@@ -61,7 +64,8 @@ public sealed class CapturePackageWriter
         var bodyName = $"source-{sources.Count + 1:D4}.json";
         var bodyPath = RestrictedEvidenceRoot.ResolveChildPath(packagePath, bodyName);
         CanonicalEvidence.WriteCreateNew(bodyPath, body);
-        var reopened = File.ReadAllBytes(bodyPath);
+        var pinned = ReadPinned(bodyPath, EvidenceLimits.MaximumDocumentBytes);
+        var reopened = pinned.Bytes;
         try
         {
             if (!StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(reopened), capture.BodySha256))
@@ -82,6 +86,7 @@ public sealed class CapturePackageWriter
             bodyName,
             capture.BodySha256,
             capture.BodySize.ToString(),
+            pinned.Identity,
             capture.SafeHeadersSha256,
             capture.RequestStartedUnixMilliseconds,
             capture.ResponseReceivedUnixMilliseconds,
@@ -91,9 +96,8 @@ public sealed class CapturePackageWriter
     public void AddArtifact(
         string artifactId,
         string artifactName,
-        string expectedRole,
-        string scope,
-        string opaqueName,
+        string metadataSourceId,
+        string metadataBodySha256,
         ReadOnlySpan<byte> archive,
         string expectedArchiveSha256,
         string expectedRunId,
@@ -104,9 +108,8 @@ public sealed class CapturePackageWriter
             artifacts.Count >= EvidenceLimits.MaximumRecords ||
             !PositiveDecimal(artifactId) ||
             !BoundedText(artifactName, EvidenceLimits.MaximumNameBytes) ||
-            !BoundedText(expectedRole, EvidenceLimits.MaximumNameBytes) ||
-            !new[] { "repository", "normal", "stale" }.Contains(scope, StringComparer.Ordinal) ||
-            !BoundedText(opaqueName, EvidenceLimits.MaximumNameBytes) ||
+            !BoundedText(metadataSourceId, EvidenceLimits.MaximumNameBytes) ||
+            !Sha256(metadataBodySha256) ||
             !BoundedText(downloadCapture.Route, EvidenceLimits.MaximumRelativePathBytes) ||
             downloadCapture.Status != 200 ||
             !StringComparer.Ordinal.Equals(downloadCapture.BodySha256, expectedArchiveSha256) ||
@@ -134,30 +137,41 @@ public sealed class CapturePackageWriter
             var objectPath = RestrictedEvidenceRoot.ResolveChildPath(packagePath, objectName);
             CanonicalEvidence.WriteCreateNew(archivePath, archive);
             CanonicalEvidence.WriteCreateNew(objectPath, admitted.EncryptedObject);
-            if (!ReopenedDigestEquals(archivePath, admitted.ArchiveSha256) ||
-                !ReopenedDigestEquals(objectPath, admitted.EncryptedObjectSha256))
+            var pinnedArchive = ReadPinned(archivePath, EvidenceLimits.MaximumArchiveBytes);
+            var pinnedObject = ReadPinned(objectPath, EvidenceLimits.MaximumEncryptedObjectBytes);
+            try
             {
-                throw new InvalidDataException("capture_artifact_reopen_invalid");
-            }
+                if (!StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(pinnedArchive.Bytes), admitted.ArchiveSha256) ||
+                    !StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(pinnedObject.Bytes), admitted.EncryptedObjectSha256))
+                {
+                    throw new InvalidDataException("capture_artifact_reopen_invalid");
+                }
 
-            artifacts.Add(new CaptureManifestArtifact(
-                artifactId,
-                artifactName,
-                expectedRole,
-                scope,
-                opaqueName,
-                admitted.ProducingRunId,
-                admitted.ProducingRunAttempt,
-                downloadCapture.Route,
-                downloadCapture.SafeHeadersSha256,
-                downloadCapture.RequestStartedUnixMilliseconds,
-                downloadCapture.ResponseReceivedUnixMilliseconds,
-                archiveName,
-                admitted.ArchiveSha256,
-                archive.Length.ToString(),
-                objectName,
-                admitted.EncryptedObjectSha256,
-                admitted.EncryptedObject.Length.ToString()));
+                artifacts.Add(new CaptureManifestArtifact(
+                    artifactId,
+                    artifactName,
+                    metadataSourceId,
+                    metadataBodySha256,
+                    admitted.ProducingRunId,
+                    admitted.ProducingRunAttempt,
+                    downloadCapture.Route,
+                    downloadCapture.SafeHeadersSha256,
+                    downloadCapture.RequestStartedUnixMilliseconds,
+                    downloadCapture.ResponseReceivedUnixMilliseconds,
+                    archiveName,
+                    admitted.ArchiveSha256,
+                    archive.Length.ToString(),
+                    pinnedArchive.Identity,
+                    objectName,
+                    admitted.EncryptedObjectSha256,
+                    admitted.EncryptedObject.Length.ToString(),
+                    pinnedObject.Identity));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(pinnedArchive.Bytes);
+                CryptographicOperations.ZeroMemory(pinnedObject.Bytes);
+            }
         }
         finally
         {
@@ -182,6 +196,23 @@ public sealed class CapturePackageWriter
             throw new InvalidDataException("capture_manifest_invalid");
         }
 
+        foreach (var source in sources)
+        {
+            var sourcePath = RestrictedEvidenceRoot.ResolveChildPath(packagePath, source.BodyPath);
+            var pinned = ReadPinned(sourcePath, EvidenceLimits.MaximumDocumentBytes);
+            try
+            {
+                if (!StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(pinned.Bytes), source.BodySha256) ||
+                    !StringComparer.Ordinal.Equals(pinned.Identity, source.BodyFileIdentity))
+                {
+                    throw new InvalidDataException("capture_manifest_reopen_invalid");
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(pinned.Bytes);
+            }
+        }
         foreach (var artifact in artifacts)
         {
             var archivePath = RestrictedEvidenceRoot.ResolveChildPath(
@@ -190,11 +221,22 @@ public sealed class CapturePackageWriter
             var objectPath = RestrictedEvidenceRoot.ResolveChildPath(
                 packagePath,
                 artifact.EncryptedObjectPath);
-            if (!File.Exists(archivePath) || !File.Exists(objectPath) ||
-                !ReopenedDigestEquals(archivePath, artifact.ArchiveSha256) ||
-                !ReopenedDigestEquals(objectPath, artifact.EncryptedObjectSha256))
+            var pinnedArchive = ReadPinned(archivePath, EvidenceLimits.MaximumArchiveBytes);
+            var pinnedObject = ReadPinned(objectPath, EvidenceLimits.MaximumEncryptedObjectBytes);
+            try
             {
-                throw new InvalidDataException("capture_manifest_reopen_invalid");
+                if (!StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(pinnedArchive.Bytes), artifact.ArchiveSha256) ||
+                    !StringComparer.Ordinal.Equals(pinnedArchive.Identity, artifact.ArchiveFileIdentity) ||
+                    !StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(pinnedObject.Bytes), artifact.EncryptedObjectSha256) ||
+                    !StringComparer.Ordinal.Equals(pinnedObject.Identity, artifact.EncryptedObjectFileIdentity))
+                {
+                    throw new InvalidDataException("capture_manifest_reopen_invalid");
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(pinnedArchive.Bytes);
+                CryptographicOperations.ZeroMemory(pinnedObject.Bytes);
             }
         }
 
@@ -240,9 +282,10 @@ public sealed class CapturePackageWriter
         value.Length == 64 &&
         value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
-    private static bool ReopenedDigestEquals(string path, string expected)
+    private bool ReopenedDigestEquals(string path, string expected)
     {
-        var bytes = File.ReadAllBytes(path);
+        var pinned = ReadPinned(path, EvidenceLimits.MaximumDocumentBytes);
+        var bytes = pinned.Bytes;
         try
         {
             return StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(bytes), expected);
@@ -252,6 +295,9 @@ public sealed class CapturePackageWriter
             CryptographicOperations.ZeroMemory(bytes);
         }
     }
+
+    private PinnedEvidenceFile ReadPinned(string path, int maximumBytes) =>
+        root.ReadPinnedFile(System.IO.Path.GetRelativePath(root.Path, path), maximumBytes);
 
     private static bool BoundedText(string? value, int maximumBytes)
     {

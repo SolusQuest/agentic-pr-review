@@ -5,7 +5,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle</AssemblyName>
+    <TrustedProofOracleSourceSha Condition="'$(TrustedProofOracleSourceSha)' == ''">unbound</TrustedProofOracleSourceSha>
+    <TrustedProofOracleSourceTree Condition="'$(TrustedProofOracleSourceTree)' == ''">unbound</TrustedProofOracleSourceTree>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>TrustedProofOracleSourceSha</_Parameter1>
+      <_Parameter2>$(TrustedProofOracleSourceSha)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>TrustedProofOracleSourceTree</_Parameter1>
+      <_Parameter2>$(TrustedProofOracleSourceTree)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
     <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />

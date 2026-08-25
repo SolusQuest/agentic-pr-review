@@ -5,9 +5,8 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 public sealed record CaptureManifestArtifact(
     string ArtifactId,
     string ArtifactName,
-    string ExpectedRole,
-    string Scope,
-    string OpaqueName,
+    string MetadataSourceId,
+    string MetadataBodySha256,
     string ProducingRunId,
     string ProducingRunAttempt,
     string DownloadRoute,
@@ -17,9 +16,11 @@ public sealed record CaptureManifestArtifact(
     string ArchivePath,
     string ArchiveSha256,
     string ArchiveSize,
+    string ArchiveFileIdentity,
     string EncryptedObjectPath,
     string EncryptedObjectSha256,
-    string EncryptedObjectSize);
+    string EncryptedObjectSize,
+    string EncryptedObjectFileIdentity);
 
 public sealed record CaptureManifestSource(
     string SourceId,
@@ -29,6 +30,7 @@ public sealed record CaptureManifestSource(
     string BodyPath,
     string BodySha256,
     string BodySize,
+    string BodyFileIdentity,
     string SafeHeadersSha256,
     long RequestStartedUnixMilliseconds,
     long ResponseReceivedUnixMilliseconds,

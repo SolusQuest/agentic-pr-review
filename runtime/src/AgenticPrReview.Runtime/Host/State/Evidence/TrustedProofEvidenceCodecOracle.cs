@@ -10,8 +10,6 @@ namespace AgenticPrReview.Runtime.Host.State.Evidence;
 
 internal sealed record TrustedProofEncryptedArtifact(
     string ArtifactId,
-    string Role,
-    string Scope,
     string OpaqueName,
     byte[] Envelope);
 
@@ -86,8 +84,6 @@ internal static class TrustedProofEvidenceCodecOracle
         if (artifacts.Count is < 7 or > 256 ||
             artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() !=
                 artifacts.Count ||
-            artifacts[0].Role != "repository-locator-root" ||
-            artifacts[0].Scope != "repository" ||
             artifacts[0].OpaqueName != LocatorRootFormat.StoreName)
         {
             return false;
@@ -143,8 +139,8 @@ internal static class TrustedProofEvidenceCodecOracle
                     var acceptances = new List<TrustedProofAcceptanceFact>();
                     records.Add(new TrustedProofDecodedArtifact(
                         artifacts[0].ArtifactId,
-                        artifacts[0].Role,
-                        artifacts[0].Scope,
+                        "unclassified",
+                        "unclassified",
                         "locator_root",
                         sentinel.WriterKeyId,
                         CanonicalHash(sentinel.Root),
@@ -185,8 +181,8 @@ internal static class TrustedProofEvidenceCodecOracle
 
                             records.Add(new TrustedProofDecodedArtifact(
                                 artifact.ArtifactId,
-                                artifact.Role,
-                                artifact.Scope,
+                                "unclassified",
+                                "unclassified",
                                 StateObjectClasses.ToWireName(header.ObjectClass),
                                 header.KeyId,
                                 header.ObjectIdentity,
@@ -216,13 +212,14 @@ internal static class TrustedProofEvidenceCodecOracle
 
                         return record with { Role = derived.Role, Scope = derived.Scope };
                     }).ToImmutableArray();
-                    var exact = topologyValid && decoded
-                        .Where(record => derivedRoles.ContainsKey(record.ArtifactId))
-                        .All(record =>
-                        {
-                            var derived = derivedRoles[record.ArtifactId];
-                            return record.Role == derived.Role && record.Scope == derived.Scope;
-                        });
+                    var ordinaryTopology = decoded.Count(record => record.ObjectClass == "locator_root") == 1 &&
+                        decoded.Count(record => record.ObjectClass == "lineage_head") == 2 &&
+                        decoded.Count(record => record.ObjectClass == "candidate") == 2 &&
+                        decoded.Count(record => record.ObjectClass == "acceptance") == 2 &&
+                        decoded.Count(record => record.ObjectClass == "publication_intent") == 4 &&
+                        decoded.Count(record => record.ObjectClass == "cleanup") == 4 &&
+                        decoded.Length == 15;
+                    var exact = topologyValid && ordinaryTopology && derivedRoles.Count == ExpectedRoles.Length;
                     result = new TrustedProofCodecOracleResult(
                         exact,
                         RecoveryOnly: !exact,

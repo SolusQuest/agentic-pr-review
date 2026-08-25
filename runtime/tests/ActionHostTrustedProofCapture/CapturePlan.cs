@@ -5,14 +5,16 @@ using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofCapture;
 
-public sealed record CapturePlanSource(string SourceId, string Route);
+public sealed record CapturePlanSource(
+    string SourceId,
+    string EndpointFamily,
+    string Route,
+    string Pagination);
 
 public sealed record CapturePlanArtifact(
     string ArtifactId,
     string ArtifactName,
-    string ExpectedRole,
-    string Scope,
-    string OpaqueName,
+    string MetadataSourceId,
     string ProducingRunId,
     string ProducingRunAttempt,
     string DownloadRoute);
@@ -29,11 +31,13 @@ public sealed record CapturePlanDocument(
 
 public static class CapturePlan
 {
+    public const string CheckedSourceMapSha256 =
+        "cd9b5828cdbd42a39b4a528bc1532e74d5317fa8882961429cad5cba96b7e9d4";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     public static CapturePlanDocument Read(RestrictedEvidenceRoot root, string relativePath)
     {
-        var path = root.ResolveExistingFile(relativePath, EvidenceLimits.MaximumDocumentBytes);
-        var bytes = File.ReadAllBytes(path);
+        var pinned = root.ReadPinnedFile(relativePath, EvidenceLimits.MaximumDocumentBytes);
+        var bytes = pinned.Bytes;
         try
         {
             var value = JsonSerializer.Deserialize<CapturePlanDocument>(bytes, EvidenceJson.Options) ??
@@ -49,7 +53,7 @@ public static class CapturePlan
                     value.OperationIds.Length != 2 ||
                     value.OperationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
                     value.OperationIds.Any(item => !Sha256(item)) ||
-                    !Sha256(value.SourceMapSha256) ||
+                    value.SourceMapSha256 != CheckedSourceMapSha256 ||
                     !BoundedText(value.PackageName, EvidenceLimits.MaximumNameBytes) ||
                     !RestrictedEvidenceRoot.IsSinglePathSegment(value.PackageName) ||
                     value.Sources.Length == 0 ||
@@ -59,17 +63,22 @@ public static class CapturePlan
                     value.Sources.Select(item => item.SourceId).Distinct(StringComparer.Ordinal).Count() != value.Sources.Length ||
                     value.Sources.Any(item =>
                         !BoundedText(item.SourceId, EvidenceLimits.MaximumNameBytes) ||
-                        !RepositoryRoute(item.Route, value.Repository)) ||
+                        !RepositoryRoute(item.EndpointFamily, value.Repository) ||
+                        !SameEndpointFamily(item.Route, item.EndpointFamily) ||
+                        !new[] { "none", "complete-cursor" }.Contains(item.Pagination, StringComparer.Ordinal)) ||
                     value.Artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() != value.Artifacts.Length ||
                     value.Artifacts.Any(item =>
                         !PositiveDecimal(item.ArtifactId) ||
                         !BoundedText(item.ArtifactName, EvidenceLimits.MaximumNameBytes) ||
-                        !BoundedText(item.ExpectedRole, EvidenceLimits.MaximumNameBytes) ||
-                        !new[] { "repository", "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
-                        !BoundedText(item.OpaqueName, EvidenceLimits.MaximumNameBytes) ||
+                        !value.Sources.Any(source =>
+                            StringComparer.Ordinal.Equals(source.SourceId, item.MetadataSourceId) &&
+                            StringComparer.Ordinal.Equals(
+                                source.EndpointFamily,
+                                $"/repos/{value.Repository}/actions/runs/{item.ProducingRunId}/artifacts") &&
+                            source.Pagination == "complete-cursor") ||
                         !PositiveDecimal(item.ProducingRunId) ||
                         !PositiveDecimal(item.ProducingRunAttempt) ||
-                        !RepositoryRoute(item.DownloadRoute, value.Repository)))
+                        item.DownloadRoute != $"/repos/{value.Repository}/actions/artifacts/{item.ArtifactId}/zip"))
                 {
                     throw new InvalidDataException("capture_plan_invalid");
                 }
@@ -105,6 +114,9 @@ public static class CapturePlan
         BoundedText(route, EvidenceLimits.MaximumRelativePathBytes) &&
         route.StartsWith($"/repos/{repository}/", StringComparison.Ordinal) &&
         !route.Contains("//", StringComparison.Ordinal);
+
+    private static bool SameEndpointFamily(string route, string endpointFamily) =>
+        route == endpointFamily || route.StartsWith($"{endpointFamily}?", StringComparison.Ordinal);
 
     private static bool BoundedText(string? value, int maximumBytes)
     {
