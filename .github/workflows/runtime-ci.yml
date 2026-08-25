@@ -123,6 +123,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Check out exact merged descendant payload source
+        uses: actions/checkout@v6
+        with:
+          ref: edc594c29a8a6b5fdacfab48643bf221277af200
+          path: payload-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact merged descendant payload source
+        run: |
+          test "$(git -C payload-source rev-parse HEAD)" = "edc594c29a8a6b5fdacfab48643bf221277af200"
+          test "$(git -C payload-source rev-parse 'HEAD^{tree}')" = "8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089"
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -140,10 +153,10 @@ jobs:
           dotnet-version: 10.0.109
 
       - name: Staged R4 E2P first clean production and verifier Native AOT build
-        run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
+        run: bash payload-source/runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
 
       - name: Staged R4 E2P second clean production and verifier Native AOT build
-        run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
+        run: bash payload-source/runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
 
       - name: Staged R4 E2P receipts are byte-identical
         run: |
@@ -152,6 +165,7 @@ jobs:
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
           cmp "$RUNNER_TEMP/r4-e2p-v2-first.receipt" "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
+          cat "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
 
   integration:
     runs-on: ubuntu-latest
