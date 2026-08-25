@@ -165,7 +165,10 @@ jobs:
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
           cmp "$RUNNER_TEMP/r4-e2p-v2-first.receipt" "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
-          cat "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
+          sed 's/^/APR_R4_E2P_RECEIPT_V2 /' \
+            runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json \
+            > "$RUNNER_TEMP/r4-e2p-v2-checked.receipt"
+          cmp "$RUNNER_TEMP/r4-e2p-v2-first.receipt" "$RUNNER_TEMP/r4-e2p-v2-checked.receipt"
 
   integration:
     runs-on: ubuntu-latest

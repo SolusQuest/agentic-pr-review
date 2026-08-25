@@ -6,11 +6,12 @@ import Ajv from 'ajv';
 import { parseDocument } from 'yaml';
 import { extractPreflight } from './check-r4-e2p-preflight.mjs';
 import { verifyReceipt } from './check-r4-e2p-receipt.mjs';
+import { verifyReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const fixtureRelative = 'runtime/tests/fixtures/action-host/trusted-proof';
 const templateRelative =
-  'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof.yml.template';
+  'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template';
 const workflowRelative = '.github/workflows/r4-trusted-proof.yml';
 const stagedTemplateRelative =
   'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template';
@@ -20,25 +21,29 @@ const stagedPreparationRelative =
   'runtime/tests/fixtures/action-host/trusted-proof-payload/preparation-contract-v2.json';
 const stagedPreparationScriptRelative = 'runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh';
 const actionSourceSha = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
-const payloadSha256 = '97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc';
-const templateSha256 = 'fa458399a93c0dc71d0f071eeea3abb7670382c5545f58dae90ca1cf9649c03a';
-const renderedWorkflowSha256 = 'd62625f4fd4cb0c3e327a80a9dcd3dfb0aca957f9e63171fa0f12a553033b603';
-const receiptLineSha256 = '3fa55211baa43da955a2eb083b2188a1fde193e6684cb129ec99f5f35374ad49';
-const receiptJsonSha256 = '9b95a87e5f40d7b506e25426e3905aaaf0510ad28d79c8a7ca3737a3952a7b34';
+const payloadSourceSha = 'edc594c29a8a6b5fdacfab48643bf221277af200';
+const payloadSourceTree = '8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089';
+const payloadSha256 = 'b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e';
+const templateSha256 = '46ff02fc0e107bdff5d4d4fbe185d8a4f97b8cb8059b99485a285c8d11a45768';
+const renderedWorkflowSha256 = '1dcf42e6c3890614d13ef1a0e6f98ca35e0029c2c78e85d4afdd4f32e29aebd9';
+const receiptLineSha256 = '346cf753a0657ba4e25c5271df21afb1a95d2574c3ca8eb2a1f2e772ec776242';
+const receiptJsonSha256 = '3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1';
 const normalCanarySha256 = 'bc58613e9f389b973f1e44de64021a7acc748fafd857b7fa99466493670db446';
 const staleCanarySha256 = '20580dc6193f607a3a1d1b6949013796f8a8c9714d3e5586e4e509a473f1382a';
 const fixtureInventory = [
   'authorization-environment-contract.json',
   'cleanup-contract.json',
   'fixture-pr-contract.json',
-  'receipt-provenance.json',
+  'historical/v1/receipt-provenance.json',
+  'historical/v1/trusted-proof-payload-receipt.json',
+  'receipt-provenance-v2.json',
   'schemas/host-restricted-evidence.schema.json',
   'schemas/public-safe-evidence.schema.json',
   'templates/host-restricted-evidence.json',
   'templates/public-safe-evidence.json',
   'traces/normal-two-run.json',
   'traces/stale-head.json',
-  'trusted-proof-payload-receipt.json',
+  'trusted-proof-payload-receipt-v2.json',
 ];
 const fixtureDigests = new Map([
   [
@@ -47,7 +52,18 @@ const fixtureDigests = new Map([
   ],
   ['cleanup-contract.json', '5d7a26d40d9e41d3d195e8dfb8496703fd40084c1fd687f22306c51575c4cdce'],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
-  ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
+  [
+    'historical/v1/receipt-provenance.json',
+    'dbcdf90d09de0d65e8dc6129e8c847fba23c4b1fef0f5379ace40b25063ff80b',
+  ],
+  [
+    'historical/v1/trusted-proof-payload-receipt.json',
+    '9b95a87e5f40d7b506e25426e3905aaaf0510ad28d79c8a7ca3737a3952a7b34',
+  ],
+  [
+    'receipt-provenance-v2.json',
+    '4dbb79b76dbfe41d8a7e8402e1b58b49af3e74620d75472b868cb07623016bc2',
+  ],
   [
     'schemas/host-restricted-evidence.schema.json',
     '354faff22e2976efa450a9e6a8dc8b6b2ec8bdc07c827026af8775e5540352f5',
@@ -69,7 +85,7 @@ const fixtureDigests = new Map([
     '7e946753efd19a1483e29306966a8d9f783d4c8b3136ddc8af39c88a898be2a8',
   ],
   ['traces/stale-head.json', '8a2a34659c0c9593bf48132d7728c98340019b85d4bad20d8bf58579b58b7a40'],
-  ['trusted-proof-payload-receipt.json', receiptJsonSha256],
+  ['trusted-proof-payload-receipt-v2.json', receiptJsonSha256],
 ]);
 
 function fail(code) {
@@ -773,7 +789,8 @@ export function checkR4TrustedProof(options = {}) {
     templateBytes.includes(0x0d) ||
     workflowBytes.includes(0x0d) ||
     sha256(templateBytes) !== templateSha256 ||
-    count(templateBytes.toString('utf8'), '__ACTION_SOURCE_SHA__') !== 7 ||
+    count(templateBytes.toString('utf8'), '__ACTION_SOURCE_SHA__') !== 5 ||
+    count(templateBytes.toString('utf8'), '__PAYLOAD_SOURCE_SHA__') !== 5 ||
     count(templateBytes.toString('utf8'), '__PAYLOAD_SHA256__') !== 3
   ) {
     fail('template-identity');
@@ -781,6 +798,7 @@ export function checkR4TrustedProof(options = {}) {
   const rendered = templateBytes
     .toString('utf8')
     .replaceAll('__ACTION_SOURCE_SHA__', actionSourceSha)
+    .replaceAll('__PAYLOAD_SOURCE_SHA__', payloadSourceSha)
     .replaceAll('__PAYLOAD_SHA256__', payloadSha256);
   if (
     workflowBytes.toString('utf8') !== rendered ||
@@ -791,31 +809,43 @@ export function checkR4TrustedProof(options = {}) {
   }
   parseWorkflow(workflowPath);
   const documents = validateFixtureContracts(fixtureRoot);
-  const receiptPath = path.join(fixtureRoot, 'trusted-proof-payload-receipt.json');
-  const receipt = verifyReceipt({ receiptPath, sourceRoot: root });
-  const receiptBytes = documents.get('trusted-proof-payload-receipt.json').bytes;
+  const historicalReceiptPath = path.join(
+    fixtureRoot,
+    'historical',
+    'v1',
+    'trusted-proof-payload-receipt.json',
+  );
+  verifyReceipt({ receiptPath: historicalReceiptPath, sourceRoot: root });
+  const receiptPath = path.join(fixtureRoot, 'trusted-proof-payload-receipt-v2.json');
+  const receipt = verifyReceiptV2({ receiptPath, sourceRoot: root });
+  const receiptBytes = documents.get('trusted-proof-payload-receipt-v2.json').bytes;
   if (
     sha256(receiptBytes) !== receiptJsonSha256 ||
-    sha256(Buffer.concat([Buffer.from('APR_R4_E2P_RECEIPT '), receiptBytes])) !==
+    sha256(Buffer.concat([Buffer.from('APR_R4_E2P_RECEIPT_V2 '), receiptBytes])) !==
       receiptLineSha256 ||
-    receipt.source_commit !== actionSourceSha ||
-    receipt.source_tree !== '9e1f7fbd9d0924331aeef4defe12ec7b47021742' ||
+    receipt.source_commit !== payloadSourceSha ||
+    receipt.source_tree !== payloadSourceTree ||
+    receipt.compiled_payload_source_commit !== payloadSourceSha ||
+    receipt.compiled_payload_source_tree !== payloadSourceTree ||
+    receipt.action_source_sha !== actionSourceSha ||
     receipt.payload_sha256 !== payloadSha256 ||
     receipt.workflow_topology_sha256 !== templateSha256 ||
     receipt.result !== 'passed'
   ) {
     fail('receipt-identity');
   }
-  const provenance = documents.get('receipt-provenance.json').value;
+  const provenance = documents.get('receipt-provenance-v2.json').value;
   exactKeys(
     provenance,
     [
       'kind',
       'issue',
-      'comment_id',
-      'comment_url',
-      'merge_sha',
+      'predecessor_issue',
+      'predecessor_pr',
+      'source_commit',
       'source_tree',
+      'materialization_run_id',
+      'materialization_job_id',
       'receipt_line_sha256',
       'receipt_json_sha256',
       'workflow_template_sha256',
@@ -827,12 +857,19 @@ export function checkR4TrustedProof(options = {}) {
     'receipt-provenance-shape',
   );
   if (
-    provenance.comment_id !== 5380622921 ||
-    provenance.merge_sha !== actionSourceSha ||
+    provenance.kind !== 'apr-r4-e3-receipt-provenance-v2' ||
+    provenance.issue !== 222 ||
+    provenance.predecessor_issue !== 221 ||
+    provenance.predecessor_pr !== 223 ||
+    provenance.source_commit !== payloadSourceSha ||
+    provenance.source_tree !== payloadSourceTree ||
+    provenance.materialization_run_id !== '32846692929' ||
+    provenance.materialization_job_id !== '97797924152' ||
     provenance.receipt_line_sha256 !== receiptLineSha256 ||
     provenance.receipt_json_sha256 !== receiptJsonSha256 ||
     provenance.workflow_template_sha256 !== templateSha256 ||
     provenance.rendered_workflow_sha256 !== renderedWorkflowSha256 ||
+    provenance.action_source_sha !== actionSourceSha ||
     provenance.payload_sha256 !== payloadSha256 ||
     provenance.result !== 'passed'
   ) {
