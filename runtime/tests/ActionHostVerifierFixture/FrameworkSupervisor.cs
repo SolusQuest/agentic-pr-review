@@ -88,7 +88,7 @@ internal static class FrameworkSupervisor
                 bundle,
                 node,
                 platform,
-                SyntheticTransactionPartitionBinding.TryCreate(values))
+                ReadCompiledPayloadSourceExpectation(values))
                 .ConfigureAwait(false);
         }
 
@@ -882,7 +882,7 @@ internal static class FrameworkSupervisor
         string bundle,
         string node,
         SyntheticOfficialPlatform platform,
-        SyntheticTransactionPartitionBinding? partitionBinding)
+        CompiledPayloadSourceExpectation? sourceExpectation)
     {
         var cases = new List<CaseResult>
         {
@@ -921,7 +921,7 @@ internal static class FrameworkSupervisor
             .Select(result => ReadCompiledPayloadIdentity(root, result.Name))
             .ToArray();
         var compiledIdentity = compiledIdentities.FirstOrDefault();
-        var compiledIdentityValid = partitionBinding is not null &&
+        var compiledIdentityValid = sourceExpectation is not null &&
             compiledIdentity is not null &&
             compiledIdentities.All(value => value == compiledIdentity) &&
             StringComparer.Ordinal.Equals(
@@ -929,35 +929,35 @@ internal static class FrameworkSupervisor
                 "apr-r4-e2p-trusted-proof-payload-v2") &&
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceCommit,
-                partitionBinding.PayloadSourceCommit) &&
+                sourceExpectation.SourceCommit) &&
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceTree,
-                partitionBinding.PayloadSourceTree);
-        var partition = partitionBinding is null
-            ? null
-            : SyntheticSemanticTransactionPartition.Derive(
-                root,
-                partitionBinding);
+                sourceExpectation.SourceTree);
         var passed = cases.All(result => result.Passed) &&
-            (partitionBinding is null ||
-                (compiledIdentityValid && partition is not null));
+            compiledIdentityValid;
         var evidence = FrameworkJson.Object(
             ("passed", passed),
-            ("payload_sha256", Sha256(payload)),
+            ("verifier_executable_sha256", Sha256(payload)),
             ("compiled_payload_proof_kind", compiledIdentity?.ProofKind),
             ("compiled_payload_source_commit", compiledIdentity?.SourceCommit),
             ("compiled_payload_source_tree", compiledIdentity?.SourceTree),
             ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
-        if (partition is not null)
-        {
-            evidence.Add("transaction_partition", partition);
-        }
         await File.WriteAllTextAsync(
             Path.Join(root, "trusted-proof-payload-evidence.json"),
             FrameworkJson.SerializeIndented(evidence))
             .ConfigureAwait(false);
         return passed ? 0 : 1;
     }
+
+    private static CompiledPayloadSourceExpectation?
+        ReadCompiledPayloadSourceExpectation(
+            IReadOnlyDictionary<string, string> values) =>
+        values.TryGetValue("payload-source-commit", out var commit) &&
+        values.TryGetValue("payload-source-tree", out var tree) &&
+        IsLowerHex(commit, 40) &&
+        IsLowerHex(tree, 40)
+            ? new(commit, tree)
+            : null;
 
     private static CompiledPayloadIdentity? ReadCompiledPayloadIdentity(
         string root,
@@ -3492,6 +3492,10 @@ internal static class FrameworkSupervisor
 
     private sealed record CompiledPayloadIdentity(
         string ProofKind,
+        string SourceCommit,
+        string SourceTree);
+
+    private sealed record CompiledPayloadSourceExpectation(
         string SourceCommit,
         string SourceTree);
 

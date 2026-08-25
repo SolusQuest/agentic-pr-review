@@ -281,7 +281,6 @@ execute_proof() {
     -p:PublishAot=false
   mkdir -p "$proof_evidence"
   verifier_sha="$(sha256sum "$verifier" | cut -d ' ' -f 1)"
-  production_payload_sha="$(sha256sum "$payload" | cut -d ' ' -f 1)"
   set +e
   dotnet "$supervisor" supervise \
     --root "$proof_evidence" --repo "$repo_root" --payload "$verifier" \
@@ -293,8 +292,6 @@ execute_proof() {
     --node "$(command -v node)" --trusted-proof-only true \
     --payload-source-commit "$payload_source_commit" \
     --payload-source-tree "$payload_source_tree" \
-    --production-payload-sha256 "$production_payload_sha" \
-    --verifier-sha256 "$verifier_sha" \
     > "$temporary_root/supervisor.stdout" \
     2> "$temporary_root/supervisor.stderr"
   supervisor_status=$?
@@ -312,16 +309,23 @@ execute_proof() {
 import fs from 'node:fs';
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const expectedCases = ['dispatch-bootstrap', 'dispatch-continuation', 'stale-head'];
-if (input?.passed !== true || !Array.isArray(input.cases) ||
+const expectedFields = [
+  'passed',
+  'verifier_executable_sha256',
+  'compiled_payload_proof_kind',
+  'compiled_payload_source_commit',
+  'compiled_payload_source_tree',
+  'cases',
+];
+if (input === null || Array.isArray(input) || typeof input !== 'object' ||
+    JSON.stringify(Object.keys(input)) !== JSON.stringify(expectedFields) ||
+    input.passed !== true || !Array.isArray(input.cases) ||
     input.cases.length !== expectedCases.length ||
-    typeof input.payload_sha256 !== 'string' ||
-    !/^[0-9a-f]{64}$/.test(input.payload_sha256) ||
+    !/^[0-9a-f]{64}$/.test(input.verifier_executable_sha256 ?? '') ||
     input.compiled_payload_proof_kind !==
       'apr-r4-e2p-trusted-proof-payload-v2' ||
     !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_commit ?? '') ||
-    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_tree ?? '') ||
-    input.transaction_partition?.kind !==
-      'apr-r4-e4-synthetic-transaction-partition-v1') {
+    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_tree ?? '')) {
   throw new Error('The trusted-proof evidence envelope is invalid.');
 }
 const cases = input.cases.map((item, index) => {
@@ -334,12 +338,11 @@ const cases = input.cases.map((item, index) => {
 });
 fs.writeFileSync(process.argv[3], JSON.stringify({
   passed: input.passed,
-  payload_sha256: input.payload_sha256,
+  verifier_executable_sha256: input.verifier_executable_sha256,
   compiled_payload_proof_kind: input.compiled_payload_proof_kind,
   compiled_payload_source_commit: input.compiled_payload_source_commit,
   compiled_payload_source_tree: input.compiled_payload_source_tree,
   cases,
-  transaction_partition: input.transaction_partition,
 }) + '\n');
 NODE
   payload_sha="$(sha256sum "$payload" | cut -d ' ' -f 1)"
@@ -375,7 +378,8 @@ const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
 if (evidence.compiled_payload_proof_kind !==
       'apr-r4-e2p-trusted-proof-payload-v2' ||
     evidence.compiled_payload_source_commit !== sourceCommit ||
-    evidence.compiled_payload_source_tree !== sourceTree) {
+    evidence.compiled_payload_source_tree !== sourceTree ||
+    evidence.verifier_executable_sha256 !== verifierSha) {
   throw new Error('The compiled payload identity does not match the verified source.');
 }
 fs.writeFileSync(outputPath, JSON.stringify({
@@ -395,7 +399,6 @@ fs.writeFileSync(outputPath, JSON.stringify({
   verifier_managed_architecture_sha256: verifierArchitectureSha,
   verifier_evidence_sha256: verifierEvidenceSha,
   build_pair_sha256: pairSha,
-  transaction_partition: evidence.transaction_partition,
 }) + '\n');
 NODE
   node scripts/compose-r4-e2p-receipt-v2.mjs \

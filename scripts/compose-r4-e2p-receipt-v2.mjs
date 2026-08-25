@@ -130,7 +130,6 @@ const receipt = {
   verifier_managed_architecture_sha256: identity.verifier_managed_architecture_sha256,
   verifier_aot_warning_policy_sha256: sha256(read(options.get('--verifier-warning-policy'))),
   verifier_evidence_sha256: identity.verifier_evidence_sha256,
-  transaction_partition: identity.transaction_partition,
   synthetic_native_aot_route: 'passed',
   standalone_default_github: 'not_executed_e4_owned',
   build_pair_sha256: identity.build_pair_sha256,

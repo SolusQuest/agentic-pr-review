@@ -227,7 +227,7 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("compiled_payload_source_commit", ordered);
         Assert.Contains("compiled_payload_source_tree", ordered);
         Assert.Contains("compiled_payload_proof_kind", ordered);
-        Assert.Contains("transaction_partition", ordered);
+        Assert.DoesNotContain("transaction_partition", ordered);
     }
 
     [Fact]
