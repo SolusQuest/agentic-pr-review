@@ -43,8 +43,27 @@ export function authorizationManifest(values) {
   });
 }
 
+export function authorizationManifestV2(values) {
+  return JSON.stringify({
+    kind: 'apr-r4-e2p-authorization-manifest-v2',
+    repository_id: values.repositoryId,
+    repository: values.repository,
+    pr_number: values.prNumber,
+    fixture_head_sha: values.fixtureHeadSha,
+    operation_id: values.operationId,
+    workflow_sha: values.workflowSha,
+    action_source_sha: values.actionSourceSha,
+    payload_source_sha: values.payloadSourceSha,
+    payload_sha256: values.payloadSha256,
+  });
+}
+
 export function authorizationDigest(values) {
   return crypto.createHash('sha256').update(authorizationManifest(values)).digest('hex');
+}
+
+export function authorizationDigestV2(values) {
+  return crypto.createHash('sha256').update(authorizationManifestV2(values)).digest('hex');
 }
 
 export async function runExtractedPreflight({ source, environment, fetchImpl }) {
@@ -77,7 +96,10 @@ function main() {
     return;
   }
   const source = extractPreflight(fs.readFileSync(path));
-  if (!source.includes("'apr-r4-e2p-authorization-manifest-v1'")) {
+  if (
+    !source.includes("'apr-r4-e2p-authorization-manifest-v1'") &&
+    !source.includes("'apr-r4-e2p-authorization-manifest-v2'")
+  ) {
     throw new Error('APR_R4_E2P_PREFLIGHT_CONTRACT_MISSING');
   }
   process.stdout.write('APR_R4_E2P_PREFLIGHT_CONTRACT_OK\n');

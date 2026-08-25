@@ -81,6 +81,7 @@ internal sealed class FrameworkStateDependencies(
                 request.EncryptedObjectDigest.Sha256,
                 result.Failure.ToString(), result.MutationState.ToString(),
                 Describe(result.Metadata));
+            RecordLifecycleUpload(request, result);
             return result;
         }
 
@@ -110,8 +111,56 @@ internal sealed class FrameworkStateDependencies(
                 request.Expected.EncryptedObjectDigest.Sha256,
                 result.Failure.ToString(), result.MutationState.ToString(),
                 Describe(request.Expected));
+            RecordLifecycleDelete(request, result);
             return result;
         }
+
+        private void RecordLifecycleUpload(
+            OpaqueStoreUploadRequest request,
+            OpaqueStoreUploadResult result)
+        {
+            var metadata = result.Metadata;
+            File.AppendAllText(
+                Path.Join(scenarioRoot, "state-lifecycle-evidence.tsv"),
+                string.Join('\t',
+                    "upload",
+                    request.Name.Value,
+                    request.CorrelationId.Value,
+                    request.EncryptedObjectDigest.Sha256,
+                    result.Failure.ToString(),
+                    result.MutationState.ToString(),
+                    metadata?.Reference.ObjectId.Value ?? "-",
+                    metadata?.ArchiveDigest.Sha256 ?? "-",
+                    metadata?.EncryptedObjectDigest.Sha256 ?? "-",
+                    metadata?.ExpiresAtUnixSeconds.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture) ?? "-",
+                    metadata?.ProducingRun.Identity ?? "-",
+                    metadata?.ProducingRun.Attempt.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture) ?? "-",
+                    metadata?.Size.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture) ?? "-",
+                    Convert.ToBase64String(request.EncryptedBytes.Span)) + "\n");
+        }
+
+        private void RecordLifecycleDelete(
+            OpaqueStoreDeleteRequest request,
+            OpaqueStoreDeleteResult result) => File.AppendAllText(
+            Path.Join(scenarioRoot, "state-lifecycle-evidence.tsv"),
+            string.Join('\t',
+                "delete",
+                request.Expected.Reference.Name.Value,
+                request.Expected.Reference.ObjectId.Value,
+                request.Expected.EncryptedObjectDigest.Sha256,
+                result.Failure.ToString(),
+                result.MutationState.ToString(),
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-") + "\n");
 
         private void Record(
             string operation,

@@ -9,6 +9,8 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 internal sealed class TrustedProofV2WorkflowAdmission :
     IActionHostTrustedWorkflowAdmission
 {
+    internal static TrustedProofV2WorkflowAdmission Instance { get; } = new();
+
     internal const string ProofKind =
         "apr-r4-e2p-trusted-proof-payload-v2";
     internal const string PayloadSourcePlaceholder = "__PAYLOAD_SOURCE_SHA__";

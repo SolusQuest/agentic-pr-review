@@ -171,6 +171,7 @@ jobs:
               String(pull.number) !== prNumber ||
               pull.state !== 'open' ||
               pull.draft !== false ||
+              pull.merged_at !== null ||
               pull.base?.repo?.full_name !== repository ||
               String(pull.base?.repo?.id) !== repositoryId ||
               pull.base?.ref !== 'main' ||

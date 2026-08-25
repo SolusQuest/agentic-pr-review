@@ -15,18 +15,16 @@
   <Target Name="GeneratePayloadBuildIdentity" BeforeTargets="CoreCompile">
     <PropertyGroup>
       <PayloadBuildIdentitySource>$(IntermediateOutputPath)TrustedProofPayloadBuildIdentity.g.cs</PayloadBuildIdentitySource>
-      <PayloadV2Identity>false</PayloadV2Identity>
-      <PayloadV2Identity Condition="'$(PayloadSourceCommit)' != '' and '$(PayloadSourceTree)' != ''">true</PayloadV2Identity>
     </PropertyGroup>
-    <Error Condition="('$(PayloadSourceCommit)' == '') != ('$(PayloadSourceTree)' == '')"
-           Text="PayloadSourceCommit and PayloadSourceTree must be supplied together." />
-    <Error Condition="'$(PayloadSourceCommit)' != '' and !$([System.Text.RegularExpressions.Regex]::IsMatch('$(PayloadSourceCommit)', '^[0-9a-f]{40}$'))"
+    <Error Condition="'$(PayloadSourceCommit)' == '' or '$(PayloadSourceTree)' == ''"
+           Text="PayloadSourceCommit and PayloadSourceTree are required for the current-head v2 payload. Retained v1 is built only from the detached #216 source." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(PayloadSourceCommit)', '^[0-9a-f]{40}$'))"
            Text="PayloadSourceCommit must be an explicit lowercase 40-hex commit." />
-    <Error Condition="'$(PayloadSourceTree)' != '' and !$([System.Text.RegularExpressions.Regex]::IsMatch('$(PayloadSourceTree)', '^[0-9a-f]{40}$'))"
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(PayloadSourceTree)', '^[0-9a-f]{40}$'))"
            Text="PayloadSourceTree must be an explicit lowercase 40-hex tree." />
     <WriteLinesToFile File="$(PayloadBuildIdentitySource)"
                       Overwrite="true"
-                      Lines="namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload%3B internal static class TrustedProofPayloadBuildIdentity { internal const bool StagedV2 = $(PayloadV2Identity)%3B internal const string SourceCommit = &quot;$(PayloadSourceCommit)&quot;%3B internal const string SourceTree = &quot;$(PayloadSourceTree)&quot;%3B }" />
+                      Lines="namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload%3B internal static class TrustedProofPayloadBuildIdentity { internal const string SourceCommit = &quot;$(PayloadSourceCommit)&quot;%3B internal const string SourceTree = &quot;$(PayloadSourceTree)&quot;%3B }" />
     <ItemGroup>
       <Compile Include="$(PayloadBuildIdentitySource)" />
     </ItemGroup>

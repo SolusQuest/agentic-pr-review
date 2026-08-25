@@ -68,6 +68,47 @@ function exactIdentitySet(value, length, label) {
     fail(label);
 }
 
+function expectedRoleIdentities() {
+  const scenarios = ['dispatch-bootstrap', 'dispatch-continuation'];
+  const publicationKinds = ['initial-intent', 'sticky-readback', 'acceptance-recovery'];
+  const identity = (role) => sha256(`apr-r4-e4-synthetic-role-v1\0${role}`);
+  const live = [
+    'dispatch-bootstrap/acceptance/receipt',
+    'dispatch-bootstrap/candidate/generation',
+    'dispatch-bootstrap/lineage-head',
+    'dispatch-bootstrap/locator-root',
+    'dispatch-continuation/acceptance/receipt',
+    'dispatch-continuation/candidate/generation',
+    'stale-head/lineage-head',
+  ];
+  const internallyReconciled = [];
+  const cleanupSelfDeleted = [];
+  for (const scenario of scenarios) {
+    for (const kind of publicationKinds) {
+      internallyReconciled.push(
+        `${scenario}/publication-intent/${kind}`,
+        `${scenario}/cleanup/opaque-write-anchor/publication-intent/${kind}`,
+      );
+      cleanupSelfDeleted.push(
+        `${scenario}/cleanup/p5-anchor/publication-intent/${kind}`,
+        `${scenario}/cleanup/p5-record/publication-intent/${kind}`,
+      );
+    }
+  }
+  internallyReconciled.push('dispatch-continuation/candidate/physical-copy');
+  cleanupSelfDeleted.push(
+    'dispatch-bootstrap/cleanup/s6-internal/empty',
+    'dispatch-continuation/cleanup/s6-internal/candidate/physical-copy',
+    'dispatch-continuation/cleanup/s6-final',
+  );
+  const identities = (roles) => roles.map(identity).sort();
+  return {
+    live: identities(live),
+    internallyReconciled: identities(internallyReconciled),
+    cleanupSelfDeleted: identities(cleanupSelfDeleted),
+  };
+}
+
 function verifyPartition(receipt) {
   const value = receipt.transaction_partition;
   exactKeys(value, partitionFields, 'partition');
@@ -89,6 +130,15 @@ function verifyPartition(receipt) {
     13,
     'partition-internally-reconciled',
   );
+  const expected = expectedRoleIdentities();
+  if (
+    JSON.stringify(value.live_anchor_object_identities) !== JSON.stringify(expected.live) ||
+    JSON.stringify(value.internally_reconciled_object_identities) !==
+      JSON.stringify(expected.internallyReconciled) ||
+    JSON.stringify(value.cleanup_self_deleted_object_identities) !==
+      JSON.stringify(expected.cleanupSelfDeleted)
+  )
+    fail('partition-semantic-membership');
   exactIdentitySet(
     value.cleanup_self_deleted_object_identities,
     15,
@@ -128,23 +178,42 @@ export function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
   const contractBytes = read(contractPath, 16_384);
   const contract = JSON.parse(contractBytes.toString('utf8'));
   exactKeys(contract, ['kind', 'receipt_kind', 'proof_role', 'ordered_fields'], 'contract');
-  if (contract.kind !== 'apr-r4-e2p-receipt-contract-v2') fail('contract-kind');
+  if (
+    contract.kind !== 'apr-r4-e2p-receipt-contract-v2' ||
+    contract.receipt_kind !== 'apr-r4-e2p-trusted-proof-payload-v2' ||
+    contract.proof_role !== 'r4-e2p'
+  )
+    fail('contract-kind');
   const { value: receipt } = canonical(receiptPath);
   exactKeys(receipt, contract.ordered_fields, 'receipt');
   if (
     receipt.kind !== 'apr-r4-e2p-trusted-proof-payload-v2' ||
     receipt.proof_role !== 'r4-e2p' ||
+    receipt.predecessor_issue !== 179 ||
+    receipt.predecessor_comment_id !== 5372084844 ||
+    receipt.predecessor_source_commit !== '0b5c96a6fea12906024c68b3d8457ccb7b026ebe' ||
+    receipt.predecessor_source_tree !== '8c4fde16f9aaefedb5a715524d9f945c5c3d0d02' ||
+    receipt.predecessor_receipt_line_sha256 !==
+      '89fbdf016aae3ca2737fe0fb91fb6cc7e4b50761058ddbe881819550e9337e24' ||
     !lowerHex(receipt.source_commit, 40) ||
     !lowerHex(receipt.source_tree, 40) ||
     receipt.compiled_payload_source_commit !== receipt.source_commit ||
     receipt.compiled_payload_source_tree !== receipt.source_tree ||
+    receipt.compiled_payload_proof_kind !== receipt.kind ||
     receipt.action_source_sha !== actionSourceSha ||
     receipt.source_commit === receipt.action_source_sha ||
+    receipt.runner !== 'ubuntu-24.04' ||
+    receipt.dotnet_sdk !== '10.0.109' ||
+    receipt.node_version !== '24' ||
+    receipt.rid !== 'linux-x64' ||
+    receipt.executable_relative_path !== 'AgenticPrReview.Runtime.ActionHostTrustedProofPayload' ||
     receipt.wrapper_build_discriminator !== 'r4-w2' ||
     receipt.payload_build_discriminator !== 'r4-w2' ||
     receipt.production_payload_smoke !== 'passed' ||
     receipt.verifier_kind !== 'apr-r4-e2p-trusted-proof-verifier-v1' ||
     receipt.verifier_role !== 'r4-e2p-verifier' ||
+    receipt.verifier_executable_relative_path !==
+      'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier' ||
     receipt.synthetic_native_aot_route !== 'passed' ||
     receipt.standalone_default_github !== 'not_executed_e4_owned' ||
     receipt.result !== 'passed' ||
@@ -160,6 +229,21 @@ export function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
       receipt.verifier_runtime_managed_intermediate_sha256
   )
     fail('shared-managed-identity');
+  const buildPairPreimage =
+    [
+      'apr-r4-e2p-build-pair-v2',
+      receipt.payload_sha256,
+      receipt.proof_managed_intermediate_sha256,
+      receipt.runtime_managed_intermediate_sha256,
+      receipt.managed_architecture_sha256,
+      receipt.verifier_sha256,
+      receipt.verifier_managed_intermediate_sha256,
+      receipt.verifier_payload_managed_intermediate_sha256,
+      receipt.verifier_runtime_managed_intermediate_sha256,
+      receipt.verifier_managed_architecture_sha256,
+      receipt.verifier_evidence_sha256,
+    ].join('\n') + '\n';
+  if (receipt.build_pair_sha256 !== sha256(buildPairPreimage)) fail('build-pair');
   verifyPartition(receipt);
 
   const fixedFiles = new Map([

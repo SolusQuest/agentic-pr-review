@@ -9,7 +9,7 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 internal static class TrustedProofPayloadHost
 {
     internal const string ProofKind =
-        "apr-r4-e2p-trusted-proof-payload-v1";
+        "apr-r4-e2p-trusted-proof-payload-v2";
     internal const string ProofRole = "r4-e2p";
     internal const string PayloadBuildDiscriminator = "r4-w2";
 

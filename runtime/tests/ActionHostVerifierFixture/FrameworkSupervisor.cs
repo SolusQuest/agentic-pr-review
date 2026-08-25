@@ -917,14 +917,36 @@ internal static class FrameworkSupervisor
             TrustedProofPayload: true),
             root, repository, payload, bundle, node, platform)
             .ConfigureAwait(false));
+        var compiledIdentities = cases
+            .Select(result => ReadCompiledPayloadIdentity(root, result.Name))
+            .ToArray();
+        var compiledIdentity = compiledIdentities.FirstOrDefault();
+        var compiledIdentityValid = partitionBinding is not null &&
+            compiledIdentity is not null &&
+            compiledIdentities.All(value => value == compiledIdentity) &&
+            StringComparer.Ordinal.Equals(
+                compiledIdentity.ProofKind,
+                "apr-r4-e2p-trusted-proof-payload-v2") &&
+            StringComparer.Ordinal.Equals(
+                compiledIdentity.SourceCommit,
+                partitionBinding.PayloadSourceCommit) &&
+            StringComparer.Ordinal.Equals(
+                compiledIdentity.SourceTree,
+                partitionBinding.PayloadSourceTree);
         var partition = partitionBinding is null
             ? null
-            : SyntheticTransactionPartition.Derive(root, partitionBinding);
+            : SyntheticSemanticTransactionPartition.Derive(
+                root,
+                partitionBinding);
         var passed = cases.All(result => result.Passed) &&
-            (partitionBinding is null || partition is not null);
+            (partitionBinding is null ||
+                (compiledIdentityValid && partition is not null));
         var evidence = FrameworkJson.Object(
             ("passed", passed),
             ("payload_sha256", Sha256(payload)),
+            ("compiled_payload_proof_kind", compiledIdentity?.ProofKind),
+            ("compiled_payload_source_commit", compiledIdentity?.SourceCommit),
+            ("compiled_payload_source_tree", compiledIdentity?.SourceTree),
             ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
         if (partition is not null)
         {
@@ -935,6 +957,37 @@ internal static class FrameworkSupervisor
             FrameworkJson.SerializeIndented(evidence))
             .ConfigureAwait(false);
         return passed ? 0 : 1;
+    }
+
+    private static CompiledPayloadIdentity? ReadCompiledPayloadIdentity(
+        string root,
+        string scenario)
+    {
+        var path = Path.Join(
+            root,
+            scenario,
+            "compiled-payload-identity.tsv");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var lines = File.ReadAllLines(path);
+        if (lines.Length != 1 || lines[0].Split('\t') is not
+            [var proofKind, var sourceCommit, var sourceTree] ||
+            !StringComparer.Ordinal.Equals(
+                proofKind,
+                "apr-r4-e2p-trusted-proof-payload-v2") ||
+            !IsLowerHex(sourceCommit, 40) ||
+            !IsLowerHex(sourceTree, 40))
+        {
+            return null;
+        }
+
+        return new CompiledPayloadIdentity(
+            proofKind,
+            sourceCommit,
+            sourceTree);
     }
 
     private static Process StartWrapper(
@@ -3435,6 +3488,11 @@ internal static class FrameworkSupervisor
         bool CanarySafe,
         bool ContinuationObserved,
         bool Passed);
+
+    private sealed record CompiledPayloadIdentity(
+        string ProofKind,
+        string SourceCommit,
+        string SourceTree);
 
     private sealed record CanaryRoute(
         IReadOnlySet<string> AllowedSinks,

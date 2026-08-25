@@ -10,6 +10,10 @@ function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
+function lowerHex(value, length) {
+  return typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`, 'u').test(value);
+}
+
 function read(path, maximum = 256 * 1024) {
   const bytes = fs.readFileSync(path);
   if (bytes.length === 0 || bytes.length > maximum) fail('file-size');
@@ -49,6 +53,42 @@ const identity = json(options.get('--identity')).value;
 const contractDocument = json(options.get('--contract'));
 const contract = contractDocument.value;
 const predecessor = json(options.get('--predecessor')).value;
+const proofKind = 'apr-r4-e2p-trusted-proof-payload-v2';
+const proofRole = 'r4-e2p';
+const buildPairPreimage =
+  [
+    'apr-r4-e2p-build-pair-v2',
+    identity.payload_sha256,
+    identity.proof_managed_intermediate_sha256,
+    identity.runtime_managed_intermediate_sha256,
+    identity.managed_architecture_sha256,
+    identity.verifier_sha256,
+    identity.verifier_managed_intermediate_sha256,
+    identity.verifier_payload_managed_intermediate_sha256,
+    identity.verifier_runtime_managed_intermediate_sha256,
+    identity.verifier_managed_architecture_sha256,
+    identity.verifier_evidence_sha256,
+  ].join('\n') + '\n';
+if (
+  contract.kind !== 'apr-r4-e2p-receipt-contract-v2' ||
+  contract.receipt_kind !== proofKind ||
+  contract.proof_role !== proofRole ||
+  predecessor.issue !== 179 ||
+  predecessor.comment_id !== 5372084844 ||
+  predecessor.source_commit !== '0b5c96a6fea12906024c68b3d8457ccb7b026ebe' ||
+  predecessor.source_tree !== '8c4fde16f9aaefedb5a715524d9f945c5c3d0d02' ||
+  predecessor.receipt_line_sha256 !==
+    '89fbdf016aae3ca2737fe0fb91fb6cc7e4b50761058ddbe881819550e9337e24' ||
+  !lowerHex(identity.source_commit, 40) ||
+  !lowerHex(identity.source_tree, 40) ||
+  identity.source_commit === '5b5769753653bb3fd3e68cf8b7bb88a1bd350613' ||
+  identity.compiled_payload_source_commit !== identity.source_commit ||
+  identity.compiled_payload_source_tree !== identity.source_tree ||
+  identity.compiled_payload_proof_kind !== proofKind ||
+  identity.build_pair_sha256 !== sha256(buildPairPreimage)
+) {
+  fail('identity');
+}
 const receipt = {
   kind: contract.receipt_kind,
   proof_role: contract.proof_role,
@@ -61,6 +101,7 @@ const receipt = {
   source_tree: identity.source_tree,
   compiled_payload_source_commit: identity.compiled_payload_source_commit,
   compiled_payload_source_tree: identity.compiled_payload_source_tree,
+  compiled_payload_proof_kind: identity.compiled_payload_proof_kind,
   runner: 'ubuntu-24.04',
   dotnet_sdk: '10.0.109',
   node_version: '24',

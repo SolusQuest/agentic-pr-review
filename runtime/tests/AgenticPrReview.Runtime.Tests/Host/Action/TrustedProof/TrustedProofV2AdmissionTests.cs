@@ -13,7 +13,6 @@ public sealed class TrustedProofV2AdmissionTests
     [Fact]
     public void StagedBuildIdentityOwnsOneDistinctExactRender()
     {
-        Assert.True(TrustedProofPayloadBuildIdentity.StagedV2);
         Assert.Equal(new string('1', 40),
             TrustedProofPayloadBuildIdentity.SourceCommit);
         Assert.Equal(new string('2', 40),
@@ -45,6 +44,9 @@ public sealed class TrustedProofV2AdmissionTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("PAYLOAD_SOURCE_SHA", activeV1,
             StringComparison.Ordinal);
+        Assert.Equal(
+            "apr-r4-e2p-trusted-proof-payload-v2",
+            TrustedProofPayloadHost.ProofKind);
     }
 
     [Fact]
@@ -107,6 +109,14 @@ public sealed class TrustedProofV2AdmissionTests
             v2.Launch,
             CancellationToken.None);
         Assert.NotNull(accepted.Invocation);
+
+        var rejectedByV1 = await v2.CreateAuthorizer().AuthorizeAsync(
+            v2.Launch,
+            CancellationToken.None);
+        Assert.Null(rejectedByV1.Invocation);
+        Assert.Equal(
+            ActionHostAuthorizationFailure.WorkflowSourceInvalid,
+            rejectedByV1.Failure);
     }
 
     private static ActionHostAuthorizer CreateV2Authorizer(
@@ -114,7 +124,7 @@ public sealed class TrustedProofV2AdmissionTests
         scenario.EventReader,
         scenario.Factory,
         ActionHostAuthorizationPolicy.TrustedProof,
-        workflowAdmission: new TrustedProofV2WorkflowAdmission());
+        workflowAdmission: TrustedProofV2WorkflowAdmission.Instance);
 
     private static ActionHostAuthorizationScenario CreateV2Scenario()
     {

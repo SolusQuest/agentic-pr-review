@@ -157,11 +157,11 @@ payload_sha256="$(sha256sum "$payload" | cut -d ' ' -f 1)"
 [[ "$payload_sha256" =~ ^[0-9a-f]{64}$ ]] || fail payload-digest
 
 output_lines="$(mktemp "${RUNNER_TEMP}/apr-r4-e2p-output.XXXXXXXX")"
-printf 'prepared_root=%s\nprepared_executable=%s\nprepared_payload_sha256=%s\naction_source_sha=%s\npayload_source_sha=%s\npayload_build_discriminator=r4-w2\n' \
+printf 'prepared_root=%s\nprepared_executable=%s\nprepared_payload_sha256=%s\naction_source_sha=%s\npayload_build_discriminator=r4-w2\n' \
   "$output_root" "AgenticPrReview.Runtime.ActionHostTrustedProofPayload" \
   "$payload_sha256" "5b5769753653bb3fd3e68cf8b7bb88a1bd350613" \
-  "$source_commit" > "$output_lines"
-[[ "$(wc -l < "$output_lines")" -eq 6 ]] || fail output-count
+  > "$output_lines"
+[[ "$(wc -l < "$output_lines")" -eq 5 ]] || fail output-count
 cat "$output_lines" >> "$github_output"
 rm -f -- "$output_lines"
 cleanup_output=false

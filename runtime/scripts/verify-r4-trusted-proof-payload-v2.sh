@@ -316,6 +316,10 @@ if (input?.passed !== true || !Array.isArray(input.cases) ||
     input.cases.length !== expectedCases.length ||
     typeof input.payload_sha256 !== 'string' ||
     !/^[0-9a-f]{64}$/.test(input.payload_sha256) ||
+    input.compiled_payload_proof_kind !==
+      'apr-r4-e2p-trusted-proof-payload-v2' ||
+    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_commit ?? '') ||
+    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_tree ?? '') ||
     input.transaction_partition?.kind !==
       'apr-r4-e4-synthetic-transaction-partition-v1') {
   throw new Error('The trusted-proof evidence envelope is invalid.');
@@ -331,6 +335,9 @@ const cases = input.cases.map((item, index) => {
 fs.writeFileSync(process.argv[3], JSON.stringify({
   passed: input.passed,
   payload_sha256: input.payload_sha256,
+  compiled_payload_proof_kind: input.compiled_payload_proof_kind,
+  compiled_payload_source_commit: input.compiled_payload_source_commit,
+  compiled_payload_source_tree: input.compiled_payload_source_tree,
   cases,
   transaction_partition: input.transaction_partition,
 }) + '\n');
@@ -365,11 +372,18 @@ const [evidencePath, outputPath, sourceCommit, sourceTree, payloadSha,
   verifierProofSha, verifierRuntimeSha, verifierArchitectureSha,
   verifierEvidenceSha, pairSha] = process.argv.slice(2);
 const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+if (evidence.compiled_payload_proof_kind !==
+      'apr-r4-e2p-trusted-proof-payload-v2' ||
+    evidence.compiled_payload_source_commit !== sourceCommit ||
+    evidence.compiled_payload_source_tree !== sourceTree) {
+  throw new Error('The compiled payload identity does not match the verified source.');
+}
 fs.writeFileSync(outputPath, JSON.stringify({
   source_commit: sourceCommit,
   source_tree: sourceTree,
-  compiled_payload_source_commit: sourceCommit,
-  compiled_payload_source_tree: sourceTree,
+  compiled_payload_source_commit: evidence.compiled_payload_source_commit,
+  compiled_payload_source_tree: evidence.compiled_payload_source_tree,
+  compiled_payload_proof_kind: evidence.compiled_payload_proof_kind,
   payload_sha256: payloadSha,
   proof_managed_intermediate_sha256: proofSha,
   runtime_managed_intermediate_sha256: runtimeSha,
@@ -518,7 +532,7 @@ NODE
     --source-root "$source_copy" --control-root "$control_root" \
     --receipt "$control_receipt" --output-root "$prepared_root" \
     --github-output "$github_output"
-  [[ "$(wc -l < "$github_output")" -eq 6 ]] || return 1
+  [[ "$(wc -l < "$github_output")" -eq 5 ]] || return 1
   grep -Fx "prepared_root=$prepared_root" "$github_output" >/dev/null
   grep -Fx 'prepared_executable=AgenticPrReview.Runtime.ActionHostTrustedProofPayload' \
     "$github_output" >/dev/null
@@ -526,8 +540,7 @@ NODE
     "$github_output" >/dev/null
   grep -Fx 'action_source_sha=5b5769753653bb3fd3e68cf8b7bb88a1bd350613' \
     "$github_output" >/dev/null
-  grep -Fx "payload_source_sha=$(git -C "$source_copy" rev-parse HEAD)" \
-    "$github_output" >/dev/null
+  ! grep -q '^payload_source_sha=' "$github_output"
   grep -Fx 'payload_build_discriminator=r4-w2' "$github_output" >/dev/null
 }
 

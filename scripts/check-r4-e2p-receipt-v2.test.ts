@@ -16,9 +16,39 @@ function sha256(value: crypto.BinaryLike) {
 }
 
 function partition(payloadSha256: string, verifierSha256: string) {
-  const identities = Array.from({ length: 35 }, (_, index) =>
-    sha256(`production-codec-object-${String(index).padStart(2, '0')}`),
-  ).sort();
+  const scenarios = ['dispatch-bootstrap', 'dispatch-continuation'];
+  const kinds = ['initial-intent', 'sticky-readback', 'acceptance-recovery'];
+  const roleIdentity = (role: string) => sha256(`apr-r4-e4-synthetic-role-v1\0${role}`);
+  const live = [
+    'dispatch-bootstrap/acceptance/receipt',
+    'dispatch-bootstrap/candidate/generation',
+    'dispatch-bootstrap/lineage-head',
+    'dispatch-bootstrap/locator-root',
+    'dispatch-continuation/acceptance/receipt',
+    'dispatch-continuation/candidate/generation',
+    'stale-head/lineage-head',
+  ];
+  const internallyReconciled: string[] = [];
+  const cleanupSelfDeleted: string[] = [];
+  for (const scenario of scenarios) {
+    for (const kind of kinds) {
+      internallyReconciled.push(
+        `${scenario}/publication-intent/${kind}`,
+        `${scenario}/cleanup/opaque-write-anchor/publication-intent/${kind}`,
+      );
+      cleanupSelfDeleted.push(
+        `${scenario}/cleanup/p5-anchor/publication-intent/${kind}`,
+        `${scenario}/cleanup/p5-record/publication-intent/${kind}`,
+      );
+    }
+  }
+  internallyReconciled.push('dispatch-continuation/candidate/physical-copy');
+  cleanupSelfDeleted.push(
+    'dispatch-bootstrap/cleanup/s6-internal/empty',
+    'dispatch-continuation/cleanup/s6-internal/candidate/physical-copy',
+    'dispatch-continuation/cleanup/s6-final',
+  );
+  const identities = (roles: string[]) => roles.map(roleIdentity).sort();
   const value = {
     kind: 'apr-r4-e4-synthetic-transaction-partition-v1',
     total_record_count: 35,
@@ -26,9 +56,9 @@ function partition(payloadSha256: string, verifierSha256: string) {
     transient_record_count: 28,
     internally_reconciled_count: 13,
     cleanup_self_deleted_count: 15,
-    live_anchor_object_identities: identities.slice(0, 7),
-    internally_reconciled_object_identities: identities.slice(7, 20),
-    cleanup_self_deleted_object_identities: identities.slice(20),
+    live_anchor_object_identities: identities(live),
+    internally_reconciled_object_identities: identities(internallyReconciled),
+    cleanup_self_deleted_object_identities: identities(cleanupSelfDeleted),
     transaction_route_evidence_sha256: '',
   };
   value.transaction_route_evidence_sha256 = sha256(
@@ -51,7 +81,7 @@ function partition(payloadSha256: string, verifierSha256: string) {
   return value;
 }
 
-function compose() {
+function compose(identityOverrides: Record<string, unknown> = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-e2p-v2-receipt-'));
   roots.push(root);
   const payloadPath = path.join(root, 'payload');
@@ -59,27 +89,42 @@ function compose() {
   const payloadSha256 = sha256(fs.readFileSync(payloadPath));
   const verifierSha256 = '6'.repeat(64);
   const identityPath = path.join(root, 'identity.json');
-  fs.writeFileSync(
-    identityPath,
-    `${JSON.stringify({
-      source_commit: '1'.repeat(40),
-      source_tree: '2'.repeat(40),
-      compiled_payload_source_commit: '1'.repeat(40),
-      compiled_payload_source_tree: '2'.repeat(40),
-      payload_sha256: payloadSha256,
-      proof_managed_intermediate_sha256: '3'.repeat(64),
-      runtime_managed_intermediate_sha256: '4'.repeat(64),
-      managed_architecture_sha256: '5'.repeat(64),
-      verifier_sha256: verifierSha256,
-      verifier_managed_intermediate_sha256: '7'.repeat(64),
-      verifier_payload_managed_intermediate_sha256: '3'.repeat(64),
-      verifier_runtime_managed_intermediate_sha256: '4'.repeat(64),
-      verifier_managed_architecture_sha256: '8'.repeat(64),
-      verifier_evidence_sha256: '9'.repeat(64),
-      transaction_partition: partition(payloadSha256, verifierSha256),
-      build_pair_sha256: 'a'.repeat(64),
-    })}\n`,
+  const identity = {
+    source_commit: '1'.repeat(40),
+    source_tree: '2'.repeat(40),
+    compiled_payload_source_commit: '1'.repeat(40),
+    compiled_payload_source_tree: '2'.repeat(40),
+    compiled_payload_proof_kind: 'apr-r4-e2p-trusted-proof-payload-v2',
+    payload_sha256: payloadSha256,
+    proof_managed_intermediate_sha256: '3'.repeat(64),
+    runtime_managed_intermediate_sha256: '4'.repeat(64),
+    managed_architecture_sha256: '5'.repeat(64),
+    verifier_sha256: verifierSha256,
+    verifier_managed_intermediate_sha256: '7'.repeat(64),
+    verifier_payload_managed_intermediate_sha256: '3'.repeat(64),
+    verifier_runtime_managed_intermediate_sha256: '4'.repeat(64),
+    verifier_managed_architecture_sha256: '8'.repeat(64),
+    verifier_evidence_sha256: '9'.repeat(64),
+    transaction_partition: partition(payloadSha256, verifierSha256),
+    build_pair_sha256: '',
+  };
+  identity.build_pair_sha256 = sha256(
+    [
+      'apr-r4-e2p-build-pair-v2',
+      identity.payload_sha256,
+      identity.proof_managed_intermediate_sha256,
+      identity.runtime_managed_intermediate_sha256,
+      identity.managed_architecture_sha256,
+      identity.verifier_sha256,
+      identity.verifier_managed_intermediate_sha256,
+      identity.verifier_payload_managed_intermediate_sha256,
+      identity.verifier_runtime_managed_intermediate_sha256,
+      identity.verifier_managed_architecture_sha256,
+      identity.verifier_evidence_sha256,
+    ].join('\n') + '\n',
   );
+  Object.assign(identity, identityOverrides);
+  fs.writeFileSync(identityPath, `${JSON.stringify(identity)}\n`);
   const args = [
     'scripts/compose-r4-e2p-receipt-v2.mjs',
     '--identity',
@@ -127,12 +172,13 @@ function compose() {
   return { payloadPath, receiptPath, sourceRoot: process.cwd() };
 }
 
-describe('R4 E2P staged receipt v2', () => {
+describe('R4 E2P current-head receipt v2', () => {
   it('admits separate exact payload and Action source identities', () => {
     const fixture = compose();
     const receipt = verifyReceiptV2(fixture);
     expect(receipt.source_commit).toBe('1'.repeat(40));
     expect(receipt.compiled_payload_source_commit).toBe(receipt.source_commit);
+    expect(receipt.compiled_payload_proof_kind).toBe(receipt.kind);
     expect(receipt.action_source_sha).toBe('5b5769753653bb3fd3e68cf8b7bb88a1bd350613');
     expect(receipt.transaction_partition.total_record_count).toBe(35);
   });
@@ -185,7 +231,7 @@ describe('R4 E2P staged receipt v2', () => {
       >;
       mutate(value.transaction_partition as Record<string, unknown>, value);
       fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
-      expect(() => verifyReceiptV2(fixture)).toThrow(/partition|payload/u);
+      expect(() => verifyReceiptV2(fixture)).toThrow(/partition|payload|build-pair/u);
     }
   });
 
@@ -215,11 +261,45 @@ describe('R4 E2P staged receipt v2', () => {
     }
   });
 
+  it.each([
+    ['predecessor_issue', 180],
+    ['predecessor_comment_id', 1],
+    ['predecessor_source_commit', '0'.repeat(40)],
+    ['predecessor_source_tree', '0'.repeat(40)],
+    ['predecessor_receipt_line_sha256', '0'.repeat(64)],
+    ['compiled_payload_proof_kind', 'apr-r4-e2p-trusted-proof-payload-v1'],
+    ['runner', 'self-hosted'],
+    ['dotnet_sdk', 'latest'],
+    ['node_version', 'latest'],
+    ['rid', 'linux-arm64'],
+    ['executable_relative_path', 'other-payload'],
+    ['verifier_executable_relative_path', 'other-verifier'],
+    ['build_pair_sha256', '0'.repeat(64)],
+  ])('rejects closed receipt field drift: %s', (field, replacement) => {
+    const fixture = compose();
+    const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    value[field] = replacement;
+    fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
+    expect(() => verifyReceiptV2(fixture)).toThrow();
+  });
+
   it('rejects platform artifact IDs presented as semantic membership', () => {
     const fixture = compose();
     const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8'));
     value.transaction_partition.live_anchor_object_identities[0] = '10001';
     fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
     expect(() => verifyReceiptV2(fixture)).toThrow(/partition-live/u);
+  });
+
+  it.each([
+    ['compiled proof kind', { compiled_payload_proof_kind: 'apr-r4-e2p-trusted-proof-payload-v1' }],
+    ['compiled source commit', { compiled_payload_source_commit: '3'.repeat(40) }],
+    ['compiled source tree', { compiled_payload_source_tree: '3'.repeat(40) }],
+    ['derived build pair', { build_pair_sha256: '0'.repeat(64) }],
+  ])('makes the composer reject inconsistent %s inputs', (_name, overrides) => {
+    expect(() => compose(overrides)).toThrow();
   });
 });

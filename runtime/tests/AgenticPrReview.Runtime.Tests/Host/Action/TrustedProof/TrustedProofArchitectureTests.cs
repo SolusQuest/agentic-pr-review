@@ -9,7 +9,60 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 public sealed class TrustedProofArchitectureTests
 {
     [Fact]
-    public void StagedV2IsCompileTimeOnlyAndLeavesTheActiveV1SurfacePinned()
+    public void FrameworkSourceInventoryGoldenMatchesThePortableInventory()
+    {
+        var root = FindRepositoryRoot();
+        var sourceRoot = Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "ActionHostVerifierFixture");
+        var framing = new StringBuilder();
+        foreach (var source in Directory.EnumerateFiles(
+                     sourceRoot,
+                     "*",
+                     SearchOption.AllDirectories)
+                     .Where(source => !source.Contains(
+                         Path.DirectorySeparatorChar + "bin" +
+                         Path.DirectorySeparatorChar,
+                         StringComparison.Ordinal) &&
+                         !source.Contains(
+                         Path.DirectorySeparatorChar + "obj" +
+                         Path.DirectorySeparatorChar,
+                         StringComparison.Ordinal))
+                     .OrderBy(source => Path.GetRelativePath(root, source)
+                         .Replace(Path.DirectorySeparatorChar, '/'),
+                         StringComparer.Ordinal))
+        {
+            var relative = Path.GetRelativePath(root, source)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            var sourceDigest = Convert.ToHexString(SHA256.HashData(
+                    File.ReadAllBytes(source)))
+                .ToLowerInvariant();
+            framing.Append(relative).Append('\0').Append(sourceDigest)
+                .Append('\n');
+        }
+
+        using var golden = JsonDocument.Parse(File.ReadAllBytes(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "framework",
+            "expected-evidence.json.golden")));
+        var expected = golden.RootElement
+            .GetProperty("source_inventory_digest")
+            .GetString();
+        var actual = Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes(framing.ToString())))
+            .ToLowerInvariant();
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void CurrentHeadPayloadIsUnconditionallyV2WithCompiledIdentity()
     {
         var root = FindRepositoryRoot();
         var payloadRoot = Path.Join(
@@ -26,6 +79,15 @@ public sealed class TrustedProofArchitectureTests
         var admission = File.ReadAllText(Path.Join(
             payloadRoot,
             "TrustedProofV2WorkflowAdmission.cs"));
+        var host = File.ReadAllText(Path.Join(
+            payloadRoot,
+            "TrustedProofPayloadHost.cs"));
+        var verifier = File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "ActionHostTrustedProofVerifier",
+            "TrustedProofVerifierHost.cs"));
         var workflow = File.ReadAllText(Path.Join(
             root,
             ".github",
@@ -53,14 +115,28 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("PayloadSourceTree", project,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "PayloadSourceCommit and PayloadSourceTree are required",
+            project,
+            StringComparison.Ordinal);
+        Assert.Contains("^[0-9a-f]{40}$", project,
+            StringComparison.Ordinal);
         Assert.Contains("TrustedProofWorkflowTemplateV2", project,
             StringComparison.Ordinal);
         Assert.Contains("r4-trusted-proof-v2.yml.template", project,
             StringComparison.Ordinal);
-        Assert.Contains("TrustedProofPayloadBuildIdentity.StagedV2",
+        Assert.Contains("TrustedProofV2WorkflowAdmission.Instance",
             composition, StringComparison.Ordinal);
-        Assert.Contains("ActionHostV1TrustedWorkflowAdmission.Instance",
+        Assert.DoesNotContain("ActionHostV1TrustedWorkflowAdmission.Instance",
             composition, StringComparison.Ordinal);
+        Assert.Contains("apr-r4-e2p-trusted-proof-payload-v2",
+            host, StringComparison.Ordinal);
+        Assert.Contains("TrustedProofPayloadBuildIdentity.SourceCommit",
+            verifier, StringComparison.Ordinal);
+        Assert.Contains("TrustedProofPayloadBuildIdentity.SourceTree",
+            verifier, StringComparison.Ordinal);
+        Assert.Contains("TrustedProofPayloadHost.ProofKind",
+            verifier, StringComparison.Ordinal);
         Assert.DoesNotContain("Environment.GetEnvironmentVariable",
             composition + admission, StringComparison.Ordinal);
         Assert.DoesNotContain("payload_source_sha", launchSources,
@@ -70,8 +146,10 @@ public sealed class TrustedProofArchitectureTests
             preparation,
             StringComparison.Ordinal);
         Assert.Contains(
-            "action_source_sha=%s\\npayload_source_sha=%s",
+            "action_source_sha=%s\\npayload_build_discriminator=r4-w2",
             preparation,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("payload_source_sha=", preparation,
             StringComparison.Ordinal);
         Assert.Contains(
             "\"5b5769753653bb3fd3e68cf8b7bb88a1bd350613\"",
@@ -113,6 +191,26 @@ public sealed class TrustedProofArchitectureTests
             preflightV2.RootElement.GetProperty("payload_source_identity")
                 .GetString());
 
+        using var preparationV2 = JsonDocument.Parse(File.ReadAllBytes(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof-payload",
+            "preparation-contract-v2.json")));
+        Assert.Equal(
+            new[]
+            {
+                "prepared_root",
+                "prepared_executable",
+                "prepared_payload_sha256",
+                "action_source_sha",
+                "payload_build_discriminator",
+            },
+            preparationV2.RootElement.GetProperty("outputs")
+                .EnumerateArray().Select(value => value.GetString()).ToArray());
+
         using var v2Contract = JsonDocument.Parse(File.ReadAllBytes(Path.Join(
             root,
             "runtime",
@@ -128,6 +226,7 @@ public sealed class TrustedProofArchitectureTests
             .EnumerateArray().Select(value => value.GetString()).ToArray();
         Assert.Contains("compiled_payload_source_commit", ordered);
         Assert.Contains("compiled_payload_source_tree", ordered);
+        Assert.Contains("compiled_payload_proof_kind", ordered);
         Assert.Contains("transaction_partition", ordered);
     }
 

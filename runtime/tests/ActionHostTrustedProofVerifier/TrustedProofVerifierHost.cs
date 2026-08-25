@@ -69,18 +69,21 @@ internal static class TrustedProofVerifierHost
         await File.WriteAllLinesAsync(
             Path.Join(scenarioRoot, "host-environment.keys"),
             ExpectedEnvironment).ConfigureAwait(false);
+        await File.WriteAllTextAsync(
+            Path.Join(scenarioRoot, "compiled-payload-identity.tsv"),
+            string.Join('\t',
+                TrustedProofPayloadHost.ProofKind,
+                TrustedProofPayloadBuildIdentity.SourceCommit,
+                TrustedProofPayloadBuildIdentity.SourceTree) + "\n")
+            .ConfigureAwait(false);
 
         Func<HttpMessageHandler> handlers = () => new VerifierRecordingHandler(
             scenarioRoot,
             "github",
-            TrustedProofPayloadBuildIdentity.StagedV2
-                ? new FrameworkGitHubHandler(
-                    scenarioRoot,
-                    launch.PayloadSha256,
-                    TrustedProofV2WorkflowAdmission.Render)
-                : new FrameworkGitHubHandler(
-                    scenarioRoot,
-                    launch.PayloadSha256));
+            new FrameworkGitHubHandler(
+                scenarioRoot,
+                launch.PayloadSha256,
+                TrustedProofV2WorkflowAdmission.Render));
         var github = new ActionHostGitHubAuthorizationTransportFactory(handlers);
         var publisher = new BoundedGitHubPublisherTransportFactory(handlers);
 
@@ -111,7 +114,8 @@ internal static class TrustedProofVerifierHost
             provider,
             new VerifierTimeProvider(),
             () => Path.Join(scenarioRoot, "host-staging"),
-            new PostAcceptanceInlinePublisherHook(publisher));
+            new PostAcceptanceInlinePublisherHook(publisher),
+            TrustedProofV2WorkflowAdmission.Instance);
         var coordinatorTask = coordinator?.CoordinateAsync(cancellation.Token);
         await using var input = new MemoryStream(inputBytes, writable: false);
         var result = await TrustedProofPayloadHost.RunAsync(
