@@ -90,6 +90,10 @@ internal static class FrameworkHost
                 "state.cryptographic-memory",
                 launch.Inputs.PreviousStateKey.ExportForPrivateLaunch());
         }
+        await File.WriteAllTextAsync(
+            Path.Join(scenarioRoot, "host-initialization-complete"),
+            "1",
+            CancellationToken.None).ConfigureAwait(false);
 
         var mode = File.ReadAllText(Path.Join(scenarioRoot, "mode")).Trim();
         if (mode == "cancel-before-side-effect")

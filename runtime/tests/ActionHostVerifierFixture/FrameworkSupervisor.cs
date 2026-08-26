@@ -241,8 +241,11 @@ internal static class FrameworkSupervisor
             "wrapper_failure", CrashHost: true), root, repository, payload,
             bundle, node, platform).ConfigureAwait(false));
 
-        var canaryRoutesPassed = EvaluateCanaryRoutes(root, canaries) &&
-            !File.Exists(Path.Join(root, "canary-route-violation"));
+        var canaryRouteFailures = new List<string>();
+        var canaryRoutesPassed = EvaluateCanaryRoutes(
+            root, canaries, canaryRouteFailures);
+        canaryRouteFailures.AddRange(CanaryRouteViolationFailures(root));
+        canaryRoutesPassed &= canaryRouteFailures.Count == 0;
         var failedGlobalGates = FailedGlobalGateNames(
             cases.Select(result => result.HostPid)
                 .Where(value => value > 0).Distinct().Count(),
@@ -258,8 +261,10 @@ internal static class FrameworkSupervisor
                 await File.WriteAllTextAsync(
                     Path.Join(root, "supervisor-global-diagnostic.json"),
                     FrameworkJson.Serialize(FrameworkJson.Object(
-                        ("kind", "apr-r4-e2-supervisor-global-diagnostic-v1"),
-                        ("failed_gates", FrameworkJson.Array(failedGlobalGates)))) + "\n")
+                        ("kind", "apr-r4-e2-supervisor-global-diagnostic-v2"),
+                        ("failed_gates", FrameworkJson.Array(failedGlobalGates)),
+                        ("canary_route_failures", FrameworkJson.Array(
+                            canaryRouteFailures)))) + "\n")
                     .ConfigureAwait(false);
             }
             await WriteEvidenceAsync(root, payload, platform, cases, false)
@@ -617,6 +622,8 @@ internal static class FrameworkSupervisor
         var crashGateReached = false;
 
         var signalGateReached = spec.SignalAfterGate is null;
+        var hostInitializationObserved =
+            !spec.SignalAfterHostStart && !spec.CrashHost;
         if (spec.CrashAfterGate is not null && hostPid > 0)
         {
             crashGateReached = await WaitForFileAsync(
@@ -640,14 +647,17 @@ internal static class FrameworkSupervisor
         }
         else if (spec.SignalAfterHostStart && hostPid > 0)
         {
-            _ = Kill(process.Id, 15);
+            hostInitializationObserved = await WaitForFileAsync(
+                Path.Join(scenario, "host-initialization-complete"),
+                TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            if (hostInitializationObserved) _ = Kill(process.Id, 15);
         }
         else if (spec.CrashHost && hostPid > 0)
         {
-            var environmentRecorded = await WaitForFileAsync(
-                Path.Join(scenario, "host-environment.keys"),
+            hostInitializationObserved = await WaitForFileAsync(
+                Path.Join(scenario, "host-initialization-complete"),
                 TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-            if (environmentRecorded) _ = KillProcess(hostPid);
+            if (hostInitializationObserved) _ = KillProcess(hostPid);
         }
 
         var exited = await WaitForExitAsync(process, ProcessTimeout)
@@ -783,6 +793,7 @@ internal static class FrameworkSupervisor
             closedEnvironment && reorderedHistoryRejected && outputUnchanged &&
             groupQuiet && platformQuiet && continuation &&
             successfulContinuation && sixTools && signalGateReached &&
+            hostInitializationObserved &&
             noProviderSatisfied && providerCountSatisfied &&
             stickyCountSatisfied && scenarioEvidenceSatisfied &&
             stateOperationSatisfied && globalEvidenceSatisfied &&
@@ -809,6 +820,8 @@ internal static class FrameworkSupervisor
                     ("successful_continuation", successfulContinuation),
                     ("tool_sequence_satisfied", sixTools),
                     ("signal_gate_reached", signalGateReached),
+                    ("host_initialization_observed",
+                        hostInitializationObserved),
                     ("no_provider_satisfied", noProviderSatisfied),
                     ("provider_count_satisfied", providerCountSatisfied),
                     ("sticky_count_satisfied", stickyCountSatisfied),
@@ -2988,7 +3001,10 @@ internal static class FrameworkSupervisor
                 .Distinct(StringComparer.Ordinal).Count() == classes.Length;
     }
 
-    private static bool EvaluateCanaryRoutes(string root, string tablePath)
+    internal static bool EvaluateCanaryRoutes(
+        string root,
+        string tablePath,
+        ICollection<string> failures)
     {
         var routes = File.ReadAllLines(tablePath).Skip(1)
             .Select(line => line.Split('\t'))
@@ -3012,11 +3028,27 @@ internal static class FrameworkSupervisor
             .Where(line => line.Length > 0)
             .Select(line => line.Split('\t'))
             .ToArray();
-        if (observations.Any(fields => fields.Length != 2 ||
-                !routes.TryGetValue(fields[0], out var route) ||
-                !RouteAllows(route, fields[1])))
+        for (var index = 0; index < observations.Length; index++)
         {
-            return false;
+            var fields = observations[index];
+            if (fields.Length != 2)
+            {
+                failures.Add("observation-shape:" +
+                    index.ToString(CultureInfo.InvariantCulture));
+                return false;
+            }
+            if (!routes.TryGetValue(fields[0], out var route))
+            {
+                failures.Add("observation-class:sha256-" +
+                    Sha256Text(fields[0]));
+                return false;
+            }
+            if (!RouteAllows(route, fields[1]))
+            {
+                failures.Add("observation-route:" + fields[0] +
+                    ":sink-sha256-" + Sha256Text(fields[1]));
+                return false;
+            }
         }
 
         foreach (var (canaryClass, route) in routes)
@@ -3026,6 +3058,7 @@ internal static class FrameworkSupervisor
                     !SinkMatches(pattern, NegativeSink(pattern)) ||
                     RouteAllows(route, NegativeSink(pattern))))
             {
+                failures.Add("forbidden-route-model:" + canaryClass);
                 return false;
             }
 
@@ -3056,16 +3089,65 @@ internal static class FrameworkSupervisor
                     ? count < 1
                     : expected < 1 || count != expected)
             {
+                failures.Add("cardinality:" + canaryClass + ":" +
+                    route.Cardinality + ":actual=" +
+                    count.ToString(CultureInfo.InvariantCulture) +
+                    ":expected=" +
+                    expected.ToString(CultureInfo.InvariantCulture));
                 return false;
             }
         }
 
         var negativeInjectionCount = RunNegativeInjectionMatrix(root, routes);
-        if (negativeInjectionCount < 1) return false;
+        if (negativeInjectionCount < 1)
+        {
+            failures.Add("negative-injection-matrix");
+            return false;
+        }
         File.WriteAllText(Path.Join(root, "canary-negative-injection-count"),
             negativeInjectionCount.ToString(CultureInfo.InvariantCulture));
         return true;
     }
+
+    internal static string[] CanaryRouteViolationFailures(string root)
+    {
+        var path = Path.Join(root, "canary-route-violation");
+        if (!File.Exists(path)) return [];
+        return File.ReadAllLines(path)
+            .Select((line, index) =>
+            {
+                var fields = line.Split('\t');
+                return fields.Length == 3
+                    ? "route-violation:" +
+                        (IsKnownCanaryClass(fields[0])
+                            ? fields[0]
+                            : "unknown-class") + ":" +
+                        (IsKnownViolationReason(fields[2])
+                            ? fields[2]
+                            : "unknown-reason") + ":sha256-" +
+                        Sha256Text(line)
+                    : "route-violation-shape:" +
+                        index.ToString(CultureInfo.InvariantCulture) + ":" +
+                        Sha256Text(line);
+            })
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Take(64)
+            .ToArray();
+    }
+
+    private static bool IsKnownCanaryClass(string value) => value is
+        "provider-key" or "github-token" or "state-key-current" or
+        "state-key-previous" or "actions-runtime-jwt" or "signed-url-sig" or
+        "repository" or "reviewed-path" or "workflow-source" or "prompt" or
+        "tool-data" or "session-plaintext" or "artifact-ciphertext" or
+        "public-result" or "archive";
+
+    private static bool IsKnownViolationReason(string value) => value is
+        "expected_missing" or "public_leak" or "forbidden_present" or
+        "zip_shape_invalid" or "envelope_shape_invalid" or
+        "ciphertext_binding_invalid" or "archive_decode_invalid" or
+        "zip_decode_invalid" or "plaintext_in_artifact_archive";
 
     private static bool RouteAllows(CanaryRoute route, string sink) =>
         (route.AllowedSinks.Contains(sink) ||

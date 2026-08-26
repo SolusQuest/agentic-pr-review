@@ -156,6 +156,81 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     }
 
     [Fact]
+    public void FrameworkKillGatesWaitForAtomicCanaryInitializationReceipt()
+    {
+        var root = FindRepositoryRoot();
+        var host = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkHost.cs"));
+        var supervisor = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkSupervisor.cs"));
+
+        var providerCount = host.IndexOf("host-provider-credential-count",
+            StringComparison.Ordinal);
+        var githubCount = host.IndexOf("host-github-credential-count",
+            StringComparison.Ordinal);
+        var initialization = host.IndexOf("host-initialization-complete",
+            StringComparison.Ordinal);
+        Assert.True(providerCount >= 0 && providerCount < initialization);
+        Assert.True(githubCount >= 0 && githubCount < initialization);
+        Assert.Contains("hostInitializationObserved = await WaitForFileAsync(",
+            supervisor, StringComparison.Ordinal);
+        Assert.Contains("hostInitializationObserved &&", supervisor,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CanaryRouteDiagnosticsNameCardinalityWithoutEchoingUnknownInput()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-canary-route-diagnostic-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var table = Path.Join(root, "routes.tsv");
+            File.WriteAllText(table,
+                "class\tsource\tapproved_private_sinks\tterminal_sinks\t" +
+                "forbidden_sinks\tcardinality\n" +
+                "public-result\tprovider.response\tagent.validation\t-\t" +
+                "public.*\texactly-one\n");
+            var failures = new List<string>();
+
+            Assert.False(global::AgenticPrReview.Runtime
+                .ActionHostVerifierFixture.FrameworkSupervisor
+                .EvaluateCanaryRoutes(root, table, failures));
+            Assert.Equal(
+                ["cardinality:public-result:exactly-one:actual=0:expected=1"],
+                failures);
+            File.WriteAllText(Path.Join(root, "canary-observations.tsv"),
+                "lowercasesecret\tpublic.output\n");
+            failures.Clear();
+            Assert.False(global::AgenticPrReview.Runtime
+                .ActionHostVerifierFixture.FrameworkSupervisor
+                .EvaluateCanaryRoutes(root, table, failures));
+            Assert.Single(failures);
+            Assert.StartsWith("observation-class:sha256-", failures[0],
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("lowercasesecret", failures[0],
+                StringComparison.Ordinal);
+
+            File.WriteAllText(Path.Join(root, "canary-route-violation"),
+                "artifact-ciphertext\tlowercasesecret\t" +
+                "plaintext_in_artifact_archive\n");
+            var violation = Assert.Single(global::AgenticPrReview.Runtime
+                .ActionHostVerifierFixture.FrameworkSupervisor
+                .CanaryRouteViolationFailures(root));
+            Assert.StartsWith("route-violation:artifact-ciphertext:" +
+                "plaintext_in_artifact_archive:sha256-", violation,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("lowercasesecret", violation,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SyntheticPlatformCountsAcceptedRequestsBeforeSchedulingHandlers()
     {
         var root = FindRepositoryRoot();
