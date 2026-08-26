@@ -15,14 +15,13 @@ internal static partial class Program
         var leases = new List<PinnedEvidenceLease>();
         var protectedScanValues = new Dictionary<string, IReadOnlyList<byte[]>>(StringComparer.Ordinal);
         var leasesByOption = new Dictionary<string, PinnedEvidenceLease>(StringComparer.Ordinal);
-        var protectedArtifactLeases = new List<PinnedEvidenceLease>();
         PinnedEvidenceLease? hostLease = null;
         PinnedEvidenceLease? manifestLease = null;
         PinnedEvidenceLease? publicScanLease = null;
         PinnedEvidenceLease? publicCandidateLease = null;
         PublicSurfaceCorpusLease? publicCorpus = null;
         byte[] publicBytes = [];
-        string? createdPublicPath = null;
+        CreatedEvidenceFileReceipt? createdPublicOutput = null;
         var completed = false;
         try
         {
@@ -35,7 +34,6 @@ internal static partial class Program
                 options["--destination-identity"],
                 [repositoryRoot, worktreeRoot, publicLogRoot]);
             AssertCredentialCopiesAbsent(root.Path);
-            protectedScanValues = ReadProtectedScanInput(Console.OpenStandardInput());
             publicCorpus = PublicSurfaceCorpusLease.Open(repositoryRoot, worktreeRoot, publicLogRoot);
 
             foreach (var option in new[]
@@ -47,6 +45,7 @@ internal static partial class Program
                 "--oracle-build-receipt",
                 "--ui-attestation",
                 "--cleanup-plan",
+                "--cleanup-execution",
                 "--public-leak-scan",
                 "--restricted-package-readback",
                 "--oracle-assembly",
@@ -70,6 +69,10 @@ internal static partial class Program
             {
                 throw new InvalidDataException("assembly_capture_invalid");
             }
+            protectedScanValues = ReadProtectedScanInput(
+                Console.OpenStandardInput(),
+                root,
+                capture);
             foreach (var source in capture.Sources)
             {
                 leases.Add(AcquireExpected(
@@ -98,8 +101,6 @@ internal static partial class Program
                     artifact.EncryptedObjectFileIdentity);
                 leases.Add(archiveLease);
                 leases.Add(encryptedObjectLease);
-                protectedArtifactLeases.Add(archiveLease);
-                protectedArtifactLeases.Add(encryptedObjectLease);
             }
             var postCleanupCaptureLease = leasesByOption["--post-cleanup-capture-manifest"];
             var postCleanupCapture = ParseCanonical<CaptureManifestDocument>(
@@ -189,39 +190,13 @@ internal static partial class Program
                 throw new InvalidDataException("assembly_output_invalid");
             }
 
-            var hostOperations = HostOperationIds(hostLease.Bytes);
-            protectedScanValues.Add(
-                "host_evidence",
-                hostOperations.Select(Encoding.UTF8.GetBytes)
-                    .Concat(protectedArtifactLeases.Select(lease => lease.Bytes))
-                    .ToArray());
-            publicCorpus.AssertAbsent(protectedScanValues, publicBytes);
-            publicCorpus.AssertExactDocumentAbsent(hostLease.Bytes, publicBytes);
-            foreach (var lease in leases)
-            {
-                publicCorpus.AssertExactDocumentAbsent(lease.Bytes, publicBytes);
-            }
-            publicCorpus.ValidateComplete(null, []);
-            if (publicPath is not null)
-            {
-                createdPublicPath = publicPath;
-                WritePublicCreateNew(publicPath, publicBytes);
-                var readback = CanonicalEvidence.ReadPinnedAbsolute(
-                    publicPath,
-                    EvidenceLimits.MaximumDocumentBytes);
-                try
-                {
-                    if (!readback.Bytes.AsSpan().SequenceEqual(publicBytes))
-                    {
-                        throw new InvalidDataException("assembly_output_invalid");
-                    }
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(readback.Bytes);
-                }
-            }
-            publicCorpus.ValidateComplete(publicPath, publicBytes);
+            createdPublicOutput = EnforcePublicProjectionBoundary(
+                publicCorpus,
+                protectedScanValues,
+                publicBytes,
+                hostLease.Bytes,
+                leases.Select(lease => lease.Bytes).ToArray(),
+                publicPath);
 
             hostLease.Validate();
             manifestLease.Validate();
@@ -264,9 +239,9 @@ internal static partial class Program
             manifestLease?.Dispose();
             publicScanLease?.Dispose();
             publicCorpus?.Dispose();
-            if (!completed && createdPublicPath is not null)
+            if (!completed)
             {
-                DeleteFailedPublicOutput(createdPublicPath, publicBytes);
+                createdPublicOutput?.DeleteIfOwned();
             }
             publicCandidateLease?.Dispose();
             CryptographicOperations.ZeroMemory(publicBytes);
@@ -291,7 +266,13 @@ internal static partial class Program
         return 1;
     }
 
-    internal static Dictionary<string, IReadOnlyList<byte[]>> ReadProtectedScanInput(Stream input)
+    internal static Dictionary<string, IReadOnlyList<byte[]>> ReadProtectedScanInput(
+        Stream input,
+        RestrictedEvidenceRoot? restrictedRoot = null,
+        CaptureManifestDocument? capture = null,
+        string? expectedDigestForTest = null,
+        string? expectedRepositoryForTest = null,
+        IReadOnlyList<string>? expectedOperationsForTest = null)
     {
         using var memory = new MemoryStream();
         var buffer = new byte[4096];
@@ -316,8 +297,21 @@ internal static partial class Program
             AssertCanonical(bytes);
             using var document = JsonDocument.Parse(bytes);
             var root = document.RootElement;
-            ExactProperties(root, ["kind", "categories"]);
-            if (root.GetProperty("kind").GetString() != "apr-r4-e3-public-scan-memory-input-v1")
+            ExactProperties(root, ["kind", "repository", "operation_ids", "categories"]);
+            var expectedRepository = capture?.Repository ?? expectedRepositoryForTest;
+            var expectedOperations = capture?.OperationIds ?? expectedOperationsForTest;
+            var expectedDigest = expectedDigestForTest ??
+                (capture is not null && restrictedRoot is not null
+                    ? AuthorizedProtectedScanDigest(restrictedRoot, capture)
+                    : null);
+            if (root.GetProperty("kind").GetString() != "apr-r4-e3-public-scan-memory-input-v2" ||
+                expectedRepository is null || expectedOperations is null || expectedDigest is null ||
+                root.GetProperty("repository").GetString() != expectedRepository ||
+                !root.GetProperty("operation_ids").EnumerateArray()
+                    .Select(item => item.GetString()).SequenceEqual(expectedOperations) ||
+                !StringComparer.Ordinal.Equals(
+                    CanonicalEvidence.Sha256(bytes),
+                    expectedDigest))
             {
                 throw new InvalidDataException("public_scan_input_invalid");
             }
@@ -329,6 +323,7 @@ internal static partial class Program
                 "session_plaintext",
                 "provider_content",
                 "tool_data",
+                "host_evidence",
             };
             ExactProperties(categories, names);
             foreach (var name in names)
@@ -348,7 +343,7 @@ internal static partial class Program
                             throw new InvalidDataException("public_scan_input_invalid");
                         }
                         var candidate = value.GetBytesFromBase64();
-                        if (candidate.Length is < 16 or > EvidenceLimits.MaximumCredentialBytes)
+                        if (candidate.Length is < 32 or > EvidenceLimits.MaximumCredentialBytes)
                         {
                             CryptographicOperations.ZeroMemory(candidate);
                             throw new InvalidDataException("public_scan_input_invalid");
@@ -366,6 +361,13 @@ internal static partial class Program
                     throw;
                 }
             }
+            if (result.Values.SelectMany(value => value)
+                .Select(Convert.ToBase64String)
+                .Distinct(StringComparer.Ordinal).Count() != result.Values.Sum(value => value.Count))
+            {
+                throw new InvalidDataException("public_scan_input_invalid");
+            }
+            ValidateOperationBoundProtectedValues(result, expectedOperations);
             return result;
         }
         catch (FormatException)
@@ -386,6 +388,57 @@ internal static partial class Program
         }
     }
 
+    private static string AuthorizedProtectedScanDigest(
+        RestrictedEvidenceRoot root,
+        CaptureManifestDocument capture)
+    {
+        var source = capture.Sources.Single(item =>
+            Regex.IsMatch(item.SourceId, "^authorization-execution-comment-[1-9][0-9]*:page:1$"));
+        using var lease = root.AcquirePinnedFile(source.BodyPath, EvidenceLimits.MaximumDocumentBytes);
+        if (!StringComparer.Ordinal.Equals(CanonicalEvidence.Sha256(lease.Bytes), source.BodySha256) ||
+            !StringComparer.Ordinal.Equals(lease.Identity, source.BodyFileIdentity))
+        {
+            throw new InvalidDataException("public_scan_input_invalid");
+        }
+        using var response = JsonDocument.Parse(lease.Bytes);
+        var body = response.RootElement.GetProperty("body").GetString() ?? "";
+        const string prefix = "<!-- apr-r4-e3-authorization ";
+        const string suffix = " -->";
+        if (!body.StartsWith(prefix, StringComparison.Ordinal) ||
+            !body.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("public_scan_input_invalid");
+        }
+        using var marker = JsonDocument.Parse(body[prefix.Length..^suffix.Length]);
+        var authorization = marker.RootElement.GetProperty("authorization");
+        var binding = authorization.GetProperty("protected_scan_input");
+        ExactProperties(binding, ["kind", "repository", "operation_ids", "categories", "sha256"]);
+        var expectedCategories = new[]
+        {
+            "authorization",
+            "state_keys",
+            "session_plaintext",
+            "provider_content",
+            "tool_data",
+            "host_evidence",
+        };
+        if (binding.GetProperty("kind").GetString() != "apr-r4-e3-operation-canary-binding-v1" ||
+            binding.GetProperty("repository").GetString() != capture.Repository ||
+            !binding.GetProperty("operation_ids").EnumerateArray()
+                .Select(item => item.GetString()).SequenceEqual(capture.OperationIds) ||
+            !binding.GetProperty("categories").EnumerateArray()
+                .Select(item => item.GetString()).SequenceEqual(expectedCategories))
+        {
+            throw new InvalidDataException("public_scan_input_invalid");
+        }
+        var digest = binding.GetProperty("sha256").GetString() ?? "";
+        if (!Regex.IsMatch(digest, "^[0-9a-f]{64}$"))
+        {
+            throw new InvalidDataException("public_scan_input_invalid");
+        }
+        return digest;
+    }
+
     private static void ZeroProtectedValues(
         IReadOnlyDictionary<string, IReadOnlyList<byte[]>> values)
     {
@@ -395,6 +448,47 @@ internal static partial class Program
             {
                 CryptographicOperations.ZeroMemory(value);
             }
+        }
+    }
+
+    private static void ValidateOperationBoundProtectedValues(
+        IReadOnlyDictionary<string, IReadOnlyList<byte[]>> actual,
+        IReadOnlyList<string> operationIds)
+    {
+        if (operationIds.Count != 2 ||
+            operationIds.Any(value => !Regex.IsMatch(value, "^[0-9a-f]{64}$")))
+        {
+            throw new InvalidDataException("public_scan_input_invalid");
+        }
+        var operation = operationIds[0];
+        var state = Encoding.UTF8.GetBytes($"APR_R4_E4_STATE_KEY_{operation}");
+        var expected = new Dictionary<string, IReadOnlyList<byte[]>>(StringComparer.Ordinal)
+        {
+            ["authorization"] =
+            [
+                Encoding.UTF8.GetBytes($"APR_R4_E4_AUTHORIZATION_{operation}"),
+                Encoding.UTF8.GetBytes($"Bearer APR_R4_E4_AUTHORIZATION_{operation}"),
+            ],
+            ["state_keys"] = [state, Encoding.UTF8.GetBytes(Convert.ToBase64String(state))],
+            ["session_plaintext"] = [Encoding.UTF8.GetBytes($"APR_R4_E4_SESSION_PLAINTEXT_{operation}")],
+            ["provider_content"] = [Encoding.UTF8.GetBytes($"APR_R4_E4_PROVIDER_CONTENT_{operation}")],
+            ["tool_data"] = [Encoding.UTF8.GetBytes($"APR_R4_E4_TOOL_DATA_{operation}")],
+            ["host_evidence"] = [Encoding.UTF8.GetBytes($"APR_R4_E4_HOST_EVIDENCE_{operation}")],
+        };
+        try
+        {
+            if (expected.Any(category =>
+                    !actual.TryGetValue(category.Key, out var observed) ||
+                    observed.Count != category.Value.Count ||
+                    observed.Where((value, index) =>
+                        !value.AsSpan().SequenceEqual(category.Value[index])).Any()))
+            {
+                throw new InvalidDataException("public_scan_input_invalid");
+            }
+        }
+        finally
+        {
+            ZeroProtectedValues(expected);
         }
     }
 
@@ -522,6 +616,74 @@ internal static partial class Program
             throw new InvalidDataException("assembly_host_invalid");
         }
         return values;
+    }
+
+    internal static CreatedEvidenceFileReceipt? EnforcePublicProjectionBoundary(
+        PublicSurfaceCorpusLease publicCorpus,
+        IReadOnlyDictionary<string, IReadOnlyList<byte[]>> protectedScanValues,
+        byte[] publicBytes,
+        byte[] hostBytes,
+        IReadOnlyList<byte[]> protectedDocuments,
+        string? publicPath)
+    {
+        _ = HostOperationIds(hostBytes);
+        using (var host = JsonDocument.Parse(hostBytes))
+        {
+            var observedCleanup = host.RootElement.GetProperty("inventories")
+                .GetProperty("observed_cleanup").EnumerateArray().ToArray();
+            var artifactIds = observedCleanup
+                .Select(item => item.GetProperty("artifact_id").GetString() ?? "")
+                .ToArray();
+            if (artifactIds.Length != 15 ||
+                artifactIds.Distinct(StringComparer.Ordinal).Count() != artifactIds.Length ||
+                artifactIds.Any(value => !Regex.IsMatch(value, "^[1-9][0-9]{0,19}$")))
+            {
+                throw new InvalidDataException("assembly_host_inventory_invalid");
+            }
+        }
+        if ((publicPath is null) != (publicBytes.Length == 0))
+        {
+            throw new InvalidDataException("assembly_output_invalid");
+        }
+
+        publicCorpus.AssertAbsent(protectedScanValues, publicBytes);
+        publicCorpus.AssertExactDocumentAbsent(hostBytes, publicBytes);
+        foreach (var document in protectedDocuments)
+        {
+            publicCorpus.AssertExactDocumentAbsent(document, publicBytes);
+        }
+        publicCorpus.ValidateComplete(null, []);
+        if (publicPath is null)
+        {
+            return null;
+        }
+
+        CreatedEvidenceFileReceipt? receipt = null;
+        try
+        {
+            receipt = WritePublicCreateNew(publicPath, publicBytes);
+            var readback = CanonicalEvidence.ReadPinnedAbsolute(
+                publicPath,
+                EvidenceLimits.MaximumDocumentBytes);
+            try
+            {
+                if (!readback.Bytes.AsSpan().SequenceEqual(publicBytes))
+                {
+                    throw new InvalidDataException("assembly_output_invalid");
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(readback.Bytes);
+            }
+            publicCorpus.ValidateComplete(publicPath, publicBytes);
+            return receipt;
+        }
+        catch
+        {
+            receipt?.DeleteIfOwned();
+            throw;
+        }
     }
 
     private static string ValidatePublicScanManifest(
@@ -708,44 +870,17 @@ internal static partial class Program
         throw new InvalidDataException("assembly_output_invalid");
     }
 
-    internal static void WritePublicCreateNew(string path, ReadOnlySpan<byte> bytes)
+    internal static CreatedEvidenceFileReceipt WritePublicCreateNew(
+        string path,
+        ReadOnlySpan<byte> bytes,
+        int? failAfterBytesForTest = null)
     {
-        using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        output.Write(bytes);
-        output.Flush(flushToDisk: true);
+        var receipt = CreatedEvidenceFileReceipt.WriteCreateNew(path, bytes, failAfterBytesForTest);
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
-    }
-
-    internal static void DeleteFailedPublicOutput(string path, ReadOnlySpan<byte> expected)
-    {
-        try
-        {
-            var info = new FileInfo(path);
-            if (!info.Exists || info.LinkTarget is not null ||
-                (info.Attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                return;
-            }
-            var current = File.ReadAllBytes(path);
-            try
-            {
-                if (current.Length <= expected.Length &&
-                    expected[..current.Length].SequenceEqual(current))
-                {
-                    File.Delete(path);
-                }
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(current);
-            }
-        }
-        catch
-        {
-        }
+        return receipt;
     }
 
     private static void AssertCredentialCopiesAbsent(string root)
@@ -794,6 +929,7 @@ internal static partial class Program
         "--oracle-build-receipt",
         "--ui-attestation",
         "--cleanup-plan",
+        "--cleanup-execution",
         "--public-leak-scan",
         "--restricted-package-readback",
         "--oracle-assembly",

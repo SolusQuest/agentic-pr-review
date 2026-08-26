@@ -191,7 +191,7 @@ function validateSourceMap(value) {
       'post-cleanup-readbacks',
       'exact-cleanup-target-get-readbacks',
       'complete-cursor',
-      'post-cleanup capture manifest and all raw source pages',
+      'cleanup execution journal, plan, post-cleanup capture manifest, and phase-specific raw readbacks',
     ],
     [
       '/canaries/live',
@@ -446,7 +446,11 @@ function validateSourceEvidenceBindings(
     ['/inventories', [{ source_id: 'production-codec-oracle-result', sha256: oracleResultSha256 }]],
     [
       '/cleanup',
-      [retainedReference('cleanup-plan'), retainedReference('post-cleanup-capture-manifest')],
+      [
+        retainedReference('cleanup-execution'),
+        retainedReference('cleanup-plan'),
+        retainedReference('post-cleanup-capture-manifest'),
+      ],
     ],
     [
       '/canaries/live',
@@ -1476,6 +1480,7 @@ function validateAuthorization(value, identities) {
       'destination_identity',
       'oracle_build',
       'commands',
+      'protected_scan_input',
     ],
     'execution-authorization-shape',
   );
@@ -1569,6 +1574,30 @@ function validateAuthorization(value, identities) {
   for (const credential of value.execution.credential_files) {
     exactKeys(credential, ['name', 'file_identity_sha256'], 'execution-credential-shape');
     if (!hex64.test(credential.file_identity_sha256)) invalid('execution-credential-values');
+  }
+  exactKeys(
+    value.execution.protected_scan_input,
+    ['kind', 'repository', 'operation_ids', 'categories', 'sha256'],
+    'execution-protected-scan-input-shape',
+  );
+  if (
+    value.execution.protected_scan_input.kind !== 'apr-r4-e3-operation-canary-binding-v1' ||
+    value.execution.protected_scan_input.repository !== identities.repository ||
+    canonicalJson(value.execution.protected_scan_input.operation_ids) !==
+      canonicalJson(value.execution.operation_ids) ||
+    canonicalJson(value.execution.protected_scan_input.categories) !==
+      canonicalJson([
+        'authorization',
+        'state_keys',
+        'session_plaintext',
+        'provider_content',
+        'tool_data',
+        'host_evidence',
+      ]) ||
+    value.execution.protected_scan_input.sha256 !==
+      sha256(canonicalJson(buildProtectedScanInput(value, identities.repository)))
+  ) {
+    invalid('execution-protected-scan-input-values');
   }
 
   exactKeys(
@@ -2364,9 +2393,19 @@ export function validateHostEvidence(input) {
     invalid('cleanup-plan-digest');
   exactKeys(
     input.cleanup,
-    ['plan_sha256', 'resources', 'entry_gate', 'ordered_readbacks', 'projection_gate'],
+    [
+      'plan_sha256',
+      'execution_journal_sha256',
+      'entry_observation',
+      'resources',
+      'entry_gate',
+      'ordered_readbacks',
+      'projection_gate',
+    ],
     'cleanup-shape',
   );
+  if (!hex64.test(input.cleanup.execution_journal_sha256)) invalid('cleanup-execution-digest');
+  interval(input.cleanup.entry_observation, 'cleanup-entry-observation');
   exactKeys(
     input.cleanup.entry_gate,
     [
@@ -2388,14 +2427,37 @@ export function validateHostEvidence(input) {
   );
   if (
     input.cleanup.ordered_readbacks.some((item) => {
-      exactKeys(item, ['phase', 'source_ids'], 'cleanup-readback-shape');
+      exactKeys(
+        item,
+        ['phase', 'observation', 'mutations', 'source_ids'],
+        'cleanup-readback-shape',
+      );
+      interval(item.observation, 'cleanup-readback-observation');
       return (
         !Array.isArray(item.source_ids) ||
         item.source_ids.some(
           (sourceId) =>
             typeof sourceId !== 'string' ||
-            !/^post-cleanup-[a-z0-9-]+:page:[1-9][0-9]*$/u.test(sourceId),
-        )
+            (!/^post-cleanup-[a-z0-9-]+:page:[1-9][0-9]*$/u.test(sourceId) &&
+              sourceId !== 'cleanup-execution:local-credential-absence'),
+        ) ||
+        !Array.isArray(item.mutations) ||
+        item.mutations.some((mutation) => {
+          exactKeys(mutation, ['target_id', 'outcome', 'source_ids'], 'cleanup-mutation-shape');
+          return (
+            typeof mutation.target_id !== 'string' ||
+            mutation.target_id.length === 0 ||
+            ![
+              'committed',
+              'known-not-sent-absent',
+              'missing-idempotent',
+              'reconciled-outcome-unknown',
+            ].includes(mutation.outcome) ||
+            !Array.isArray(mutation.source_ids) ||
+            mutation.source_ids.length === 0 ||
+            mutation.source_ids.some((sourceId) => !item.source_ids.includes(sourceId))
+          );
+        })
       );
     })
   ) {
@@ -2414,7 +2476,7 @@ export function validateHostEvidence(input) {
       'all_runs_terminal',
       'sticky_exact',
       'credential_copies_absent',
-      'private_manifest_finalized',
+      'private_manifest_inputs_sealed',
     ],
     'projection-gate-shape',
   );
@@ -2489,7 +2551,7 @@ export function validateHostEvidence(input) {
     input.restricted_package.current_key_copy_absent !== true ||
     input.restricted_package.previous_key_copy_absent !== true ||
     input.restricted_package.manifest_finalized !== true ||
-    input.cleanup.projection_gate.private_manifest_finalized !== true
+    input.cleanup.projection_gate.private_manifest_inputs_sealed !== true
   ) {
     invalid('restricted-package-values');
   }
@@ -2933,6 +2995,208 @@ function capturedPages(manifest, bodies, sourceId, route, pagination) {
   };
 }
 
+function cleanupMutationTargets(cleanupPlan) {
+  return new Map([
+    [
+      'remove-proof-control',
+      cleanupPlan.targets.control_comments.map(({ comment_id }) => `comment:${comment_id}`),
+    ],
+    [
+      'delete-observed-state',
+      cleanupPlan.targets.state_artifacts.map(({ artifact_id }) => `artifact:${artifact_id}`),
+    ],
+    [
+      'remove-authorization-and-secrets',
+      [
+        `variable:${cleanupPlan.targets.authorization_variable.name}`,
+        ...cleanupPlan.targets.secrets.map(({ name }) => `secret:${name}`),
+      ],
+    ],
+    ['restore-environment', [`environment:${cleanupPlan.targets.environment.name}`]],
+    [
+      'retire-fixtures',
+      [
+        ...cleanupPlan.targets.fixture_refs.map(({ ref }) => `ref:${ref}`),
+        ...cleanupPlan.targets.fixture_prs.map(({ number }) => `pr:${number}`),
+      ],
+    ],
+    [
+      'remove-local-credentials',
+      cleanupPlan.targets.credential_copies.map(({ name }) => `credential:${name}`),
+    ],
+  ]);
+}
+
+function validateCleanupExecution({
+  cleanupExecution,
+  cleanupPlan,
+  authorizations,
+  captureManifest,
+  captureManifestSha256,
+  postCleanupCaptureManifest,
+  postCleanupCaptureManifestSha256,
+  oracleResultSha256,
+  credentialCopiesAbsent,
+}) {
+  exactKeys(
+    cleanupExecution,
+    ['kind', 'repository', 'operation_ids', 'plan_sha256', 'entry', 'phases', 'seal'],
+    'cleanup-execution-shape',
+  );
+  exactKeys(
+    cleanupExecution.entry,
+    [
+      'cleanup_authorization_source_id',
+      'capture_manifest_sha256',
+      'oracle_result_sha256',
+      'run_terminal_source_ids',
+      'observation',
+    ],
+    'cleanup-execution-entry-shape',
+  );
+  interval(cleanupExecution.entry.observation, 'cleanup-execution-entry-observation');
+  const expectedRunSources = authorizations.execution.operation_runs.map(
+    ({ run_id }) => `run-terminal-${run_id}:page:1`,
+  );
+  const captureSources = new Map(
+    captureManifest.sources.map((source) => [source.source_id, source]),
+  );
+  if (
+    cleanupExecution.kind !== 'apr-r4-e3-cleanup-execution-v1' ||
+    cleanupExecution.repository !== captureManifest.repository ||
+    canonicalJson(cleanupExecution.operation_ids) !==
+      canonicalJson(captureManifest.operation_ids) ||
+    cleanupExecution.plan_sha256 !== sha256(canonicalJson(cleanupPlan)) ||
+    cleanupExecution.entry.cleanup_authorization_source_id !==
+      `authorization-cleanup-comment-${authorizations.cleanup.source.comment_id}:page:1` ||
+    cleanupExecution.entry.capture_manifest_sha256 !== captureManifestSha256 ||
+    cleanupExecution.entry.oracle_result_sha256 !== oracleResultSha256 ||
+    canonicalJson(cleanupExecution.entry.run_terminal_source_ids) !==
+      canonicalJson(expectedRunSources) ||
+    authorizations.cleanup.source.observation.response_received >=
+      cleanupExecution.entry.observation.request_started ||
+    expectedRunSources.some((sourceId) => {
+      const source = captureSources.get(sourceId);
+      return (
+        source === undefined ||
+        source.response_received_unix_milliseconds >=
+          cleanupExecution.entry.observation.request_started
+      );
+    })
+  ) {
+    invalid('cleanup-execution-entry');
+  }
+
+  if (
+    !Array.isArray(cleanupExecution.phases) ||
+    cleanupExecution.phases.length !== cleanupPhases.length
+  ) {
+    invalid('cleanup-execution-phases');
+  }
+  const postSources = new Map(
+    postCleanupCaptureManifest.sources.map((source) => [source.source_id, source]),
+  );
+  const targets = cleanupMutationTargets(cleanupPlan);
+  const usedReadbacks = new Set();
+  const localCredentialReadback = 'cleanup-execution:local-credential-absence';
+  let previousResponse = cleanupExecution.entry.observation.response_received;
+  for (let index = 0; index < cleanupPhases.length; index += 1) {
+    const phase = cleanupExecution.phases[index];
+    exactKeys(
+      phase,
+      ['phase', 'observation', 'mutations', 'readback_source_ids'],
+      'cleanup-execution-phase-shape',
+    );
+    interval(phase.observation, 'cleanup-execution-phase-observation');
+    if (
+      phase.phase !== cleanupPhases[index] ||
+      phase.observation.request_started <= previousResponse ||
+      !Array.isArray(phase.readback_source_ids) ||
+      new Set(phase.readback_source_ids).size !== phase.readback_source_ids.length ||
+      phase.readback_source_ids.some((sourceId) => {
+        if (sourceId === localCredentialReadback) {
+          return phase.phase !== 'remove-local-credentials' || usedReadbacks.has(sourceId);
+        }
+        const source = postSources.get(sourceId);
+        return (
+          usedReadbacks.has(sourceId) ||
+          source === undefined ||
+          source.request_started_unix_milliseconds < phase.observation.request_started ||
+          source.response_received_unix_milliseconds > phase.observation.response_received
+        );
+      })
+    ) {
+      invalid('cleanup-execution-phase-order');
+    }
+    phase.readback_source_ids.forEach((sourceId) => usedReadbacks.add(sourceId));
+    const expectedTargets = targets.get(phase.phase) ?? [];
+    if (!Array.isArray(phase.mutations) || phase.mutations.length !== expectedTargets.length) {
+      invalid('cleanup-execution-mutation-cardinality');
+    }
+    const observedTargets = [];
+    for (const mutation of phase.mutations) {
+      exactKeys(
+        mutation,
+        ['target_id', 'outcome', 'request', 'post_readback_source_ids'],
+        'cleanup-execution-mutation-shape',
+      );
+      interval(mutation.request, 'cleanup-execution-mutation-request');
+      if (
+        ![
+          'committed',
+          'known-not-sent-absent',
+          'missing-idempotent',
+          'reconciled-outcome-unknown',
+        ].includes(mutation.outcome) ||
+        mutation.request.request_started < phase.observation.request_started ||
+        mutation.request.response_received > phase.observation.response_received ||
+        !Array.isArray(mutation.post_readback_source_ids) ||
+        mutation.post_readback_source_ids.length === 0 ||
+        mutation.post_readback_source_ids.some((sourceId) => {
+          if (sourceId === localCredentialReadback) {
+            return phase.phase !== 'remove-local-credentials';
+          }
+          const source = postSources.get(sourceId);
+          return (
+            !phase.readback_source_ids.includes(sourceId) ||
+            source.request_started_unix_milliseconds <= mutation.request.response_received
+          );
+        })
+      ) {
+        invalid('cleanup-execution-mutation-outcome');
+      }
+      observedTargets.push(mutation.target_id);
+    }
+    if (canonicalJson(observedTargets) !== canonicalJson(expectedTargets)) {
+      invalid('cleanup-execution-mutation-targets');
+    }
+    previousResponse = phase.observation.response_received;
+  }
+  exactKeys(
+    cleanupExecution.seal,
+    [
+      'observation',
+      'post_cleanup_capture_manifest_sha256',
+      'credential_copies_absent',
+      'private_manifest_inputs_sealed',
+    ],
+    'cleanup-execution-seal-shape',
+  );
+  interval(cleanupExecution.seal.observation, 'cleanup-execution-seal-observation');
+  if (
+    cleanupExecution.seal.observation.request_started <= previousResponse ||
+    cleanupExecution.seal.post_cleanup_capture_manifest_sha256 !==
+      postCleanupCaptureManifestSha256 ||
+    cleanupExecution.seal.credential_copies_absent !== credentialCopiesAbsent ||
+    cleanupExecution.seal.private_manifest_inputs_sealed !== true ||
+    [...usedReadbacks].filter((sourceId) => sourceId !== localCredentialReadback).length !==
+      postCleanupCaptureManifest.sources.length
+  ) {
+    invalid('cleanup-execution-seal');
+  }
+  return cleanupExecution.phases;
+}
+
 export function derivePostCleanupEvidence({
   captureManifest,
   postCleanupCaptureManifest,
@@ -2942,6 +3206,10 @@ export function derivePostCleanupEvidence({
   cleanupPlan,
   exactSevenSuccess,
   credentialCopiesAbsent,
+  cleanupExecution,
+  captureManifestSha256,
+  postCleanupCaptureManifestSha256,
+  oracleResultSha256,
 }) {
   if (
     !(postCleanupCapturedSourceBodies instanceof Map) ||
@@ -2976,12 +3244,12 @@ export function derivePostCleanupEvidence({
     );
   };
   const normalComments = read(
-    `post-cleanup-comments-normal-pr-${fixtures[0].number}`,
+    `post-cleanup-control-comments-normal-pr-${fixtures[0].number}`,
     `${repositoryRoute}/issues/${fixtures[0].number}/comments`,
     'complete-cursor',
   );
   const staleComments = read(
-    `post-cleanup-comments-stale-pr-${fixtures[1].number}`,
+    `post-cleanup-control-comments-stale-pr-${fixtures[1].number}`,
     `${repositoryRoute}/issues/${fixtures[1].number}/comments`,
     'complete-cursor',
   );
@@ -3001,15 +3269,22 @@ export function derivePostCleanupEvidence({
   ) {
     invalid('post-cleanup-proof-control');
   }
+  const stateDeleteReads = runs.map((run) =>
+    read(
+      `post-cleanup-state-delete-run-${run}`,
+      `${repositoryRoute}/actions/runs/${run}/artifacts`,
+      'complete-cursor',
+    ),
+  );
   const artifactReads = runs.map((run) =>
     read(
-      `post-cleanup-artifacts-run-${run}`,
+      `post-cleanup-state-empty-run-${run}`,
       `${repositoryRoute}/actions/runs/${run}/artifacts`,
       'complete-cursor',
     ),
   );
   if (
-    artifactReads.some(({ values }) =>
+    [...stateDeleteReads, ...artifactReads].some(({ values }) =>
       values.some(
         (page) =>
           page.total_count !== 0 || !Array.isArray(page.artifacts) || page.artifacts.length !== 0,
@@ -3075,7 +3350,7 @@ export function derivePostCleanupEvidence({
     invalid('post-cleanup-fixture-prs');
   }
   const runReads = runs.map((run) =>
-    read(`post-cleanup-run-${run}`, `${repositoryRoute}/actions/runs/${run}`),
+    read(`post-cleanup-final-run-${run}`, `${repositoryRoute}/actions/runs/${run}`),
   );
   if (
     runReads.some(
@@ -3087,6 +3362,26 @@ export function derivePostCleanupEvidence({
     )
   ) {
     invalid('post-cleanup-runs');
+  }
+  const stickyNormalComments = read(
+    `post-cleanup-sticky-comments-normal-pr-${fixtures[0].number}`,
+    `${repositoryRoute}/issues/${fixtures[0].number}/comments`,
+    'complete-cursor',
+  );
+  const stickyStaleComments = read(
+    `post-cleanup-sticky-comments-stale-pr-${fixtures[1].number}`,
+    `${repositoryRoute}/issues/${fixtures[1].number}/comments`,
+    'complete-cursor',
+  );
+  const stickyValues = [...stickyNormalComments.values, ...stickyStaleComments.values].flat();
+  const finalStickyMatches = stickyValues.filter(({ id }) => String(id) === sticky.comment_id);
+  if (
+    stickyValues.some(({ id }) => deletedCommentIds.has(String(id))) ||
+    finalStickyMatches.length !== 1 ||
+    typeof finalStickyMatches[0].body !== 'string' ||
+    sha256(Buffer.from(finalStickyMatches[0].body, 'utf8')) !== sticky.body_sha256
+  ) {
+    invalid('post-cleanup-sticky');
   }
   const observedBaseIds = new Set(
     postCleanupCaptureManifest.sources.map(({ source_id }) =>
@@ -3103,34 +3398,32 @@ export function derivePostCleanupEvidence({
     ...normalComments.references,
     ...staleComments.references,
     ...artifactReads.flatMap(({ references: value }) => value),
+    ...stateDeleteReads.flatMap(({ references: value }) => value),
     ...variables.references,
     ...secrets.references,
     ...environment.references,
     ...refs.flatMap(({ references: value }) => value),
     ...pulls.flatMap(({ references: value }) => value),
     ...runReads.flatMap(({ references: value }) => value),
+    ...stickyNormalComments.references,
+    ...stickyStaleComments.references,
   ].sort((left, right) => left.source_id.localeCompare(right.source_id));
-  const phases = [
-    ['settle-runs', runReads.flatMap(({ references: value }) => value)],
-    ['remove-proof-control', [...normalComments.references, ...staleComments.references]],
-    ['delete-observed-state', artifactReads.flatMap(({ references: value }) => value)],
-    ['enumerate-empty-state', artifactReads.flatMap(({ references: value }) => value)],
-    ['remove-authorization-and-secrets', [...variables.references, ...secrets.references]],
-    ['restore-environment', environment.references],
-    [
-      'retire-fixtures',
-      [
-        ...refs.flatMap(({ references: value }) => value),
-        ...pulls.flatMap(({ references: value }) => value),
-      ],
-    ],
-    ['read-back-sticky', [...normalComments.references, ...staleComments.references]],
-    ['remove-local-credentials', []],
-    ['finalize-private-manifest', []],
-  ];
+  const phases = validateCleanupExecution({
+    cleanupExecution,
+    cleanupPlan,
+    authorizations,
+    captureManifest,
+    captureManifestSha256,
+    postCleanupCaptureManifest,
+    postCleanupCaptureManifestSha256,
+    oracleResultSha256,
+    credentialCopiesAbsent,
+  });
   return {
     cleanup: {
       plan_sha256: sha256(canonicalJson(cleanupPlan)),
+      execution_journal_sha256: sha256(canonicalJson(cleanupExecution)),
+      entry_observation: cleanupExecution.entry.observation,
       resources: {
         authorization_variable: cleanupPlan.targets.authorization_variable.name,
         secret_names: cleanupPlan.targets.secrets.map(({ name }) => name),
@@ -3155,9 +3448,15 @@ export function derivePostCleanupEvidence({
         artifacts_captured: true,
         plan_approved: true,
       },
-      ordered_readbacks: phases.map(([phase, sourceReferences]) => ({
-        phase,
-        source_ids: sourceReferences.map(({ source_id }) => source_id),
+      ordered_readbacks: phases.map((phase) => ({
+        phase: phase.phase,
+        observation: phase.observation,
+        mutations: phase.mutations.map((mutation) => ({
+          target_id: mutation.target_id,
+          outcome: mutation.outcome,
+          source_ids: mutation.post_readback_source_ids,
+        })),
+        source_ids: phase.readback_source_ids,
       })),
       projection_gate: {
         exact_seven_success: exactSevenSuccess,
@@ -3170,25 +3469,50 @@ export function derivePostCleanupEvidence({
         all_runs_terminal: true,
         sticky_exact: true,
         credential_copies_absent: credentialCopiesAbsent,
-        private_manifest_finalized: true,
+        private_manifest_inputs_sealed: cleanupExecution.seal.private_manifest_inputs_sealed,
       },
     },
     references,
   };
 }
 
-export function protectedCanaryCategories(authorizations) {
+export function buildProtectedScanInput(authorizations, repository) {
   const operation = authorizations.execution.operation_ids[0];
-  return new Map([
-    ['authorization', [Buffer.from(`APR_R4_E4_AUTHORIZATION_${operation}`, 'utf8')]],
-    ['state_keys', [Buffer.from(`APR_R4_E4_STATE_KEY_${operation}`, 'utf8')]],
+  const rawStateCanary = Buffer.from(`APR_R4_E4_STATE_KEY_${operation}`, 'utf8');
+  const values = new Map([
+    [
+      'authorization',
+      [
+        Buffer.from(`APR_R4_E4_AUTHORIZATION_${operation}`, 'utf8'),
+        Buffer.from(`Bearer APR_R4_E4_AUTHORIZATION_${operation}`, 'utf8'),
+      ],
+    ],
+    ['state_keys', [rawStateCanary, Buffer.from(rawStateCanary.toString('base64'), 'utf8')]],
     ['session_plaintext', [Buffer.from(`APR_R4_E4_SESSION_PLAINTEXT_${operation}`, 'utf8')]],
     ['provider_content', [Buffer.from(`APR_R4_E4_PROVIDER_CONTENT_${operation}`, 'utf8')]],
     ['tool_data', [Buffer.from(`APR_R4_E4_TOOL_DATA_${operation}`, 'utf8')]],
-    [
-      'host_evidence',
-      authorizations.execution.operation_ids.map((value) => Buffer.from(value, 'utf8')),
-    ],
+    ['host_evidence', [Buffer.from(`APR_R4_E4_HOST_EVIDENCE_${operation}`, 'utf8')]],
+  ]);
+  return {
+    kind: 'apr-r4-e3-public-scan-memory-input-v2',
+    repository,
+    operation_ids: authorizations.execution.operation_ids,
+    categories: Object.fromEntries(
+      [...values].map(([name, category]) => [
+        name,
+        category.map((value) => value.toString('base64')),
+      ]),
+    ),
+  };
+}
+
+export function protectedCanaryCategories(authorizations, repository) {
+  const input = buildProtectedScanInput(authorizations, repository);
+  return new Map([
+    ...Object.entries(input.categories).map(([name, values]) => [
+      name,
+      values.map((value) => Buffer.from(value, 'base64')),
+    ]),
   ]);
 }
 
@@ -3231,12 +3555,9 @@ export function scanPublicCandidate({
     categoryNames.map((name) => {
       const present = [...surfaces.values()].some((raw) => {
         const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'utf8');
-        return protectedCategories.get(name).some((protectedValue) => {
-          for (let offset = 0; offset <= protectedValue.length - 16; offset += 1) {
-            if (bytes.indexOf(protectedValue.subarray(offset, offset + 16)) !== -1) return true;
-          }
-          return false;
-        });
+        return protectedCategories
+          .get(name)
+          .some((protectedValue) => bytes.indexOf(protectedValue) !== -1);
       });
       return [name, present ? 'present' : 'absent'];
     }),
@@ -3384,10 +3705,12 @@ export function assembleTrustedProofEvidence({
   const restrictedPackage = retainedDocuments.get('restricted-package-readback');
   const publicLeakScan = retainedDocuments.get('public-leak-scan-result');
   const cleanupPlan = retainedDocuments.get('cleanup-plan');
+  const cleanupExecution = retainedDocuments.get('cleanup-execution');
   if (
     restrictedPackage === undefined ||
     publicLeakScan === undefined ||
-    cleanupPlan === undefined
+    cleanupPlan === undefined ||
+    cleanupExecution === undefined
   ) {
     invalid('assembler-retained-document-set');
   }
@@ -3410,6 +3733,10 @@ export function assembleTrustedProofEvidence({
       ({ disposition }) => disposition === 'recovery-only-delete',
     ),
     credentialCopiesAbsent,
+    cleanupExecution,
+    captureManifestSha256,
+    postCleanupCaptureManifestSha256,
+    oracleResultSha256,
   });
   const cleanup = postCleanup.cleanup;
   const expectedRestrictedPackage = {
@@ -3460,7 +3787,7 @@ export function assembleTrustedProofEvidence({
         value.text,
       ]),
     ]),
-    protectedCategories: protectedCanaryCategories(authorizations),
+    protectedCategories: protectedCanaryCategories(authorizations, captureManifest.repository),
   });
   const expectedPublicLeakScan = {
     source: 'post-cleanup-repository-and-output-scan',

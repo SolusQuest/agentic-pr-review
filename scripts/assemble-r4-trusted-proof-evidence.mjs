@@ -256,6 +256,7 @@ function parseArgs(args) {
     '--oracle-build-receipt',
     '--ui-attestation',
     '--cleanup-plan',
+    '--cleanup-execution',
     '--public-leak-scan',
     '--restricted-package-readback',
     '--oracle-assembly',
@@ -365,6 +366,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       false,
     );
     const retainedInputs = [
+      ['cleanup-execution', '--cleanup-execution'],
       ['cleanup-plan', '--cleanup-plan'],
       ['oracle-build-receipt', '--oracle-build-receipt'],
       ['public-leak-scan-result', '--public-leak-scan'],

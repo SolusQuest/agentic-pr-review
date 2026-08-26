@@ -40,7 +40,7 @@ public sealed record CapturePlanDocument(
 public static class CapturePlan
 {
     public const string CheckedSourceMapSha256 =
-        "1518126dd0a11ccc9b3c847906b07aeed85472ab92acd2d9686b838fc48b15dd";
+        "612c10ed04ee0545a0cd36869ca83cbed75eae687a3131513c2969d791003281";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     public static CapturePlanDocument Read(RestrictedEvidenceRoot root, string relativePath)
     {
@@ -303,8 +303,10 @@ public static class CapturePlan
         var runs = value.OperationRuns.Select(item => item.RunId).ToArray();
         var expected = new List<string>
         {
-            "comments-normal",
-            "comments-stale",
+            "control-comments-normal",
+            "control-comments-stale",
+            "sticky-comments-normal",
+            "sticky-comments-stale",
             "variables",
             "secrets",
             "environment",
@@ -313,8 +315,9 @@ public static class CapturePlan
             "pr-normal",
             "pr-stale",
         };
-        expected.AddRange(runs.Select(run => $"artifacts-{run}"));
-        expected.AddRange(runs.Select(run => $"run-{run}"));
+        expected.AddRange(runs.Select(run => $"state-delete-{run}"));
+        expected.AddRange(runs.Select(run => $"state-empty-{run}"));
+        expected.AddRange(runs.Select(run => $"final-run-{run}"));
         var prNumbers = new HashSet<string>(StringComparer.Ordinal);
         foreach (var source in value.Sources)
         {
@@ -351,21 +354,23 @@ public static class CapturePlan
         var root = $"/repos/{repository}";
         var comments = Regex.Match(
             source.SourceId,
-            "^post-cleanup-comments-(normal|stale)-pr-([1-9][0-9]*)$");
+            "^post-cleanup-(control|sticky)-comments-(normal|stale)-pr-([1-9][0-9]*)$");
         if (comments.Success)
         {
-            classification = $"comments-{comments.Groups[1].Value}";
-            prNumbers.Add(comments.Groups[2].Value);
+            classification = $"{comments.Groups[1].Value}-comments-{comments.Groups[2].Value}";
+            prNumbers.Add(comments.Groups[3].Value);
             return Exact(
                 source,
-                $"{root}/issues/{comments.Groups[2].Value}/comments",
+                $"{root}/issues/{comments.Groups[3].Value}/comments",
                 "complete-cursor");
         }
-        var artifacts = Regex.Match(source.SourceId, "^post-cleanup-artifacts-run-([1-9][0-9]*)$");
-        if (artifacts.Success && runs.Contains(artifacts.Groups[1].Value, StringComparer.Ordinal))
+        var artifacts = Regex.Match(
+            source.SourceId,
+            "^post-cleanup-state-(delete|empty)-run-([1-9][0-9]*)$");
+        if (artifacts.Success && runs.Contains(artifacts.Groups[2].Value, StringComparer.Ordinal))
         {
-            var run = artifacts.Groups[1].Value;
-            classification = $"artifacts-{run}";
+            var run = artifacts.Groups[2].Value;
+            classification = $"state-{artifacts.Groups[1].Value}-{run}";
             return Exact(source, $"{root}/actions/runs/{run}/artifacts", "complete-cursor");
         }
         if (source.SourceId == "post-cleanup-variables")
@@ -402,11 +407,11 @@ public static class CapturePlan
             classification = $"pr-{scope}";
             return Exact(source, $"{root}/pulls/{pull.Groups[2].Value}", "none");
         }
-        var runSource = Regex.Match(source.SourceId, "^post-cleanup-run-([1-9][0-9]*)$");
+        var runSource = Regex.Match(source.SourceId, "^post-cleanup-final-run-([1-9][0-9]*)$");
         if (runSource.Success && runs.Contains(runSource.Groups[1].Value, StringComparer.Ordinal))
         {
             var run = runSource.Groups[1].Value;
-            classification = $"run-{run}";
+            classification = $"final-run-{run}";
             return Exact(source, $"{root}/actions/runs/{run}", "none");
         }
         return false;

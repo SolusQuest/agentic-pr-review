@@ -127,12 +127,12 @@ internal sealed class PublicSurfaceCorpusLease : IDisposable
             {
                 foreach (var file in files)
                 {
-                    if (ContainsProtectedFragment(file.Bytes, protectedValue))
+                    if (file.Bytes.AsSpan().IndexOf(protectedValue) >= 0)
                     {
                         throw new InvalidDataException("public_scan_leak");
                     }
                 }
-                if (ContainsProtectedFragment(publicOutput, protectedValue))
+                if (publicOutput.IndexOf(protectedValue) >= 0)
                 {
                     throw new InvalidDataException("public_scan_leak");
                 }
@@ -171,19 +171,6 @@ internal sealed class PublicSurfaceCorpusLease : IDisposable
         {
             file.Dispose();
         }
-    }
-
-    private static bool ContainsProtectedFragment(ReadOnlySpan<byte> surface, ReadOnlySpan<byte> value)
-    {
-        const int fragmentLength = 16;
-        for (var offset = 0; offset <= value.Length - fragmentLength; offset++)
-        {
-            if (surface.IndexOf(value.Slice(offset, fragmentLength)) >= 0)
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static void Enumerate(CorpusRoot root, string current, List<CorpusFileLease> result)

@@ -8,6 +8,7 @@ import {
   assembleTrustedProofEvidence,
   assertPublicSafeEvidence,
   buildFinalizedPrivatePackageManifest,
+  buildProtectedScanInput,
   canonicalJson,
   cleanupPhases,
   generateCleanupPlan,
@@ -87,6 +88,11 @@ function syntheticAssembly(input = host) {
     fs.readFileSync(path.join(fixtureRoot, 'trusted-proof-payload-receipt-v2.json'), 'utf8'),
   );
   const payloadReceiptSha256 = sha256(canonicalJson(payloadReceipt));
+  candidate.authorizations.execution.protected_scan_input.sha256 = sha256(
+    canonicalJson(
+      buildProtectedScanInput(candidate.authorizations, candidate.identities.repository),
+    ),
+  );
   const roleById = new Map(
     candidate.inventories.expected_success.map((record: any) => [record.artifact_id, record.role]),
   );
@@ -457,6 +463,8 @@ function syntheticAssembly(input = host) {
   let postObservation = 200;
   const registerPostCleanup = (sourceId: string, route: string, value: any) => {
     const text = canonicalJson(value);
+    const observation = postObservation;
+    postObservation += 6;
     postCleanupCapturedSourceBodies.set(`${sourceId}:page:1`, { text });
     postCleanupSources.push({
       source_id: `${sourceId}:page:1`,
@@ -470,24 +478,31 @@ function syntheticAssembly(input = host) {
         .padStart(64, 'a')
         .slice(-64),
       safe_headers_sha256: 'd'.repeat(64),
-      request_started_unix_milliseconds: postObservation++,
-      response_received_unix_milliseconds: postObservation++,
+      request_started_unix_milliseconds: observation,
+      response_received_unix_milliseconds: observation + 1,
       next_route: null,
     });
   };
   registerPostCleanup(
-    `post-cleanup-comments-normal-pr-${candidate.identities.normal_pr_number}`,
+    `post-cleanup-control-comments-normal-pr-${candidate.identities.normal_pr_number}`,
     `/repos/${candidate.identities.repository}/issues/${candidate.identities.normal_pr_number}/comments`,
     [{ id: Number(candidate.cleanup.resources.sticky.comment_id), body: stickyBody }],
   );
   registerPostCleanup(
-    `post-cleanup-comments-stale-pr-${candidate.identities.stale_pr_number}`,
+    `post-cleanup-control-comments-stale-pr-${candidate.identities.stale_pr_number}`,
     `/repos/${candidate.identities.repository}/issues/${candidate.identities.stale_pr_number}/comments`,
     [],
   );
   for (const run of candidate.authorizations.execution.operation_runs) {
     registerPostCleanup(
-      `post-cleanup-artifacts-run-${run.run_id}`,
+      `post-cleanup-state-delete-run-${run.run_id}`,
+      `/repos/${candidate.identities.repository}/actions/runs/${run.run_id}/artifacts`,
+      { total_count: 0, artifacts: [] },
+    );
+  }
+  for (const run of candidate.authorizations.execution.operation_runs) {
+    registerPostCleanup(
+      `post-cleanup-state-empty-run-${run.run_id}`,
       `/repos/${candidate.identities.repository}/actions/runs/${run.run_id}/artifacts`,
       { total_count: 0, artifacts: [] },
     );
@@ -521,9 +536,19 @@ function syntheticAssembly(input = host) {
       { number: Number(fixture.number), state: 'closed' },
     ),
   );
+  registerPostCleanup(
+    `post-cleanup-sticky-comments-normal-pr-${candidate.identities.normal_pr_number}`,
+    `/repos/${candidate.identities.repository}/issues/${candidate.identities.normal_pr_number}/comments`,
+    [{ id: Number(candidate.cleanup.resources.sticky.comment_id), body: stickyBody }],
+  );
+  registerPostCleanup(
+    `post-cleanup-sticky-comments-stale-pr-${candidate.identities.stale_pr_number}`,
+    `/repos/${candidate.identities.repository}/issues/${candidate.identities.stale_pr_number}/comments`,
+    [],
+  );
   for (const run of candidate.authorizations.execution.operation_runs) {
     registerPostCleanup(
-      `post-cleanup-run-${run.run_id}`,
+      `post-cleanup-final-run-${run.run_id}`,
       `/repos/${candidate.identities.repository}/actions/runs/${run.run_id}`,
       { id: Number(run.run_id), status: 'completed', conclusion: 'success' },
     );
@@ -541,6 +566,157 @@ function syntheticAssembly(input = host) {
     finalized: true,
   };
   const postCleanupCaptureManifestSha256 = sha256(canonicalJson(postCleanupCaptureManifest));
+  const phaseSources = new Map<string, string[]>([
+    ['settle-runs', []],
+    [
+      'remove-proof-control',
+      postCleanupSources
+        .filter(({ source_id }) => source_id.startsWith('post-cleanup-control-comments-'))
+        .map(({ source_id }) => source_id),
+    ],
+    [
+      'delete-observed-state',
+      postCleanupSources
+        .filter(({ source_id }) => source_id.startsWith('post-cleanup-state-delete-'))
+        .map(({ source_id }) => source_id),
+    ],
+    [
+      'enumerate-empty-state',
+      postCleanupSources
+        .filter(({ source_id }) => source_id.startsWith('post-cleanup-state-empty-'))
+        .map(({ source_id }) => source_id),
+    ],
+    [
+      'remove-authorization-and-secrets',
+      postCleanupSources
+        .filter(({ source_id }) =>
+          ['post-cleanup-variables:page:1', 'post-cleanup-secrets:page:1'].includes(source_id),
+        )
+        .map(({ source_id }) => source_id),
+    ],
+    [
+      'restore-environment',
+      postCleanupSources
+        .filter(({ source_id }) => source_id === 'post-cleanup-environment:page:1')
+        .map(({ source_id }) => source_id),
+    ],
+    [
+      'retire-fixtures',
+      postCleanupSources
+        .filter(
+          ({ source_id }) =>
+            source_id.startsWith('post-cleanup-ref-') || source_id.startsWith('post-cleanup-pr-'),
+        )
+        .map(({ source_id }) => source_id),
+    ],
+    [
+      'read-back-sticky',
+      postCleanupSources
+        .filter(({ source_id }) => source_id.startsWith('post-cleanup-sticky-comments-'))
+        .map(({ source_id }) => source_id),
+    ],
+    ['remove-local-credentials', ['cleanup-execution:local-credential-absence']],
+    [
+      'finalize-private-manifest',
+      postCleanupSources
+        .filter(({ source_id }) => source_id.startsWith('post-cleanup-final-run-'))
+        .map(({ source_id }) => source_id),
+    ],
+  ]);
+  const mutationTargets = new Map<string, string[]>([
+    [
+      'remove-proof-control',
+      generatedCleanup.plan.targets.control_comments.map(
+        ({ comment_id }: any) => `comment:${comment_id}`,
+      ),
+    ],
+    [
+      'delete-observed-state',
+      generatedCleanup.plan.targets.state_artifacts.map(
+        ({ artifact_id }: any) => `artifact:${artifact_id}`,
+      ),
+    ],
+    [
+      'remove-authorization-and-secrets',
+      [
+        `variable:${generatedCleanup.plan.targets.authorization_variable.name}`,
+        ...generatedCleanup.plan.targets.secrets.map(({ name }: any) => `secret:${name}`),
+      ],
+    ],
+    ['restore-environment', [`environment:${generatedCleanup.plan.targets.environment.name}`]],
+    [
+      'retire-fixtures',
+      [
+        ...generatedCleanup.plan.targets.fixture_refs.map(({ ref }: any) => `ref:${ref}`),
+        ...generatedCleanup.plan.targets.fixture_prs.map(({ number }: any) => `pr:${number}`),
+      ],
+    ],
+    [
+      'remove-local-credentials',
+      generatedCleanup.plan.targets.credential_copies.map(({ name }: any) => `credential:${name}`),
+    ],
+  ]);
+  const postSourceById = new Map(postCleanupSources.map((source) => [source.source_id, source]));
+  const runTerminalSources = candidate.authorizations.execution.operation_runs.map(
+    ({ run_id }: any) => `run-terminal-${run_id}:page:1`,
+  );
+  const entryStart =
+    Math.max(
+      candidate.authorizations.cleanup.source.observation.response_received,
+      ...runTerminalSources.map(
+        (sourceId) =>
+          captureManifest.sources.find(({ source_id }: any) => source_id === sourceId)
+            .response_received_unix_milliseconds,
+      ),
+    ) + 1;
+  let priorResponse = entryStart + 1;
+  const phases = cleanupPhases.map((phase) => {
+    const sourceIds = phaseSources.get(phase)!;
+    const realSources = sourceIds
+      .filter((sourceId) => sourceId !== 'cleanup-execution:local-credential-absence')
+      .map((sourceId) => postSourceById.get(sourceId)!);
+    const start =
+      realSources.length === 0
+        ? priorResponse + 1
+        : Math.min(...realSources.map((source) => source.request_started_unix_milliseconds)) - 2;
+    const response =
+      realSources.length === 0
+        ? start + 1
+        : Math.max(...realSources.map((source) => source.response_received_unix_milliseconds));
+    const mutations = (mutationTargets.get(phase) ?? []).map((target_id) => ({
+      target_id,
+      outcome: 'reconciled-outcome-unknown',
+      request: { request_started: start, response_received: start + 1 },
+      post_readback_source_ids: sourceIds,
+    }));
+    priorResponse = response;
+    return {
+      phase,
+      observation: { request_started: start, response_received: response },
+      mutations,
+      readback_source_ids: sourceIds,
+    };
+  });
+  const cleanupExecution = {
+    kind: 'apr-r4-e3-cleanup-execution-v1',
+    repository: candidate.identities.repository,
+    operation_ids: candidate.identities.operation_ids,
+    plan_sha256: generatedCleanup.digest,
+    entry: {
+      cleanup_authorization_source_id: `authorization-cleanup-comment-${candidate.authorizations.cleanup.source.comment_id}:page:1`,
+      capture_manifest_sha256: captureManifestSha256,
+      oracle_result_sha256: oracleResultSha256,
+      run_terminal_source_ids: runTerminalSources,
+      observation: { request_started: entryStart, response_received: entryStart + 1 },
+    },
+    phases,
+    seal: {
+      observation: { request_started: priorResponse + 1, response_received: priorResponse + 2 },
+      post_cleanup_capture_manifest_sha256: postCleanupCaptureManifestSha256,
+      credential_copies_absent: true,
+      private_manifest_inputs_sealed: true,
+    },
+  };
   candidate.restricted_package.capture_manifest_sha256 = captureManifestSha256;
   candidate.restricted_package.oracle_result_sha256 = oracleResultSha256;
   const publicSurfaceCorpus = new Map<string, Buffer>([
@@ -550,7 +726,10 @@ function syntheticAssembly(input = host) {
     candidate: expectedPublic,
     corpus: publicSurfaceCorpus,
     protectedDocuments: new Map(),
-    protectedCategories: protectedCanaryCategories(candidate.authorizations),
+    protectedCategories: protectedCanaryCategories(
+      candidate.authorizations,
+      candidate.identities.repository,
+    ),
   });
   candidate.canaries.public_leak_scan = {
     source: 'post-cleanup-repository-and-output-scan',
@@ -651,6 +830,7 @@ function syntheticAssembly(input = host) {
       [
         '/cleanup',
         [
+          { source_id: 'cleanup-execution', sha256: sha256(canonicalJson(cleanupExecution)) },
           { source_id: 'cleanup-plan', sha256: sha256(canonicalJson(generatedCleanup.plan)) },
           {
             source_id: 'post-cleanup-capture-manifest',
@@ -736,6 +916,7 @@ function syntheticAssembly(input = host) {
       ['trusted-proof-payload-receipt-v2', payloadReceipt],
       ['oracle-build-receipt', oracleBuildReceipt],
       ['cleanup-plan', generatedCleanup.plan],
+      ['cleanup-execution', cleanupExecution],
       ['public-leak-scan-result', candidate.canaries.public_leak_scan],
       ['restricted-package-readback', candidate.restricted_package],
     ]),
@@ -907,6 +1088,56 @@ describe('R4 E3 executable evidence contract', () => {
     ).toEqual(expectedPublic);
   });
 
+  test.each([
+    [
+      'early first mutation',
+      (journal: any) => {
+        journal.phases[1].mutations[0].request.request_started =
+          journal.entry.observation.request_started - 2;
+      },
+    ],
+    [
+      'reordered phases',
+      (journal: any) => {
+        [journal.phases[2], journal.phases[3]] = [journal.phases[3], journal.phases[2]];
+      },
+    ],
+    [
+      'mutation without post-readback',
+      (journal: any) => {
+        journal.phases[1].mutations[0].post_readback_source_ids = [];
+      },
+    ],
+    [
+      'reused final readback for an earlier phase',
+      (journal: any) => {
+        journal.phases[3].readback_source_ids = journal.phases[2].readback_source_ids;
+        for (const mutation of journal.phases[3].mutations) {
+          mutation.post_readback_source_ids = journal.phases[2].readback_source_ids;
+        }
+      },
+    ],
+    [
+      'unresolved outcome',
+      (journal: any) => {
+        journal.phases[2].mutations[0].outcome = 'outcome-unknown';
+      },
+    ],
+    [
+      'seal before the last phase',
+      (journal: any) => {
+        journal.seal.observation.request_started =
+          journal.phases.at(-1).observation.request_started;
+      },
+    ],
+  ])('rejects cleanup execution with %s', (_name, mutate) => {
+    const input = syntheticAssembly();
+    const journal = input.retainedDocuments.get('cleanup-execution');
+    mutate(journal);
+    refreshRetainedDocument(input, '/cleanup', 'cleanup-execution');
+    expect(() => assembleTrustedProofEvidence(input)).toThrow(/cleanup-execution/u);
+  });
+
   test('rejects projection when the finalized private manifest readback drifts', () => {
     const input = syntheticAssembly();
     const assembled = assembleTrustedProofEvidence(input);
@@ -1035,7 +1266,7 @@ describe('R4 E3 executable evidence contract', () => {
       'remaining post-cleanup artifact',
       (value: any) => {
         const source = value.postCleanupCaptureManifest.sources.find((candidate: any) =>
-          candidate.source_id.startsWith('post-cleanup-artifacts-run-'),
+          candidate.source_id.startsWith('post-cleanup-state-empty-run-'),
         );
         refreshPostCleanupCapture(value, source.source_id, {
           total_count: 1,
@@ -1058,7 +1289,7 @@ describe('R4 E3 executable evidence contract', () => {
       'post-cleanup route from another operation',
       (value: any) => {
         const source = value.postCleanupCaptureManifest.sources.find((candidate: any) =>
-          candidate.source_id.startsWith('post-cleanup-run-'),
+          candidate.source_id.startsWith('post-cleanup-final-run-'),
         );
         source.route = `/repos/${host.identities.repository}/actions/runs/9999`;
         refreshPostCleanupCapture(value, source.source_id);

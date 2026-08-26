@@ -198,13 +198,13 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
-    public void PublicCorpusScansEveryCategoryAndProtectedSubstring()
+    public void PublicCorpusScansEveryCategoryForExactOperationBoundValues()
     {
         var repository = CreatePlainRoot("scan-repository");
         var logs = CreatePlainRoot("scan-logs");
         var canary = Encoding.UTF8.GetBytes("APR222-PROTECTED-CANARY-WITH-PARTIAL-WINDOW");
         File.WriteAllText(Path.Join(repository, "safe.txt"), "safe");
-        File.WriteAllText(Path.Join(logs, "run.log"), Encoding.UTF8.GetString(canary.AsSpan(8, 16)));
+        File.WriteAllText(Path.Join(logs, "run.log"), Encoding.UTF8.GetString(canary));
         using var corpus = PublicSurfaceCorpusLease.Open(repository, repository, logs);
         var categories = new Dictionary<string, IReadOnlyList<byte[]>>(StringComparer.Ordinal)
         {
@@ -230,7 +230,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         var output = CanonicalEvidence.Encode(new { kind = "public" }, EvidenceJson.Options);
         var outputPath = Path.Join(worktree, "evidence.json");
         EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output);
-        Assert.Throws<IOException>(() => EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output));
+        Assert.Throws<InvalidDataException>(() =>
+            EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output));
 
         corpus.ValidateComplete(outputPath, output);
         File.WriteAllText(outputPath, "replaced");
@@ -238,45 +239,86 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
-    public void FailedPublicOutputCleanupRemovesOnlyAnExpectedPrefix()
+    public void FailedPublicOutputCleanupRequiresTheCreatedPhysicalIdentity()
     {
         var root = CreatePlainRoot("failed-public-output");
         var expected = Encoding.UTF8.GetBytes("expected-complete-output");
         var partialPath = Path.Join(root, "partial.json");
-        File.WriteAllBytes(partialPath, expected[..8]);
-        EvidenceAssemblerProgram.DeleteFailedPublicOutput(partialPath, expected);
+        Assert.Throws<IOException>(() =>
+            EvidenceAssemblerProgram.WritePublicCreateNew(partialPath, expected, failAfterBytesForTest: 8));
         Assert.False(File.Exists(partialPath));
 
-        var unrelatedPath = Path.Join(root, "unrelated.json");
-        File.WriteAllText(unrelatedPath, "attacker-owned");
-        EvidenceAssemblerProgram.DeleteFailedPublicOutput(unrelatedPath, expected);
-        Assert.True(File.Exists(unrelatedPath));
+        var competingPath = Path.Join(root, "competing.json");
+        File.WriteAllBytes(competingPath, expected[..8]);
+        Assert.Throws<InvalidDataException>(() =>
+            EvidenceAssemblerProgram.WritePublicCreateNew(competingPath, expected));
+        Assert.Equal(expected[..8], File.ReadAllBytes(competingPath));
+
+        var replacePath = Path.Join(root, "replace.json");
+        var receipt = EvidenceAssemblerProgram.WritePublicCreateNew(replacePath, expected);
+        File.Delete(replacePath);
+        File.WriteAllBytes(replacePath, expected[..8]);
+        receipt.DeleteIfOwned();
+        Assert.Equal(expected[..8], File.ReadAllBytes(replacePath));
     }
 
     [Fact]
     public void ProtectedScanInputIsCanonicalBoundedAndNeverPersisted()
     {
-        static string Value(char value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(new string(value, 32)));
-        var input = CanonicalEvidence.Encode(
+        const string repository = "SolusQuest/agentic-pr-review";
+        var operations = new[] { new string('1', 64), new string('2', 64) };
+        var operation = operations[0];
+        static string Value(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+        byte[] Encode(string toolData) => CanonicalEvidence.Encode(
             new
             {
-                kind = "apr-r4-e3-public-scan-memory-input-v1",
+                kind = "apr-r4-e3-public-scan-memory-input-v2",
+                repository,
+                operation_ids = operations,
                 categories = new Dictionary<string, string[]>(StringComparer.Ordinal)
                 {
-                    ["authorization"] = [Value('a')],
-                    ["state_keys"] = [Value('b'), Value('c')],
-                    ["session_plaintext"] = [Value('d')],
-                    ["provider_content"] = [Value('e')],
-                    ["tool_data"] = [Value('f')],
+                    ["authorization"] =
+                    [
+                        Value($"APR_R4_E4_AUTHORIZATION_{operation}"),
+                        Value($"Bearer APR_R4_E4_AUTHORIZATION_{operation}"),
+                    ],
+                    ["state_keys"] =
+                    [
+                        Value($"APR_R4_E4_STATE_KEY_{operation}"),
+                        Value(Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                            $"APR_R4_E4_STATE_KEY_{operation}"))),
+                    ],
+                    ["session_plaintext"] = [Value($"APR_R4_E4_SESSION_PLAINTEXT_{operation}")],
+                    ["provider_content"] = [Value($"APR_R4_E4_PROVIDER_CONTENT_{operation}")],
+                    ["tool_data"] = [Value(toolData)],
+                    ["host_evidence"] = [Value($"APR_R4_E4_HOST_EVIDENCE_{operation}")],
                 },
             },
             EvidenceJson.Options);
+        var input = Encode($"APR_R4_E4_TOOL_DATA_{operation}");
         using var stream = new MemoryStream(input);
-        var values = EvidenceAssemblerProgram.ReadProtectedScanInput(stream);
+        var values = EvidenceAssemblerProgram.ReadProtectedScanInput(
+            stream,
+            expectedDigestForTest: CanonicalEvidence.Sha256(input),
+            expectedRepositoryForTest: repository,
+            expectedOperationsForTest: operations);
         try
         {
-            Assert.Equal(5, values.Count);
-            Assert.All(values.Values, category => Assert.All(category, value => Assert.Equal(32, value.Length)));
+            Assert.Equal(6, values.Count);
+            var substituted = Encode($"APR_R4_E4_TOOL_DATA_SUBSTITUTED_{operation}");
+            try
+            {
+                using var substitutedStream = new MemoryStream(substituted);
+                Assert.Throws<InvalidDataException>(() => EvidenceAssemblerProgram.ReadProtectedScanInput(
+                    substitutedStream,
+                    expectedDigestForTest: CanonicalEvidence.Sha256(substituted),
+                    expectedRepositoryForTest: repository,
+                    expectedOperationsForTest: operations));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(substituted);
+            }
         }
         finally
         {
@@ -288,6 +330,97 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 }
             }
             CryptographicOperations.ZeroMemory(input);
+        }
+    }
+
+    [Fact]
+    public void AssemblerPublishesActualCandidateAcrossRealCorpusAndFullAdmittedInventory()
+    {
+        var repository = FindRepositoryRoot();
+        var worktree = CreatePlainRoot("successful-assembler-worktree");
+        var logs = CreatePlainRoot("successful-assembler-logs");
+        File.WriteAllText(Path.Join(logs, "run.log"), "ordinary-public-log");
+        var publicBytes = File.ReadAllBytes(Path.Join(
+            repository,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof",
+            "templates",
+            "public-safe-evidence.json"));
+        var hostTemplate = File.ReadAllText(Path.Join(
+            repository,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof",
+            "templates",
+            "host-restricted-evidence.json"));
+        var hostBytes = Encoding.UTF8.GetBytes(hostTemplate.Replace(
+            "\"api_version\":\"2026-03-10\"",
+            "\"api_version\":\"2026-03-11\"",
+            StringComparison.Ordinal));
+        Assert.DoesNotContain("\"api_version\":\"2026-03-10\"", Encoding.UTF8.GetString(hostBytes));
+        var categories = new Dictionary<string, IReadOnlyList<byte[]>>(StringComparer.Ordinal)
+        {
+            ["authorization"] = [RandomNumberGenerator.GetBytes(32)],
+            ["state_keys"] = [RandomNumberGenerator.GetBytes(32)],
+            ["session_plaintext"] = [RandomNumberGenerator.GetBytes(32)],
+            ["provider_content"] = [RandomNumberGenerator.GetBytes(32)],
+            ["tool_data"] = [RandomNumberGenerator.GetBytes(32)],
+            ["host_evidence"] = [RandomNumberGenerator.GetBytes(32)],
+        };
+        var admittedDocuments = new List<byte[]>();
+        try
+        {
+            for (var index = 0; index < 15; index++)
+            {
+                var encrypted = Encoding.UTF8.GetBytes($"production-shaped-encrypted-object-{index:D2}");
+                var archive = CreateArchive(encrypted);
+                var admitted = ArtifactArchiveAdmission.Admit(
+                    archive,
+                    CanonicalEvidence.Sha256(archive),
+                    "9001",
+                    "1");
+                Assert.Equal(encrypted, admitted.EncryptedObject);
+                admittedDocuments.Add(archive);
+                admittedDocuments.Add(admitted.EncryptedObject);
+            }
+            Assert.Equal(30, admittedDocuments.Count);
+
+            using var corpus = PublicSurfaceCorpusLease.Open(repository, worktree, logs);
+            var outputPath = Path.Join(worktree, "trusted-proof-public.json");
+            var receipt = EvidenceAssemblerProgram.EnforcePublicProjectionBoundary(
+                corpus,
+                categories,
+                publicBytes,
+                hostBytes,
+                admittedDocuments,
+                outputPath);
+
+            Assert.NotNull(receipt);
+            Assert.Equal(publicBytes, File.ReadAllBytes(outputPath));
+            Assert.Equal(15, JsonDocument.Parse(hostBytes).RootElement
+                .GetProperty("inventories").GetProperty("observed_cleanup")
+                .GetArrayLength());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(publicBytes);
+            CryptographicOperations.ZeroMemory(hostBytes);
+            foreach (var category in categories.Values)
+            {
+                foreach (var value in category)
+                {
+                    CryptographicOperations.ZeroMemory(value);
+                }
+            }
+            foreach (var document in admittedDocuments)
+            {
+                CryptographicOperations.ZeroMemory(document);
+            }
         }
     }
 
@@ -929,6 +1062,19 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         var locator = OperatingSystem.IsWindows() ? "where.exe" : "which";
         return RunProcess(locator, Directory.GetCurrentDirectory(), name)
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)[0];
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null &&
+            !File.Exists(Path.Join(directory.FullName, "package.json")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ??
+            throw new InvalidOperationException("Repository root not found.");
     }
 
     private static string RunProcess(

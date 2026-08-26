@@ -6,6 +6,94 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 
 public sealed record PinnedEvidenceFile(byte[] Bytes, string Identity);
 
+public sealed class CreatedEvidenceFileReceipt
+{
+    private readonly EvidenceFileIdentity identity;
+
+    private CreatedEvidenceFileReceipt(string path, EvidenceFileIdentity identity)
+    {
+        Path = path;
+        this.identity = identity;
+    }
+
+    public string Path { get; }
+
+    public static CreatedEvidenceFileReceipt WriteCreateNew(
+        string path,
+        ReadOnlySpan<byte> bytes,
+        int? failAfterBytesForTest = null)
+    {
+        CreatedEvidenceFileReceipt? receipt = null;
+        try
+        {
+            using (var handle = EvidenceFileHandle.CreateNewNoFollow(path))
+            {
+                var identity = EvidenceFileHandle.Identity(handle);
+                if (identity.Links != 1)
+                {
+                    throw new InvalidDataException("created_file_identity_invalid");
+                }
+                receipt = new CreatedEvidenceFileReceipt(System.IO.Path.GetFullPath(path), identity);
+                using var stream = new FileStream(handle, FileAccess.Write);
+                if (failAfterBytesForTest is int count)
+                {
+                    stream.Write(bytes[..Math.Min(count, bytes.Length)]);
+                    stream.Flush(flushToDisk: true);
+                    throw new IOException("created_file_injected_partial_write");
+                }
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+            if (!receipt.IsCurrentIdentity())
+            {
+                throw new InvalidDataException("created_file_identity_invalid");
+            }
+            return receipt;
+        }
+        catch
+        {
+            receipt?.DeleteIfOwned();
+            throw;
+        }
+    }
+
+    public bool IsCurrentIdentity()
+    {
+        try
+        {
+            using var handle = EvidenceFileHandle.OpenNoFollow(Path);
+            var current = EvidenceFileHandle.Identity(handle);
+            return current.Device == identity.Device &&
+                current.File == identity.File &&
+                current.Links == 1 &&
+                current.Mode == identity.Mode &&
+                current.Owner == identity.Owner;
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    public void DeleteIfOwned()
+    {
+        try
+        {
+            if (!IsCurrentIdentity())
+            {
+                return;
+            }
+            File.Delete(Path);
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            // Failure cleanup must never replace the original stable error or delete another identity.
+        }
+    }
+}
+
 public sealed class PinnedEvidenceLease : IDisposable
 {
     private readonly SafeFileHandle handle;

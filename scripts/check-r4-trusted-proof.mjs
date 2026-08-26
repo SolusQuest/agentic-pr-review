@@ -63,7 +63,7 @@ const fixtureDigests = new Map([
   ],
   [
     'authorizations/execution.json',
-    'a9dcb8e9f0ce8b696310849c552eed621eca9f6f27bd776c2c0567c64ef52887',
+    'e2d50bc9b1ad589a32a4010583b58765b41dc0c1a526cfe0b3ca34e32afd08ce',
   ],
   ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
   ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
@@ -87,16 +87,16 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '4ff8b19e4a2544fa3f0daa8557656bd42b69541c21856cbe5391011dc5887bde',
+    'e965471374b4cfab408494db8b1d94bccbcad21b3457c514170cf86baad0a4de',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
     'fab487f9274857335cd976414f070957c812d528f69841caa52c8ab31e836594',
   ],
-  ['source-map.json', '1518126dd0a11ccc9b3c847906b07aeed85472ab92acd2d9686b838fc48b15dd'],
+  ['source-map.json', '612c10ed04ee0545a0cd36869ca83cbed75eae687a3131513c2969d791003281'],
   [
     'templates/host-restricted-evidence.json',
-    '2ad8ef8259c07e7f3ddf791417ddc76517e0ff9d885fff5dbc7254d08859eb51',
+    'da2a7573b3b94c607585ee5825f7229b6a40fae0ff0fe2fb912a742756ce67f4',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -855,6 +855,7 @@ export function checkR4TrustedProof(options = {}) {
     assemblerSource.includes('--assembly-input') ||
     !assemblerSource.includes('--source-bundle') ||
     !assemblerSource.includes('--post-cleanup-capture-manifest') ||
+    !assemblerSource.includes('--cleanup-execution') ||
     !assemblerSource.includes('--oracle-assembly') ||
     !assemblerSource.includes('--production-assembly') ||
     !assemblerSource.includes('--public-scan-output') ||
@@ -872,8 +873,9 @@ export function checkR4TrustedProof(options = {}) {
     !assemblerBoundarySource.includes('publicCorpus.AssertExactDocumentAbsent') ||
     !assemblerBoundarySource.includes('publicCorpus.ValidateComplete') ||
     !assemblerBoundarySource.includes('WritePublicCreateNew') ||
-    !assemblerBoundarySource.includes('FileMode.CreateNew') ||
-    !publicCorpusSource.includes('ContainsProtectedFragment') ||
+    !assemblerBoundarySource.includes('CreatedEvidenceFileReceipt') ||
+    publicCorpusSource.includes('ContainsProtectedFragment') ||
+    !publicCorpusSource.includes('IndexOf(protectedValue)') ||
     !publicCorpusSource.includes('EnumerateDigests') ||
     !assemblerBoundarySource.includes('ValidatePrivateManifest') ||
     !assemblerBoundarySource.includes('assemble-r4-trusted-proof-evidence.mjs')
