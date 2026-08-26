@@ -243,15 +243,25 @@ internal static class FrameworkSupervisor
 
         var canaryRoutesPassed = EvaluateCanaryRoutes(root, canaries) &&
             !File.Exists(Path.Join(root, "canary-route-violation"));
-        if (cases.Any(result => !result.Passed) ||
+        var failedGlobalGates = FailedGlobalGateNames(
             cases.Select(result => result.HostPid)
-                .Where(value => value > 0).Distinct().Count() < 2 ||
-            !canaryRoutesPassed ||
-            platform.ArtifactNames.Count < 1 ||
-            !File.Exists(Path.Join(root, "official-delete-count")) ||
-            !File.Exists(Path.Join(root, "official-signed-download-count")) ||
-            !File.Exists(Path.Join(root, "official-finalize-count")))
+                .Where(value => value > 0).Distinct().Count(),
+            canaryRoutesPassed,
+            platform.ArtifactNames.Count,
+            File.Exists(Path.Join(root, "official-delete-count")),
+            File.Exists(Path.Join(root, "official-signed-download-count")),
+            File.Exists(Path.Join(root, "official-finalize-count")));
+        if (cases.Any(result => !result.Passed) || failedGlobalGates.Length != 0)
         {
+            if (failedGlobalGates.Length != 0)
+            {
+                await File.WriteAllTextAsync(
+                    Path.Join(root, "supervisor-global-diagnostic.json"),
+                    FrameworkJson.Serialize(FrameworkJson.Object(
+                        ("kind", "apr-r4-e2-supervisor-global-diagnostic-v1"),
+                        ("failed_gates", FrameworkJson.Array(failedGlobalGates)))) + "\n")
+                    .ConfigureAwait(false);
+            }
             await WriteEvidenceAsync(root, payload, platform, cases, false)
                 .ConfigureAwait(false);
             return 1;
@@ -291,6 +301,24 @@ internal static class FrameworkSupervisor
         }
         Console.WriteLine("APR_ACTION_HOST_FRAMEWORK_VERIFY_OK");
         return 0;
+    }
+
+    internal static string[] FailedGlobalGateNames(
+        int distinctPositiveHostPids,
+        bool canaryRoutesPassed,
+        int artifactNameCount,
+        bool deleteCountObserved,
+        bool signedDownloadCountObserved,
+        bool finalizeCountObserved)
+    {
+        var failed = new List<string>();
+        if (distinctPositiveHostPids < 2) failed.Add("host-pid-diversity");
+        if (!canaryRoutesPassed) failed.Add("canary-routes");
+        if (artifactNameCount < 1) failed.Add("official-artifact-name");
+        if (!deleteCountObserved) failed.Add("official-delete-count");
+        if (!signedDownloadCountObserved) failed.Add("official-signed-download-count");
+        if (!finalizeCountObserved) failed.Add("official-finalize-count");
+        return [.. failed];
     }
 
     private static async Task<int> VerifyArtifactMetadataRouteCaptureAsync(

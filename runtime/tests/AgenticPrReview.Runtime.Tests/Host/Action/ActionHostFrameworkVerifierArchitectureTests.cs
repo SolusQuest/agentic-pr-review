@@ -96,6 +96,8 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_ACTION_HOST_FRAMEWORK_FAILED_DIAGNOSTIC", verifier,
             StringComparison.Ordinal);
+        Assert.Contains("APR_ACTION_HOST_FRAMEWORK_GLOBAL_DIAGNOSTIC", verifier,
+            StringComparison.Ordinal);
         var goldenAssignment =
             "golden=\"$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden\"";
         Assert.True(verifier.IndexOf(goldenAssignment, StringComparison.Ordinal) <
@@ -132,6 +134,25 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_R4_W13_SOURCE_TREE", runner,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FrameworkSupervisorGlobalDiagnosticsNameEveryFailedInvariant()
+    {
+        Assert.Equal(
+            [
+                "host-pid-diversity",
+                "canary-routes",
+                "official-artifact-name",
+                "official-delete-count",
+                "official-signed-download-count",
+                "official-finalize-count",
+            ],
+            global::AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor
+                .FailedGlobalGateNames(1, false, 0, false, false, false));
+        Assert.Empty(
+            global::AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor
+                .FailedGlobalGateNames(2, true, 1, true, true, true));
     }
 
     [Fact]
