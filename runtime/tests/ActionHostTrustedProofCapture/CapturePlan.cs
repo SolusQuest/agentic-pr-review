@@ -40,7 +40,7 @@ public sealed record CapturePlanDocument(
 public static class CapturePlan
 {
     public const string CheckedSourceMapSha256 =
-        "6bc836a50bb5b2f55dba1c23bab604bba402ca7b0761ef47a9df4eea9264e0e9";
+        "1518126dd0a11ccc9b3c847906b07aeed85472ab92acd2d9686b838fc48b15dd";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     public static CapturePlanDocument Read(RestrictedEvidenceRoot root, string relativePath)
     {
@@ -50,11 +50,13 @@ public static class CapturePlan
         {
             var value = JsonSerializer.Deserialize<CapturePlanDocument>(bytes, EvidenceJson.Options) ??
                 throw new InvalidDataException("capture_plan_invalid");
+            var preCleanup = value.Kind == "apr-r4-e3-capture-plan-v1";
+            var postCleanup = value.Kind == "apr-r4-e3-post-cleanup-capture-plan-v1";
             var canonical = CanonicalEvidence.Encode(value, EvidenceJson.Options);
             try
             {
                 if (!bytes.AsSpan().SequenceEqual(canonical) ||
-                    value.Kind != "apr-r4-e3-capture-plan-v1" ||
+                    (!preCleanup && !postCleanup) ||
                     !PositiveDecimal(value.RepositoryId) ||
                     value.Repository.Split('/').Length != 2 ||
                     value.Repository.Split('/').Any(part => !BoundedText(part, EvidenceLimits.MaximumNameBytes)) ||
@@ -84,11 +86,11 @@ public static class CapturePlan
                     value.SourceMapSha256 != CheckedSourceMapSha256 ||
                     !BoundedText(value.PackageName, EvidenceLimits.MaximumNameBytes) ||
                     !RestrictedEvidenceRoot.IsSinglePathSegment(value.PackageName) ||
-                    value.Sources.Length != 35 ||
-                    value.Artifacts.Length == 0 ||
+                    value.Sources.Length != (preCleanup ? 35 : 17) ||
+                    (preCleanup ? value.Artifacts.Length == 0 : value.Artifacts.Length != 0) ||
                     value.Artifacts.Length > EvidenceLimits.MaximumRecords ||
                     value.Sources.Select(item => item.SourceId).Distinct(StringComparer.Ordinal).Count() != value.Sources.Length ||
-                    !ExactSources(value) ||
+                    !(preCleanup ? ExactSources(value) : ExactPostCleanupSources(value)) ||
                     value.Artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() != value.Artifacts.Length ||
                     value.Artifacts.Any(item =>
                         !PositiveDecimal(item.ArtifactId) ||
@@ -292,6 +294,120 @@ public static class CapturePlan
                     ? $"{root}/actions/runs/{run}/artifacts"
                     : $"{root}/actions/runs/{run}",
                 family == "artifacts-run" ? "complete-cursor" : "none");
+        }
+        return false;
+    }
+
+    private static bool ExactPostCleanupSources(CapturePlanDocument value)
+    {
+        var runs = value.OperationRuns.Select(item => item.RunId).ToArray();
+        var expected = new List<string>
+        {
+            "comments-normal",
+            "comments-stale",
+            "variables",
+            "secrets",
+            "environment",
+            "ref-normal",
+            "ref-stale",
+            "pr-normal",
+            "pr-stale",
+        };
+        expected.AddRange(runs.Select(run => $"artifacts-{run}"));
+        expected.AddRange(runs.Select(run => $"run-{run}"));
+        var prNumbers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var source in value.Sources)
+        {
+            if (!TryClassifyPostCleanupSource(
+                    source,
+                    value.Repository,
+                    value.OperationIds,
+                    runs,
+                    prNumbers,
+                    out var classification) ||
+                !expected.Remove(classification))
+            {
+                return false;
+            }
+        }
+        return expected.Count == 0 && prNumbers.Count == 2;
+    }
+
+    private static bool TryClassifyPostCleanupSource(
+        CapturePlanSource source,
+        string repository,
+        string[] operationIds,
+        string[] runs,
+        HashSet<string> prNumbers,
+        out string classification)
+    {
+        classification = string.Empty;
+        if (!BoundedText(source.SourceId, EvidenceLimits.MaximumNameBytes) ||
+            !BoundedText(source.EndpointFamily, EvidenceLimits.MaximumRelativePathBytes) ||
+            !BoundedText(source.Route, EvidenceLimits.MaximumRelativePathBytes))
+        {
+            return false;
+        }
+        var root = $"/repos/{repository}";
+        var comments = Regex.Match(
+            source.SourceId,
+            "^post-cleanup-comments-(normal|stale)-pr-([1-9][0-9]*)$");
+        if (comments.Success)
+        {
+            classification = $"comments-{comments.Groups[1].Value}";
+            prNumbers.Add(comments.Groups[2].Value);
+            return Exact(
+                source,
+                $"{root}/issues/{comments.Groups[2].Value}/comments",
+                "complete-cursor");
+        }
+        var artifacts = Regex.Match(source.SourceId, "^post-cleanup-artifacts-run-([1-9][0-9]*)$");
+        if (artifacts.Success && runs.Contains(artifacts.Groups[1].Value, StringComparer.Ordinal))
+        {
+            var run = artifacts.Groups[1].Value;
+            classification = $"artifacts-{run}";
+            return Exact(source, $"{root}/actions/runs/{run}/artifacts", "complete-cursor");
+        }
+        if (source.SourceId == "post-cleanup-variables")
+        {
+            classification = "variables";
+            return Exact(source, $"{root}/actions/variables", "complete-cursor");
+        }
+        if (source.SourceId == "post-cleanup-secrets")
+        {
+            classification = "secrets";
+            return Exact(source, $"{root}/actions/secrets", "complete-cursor");
+        }
+        if (source.SourceId == "post-cleanup-environment")
+        {
+            classification = "environment";
+            return Exact(source, $"{root}/environments/r4-trusted-proof", "none");
+        }
+        var fixtureRef = Regex.Match(source.SourceId, "^post-cleanup-ref-(normal|stale)$");
+        if (fixtureRef.Success)
+        {
+            var scope = fixtureRef.Groups[1].Value;
+            var operation = operationIds[scope == "normal" ? 0 : 1];
+            classification = $"ref-{scope}";
+            return Exact(
+                source,
+                $"{root}/git/matching-refs/heads/r4-trusted-proof/{operation}",
+                "complete-cursor");
+        }
+        var pull = Regex.Match(source.SourceId, "^post-cleanup-pr-(normal|stale)-([1-9][0-9]*)$");
+        if (pull.Success)
+        {
+            var scope = pull.Groups[1].Value;
+            prNumbers.Add(pull.Groups[2].Value);
+            classification = $"pr-{scope}";
+            return Exact(source, $"{root}/pulls/{pull.Groups[2].Value}", "none");
+        }
+        var runSource = Regex.Match(source.SourceId, "^post-cleanup-run-([1-9][0-9]*)$");
+        if (runSource.Success && runs.Contains(runSource.Groups[1].Value, StringComparer.Ordinal))
+        {
+            var run = runSource.Groups[1].Value;
+            classification = $"run-{run}";
+            return Exact(source, $"{root}/actions/runs/{run}", "none");
         }
         return false;
     }

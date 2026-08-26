@@ -14,10 +14,6 @@
   </Target>
   <ItemGroup>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>TrustedProofOracleBuildReceiptArgument</_Parameter1>
-      <_Parameter2>--build-receipt-output</_Parameter2>
-    </AssemblyAttribute>
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>TrustedProofOracleSourceSha</_Parameter1>
       <_Parameter2>$(TrustedProofOracleSourceSha)</_Parameter2>
     </AssemblyAttribute>

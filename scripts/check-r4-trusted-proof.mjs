@@ -63,7 +63,7 @@ const fixtureDigests = new Map([
   ],
   [
     'authorizations/execution.json',
-    '93054357c861fab4df4ce9bb47f191f6b0f48a42abba835218816438b31a5809',
+    'a9dcb8e9f0ce8b696310849c552eed621eca9f6f27bd776c2c0567c64ef52887',
   ],
   ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
   ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
@@ -87,16 +87,16 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '155dbb1b86c454696b3285577f75cfaf7f4f8fe28b1bf1e7fb5796d61848b7b9',
+    '4ff8b19e4a2544fa3f0daa8557656bd42b69541c21856cbe5391011dc5887bde',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
     'fab487f9274857335cd976414f070957c812d528f69841caa52c8ab31e836594',
   ],
-  ['source-map.json', '6bc836a50bb5b2f55dba1c23bab604bba402ca7b0761ef47a9df4eea9264e0e9'],
+  ['source-map.json', '1518126dd0a11ccc9b3c847906b07aeed85472ab92acd2d9686b838fc48b15dd'],
   [
     'templates/host-restricted-evidence.json',
-    'ee54f702d8d2d860158a6047642919528a0668d033246c1e1d989d91b0e794b0',
+    '2ad8ef8259c07e7f3ddf791417ddc76517e0ff9d885fff5dbc7254d08859eb51',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -775,6 +775,24 @@ export function checkR4TrustedProof(options = {}) {
     ),
     'utf8',
   );
+  const oracleSource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofEvidenceOracle', 'Program.cs'),
+    'utf8',
+  );
+  const oracleBuildProject = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofOracleBuild',
+      'AgenticPrReview.Runtime.ActionHostTrustedProofOracleBuild.csproj',
+    ),
+    'utf8',
+  );
+  const oracleBuildSource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofOracleBuild', 'Program.cs'),
+    'utf8',
+  );
   const assemblerSource = fs.readFileSync(
     path.join(root, 'scripts', 'assemble-r4-trusted-proof-evidence.mjs'),
     'utf8',
@@ -786,8 +804,27 @@ export function checkR4TrustedProof(options = {}) {
   if (
     !oracleProject.includes('TrustedProofOracleSourceSha') ||
     !oracleProject.includes('TrustedProofOracleSourceTree') ||
+    oracleProject.includes('TrustedProofOracleBuildReceiptArgument') ||
+    oracleSource.includes('OracleBuildReceipt') ||
+    !oracleBuildProject.includes('TrustedProofOracleBuildSourceRootArgument') ||
+    !oracleBuildProject.includes('TrustedProofOracleBuildSourceTreeCommand') ||
+    !oracleBuildSource.includes('--source-commit') ||
+    !oracleBuildSource.includes('--source-tree') ||
+    !oracleBuildSource.includes('--git-executable') ||
+    !oracleBuildSource.includes('--dotnet-executable') ||
+    !oracleBuildSource.includes('--build-receipt-output') ||
+    count(
+      oracleBuildSource,
+      'AssertSourceIdentity(git, sourceRoot, expectedCommit, expectedTree)',
+    ) !== 2 ||
+    !oracleBuildSource.includes('"status", "--porcelain=v1", "--untracked-files=all"') ||
+    !oracleBuildSource.includes('"apr-r4-e3-independent-oracle-build-receipt-v2"') ||
     assemblerSource.includes('--assembly-input') ||
     !assemblerSource.includes('--source-bundle') ||
+    !assemblerSource.includes('--post-cleanup-capture-manifest') ||
+    !assemblerSource.includes('--oracle-assembly') ||
+    !assemblerSource.includes('--production-assembly') ||
+    !assemblerSource.includes('--public-scan-output') ||
     !assemblerBoundarySource.includes('AcquirePinnedFile') ||
     !assemblerBoundarySource.includes('lease.Validate()') ||
     !assemblerBoundarySource.includes('AssertCredentialCopiesAbsent') ||

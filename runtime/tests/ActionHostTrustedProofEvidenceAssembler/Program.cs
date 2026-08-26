@@ -13,8 +13,10 @@ internal static partial class Program
     private static int Main(string[] args)
     {
         var leases = new List<PinnedEvidenceLease>();
+        var leasesByOption = new Dictionary<string, PinnedEvidenceLease>(StringComparer.Ordinal);
         PinnedEvidenceLease? hostLease = null;
         PinnedEvidenceLease? manifestLease = null;
+        PinnedEvidenceLease? publicScanLease = null;
         try
         {
             var options = ParseArgs(args);
@@ -30,19 +32,26 @@ internal static partial class Program
             {
                 "--source-bundle",
                 "--capture-manifest",
+                "--post-cleanup-capture-manifest",
                 "--oracle-result",
                 "--oracle-build-receipt",
                 "--ui-attestation",
                 "--cleanup-plan",
-                "--cleanup-readbacks",
                 "--public-leak-scan",
                 "--restricted-package-readback",
+                "--oracle-assembly",
+                "--production-assembly",
             })
             {
-                leases.Add(root.AcquirePinnedFile(options[option], EvidenceLimits.MaximumDocumentBytes));
+                var maximum = option is "--oracle-assembly" or "--production-assembly"
+                    ? EvidenceLimits.MaximumArchiveBytes
+                    : EvidenceLimits.MaximumDocumentBytes;
+                var lease = root.AcquirePinnedFile(options[option], maximum);
+                leases.Add(lease);
+                leasesByOption.Add(option, lease);
             }
 
-            var captureLease = leases[1];
+            var captureLease = leasesByOption["--capture-manifest"];
             var capture = ParseCanonical<CaptureManifestDocument>(captureLease.Bytes);
             if (capture is null || !capture.Finalized ||
                 !StringComparer.Ordinal.Equals(
@@ -78,6 +87,27 @@ internal static partial class Program
                     artifact.EncryptedObjectSha256,
                     artifact.EncryptedObjectFileIdentity));
             }
+            var postCleanupCaptureLease = leasesByOption["--post-cleanup-capture-manifest"];
+            var postCleanupCapture = ParseCanonical<CaptureManifestDocument>(
+                postCleanupCaptureLease.Bytes);
+            if (postCleanupCapture is null || !postCleanupCapture.Finalized ||
+                postCleanupCapture.Artifacts.Length != 0 ||
+                !StringComparer.Ordinal.Equals(
+                    postCleanupCapture.DestinationIdentitySha256,
+                    root.DestinationIdentitySha256))
+            {
+                throw new InvalidDataException("assembly_post_cleanup_capture_invalid");
+            }
+            foreach (var source in postCleanupCapture.Sources)
+            {
+                leases.Add(AcquireExpected(
+                    root,
+                    source.BodyPath,
+                    EvidenceLimits.MaximumDocumentBytes,
+                    source.BodySize,
+                    source.BodySha256,
+                    source.BodyFileIdentity));
+            }
 
             var result = RunNode(options, repositoryRoot);
             foreach (var lease in leases)
@@ -90,8 +120,12 @@ internal static partial class Program
             manifestLease = root.AcquirePinnedFile(
                 options["--package-manifest-output"],
                 EvidenceLimits.MaximumDocumentBytes);
+            publicScanLease = root.AcquirePinnedFile(
+                options["--public-scan-output"],
+                EvidenceLimits.MaximumDocumentBytes);
             AssertCanonical(hostLease.Bytes);
             AssertCanonical(manifestLease.Bytes);
+            AssertCanonical(publicScanLease.Bytes);
             var hostSha256 = CanonicalEvidence.Sha256(hostLease.Bytes);
 
             var success = SuccessOutput().Match(result);
@@ -100,10 +134,15 @@ internal static partial class Program
                 manifestLease.Bytes,
                 root.DestinationIdentitySha256,
                 hostSha256,
-                CanonicalEvidence.Sha256(leases[0].Bytes),
-                CanonicalEvidence.Sha256(leases[1].Bytes),
-                CanonicalEvidence.Sha256(leases[2].Bytes),
-                CanonicalEvidence.Sha256(leases[5].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--source-bundle"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--capture-manifest"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--post-cleanup-capture-manifest"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--oracle-result"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--cleanup-plan"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--oracle-build-receipt"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--oracle-assembly"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--production-assembly"].Bytes),
+                CanonicalEvidence.Sha256(publicScanLease.Bytes),
                 success.Success);
             if (success.Success)
             {
@@ -140,6 +179,7 @@ internal static partial class Program
 
             hostLease.Validate();
             manifestLease.Validate();
+            publicScanLease.Validate();
             Console.Out.Write(result);
             return 0;
         }
@@ -174,6 +214,7 @@ internal static partial class Program
         finally
         {
             manifestLease?.Dispose();
+            publicScanLease?.Dispose();
             hostLease?.Dispose();
             foreach (var lease in leases)
             {
@@ -306,8 +347,13 @@ internal static partial class Program
         string hostSha256,
         string sourceBundleSha256,
         string captureManifestSha256,
+        string postCleanupCaptureManifestSha256,
         string oracleResultSha256,
         string cleanupPlanSha256,
+        string oracleBuildReceiptSha256,
+        string oracleAssemblySha256,
+        string productionAssemblySha256,
+        string publicScanManifestSha256,
         bool projectionEligible)
     {
         using var document = JsonDocument.Parse(bytes);
@@ -318,7 +364,13 @@ internal static partial class Program
             "host_evidence_sha256",
             "source_bundle_sha256",
             "capture_manifest_sha256",
+            "post_cleanup_capture_manifest_sha256",
             "oracle_result_sha256",
+            "oracle_build_receipt_sha256",
+            "oracle_assembly_sha256",
+            "production_assembly_sha256",
+            "public_candidate_sha256",
+            "public_scan_manifest_sha256",
             "cleanup_plan_sha256",
             "credential_absence",
             "projection_eligible",
@@ -331,7 +383,14 @@ internal static partial class Program
             root.GetProperty("host_evidence_sha256").GetString() != hostSha256 ||
             root.GetProperty("source_bundle_sha256").GetString() != sourceBundleSha256 ||
             root.GetProperty("capture_manifest_sha256").GetString() != captureManifestSha256 ||
+            root.GetProperty("post_cleanup_capture_manifest_sha256").GetString() !=
+                postCleanupCaptureManifestSha256 ||
             root.GetProperty("oracle_result_sha256").GetString() != oracleResultSha256 ||
+            root.GetProperty("oracle_build_receipt_sha256").GetString() != oracleBuildReceiptSha256 ||
+            root.GetProperty("oracle_assembly_sha256").GetString() != oracleAssemblySha256 ||
+            root.GetProperty("production_assembly_sha256").GetString() != productionAssemblySha256 ||
+            !Regex.IsMatch(root.GetProperty("public_candidate_sha256").GetString() ?? "", "^[0-9a-f]{64}$") ||
+            root.GetProperty("public_scan_manifest_sha256").GetString() != publicScanManifestSha256 ||
             root.GetProperty("cleanup_plan_sha256").GetString() != cleanupPlanSha256 ||
             credentials.EnumerateObject().Any(item => item.Value.ValueKind != JsonValueKind.True) ||
             root.GetProperty("projection_eligible").GetBoolean() != projectionEligible ||
@@ -447,15 +506,18 @@ internal static partial class Program
         "--worktree-root",
         "--source-bundle",
         "--capture-manifest",
+        "--post-cleanup-capture-manifest",
         "--oracle-result",
         "--oracle-build-receipt",
         "--ui-attestation",
         "--cleanup-plan",
-        "--cleanup-readbacks",
         "--public-leak-scan",
         "--restricted-package-readback",
+        "--oracle-assembly",
+        "--production-assembly",
         "--host-output",
         "--package-manifest-output",
+        "--public-scan-output",
         "--public-output",
     ];
 

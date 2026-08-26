@@ -13,6 +13,7 @@ import {
   generateCleanupPlan,
   projectTrustedProofEvidence,
   projectFinalizedTrustedProofEvidence,
+  scanPublicCandidate,
   sha256,
   validateHostEvidence,
 } from './r4-trusted-proof-contract.mjs';
@@ -38,6 +39,49 @@ function projectMutation(mutator: (candidate: any) => void) {
 
 function syntheticAssembly(input = host) {
   const candidate = copy(input);
+  const stickyBody = '<!-- apr-r4-e3-sticky {"result":"retained"} -->';
+  candidate.cleanup.resources.sticky.body_sha256 = sha256(Buffer.from(stickyBody, 'utf8'));
+  candidate.cleanup.resources.sticky.marker_sha256 = sha256(
+    Buffer.from('{"result":"retained"}', 'utf8'),
+  );
+  const restoredEnvironment = {
+    id: Number(candidate.environment.protection_snapshot.environment_id),
+    name: candidate.environment.name,
+    protection_rules: [
+      {
+        type: 'required_reviewers',
+        required_approvals: candidate.environment.protection_snapshot.required_approvals,
+        reviewers: candidate.environment.protection_snapshot.required_reviewer_ids.map(
+          (id: string) => ({ type: 'User', reviewer: { id: Number(id) } }),
+        ),
+      },
+    ],
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+  };
+  candidate.cleanup.resources.environment_snapshot_sha256 = sha256(
+    canonicalJson(restoredEnvironment),
+  );
+  const oracleBinaries = {
+    oracle_assembly_path:
+      'oracle-build/AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.dll',
+    oracle_assembly_sha256: 'b'.repeat(64),
+    production_assembly_path: 'oracle-build/AgenticPrReview.Runtime.dll',
+    production_assembly_sha256: 'c'.repeat(64),
+  };
+  const oracleBuildReceipt = {
+    kind: 'apr-r4-e3-independent-oracle-build-receipt-v2',
+    source_commit: candidate.identities.oracle_source_sha,
+    source_tree: candidate.identities.oracle_source_tree,
+    ...oracleBinaries,
+    result: 'passed',
+  };
+  candidate.authorizations.execution.oracle_build = {
+    source_commit: oracleBuildReceipt.source_commit,
+    source_tree: oracleBuildReceipt.source_tree,
+    build_receipt_sha256: sha256(canonicalJson(oracleBuildReceipt)),
+    oracle_assembly_sha256: oracleBinaries.oracle_assembly_sha256,
+    production_assembly_sha256: oracleBinaries.production_assembly_sha256,
+  };
   const payloadReceipt = JSON.parse(
     fs.readFileSync(path.join(fixtureRoot, 'trusted-proof-payload-receipt-v2.json'), 'utf8'),
   );
@@ -135,23 +179,7 @@ function syntheticAssembly(input = host) {
   candidate.environment.protection_snapshot.readback_sha256 = registerCapture(
     'environment-protection:page:1',
     `/repos/${candidate.identities.repository}/environments/r4-trusted-proof`,
-    {
-      id: Number(candidate.environment.protection_snapshot.environment_id),
-      name: candidate.environment.name,
-      protection_rules: [
-        {
-          type: 'required_reviewers',
-          required_approvals: candidate.environment.protection_snapshot.required_approvals,
-          reviewers: candidate.environment.protection_snapshot.required_reviewer_ids.map(
-            (id: string) => ({ type: 'User', reviewer: { id: Number(id) } }),
-          ),
-        },
-      ],
-      deployment_branch_policy: {
-        protected_branches: false,
-        custom_branch_policies: true,
-      },
-    },
+    restoredEnvironment,
     candidate.environment.protection_snapshot.observation,
   );
   const uiAttestation = {
@@ -423,16 +451,112 @@ function syntheticAssembly(input = host) {
     }),
   };
   const oracleResultSha256 = sha256(canonicalJson(oracleResult));
-  const oracleBuildReceipt = {
-    kind: 'apr-r4-e3-production-codec-oracle-build-receipt-v1',
-    source_commit: oracleResult.oracle_source_sha,
-    source_tree: oracleResult.oracle_source_tree,
-    oracle_assembly_sha256: oracleResult.oracle_assembly_sha256,
-    production_assembly_sha256: oracleResult.production_assembly_sha256,
-    result: 'passed',
+  const postCleanupCapturedSourceBodies = new Map<string, { text: string }>();
+  const postCleanupSources: any[] = [];
+  let postObservation = 200;
+  const registerPostCleanup = (sourceId: string, route: string, value: any) => {
+    const text = canonicalJson(value);
+    postCleanupCapturedSourceBodies.set(`${sourceId}:page:1`, { text });
+    postCleanupSources.push({
+      source_id: `${sourceId}:page:1`,
+      route,
+      page: 1,
+      status: 200,
+      body_path: `post-cleanup-${postCleanupSources.length + 1}.json`,
+      body_sha256: sha256(Buffer.from(text, 'utf8')),
+      body_size: String(Buffer.byteLength(text, 'utf8')),
+      body_file_identity: String(postCleanupSources.length + 1)
+        .padStart(64, 'a')
+        .slice(-64),
+      safe_headers_sha256: 'd'.repeat(64),
+      request_started_unix_milliseconds: postObservation++,
+      response_received_unix_milliseconds: postObservation++,
+      next_route: null,
+    });
   };
+  registerPostCleanup(
+    `post-cleanup-comments-normal-pr-${candidate.identities.normal_pr_number}`,
+    `/repos/${candidate.identities.repository}/issues/${candidate.identities.normal_pr_number}/comments`,
+    [{ id: Number(candidate.cleanup.resources.sticky.comment_id), body: stickyBody }],
+  );
+  registerPostCleanup(
+    `post-cleanup-comments-stale-pr-${candidate.identities.stale_pr_number}`,
+    `/repos/${candidate.identities.repository}/issues/${candidate.identities.stale_pr_number}/comments`,
+    [],
+  );
+  for (const run of candidate.authorizations.execution.operation_runs) {
+    registerPostCleanup(
+      `post-cleanup-artifacts-run-${run.run_id}`,
+      `/repos/${candidate.identities.repository}/actions/runs/${run.run_id}/artifacts`,
+      { total_count: 0, artifacts: [] },
+    );
+  }
+  registerPostCleanup(
+    'post-cleanup-variables',
+    `/repos/${candidate.identities.repository}/actions/variables`,
+    { total_count: 0, variables: [] },
+  );
+  registerPostCleanup(
+    'post-cleanup-secrets',
+    `/repos/${candidate.identities.repository}/actions/secrets`,
+    { total_count: 0, secrets: [] },
+  );
+  registerPostCleanup(
+    'post-cleanup-environment',
+    `/repos/${candidate.identities.repository}/environments/${candidate.environment.name}`,
+    restoredEnvironment,
+  );
+  candidate.identities.operation_ids.forEach((operationId: string, index: number) =>
+    registerPostCleanup(
+      `post-cleanup-ref-${index === 0 ? 'normal' : 'stale'}`,
+      `/repos/${candidate.identities.repository}/git/matching-refs/heads/r4-trusted-proof/${operationId}`,
+      [],
+    ),
+  );
+  candidate.authorizations.execution.fixture_prs.forEach((fixture: any, index: number) =>
+    registerPostCleanup(
+      `post-cleanup-pr-${index === 0 ? 'normal' : 'stale'}-${fixture.number}`,
+      `/repos/${candidate.identities.repository}/pulls/${fixture.number}`,
+      { number: Number(fixture.number), state: 'closed' },
+    ),
+  );
+  for (const run of candidate.authorizations.execution.operation_runs) {
+    registerPostCleanup(
+      `post-cleanup-run-${run.run_id}`,
+      `/repos/${candidate.identities.repository}/actions/runs/${run.run_id}`,
+      { id: Number(run.run_id), status: 'completed', conclusion: 'success' },
+    );
+  }
+  const postCleanupCaptureManifest = {
+    kind: 'apr-r4-e3-capture-manifest-v1',
+    repository_id: captureManifest.repository_id,
+    repository: captureManifest.repository,
+    operation_ids: captureManifest.operation_ids,
+    operation_runs: captureManifest.operation_runs,
+    source_map_sha256: captureManifest.source_map_sha256,
+    destination_identity_sha256: captureManifest.destination_identity_sha256,
+    sources: postCleanupSources,
+    artifacts: [],
+    finalized: true,
+  };
+  const postCleanupCaptureManifestSha256 = sha256(canonicalJson(postCleanupCaptureManifest));
   candidate.restricted_package.capture_manifest_sha256 = captureManifestSha256;
   candidate.restricted_package.oracle_result_sha256 = oracleResultSha256;
+  const publicSurfaceCorpus = new Map<string, Buffer>([
+    ['worktree:public-log.txt', Buffer.from('public execution log\n', 'utf8')],
+  ]);
+  const publicScanManifest = scanPublicCandidate({
+    candidate: expectedPublic,
+    corpus: publicSurfaceCorpus,
+    protectedDocuments: new Map(),
+  });
+  candidate.canaries.public_leak_scan = {
+    source: 'post-cleanup-repository-and-output-scan',
+    candidate_sha256: publicScanManifest.candidate_sha256,
+    corpus_sha256: sha256(canonicalJson(publicScanManifest.corpus)),
+    scanned_files: publicScanManifest.corpus.length,
+    results: publicScanManifest.results,
+  };
   const sourceMap = copy(candidate.source_map);
   const captureReference = (sourceId: string) => ({
     source_id: sourceId,
@@ -526,7 +650,10 @@ function syntheticAssembly(input = host) {
         '/cleanup',
         [
           { source_id: 'cleanup-plan', sha256: sha256(canonicalJson(generatedCleanup.plan)) },
-          { source_id: 'cleanup-readbacks', sha256: sha256(canonicalJson(candidate.cleanup)) },
+          {
+            source_id: 'post-cleanup-capture-manifest',
+            sha256: postCleanupCaptureManifestSha256,
+          },
         ],
       ],
       [
@@ -597,17 +724,21 @@ function syntheticAssembly(input = host) {
     sourceBundle,
     captureManifest,
     captureManifestSha256,
+    postCleanupCaptureManifest,
+    postCleanupCaptureManifestSha256,
     oracleResult,
     oracleResultSha256,
     capturedSourceBodies,
+    postCleanupCapturedSourceBodies,
     retainedDocuments: new Map([
       ['trusted-proof-payload-receipt-v2', payloadReceipt],
       ['oracle-build-receipt', oracleBuildReceipt],
       ['cleanup-plan', generatedCleanup.plan],
-      ['cleanup-readbacks', candidate.cleanup],
       ['public-leak-scan-result', candidate.canaries.public_leak_scan],
       ['restricted-package-readback', candidate.restricted_package],
     ]),
+    oracleBinaries,
+    publicSurfaceCorpus,
     uiAttestation,
     uiAttestationSha256,
     credentialCopiesAbsent: true,
@@ -624,6 +755,35 @@ function refreshRetainedDocument(assembly: any, pointer: string, sourceId: strin
   reference.sha256 = sha256(canonicalJson(assembly.retainedDocuments.get(sourceId)));
   document.evidence.set_sha256 = sha256(
     canonicalJson({ kind: document.evidence.kind, references: document.evidence.references }),
+  );
+}
+
+function refreshPostCleanupCapture(assembly: any, sourceId: string, value?: any) {
+  const source = assembly.postCleanupCaptureManifest.sources.find(
+    (candidate: any) => candidate.source_id === sourceId,
+  );
+  if (source === undefined) throw new Error(`missing synthetic post-cleanup source ${sourceId}`);
+  if (value !== undefined) {
+    const text = canonicalJson(value);
+    assembly.postCleanupCapturedSourceBodies.set(sourceId, { text });
+    source.body_sha256 = sha256(Buffer.from(text, 'utf8'));
+    source.body_size = String(Buffer.byteLength(text, 'utf8'));
+  }
+  assembly.postCleanupCaptureManifestSha256 = sha256(
+    canonicalJson(assembly.postCleanupCaptureManifest),
+  );
+  const cleanupDocument = assembly.sourceBundle.documents.find(
+    (candidate: any) => candidate.destination_pointer === '/cleanup',
+  );
+  const reference = cleanupDocument.evidence.references.find(
+    (candidate: any) => candidate.source_id === 'post-cleanup-capture-manifest',
+  );
+  reference.sha256 = assembly.postCleanupCaptureManifestSha256;
+  cleanupDocument.evidence.set_sha256 = sha256(
+    canonicalJson({
+      kind: cleanupDocument.evidence.kind,
+      references: cleanupDocument.evidence.references,
+    }),
   );
 }
 
@@ -716,16 +876,30 @@ describe('R4 E3 executable evidence contract', () => {
       host: assembled.host,
       sourceBundle: input.sourceBundle,
       captureManifestSha256: input.captureManifestSha256,
+      postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
       oracleResultSha256: input.oracleResultSha256,
       cleanupPlan: assembled.cleanupPlan,
+      oracleBuildReceiptSha256:
+        assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
+      oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+      productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+      publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+      publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
     });
     expect(
       projectFinalizedTrustedProofEvidence({
         host: assembled.host,
         sourceBundle: input.sourceBundle,
         captureManifestSha256: input.captureManifestSha256,
+        postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
         oracleResultSha256: input.oracleResultSha256,
         cleanupPlan: assembled.cleanupPlan,
+        oracleBuildReceiptSha256:
+          assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
+        oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+        productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+        publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+        publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
         privatePackageManifest,
       }),
     ).toEqual(expectedPublic);
@@ -738,8 +912,15 @@ describe('R4 E3 executable evidence contract', () => {
       host: assembled.host,
       sourceBundle: input.sourceBundle,
       captureManifestSha256: input.captureManifestSha256,
+      postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
       oracleResultSha256: input.oracleResultSha256,
       cleanupPlan: assembled.cleanupPlan,
+      oracleBuildReceiptSha256:
+        assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
+      oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+      productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+      publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+      publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
     });
     privatePackageManifest.host_evidence_sha256 = 'f'.repeat(64);
     expect(() =>
@@ -747,8 +928,15 @@ describe('R4 E3 executable evidence contract', () => {
         host: assembled.host,
         sourceBundle: input.sourceBundle,
         captureManifestSha256: input.captureManifestSha256,
+        postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
         oracleResultSha256: input.oracleResultSha256,
         cleanupPlan: assembled.cleanupPlan,
+        oracleBuildReceiptSha256:
+          assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
+        oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+        productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+        publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+        publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
         privatePackageManifest,
       }),
     ).toThrow(/private-package-finalized-readback/u);
@@ -833,6 +1021,61 @@ describe('R4 E3 executable evidence contract', () => {
       (value: any) => {
         value.retainedDocuments.get('oracle-build-receipt').oracle_assembly_sha256 = 'f'.repeat(64);
         refreshRetainedDocument(value, '/identities', 'oracle-build-receipt');
+      },
+    ],
+    [
+      'replacement oracle binary',
+      (value: any) => {
+        value.oracleBinaries.oracle_assembly_sha256 = 'f'.repeat(64);
+      },
+    ],
+    [
+      'remaining post-cleanup artifact',
+      (value: any) => {
+        const source = value.postCleanupCaptureManifest.sources.find((candidate: any) =>
+          candidate.source_id.startsWith('post-cleanup-artifacts-run-'),
+        );
+        refreshPostCleanupCapture(value, source.source_id, {
+          total_count: 1,
+          artifacts: [{ id: 999 }],
+        });
+      },
+    ],
+    [
+      'omitted post-cleanup source',
+      (value: any) => {
+        const sourceId = 'post-cleanup-secrets:page:1';
+        value.postCleanupCaptureManifest.sources = value.postCleanupCaptureManifest.sources.filter(
+          (candidate: any) => candidate.source_id !== sourceId,
+        );
+        value.postCleanupCapturedSourceBodies.delete(sourceId);
+        refreshPostCleanupCapture(value, value.postCleanupCaptureManifest.sources[0].source_id);
+      },
+    ],
+    [
+      'post-cleanup route from another operation',
+      (value: any) => {
+        const source = value.postCleanupCaptureManifest.sources.find((candidate: any) =>
+          candidate.source_id.startsWith('post-cleanup-run-'),
+        );
+        source.route = `/repos/${host.identities.repository}/actions/runs/9999`;
+        refreshPostCleanupCapture(value, source.source_id);
+      },
+    ],
+    [
+      'public surface containing protected evidence',
+      (value: any) => {
+        value.publicSurfaceCorpus.set(
+          'worktree:leaked-source-bundle.json',
+          Buffer.from(canonicalJson(value.sourceBundle), 'utf8'),
+        );
+      },
+    ],
+    [
+      'caller scan summary for a different candidate',
+      (value: any) => {
+        value.retainedDocuments.get('public-leak-scan-result').candidate_sha256 = 'f'.repeat(64);
+        refreshRetainedDocument(value, '/canaries/public_leak_scan', 'public-leak-scan-result');
       },
     ],
     [

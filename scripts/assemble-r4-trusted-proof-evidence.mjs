@@ -15,6 +15,37 @@ const markerName = '.apr-r4-e3-restricted-root.json';
 const markerKind = 'apr-r4-e3-maintainer-approved-restricted-root-v1';
 const maximumDocumentBytes = 256 * 1024;
 
+function publicSurfaceCorpus(repositoryRoot, worktreeRoot) {
+  const result = new Map();
+  const excluded = new Set(['.git', 'node_modules', 'bin', 'obj']);
+  let totalBytes = 0;
+  const visit = (root, label, current = root) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (
+        excluded.has(entry.name) ||
+        (entry.name === 'worktrees' && path.basename(current) === '.codex')
+      ) {
+        continue;
+      }
+      const pathname = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) invalid();
+      if (entry.isDirectory()) {
+        visit(root, label, pathname);
+      } else if (entry.isFile()) {
+        const stat = fs.statSync(pathname);
+        if (stat.size > maximumDocumentBytes * 16) invalid();
+        const bytes = fs.readFileSync(pathname);
+        totalBytes += bytes.length;
+        if (result.size >= 4096 || totalBytes > maximumDocumentBytes * 256) invalid();
+        result.set(`${label}:${path.relative(root, pathname).split(path.sep).join('/')}`, bytes);
+      }
+    }
+  };
+  visit(repositoryRoot, 'repository');
+  if (worktreeRoot !== repositoryRoot) visit(worktreeRoot, 'worktree');
+  return result;
+}
+
 function invalid() {
   throw new Error('APR_R4_E3_ASSEMBLY_INVALID');
 }
@@ -218,15 +249,18 @@ function parseArgs(args) {
     '--worktree-root',
     '--source-bundle',
     '--capture-manifest',
+    '--post-cleanup-capture-manifest',
     '--oracle-result',
     '--oracle-build-receipt',
     '--ui-attestation',
     '--cleanup-plan',
-    '--cleanup-readbacks',
     '--public-leak-scan',
     '--restricted-package-readback',
+    '--oracle-assembly',
+    '--production-assembly',
     '--host-output',
     '--package-manifest-output',
+    '--public-scan-output',
     '--public-output',
   ];
   if (args.length !== names.length * 2) invalid();
@@ -297,6 +331,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     );
     const capturePath = resolveExisting(restrictedRoot, options['--capture-manifest']);
     const capture = readCanonical(capturePath, rootStat.dev);
+    const postCleanupCapturePath = resolveExisting(
+      restrictedRoot,
+      options['--post-cleanup-capture-manifest'],
+    );
+    const postCleanupCapture = readCanonical(postCleanupCapturePath, rootStat.dev);
     const oracle = readCanonical(
       resolveExisting(restrictedRoot, options['--oracle-result']),
       rootStat.dev,
@@ -323,7 +362,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     const retainedInputs = [
       ['cleanup-plan', '--cleanup-plan'],
       ['oracle-build-receipt', '--oracle-build-receipt'],
-      ['cleanup-readbacks', '--cleanup-readbacks'],
       ['public-leak-scan-result', '--public-leak-scan'],
       ['restricted-package-readback', '--restricted-package-readback'],
     ].map(([sourceId, option]) => [
@@ -333,32 +371,76 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     const credentialNames = ['github-token', 'current-state-key', 'previous-state-key'];
     if (credentialNames.some((name) => fs.existsSync(path.join(restrictedRoot, name)))) invalid();
     const capturedSourceBodies = verifyCapturedFiles(restrictedRoot, capturePath, capture.value);
+    const postCleanupCapturedSourceBodies = verifyCapturedFiles(
+      restrictedRoot,
+      postCleanupCapturePath,
+      postCleanupCapture.value,
+    );
+    const oracleAssemblyPath = resolveExisting(restrictedRoot, options['--oracle-assembly']);
+    const productionAssemblyPath = resolveExisting(
+      restrictedRoot,
+      options['--production-assembly'],
+    );
+    const oracleAssembly = readPinned(oracleAssemblyPath, maximumDocumentBytes * 16, rootStat.dev);
+    const productionAssembly = readPinned(
+      productionAssemblyPath,
+      maximumDocumentBytes * 16,
+      rootStat.dev,
+    );
+    const oracleBinaries = {
+      oracle_assembly_path: options['--oracle-assembly'],
+      oracle_assembly_sha256: sha256(oracleAssembly.bytes),
+      production_assembly_path: options['--production-assembly'],
+      production_assembly_sha256: sha256(productionAssembly.bytes),
+    };
+    oracleAssembly.bytes.fill(0);
+    productionAssembly.bytes.fill(0);
 
+    const publicCorpus = publicSurfaceCorpus(repositoryRoot, worktreeRoot);
     const assembled = assembleTrustedProofEvidence({
       sourceMap: sourceMap.value,
       sourceBundle: sourceBundle.value,
       captureManifest: capture.value,
       captureManifestSha256: sha256(capture.bytes),
+      postCleanupCaptureManifest: postCleanupCapture.value,
+      postCleanupCaptureManifestSha256: sha256(postCleanupCapture.bytes),
       oracleResult: oracle.value,
       oracleResultSha256: sha256(oracle.bytes),
       capturedSourceBodies,
+      postCleanupCapturedSourceBodies,
       uiAttestation: uiAttestation.value,
       uiAttestationSha256: sha256(uiAttestation.bytes),
       retainedDocuments: new Map([
         ['trusted-proof-payload-receipt-v2', payloadReceipt.value],
         ...retainedInputs,
       ]),
+      oracleBinaries,
+      publicSurfaceCorpus: publicCorpus,
       credentialCopiesAbsent: true,
     });
+    for (const bytes of publicCorpus.values()) bytes.fill(0);
     const hostOutput = resolveNew(restrictedRoot, options['--host-output']);
     const packageManifestOutput = resolveNew(restrictedRoot, options['--package-manifest-output']);
+    const publicScanOutput = resolveNew(restrictedRoot, options['--public-scan-output']);
     fs.writeFileSync(hostOutput, canonicalJson(assembled.host), { flag: 'wx', mode: 0o600 });
+    fs.writeFileSync(publicScanOutput, canonicalJson(assembled.publicScanManifest), {
+      flag: 'wx',
+      mode: 0o600,
+    });
     const privatePackageManifest = buildFinalizedPrivatePackageManifest({
       host: assembled.host,
       sourceBundle: sourceBundle.value,
       captureManifestSha256: sha256(capture.bytes),
+      postCleanupCaptureManifestSha256: sha256(postCleanupCapture.bytes),
       oracleResultSha256: sha256(oracle.bytes),
       cleanupPlan: assembled.cleanupPlan,
+      oracleBuildReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('oracle-build-receipt')),
+      ),
+      oracleAssemblySha256: oracleBinaries.oracle_assembly_sha256,
+      productionAssemblySha256: oracleBinaries.production_assembly_sha256,
+      publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+      publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
     });
     fs.writeFileSync(packageManifestOutput, canonicalJson(privatePackageManifest), {
       flag: 'wx',
@@ -371,8 +453,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       host: hostReadback.value,
       sourceBundle: sourceBundle.value,
       captureManifestSha256: sha256(capture.bytes),
+      postCleanupCaptureManifestSha256: sha256(postCleanupCapture.bytes),
       oracleResultSha256: sha256(oracle.bytes),
       cleanupPlan: assembled.cleanupPlan,
+      oracleBuildReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('oracle-build-receipt')),
+      ),
+      oracleAssemblySha256: oracleBinaries.oracle_assembly_sha256,
+      productionAssemblySha256: oracleBinaries.production_assembly_sha256,
+      publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+      publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
       privatePackageManifest: manifestReadback.value,
     });
     if (assembled.recoveryOnly) {
@@ -385,10 +475,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
         host: hostReadback.value,
         sourceBundle: sourceBundle.value,
         captureManifestSha256: sha256(capture.bytes),
+        postCleanupCaptureManifestSha256: sha256(postCleanupCapture.bytes),
         oracleResultSha256: sha256(oracle.bytes),
         cleanupPlan: assembled.cleanupPlan,
+        oracleBuildReceiptSha256: sha256(
+          canonicalJson(new Map(retainedInputs).get('oracle-build-receipt')),
+        ),
+        oracleAssemblySha256: oracleBinaries.oracle_assembly_sha256,
+        productionAssemblySha256: oracleBinaries.production_assembly_sha256,
+        publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+        publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
         privatePackageManifest: manifestReadback.value,
       });
+      if (canonicalJson(publicEvidence) !== canonicalJson(assembled.publicCandidate)) invalid();
       fs.writeFileSync(publicOutput, canonicalJson(publicEvidence), {
         flag: 'wx',
         mode: 0o600,

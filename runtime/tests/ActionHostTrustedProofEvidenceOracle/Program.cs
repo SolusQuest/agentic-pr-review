@@ -43,14 +43,6 @@ internal sealed record OracleDocument(
     bool RecoveryOnly,
     OracleRecord[] Records);
 
-internal sealed record OracleBuildReceipt(
-    string Kind,
-    string SourceCommit,
-    string SourceTree,
-    string OracleAssemblySha256,
-    string ProductionAssemblySha256,
-    string Result);
-
 internal static class Program
 {
     private static int Main(string[] args)
@@ -295,28 +287,6 @@ internal static class Program
                     CryptographicOperations.ZeroMemory(output);
                 }
 
-                var buildReceipt = CanonicalEvidence.Encode(
-                    new OracleBuildReceipt(
-                        "apr-r4-e3-production-codec-oracle-build-receipt-v1",
-                        sourceSha,
-                        sourceTree,
-                        oracleAssemblySha256,
-                        productionAssemblySha256,
-                        "passed"),
-                    EvidenceJson.Options);
-                try
-                {
-                    var packagePath = System.IO.Path.GetDirectoryName(manifestPath)!;
-                    CanonicalEvidence.WriteCreateNew(
-                        RestrictedEvidenceRoot.ResolveChildPath(
-                            packagePath,
-                            options["--build-receipt-output"]),
-                        buildReceipt);
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(buildReceipt);
-                }
                 root.RemoveCredentialFile(currentCredentialPath);
                 currentCredentialPath = null;
                 if (previousCredentialPath is not null)
@@ -420,7 +390,6 @@ internal static class Program
             "--oracle-source-tree",
             "--current-state-key-file",
             "--output",
-            "--build-receipt-output",
         };
         var allowed = required.Append("--previous-state-key-file").ToHashSet(StringComparer.Ordinal);
         if (args.Length % 2 != 0)
@@ -439,10 +408,6 @@ internal static class Program
 
         if (required.Any(name => !result.ContainsKey(name)) ||
             !RestrictedEvidenceRoot.IsSinglePathSegment(result["--output"]) ||
-            !RestrictedEvidenceRoot.IsSinglePathSegment(result["--build-receipt-output"]) ||
-            StringComparer.OrdinalIgnoreCase.Equals(
-                result["--output"],
-                result["--build-receipt-output"]) ||
             !StringComparer.Ordinal.Equals(
                 result["--current-state-key-file"],
                 "current-state-key") ||

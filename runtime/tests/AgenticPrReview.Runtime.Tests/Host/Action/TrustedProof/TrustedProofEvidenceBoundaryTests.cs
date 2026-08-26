@@ -39,6 +39,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     {
         var capture = typeof(TrustedProofCaptureClient).Assembly;
         var oracle = Assembly.Load("AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle");
+        var oracleBuild = Assembly.Load("AgenticPrReview.Runtime.ActionHostTrustedProofOracleBuild");
         var assembler = Assembly.Load("AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceAssembler");
         Assert.DoesNotContain(
             capture.GetReferencedAssemblies(),
@@ -62,10 +63,17 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.DoesNotContain("--previous-state-key-file", captureStrings, StringComparison.Ordinal);
         Assert.DoesNotContain("--github-token-file", oracleStrings, StringComparison.Ordinal);
         Assert.DoesNotContain("HttpClient", oracleStrings, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            oracle.GetCustomAttributes<AssemblyMetadataAttribute>(),
+            item => item.Key == "TrustedProofOracleBuildReceiptArgument");
         Assert.Equal(
-            "--build-receipt-output",
-            oracle.GetCustomAttributes<AssemblyMetadataAttribute>()
-                .Single(item => item.Key == "TrustedProofOracleBuildReceiptArgument").Value);
+            "--source-root",
+            oracleBuild.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .Single(item => item.Key == "TrustedProofOracleBuildSourceRootArgument").Value);
+        Assert.Equal(
+            "HEAD^{tree}",
+            oracleBuild.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .Single(item => item.Key == "TrustedProofOracleBuildSourceTreeCommand").Value);
         Assert.Equal(
             "scripts/assemble-r4-trusted-proof-evidence.mjs",
             assembler.GetCustomAttributes<AssemblyMetadataAttribute>()
