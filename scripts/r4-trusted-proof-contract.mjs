@@ -3177,8 +3177,47 @@ export function derivePostCleanupEvidence({
   };
 }
 
-export function scanPublicCandidate({ candidate, corpus, protectedDocuments }) {
-  if (!(corpus instanceof Map) || !(protectedDocuments instanceof Map)) {
+export function protectedCanaryCategories(authorizations) {
+  const operation = authorizations.execution.operation_ids[0];
+  return new Map([
+    ['authorization', [Buffer.from(`APR_R4_E4_AUTHORIZATION_${operation}`, 'utf8')]],
+    ['state_keys', [Buffer.from(`APR_R4_E4_STATE_KEY_${operation}`, 'utf8')]],
+    ['session_plaintext', [Buffer.from(`APR_R4_E4_SESSION_PLAINTEXT_${operation}`, 'utf8')]],
+    ['provider_content', [Buffer.from(`APR_R4_E4_PROVIDER_CONTENT_${operation}`, 'utf8')]],
+    ['tool_data', [Buffer.from(`APR_R4_E4_TOOL_DATA_${operation}`, 'utf8')]],
+    [
+      'host_evidence',
+      authorizations.execution.operation_ids.map((value) => Buffer.from(value, 'utf8')),
+    ],
+  ]);
+}
+
+export function scanPublicCandidate({
+  candidate,
+  corpus,
+  protectedDocuments,
+  protectedCategories,
+}) {
+  const categoryNames = [
+    'authorization',
+    'state_keys',
+    'session_plaintext',
+    'provider_content',
+    'tool_data',
+    'host_evidence',
+  ];
+  if (
+    !(corpus instanceof Map) ||
+    !(protectedDocuments instanceof Map) ||
+    !(protectedCategories instanceof Map) ||
+    JSON.stringify([...protectedCategories.keys()]) !== JSON.stringify(categoryNames) ||
+    [...protectedCategories.values()].some(
+      (values) =>
+        !Array.isArray(values) ||
+        values.length === 0 ||
+        values.some((value) => !Buffer.isBuffer(value) || value.length < 16),
+    )
+  ) {
     invalid('public-scan-input');
   }
   const candidateBytes = Buffer.from(canonicalJson(candidate), 'utf8');
@@ -3188,6 +3227,21 @@ export function scanPublicCandidate({ candidate, corpus, protectedDocuments }) {
   const surfaces = new Map(corpus);
   surfaces.set('public-candidate', candidateBytes);
   const entries = [];
+  const results = Object.fromEntries(
+    categoryNames.map((name) => {
+      const present = [...surfaces.values()].some((raw) => {
+        const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'utf8');
+        return protectedCategories.get(name).some((protectedValue) => {
+          for (let offset = 0; offset <= protectedValue.length - 16; offset += 1) {
+            if (bytes.indexOf(protectedValue.subarray(offset, offset + 16)) !== -1) return true;
+          }
+          return false;
+        });
+      });
+      return [name, present ? 'present' : 'absent'];
+    }),
+  );
+  if (Object.values(results).some((value) => value !== 'absent')) invalid('public-scan-leak');
   for (const [surfaceId, raw] of [...surfaces].sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
@@ -3207,14 +3261,7 @@ export function scanPublicCandidate({ candidate, corpus, protectedDocuments }) {
     kind: 'apr-r4-e3-public-candidate-scan-v1',
     candidate_sha256: sha256(candidateBytes),
     corpus: entries,
-    results: {
-      authorization: 'absent',
-      state_keys: 'absent',
-      session_plaintext: 'absent',
-      provider_content: 'absent',
-      tool_data: 'absent',
-      host_evidence: 'absent',
-    },
+    results,
   };
   return scan;
 }
@@ -3413,6 +3460,7 @@ export function assembleTrustedProofEvidence({
         value.text,
       ]),
     ]),
+    protectedCategories: protectedCanaryCategories(authorizations),
   });
   const expectedPublicLeakScan = {
     source: 'post-cleanup-repository-and-output-scan',

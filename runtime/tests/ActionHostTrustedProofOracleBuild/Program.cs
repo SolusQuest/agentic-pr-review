@@ -39,18 +39,31 @@ internal static class Program
             var git = ExactExecutable(options["--git-executable"]);
             var dotnet = ExactExecutable(options["--dotnet-executable"]);
 
-            AssertSourceIdentity(git, sourceRoot, expectedCommit, expectedTree);
+            var snapshotDirectory = RestrictedEvidenceRoot.ResolveChildPath(
+                root.Path,
+                options["--snapshot-directory"]);
+            var intermediateDirectory = RestrictedEvidenceRoot.ResolveChildPath(
+                root.Path,
+                options["--intermediate-directory"]);
             var outputDirectory = RestrictedEvidenceRoot.ResolveChildPath(
                 root.Path,
                 options["--output-directory"]);
-            if (Directory.Exists(outputDirectory) || File.Exists(outputDirectory))
-            {
-                throw new InvalidDataException("oracle_build_output_invalid");
-            }
-            Directory.CreateDirectory(outputDirectory);
-            RestrictDirectory(outputDirectory);
-            RunBuild(dotnet, sourceRoot, outputDirectory, expectedCommit, expectedTree);
-            AssertSourceIdentity(git, sourceRoot, expectedCommit, expectedTree);
+            using var snapshot = AuthorizedGitSnapshot.Materialize(
+                git,
+                sourceRoot,
+                expectedCommit,
+                expectedTree,
+                snapshotDirectory);
+            CreateFreshBuildDirectory(intermediateDirectory);
+            CreateFreshBuildDirectory(outputDirectory);
+            RunBuild(
+                dotnet,
+                snapshot.Root,
+                intermediateDirectory,
+                outputDirectory,
+                expectedCommit,
+                expectedTree);
+            snapshot.Validate();
 
             var oraclePath = System.IO.Path.Join(outputDirectory, OracleAssemblyName);
             var productionPath = System.IO.Path.Join(outputDirectory, ProductionAssemblyName);
@@ -110,29 +123,10 @@ internal static class Program
         }
     }
 
-    private static void AssertSourceIdentity(
-        string git,
-        string sourceRoot,
-        string expectedCommit,
-        string expectedTree)
-    {
-        var commit = Run(git, sourceRoot, ["rev-parse", "--verify", "HEAD"]);
-        var tree = Run(git, sourceRoot, ["rev-parse", "--verify", "HEAD^{tree}"]);
-        var status = Run(
-            git,
-            sourceRoot,
-            ["status", "--porcelain=v1", "--untracked-files=all"]);
-        if (!StringComparer.Ordinal.Equals(commit, expectedCommit) ||
-            !StringComparer.Ordinal.Equals(tree, expectedTree) ||
-            status.Length != 0)
-        {
-            throw new InvalidDataException("oracle_build_source_invalid");
-        }
-    }
-
     private static void RunBuild(
         string dotnet,
         string sourceRoot,
+        string intermediateDirectory,
         string outputDirectory,
         string sourceCommit,
         string sourceTree)
@@ -147,6 +141,26 @@ internal static class Program
         {
             throw new InvalidDataException("oracle_build_project_invalid");
         }
+        var toolHome = System.IO.Path.Join(intermediateDirectory, "tool-home");
+        var packages = System.IO.Path.Join(intermediateDirectory, "nuget-packages");
+        var temporary = System.IO.Path.Join(intermediateDirectory, "temporary");
+        foreach (var directory in new[] { toolHome, packages, temporary })
+        {
+            Directory.CreateDirectory(directory);
+            RestrictDirectory(directory);
+        }
+        var nugetConfig = System.IO.Path.Join(intermediateDirectory, "NuGet.Config");
+        var nugetConfigBytes = Encoding.UTF8.GetBytes(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><packageSources><clear /><add key=\"nuget.org\" value=\"https://api.nuget.org/v3/index.json\" protocolVersion=\"3\" /></packageSources></configuration>\n");
+        using (var config = new FileStream(
+            nugetConfig,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.Read))
+        {
+            config.Write(nugetConfigBytes);
+            config.Flush(flushToDisk: true);
+        }
         var arguments = new[]
         {
             "publish",
@@ -155,17 +169,41 @@ internal static class Program
             "Release",
             "--output",
             outputDirectory,
+            "--artifacts-path",
+            intermediateDirectory,
+            "--disable-build-servers",
+            "--force",
+            "--no-cache",
+            "--configfile",
+            nugetConfig,
             $"-p:TrustedProofOracleSourceSha={sourceCommit}",
             $"-p:TrustedProofOracleSourceTree={sourceTree}",
+            "-p:ActionHostVerifierFrameworkReference=true",
+            "-p:ContinuousIntegrationBuild=true",
+            "-p:Deterministic=true",
+            "-p:UseSharedCompilation=false",
+            $"-p:PathMap={sourceRoot}=/_/apr-r4-e3-authorized-source",
+            "-p:ImportDirectoryBuildProps=false",
+            "-p:ImportDirectoryBuildTargets=false",
             "--nologo",
         };
-        _ = Run(dotnet, sourceRoot, arguments, TimeSpan.FromMinutes(10));
+        _ = Run(
+            dotnet,
+            sourceRoot,
+            arguments,
+            toolHome,
+            packages,
+            temporary,
+            TimeSpan.FromMinutes(10));
     }
 
     private static string Run(
         string executable,
         string workingDirectory,
         IReadOnlyList<string> arguments,
+        string toolHome,
+        string packages,
+        string temporary,
         TimeSpan? timeout = null)
     {
         var start = new ProcessStartInfo(executable)
@@ -180,11 +218,42 @@ internal static class Program
         {
             start.ArgumentList.Add(argument);
         }
-        start.Environment.Remove("GITHUB_TOKEN");
-        start.Environment.Remove("GH_TOKEN");
-        start.Environment.Remove("DEEPSEEK_API_KEY");
-        start.Environment.Remove("AGENTIC_PR_REVIEW_STATE_KEY");
-        start.Environment.Remove("AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY");
+        start.Environment.Clear();
+        start.Environment["DOTNET_CLI_HOME"] = toolHome;
+        start.Environment["DOTNET_MULTILEVEL_LOOKUP"] = "0";
+        start.Environment["DOTNET_NOLOGO"] = "1";
+        start.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        start.Environment["NUGET_PACKAGES"] = packages;
+        start.Environment["NUGET_XMLDOC_MODE"] = "skip";
+        if (OperatingSystem.IsWindows())
+        {
+            var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            var commonProgramFiles = Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles);
+            var commonProgramFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86);
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var roaming = System.IO.Path.Join(toolHome, "appdata", "roaming");
+            var local = System.IO.Path.Join(toolHome, "appdata", "local");
+            Directory.CreateDirectory(roaming);
+            Directory.CreateDirectory(local);
+            start.Environment["APPDATA"] = roaming;
+            start.Environment["LOCALAPPDATA"] = local;
+            start.Environment["USERPROFILE"] = toolHome;
+            start.Environment["ProgramData"] = programData;
+            start.Environment["ProgramFiles"] = programFiles;
+            start.Environment["ProgramFiles(x86)"] = programFilesX86;
+            start.Environment["CommonProgramFiles"] = commonProgramFiles;
+            start.Environment["CommonProgramFiles(x86)"] = commonProgramFilesX86;
+            start.Environment["SystemRoot"] = windows;
+            start.Environment["WINDIR"] = windows;
+            start.Environment["TEMP"] = temporary;
+            start.Environment["TMP"] = temporary;
+        }
+        else
+        {
+            start.Environment["TMPDIR"] = temporary;
+        }
         using var process = Process.Start(start) ??
             throw new InvalidDataException("oracle_build_process_invalid");
         var stdout = process.StandardOutput.ReadToEndAsync();
@@ -264,6 +333,8 @@ internal static class Program
             "--worktree-root",
             "--git-executable",
             "--dotnet-executable",
+            "--snapshot-directory",
+            "--intermediate-directory",
             "--output-directory",
             "--build-receipt-output",
         };
@@ -282,11 +353,29 @@ internal static class Program
         }
         if (names.Any(name => !result.ContainsKey(name)) ||
             !RestrictedEvidenceRoot.IsSinglePathSegment(result["--output-directory"]) ||
+            !RestrictedEvidenceRoot.IsSinglePathSegment(result["--snapshot-directory"]) ||
+            !RestrictedEvidenceRoot.IsSinglePathSegment(result["--intermediate-directory"]) ||
+            new[] {
+                result["--snapshot-directory"],
+                result["--intermediate-directory"],
+                result["--output-directory"],
+                result["--build-receipt-output"],
+            }.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 4 ||
             !RestrictedEvidenceRoot.IsSinglePathSegment(result["--build-receipt-output"]))
         {
             throw new InvalidDataException("oracle_build_arguments_invalid");
         }
         return result;
+    }
+
+    internal static void CreateFreshBuildDirectory(string path)
+    {
+        if (Directory.Exists(path) || File.Exists(path))
+        {
+            throw new InvalidDataException("oracle_build_output_invalid");
+        }
+        Directory.CreateDirectory(path);
+        RestrictDirectory(path);
     }
 
     private static void RestrictDirectory(string path)

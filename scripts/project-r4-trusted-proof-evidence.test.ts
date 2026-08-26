@@ -13,6 +13,7 @@ import {
   generateCleanupPlan,
   projectTrustedProofEvidence,
   projectFinalizedTrustedProofEvidence,
+  protectedCanaryCategories,
   scanPublicCandidate,
   sha256,
   validateHostEvidence,
@@ -549,6 +550,7 @@ function syntheticAssembly(input = host) {
     candidate: expectedPublic,
     corpus: publicSurfaceCorpus,
     protectedDocuments: new Map(),
+    protectedCategories: protectedCanaryCategories(candidate.authorizations),
   });
   candidate.canaries.public_leak_scan = {
     source: 'post-cleanup-repository-and-output-scan',
@@ -1068,6 +1070,17 @@ describe('R4 E3 executable evidence contract', () => {
         value.publicSurfaceCorpus.set(
           'worktree:leaked-source-bundle.json',
           Buffer.from(canonicalJson(value.sourceBundle), 'utf8'),
+        );
+      },
+    ],
+    [
+      'public surface containing only a protected category fragment',
+      (value: any) => {
+        const operation = value.captureManifest.operation_ids[0];
+        const canary = `APR_R4_E4_PROVIDER_CONTENT_${operation}`;
+        value.publicSurfaceCorpus.set(
+          'logs:partial-provider-canary.log',
+          Buffer.from(canary.slice(9, 31), 'utf8'),
         );
       },
     ],

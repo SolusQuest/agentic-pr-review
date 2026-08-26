@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
@@ -10,7 +11,11 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHostTrustedProofCapture;
 using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
+using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceAssembler;
+using AgenticPrReview.Runtime.ActionHostTrustedProofOracleBuild;
 using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
+using EvidenceAssemblerProgram = AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceAssembler.Program;
+using OracleBuildProgram = AgenticPrReview.Runtime.ActionHostTrustedProofOracleBuild.Program;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
@@ -86,6 +91,204 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "4444444444444444444444444444444444444444",
             oracle.GetCustomAttributes<AssemblyMetadataAttribute>()
                 .Single(item => item.Key == "TrustedProofOracleSourceTree").Value);
+    }
+
+    [Fact]
+    public void OracleBuildSnapshotUsesOnlyAuthorizedGitBlobsAndStaysStable()
+    {
+        var repository = CreateGitRepository();
+        var restricted = CreateRestrictedRoot();
+        var git = FindExecutable("git");
+        var commit = RunProcess(git, repository, "rev-parse", "HEAD");
+        var tree = RunProcess(git, repository, "rev-parse", "HEAD^{tree}");
+        File.WriteAllText(Path.Join(repository, ".git", "info", "exclude"), "Directory.Build.targets\n");
+        File.WriteAllText(
+            Path.Join(repository, "Directory.Build.targets"),
+            "<Project><Target Name=\"Injected\" BeforeTargets=\"Build\" /></Project>");
+
+        var destination = Path.Join(restricted.Path, "authorized-source");
+        using var snapshot = AuthorizedGitSnapshot.Materialize(
+            git,
+            repository,
+            commit,
+            tree,
+            destination);
+
+        Assert.Equal("authorized\n", File.ReadAllText(Path.Join(snapshot.Root, "source.txt")));
+        Assert.False(File.Exists(Path.Join(snapshot.Root, "Directory.Build.targets")));
+        File.WriteAllText(Path.Join(repository, "source.txt"), "replaced-during-build\n");
+        Assert.ThrowsAny<Exception>(() => File.WriteAllText(
+            Path.Join(snapshot.Root, "source.txt"),
+            "snapshot-injection\n"));
+        Assert.ThrowsAny<Exception>(() => File.WriteAllText(
+            Path.Join(snapshot.Root, "injected.cs"),
+            "namespace Injected;"));
+        snapshot.Validate();
+        Assert.Equal("authorized\n", File.ReadAllText(Path.Join(snapshot.Root, "source.txt")));
+    }
+
+    [Fact]
+    public void OracleBuildSnapshotRejectsPrepopulatedDestination()
+    {
+        var repository = CreateGitRepository();
+        var restricted = CreateRestrictedRoot();
+        var git = FindExecutable("git");
+        var commit = RunProcess(git, repository, "rev-parse", "HEAD");
+        var tree = RunProcess(git, repository, "rev-parse", "HEAD^{tree}");
+        var destination = Path.Join(restricted.Path, "stale-source");
+        Directory.CreateDirectory(destination);
+
+        Assert.Throws<InvalidDataException>(() => AuthorizedGitSnapshot.Materialize(
+            git,
+            repository,
+            commit,
+            tree,
+            destination));
+    }
+
+    [Fact]
+    public void OracleBuildRejectsPrepopulatedIntermediateAndOutputDirectories()
+    {
+        var root = CreatePlainRoot("oracle-build-fresh");
+        var staleIntermediate = Path.Join(root, "intermediate");
+        var staleOutput = Path.Join(root, "output");
+        Directory.CreateDirectory(staleIntermediate);
+        File.WriteAllText(staleOutput, "stale-output");
+
+        Assert.Throws<InvalidDataException>(() =>
+            OracleBuildProgram.CreateFreshBuildDirectory(staleIntermediate));
+        Assert.Throws<InvalidDataException>(() =>
+            OracleBuildProgram.CreateFreshBuildDirectory(staleOutput));
+    }
+
+    [Theory]
+    [InlineData("Directory.Build.targets:payload")]
+    [InlineData("CON/source.cs")]
+    [InlineData("nested/trailing. ")]
+    [InlineData("nested/../escape.cs")]
+    public void OracleBuildRejectsPlatformAliasingGitPaths(string relative)
+    {
+        Assert.False(AuthorizedGitSnapshot.IsSafeRelativePath(relative));
+    }
+
+    [Fact]
+    public void PublicCorpusRejectsPostScanAdditionAndReplacement()
+    {
+        var repository = CreatePlainRoot("corpus-repository");
+        var worktree = CreatePlainRoot("corpus-worktree");
+        var logs = CreatePlainRoot("corpus-logs");
+        File.WriteAllText(Path.Join(repository, "tracked.txt"), "safe-repository");
+        File.WriteAllText(Path.Join(worktree, "public.txt"), "safe-worktree");
+        File.WriteAllText(Path.Join(logs, "run.log"), "safe-log");
+        using var corpus = PublicSurfaceCorpusLease.Open(repository, worktree, logs);
+
+        File.WriteAllText(Path.Join(worktree, "late.txt"), "late-protected-value");
+        Assert.Throws<InvalidDataException>(() => corpus.ValidateComplete(null, []));
+
+        File.Delete(Path.Join(worktree, "late.txt"));
+        try
+        {
+            File.WriteAllText(Path.Join(logs, "run.log"), "replaced-log");
+        }
+        catch (IOException) when (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        Assert.Throws<InvalidDataException>(() => corpus.ValidateComplete(null, []));
+    }
+
+    [Fact]
+    public void PublicCorpusScansEveryCategoryAndProtectedSubstring()
+    {
+        var repository = CreatePlainRoot("scan-repository");
+        var logs = CreatePlainRoot("scan-logs");
+        var canary = Encoding.UTF8.GetBytes("APR222-PROTECTED-CANARY-WITH-PARTIAL-WINDOW");
+        File.WriteAllText(Path.Join(repository, "safe.txt"), "safe");
+        File.WriteAllText(Path.Join(logs, "run.log"), Encoding.UTF8.GetString(canary.AsSpan(8, 16)));
+        using var corpus = PublicSurfaceCorpusLease.Open(repository, repository, logs);
+        var categories = new Dictionary<string, IReadOnlyList<byte[]>>(StringComparer.Ordinal)
+        {
+            ["authorization"] = [canary],
+            ["state_keys"] = [Encoding.UTF8.GetBytes("APR222-STATE-KEY-CANARY-00000001")],
+            ["session_plaintext"] = [Encoding.UTF8.GetBytes("APR222-SESSION-CANARY-0000000001")],
+            ["provider_content"] = [Encoding.UTF8.GetBytes("APR222-PROVIDER-CANARY-000000001")],
+            ["tool_data"] = [Encoding.UTF8.GetBytes("APR222-TOOL-CANARY-0000000000001")],
+            ["host_evidence"] = [Encoding.UTF8.GetBytes("APR222-HOST-CANARY-0000000000001")],
+        };
+
+        Assert.Throws<InvalidDataException>(() => corpus.AssertAbsent(categories, []));
+    }
+
+    [Fact]
+    public void PublicCorpusAllowsOnlyTheBoundFinalOutputAddition()
+    {
+        var repository = CreatePlainRoot("final-repository");
+        var worktree = CreatePlainRoot("final-worktree");
+        var logs = CreatePlainRoot("final-logs");
+        File.WriteAllText(Path.Join(repository, "source.txt"), "safe");
+        using var corpus = PublicSurfaceCorpusLease.Open(repository, worktree, logs);
+        var output = CanonicalEvidence.Encode(new { kind = "public" }, EvidenceJson.Options);
+        var outputPath = Path.Join(worktree, "evidence.json");
+        EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output);
+        Assert.Throws<IOException>(() => EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output));
+
+        corpus.ValidateComplete(outputPath, output);
+        File.WriteAllText(outputPath, "replaced");
+        Assert.Throws<InvalidDataException>(() => corpus.ValidateComplete(outputPath, output));
+    }
+
+    [Fact]
+    public void FailedPublicOutputCleanupRemovesOnlyAnExpectedPrefix()
+    {
+        var root = CreatePlainRoot("failed-public-output");
+        var expected = Encoding.UTF8.GetBytes("expected-complete-output");
+        var partialPath = Path.Join(root, "partial.json");
+        File.WriteAllBytes(partialPath, expected[..8]);
+        EvidenceAssemblerProgram.DeleteFailedPublicOutput(partialPath, expected);
+        Assert.False(File.Exists(partialPath));
+
+        var unrelatedPath = Path.Join(root, "unrelated.json");
+        File.WriteAllText(unrelatedPath, "attacker-owned");
+        EvidenceAssemblerProgram.DeleteFailedPublicOutput(unrelatedPath, expected);
+        Assert.True(File.Exists(unrelatedPath));
+    }
+
+    [Fact]
+    public void ProtectedScanInputIsCanonicalBoundedAndNeverPersisted()
+    {
+        static string Value(char value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(new string(value, 32)));
+        var input = CanonicalEvidence.Encode(
+            new
+            {
+                kind = "apr-r4-e3-public-scan-memory-input-v1",
+                categories = new Dictionary<string, string[]>(StringComparer.Ordinal)
+                {
+                    ["authorization"] = [Value('a')],
+                    ["state_keys"] = [Value('b'), Value('c')],
+                    ["session_plaintext"] = [Value('d')],
+                    ["provider_content"] = [Value('e')],
+                    ["tool_data"] = [Value('f')],
+                },
+            },
+            EvidenceJson.Options);
+        using var stream = new MemoryStream(input);
+        var values = EvidenceAssemblerProgram.ReadProtectedScanInput(stream);
+        try
+        {
+            Assert.Equal(5, values.Count);
+            Assert.All(values.Values, category => Assert.All(category, value => Assert.Equal(32, value.Length)));
+        }
+        finally
+        {
+            foreach (var category in values.Values)
+            {
+                foreach (var value in category)
+                {
+                    CryptographicOperations.ZeroMemory(value);
+                }
+            }
+            CryptographicOperations.ZeroMemory(input);
+        }
     }
 
     [Theory]
@@ -617,6 +820,29 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             Directory.Exists(root) &&
             RestrictedEvidenceRoot.IsWithin(root, Directory.GetCurrentDirectory())))
         {
+            if (OperatingSystem.IsWindows())
+            {
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                }
+                foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories))
+                {
+                    File.SetAttributes(directory, FileAttributes.Directory);
+                }
+            }
+            else
+            {
+                foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories))
+                {
+                    File.SetUnixFileMode(
+                        directory,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                File.SetUnixFileMode(
+                    root,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
             Directory.Delete(root, recursive: true);
         }
     }
@@ -661,6 +887,76 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
         return RestrictedEvidenceRoot.Open(path, identity, []);
+    }
+
+    private string CreateGitRepository()
+    {
+        var path = Path.Join(
+            Directory.GetCurrentDirectory(),
+            $".apr-r4-e3-git-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        roots.Add(path);
+        var git = FindExecutable("git");
+        _ = RunProcess(git, path, "init", "--quiet");
+        File.WriteAllText(Path.Join(path, "source.txt"), "authorized\n", new UTF8Encoding(false));
+        _ = RunProcess(git, path, "add", "source.txt");
+        _ = RunProcess(
+            git,
+            path,
+            "-c",
+            "user.name=APR Test",
+            "-c",
+            "user.email=apr-test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "authorized source");
+        return path;
+    }
+
+    private string CreatePlainRoot(string label)
+    {
+        var path = Path.Join(
+            Directory.GetCurrentDirectory(),
+            $".apr-r4-e3-{label}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        roots.Add(path);
+        return path;
+    }
+
+    private static string FindExecutable(string name)
+    {
+        var locator = OperatingSystem.IsWindows() ? "where.exe" : "which";
+        return RunProcess(locator, Directory.GetCurrentDirectory(), name)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)[0];
+    }
+
+    private static string RunProcess(
+        string executable,
+        string workingDirectory,
+        params string[] arguments)
+    {
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = workingDirectory,
+        };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("test_process_start_failed");
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"test_process_failed:{error}");
+        }
+        return output.TrimEnd('\r', '\n');
     }
 
     private static void WriteRestrictedText(string path, string value)

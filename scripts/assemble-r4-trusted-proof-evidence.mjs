@@ -15,7 +15,7 @@ const markerName = '.apr-r4-e3-restricted-root.json';
 const markerKind = 'apr-r4-e3-maintainer-approved-restricted-root-v1';
 const maximumDocumentBytes = 256 * 1024;
 
-function publicSurfaceCorpus(repositoryRoot, worktreeRoot) {
+function publicSurfaceCorpus(repositoryRoot, worktreeRoot, logRoot) {
   const result = new Map();
   const excluded = new Set(['.git', 'node_modules', 'bin', 'obj']);
   let totalBytes = 0;
@@ -43,6 +43,7 @@ function publicSurfaceCorpus(repositoryRoot, worktreeRoot) {
   };
   visit(repositoryRoot, 'repository');
   if (worktreeRoot !== repositoryRoot) visit(worktreeRoot, 'worktree');
+  if (logRoot !== repositoryRoot && logRoot !== worktreeRoot) visit(logRoot, 'logs');
   return result;
 }
 
@@ -247,6 +248,7 @@ function parseArgs(args) {
     '--destination-identity',
     '--repository-root',
     '--worktree-root',
+    '--public-log-root',
     '--source-bundle',
     '--capture-manifest',
     '--post-cleanup-capture-manifest',
@@ -261,7 +263,7 @@ function parseArgs(args) {
     '--host-output',
     '--package-manifest-output',
     '--public-scan-output',
-    '--public-output',
+    '--public-candidate-output',
   ];
   if (args.length !== names.length * 2) invalid();
   const values = new Map();
@@ -279,6 +281,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     const restrictedRoot = path.resolve(options['--restricted-root']);
     const repositoryRoot = path.resolve(options['--repository-root']);
     const worktreeRoot = path.resolve(options['--worktree-root']);
+    const logRoot = path.resolve(options['--public-log-root']);
     const temporaryRoot = path.resolve(os.tmpdir());
     if (
       !path.isAbsolute(options['--restricted-root']) ||
@@ -287,6 +290,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       within(repositoryRoot, restrictedRoot) ||
       within(restrictedRoot, worktreeRoot) ||
       within(worktreeRoot, restrictedRoot) ||
+      within(restrictedRoot, logRoot) ||
+      within(logRoot, restrictedRoot) ||
       within(restrictedRoot, temporaryRoot) ||
       within(temporaryRoot, restrictedRoot)
     ) {
@@ -396,7 +401,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     oracleAssembly.bytes.fill(0);
     productionAssembly.bytes.fill(0);
 
-    const publicCorpus = publicSurfaceCorpus(repositoryRoot, worktreeRoot);
+    if (!path.isAbsolute(logRoot) || !fs.statSync(logRoot).isDirectory()) invalid();
+    assertNoLinks(logRoot, logRoot);
+    const publicCorpus = publicSurfaceCorpus(repositoryRoot, worktreeRoot, logRoot);
     const assembled = assembleTrustedProofEvidence({
       sourceMap: sourceMap.value,
       sourceBundle: sourceBundle.value,
@@ -470,7 +477,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
         `APR_R4_E3_ASSEMBLY_RECOVERY_ONLY ${sha256(canonicalJson(assembled.host))}\n`,
       );
     } else {
-      const publicOutput = resolveNew(worktreeRoot, options['--public-output']);
+      const publicCandidateOutput = resolveNew(
+        restrictedRoot,
+        options['--public-candidate-output'],
+      );
       const publicEvidence = projectFinalizedTrustedProofEvidence({
         host: hostReadback.value,
         sourceBundle: sourceBundle.value,
@@ -488,7 +498,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
         privatePackageManifest: manifestReadback.value,
       });
       if (canonicalJson(publicEvidence) !== canonicalJson(assembled.publicCandidate)) invalid();
-      fs.writeFileSync(publicOutput, canonicalJson(publicEvidence), {
+      fs.writeFileSync(publicCandidateOutput, canonicalJson(publicEvidence), {
         flag: 'wx',
         mode: 0o600,
       });

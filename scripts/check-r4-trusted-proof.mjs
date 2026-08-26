@@ -793,12 +793,32 @@ export function checkR4TrustedProof(options = {}) {
     path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofOracleBuild', 'Program.cs'),
     'utf8',
   );
+  const authorizedSnapshotSource = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofOracleBuild',
+      'AuthorizedGitSnapshot.cs',
+    ),
+    'utf8',
+  );
   const assemblerSource = fs.readFileSync(
     path.join(root, 'scripts', 'assemble-r4-trusted-proof-evidence.mjs'),
     'utf8',
   );
   const assemblerBoundarySource = fs.readFileSync(
     path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofEvidenceAssembler', 'Program.cs'),
+    'utf8',
+  );
+  const publicCorpusSource = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofEvidenceAssembler',
+      'PublicSurfaceCorpusLease.cs',
+    ),
     'utf8',
   );
   if (
@@ -813,11 +833,24 @@ export function checkR4TrustedProof(options = {}) {
     !oracleBuildSource.includes('--git-executable') ||
     !oracleBuildSource.includes('--dotnet-executable') ||
     !oracleBuildSource.includes('--build-receipt-output') ||
-    count(
-      oracleBuildSource,
-      'AssertSourceIdentity(git, sourceRoot, expectedCommit, expectedTree)',
-    ) !== 2 ||
-    !oracleBuildSource.includes('"status", "--porcelain=v1", "--untracked-files=all"') ||
+    !oracleBuildSource.includes('--snapshot-directory') ||
+    !oracleBuildSource.includes('--intermediate-directory') ||
+    !oracleBuildSource.includes('AuthorizedGitSnapshot.Materialize') ||
+    !oracleBuildSource.includes('CreateFreshBuildDirectory') ||
+    !oracleBuildSource.includes('snapshot.Validate()') ||
+    !oracleBuildSource.includes('"--artifacts-path"') ||
+    !oracleBuildSource.includes('"--configfile"') ||
+    !oracleBuildSource.includes('"-p:ActionHostVerifierFrameworkReference=true"') ||
+    !oracleBuildSource.includes('start.Environment.Clear()') ||
+    !oracleBuildSource.includes('DOTNET_CLI_HOME') ||
+    !oracleBuildSource.includes('USERPROFILE') ||
+    !authorizedSnapshotSource.includes('"ls-tree", "-rz", "--full-tree"') ||
+    !authorizedSnapshotSource.includes('"cat-file", "--batch"') ||
+    !authorizedSnapshotSource.includes('FileMode.CreateNew') ||
+    !authorizedSnapshotSource.includes('lease.Validate()') ||
+    !authorizedSnapshotSource.includes('GIT_NO_REPLACE_OBJECTS') ||
+    !authorizedSnapshotSource.includes('IncrementalHash.CreateHash(HashAlgorithmName.SHA1)') ||
+    !authorizedSnapshotSource.includes('SetWindowsAccess') ||
     !oracleBuildSource.includes('"apr-r4-e3-independent-oracle-build-receipt-v2"') ||
     assemblerSource.includes('--assembly-input') ||
     !assemblerSource.includes('--source-bundle') ||
@@ -825,9 +858,23 @@ export function checkR4TrustedProof(options = {}) {
     !assemblerSource.includes('--oracle-assembly') ||
     !assemblerSource.includes('--production-assembly') ||
     !assemblerSource.includes('--public-scan-output') ||
+    !assemblerSource.includes('--public-candidate-output') ||
+    !assemblerSource.includes('--public-log-root') ||
     !assemblerBoundarySource.includes('AcquirePinnedFile') ||
     !assemblerBoundarySource.includes('lease.Validate()') ||
     !assemblerBoundarySource.includes('AssertCredentialCopiesAbsent') ||
+    !assemblerBoundarySource.includes('Console.OpenStandardInput()') ||
+    !assemblerBoundarySource.includes('ReadProtectedScanInput') ||
+    !assemblerBoundarySource.includes('RedirectStandardInput = true') ||
+    !assemblerBoundarySource.includes('process.StandardInput.Close()') ||
+    !assemblerBoundarySource.includes('PublicSurfaceCorpusLease.Open') ||
+    !assemblerBoundarySource.includes('publicCorpus.AssertAbsent') ||
+    !assemblerBoundarySource.includes('publicCorpus.AssertExactDocumentAbsent') ||
+    !assemblerBoundarySource.includes('publicCorpus.ValidateComplete') ||
+    !assemblerBoundarySource.includes('WritePublicCreateNew') ||
+    !assemblerBoundarySource.includes('FileMode.CreateNew') ||
+    !publicCorpusSource.includes('ContainsProtectedFragment') ||
+    !publicCorpusSource.includes('EnumerateDigests') ||
     !assemblerBoundarySource.includes('ValidatePrivateManifest') ||
     !assemblerBoundarySource.includes('assemble-r4-trusted-proof-evidence.mjs')
   ) {
