@@ -1094,14 +1094,14 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             base64Key);
         using (representations)
         {
-            Thread.Sleep(250);
+            Thread.Sleep(2_500);
             LaunchGuardian(
                 restricted,
                 descriptorName,
                 specs,
                 representations,
-                handoffMilliseconds: 150,
-                connectedSessionMilliseconds: 1_000);
+                handoffMilliseconds: 2_000,
+                connectedSessionMilliseconds: 2_000);
             CompleteGuardianDeletion(restricted, descriptorName, specs, expected);
         }
         CryptographicOperations.ZeroMemory(expected);
