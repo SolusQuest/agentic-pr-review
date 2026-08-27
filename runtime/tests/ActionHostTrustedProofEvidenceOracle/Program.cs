@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Reflection;
 using System.Text;
@@ -57,6 +58,9 @@ internal static class Program
         string? currentCredentialPath = null;
         string? previousCredentialPath = null;
         var credentialLeaseLaunchAttempted = false;
+        CredentialFileRepresentations? currentRepresentations = null;
+        CredentialFileRepresentations? previousRepresentations = null;
+        var operation = Stopwatch.StartNew();
         try
         {
             var options = Parse(args);
@@ -139,64 +143,23 @@ internal static class Program
             }
 
             currentCredentialPath = options["--current-state-key-file"];
-            using var currentRepresentations = root.ReadCredentialFileRepresentations(
+            currentRepresentations = root.ReadCredentialFileRepresentations(
                 currentCredentialPath,
                 base64Key: true,
                 deleteExactIdentityOnFailure: true);
             current = currentRepresentations.DecodedKey!.ToArray();
-            CredentialFileRepresentations? previousRepresentations = null;
-            try
+            if (options.TryGetValue("--previous-state-key-file", out var previousPath))
             {
-                if (options.TryGetValue("--previous-state-key-file", out var previousPath))
+                previousCredentialPath = previousPath;
+                previousRepresentations = root.ReadCredentialFileRepresentations(
+                    previousCredentialPath,
+                    base64Key: true,
+                    deleteExactIdentityOnFailure: true);
+                previous = previousRepresentations.DecodedKey!.ToArray();
+                if (CryptographicOperations.FixedTimeEquals(current, previous))
                 {
-                    previousCredentialPath = previousPath;
-                    previousRepresentations = root.ReadCredentialFileRepresentations(
-                        previousCredentialPath,
-                        base64Key: true,
-                        deleteExactIdentityOnFailure: true);
-                    previous = previousRepresentations.DecodedKey!.ToArray();
-                    if (CryptographicOperations.FixedTimeEquals(current, previous))
-                    {
-                        throw new InvalidDataException("state_keys_duplicate");
-                    }
+                    throw new InvalidDataException("state_keys_duplicate");
                 }
-                var specs = new List<CredentialLeaseSpec>
-                {
-                    new(currentCredentialPath, Base64Key: true),
-                };
-                var representations = new List<CredentialFileRepresentations>
-                {
-                    currentRepresentations,
-                };
-                if (previousCredentialPath is not null && previousRepresentations is not null)
-                {
-                    specs.Add(new(previousCredentialPath, Base64Key: true));
-                    representations.Add(previousRepresentations);
-                }
-                credentialLeaseLaunchAttempted = true;
-                CredentialLeaseAuthorityClient.LaunchCurrentProcess(
-                    root,
-                    options["--destination-identity"],
-                    [options["--repository-root"], options["--worktree-root"]],
-                    CredentialLeaseAuthorityClient.StateKeyDescriptorName,
-                    specs,
-                    representations);
-            }
-            catch
-            {
-                if (!credentialLeaseLaunchAttempted)
-                {
-                    TryDeleteExactCredential(currentRepresentations);
-                    if (previousRepresentations is not null)
-                    {
-                        TryDeleteExactCredential(previousRepresentations);
-                    }
-                }
-                throw;
-            }
-            finally
-            {
-                previousRepresentations?.Dispose();
             }
 
             var encrypted = new List<TrustedProofEncryptedArtifact>(manifest.Artifacts.Length);
@@ -339,6 +302,33 @@ internal static class Program
                     CryptographicOperations.ZeroMemory(output);
                 }
 
+                if (operation.Elapsed > EvidenceLimits.LogicalOperationTimeout)
+                {
+                    throw new InvalidDataException("codec_oracle_timeout");
+                }
+                var specs = new List<CredentialLeaseSpec>
+                {
+                    new(currentCredentialPath, Base64Key: true),
+                };
+                var representations = new List<CredentialFileRepresentations>
+                {
+                    currentRepresentations,
+                };
+                if (previousCredentialPath is not null && previousRepresentations is not null)
+                {
+                    specs.Add(new(previousCredentialPath, Base64Key: true));
+                    representations.Add(previousRepresentations);
+                }
+                credentialLeaseLaunchAttempted = true;
+                CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+                    root,
+                    options["--destination-identity"],
+                    [options["--repository-root"], options["--worktree-root"]],
+                    CredentialLeaseAuthorityClient.StateKeyDescriptorName,
+                    specs,
+                    representations,
+                    timeouts: CredentialLeaseAuthorityTimeouts.OracleSuccessor);
+
                 currentCredentialPath = null;
                 if (previousCredentialPath is not null)
                 {
@@ -408,7 +398,20 @@ internal static class Program
                         // Never fall back to pathname deletion after lease authority was attempted.
                     }
                 }
+                else
+                {
+                    if (currentRepresentations is not null)
+                    {
+                        TryDeleteExactCredential(currentRepresentations);
+                    }
+                    if (previousRepresentations is not null)
+                    {
+                        TryDeleteExactCredential(previousRepresentations);
+                    }
+                }
             }
+            currentRepresentations?.Dispose();
+            previousRepresentations?.Dispose();
         }
     }
 

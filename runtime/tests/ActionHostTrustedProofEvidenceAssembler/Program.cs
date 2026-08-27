@@ -86,6 +86,9 @@ internal static partial class Program
                 out githubCredentialAuthority,
                 out stateKeyCredentialAuthority,
                 out leasedCredentialValues);
+            githubCredentialAuthority.DeleteCredentialFiles();
+            stateKeyCredentialAuthority.DeleteCredentialFiles();
+            AssertCredentialCopiesAbsent(root.Path, credentialPaths);
             foreach (var source in capture.Sources)
             {
                 leases.Add(AcquireExpected(
@@ -223,8 +226,11 @@ internal static partial class Program
                 publicPath,
                 () =>
                 {
-                    githubCredentialAuthority.DeleteCredentialFiles();
-                    stateKeyCredentialAuthority.DeleteCredentialFiles();
+                    if (!githubCredentialAuthority.CredentialsDeleted ||
+                        !stateKeyCredentialAuthority.CredentialsDeleted)
+                    {
+                        throw new InvalidDataException("credential_lease_deletion_invalid");
+                    }
                     AssertCredentialCopiesAbsent(root.Path, credentialPaths);
                     credentialPaths.Clear();
 

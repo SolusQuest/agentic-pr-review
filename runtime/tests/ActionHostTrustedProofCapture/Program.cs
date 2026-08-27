@@ -22,6 +22,7 @@ internal static class Program
         RestrictedEvidenceRoot? root = null;
         string? credentialPath = null;
         var credentialLeaseLaunchAttempted = false;
+        CredentialFileRepresentations? token = null;
         try
         {
             var options = Parse(args);
@@ -31,99 +32,98 @@ internal static class Program
                 [options["--repository-root"], options["--worktree-root"]]);
             var plan = CapturePlan.Read(root, options["--capture-plan"]);
             credentialPath = options["--github-token-file"];
-            using var token = root.ReadCredentialFileRepresentations(
+            token = root.ReadCredentialFileRepresentations(
                 options["--github-token-file"],
                 base64Key: false,
                 deleteExactIdentityOnFailure: true);
+            using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
+            using var timeout = new CancellationTokenSource(
+                EvidenceLimits.LogicalOperationTimeout);
+            var writer = new CapturePackageWriter(root, plan.PackageName);
+            var artifactMetadata = new Dictionary<string, CapturedArtifactMetadata>(StringComparer.Ordinal);
+            foreach (var source in plan.Sources)
             {
-                credentialLeaseLaunchAttempted = true;
-                CredentialLeaseAuthorityClient.LaunchCurrentProcess(
-                    root,
-                    options["--destination-identity"],
-                    [options["--repository-root"], options["--worktree-root"]],
-                    CredentialLeaseAuthorityClient.GitHubDescriptorName,
-                    [new CredentialLeaseSpec(options["--github-token-file"], Base64Key: false)],
-                    [token]);
-                using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
-                using var timeout = new CancellationTokenSource(
-                    EvidenceLimits.LogicalOperationTimeout);
-                var writer = new CapturePackageWriter(root, plan.PackageName);
-                var artifactMetadata = new Dictionary<string, CapturedArtifactMetadata>(StringComparer.Ordinal);
-                foreach (var source in plan.Sources)
+                var pages = await client.GetPaginatedAsync(
+                    source.Route,
+                    source.EndpointFamily,
+                    timeout.Token);
+                try
                 {
-                    var pages = await client.GetPaginatedAsync(
-                        source.Route,
-                        source.EndpointFamily,
-                        timeout.Token);
-                    try
+                    for (var index = 0; index < pages.Captures.Length; index++)
                     {
-                        for (var index = 0; index < pages.Captures.Length; index++)
-                        {
-                            writer.AddSource(
-                                $"{source.SourceId}:page:{index + 1}",
-                                pages.Captures[index],
-                                pages.Bodies[index]);
-                        }
-                        if (plan.Artifacts.Any(item =>
-                                StringComparer.Ordinal.Equals(item.MetadataSourceId, source.SourceId)))
-                        {
-                            IndexArtifactMetadata(source, pages, artifactMetadata);
-                        }
+                        writer.AddSource(
+                            $"{source.SourceId}:page:{index + 1}",
+                            pages.Captures[index],
+                            pages.Bodies[index]);
                     }
-                    finally
+                    if (plan.Artifacts.Any(item =>
+                            StringComparer.Ordinal.Equals(item.MetadataSourceId, source.SourceId)))
                     {
-                        foreach (var body in pages.Bodies)
-                        {
-                            CryptographicOperations.ZeroMemory(body);
-                        }
+                        IndexArtifactMetadata(source, pages, artifactMetadata);
                     }
                 }
-
-                foreach (var artifact in plan.Artifacts)
+                finally
                 {
-                    if (!artifactMetadata.TryGetValue(artifact.ArtifactId, out var metadata) ||
-                        !StringComparer.Ordinal.Equals(metadata.ArtifactName, artifact.ArtifactName) ||
-                        !StringComparer.Ordinal.Equals(metadata.ProducingRunId, artifact.ProducingRunId) ||
-                        !StringComparer.Ordinal.Equals(metadata.SourceId, artifact.MetadataSourceId))
+                    foreach (var body in pages.Bodies)
                     {
-                        throw new InvalidDataException("artifact_metadata_invalid");
-                    }
-                    var downloaded = await client.DownloadArtifactAsync(
-                        artifact.DownloadRoute,
-                        timeout.Token);
-                    try
-                    {
-                        writer.AddArtifact(
-                            artifact.ArtifactId,
-                            metadata.ArtifactName,
-                            metadata.SourceId,
-                            metadata.BodySha256,
-                            downloaded.Archive,
-                            CanonicalEvidence.Sha256(downloaded.Archive),
-                            artifact.ProducingRunId,
-                            artifact.ProducingRunAttempt,
-                            downloaded.Capture);
-                    }
-                    finally
-                    {
-                        CryptographicOperations.ZeroMemory(downloaded.Archive);
+                        CryptographicOperations.ZeroMemory(body);
                     }
                 }
-
-                var finalized = writer.Finalize(
-                    plan.RepositoryId,
-                    plan.Repository,
-                    plan.OperationIds,
-                    plan.OperationRuns.Select(item => new CaptureManifestOperationRun(
-                        item.OperationId,
-                        item.Scope,
-                        item.RunId,
-                        item.RunAttempt)).ToArray(),
-                    plan.SourceMapSha256);
-                credentialPath = null;
-                Console.Out.WriteLine($"APR_R4_E3_CAPTURE_OK {finalized.Sha256}");
-                return 0;
             }
+
+            foreach (var artifact in plan.Artifacts)
+            {
+                if (!artifactMetadata.TryGetValue(artifact.ArtifactId, out var metadata) ||
+                    !StringComparer.Ordinal.Equals(metadata.ArtifactName, artifact.ArtifactName) ||
+                    !StringComparer.Ordinal.Equals(metadata.ProducingRunId, artifact.ProducingRunId) ||
+                    !StringComparer.Ordinal.Equals(metadata.SourceId, artifact.MetadataSourceId))
+                {
+                    throw new InvalidDataException("artifact_metadata_invalid");
+                }
+                var downloaded = await client.DownloadArtifactAsync(
+                    artifact.DownloadRoute,
+                    timeout.Token);
+                try
+                {
+                    writer.AddArtifact(
+                        artifact.ArtifactId,
+                        metadata.ArtifactName,
+                        metadata.SourceId,
+                        metadata.BodySha256,
+                        downloaded.Archive,
+                        CanonicalEvidence.Sha256(downloaded.Archive),
+                        artifact.ProducingRunId,
+                        artifact.ProducingRunAttempt,
+                        downloaded.Capture);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(downloaded.Archive);
+                }
+            }
+
+            var finalized = writer.Finalize(
+                plan.RepositoryId,
+                plan.Repository,
+                plan.OperationIds,
+                plan.OperationRuns.Select(item => new CaptureManifestOperationRun(
+                    item.OperationId,
+                    item.Scope,
+                    item.RunId,
+                    item.RunAttempt)).ToArray(),
+                plan.SourceMapSha256);
+            credentialLeaseLaunchAttempted = true;
+            CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+                root,
+                options["--destination-identity"],
+                [options["--repository-root"], options["--worktree-root"]],
+                CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                [new CredentialLeaseSpec(options["--github-token-file"], Base64Key: false)],
+                [token],
+                timeouts: CredentialLeaseAuthorityTimeouts.CaptureSuccessor);
+            credentialPath = null;
+            Console.Out.WriteLine($"APR_R4_E3_CAPTURE_OK {finalized.Sha256}");
+            return 0;
         }
         catch (InvalidDataException)
         {
@@ -168,7 +168,26 @@ internal static class Program
                         // Never fall back to a pathname delete after lease authority was attempted.
                     }
                 }
+                else if (token is not null)
+                {
+                    TryDeleteExactCredential(token);
+                }
             }
+            token?.Dispose();
+        }
+    }
+
+    private static void TryDeleteExactCredential(CredentialFileRepresentations value)
+    {
+        try
+        {
+            value.DeleteExactIdentity();
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or IOException or UnauthorizedAccessException or
+            ObjectDisposedException)
+        {
+            // Failure remains terminal and a replacement pathname is never deletion authority.
         }
     }
 

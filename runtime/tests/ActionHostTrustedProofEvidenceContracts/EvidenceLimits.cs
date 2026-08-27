@@ -15,4 +15,8 @@ public static class EvidenceLimits
     public const int MaximumCompressionRatio = 100;
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan LogicalOperationTimeout = TimeSpan.FromSeconds(120);
+    public static readonly TimeSpan CaptureCredentialHandoffTimeout =
+        LogicalOperationTimeout + RequestTimeout;
+    public static readonly TimeSpan OracleCredentialHandoffTimeout = RequestTimeout;
+    public static readonly TimeSpan CredentialConnectedSessionTimeout = RequestTimeout;
 }

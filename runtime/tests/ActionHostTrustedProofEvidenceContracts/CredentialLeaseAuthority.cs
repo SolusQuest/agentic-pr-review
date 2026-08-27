@@ -22,6 +22,19 @@ public sealed record CredentialLeaseDescriptor(
     int ProcessId,
     CredentialLeaseDescriptorFile[] Files);
 
+public sealed record CredentialLeaseAuthorityTimeouts(
+    TimeSpan Handoff,
+    TimeSpan ConnectedSession)
+{
+    public static CredentialLeaseAuthorityTimeouts CaptureSuccessor { get; } = new(
+        EvidenceLimits.CaptureCredentialHandoffTimeout,
+        EvidenceLimits.CredentialConnectedSessionTimeout);
+
+    public static CredentialLeaseAuthorityTimeouts OracleSuccessor { get; } = new(
+        EvidenceLimits.OracleCredentialHandoffTimeout,
+        EvidenceLimits.CredentialConnectedSessionTimeout);
+}
+
 public sealed class CredentialLeaseValue : IDisposable
 {
     internal CredentialLeaseValue(
@@ -216,7 +229,8 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
         IReadOnlyList<CredentialLeaseSpec> specs,
         IReadOnlyList<CredentialFileRepresentations> values,
         string? entryAssemblyOverride = null,
-        string? executableOverride = null)
+        string? executableOverride = null,
+        CredentialLeaseAuthorityTimeouts? timeouts = null)
     {
         if (specs.Count != values.Count || specs.Count is < 1 or > 3)
         {
@@ -226,6 +240,19 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             ? Environment.ProcessPath ?? throw new InvalidDataException("credential_lease_launch_invalid")
             : "dotnet");
         var entryAssembly = entryAssemblyOverride ?? Assembly.GetEntryAssembly()?.Location ?? "";
+        timeouts ??= CredentialLeaseAuthorityTimeouts.CaptureSuccessor;
+        int handoffTimeoutMilliseconds;
+        int connectedSessionTimeoutMilliseconds;
+        try
+        {
+            handoffTimeoutMilliseconds = TimeoutMilliseconds(timeouts.Handoff);
+            connectedSessionTimeoutMilliseconds = TimeoutMilliseconds(timeouts.ConnectedSession);
+        }
+        catch
+        {
+            DeleteInputsIfRetained(values);
+            throw;
+        }
         var info = new ProcessStartInfo(executable)
         {
             UseShellExecute = false,
@@ -244,6 +271,10 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
         info.ArgumentList.Add(root.Path);
         info.ArgumentList.Add(destinationIdentity);
         info.ArgumentList.Add(descriptorName);
+        info.ArgumentList.Add(handoffTimeoutMilliseconds.ToString(
+            System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add(connectedSessionTimeoutMilliseconds.ToString(
+            System.Globalization.CultureInfo.InvariantCulture));
         info.ArgumentList.Add(excludedRoots.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
         foreach (var excluded in excludedRoots) info.ArgumentList.Add(excluded);
         info.ArgumentList.Add(specs.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -310,6 +341,8 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             var rootPath = args[index++];
             var destinationIdentity = args[index++];
             descriptorName = args[index++];
+            var handoffTimeout = ParseTimeout(args[index++]);
+            var connectedSessionTimeout = ParseTimeout(args[index++]);
             var excludedCount = ParseCount(args[index++], 1, 4);
             var excluded = args.Skip(index).Take(excludedCount).ToArray();
             index += excludedCount;
@@ -389,11 +422,17 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             }
             Console.Out.WriteLine("APR_R4_E3_CREDENTIAL_GUARDIAN_READY");
             Console.Out.Flush();
-            using var timeout = new CancellationTokenSource(EvidenceLimits.LogicalOperationTimeout);
-            using var abort = timeout.Token.Register(
+            using (var handoff = new CancellationTokenSource(handoffTimeout))
+            using (handoff.Token.Register(
+                static state => ((NamedPipeServerStream)state!).Dispose(),
+                server))
+            {
+                await server.WaitForConnectionAsync(handoff.Token).ConfigureAwait(false);
+            }
+            using var connectedSession = new CancellationTokenSource(connectedSessionTimeout);
+            using var abortConnectedSession = connectedSession.Token.Register(
                 static state => ((NamedPipeServerStream)state!).Dispose(),
                 server);
-            await server.WaitForConnectionAsync(timeout.Token).ConfigureAwait(false);
             if (ReadCommand(server) != "SCAN") throw new InvalidDataException("credential_lease_protocol_invalid");
             WriteInt32(server, leases.Count);
             for (var item = 0; item < leases.Count; item++)
@@ -552,6 +591,32 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
         int.TryParse(value, out var count) && count >= minimum && count <= maximum
             ? count
             : throw new InvalidDataException("credential_lease_arguments_invalid");
+
+    private static TimeSpan ParseTimeout(string value) =>
+        int.TryParse(
+            value,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var milliseconds) &&
+            milliseconds >= 1 &&
+            milliseconds <= MaximumGuardianTimeoutMilliseconds
+            ? TimeSpan.FromMilliseconds(milliseconds)
+            : throw new InvalidDataException("credential_lease_arguments_invalid");
+
+    private static int TimeoutMilliseconds(TimeSpan value)
+    {
+        var milliseconds = value.TotalMilliseconds;
+        if (milliseconds < 1 ||
+            milliseconds > MaximumGuardianTimeoutMilliseconds ||
+            milliseconds != Math.Truncate(milliseconds))
+        {
+            throw new InvalidDataException("credential_lease_launch_invalid");
+        }
+        return checked((int)milliseconds);
+    }
+
+    private static int MaximumGuardianTimeoutMilliseconds => checked(
+        (int)EvidenceLimits.CaptureCredentialHandoffTimeout.TotalMilliseconds);
 
     private static void WriteCommand(Stream stream, string command) => WriteText(stream, command);
     private static string ReadCommand(Stream stream) => ReadText(stream, 16);

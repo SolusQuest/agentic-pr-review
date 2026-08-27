@@ -38,6 +38,11 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.Equal(ArtifactBridgeLimits.MaximumRecords, EvidenceLimits.MaximumRecords);
         Assert.Equal(ArtifactBridgeLimits.RequestTimeout, EvidenceLimits.RequestTimeout);
         Assert.Equal(ArtifactBridgeLimits.LogicalOperationTimeout, EvidenceLimits.LogicalOperationTimeout);
+        Assert.Equal(
+            EvidenceLimits.LogicalOperationTimeout + EvidenceLimits.RequestTimeout,
+            EvidenceLimits.CaptureCredentialHandoffTimeout);
+        Assert.Equal(EvidenceLimits.RequestTimeout, EvidenceLimits.OracleCredentialHandoffTimeout);
+        Assert.Equal(EvidenceLimits.RequestTimeout, EvidenceLimits.CredentialConnectedSessionTimeout);
     }
 
     [Fact]
@@ -1048,6 +1053,170 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(CredentialLeaseAuthorityClient.GitHubDescriptorName, "github-token", false)]
+    [InlineData(CredentialLeaseAuthorityClient.StateKeyDescriptorName, "current-state-key", true)]
+    public void CredentialGuardianHandoffClockStartsOnlyWhenProducerTransfersAuthority(
+        string descriptorName,
+        string credentialName,
+        bool base64Key)
+    {
+        var (restricted, expected, representations, specs) = CreateGuardianTimingFixture(
+            credentialName,
+            base64Key);
+        using (representations)
+        {
+            Thread.Sleep(250);
+            LaunchGuardian(
+                restricted,
+                descriptorName,
+                specs,
+                representations,
+                handoffMilliseconds: 150,
+                connectedSessionMilliseconds: 1_000);
+            CompleteGuardianDeletion(restricted, descriptorName, specs, expected);
+        }
+        CryptographicOperations.ZeroMemory(expected);
+    }
+
+    [Theory]
+    [InlineData(CredentialLeaseAuthorityClient.GitHubDescriptorName, "github-token", false)]
+    [InlineData(CredentialLeaseAuthorityClient.StateKeyDescriptorName, "current-state-key", true)]
+    public void CredentialGuardianStartsFreshConnectedSessionAfterDelayedHandoff(
+        string descriptorName,
+        string credentialName,
+        bool base64Key)
+    {
+        var (restricted, expected, representations, specs) = CreateGuardianTimingFixture(
+            credentialName,
+            base64Key);
+        using (representations)
+        {
+            LaunchGuardian(
+                restricted,
+                descriptorName,
+                specs,
+                representations,
+                handoffMilliseconds: 6_000,
+                connectedSessionMilliseconds: 2_000);
+            Thread.Sleep(2_500);
+            CompleteGuardianDeletion(restricted, descriptorName, specs, expected, delayMilliseconds: 50);
+        }
+        CryptographicOperations.ZeroMemory(expected);
+    }
+
+    [Theory]
+    [InlineData(CredentialLeaseAuthorityClient.GitHubDescriptorName, "github-token", false)]
+    [InlineData(CredentialLeaseAuthorityClient.StateKeyDescriptorName, "current-state-key", true)]
+    public void CredentialGuardianHandoffExpiryRemovesTheExactOriginalIdentity(
+        string descriptorName,
+        string credentialName,
+        bool base64Key)
+    {
+        var (restricted, expected, representations, specs) = CreateGuardianTimingFixture(
+            credentialName,
+            base64Key);
+        using (representations)
+        {
+            LaunchGuardian(
+                restricted,
+                descriptorName,
+                specs,
+                representations,
+                handoffMilliseconds: 150,
+                connectedSessionMilliseconds: 1_000);
+            Assert.True(SpinWait.SpinUntil(
+                () => !EvidenceFileHandle.PathEntryExists(Path.Join(restricted.Path, credentialName)) &&
+                    !EvidenceFileHandle.PathEntryExists(Path.Join(restricted.Path, descriptorName)),
+                TimeSpan.FromSeconds(5)));
+        }
+        CryptographicOperations.ZeroMemory(expected);
+    }
+
+    [Theory]
+    [InlineData(CredentialLeaseAuthorityClient.GitHubDescriptorName, "github-token", false)]
+    [InlineData(CredentialLeaseAuthorityClient.StateKeyDescriptorName, "current-state-key", true)]
+    public void CredentialGuardianConnectedSessionExpiryFailsClosedForBothCredentialFamilies(
+        string descriptorName,
+        string credentialName,
+        bool base64Key)
+    {
+        var (restricted, expected, representations, specs) = CreateGuardianTimingFixture(
+            credentialName,
+            base64Key);
+        using (representations)
+        {
+            LaunchGuardian(
+                restricted,
+                descriptorName,
+                specs,
+                representations,
+                handoffMilliseconds: 2_000,
+                connectedSessionMilliseconds: 150);
+            using var client = CredentialLeaseAuthorityClient.Open(restricted, descriptorName, specs);
+            var values = client.ReadValues();
+            try
+            {
+                Assert.Equal(expected, Assert.Single(values).FileBytes);
+                Assert.True(SpinWait.SpinUntil(
+                    () => !EvidenceFileHandle.PathEntryExists(Path.Join(restricted.Path, credentialName)) &&
+                        !EvidenceFileHandle.PathEntryExists(Path.Join(restricted.Path, descriptorName)),
+                    TimeSpan.FromSeconds(5)));
+                Assert.ThrowsAny<IOException>(() => client.DeleteCredentialFiles());
+            }
+            finally
+            {
+                foreach (var value in values) value.Dispose();
+            }
+        }
+        CryptographicOperations.ZeroMemory(expected);
+    }
+
+    [Theory]
+    [InlineData(CredentialLeaseAuthorityClient.GitHubDescriptorName, "github-token", false)]
+    [InlineData(CredentialLeaseAuthorityClient.StateKeyDescriptorName, "current-state-key", true)]
+    public void LinuxCredentialGuardianSessionExpiryPreservesReplacementPathname(
+        string descriptorName,
+        string credentialName,
+        bool base64Key)
+    {
+        if (!OperatingSystem.IsLinux()) return;
+
+        var (restricted, expected, representations, specs) = CreateGuardianTimingFixture(
+            credentialName,
+            base64Key);
+        var credentialPath = Path.Join(restricted.Path, credentialName);
+        var competitor = Enumerable.Repeat((byte)'Z', expected.Length).ToArray();
+        using (representations)
+        {
+            LaunchGuardian(
+                restricted,
+                descriptorName,
+                specs,
+                representations,
+                handoffMilliseconds: 2_000,
+                connectedSessionMilliseconds: 150);
+            using var client = CredentialLeaseAuthorityClient.Open(restricted, descriptorName, specs);
+            var values = client.ReadValues();
+            try
+            {
+                File.Move(credentialPath, Path.Join(restricted.Path, $"displaced-{credentialName}"));
+                File.WriteAllBytes(credentialPath, competitor);
+                Assert.True(SpinWait.SpinUntil(
+                    () => !EvidenceFileHandle.PathEntryExists(Path.Join(restricted.Path, descriptorName)),
+                    TimeSpan.FromSeconds(5)));
+                Assert.Equal(competitor, File.ReadAllBytes(credentialPath));
+                Assert.ThrowsAny<IOException>(() => client.DeleteCredentialFiles());
+            }
+            finally
+            {
+                foreach (var value in values) value.Dispose();
+            }
+        }
+        CryptographicOperations.ZeroMemory(expected);
+        CryptographicOperations.ZeroMemory(competitor);
+    }
+
     [Fact]
     public void CredentialGuardianLaunchFailureDisposesTheRetainedInputIdentity()
     {
@@ -1070,6 +1239,38 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 [new CredentialLeaseSpec(credentialName, Base64Key: false)],
                 [representations],
                 Path.Join(restricted.Path, "missing-guardian.dll")));
+
+        Assert.False(EvidenceFileHandle.PathEntryExists(credentialPath));
+        Assert.False(EvidenceFileHandle.PathEntryExists(Path.Join(
+            restricted.Path,
+            CredentialLeaseAuthorityClient.GitHubDescriptorName)));
+    }
+
+    [Fact]
+    public void CredentialGuardianInvalidTimeoutDisposesTheRetainedInputIdentity()
+    {
+        var restricted = CreateRestrictedRoot();
+        const string credentialName = "github-token";
+        var credentialPath = Path.Join(restricted.Path, credentialName);
+        WriteRestrictedText(
+            credentialPath,
+            "synthetic-invalid-timeout-token-used-only-by-this-test");
+        using var representations = restricted.ReadCredentialFileRepresentations(
+            credentialName,
+            base64Key: false);
+
+        Assert.Throws<InvalidDataException>(() =>
+            CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+                restricted,
+                restricted.DestinationIdentitySha256,
+                [CreatePlainRoot("guardian-invalid-timeout-excluded")],
+                CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                [new CredentialLeaseSpec(credentialName, Base64Key: false)],
+                [representations],
+                typeof(CapturePlan).Assembly.Location,
+                timeouts: new CredentialLeaseAuthorityTimeouts(
+                    TimeSpan.Zero,
+                    EvidenceLimits.CredentialConnectedSessionTimeout)));
 
         Assert.False(EvidenceFileHandle.PathEntryExists(credentialPath));
         Assert.False(EvidenceFileHandle.PathEntryExists(Path.Join(
@@ -2096,6 +2297,85 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         };
         response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         return response;
+    }
+
+    private (RestrictedEvidenceRoot Root, byte[] Expected, CredentialFileRepresentations Representations,
+        CredentialLeaseSpec[] Specs) CreateGuardianTimingFixture(string credentialName, bool base64Key)
+    {
+        var restricted = CreateRestrictedRoot();
+        byte[] expected;
+        if (base64Key)
+        {
+            var key = RandomNumberGenerator.GetBytes(32);
+            try
+            {
+                expected = Encoding.UTF8.GetBytes(Convert.ToBase64String(key));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(key);
+            }
+        }
+        else
+        {
+            expected = Encoding.UTF8.GetBytes("synthetic-guardian-timing-credential");
+        }
+        WriteRestrictedText(
+            Path.Join(restricted.Path, credentialName),
+            Encoding.UTF8.GetString(expected));
+        return (
+            restricted,
+            expected,
+            restricted.ReadCredentialFileRepresentations(credentialName, base64Key),
+            [new CredentialLeaseSpec(credentialName, base64Key)]);
+    }
+
+    private void LaunchGuardian(
+        RestrictedEvidenceRoot restricted,
+        string descriptorName,
+        CredentialLeaseSpec[] specs,
+        CredentialFileRepresentations representations,
+        int handoffMilliseconds,
+        int connectedSessionMilliseconds)
+    {
+        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+            restricted,
+            restricted.DestinationIdentitySha256,
+            [CreatePlainRoot("guardian-timing-excluded")],
+            descriptorName,
+            specs,
+            [representations],
+            typeof(CapturePlan).Assembly.Location,
+            timeouts: new CredentialLeaseAuthorityTimeouts(
+                TimeSpan.FromMilliseconds(handoffMilliseconds),
+                TimeSpan.FromMilliseconds(connectedSessionMilliseconds)));
+    }
+
+    private static void CompleteGuardianDeletion(
+        RestrictedEvidenceRoot restricted,
+        string descriptorName,
+        CredentialLeaseSpec[] specs,
+        byte[] expected,
+        int delayMilliseconds = 0)
+    {
+        using var client = CredentialLeaseAuthorityClient.Open(restricted, descriptorName, specs);
+        var values = client.ReadValues();
+        try
+        {
+            if (delayMilliseconds != 0) Thread.Sleep(delayMilliseconds);
+            Assert.Equal(expected, Assert.Single(values).FileBytes);
+            client.DeleteCredentialFiles();
+            Assert.True(SpinWait.SpinUntil(
+                () => !EvidenceFileHandle.PathEntryExists(Path.Join(
+                        restricted.Path,
+                        specs[0].RelativePath)) &&
+                    !EvidenceFileHandle.PathEntryExists(Path.Join(restricted.Path, descriptorName)),
+                TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            foreach (var value in values) value.Dispose();
+        }
     }
 
     private static CaptureManifestOperationRun[] OperationRuns() =>
