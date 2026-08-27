@@ -221,7 +221,7 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
         pipe.Dispose();
     }
 
-    public static void LaunchCurrentProcess(
+    public static int LaunchCurrentProcess(
         RestrictedEvidenceRoot root,
         string destinationIdentity,
         IReadOnlyList<string> excludedRoots,
@@ -303,6 +303,7 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             {
                 value.ReleaseRetainedIdentity();
             }
+            return process.Id;
         }
         catch (TimeoutException exception)
         {

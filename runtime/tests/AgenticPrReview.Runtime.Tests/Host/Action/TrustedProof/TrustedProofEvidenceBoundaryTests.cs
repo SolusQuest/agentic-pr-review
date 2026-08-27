@@ -23,6 +23,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
 {
     private readonly List<string> roots = [];
+    private readonly List<int> guardianProcessIds = [];
 
     [Fact]
     public void EvidenceLimitsMatchProductionArtifactBridge()
@@ -1047,14 +1048,14 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         using var representations = restricted.ReadCredentialFileRepresentations(
             credentialName,
             base64Key: false);
-        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+        TrackGuardian(CredentialLeaseAuthorityClient.LaunchCurrentProcess(
             restricted,
             restricted.DestinationIdentitySha256,
             [CreatePlainRoot("guardian-excluded")],
             CredentialLeaseAuthorityClient.GitHubDescriptorName,
             [new CredentialLeaseSpec(credentialName, Base64Key: false)],
             [representations],
-            typeof(CapturePlan).Assembly.Location);
+            typeof(CapturePlan).Assembly.Location));
 
         using var client = CredentialLeaseAuthorityClient.Open(
             restricted,
@@ -1355,22 +1356,22 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         using var keyRepresentations = restricted.ReadCredentialFileRepresentations(
             keyName,
             base64Key: true);
-        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+        TrackGuardian(CredentialLeaseAuthorityClient.LaunchCurrentProcess(
             restricted,
             restricted.DestinationIdentitySha256,
             [CreatePlainRoot("guardian-continuity-excluded")],
             CredentialLeaseAuthorityClient.GitHubDescriptorName,
             [new CredentialLeaseSpec(tokenName, Base64Key: false)],
             [tokenRepresentations],
-            typeof(CapturePlan).Assembly.Location);
-        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+            typeof(CapturePlan).Assembly.Location));
+        TrackGuardian(CredentialLeaseAuthorityClient.LaunchCurrentProcess(
             restricted,
             restricted.DestinationIdentitySha256,
             [CreatePlainRoot("guardian-continuity-excluded-keys")],
             CredentialLeaseAuthorityClient.StateKeyDescriptorName,
             [new CredentialLeaseSpec(keyName, Base64Key: true)],
             [keyRepresentations],
-            typeof(CapturePlan).Assembly.Location);
+            typeof(CapturePlan).Assembly.Location));
 
         if (!OperatingSystem.IsWindows())
         {
@@ -1452,7 +1453,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         var shortPhases = new CredentialLeaseAuthorityTimeouts(
             TimeSpan.FromSeconds(5),
             TimeSpan.FromSeconds(2));
-        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+        TrackGuardian(CredentialLeaseAuthorityClient.LaunchCurrentProcess(
             restricted,
             restricted.DestinationIdentitySha256,
             [CreatePlainRoot("guardian-coordinator-excluded")],
@@ -1460,8 +1461,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             [new CredentialLeaseSpec(tokenName, Base64Key: false)],
             [tokenRepresentations],
             typeof(CapturePlan).Assembly.Location,
-            timeouts: shortPhases);
-        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+            timeouts: shortPhases));
+        TrackGuardian(CredentialLeaseAuthorityClient.LaunchCurrentProcess(
             restricted,
             restricted.DestinationIdentitySha256,
             [CreatePlainRoot("guardian-coordinator-excluded-keys")],
@@ -1469,7 +1470,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             [new CredentialLeaseSpec(keyName, Base64Key: true)],
             [keyRepresentations],
             typeof(CapturePlan).Assembly.Location,
-            timeouts: shortPhases);
+            timeouts: shortPhases));
 
         var options = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -1533,14 +1534,14 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             credentialName,
             base64Key: false);
         var specs = new[] { new CredentialLeaseSpec(credentialName, Base64Key: false) };
-        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+        TrackGuardian(CredentialLeaseAuthorityClient.LaunchCurrentProcess(
             restricted,
             restricted.DestinationIdentitySha256,
             [CreatePlainRoot("guardian-replacement-excluded")],
             CredentialLeaseAuthorityClient.GitHubDescriptorName,
             specs,
             [representations],
-            typeof(CapturePlan).Assembly.Location);
+            typeof(CapturePlan).Assembly.Location));
 
         using var client = CredentialLeaseAuthorityClient.Open(
             restricted,
@@ -2180,6 +2181,11 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
 
     public void Dispose()
     {
+        foreach (var processId in guardianProcessIds.Distinct())
+        {
+            Assert.True(WaitForGuardianExit(processId),
+                $"Credential guardian {processId} did not exit before test-root cleanup.");
+        }
         foreach (var root in roots.Where(root =>
             Directory.Exists(root) &&
             RestrictedEvidenceRoot.IsWithin(root, Directory.GetCurrentDirectory())))
@@ -2457,7 +2463,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         int handoffMilliseconds,
         int connectedSessionMilliseconds)
     {
-        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+        TrackGuardian(CredentialLeaseAuthorityClient.LaunchCurrentProcess(
             restricted,
             restricted.DestinationIdentitySha256,
             [CreatePlainRoot("guardian-timing-excluded")],
@@ -2467,7 +2473,23 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             typeof(CapturePlan).Assembly.Location,
             timeouts: new CredentialLeaseAuthorityTimeouts(
                 TimeSpan.FromMilliseconds(handoffMilliseconds),
-                TimeSpan.FromMilliseconds(connectedSessionMilliseconds)));
+                TimeSpan.FromMilliseconds(connectedSessionMilliseconds))));
+    }
+
+    private void TrackGuardian(int processId) => guardianProcessIds.Add(processId);
+
+    private static bool WaitForGuardianExit(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.WaitForExit((int)TimeSpan.FromSeconds(10).TotalMilliseconds);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
+        {
+            return true;
+        }
     }
 
     private static void CompleteGuardianDeletion(
