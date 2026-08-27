@@ -15,22 +15,49 @@ public sealed record RestrictedRootMarker(
 
 public sealed class CredentialFileRepresentations : IDisposable
 {
+    private PinnedEvidenceLease? lease;
+
     internal CredentialFileRepresentations(
         byte[] fileBytes,
         byte[]? decodedKey,
-        string physicalIdentitySha256)
+        string physicalIdentitySha256,
+        PinnedEvidenceLease lease)
     {
         FileBytes = fileBytes;
         DecodedKey = decodedKey;
         PhysicalIdentitySha256 = physicalIdentitySha256;
+        this.lease = lease;
     }
 
     public byte[] FileBytes { get; }
     public byte[]? DecodedKey { get; }
     public string PhysicalIdentitySha256 { get; }
 
+    public void DeleteExactIdentity()
+    {
+        var retained = lease ?? throw new ObjectDisposedException(nameof(CredentialFileRepresentations));
+        try
+        {
+            retained.DeleteExactIdentity();
+        }
+        finally
+        {
+            if (retained.IsDisposed)
+            {
+                lease = null;
+            }
+        }
+    }
+
+    public void ReleaseRetainedIdentity()
+    {
+        lease?.Dispose();
+        lease = null;
+    }
+
     public void Dispose()
     {
+        ReleaseRetainedIdentity();
         CryptographicOperations.ZeroMemory(FileBytes);
         if (DecodedKey is not null)
         {
@@ -242,9 +269,12 @@ public sealed class RestrictedEvidenceRoot
 
     public CredentialFileRepresentations ReadCredentialFileRepresentations(
         string relativePath,
-        bool base64Key)
+        bool base64Key,
+        bool deleteExactIdentityOnFailure = false)
     {
-        using var pinned = AcquirePinnedFile(relativePath, EvidenceLimits.MaximumCredentialBytes);
+        PinnedEvidenceLease? pinned = AcquirePinnedFile(
+            relativePath,
+            EvidenceLimits.MaximumCredentialBytes);
         var bytes = pinned.Bytes;
         byte[]? decoded = null;
         char[]? characters = null;
@@ -261,7 +291,13 @@ public sealed class RestrictedEvidenceRoot
             if (!base64Key)
             {
                 pinned.Validate();
-                return new CredentialFileRepresentations(bytes.ToArray(), null, pinned.Identity);
+                var tokenResult = new CredentialFileRepresentations(
+                    bytes.ToArray(),
+                    null,
+                    pinned.Identity,
+                    pinned);
+                pinned = null;
+                return tokenResult;
             }
 
             if (bytes.Length != 44)
@@ -290,9 +326,14 @@ public sealed class RestrictedEvidenceRoot
             }
 
             pinned.Validate();
-            var result = new CredentialFileRepresentations(bytes.ToArray(), decoded, pinned.Identity);
+            var keyResult = new CredentialFileRepresentations(
+                bytes.ToArray(),
+                decoded,
+                pinned.Identity,
+                pinned);
+            pinned = null;
             decoded = null;
-            return result;
+            return keyResult;
         }
         catch (Exception exception) when (
             exception is DecoderFallbackException or FormatException)
@@ -301,6 +342,22 @@ public sealed class RestrictedEvidenceRoot
         }
         finally
         {
+            if (pinned is not null)
+            {
+                if (deleteExactIdentityOnFailure)
+                {
+                    try
+                    {
+                        pinned.DeleteExactIdentity();
+                    }
+                    catch (Exception exception) when (
+                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
+                    {
+                        // Retain an unverified or replaced pathname rather than deleting a competitor.
+                    }
+                }
+                pinned.Dispose();
+            }
             if (decoded is not null)
             {
                 CryptographicOperations.ZeroMemory(decoded);
@@ -321,7 +378,7 @@ public sealed class RestrictedEvidenceRoot
     public PinnedEvidenceLease AcquirePinnedFile(string relativePath, int maximumBytes)
     {
         var path = ResolveExistingFile(relativePath, maximumBytes);
-        var handle = EvidenceFileHandle.OpenNoFollow(path);
+        var handle = EvidenceFileHandle.OpenNoFollowForDisposition(path);
         var retained = false;
         try
         {
@@ -474,9 +531,10 @@ public sealed class RestrictedEvidenceRoot
 
     public void RemoveCredentialFile(string relativePath)
     {
-        var path = ResolveExistingFile(relativePath, EvidenceLimits.MaximumCredentialBytes);
-        File.Delete(path);
-        if (File.Exists(path))
+        using var lease = AcquirePinnedFile(relativePath, EvidenceLimits.MaximumCredentialBytes);
+        lease.DeleteExactIdentity();
+        if (EvidenceFileHandle.PathEntryExists(
+                ResolveChildPath(Path, relativePath)))
         {
             throw new InvalidDataException("credential_file_removal_invalid");
         }

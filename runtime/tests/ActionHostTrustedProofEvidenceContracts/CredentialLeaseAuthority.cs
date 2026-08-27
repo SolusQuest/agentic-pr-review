@@ -215,15 +215,16 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
         string descriptorName,
         IReadOnlyList<CredentialLeaseSpec> specs,
         IReadOnlyList<CredentialFileRepresentations> values,
-        string? entryAssemblyOverride = null)
+        string? entryAssemblyOverride = null,
+        string? executableOverride = null)
     {
         if (specs.Count != values.Count || specs.Count is < 1 or > 3)
         {
             throw new InvalidDataException("credential_lease_launch_invalid");
         }
-        var executable = entryAssemblyOverride is null
+        var executable = executableOverride ?? (entryAssemblyOverride is null
             ? Environment.ProcessPath ?? throw new InvalidDataException("credential_lease_launch_invalid")
-            : "dotnet";
+            : "dotnet");
         var entryAssembly = entryAssemblyOverride ?? Assembly.GetEntryAssembly()?.Location ?? "";
         var info = new ProcessStartInfo(executable)
         {
@@ -252,9 +253,9 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             info.ArgumentList.Add(spec.Base64Key ? "1" : "0");
         }
         using var process = new Process { StartInfo = info };
-        if (!process.Start()) throw new InvalidDataException("credential_lease_launch_invalid");
         try
         {
+            if (!process.Start()) throw new InvalidDataException("credential_lease_launch_invalid");
             WriteCommand(process.StandardInput.BaseStream, "INIT");
             WriteInt32(process.StandardInput.BaseStream, values.Count);
             foreach (var value in values) WriteBytes(process.StandardInput.BaseStream, value.FileBytes);
@@ -265,18 +266,29 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
                 .GetResult();
             if (ready != "APR_R4_E3_CREDENTIAL_GUARDIAN_READY")
             {
-                StopFailedGuardian(process);
                 throw new InvalidDataException("credential_lease_launch_invalid");
+            }
+            foreach (var value in values)
+            {
+                value.ReleaseRetainedIdentity();
             }
         }
         catch (TimeoutException exception)
         {
             StopFailedGuardian(process);
+            DeleteInputsIfRetained(values);
+            throw new InvalidDataException("credential_lease_launch_invalid", exception);
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            StopFailedGuardian(process);
+            DeleteInputsIfRetained(values);
             throw new InvalidDataException("credential_lease_launch_invalid", exception);
         }
         catch
         {
             StopFailedGuardian(process);
+            DeleteInputsIfRetained(values);
             throw;
         }
     }
@@ -397,10 +409,9 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             {
                 for (var item = 0; item < leases.Count; item++)
                 {
-                    leases[item].ReleaseForDeletionIfExact();
-                    root.RemoveCredentialFile(specs[item].RelativePath);
+                    leases[item].DeleteExactIdentity();
                 }
-                if (specs.Any(spec => File.Exists(
+                if (specs.Any(spec => EvidenceFileHandle.PathEntryExists(
                         RestrictedEvidenceRoot.ResolveChildPath(root.Path, spec.RelativePath))))
                 {
                     throw new InvalidDataException("credential_lease_deletion_invalid");
@@ -412,8 +423,12 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
                 server.Flush();
                 throw;
             }
-            descriptorLease.ReleaseForDeletionIfExact();
-            root.RemoveCredentialFile(descriptorName);
+            descriptorLease.DeleteExactIdentity();
+            if (EvidenceFileHandle.PathEntryExists(
+                    RestrictedEvidenceRoot.ResolveChildPath(root.Path, descriptorName)))
+            {
+                throw new InvalidDataException("credential_lease_deletion_invalid");
+            }
             descriptorLease.Dispose();
             descriptorLease = null;
             descriptorName = null;
@@ -435,8 +450,7 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
                 {
                     try
                     {
-                        leases[index].ReleaseForDeletionIfExact();
-                        root.RemoveCredentialFile(specs[index].RelativePath);
+                        leases[index].DeleteExactIdentity();
                     }
                     catch
                     {
@@ -449,8 +463,7 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             {
                 try
                 {
-                    descriptorLease.ReleaseForDeletionIfExact();
-                    root.RemoveCredentialFile(descriptorName);
+                    descriptorLease.DeleteExactIdentity();
                 }
                 catch
                 {
@@ -487,6 +500,24 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // The launch failure remains authoritative.
+        }
+    }
+
+    private static void DeleteInputsIfRetained(
+        IReadOnlyList<CredentialFileRepresentations> values)
+    {
+        foreach (var value in values)
+        {
+            try
+            {
+                value.DeleteExactIdentity();
+            }
+            catch (Exception exception) when (
+                exception is InvalidDataException or IOException or UnauthorizedAccessException or
+                ObjectDisposedException)
+            {
+                // A failed launch has no successor authority. Preserve any replacement pathname.
+            }
         }
     }
 

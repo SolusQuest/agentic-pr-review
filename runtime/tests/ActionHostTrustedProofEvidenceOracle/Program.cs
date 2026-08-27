@@ -141,24 +141,25 @@ internal static class Program
             currentCredentialPath = options["--current-state-key-file"];
             using var currentRepresentations = root.ReadCredentialFileRepresentations(
                 currentCredentialPath,
-                base64Key: true);
+                base64Key: true,
+                deleteExactIdentityOnFailure: true);
             current = currentRepresentations.DecodedKey!.ToArray();
             CredentialFileRepresentations? previousRepresentations = null;
-            if (options.TryGetValue("--previous-state-key-file", out var previousPath))
-            {
-                previousCredentialPath = previousPath;
-                previousRepresentations = root.ReadCredentialFileRepresentations(
-                    previousCredentialPath,
-                    base64Key: true);
-                previous = previousRepresentations.DecodedKey!.ToArray();
-                if (CryptographicOperations.FixedTimeEquals(current, previous))
-                {
-                    previousRepresentations.Dispose();
-                    throw new InvalidDataException("state_keys_duplicate");
-                }
-            }
             try
             {
+                if (options.TryGetValue("--previous-state-key-file", out var previousPath))
+                {
+                    previousCredentialPath = previousPath;
+                    previousRepresentations = root.ReadCredentialFileRepresentations(
+                        previousCredentialPath,
+                        base64Key: true,
+                        deleteExactIdentityOnFailure: true);
+                    previous = previousRepresentations.DecodedKey!.ToArray();
+                    if (CryptographicOperations.FixedTimeEquals(current, previous))
+                    {
+                        throw new InvalidDataException("state_keys_duplicate");
+                    }
+                }
                 var specs = new List<CredentialLeaseSpec>
                 {
                     new(currentCredentialPath, Base64Key: true),
@@ -180,6 +181,18 @@ internal static class Program
                     CredentialLeaseAuthorityClient.StateKeyDescriptorName,
                     specs,
                     representations);
+            }
+            catch
+            {
+                if (!credentialLeaseLaunchAttempted)
+                {
+                    TryDeleteExactCredential(currentRepresentations);
+                    if (previousRepresentations is not null)
+                    {
+                        TryDeleteExactCredential(previousRepresentations);
+                    }
+                }
+                throw;
             }
             finally
             {
@@ -395,24 +408,15 @@ internal static class Program
                         // Never fall back to pathname deletion after lease authority was attempted.
                     }
                 }
-                else
-                {
-                    TryRemoveCredentialFile(root, currentCredentialPath);
-                }
-            }
-            if (root is not null && previousCredentialPath is not null &&
-                !credentialLeaseLaunchAttempted)
-            {
-                TryRemoveCredentialFile(root, previousCredentialPath);
             }
         }
     }
 
-    private static void TryRemoveCredentialFile(RestrictedEvidenceRoot root, string relativePath)
+    private static void TryDeleteExactCredential(CredentialFileRepresentations value)
     {
         try
         {
-            root.RemoveCredentialFile(relativePath);
+            value.DeleteExactIdentity();
         }
         catch (InvalidDataException)
         {

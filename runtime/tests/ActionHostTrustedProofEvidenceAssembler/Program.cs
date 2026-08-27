@@ -248,8 +248,7 @@ internal static partial class Program
                         finalizedManifest.Dispose();
                         throw new InvalidDataException("assembly_manifest_finalization_invalid");
                     }
-                    manifestLease.Dispose();
-                    root.RemoveCredentialFile(manifestDraftPath);
+                    manifestLease.DeleteExactIdentity();
                     manifestLease = finalizedManifest;
                     manifestLease.Validate();
                 });
@@ -1228,7 +1227,8 @@ internal static partial class Program
         string root,
         IEnumerable<string> credentialPaths)
     {
-        if (credentialPaths.Any(name => File.Exists(System.IO.Path.Join(root, name))))
+        if (credentialPaths.Any(name => EvidenceFileHandle.PathEntryExists(
+                System.IO.Path.Join(root, name))))
         {
             throw new InvalidDataException("assembly_credential_copy_invalid");
         }

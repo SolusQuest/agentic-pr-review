@@ -33,7 +33,8 @@ internal static class Program
             credentialPath = options["--github-token-file"];
             using var token = root.ReadCredentialFileRepresentations(
                 options["--github-token-file"],
-                base64Key: false);
+                base64Key: false,
+                deleteExactIdentityOnFailure: true);
             {
                 credentialLeaseLaunchAttempted = true;
                 CredentialLeaseAuthorityClient.LaunchCurrentProcess(
@@ -165,18 +166,6 @@ internal static class Program
                         exception is InvalidDataException or IOException or UnauthorizedAccessException)
                     {
                         // Never fall back to a pathname delete after lease authority was attempted.
-                    }
-                }
-                else
-                {
-                    try
-                    {
-                        root.RemoveCredentialFile(credentialPath);
-                    }
-                    catch (Exception exception) when (
-                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
-                    {
-                        // No cross-process authority existed; failure remains terminal.
                     }
                 }
             }

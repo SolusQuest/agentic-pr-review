@@ -14,6 +14,7 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
     private readonly string stagingPath;
     private EvidenceFileIdentity identity;
     private bool published;
+    private bool retracted;
     private bool disposed;
 
     private CreatedEvidenceFileReceipt(
@@ -137,7 +138,7 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
         ValidatePublishedIdentityAndBytes();
     }
 
-    public void RetractIfOwned()
+    public void RetractIfOwned(Action<string>? afterValidationBeforeDispositionForTest = null)
     {
         if (!published)
         {
@@ -146,20 +147,25 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
         }
         try
         {
-            ValidatePublishedIdentityAndBytes();
-            File.Delete(Path);
-            if (File.Exists(Path))
-            {
-                throw new InvalidDataException("created_file_retraction_invalid");
-            }
+            ExactIdentityFileDisposition.Delete(
+                Path,
+                handle,
+                identity,
+                expectedBytes,
+                afterValidationBeforeDispositionForTest);
             published = false;
+            retracted = true;
         }
         catch (Exception exception) when (
             exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            // Retraction is permitted only while the final pathname still names
-            // the process-created physical identity with the exact expected bytes.
-            // A replacement or competitor is never deleted.
+            if (handle.IsClosed)
+            {
+                published = false;
+                retracted = true;
+            }
+            // Retraction may remove only the retained process-created identity
+            // with its exact expected bytes. A replacement or competitor is never deleted.
         }
     }
 
@@ -200,7 +206,7 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
             return;
         }
         disposed = true;
-        if (!published)
+        if (!published && !retracted)
         {
             DeleteIfOwned();
         }
@@ -318,6 +324,7 @@ public sealed class PinnedEvidenceLease : IDisposable
 
     public byte[] Bytes { get; }
     public string Identity { get; }
+    public bool IsDisposed => disposed;
 
     public void Validate()
     {
@@ -362,12 +369,32 @@ public sealed class PinnedEvidenceLease : IDisposable
         }
     }
 
-    public void ReleaseForDeletionIfExact()
+    public void DeleteExactIdentity(Action<string>? afterValidationBeforeDispositionForTest = null)
     {
-        ValidateExactBytes();
-        disposed = true;
-        CryptographicOperations.ZeroMemory(Bytes);
-        handle.Dispose();
+        ObjectDisposedException.ThrowIf(disposed, this);
+        try
+        {
+            ExactIdentityFileDisposition.Delete(
+                path,
+                handle,
+                physicalIdentity,
+                Bytes,
+                afterValidationBeforeDispositionForTest);
+        }
+        finally
+        {
+            if (handle.IsClosed)
+            {
+                disposed = true;
+                CryptographicOperations.ZeroMemory(Bytes);
+            }
+        }
+        if (!disposed)
+        {
+            disposed = true;
+            CryptographicOperations.ZeroMemory(Bytes);
+            handle.Dispose();
+        }
     }
 
     public void Dispose()
@@ -379,6 +406,158 @@ public sealed class PinnedEvidenceLease : IDisposable
         disposed = true;
         CryptographicOperations.ZeroMemory(Bytes);
         handle.Dispose();
+    }
+}
+
+internal static class ExactIdentityFileDisposition
+{
+    internal static void Delete(
+        string path,
+        SafeFileHandle retainedHandle,
+        EvidenceFileIdentity expectedIdentity,
+        ReadOnlySpan<byte> expectedBytes,
+        Action<string>? afterValidationBeforeDispositionForTest)
+    {
+        var fullPath = System.IO.Path.GetFullPath(path);
+        ValidateExact(fullPath, retainedHandle, expectedIdentity, expectedBytes);
+
+        if (OperatingSystem.IsWindows())
+        {
+            afterValidationBeforeDispositionForTest?.Invoke(fullPath);
+            ValidateRetained(retainedHandle, expectedIdentity, expectedBytes);
+            EvidenceFileHandle.DeleteRetainedIdentity(retainedHandle);
+            retainedHandle.Dispose();
+            if (EvidenceFileHandle.PathEntryExists(fullPath))
+            {
+                throw new InvalidDataException("exact_identity_disposition_competitor_present");
+            }
+            return;
+        }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new InvalidDataException("restricted_platform_unsupported");
+        }
+
+        var parent = System.IO.Path.GetDirectoryName(fullPath) ??
+            throw new InvalidDataException("exact_identity_disposition_parent_invalid");
+        var quarantineDirectory = System.IO.Path.Join(
+            parent,
+            $".apr-r4-disposition-{Guid.NewGuid():N}");
+        var quarantinePath = System.IO.Path.Join(quarantineDirectory, "candidate");
+        var quarantined = false;
+        EvidenceFileHandle.CreateDirectoryExclusive(quarantineDirectory);
+        try
+        {
+            afterValidationBeforeDispositionForTest?.Invoke(fullPath);
+            EvidenceFileHandle.MoveNoReplace(fullPath, quarantinePath);
+            quarantined = true;
+            try
+            {
+                ValidateExact(
+                    quarantinePath,
+                    retainedHandle,
+                    expectedIdentity,
+                    expectedBytes);
+            }
+            catch
+            {
+                RestoreWithoutReplace(quarantinePath, fullPath);
+                quarantined = false;
+                throw;
+            }
+
+            File.Delete(quarantinePath);
+            quarantined = false;
+            if (EvidenceFileHandle.PathEntryExists(quarantinePath) ||
+                EvidenceFileHandle.PathEntryExists(fullPath))
+            {
+                throw new InvalidDataException("exact_identity_disposition_invalid");
+            }
+        }
+        finally
+        {
+            if (!quarantined)
+            {
+                TryDeleteEmptyDirectory(quarantineDirectory);
+            }
+        }
+    }
+
+    private static void ValidateExact(
+        string path,
+        SafeFileHandle retainedHandle,
+        EvidenceFileIdentity expectedIdentity,
+        ReadOnlySpan<byte> expectedBytes)
+    {
+        ValidateRetained(retainedHandle, expectedIdentity, expectedBytes);
+        using var current = EvidenceFileHandle.OpenNoFollowSharedWrite(path);
+        if (EvidenceFileHandle.Identity(current) != expectedIdentity)
+        {
+            throw new InvalidDataException("exact_identity_disposition_identity_invalid");
+        }
+    }
+
+    private static void ValidateRetained(
+        SafeFileHandle retainedHandle,
+        EvidenceFileIdentity expectedIdentity,
+        ReadOnlySpan<byte> expectedBytes)
+    {
+        if (EvidenceFileHandle.Identity(retainedHandle) != expectedIdentity)
+        {
+            throw new InvalidDataException("exact_identity_disposition_identity_invalid");
+        }
+
+        var actual = new byte[expectedBytes.Length];
+        try
+        {
+            var offset = 0;
+            while (offset < actual.Length)
+            {
+                var read = RandomAccess.Read(retainedHandle, actual.AsSpan(offset), offset);
+                if (read == 0)
+                {
+                    break;
+                }
+                offset += read;
+            }
+            if (offset != actual.Length ||
+                EvidenceFileHandle.Identity(retainedHandle).Size != actual.Length ||
+                !actual.AsSpan().SequenceEqual(expectedBytes))
+            {
+                throw new InvalidDataException("exact_identity_disposition_bytes_invalid");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(actual);
+        }
+    }
+
+    private static void RestoreWithoutReplace(string quarantinePath, string originalPath)
+    {
+        try
+        {
+            EvidenceFileHandle.MoveNoReplace(quarantinePath, originalPath);
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException("exact_identity_disposition_restore_invalid", exception);
+        }
+    }
+
+    private static void TryDeleteEmptyDirectory(string directory)
+    {
+        try
+        {
+            Directory.Delete(directory, recursive: false);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // A non-empty quarantine retains the displaced entry; never delete it during recovery.
+        }
     }
 }
 
@@ -403,6 +582,7 @@ public static partial class EvidenceFileHandle
     private const int OpenCloseOnExec = 0x80000;
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
+    private const uint DeleteAccess = 0x00010000;
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareWrite = 0x00000002;
     private const uint FileShareDelete = 0x00000004;
@@ -468,11 +648,50 @@ public static partial class EvidenceFileHandle
         return handle;
     }
 
+    internal static SafeFileHandle OpenNoFollowForDisposition(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return OpenNoFollow(path);
+        }
+        var handle = CreateFile(
+            path,
+            GenericRead | DeleteAccess,
+            FileShareRead | FileShareDelete,
+            0,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagRandomAccess,
+            0);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            throw new InvalidDataException("restricted_file_open_invalid");
+        }
+        return handle;
+    }
+
     public static bool PathNamesRetainedHandle(string path, SafeFileHandle retainedHandle)
     {
         var retained = Identity(retainedHandle);
         using var current = OpenNoFollowSharedWrite(path);
         return Identity(current) == retained;
+    }
+
+    public static bool PathEntryExists(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
     }
 
     internal static SafeFileHandle CreateNewNoFollow(string path)
@@ -481,7 +700,7 @@ public static partial class EvidenceFileHandle
         {
             var handle = CreateFile(
                 path,
-                GenericRead | GenericWrite,
+                GenericRead | GenericWrite | DeleteAccess,
                 FileShareRead | FileShareDelete,
                 0,
                 CreateNew,
@@ -593,6 +812,23 @@ public static partial class EvidenceFileHandle
         throw new InvalidDataException("restricted_platform_unsupported");
     }
 
+    internal static void DeleteRetainedIdentity(SafeFileHandle handle)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new InvalidDataException("restricted_platform_unsupported");
+        }
+        var disposition = new FileDispositionInformation { DeleteFile = 1 };
+        if (!SetFileInformationByHandle(
+                handle,
+                FileDispositionInfo,
+                ref disposition,
+                (uint)Marshal.SizeOf<FileDispositionInformation>()))
+        {
+            throw new InvalidDataException("exact_identity_disposition_invalid");
+        }
+    }
+
     [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial SafeFileHandle CreateFile(
         string fileName,
@@ -616,6 +852,16 @@ public static partial class EvidenceFileHandle
     private static partial bool GetFileInformationByHandle(
         SafeFileHandle handle,
         out ByHandleFileInformation information);
+
+    private const int FileDispositionInfo = 4;
+
+    [LibraryImport("kernel32.dll", EntryPoint = "SetFileInformationByHandle", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetFileInformationByHandle(
+        SafeFileHandle handle,
+        int fileInformationClass,
+        ref FileDispositionInformation fileInformation,
+        uint bufferSize);
 
     [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int Open(string path, int flags);
@@ -657,6 +903,9 @@ public static partial class EvidenceFileHandle
 
     [StructLayout(LayoutKind.Sequential)]
     private struct FileTime { internal uint Low; internal uint High; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInformation { internal int DeleteFile; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct LinuxFileInformation

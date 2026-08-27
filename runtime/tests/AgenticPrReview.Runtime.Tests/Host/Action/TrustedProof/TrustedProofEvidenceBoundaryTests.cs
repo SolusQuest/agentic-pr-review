@@ -838,6 +838,47 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExactIdentityRetractionPreservesCompetitorInjectedAfterLastValidation(
+        bool directoryCompetitor)
+    {
+        var root = CreatePlainRoot("exact-retraction-competitor");
+        var outputPath = Path.Join(root, "public.json");
+        var displacedPath = Path.Join(root, "displaced-public.json");
+        var expected = Encoding.UTF8.GetBytes("expected-public-output");
+        var competitor = Encoding.UTF8.GetBytes("competitor-public-output");
+        using var receipt = EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, expected);
+
+        receipt.RetractIfOwned(path =>
+        {
+            File.Move(path, displacedPath);
+            if (directoryCompetitor)
+            {
+                Directory.CreateDirectory(path);
+            }
+            else
+            {
+                File.WriteAllBytes(path, competitor);
+            }
+        });
+
+        if (directoryCompetitor)
+        {
+            Assert.True(Directory.Exists(outputPath));
+        }
+        else
+        {
+            Assert.Equal(competitor, File.ReadAllBytes(outputPath));
+        }
+        if (File.Exists(displacedPath))
+        {
+            Assert.Equal(expected, File.ReadAllBytes(displacedPath));
+        }
+        Assert.Empty(Directory.EnumerateDirectories(root, ".apr-r4-disposition-*"));
+    }
+
     [Fact]
     public void PinnedCredentialLeaseRejectsSameIdentityContentDrift()
     {
@@ -862,6 +903,104 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 lease.ValidateExactBytes();
             });
         }
+    }
+
+    [Theory]
+    [InlineData("github-token", false)]
+    [InlineData("github-token", true)]
+    [InlineData(CredentialLeaseAuthorityClient.GitHubDescriptorName, false)]
+    [InlineData(CredentialLeaseAuthorityClient.GitHubDescriptorName, true)]
+    public void ExactIdentityDispositionPreservesCredentialAndDescriptorCompetitors(
+        string relativePath,
+        bool directoryCompetitor)
+    {
+        var restricted = CreateRestrictedRoot();
+        var path = Path.Join(restricted.Path, relativePath);
+        var displacedPath = Path.Join(restricted.Path, $"displaced-{relativePath}");
+        var expected = Encoding.UTF8.GetBytes("expected-retained-identity");
+        var competitor = Encoding.UTF8.GetBytes("competitor-retained-identity");
+        WriteRestrictedText(path, Encoding.UTF8.GetString(expected));
+        using var lease = restricted.AcquirePinnedFile(
+            relativePath,
+            EvidenceLimits.MaximumDocumentBytes);
+
+        Assert.Throws<InvalidDataException>(() => lease.DeleteExactIdentity(currentPath =>
+        {
+            File.Move(currentPath, displacedPath);
+            if (directoryCompetitor)
+            {
+                Directory.CreateDirectory(currentPath);
+            }
+            else
+            {
+                File.WriteAllBytes(currentPath, competitor);
+            }
+        }));
+
+        if (directoryCompetitor)
+        {
+            Assert.True(Directory.Exists(path));
+        }
+        else
+        {
+            Assert.Equal(competitor, File.ReadAllBytes(path));
+        }
+        if (File.Exists(displacedPath))
+        {
+            Assert.Equal(expected, File.ReadAllBytes(displacedPath));
+        }
+        Assert.Empty(Directory.EnumerateDirectories(
+            restricted.Path,
+            ".apr-r4-disposition-*"));
+    }
+
+    [Fact]
+    public void ExactIdentityDispositionRejectsNewHardLinkAfterLastValidation()
+    {
+        var restricted = CreateRestrictedRoot();
+        const string relativePath = "github-token";
+        var path = Path.Join(restricted.Path, relativePath);
+        var hardLinkPath = Path.Join(restricted.Path, "credential-hard-link");
+        var expected = Encoding.UTF8.GetBytes("expected-retained-identity");
+        WriteRestrictedText(path, Encoding.UTF8.GetString(expected));
+        using var lease = restricted.AcquirePinnedFile(
+            relativePath,
+            EvidenceLimits.MaximumCredentialBytes);
+
+        Assert.Throws<InvalidDataException>(() => lease.DeleteExactIdentity(currentPath =>
+            HardLinkTestPlatform.Create(hardLinkPath, currentPath)));
+
+        lease.Dispose();
+        Assert.Equal(expected, File.ReadAllBytes(path));
+        Assert.Equal(expected, File.ReadAllBytes(hardLinkPath));
+    }
+
+    [Fact]
+    public void LinuxExactIdentityDispositionRestoresSameInodeDriftAfterLastValidation()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var restricted = CreateRestrictedRoot();
+        const string relativePath = "github-token";
+        var path = Path.Join(restricted.Path, relativePath);
+        var expected = Encoding.UTF8.GetBytes("expected-retained-identity");
+        var changed = Encoding.UTF8.GetBytes("modified-retained-identity");
+        Assert.Equal(expected.Length, changed.Length);
+        WriteRestrictedText(path, Encoding.UTF8.GetString(expected));
+        using var lease = restricted.AcquirePinnedFile(
+            relativePath,
+            EvidenceLimits.MaximumCredentialBytes);
+
+        Assert.Throws<InvalidDataException>(() => lease.DeleteExactIdentity(currentPath =>
+            File.WriteAllBytes(currentPath, changed)));
+
+        Assert.Equal(changed, File.ReadAllBytes(path));
+        Assert.Empty(Directory.EnumerateDirectories(
+            restricted.Path,
+            ".apr-r4-disposition-*"));
     }
 
     [Fact]
@@ -907,6 +1046,65 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             foreach (var value in values) value.Dispose();
             CryptographicOperations.ZeroMemory(expected);
         }
+    }
+
+    [Fact]
+    public void CredentialGuardianLaunchFailureDisposesTheRetainedInputIdentity()
+    {
+        var restricted = CreateRestrictedRoot();
+        const string credentialName = "github-token";
+        var credentialPath = Path.Join(restricted.Path, credentialName);
+        WriteRestrictedText(
+            credentialPath,
+            "synthetic-failed-guardian-token-used-only-by-this-test");
+        using var representations = restricted.ReadCredentialFileRepresentations(
+            credentialName,
+            base64Key: false);
+
+        Assert.Throws<InvalidDataException>(() =>
+            CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+                restricted,
+                restricted.DestinationIdentitySha256,
+                [CreatePlainRoot("guardian-launch-failure-excluded")],
+                CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                [new CredentialLeaseSpec(credentialName, Base64Key: false)],
+                [representations],
+                Path.Join(restricted.Path, "missing-guardian.dll")));
+
+        Assert.False(EvidenceFileHandle.PathEntryExists(credentialPath));
+        Assert.False(EvidenceFileHandle.PathEntryExists(Path.Join(
+            restricted.Path,
+            CredentialLeaseAuthorityClient.GitHubDescriptorName)));
+    }
+
+    [Fact]
+    public void CredentialGuardianProcessStartFailureDisposesTheRetainedInputIdentity()
+    {
+        var restricted = CreateRestrictedRoot();
+        const string credentialName = "github-token";
+        var credentialPath = Path.Join(restricted.Path, credentialName);
+        WriteRestrictedText(
+            credentialPath,
+            "synthetic-unstartable-guardian-token-used-only-by-this-test");
+        using var representations = restricted.ReadCredentialFileRepresentations(
+            credentialName,
+            base64Key: false);
+
+        Assert.Throws<InvalidDataException>(() =>
+            CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+                restricted,
+                restricted.DestinationIdentitySha256,
+                [CreatePlainRoot("guardian-process-start-failure-excluded")],
+                CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                [new CredentialLeaseSpec(credentialName, Base64Key: false)],
+                [representations],
+                typeof(CapturePlan).Assembly.Location,
+                Path.Join(restricted.Path, "missing-guardian-executable")));
+
+        Assert.False(EvidenceFileHandle.PathEntryExists(credentialPath));
+        Assert.False(EvidenceFileHandle.PathEntryExists(Path.Join(
+            restricted.Path,
+            CredentialLeaseAuthorityClient.GitHubDescriptorName)));
     }
 
     [Fact]
@@ -1007,6 +1205,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         var restricted = CreateRestrictedRoot();
         const string credentialName = "github-token";
         var credentialPath = Path.Join(restricted.Path, credentialName);
+        var displacedPath = Path.Join(restricted.Path, "displaced-github-token");
         var expected = Enumerable.Repeat((byte)'A', 48).ToArray();
         var competitor = Enumerable.Repeat((byte)'B', 48).ToArray();
         WriteRestrictedText(credentialPath, Encoding.UTF8.GetString(expected));
@@ -1031,19 +1230,18 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         try
         {
             Assert.Equal(expected, Assert.Single(values).FileBytes);
-            if (OperatingSystem.IsWindows())
-            {
-                Assert.Throws<IOException>(() => File.Delete(credentialPath));
-                client.DeleteCredentialFiles();
-                Assert.False(File.Exists(credentialPath));
-            }
-            else
-            {
-                File.Delete(credentialPath);
-                File.WriteAllBytes(credentialPath, competitor);
-                Assert.Throws<InvalidDataException>(() => client.DeleteCredentialFiles());
-                Assert.Equal(competitor, File.ReadAllBytes(credentialPath));
-            }
+            File.Move(credentialPath, displacedPath);
+            File.WriteAllBytes(credentialPath, competitor);
+            Assert.Throws<InvalidDataException>(() => client.DeleteCredentialFiles());
+            Assert.Equal(competitor, File.ReadAllBytes(credentialPath));
+            Assert.True(SpinWait.SpinUntil(
+                () => OriginalIdentityIsDeletedOrReadable(displacedPath, expected),
+                TimeSpan.FromSeconds(5)));
+            Assert.True(SpinWait.SpinUntil(
+                () => !EvidenceFileHandle.PathEntryExists(Path.Join(
+                    restricted.Path,
+                    CredentialLeaseAuthorityClient.GitHubDescriptorName)),
+                TimeSpan.FromSeconds(5)));
         }
         finally
         {
@@ -1341,7 +1539,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
-    public void WindowsPinnedLeaseDeniesReplacementForTheAssemblyWindow()
+    public void WindowsPinnedLeaseRetainsIdentityAcrossPathReplacement()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -1354,10 +1552,15 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         using var lease = root.AcquirePinnedFile(
             "leased-source",
             EvidenceLimits.MaximumDocumentBytes);
+        var displacedPath = Path.Join(root.Path, "replacement-target");
 
-        Assert.Throws<IOException>(() =>
-            File.Move(path, Path.Join(root.Path, "replacement-target")));
-        lease.Validate();
+        File.Move(path, displacedPath);
+        File.WriteAllText(path, "synthetic-competitor");
+
+        Assert.Throws<InvalidDataException>(() => lease.Validate());
+        lease.Dispose();
+        Assert.Equal("synthetic-source", File.ReadAllText(displacedPath));
+        Assert.Equal("synthetic-competitor", File.ReadAllText(path));
     }
 
     [Fact]
@@ -1819,6 +2022,28 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    private static bool OriginalIdentityIsDeletedOrReadable(
+        string path,
+        ReadOnlySpan<byte> expected)
+    {
+        if (!File.Exists(path))
+        {
+            return true;
+        }
+        try
+        {
+            return File.ReadAllBytes(path).AsSpan().SequenceEqual(expected);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
