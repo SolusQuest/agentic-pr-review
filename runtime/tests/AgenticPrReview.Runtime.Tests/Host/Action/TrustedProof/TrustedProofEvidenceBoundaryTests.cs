@@ -100,6 +100,34 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public void AssemblerDeletesCredentialsBeforeCorpusAndStdinWork()
+    {
+        var source = File.ReadAllText(Path.Join(
+            FindRepositoryRoot(),
+            "runtime",
+            "tests",
+            "ActionHostTrustedProofEvidenceAssembler",
+            "Program.cs"));
+        var acquire = source.IndexOf(
+            "AcquireAndDeleteLeasedCredentials(",
+            StringComparison.Ordinal);
+        var corpus = source.IndexOf(
+            "PublicSurfaceCorpusLease.Open(",
+            StringComparison.Ordinal);
+        var stdin = source.IndexOf(
+            "ReadProtectedScanInput(",
+            StringComparison.Ordinal);
+        var append = source.IndexOf(
+            "AppendLeasedCredentialRepresentations(",
+            StringComparison.Ordinal);
+
+        Assert.True(acquire >= 0);
+        Assert.True(acquire < corpus);
+        Assert.True(corpus < stdin);
+        Assert.True(stdin < append);
+    }
+
+    [Fact]
     public void OracleBuildSnapshotUsesOnlyAuthorizedGitBlobsAndStaysStable()
     {
         var repository = CreateGitRepository();
@@ -1354,14 +1382,14 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
 
         var categories = SyntheticProtectedCategories();
         var paths = new List<string>();
-        EvidenceAssemblerProgram.AppendLeasedActualCredentialValues(
-            categories,
+        var options = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["--github-token-file"] = tokenName,
+            ["--current-state-key-file"] = keyName,
+        };
+        EvidenceAssemblerProgram.AcquireAndDeleteLeasedCredentials(
             restricted,
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["--github-token-file"] = tokenName,
-                ["--current-state-key-file"] = keyName,
-            },
+            options,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [tokenName] = tokenRepresentations.PhysicalIdentitySha256,
@@ -1373,6 +1401,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             out var leasedValues);
         try
         {
+            EvidenceAssemblerProgram.AppendLeasedCredentialRepresentations(
+                categories,
+                options,
+                leasedValues);
             Assert.Contains(categories["authorization"], value => value.AsSpan().SequenceEqual(token));
             Assert.Contains(categories["authorization"], value =>
                 value.AsSpan().SequenceEqual(Encoding.UTF8.GetBytes(
@@ -1384,9 +1416,96 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             Assert.Contains(categories["authorization"], value => ReferenceEquals(value, leasedToken.FileBytes));
             Assert.Contains(categories["state_keys"], value => ReferenceEquals(value, leasedKey.FileBytes));
             Assert.Contains(categories["state_keys"], value => ReferenceEquals(value, leasedKey.DecodedKey));
-            githubAuthority.DeleteCredentialFiles();
-            stateKeyAuthority.DeleteCredentialFiles();
+            Assert.True(githubAuthority.CredentialsDeleted);
+            Assert.True(stateKeyAuthority.CredentialsDeleted);
             Assert.All(paths, path => Assert.False(File.Exists(Path.Join(restricted.Path, path))));
+        }
+        finally
+        {
+            githubAuthority.Dispose();
+            stateKeyAuthority.Dispose();
+            foreach (var value in leasedValues) value.Dispose();
+            ZeroProtectedCategories(categories);
+            CryptographicOperations.ZeroMemory(token);
+            CryptographicOperations.ZeroMemory(decodedKey);
+            CryptographicOperations.ZeroMemory(encodedKey);
+        }
+    }
+
+    [Fact]
+    public void CredentialCoordinatorDeletesBeforeSlowSuccessorWorkAndAppendsFromMemory()
+    {
+        var restricted = CreateRestrictedRoot();
+        const string tokenName = "github-token";
+        const string keyName = "current-state-key";
+        var token = Encoding.UTF8.GetBytes("synthetic-coordinator-token-retained-in-memory");
+        var decodedKey = RandomNumberGenerator.GetBytes(32);
+        var encodedKey = Encoding.UTF8.GetBytes(Convert.ToBase64String(decodedKey));
+        WriteRestrictedText(Path.Join(restricted.Path, tokenName), Encoding.UTF8.GetString(token));
+        WriteRestrictedText(Path.Join(restricted.Path, keyName), Encoding.UTF8.GetString(encodedKey));
+        using var tokenRepresentations = restricted.ReadCredentialFileRepresentations(
+            tokenName,
+            base64Key: false);
+        using var keyRepresentations = restricted.ReadCredentialFileRepresentations(
+            keyName,
+            base64Key: true);
+        var shortPhases = new CredentialLeaseAuthorityTimeouts(
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(2));
+        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+            restricted,
+            restricted.DestinationIdentitySha256,
+            [CreatePlainRoot("guardian-coordinator-excluded")],
+            CredentialLeaseAuthorityClient.GitHubDescriptorName,
+            [new CredentialLeaseSpec(tokenName, Base64Key: false)],
+            [tokenRepresentations],
+            typeof(CapturePlan).Assembly.Location,
+            timeouts: shortPhases);
+        CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+            restricted,
+            restricted.DestinationIdentitySha256,
+            [CreatePlainRoot("guardian-coordinator-excluded-keys")],
+            CredentialLeaseAuthorityClient.StateKeyDescriptorName,
+            [new CredentialLeaseSpec(keyName, Base64Key: true)],
+            [keyRepresentations],
+            typeof(CapturePlan).Assembly.Location,
+            timeouts: shortPhases);
+
+        var options = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["--github-token-file"] = tokenName,
+            ["--current-state-key-file"] = keyName,
+        };
+        var categories = SyntheticProtectedCategories();
+        var paths = new List<string>();
+        EvidenceAssemblerProgram.AcquireAndDeleteLeasedCredentials(
+            restricted,
+            options,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [tokenName] = tokenRepresentations.PhysicalIdentitySha256,
+                [keyName] = keyRepresentations.PhysicalIdentitySha256,
+            },
+            paths,
+            out var githubAuthority,
+            out var stateKeyAuthority,
+            out var leasedValues);
+        try
+        {
+            Assert.True(githubAuthority.CredentialsDeleted);
+            Assert.True(stateKeyAuthority.CredentialsDeleted);
+            Assert.All(paths, path => Assert.False(EvidenceFileHandle.PathEntryExists(
+                Path.Join(restricted.Path, path))));
+
+            Thread.Sleep(5_500);
+            EvidenceAssemblerProgram.AppendLeasedCredentialRepresentations(
+                categories,
+                options,
+                leasedValues);
+
+            Assert.Contains(categories["authorization"], value => value.AsSpan().SequenceEqual(token));
+            Assert.Contains(categories["state_keys"], value => value.AsSpan().SequenceEqual(decodedKey));
+            Assert.Contains(categories["state_keys"], value => value.AsSpan().SequenceEqual(encodedKey));
         }
         finally
         {
