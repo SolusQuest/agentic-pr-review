@@ -369,7 +369,7 @@ public sealed class RestrictedEvidenceRoot
             }
             var identity = CanonicalEvidence.Sha256(Encoding.UTF8.GetBytes(before.Canonical));
             retained = true;
-            return new PinnedEvidenceLease(handle, before, bytes, identity);
+            return new PinnedEvidenceLease(path, handle, before, bytes, identity);
         }
         finally
         {

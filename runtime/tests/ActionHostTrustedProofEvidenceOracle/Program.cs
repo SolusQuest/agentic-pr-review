@@ -47,11 +47,16 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (CredentialLeaseAuthorityClient.IsGuardianCommand(args))
+        {
+            return CredentialLeaseAuthorityClient.RunGuardianAsync(args).GetAwaiter().GetResult();
+        }
         byte[] current = [];
         byte[]? previous = null;
         RestrictedEvidenceRoot? root = null;
         string? currentCredentialPath = null;
         string? previousCredentialPath = null;
+        var credentialLeaseLaunchAttempted = false;
         try
         {
             var options = Parse(args);
@@ -134,17 +139,51 @@ internal static class Program
             }
 
             currentCredentialPath = options["--current-state-key-file"];
-            current = root.ReadCredentialFile(
+            using var currentRepresentations = root.ReadCredentialFileRepresentations(
                 currentCredentialPath,
                 base64Key: true);
+            current = currentRepresentations.DecodedKey!.ToArray();
+            CredentialFileRepresentations? previousRepresentations = null;
             if (options.TryGetValue("--previous-state-key-file", out var previousPath))
             {
                 previousCredentialPath = previousPath;
-                previous = root.ReadCredentialFile(previousCredentialPath, base64Key: true);
+                previousRepresentations = root.ReadCredentialFileRepresentations(
+                    previousCredentialPath,
+                    base64Key: true);
+                previous = previousRepresentations.DecodedKey!.ToArray();
                 if (CryptographicOperations.FixedTimeEquals(current, previous))
                 {
+                    previousRepresentations.Dispose();
                     throw new InvalidDataException("state_keys_duplicate");
                 }
+            }
+            try
+            {
+                var specs = new List<CredentialLeaseSpec>
+                {
+                    new(currentCredentialPath, Base64Key: true),
+                };
+                var representations = new List<CredentialFileRepresentations>
+                {
+                    currentRepresentations,
+                };
+                if (previousCredentialPath is not null && previousRepresentations is not null)
+                {
+                    specs.Add(new(previousCredentialPath, Base64Key: true));
+                    representations.Add(previousRepresentations);
+                }
+                credentialLeaseLaunchAttempted = true;
+                CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+                    root,
+                    options["--destination-identity"],
+                    [options["--repository-root"], options["--worktree-root"]],
+                    CredentialLeaseAuthorityClient.StateKeyDescriptorName,
+                    specs,
+                    representations);
+            }
+            finally
+            {
+                previousRepresentations?.Dispose();
             }
 
             var encrypted = new List<TrustedProofEncryptedArtifact>(manifest.Artifacts.Length);
@@ -333,9 +372,36 @@ internal static class Program
             }
             if (root is not null && currentCredentialPath is not null)
             {
-                TryRemoveCredentialFile(root, currentCredentialPath);
+                if (credentialLeaseLaunchAttempted)
+                {
+                    try
+                    {
+                        var specs = new List<CredentialLeaseSpec>
+                        {
+                            new(currentCredentialPath, Base64Key: true),
+                        };
+                        if (previousCredentialPath is not null)
+                        {
+                            specs.Add(new(previousCredentialPath, Base64Key: true));
+                        }
+                        CredentialLeaseAuthorityClient.DeleteAbandoned(
+                            root,
+                            CredentialLeaseAuthorityClient.StateKeyDescriptorName,
+                            specs);
+                    }
+                    catch (Exception exception) when (
+                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
+                    {
+                        // Never fall back to pathname deletion after lease authority was attempted.
+                    }
+                }
+                else
+                {
+                    TryRemoveCredentialFile(root, currentCredentialPath);
+                }
             }
-            if (root is not null && previousCredentialPath is not null)
+            if (root is not null && previousCredentialPath is not null &&
+                !credentialLeaseLaunchAttempted)
             {
                 TryRemoveCredentialFile(root, previousCredentialPath);
             }

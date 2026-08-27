@@ -22,6 +22,9 @@ internal static partial class Program
         PinnedEvidenceLease? publicScanLease = null;
         PinnedEvidenceLease? publicCandidateLease = null;
         PublicSurfaceCorpusLease? publicCorpus = null;
+        CredentialLeaseAuthorityClient? githubCredentialAuthority = null;
+        CredentialLeaseAuthorityClient? stateKeyCredentialAuthority = null;
+        CredentialLeaseValue[] leasedCredentialValues = [];
         byte[] publicBytes = [];
         CreatedEvidenceFileReceipt? createdPublicOutput = null;
         try
@@ -74,12 +77,15 @@ internal static partial class Program
                 root,
                 capture);
             var authorizedCredentialIdentities = AuthorizedCredentialIdentities(root, capture);
-            AppendActualCredentialValues(
+            AppendLeasedActualCredentialValues(
                 protectedScanValues,
                 root,
                 options,
                 authorizedCredentialIdentities,
-                credentialPaths);
+                credentialPaths,
+                out githubCredentialAuthority,
+                out stateKeyCredentialAuthority,
+                out leasedCredentialValues);
             foreach (var source in capture.Sources)
             {
                 leases.Add(AcquireExpected(
@@ -217,10 +223,8 @@ internal static partial class Program
                 publicPath,
                 () =>
                 {
-                    foreach (var credentialPath in credentialPaths)
-                    {
-                        root.RemoveCredentialFile(credentialPath);
-                    }
+                    githubCredentialAuthority.DeleteCredentialFiles();
+                    stateKeyCredentialAuthority.DeleteCredentialFiles();
                     AssertCredentialCopiesAbsent(root.Path, credentialPaths);
                     credentialPaths.Clear();
 
@@ -282,11 +286,44 @@ internal static partial class Program
         }
         finally
         {
+            if (githubCredentialAuthority is not null &&
+                stateKeyCredentialAuthority is not null &&
+                credentialPaths.Count != 0)
+            {
+                try
+                {
+                    if (!githubCredentialAuthority.CredentialsDeleted)
+                    {
+                        githubCredentialAuthority.DeleteCredentialFiles();
+                    }
+                    if (!stateKeyCredentialAuthority.CredentialsDeleted)
+                    {
+                        stateKeyCredentialAuthority.DeleteCredentialFiles();
+                    }
+                    if (root is not null)
+                    {
+                        AssertCredentialCopiesAbsent(root.Path, credentialPaths);
+                    }
+                    credentialPaths.Clear();
+                }
+                catch (Exception exception) when (
+                    exception is InvalidDataException or IOException or UnauthorizedAccessException)
+                {
+                    // Failure remains terminal. The guardians retain the only
+                    // authority to remove the original physical identities.
+                }
+            }
             manifestLease?.Dispose();
             publicScanLease?.Dispose();
             publicCorpus?.Dispose();
             createdPublicOutput?.Dispose();
             publicCandidateLease?.Dispose();
+            githubCredentialAuthority?.Dispose();
+            stateKeyCredentialAuthority?.Dispose();
+            foreach (var value in leasedCredentialValues)
+            {
+                value.Dispose();
+            }
             CryptographicOperations.ZeroMemory(publicBytes);
             foreach (var values in protectedScanValues.Values)
             {
@@ -299,13 +336,6 @@ internal static partial class Program
             foreach (var lease in leases)
             {
                 lease.Dispose();
-            }
-            if (root is not null)
-            {
-                foreach (var credentialPath in credentialPaths)
-                {
-                    TryRemoveCredentialFile(root, credentialPath);
-                }
             }
         }
     }
@@ -587,6 +617,114 @@ internal static partial class Program
         values["state_keys"] = stateKeys;
     }
 
+    internal static void AppendLeasedActualCredentialValues(
+        Dictionary<string, IReadOnlyList<byte[]>> values,
+        RestrictedEvidenceRoot root,
+        IReadOnlyDictionary<string, string> options,
+        IReadOnlyDictionary<string, string> authorizedCredentialIdentities,
+        ICollection<string> credentialPaths,
+        out CredentialLeaseAuthorityClient githubAuthority,
+        out CredentialLeaseAuthorityClient stateKeyAuthority,
+        out CredentialLeaseValue[] leasedValues)
+    {
+        var tokenPath = options["--github-token-file"];
+        var currentPath = options["--current-state-key-file"];
+        var previousPath = options.TryGetValue("--previous-state-key-file", out var previous)
+            ? previous
+            : null;
+        if (tokenPath != "github-token" || currentPath != "current-state-key" ||
+            (previousPath is not null && previousPath != "previous-state-key"))
+        {
+            throw new InvalidDataException("public_scan_input_invalid");
+        }
+        var tokenSpecs = new[] { new CredentialLeaseSpec(tokenPath, Base64Key: false) };
+        var keySpecs = previousPath is null
+            ? [new CredentialLeaseSpec(currentPath, Base64Key: true)]
+            : new[]
+            {
+                new CredentialLeaseSpec(currentPath, Base64Key: true),
+                new CredentialLeaseSpec(previousPath, Base64Key: true),
+            };
+        githubAuthority = CredentialLeaseAuthorityClient.Open(
+            root,
+            CredentialLeaseAuthorityClient.GitHubDescriptorName,
+            tokenSpecs);
+        try
+        {
+            stateKeyAuthority = CredentialLeaseAuthorityClient.Open(
+                root,
+                CredentialLeaseAuthorityClient.StateKeyDescriptorName,
+                keySpecs);
+        }
+        catch
+        {
+            githubAuthority.Dispose();
+            throw;
+        }
+        var all = new List<CredentialLeaseValue>();
+        try
+        {
+            all.AddRange(githubAuthority.ReadValues());
+            all.AddRange(stateKeyAuthority.ReadValues());
+            leasedValues = [.. all];
+            var byName = leasedValues.ToDictionary(item => item.RelativePath, StringComparer.Ordinal);
+            var expectedNames = previousPath is null
+                ? new[] { tokenPath, currentPath }
+                : new[] { tokenPath, currentPath, previousPath };
+            if (byName.Count != expectedNames.Length ||
+                expectedNames.Any(name => !byName.ContainsKey(name)) ||
+                authorizedCredentialIdentities.Count != byName.Count ||
+                byName.Any(item =>
+                    !authorizedCredentialIdentities.TryGetValue(item.Key, out var identity) ||
+                    identity != item.Value.PhysicalIdentitySha256))
+            {
+                throw new InvalidDataException("public_scan_input_invalid");
+            }
+            credentialPaths.Add(tokenPath);
+            credentialPaths.Add(currentPath);
+            if (previousPath is not null) credentialPaths.Add(previousPath);
+
+            var token = byName[tokenPath];
+            var current = byName[currentPath];
+            var previousKey = previousPath is null ? null : byName[previousPath];
+            if (current.DecodedKey is null ||
+                (previousKey is not null && previousKey.DecodedKey is null) ||
+                previousKey is not null && CryptographicOperations.FixedTimeEquals(
+                    current.DecodedKey,
+                    previousKey.DecodedKey!))
+            {
+                throw new InvalidDataException("public_scan_input_invalid");
+            }
+            var bearer = new byte[7 + token.FileBytes.Length];
+            "Bearer "u8.CopyTo(bearer);
+            token.FileBytes.CopyTo(bearer, 7);
+            var authorization = values["authorization"].Concat(
+                new[] { token.FileBytes, bearer }).ToArray();
+            var stateKeys = values["state_keys"].Concat(
+                new[] { current.DecodedKey, current.FileBytes }
+                    .Concat(previousKey is null
+                        ? []
+                        : [previousKey.DecodedKey!, previousKey.FileBytes]))
+                .ToArray();
+            if (ContainsDuplicateProtectedValues(authorization.Concat(stateKeys).ToArray()))
+            {
+                ZeroArrays(authorization.Skip(values["authorization"].Count));
+                ZeroArrays(stateKeys.Skip(values["state_keys"].Count));
+                throw new InvalidDataException("public_scan_input_invalid");
+            }
+            values["authorization"] = authorization;
+            values["state_keys"] = stateKeys;
+        }
+        catch
+        {
+            foreach (var value in all) value.Dispose();
+            githubAuthority.Dispose();
+            stateKeyAuthority.Dispose();
+            leasedValues = [];
+            throw;
+        }
+    }
+
     private static bool ContainsDuplicateProtectedValues(IReadOnlyList<byte[]> values)
     {
         for (var left = 0; left < values.Count; left++)
@@ -637,19 +775,6 @@ internal static partial class Program
         foreach (var value in values)
         {
             CryptographicOperations.ZeroMemory(value);
-        }
-    }
-
-    private static void TryRemoveCredentialFile(RestrictedEvidenceRoot root, string relativePath)
-    {
-        try
-        {
-            root.RemoveCredentialFile(relativePath);
-        }
-        catch (Exception exception) when (
-            exception is InvalidDataException or IOException or UnauthorizedAccessException)
-        {
-            // Failure cleanup preserves the stable non-leaking assembler result.
         }
     }
 
@@ -827,7 +952,8 @@ internal static partial class Program
         byte[] hostBytes,
         IReadOnlyList<byte[]> protectedDocuments,
         string? publicPath,
-        Action? afterScanBeforePublication = null)
+        Action? afterScanBeforePublication = null,
+        Action<string>? afterPublicationForTest = null)
     {
         _ = HostOperationIds(hostBytes);
         using (var host = JsonDocument.Parse(hostBytes))
@@ -861,10 +987,27 @@ internal static partial class Program
         afterScanBeforePublication?.Invoke();
         if (publicPath is null)
         {
+            publicCorpus.ValidateComplete(null, []);
             return null;
         }
 
-        return WritePublicCreateNew(publicPath, publicBytes);
+        CreatedEvidenceFileReceipt? receipt = null;
+        try
+        {
+            receipt = WritePublicCreateNew(
+                publicPath,
+                publicBytes,
+                afterPublishForTest: afterPublicationForTest);
+            publicCorpus.ValidateComplete(publicPath, publicBytes);
+            receipt.ValidatePublished();
+            return receipt;
+        }
+        catch
+        {
+            receipt?.RetractIfOwned();
+            receipt?.Dispose();
+            throw;
+        }
     }
 
     internal static void AssertProtectedValuesAbsent(

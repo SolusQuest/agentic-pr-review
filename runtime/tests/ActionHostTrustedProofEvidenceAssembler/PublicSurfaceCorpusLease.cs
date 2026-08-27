@@ -83,21 +83,10 @@ internal sealed class PublicSurfaceCorpusLease : IDisposable
         {
             throw new InvalidDataException("public_corpus_changed");
         }
-        if (publicOutputPath is not null)
-        {
-            var current = File.ReadAllBytes(publicOutputPath);
-            try
-            {
-                if (!current.AsSpan().SequenceEqual(publicOutput))
-                {
-                    throw new InvalidDataException("public_output_changed");
-                }
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(current);
-            }
-        }
+        // EnumerateDigests opens the current pathname with sharing compatible
+        // with the retained publication handle. The exact expected digest above
+        // already binds the observed bytes without reopening through a weaker
+        // default-sharing File.ReadAllBytes call.
     }
 
     internal void AssertAbsent(
@@ -272,7 +261,11 @@ internal sealed class CorpusFileLease : IDisposable
         {
             throw new InvalidDataException("public_corpus_file_invalid");
         }
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
         try
         {
             var bytes = new byte[checked((int)stream.Length)];
@@ -297,6 +290,10 @@ internal sealed class CorpusFileLease : IDisposable
     internal void Validate()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
+        if (!EvidenceFileHandle.PathNamesRetainedHandle(Path, stream.SafeFileHandle))
+        {
+            throw new InvalidDataException("public_corpus_changed");
+        }
         stream.Position = 0;
         var current = SHA256.HashData(stream);
         try

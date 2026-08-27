@@ -15,8 +15,13 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
+        if (CredentialLeaseAuthorityClient.IsGuardianCommand(args))
+        {
+            return await CredentialLeaseAuthorityClient.RunGuardianAsync(args).ConfigureAwait(false);
+        }
         RestrictedEvidenceRoot? root = null;
         string? credentialPath = null;
+        var credentialLeaseLaunchAttempted = false;
         try
         {
             var options = Parse(args);
@@ -26,10 +31,19 @@ internal static class Program
                 [options["--repository-root"], options["--worktree-root"]]);
             var plan = CapturePlan.Read(root, options["--capture-plan"]);
             credentialPath = options["--github-token-file"];
-            var token = root.ReadCredentialFile(options["--github-token-file"], base64Key: false);
-            try
+            using var token = root.ReadCredentialFileRepresentations(
+                options["--github-token-file"],
+                base64Key: false);
             {
-                using var client = TrustedProofCaptureClient.CreateProduction(token);
+                credentialLeaseLaunchAttempted = true;
+                CredentialLeaseAuthorityClient.LaunchCurrentProcess(
+                    root,
+                    options["--destination-identity"],
+                    [options["--repository-root"], options["--worktree-root"]],
+                    CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                    [new CredentialLeaseSpec(options["--github-token-file"], Base64Key: false)],
+                    [token]);
+                using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
                 using var timeout = new CancellationTokenSource(
                     EvidenceLimits.LogicalOperationTimeout);
                 var writer = new CapturePackageWriter(root, plan.PackageName);
@@ -109,10 +123,6 @@ internal static class Program
                 Console.Out.WriteLine($"APR_R4_E3_CAPTURE_OK {finalized.Sha256}");
                 return 0;
             }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(token);
-            }
         }
         catch (InvalidDataException)
         {
@@ -142,21 +152,32 @@ internal static class Program
         {
             if (root is not null && credentialPath is not null)
             {
-                try
+                if (credentialLeaseLaunchAttempted)
                 {
-                    root.RemoveCredentialFile(credentialPath);
+                    try
+                    {
+                        CredentialLeaseAuthorityClient.DeleteAbandoned(
+                            root,
+                            CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                            [new CredentialLeaseSpec(credentialPath, Base64Key: false)]);
+                    }
+                    catch (Exception exception) when (
+                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
+                    {
+                        // Never fall back to a pathname delete after lease authority was attempted.
+                    }
                 }
-                catch (InvalidDataException)
+                else
                 {
-                    // Failure is already terminal; preserve the stable non-leaking marker.
-                }
-                catch (IOException)
-                {
-                    // Failure is already terminal; preserve the stable non-leaking marker.
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    // Failure is already terminal; preserve the stable non-leaking marker.
+                    try
+                    {
+                        root.RemoveCredentialFile(credentialPath);
+                    }
+                    catch (Exception exception) when (
+                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
+                    {
+                        // No cross-process authority existed; failure remains terminal.
+                    }
                 }
             }
         }

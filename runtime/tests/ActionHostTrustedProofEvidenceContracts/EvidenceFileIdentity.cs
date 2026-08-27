@@ -83,7 +83,6 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
                 TryDeleteEmptyDirectory(stagingDirectory);
                 afterPublishForTest?.Invoke(finalPath);
                 receipt.ValidatePublishedIdentityAndBytes();
-                handle.Dispose();
             }
             catch
             {
@@ -108,7 +107,7 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
         }
         catch
         {
-            receipt?.DeleteIfOwned();
+            receipt?.RetractIfOwned();
             receipt?.Dispose();
             if (receipt is null)
             {
@@ -130,6 +129,37 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
             exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
             return false;
+        }
+    }
+
+    public void ValidatePublished()
+    {
+        ValidatePublishedIdentityAndBytes();
+    }
+
+    public void RetractIfOwned()
+    {
+        if (!published)
+        {
+            DeleteIfOwned();
+            return;
+        }
+        try
+        {
+            ValidatePublishedIdentityAndBytes();
+            File.Delete(Path);
+            if (File.Exists(Path))
+            {
+                throw new InvalidDataException("created_file_retraction_invalid");
+            }
+            published = false;
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            // Retraction is permitted only while the final pathname still names
+            // the process-created physical identity with the exact expected bytes.
+            // A replacement or competitor is never deleted.
         }
     }
 
@@ -267,16 +297,19 @@ public sealed class CreatedEvidenceFileReceipt : IDisposable
 
 public sealed class PinnedEvidenceLease : IDisposable
 {
+    private readonly string path;
     private readonly SafeFileHandle handle;
     private readonly EvidenceFileIdentity physicalIdentity;
     private bool disposed;
 
     internal PinnedEvidenceLease(
+        string path,
         SafeFileHandle handle,
         EvidenceFileIdentity physicalIdentity,
         byte[] bytes,
         string identity)
     {
+        this.path = path;
         this.handle = handle;
         this.physicalIdentity = physicalIdentity;
         Bytes = bytes;
@@ -293,6 +326,48 @@ public sealed class PinnedEvidenceLease : IDisposable
         {
             throw new InvalidDataException("restricted_file_replaced");
         }
+        using var current = EvidenceFileHandle.OpenNoFollowSharedWrite(path);
+        if (EvidenceFileHandle.Identity(current) != physicalIdentity)
+        {
+            throw new InvalidDataException("restricted_file_replaced");
+        }
+    }
+
+    public void ValidateExactBytes()
+    {
+        Validate();
+        var current = new byte[Bytes.Length];
+        try
+        {
+            var offset = 0;
+            while (offset < current.Length)
+            {
+                var read = RandomAccess.Read(handle, current.AsSpan(offset), offset);
+                if (read == 0)
+                {
+                    break;
+                }
+                offset += read;
+            }
+            if (offset != current.Length ||
+                EvidenceFileHandle.Identity(handle).Size != current.Length ||
+                !current.AsSpan().SequenceEqual(Bytes))
+            {
+                throw new InvalidDataException("restricted_file_contents_changed");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(current);
+        }
+    }
+
+    public void ReleaseForDeletionIfExact()
+    {
+        ValidateExactBytes();
+        disposed = true;
+        CryptographicOperations.ZeroMemory(Bytes);
+        handle.Dispose();
     }
 
     public void Dispose()
@@ -318,7 +393,7 @@ internal readonly record struct EvidenceFileIdentity(
     internal string Canonical => $"{Device:x16}:{File:x16}:{Links}:{Size}:{Mode:x8}:{Owner}";
 }
 
-internal static partial class EvidenceFileHandle
+public static partial class EvidenceFileHandle
 {
     private const int OpenReadOnly = 0;
     private const int OpenReadWrite = 2;
@@ -391,6 +466,13 @@ internal static partial class EvidenceFileHandle
             throw new InvalidDataException("restricted_file_open_invalid");
         }
         return handle;
+    }
+
+    public static bool PathNamesRetainedHandle(string path, SafeFileHandle retainedHandle)
+    {
+        var retained = Identity(retainedHandle);
+        using var current = OpenNoFollowSharedWrite(path);
+        return Identity(current) == retained;
     }
 
     internal static SafeFileHandle CreateNewNoFollow(string path)
