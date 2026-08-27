@@ -577,8 +577,7 @@ internal static partial class Program
                     ? []
                     : [previousKey.DecodedKey!.ToArray(), previousKey.FileBytes.ToArray()]))
             .ToArray();
-        if (authorization.Concat(stateKeys).Select(Convert.ToBase64String)
-            .Distinct(StringComparer.Ordinal).Count() != authorization.Length + stateKeys.Length)
+        if (ContainsDuplicateProtectedValues(authorization.Concat(stateKeys).ToArray()))
         {
             ZeroArrays(authorization.Skip(values["authorization"].Count));
             ZeroArrays(stateKeys.Skip(values["state_keys"].Count));
@@ -586,6 +585,22 @@ internal static partial class Program
         }
         values["authorization"] = authorization;
         values["state_keys"] = stateKeys;
+    }
+
+    private static bool ContainsDuplicateProtectedValues(IReadOnlyList<byte[]> values)
+    {
+        for (var left = 0; left < values.Count; left++)
+        {
+            for (var right = left + 1; right < values.Count; right++)
+            {
+                if (values[left].Length == values[right].Length &&
+                    CryptographicOperations.FixedTimeEquals(values[left], values[right]))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static IReadOnlyDictionary<string, string> AuthorizedCredentialIdentities(
