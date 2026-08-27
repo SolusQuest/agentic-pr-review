@@ -6,14 +6,28 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 
 public sealed record PinnedEvidenceFile(byte[] Bytes, string Identity);
 
-public sealed class CreatedEvidenceFileReceipt
+public sealed class CreatedEvidenceFileReceipt : IDisposable
 {
-    private readonly EvidenceFileIdentity identity;
+    private readonly SafeFileHandle handle;
+    private readonly byte[] expectedBytes;
+    private readonly string stagingDirectory;
+    private readonly string stagingPath;
+    private EvidenceFileIdentity identity;
+    private bool published;
+    private bool disposed;
 
-    private CreatedEvidenceFileReceipt(string path, EvidenceFileIdentity identity)
+    private CreatedEvidenceFileReceipt(
+        string path,
+        string stagingDirectory,
+        string stagingPath,
+        SafeFileHandle handle,
+        ReadOnlySpan<byte> expectedBytes)
     {
         Path = path;
-        this.identity = identity;
+        this.stagingDirectory = stagingDirectory;
+        this.stagingPath = stagingPath;
+        this.handle = handle;
+        this.expectedBytes = expectedBytes.ToArray();
     }
 
     public string Path { get; }
@@ -21,38 +35,85 @@ public sealed class CreatedEvidenceFileReceipt
     public static CreatedEvidenceFileReceipt WriteCreateNew(
         string path,
         ReadOnlySpan<byte> bytes,
-        int? failAfterBytesForTest = null)
+        int? failAfterBytesForTest = null,
+        Action<string>? beforePublishForTest = null,
+        Action<string>? afterPublishForTest = null)
     {
+        var finalPath = System.IO.Path.GetFullPath(path);
+        var parent = System.IO.Path.GetDirectoryName(finalPath) ??
+            throw new InvalidDataException("created_file_parent_invalid");
+        var stagingDirectory = System.IO.Path.Join(
+            parent,
+            $".apr-r4-evidence-{Guid.NewGuid():N}");
+        var stagingPath = System.IO.Path.Join(stagingDirectory, "candidate");
         CreatedEvidenceFileReceipt? receipt = null;
         try
         {
-            using (var handle = EvidenceFileHandle.CreateNewNoFollow(path))
+            EvidenceFileHandle.CreateDirectoryExclusive(stagingDirectory);
+            var handle = EvidenceFileHandle.CreateNewNoFollow(stagingPath);
+            try
             {
                 var identity = EvidenceFileHandle.Identity(handle);
                 if (identity.Links != 1)
                 {
                     throw new InvalidDataException("created_file_identity_invalid");
                 }
-                receipt = new CreatedEvidenceFileReceipt(System.IO.Path.GetFullPath(path), identity);
-                using var stream = new FileStream(handle, FileAccess.Write);
+                receipt = new CreatedEvidenceFileReceipt(
+                    finalPath,
+                    stagingDirectory,
+                    stagingPath,
+                    handle,
+                    bytes);
                 if (failAfterBytesForTest is int count)
                 {
-                    stream.Write(bytes[..Math.Min(count, bytes.Length)]);
-                    stream.Flush(flushToDisk: true);
+                    RandomAccess.Write(handle, bytes[..Math.Min(count, bytes.Length)], 0);
+                    RandomAccess.FlushToDisk(handle);
+                    receipt.identity = EvidenceFileHandle.Identity(handle);
                     throw new IOException("created_file_injected_partial_write");
                 }
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: true);
+                RandomAccess.Write(handle, bytes, 0);
+                RandomAccess.FlushToDisk(handle);
+                receipt.identity = EvidenceFileHandle.Identity(handle);
+                receipt.ValidateHandleAndPath(stagingPath);
+                receipt.ValidateHandleBytes();
+                beforePublishForTest?.Invoke(stagingPath);
+                receipt.ValidateHandleAndPath(stagingPath);
+                EvidenceFileHandle.MoveNoReplace(stagingPath, finalPath);
+                receipt.published = true;
+                TryDeleteEmptyDirectory(stagingDirectory);
+                afterPublishForTest?.Invoke(finalPath);
+                receipt.ValidatePublishedIdentityAndBytes();
+                handle.Dispose();
             }
-            if (!receipt.IsCurrentIdentity())
+            catch
             {
-                throw new InvalidDataException("created_file_identity_invalid");
+                if (receipt is null)
+                {
+                    handle.Dispose();
+                }
+                else
+                {
+                    try
+                    {
+                        receipt.identity = EvidenceFileHandle.Identity(handle);
+                    }
+                    catch (InvalidDataException)
+                    {
+                        // The original exception remains authoritative.
+                    }
+                }
+                throw;
             }
             return receipt;
         }
         catch
         {
             receipt?.DeleteIfOwned();
+            receipt?.Dispose();
+            if (receipt is null)
+            {
+                TryDeleteStaging(stagingPath, stagingDirectory);
+            }
             throw;
         }
     }
@@ -63,11 +124,7 @@ public sealed class CreatedEvidenceFileReceipt
         {
             using var handle = EvidenceFileHandle.OpenNoFollow(Path);
             var current = EvidenceFileHandle.Identity(handle);
-            return current.Device == identity.Device &&
-                current.File == identity.File &&
-                current.Links == 1 &&
-                current.Mode == identity.Mode &&
-                current.Owner == identity.Owner;
+            return SameOwnedIdentity(current, identity);
         }
         catch (Exception exception) when (
             exception is InvalidDataException or IOException or UnauthorizedAccessException)
@@ -78,18 +135,132 @@ public sealed class CreatedEvidenceFileReceipt
 
     public void DeleteIfOwned()
     {
+        if (published)
+        {
+            return;
+        }
         try
         {
-            if (!IsCurrentIdentity())
-            {
-                return;
-            }
-            File.Delete(Path);
+            ValidateHandleAndPath(stagingPath);
+            File.Delete(stagingPath);
+            Directory.Delete(stagingDirectory, recursive: false);
         }
         catch (Exception exception) when (
             exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            // Failure cleanup must never replace the original stable error or delete another identity.
+            // The private staging entry is process-owned. Cleanup must never touch the final path.
+        }
+    }
+
+    private void ValidatePublishedIdentityAndBytes()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!published)
+        {
+            throw new InvalidDataException("created_file_not_published");
+        }
+        ValidateHandleAndPath(Path);
+        ValidateHandleBytes();
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+        disposed = true;
+        if (!published)
+        {
+            DeleteIfOwned();
+        }
+        CryptographicOperations.ZeroMemory(expectedBytes);
+        handle.Dispose();
+    }
+
+    private void ValidateHandleAndPath(string currentPath)
+    {
+        var retained = EvidenceFileHandle.Identity(handle);
+        if (!SameOwnedIdentity(retained, identity))
+        {
+            throw new InvalidDataException("created_file_identity_invalid");
+        }
+        try
+        {
+            using var currentHandle = EvidenceFileHandle.OpenNoFollowSharedWrite(currentPath);
+            if (!SameOwnedIdentity(EvidenceFileHandle.Identity(currentHandle), identity))
+            {
+                throw new InvalidDataException("created_file_identity_invalid");
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException("created_file_identity_invalid", exception);
+        }
+    }
+
+    private void ValidateHandleBytes()
+    {
+        var actual = new byte[expectedBytes.Length];
+        try
+        {
+            var offset = 0;
+            while (offset < actual.Length)
+            {
+                var read = RandomAccess.Read(handle, actual.AsSpan(offset), offset);
+                if (read == 0)
+                {
+                    break;
+                }
+                offset += read;
+            }
+            if (offset != actual.Length ||
+                EvidenceFileHandle.Identity(handle).Size != actual.Length ||
+                !actual.AsSpan().SequenceEqual(expectedBytes))
+            {
+                throw new InvalidDataException("created_file_bytes_invalid");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(actual);
+        }
+    }
+
+    private static bool SameOwnedIdentity(EvidenceFileIdentity left, EvidenceFileIdentity right) =>
+        left.Device == right.Device &&
+        left.File == right.File &&
+        left.Links == 1 &&
+        right.Links == 1 &&
+        left.Mode == right.Mode &&
+        left.Owner == right.Owner &&
+        left.Size == right.Size;
+
+    private static void TryDeleteStaging(string path, string directory)
+    {
+        try
+        {
+            File.Delete(path);
+            Directory.Delete(directory, recursive: false);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // The private staging entry is process-owned and the final path was never touched.
+        }
+    }
+
+    private static void TryDeleteEmptyDirectory(string directory)
+    {
+        try
+        {
+            Directory.Delete(directory, recursive: false);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // Publication is already atomic and authoritative; an empty private staging shell is harmless.
         }
     }
 }
@@ -150,7 +321,7 @@ internal readonly record struct EvidenceFileIdentity(
 internal static partial class EvidenceFileHandle
 {
     private const int OpenReadOnly = 0;
-    private const int OpenWriteOnly = 1;
+    private const int OpenReadWrite = 2;
     private const int OpenCreate = 0x40;
     private const int OpenExclusive = 0x80;
     private const int OpenNoFollowFlag = 0x20000;
@@ -158,6 +329,8 @@ internal static partial class EvidenceFileHandle
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
     private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint FileShareDelete = 0x00000004;
     private const uint CreateNew = 1;
     private const uint OpenExisting = 3;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
@@ -198,14 +371,36 @@ internal static partial class EvidenceFileHandle
         throw new InvalidDataException("restricted_platform_unsupported");
     }
 
+    internal static SafeFileHandle OpenNoFollowSharedWrite(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return OpenNoFollow(path);
+        }
+        var handle = CreateFile(
+            path,
+            GenericRead,
+            FileShareRead | FileShareWrite | FileShareDelete,
+            0,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagRandomAccess,
+            0);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            throw new InvalidDataException("restricted_file_open_invalid");
+        }
+        return handle;
+    }
+
     internal static SafeFileHandle CreateNewNoFollow(string path)
     {
         if (OperatingSystem.IsWindows())
         {
             var handle = CreateFile(
                 path,
-                GenericWrite,
-                0,
+                GenericRead | GenericWrite,
+                FileShareRead | FileShareDelete,
                 0,
                 CreateNew,
                 FileFlagOpenReparsePoint | FileFlagRandomAccess,
@@ -223,7 +418,7 @@ internal static partial class EvidenceFileHandle
             const uint ownerReadWrite = 0x180;
             var descriptor = OpenCreateNew(
                 path,
-                OpenWriteOnly | OpenCreate | OpenExclusive | OpenNoFollowFlag | OpenCloseOnExec,
+                OpenReadWrite | OpenCreate | OpenExclusive | OpenNoFollowFlag | OpenCloseOnExec,
                 ownerReadWrite);
             if (descriptor < 0)
             {
@@ -269,6 +464,29 @@ internal static partial class EvidenceFileHandle
 
     internal static uint EffectiveUserId() => OperatingSystem.IsLinux() ? GetEffectiveUserId() : 0;
 
+    internal static void MoveNoReplace(string source, string destination)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (!MoveFile(source, destination))
+            {
+                throw new InvalidDataException("created_file_publish_invalid");
+            }
+            return;
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            const int currentDirectory = -100;
+            const uint noReplace = 1;
+            if (RenameAt2(currentDirectory, source, currentDirectory, destination, noReplace) != 0)
+            {
+                throw new InvalidDataException("created_file_publish_invalid");
+            }
+            return;
+        }
+        throw new InvalidDataException("restricted_platform_unsupported");
+    }
+
     internal static void CreateDirectoryExclusive(string path)
     {
         if (OperatingSystem.IsWindows())
@@ -303,6 +521,10 @@ internal static partial class EvidenceFileHandle
         uint flagsAndAttributes,
         nint templateFile);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "MoveFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool MoveFile(string existingFileName, string newFileName);
+
     [LibraryImport("kernel32.dll", EntryPoint = "CreateDirectoryW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool CreateDirectory(string pathName, nint securityAttributes);
@@ -318,6 +540,14 @@ internal static partial class EvidenceFileHandle
 
     [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int OpenCreateNew(string path, int flags, uint mode);
+
+    [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameAt2(
+        int oldDirectory,
+        string oldPath,
+        int newDirectory,
+        string newPath,
+        uint flags);
 
     [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static partial int FStat(int fileDescriptor, out LinuxFileInformation information);

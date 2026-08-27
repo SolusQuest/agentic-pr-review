@@ -9,6 +9,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.ActionHostTrustedProofCapture;
 using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceAssembler;
@@ -229,7 +230,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         using var corpus = PublicSurfaceCorpusLease.Open(repository, worktree, logs);
         var output = CanonicalEvidence.Encode(new { kind = "public" }, EvidenceJson.Options);
         var outputPath = Path.Join(worktree, "evidence.json");
-        EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output);
+        using var receipt = EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output);
         Assert.Throws<InvalidDataException>(() =>
             EvidenceAssemblerProgram.WritePublicCreateNew(outputPath, output));
 
@@ -255,11 +256,82 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.Equal(expected[..8], File.ReadAllBytes(competingPath));
 
         var replacePath = Path.Join(root, "replace.json");
-        var receipt = EvidenceAssemblerProgram.WritePublicCreateNew(replacePath, expected);
+        using var receipt = EvidenceAssemblerProgram.WritePublicCreateNew(replacePath, expected);
         File.Delete(replacePath);
         File.WriteAllBytes(replacePath, expected[..8]);
         receipt.DeleteIfOwned();
         Assert.Equal(expected[..8], File.ReadAllBytes(replacePath));
+    }
+
+    [Fact]
+    public void AtomicPublicationNeverDeletesAReplacementAfterStagingValidation()
+    {
+        var root = CreatePlainRoot("staging-replacement");
+        var outputPath = Path.Join(root, "public.json");
+        var expected = Encoding.UTF8.GetBytes("expected-complete-output");
+        var competing = Encoding.UTF8.GetBytes("competitor-owned-staging-entry");
+
+        Assert.Throws<InvalidDataException>(() => EvidenceAssemblerProgram.WritePublicCreateNew(
+            outputPath,
+            expected,
+            beforePublishForTest: stagingPath =>
+            {
+                File.Move(stagingPath, Path.Join(root, "displaced-created-identity"));
+                File.WriteAllBytes(stagingPath, competing);
+            }));
+
+        Assert.False(File.Exists(outputPath));
+        Assert.Contains(
+            Directory.EnumerateFiles(root, "candidate", SearchOption.AllDirectories),
+            path => File.ReadAllBytes(path).SequenceEqual(competing));
+    }
+
+    [Fact]
+    public void AtomicPublicationRejectsSameByteReplacementBeforeSuccess()
+    {
+        var root = CreatePlainRoot("same-byte-final-replacement");
+        var outputPath = Path.Join(root, "public.json");
+        var displacedPath = Path.Join(root, "displaced-created-identity");
+        var expected = Encoding.UTF8.GetBytes("expected-complete-output");
+
+        Assert.Throws<InvalidDataException>(() => EvidenceAssemblerProgram.WritePublicCreateNew(
+            outputPath,
+            expected,
+            afterPublishForTest: publishedPath =>
+            {
+                File.Move(publishedPath, displacedPath);
+                File.WriteAllBytes(publishedPath, expected);
+            }));
+
+        Assert.Equal(expected, File.ReadAllBytes(outputPath));
+        Assert.Equal(expected, File.ReadAllBytes(displacedPath));
+    }
+
+    [Fact]
+    public void AtomicPublicationRejectsHardLinkReplacementBeforeSuccess()
+    {
+        var root = CreatePlainRoot("hard-link-final-replacement");
+        var outputPath = Path.Join(root, "public.json");
+        var displacedPath = Path.Join(root, "displaced-created-identity");
+        var competitorPath = Path.Join(root, "competitor");
+        var expected = Encoding.UTF8.GetBytes("expected-complete-output");
+        File.WriteAllBytes(competitorPath, expected);
+
+        Assert.Throws<InvalidDataException>(() => EvidenceAssemblerProgram.WritePublicCreateNew(
+            outputPath,
+            expected,
+            afterPublishForTest: publishedPath =>
+            {
+                File.Move(publishedPath, displacedPath);
+                HardLinkTestPlatform.Create(publishedPath, competitorPath);
+            }));
+
+        Assert.Equal(expected, File.ReadAllBytes(outputPath));
+        Assert.Equal(2, new FileInfo(competitorPath).LinkTarget is null
+            ? Directory.EnumerateFiles(root).Count(path =>
+                File.ReadAllBytes(path).SequenceEqual(expected) &&
+                !StringComparer.Ordinal.Equals(path, displacedPath))
+            : 0);
     }
 
     [Fact]
@@ -330,6 +402,172 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 }
             }
             CryptographicOperations.ZeroMemory(input);
+        }
+    }
+
+    [Theory]
+    [InlineData("authorization-raw")]
+    [InlineData("authorization-bearer")]
+    [InlineData("state-key-raw")]
+    [InlineData("state-key-base64")]
+    [InlineData("substituted-state-key-raw")]
+    public void ActualCredentialRepresentationsAreScannedBeforeCopiesAreRemoved(string leakKind)
+    {
+        var restricted = CreateRestrictedRoot();
+        var repository = CreatePlainRoot($"credential-scan-repository-{leakKind}");
+        var worktree = CreatePlainRoot($"credential-scan-worktree-{leakKind}");
+        var logs = CreatePlainRoot($"credential-scan-logs-{leakKind}");
+        var token = Encoding.UTF8.GetBytes("synthetic-github-token-value-used-only-by-this-test");
+        var current = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+        var previous = Enumerable.Range(65, 32).Select(value => (byte)value).ToArray();
+        if (leakKind == "substituted-state-key-raw")
+        {
+            current = Enumerable.Range(129, 32).Select(value => (byte)value).ToArray();
+        }
+        WriteRestrictedText(Path.Join(restricted.Path, "github-token"), Encoding.UTF8.GetString(token));
+        WriteRestrictedText(Path.Join(restricted.Path, "current-state-key"), Convert.ToBase64String(current));
+        WriteRestrictedText(Path.Join(restricted.Path, "previous-state-key"), Convert.ToBase64String(previous));
+        var values = SyntheticProtectedCategories();
+        var credentialPaths = new List<string>();
+        var options = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["--github-token-file"] = "github-token",
+            ["--current-state-key-file"] = "current-state-key",
+            ["--previous-state-key-file"] = "previous-state-key",
+        };
+        try
+        {
+            EvidenceAssemblerProgram.AppendActualCredentialValues(
+                values,
+                restricted,
+                options,
+                CredentialIdentities(restricted),
+                credentialPaths);
+            Assert.Equal(4, values["authorization"].Count);
+            Assert.Equal(6, values["state_keys"].Count);
+            var leak = leakKind switch
+            {
+                "authorization-raw" => values["authorization"][2],
+                "authorization-bearer" => values["authorization"][3],
+                "state-key-raw" or "substituted-state-key-raw" => values["state_keys"][2],
+                _ => values["state_keys"][3],
+            };
+            File.WriteAllBytes(Path.Join(logs, "public.log"), leak);
+            using var corpus = PublicSurfaceCorpusLease.Open(repository, worktree, logs);
+            Assert.Throws<InvalidDataException>(() => corpus.AssertAbsent(values, []));
+            var privateLeak = leak.ToArray();
+            var safeHost = Encoding.UTF8.GetBytes("safe-host-document");
+            try
+            {
+                Assert.Throws<InvalidDataException>(() =>
+                    EvidenceAssemblerProgram.AssertProtectedValuesAbsent(
+                        values,
+                        safeHost,
+                        [privateLeak]));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(privateLeak);
+                CryptographicOperations.ZeroMemory(safeHost);
+            }
+
+            foreach (var path in credentialPaths)
+            {
+                restricted.RemoveCredentialFile(path);
+                Assert.False(File.Exists(Path.Join(restricted.Path, path)));
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(token);
+            CryptographicOperations.ZeroMemory(current);
+            CryptographicOperations.ZeroMemory(previous);
+            foreach (var category in values.Values)
+            {
+                foreach (var value in category)
+                {
+                    CryptographicOperations.ZeroMemory(value);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void ActualCredentialScanRejectsDuplicateOrIncompleteKeyRepresentations()
+    {
+        var restricted = CreateRestrictedRoot();
+        WriteRestrictedText(Path.Join(restricted.Path, "github-token"),
+            "synthetic-github-token-value-used-only-by-this-test");
+        var duplicate = Convert.ToBase64String(Enumerable.Range(1, 32).Select(value => (byte)value).ToArray());
+        WriteRestrictedText(Path.Join(restricted.Path, "current-state-key"), duplicate);
+        WriteRestrictedText(Path.Join(restricted.Path, "previous-state-key"), duplicate);
+        var values = SyntheticProtectedCategories();
+        try
+        {
+            Assert.Throws<InvalidDataException>(() =>
+                EvidenceAssemblerProgram.AppendActualCredentialValues(
+                    values,
+                    restricted,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["--github-token-file"] = "github-token",
+                        ["--current-state-key-file"] = "current-state-key",
+                        ["--previous-state-key-file"] = "previous-state-key",
+                    },
+                    CredentialIdentities(restricted),
+                    new List<string>()));
+        }
+        finally
+        {
+            foreach (var category in values.Values)
+            {
+                foreach (var value in category)
+                {
+                    CryptographicOperations.ZeroMemory(value);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void ActualCredentialScanRejectsAuthorizedFileIdentityReplacement()
+    {
+        var restricted = CreateRestrictedRoot();
+        WriteRestrictedText(Path.Join(restricted.Path, "github-token"),
+            "synthetic-github-token-value-used-only-by-this-test");
+        WriteRestrictedText(Path.Join(restricted.Path, "current-state-key"),
+            Convert.ToBase64String(Enumerable.Range(1, 32).Select(value => (byte)value).ToArray()));
+        WriteRestrictedText(Path.Join(restricted.Path, "previous-state-key"),
+            Convert.ToBase64String(Enumerable.Range(65, 32).Select(value => (byte)value).ToArray()));
+        var authorized = CredentialIdentities(restricted);
+        restricted.RemoveCredentialFile("github-token");
+        WriteRestrictedText(Path.Join(restricted.Path, "github-token"),
+            "replacement-github-token-value-used-only-by-this-test");
+        var values = SyntheticProtectedCategories();
+        try
+        {
+            Assert.Throws<InvalidDataException>(() =>
+                EvidenceAssemblerProgram.AppendActualCredentialValues(
+                    values,
+                    restricted,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["--github-token-file"] = "github-token",
+                        ["--current-state-key-file"] = "current-state-key",
+                        ["--previous-state-key-file"] = "previous-state-key",
+                    },
+                    authorized,
+                    new List<string>()));
+        }
+        finally
+        {
+            foreach (var category in values.Values)
+            {
+                foreach (var value in category)
+                {
+                    CryptographicOperations.ZeroMemory(value);
+                }
+            }
         }
     }
 
@@ -420,6 +658,67 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             foreach (var document in admittedDocuments)
             {
                 CryptographicOperations.ZeroMemory(document);
+            }
+        }
+    }
+
+    [Fact]
+    public void RecoveryOnlyAssemblerAdmitsAuthenticatedExtraWithoutPublicProjection()
+    {
+        var repository = FindRepositoryRoot();
+        var worktree = CreatePlainRoot("recovery-assembler-worktree");
+        var logs = CreatePlainRoot("recovery-assembler-logs");
+        File.WriteAllText(Path.Join(logs, "run.log"), "ordinary-public-log");
+        var templatePath = Path.Join(
+            repository,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof",
+            "templates",
+            "host-restricted-evidence.json");
+        var host = JsonNode.Parse(File.ReadAllText(templatePath))!.AsObject();
+        var observed = host["inventories"]!["observed_cleanup"]!.AsArray();
+        var extra = observed[^1]!.DeepClone().AsObject();
+        extra["artifact_id"] = "1016";
+        extra["artifact_name"] = "apr-r4-recovery-only-1016";
+        extra["disposition"] = "recovery-only";
+        observed.Add(extra);
+        var hostBytes = CanonicalEvidence.Encode(host, EvidenceJson.Options);
+        var categories = new Dictionary<string, IReadOnlyList<byte[]>>(StringComparer.Ordinal)
+        {
+            ["authorization"] = [RandomNumberGenerator.GetBytes(32)],
+            ["state_keys"] = [RandomNumberGenerator.GetBytes(32)],
+            ["session_plaintext"] = [RandomNumberGenerator.GetBytes(32)],
+            ["provider_content"] = [RandomNumberGenerator.GetBytes(32)],
+            ["tool_data"] = [RandomNumberGenerator.GetBytes(32)],
+            ["host_evidence"] = [RandomNumberGenerator.GetBytes(32)],
+        };
+        try
+        {
+            using var corpus = PublicSurfaceCorpusLease.Open(repository, worktree, logs);
+            var receipt = EvidenceAssemblerProgram.EnforcePublicProjectionBoundary(
+                corpus,
+                categories,
+                [],
+                hostBytes,
+                [],
+                null);
+
+            Assert.Null(receipt);
+            Assert.Empty(Directory.EnumerateFiles(worktree));
+            Assert.Equal(16, observed.Count);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(hostBytes);
+            foreach (var category in categories.Values)
+            {
+                foreach (var value in category)
+                {
+                    CryptographicOperations.ZeroMemory(value);
+                }
             }
         }
     }
@@ -836,6 +1135,85 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public async Task PostCleanupPlanAdmitsAllTwentyThreeConcreteSourcesAndExecutesEveryRoute()
+    {
+        var root = CreateRestrictedRoot();
+        var plan = CreatePostCleanupPlan();
+        var bytes = CanonicalEvidence.Encode(plan, EvidenceJson.Options);
+        try
+        {
+            root.WritePinnedFileCreateNew("post-cleanup-plan.json", bytes);
+            var accepted = CapturePlan.Read(root, "post-cleanup-plan.json");
+            Assert.Equal(23, accepted.Sources.Length);
+
+            var calls = new List<string>();
+            var token = Encoding.UTF8.GetBytes("synthetic-token-value-with-at-least-thirty-two-bytes");
+            try
+            {
+                using var client = new TrustedProofCaptureClient(
+                    token,
+                    new RecordingHandler(request =>
+                    {
+                        calls.Add(request.RequestUri!.PathAndQuery);
+                        return JsonResponse("{}");
+                    }),
+                    new RecordingHandler(_ => throw new InvalidOperationException()));
+                foreach (var source in accepted.Sources)
+                {
+                    var pages = await client.GetPaginatedAsync(
+                        source.Route,
+                        source.EndpointFamily,
+                        CancellationToken.None);
+                    foreach (var body in pages.Bodies)
+                    {
+                        CryptographicOperations.ZeroMemory(body);
+                    }
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(token);
+            }
+            Assert.Equal(23, calls.Count);
+            Assert.Equal(17, calls.Distinct(StringComparer.Ordinal).Count());
+
+            AssertInvalidPostCleanupPlan(root, "missing.json", plan with
+            {
+                Sources = plan.Sources[..^1],
+            });
+            AssertInvalidPostCleanupPlan(root, "duplicate.json", plan with
+            {
+                Sources = plan.Sources.Select((item, index) => index == 1 ? plan.Sources[0] : item).ToArray(),
+            });
+            AssertInvalidPostCleanupPlan(root, "cross-run.json", plan with
+            {
+                Sources = plan.Sources.Select(item =>
+                    item.SourceId == "post-cleanup-final-run-9004"
+                        ? item with
+                        {
+                            SourceId = "post-cleanup-final-run-9999",
+                            EndpointFamily = "/repos/SolusQuest/agentic-pr-review/actions/runs/9999",
+                            Route = "/repos/SolusQuest/agentic-pr-review/actions/runs/9999",
+                        }
+                        : item).ToArray(),
+            });
+            AssertInvalidPostCleanupPlan(root, "extra-repeated-family.json", plan with
+            {
+                Sources = [.. plan.Sources, plan.Sources[0] with
+                {
+                    SourceId = "post-cleanup-control-comments-normal-pr-1003",
+                    EndpointFamily = "/repos/SolusQuest/agentic-pr-review/issues/1003/comments",
+                    Route = "/repos/SolusQuest/agentic-pr-review/issues/1003/comments",
+                }],
+            });
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    [Fact]
     public async Task CollectorRejectsPaginationOutsideTheOriginalEndpointFamily()
     {
         var page = JsonResponse("{\"page\":1}");
@@ -1172,6 +1550,99 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         new(new string('8', 64), "stale", "9003", "1"),
         new(new string('8', 64), "stale", "9004", "1"),
     ];
+
+    private static Dictionary<string, IReadOnlyList<byte[]>> SyntheticProtectedCategories() =>
+        new(StringComparer.Ordinal)
+        {
+            ["authorization"] =
+            [
+                Encoding.UTF8.GetBytes("APR222-SYNTHETIC-AUTHORIZATION-RAW"),
+                Encoding.UTF8.GetBytes("APR222-SYNTHETIC-AUTHORIZATION-BEARER"),
+            ],
+            ["state_keys"] =
+            [
+                Encoding.UTF8.GetBytes("APR222-SYNTHETIC-STATE-KEY-RAW"),
+                Encoding.UTF8.GetBytes("APR222-SYNTHETIC-STATE-KEY-BASE64"),
+            ],
+            ["session_plaintext"] = [Encoding.UTF8.GetBytes("APR222-SYNTHETIC-SESSION-PLAINTEXT")],
+            ["provider_content"] = [Encoding.UTF8.GetBytes("APR222-SYNTHETIC-PROVIDER-CONTENT")],
+            ["tool_data"] = [Encoding.UTF8.GetBytes("APR222-SYNTHETIC-TOOL-DATA-VALUE")],
+            ["host_evidence"] = [Encoding.UTF8.GetBytes("APR222-SYNTHETIC-HOST-EVIDENCE")],
+        };
+
+    private static IReadOnlyDictionary<string, string> CredentialIdentities(
+        RestrictedEvidenceRoot root)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in new[] { "github-token", "current-state-key", "previous-state-key" })
+        {
+            using var lease = root.AcquirePinnedFile(name, EvidenceLimits.MaximumCredentialBytes);
+            result.Add(name, lease.Identity);
+        }
+        return result;
+    }
+
+    private static CapturePlanDocument CreatePostCleanupPlan()
+    {
+        const string repository = "SolusQuest/agentic-pr-review";
+        const string root = "/repos/SolusQuest/agentic-pr-review";
+        var operationIds = new[] { new string('6', 64), new string('8', 64) };
+        var runs = new[] { "9001", "9002", "9003", "9004" };
+        static CapturePlanSource Source(string id, string route, string pagination = "none") =>
+            new(id, route, route, pagination);
+        var sources = new List<CapturePlanSource>
+        {
+            Source("post-cleanup-control-comments-normal-pr-1001", $"{root}/issues/1001/comments", "complete-cursor"),
+            Source("post-cleanup-control-comments-stale-pr-1002", $"{root}/issues/1002/comments", "complete-cursor"),
+            Source("post-cleanup-sticky-comments-normal-pr-1001", $"{root}/issues/1001/comments", "complete-cursor"),
+            Source("post-cleanup-sticky-comments-stale-pr-1002", $"{root}/issues/1002/comments", "complete-cursor"),
+            Source("post-cleanup-variables", $"{root}/actions/variables", "complete-cursor"),
+            Source("post-cleanup-secrets", $"{root}/actions/secrets", "complete-cursor"),
+            Source("post-cleanup-environment", $"{root}/environments/r4-trusted-proof"),
+            Source("post-cleanup-ref-normal", $"{root}/git/matching-refs/heads/r4-trusted-proof/{operationIds[0]}", "complete-cursor"),
+            Source("post-cleanup-ref-stale", $"{root}/git/matching-refs/heads/r4-trusted-proof/{operationIds[1]}", "complete-cursor"),
+            Source("post-cleanup-pr-normal-1001", $"{root}/pulls/1001"),
+            Source("post-cleanup-pr-stale-1002", $"{root}/pulls/1002"),
+        };
+        foreach (var run in runs)
+        {
+            sources.Add(Source($"post-cleanup-state-delete-run-{run}", $"{root}/actions/runs/{run}/artifacts", "complete-cursor"));
+            sources.Add(Source($"post-cleanup-state-empty-run-{run}", $"{root}/actions/runs/{run}/artifacts", "complete-cursor"));
+            sources.Add(Source($"post-cleanup-final-run-{run}", $"{root}/actions/runs/{run}"));
+        }
+        return new CapturePlanDocument(
+            "apr-r4-e3-post-cleanup-capture-plan-v1",
+            "42",
+            repository,
+            operationIds,
+            [
+                new(operationIds[0], "normal", runs[0], "1"),
+                new(operationIds[0], "normal", runs[1], "1"),
+                new(operationIds[1], "stale", runs[2], "1"),
+                new(operationIds[1], "stale", runs[3], "1"),
+            ],
+            CapturePlan.CheckedSourceMapSha256,
+            "post-cleanup-capture",
+            sources.ToArray(),
+            []);
+    }
+
+    private static void AssertInvalidPostCleanupPlan(
+        RestrictedEvidenceRoot root,
+        string relativePath,
+        CapturePlanDocument plan)
+    {
+        var bytes = CanonicalEvidence.Encode(plan, EvidenceJson.Options);
+        try
+        {
+            root.WritePinnedFileCreateNew(relativePath, bytes);
+            Assert.Throws<InvalidDataException>(() => CapturePlan.Read(root, relativePath));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
 
     private static SafeResponseCapture DownloadCapture(byte[] archive) =>
         new(

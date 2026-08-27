@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.Versioning;
+using System.Buffers;
+using System.Buffers.Text;
 using System.Text;
 using System.Text.Json;
 
@@ -10,6 +12,32 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 public sealed record RestrictedRootMarker(
     string Kind,
     string DestinationIdentitySha256);
+
+public sealed class CredentialFileRepresentations : IDisposable
+{
+    internal CredentialFileRepresentations(
+        byte[] fileBytes,
+        byte[]? decodedKey,
+        string physicalIdentitySha256)
+    {
+        FileBytes = fileBytes;
+        DecodedKey = decodedKey;
+        PhysicalIdentitySha256 = physicalIdentitySha256;
+    }
+
+    public byte[] FileBytes { get; }
+    public byte[]? DecodedKey { get; }
+    public string PhysicalIdentitySha256 { get; }
+
+    public void Dispose()
+    {
+        CryptographicOperations.ZeroMemory(FileBytes);
+        if (DecodedKey is not null)
+        {
+            CryptographicOperations.ZeroMemory(DecodedKey);
+        }
+    }
+}
 
 public sealed class RestrictedEvidenceRoot
 {
@@ -208,36 +236,63 @@ public sealed class RestrictedEvidenceRoot
 
     public byte[] ReadCredentialFile(string relativePath, bool base64Key)
     {
-        var pinned = ReadPinnedFile(relativePath, EvidenceLimits.MaximumCredentialBytes);
+        using var representations = ReadCredentialFileRepresentations(relativePath, base64Key);
+        return (base64Key ? representations.DecodedKey! : representations.FileBytes).ToArray();
+    }
+
+    public CredentialFileRepresentations ReadCredentialFileRepresentations(
+        string relativePath,
+        bool base64Key)
+    {
+        using var pinned = AcquirePinnedFile(relativePath, EvidenceLimits.MaximumCredentialBytes);
         var bytes = pinned.Bytes;
+        byte[]? decoded = null;
+        char[]? characters = null;
         try
         {
-            var text = StrictUtf8.GetString(bytes);
-            if (text.Length == 0 ||
-                text.Any(character => char.IsWhiteSpace(character) || char.IsControl(character)))
+            characters = new char[StrictUtf8.GetCharCount(bytes)];
+            StrictUtf8.GetChars(bytes, characters);
+            if (characters.Length == 0 ||
+                characters.Any(character => char.IsWhiteSpace(character) || char.IsControl(character)))
             {
                 throw new InvalidDataException("credential_file_invalid");
             }
 
             if (!base64Key)
             {
-                return bytes.ToArray();
+                pinned.Validate();
+                return new CredentialFileRepresentations(bytes.ToArray(), null, pinned.Identity);
             }
 
-            if (text.Length != 44)
+            if (bytes.Length != 44)
             {
                 throw new InvalidDataException("credential_file_invalid");
             }
 
-            var decoded = Convert.FromBase64String(text);
-            if (decoded.Length != 32 ||
-                !StringComparer.Ordinal.Equals(Convert.ToBase64String(decoded), text))
+            decoded = new byte[32];
+            var canonical = new byte[44];
+            try
             {
-                CryptographicOperations.ZeroMemory(decoded);
-                throw new InvalidDataException("credential_file_invalid");
+                if (Base64.DecodeFromUtf8(bytes, decoded, out var consumed, out var written) !=
+                        OperationStatus.Done ||
+                    consumed != bytes.Length || written != decoded.Length ||
+                    Base64.EncodeToUtf8(decoded, canonical, out var encodedConsumed, out var encodedWritten) !=
+                        OperationStatus.Done ||
+                    encodedConsumed != decoded.Length || encodedWritten != canonical.Length ||
+                    !canonical.AsSpan().SequenceEqual(bytes))
+                {
+                    throw new InvalidDataException("credential_file_invalid");
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(canonical);
             }
 
-            return decoded;
+            pinned.Validate();
+            var result = new CredentialFileRepresentations(bytes.ToArray(), decoded, pinned.Identity);
+            decoded = null;
+            return result;
         }
         catch (Exception exception) when (
             exception is DecoderFallbackException or FormatException)
@@ -246,7 +301,14 @@ public sealed class RestrictedEvidenceRoot
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(bytes);
+            if (decoded is not null)
+            {
+                CryptographicOperations.ZeroMemory(decoded);
+            }
+            if (characters is not null)
+            {
+                characters.AsSpan().Clear();
+            }
         }
     }
 

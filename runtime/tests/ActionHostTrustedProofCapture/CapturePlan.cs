@@ -86,7 +86,7 @@ public static class CapturePlan
                     value.SourceMapSha256 != CheckedSourceMapSha256 ||
                     !BoundedText(value.PackageName, EvidenceLimits.MaximumNameBytes) ||
                     !RestrictedEvidenceRoot.IsSinglePathSegment(value.PackageName) ||
-                    value.Sources.Length != (preCleanup ? 35 : 17) ||
+                    value.Sources.Length != (preCleanup ? 35 : 23) ||
                     (preCleanup ? value.Artifacts.Length == 0 : value.Artifacts.Length != 0) ||
                     value.Artifacts.Length > EvidenceLimits.MaximumRecords ||
                     value.Sources.Select(item => item.SourceId).Distinct(StringComparer.Ordinal).Count() != value.Sources.Length ||

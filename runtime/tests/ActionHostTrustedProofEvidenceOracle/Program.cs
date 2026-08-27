@@ -287,11 +287,9 @@ internal static class Program
                     CryptographicOperations.ZeroMemory(output);
                 }
 
-                root.RemoveCredentialFile(currentCredentialPath);
                 currentCredentialPath = null;
                 if (previousCredentialPath is not null)
                 {
-                    root.RemoveCredentialFile(previousCredentialPath);
                     previousCredentialPath = null;
                 }
 

@@ -105,14 +105,13 @@ internal static class Program
                         item.RunId,
                         item.RunAttempt)).ToArray(),
                     plan.SourceMapSha256);
+                credentialPath = null;
                 Console.Out.WriteLine($"APR_R4_E3_CAPTURE_OK {finalized.Sha256}");
                 return 0;
             }
             finally
             {
                 CryptographicOperations.ZeroMemory(token);
-                root.RemoveCredentialFile(options["--github-token-file"]);
-                credentialPath = null;
             }
         }
         catch (InvalidDataException)

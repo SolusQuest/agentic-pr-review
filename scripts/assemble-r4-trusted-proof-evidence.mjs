@@ -149,6 +149,15 @@ export function pinnedFileIdentity(pathname) {
   }
 }
 
+function directoryDevice(pathname) {
+  const descriptor = fs.openSync(pathname, fs.constants.O_RDONLY);
+  try {
+    return fs.fstatSync(descriptor, { bigint: true }).dev;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
 function readCanonical(pathname, expectedDevice, requireOwnerOnly = true) {
   const pinned = readPinned(pathname, maximumDocumentBytes, expectedDevice, requireOwnerOnly);
   const { bytes } = pinned;
@@ -180,7 +189,7 @@ function resolvePackageFile(restrictedRoot, packageRoot, relative, maximumBytes)
 
 export function verifyCapturedFiles(restrictedRoot, manifestPath, manifest) {
   const packageRoot = path.dirname(manifestPath);
-  const rootDevice = fs.statSync(restrictedRoot, { bigint: true }).dev;
+  const rootDevice = directoryDevice(restrictedRoot);
   const capturedSourceBodies = new Map();
   for (const source of manifest.sources) {
     const pinned = readPinned(
@@ -300,13 +309,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     }
     assertNoLinks(restrictedRoot, restrictedRoot);
     const rootStat = fs.statSync(restrictedRoot, { bigint: true });
+    const rootDevice = directoryDevice(restrictedRoot);
     if (
       process.platform !== 'win32' &&
       ((rootStat.mode & 0x3fn) !== 0n || rootStat.uid !== BigInt(process.geteuid()))
     ) {
       invalid();
     }
-    const marker = readCanonical(resolveExisting(restrictedRoot, markerName), rootStat.dev).value;
+    const marker = readCanonical(resolveExisting(restrictedRoot, markerName), rootDevice).value;
     if (
       JSON.stringify(Object.keys(marker)) !==
         JSON.stringify(['kind', 'destination_identity_sha256']) ||
@@ -333,22 +343,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     );
     const sourceBundle = readCanonical(
       resolveExisting(restrictedRoot, options['--source-bundle']),
-      rootStat.dev,
+      rootDevice,
     );
     const capturePath = resolveExisting(restrictedRoot, options['--capture-manifest']);
-    const capture = readCanonical(capturePath, rootStat.dev);
+    const capture = readCanonical(capturePath, rootDevice);
     const postCleanupCapturePath = resolveExisting(
       restrictedRoot,
       options['--post-cleanup-capture-manifest'],
     );
-    const postCleanupCapture = readCanonical(postCleanupCapturePath, rootStat.dev);
+    const postCleanupCapture = readCanonical(postCleanupCapturePath, rootDevice);
     const oracle = readCanonical(
       resolveExisting(restrictedRoot, options['--oracle-result']),
-      rootStat.dev,
+      rootDevice,
     );
     const uiAttestation = readCanonical(
       resolveExisting(restrictedRoot, options['--ui-attestation']),
-      rootStat.dev,
+      rootDevice,
     );
     const payloadReceipt = readCanonical(
       resolveExisting(
@@ -373,10 +383,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       ['restricted-package-readback', '--restricted-package-readback'],
     ].map(([sourceId, option]) => [
       sourceId,
-      readCanonical(resolveExisting(restrictedRoot, options[option]), rootStat.dev).value,
+      readCanonical(resolveExisting(restrictedRoot, options[option]), rootDevice).value,
     ]);
-    const credentialNames = ['github-token', 'current-state-key', 'previous-state-key'];
-    if (credentialNames.some((name) => fs.existsSync(path.join(restrictedRoot, name)))) invalid();
     const capturedSourceBodies = verifyCapturedFiles(restrictedRoot, capturePath, capture.value);
     const postCleanupCapturedSourceBodies = verifyCapturedFiles(
       restrictedRoot,
@@ -388,11 +396,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       restrictedRoot,
       options['--production-assembly'],
     );
-    const oracleAssembly = readPinned(oracleAssemblyPath, maximumDocumentBytes * 16, rootStat.dev);
+    const oracleAssembly = readPinned(oracleAssemblyPath, maximumDocumentBytes * 16, rootDevice);
     const productionAssembly = readPinned(
       productionAssemblyPath,
       maximumDocumentBytes * 16,
-      rootStat.dev,
+      rootDevice,
     );
     const oracleBinaries = {
       oracle_assembly_path: options['--oracle-assembly'],
@@ -455,8 +463,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       flag: 'wx',
       mode: 0o600,
     });
-    const hostReadback = readCanonical(hostOutput, rootStat.dev);
-    const manifestReadback = readCanonical(packageManifestOutput, rootStat.dev);
+    const hostReadback = readCanonical(hostOutput, rootDevice);
+    const manifestReadback = readCanonical(packageManifestOutput, rootDevice);
     if (canonicalJson(hostReadback.value) !== canonicalJson(assembled.host)) invalid();
     assertFinalizedPrivatePackage({
       host: hostReadback.value,
