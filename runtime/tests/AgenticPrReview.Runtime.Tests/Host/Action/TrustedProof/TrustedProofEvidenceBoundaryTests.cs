@@ -129,6 +129,54 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public void CredentialGuardianUsesFreshAllowlistedEnvironment()
+    {
+        var start = CredentialLeaseAuthorityClient.CreateGuardianStartInfo("guardian");
+        var expectedNames = OperatingSystem.IsWindows() &&
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows).Length != 0
+            ? new[] { "SystemRoot", "WINDIR" }
+            : [];
+
+        Assert.Equal(
+            expectedNames.Order(StringComparer.OrdinalIgnoreCase),
+            start.Environment.Keys.Order(StringComparer.OrdinalIgnoreCase));
+        Assert.DoesNotContain(start.Environment.Keys, name =>
+            name.Contains("TOKEN", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("SECRET", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("KEY", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AssemblerCredentialArgumentsKeepPreviousKeyOptional(bool includePrevious)
+    {
+        var arguments = EvidenceAssemblerProgram.NodeArgumentNames
+            .Append("--node-executable")
+            .Append("--public-output")
+            .Append("--github-token-file")
+            .Append("--current-state-key-file")
+            .SelectMany(name => new[]
+            {
+                name,
+                name switch
+                {
+                    "--github-token-file" => "github-token",
+                    "--current-state-key-file" => "current-state-key",
+                    _ => name[2..],
+                },
+            })
+            .ToList();
+        if (includePrevious)
+        {
+            arguments.Add("--previous-state-key-file");
+            arguments.Add("previous-state-key");
+        }
+        var options = EvidenceAssemblerProgram.ParseArgs([.. arguments]);
+        Assert.Equal(includePrevious, options.ContainsKey("--previous-state-key-file"));
+    }
+
+    [Fact]
     public void OracleBuildSnapshotUsesOnlyAuthorizedGitBlobsAndStaysStable()
     {
         var repository = CreateGitRepository();
@@ -1338,7 +1386,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
-    public void CredentialGuardiansCarryActualUsedBytesAcrossOverwriteAndRestore()
+    public void CurrentKeyOnlyGuardianPathAcceptsAuthorizationSupersetAndCarriesUsedBytes()
     {
         var restricted = CreateRestrictedRoot();
         const string tokenName = "github-token";
@@ -1395,6 +1443,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             {
                 [tokenName] = tokenRepresentations.PhysicalIdentitySha256,
                 [keyName] = keyRepresentations.PhysicalIdentitySha256,
+                ["previous-state-key"] = new string('a', 64),
             },
             paths,
             out var githubAuthority,

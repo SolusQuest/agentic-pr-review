@@ -592,8 +592,7 @@ internal static partial class Program
         {
             actualIdentities.Add(previousPath, previousKey.PhysicalIdentitySha256);
         }
-        if (authorizedCredentialIdentities.Count != actualIdentities.Count ||
-            actualIdentities.Any(item =>
+        if (actualIdentities.Any(item =>
                 !authorizedCredentialIdentities.TryGetValue(item.Key, out var expected) ||
                 !StringComparer.Ordinal.Equals(item.Value, expected)))
         {
@@ -678,7 +677,6 @@ internal static partial class Program
                 : new[] { tokenPath, currentPath, previousPath };
             if (byName.Count != expectedNames.Length ||
                 expectedNames.Any(name => !byName.ContainsKey(name)) ||
-                authorizedCredentialIdentities.Count != byName.Count ||
                 byName.Any(item =>
                     !authorizedCredentialIdentities.TryGetValue(item.Key, out var identity) ||
                     identity != item.Value.PhysicalIdentitySha256))
@@ -1305,13 +1303,12 @@ internal static partial class Program
         }
     }
 
-    private static IReadOnlyDictionary<string, string> ParseArgs(string[] args)
+    internal static IReadOnlyDictionary<string, string> ParseArgs(string[] args)
     {
         var required = NodeArgumentNames.Append("--node-executable").Append("--public-output")
             .Append("--github-token-file").Append("--current-state-key-file")
-            .Append("--previous-state-key-file")
             .ToHashSet(StringComparer.Ordinal);
-        var allowed = required;
+        var allowed = required.Append("--previous-state-key-file").ToHashSet(StringComparer.Ordinal);
         if (args.Length % 2 != 0)
         {
             throw new InvalidDataException("assembly_arguments_invalid");
@@ -1331,7 +1328,7 @@ internal static partial class Program
         return result;
     }
 
-    private static readonly string[] NodeArgumentNames =
+    internal static readonly string[] NodeArgumentNames =
     [
         "--restricted-root",
         "--destination-identity",

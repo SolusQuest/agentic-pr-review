@@ -253,14 +253,7 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             DeleteInputsIfRetained(values);
             throw;
         }
-        var info = new ProcessStartInfo(executable)
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = false,
-            CreateNoWindow = true,
-        };
+        var info = CreateGuardianStartInfo(executable);
         if (entryAssemblyOverride is not null ||
             Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         {
@@ -323,6 +316,29 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
             DeleteInputsIfRetained(values);
             throw;
         }
+    }
+
+    internal static ProcessStartInfo CreateGuardianStartInfo(string executable)
+    {
+        var info = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = false,
+            CreateNoWindow = true,
+        };
+        info.Environment.Clear();
+        if (OperatingSystem.IsWindows())
+        {
+            var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (windows.Length != 0)
+            {
+                info.Environment["SystemRoot"] = windows;
+                info.Environment["WINDIR"] = windows;
+            }
+        }
+        return info;
     }
 
     public static bool IsGuardianCommand(string[] args) =>
