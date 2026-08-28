@@ -119,7 +119,7 @@ public sealed class RetainedStateTransactionContractTests
     }
 
     [Fact]
-    public void TrustedProofCleanupVectorMatchesProductionCodec()
+    public void RetainedSyntheticCleanupVectorMatchesProductionCodec()
     {
         var root = FindRepositoryRoot();
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Join(
@@ -128,9 +128,9 @@ public sealed class RetainedStateTransactionContractTests
             "tests",
             "fixtures",
             "action-host",
-            "trusted-proof",
-            "templates",
-            "host-restricted-evidence.json")));
+            "trusted-proof-payload",
+            "codec-vectors",
+            "retained-transaction-host-evidence.json")));
         var fixture = document.RootElement.GetProperty("fixture");
         var cleanup = document.RootElement
             .GetProperty("state")
@@ -235,7 +235,7 @@ public sealed class RetainedStateTransactionContractTests
     }
 
     [Fact]
-    public void TrustedProofSuccessfulTransactionsMatchProductionCodecs()
+    public void RetainedSyntheticTransactionsMatchProductionCodecs()
     {
         var root = FindRepositoryRoot();
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Join(
@@ -244,9 +244,9 @@ public sealed class RetainedStateTransactionContractTests
             "tests",
             "fixtures",
             "action-host",
-            "trusted-proof",
-            "templates",
-            "host-restricted-evidence.json")));
+            "trusted-proof-payload",
+            "codec-vectors",
+            "retained-transaction-host-evidence.json")));
         var evidence = document.RootElement;
         var records = evidence
             .GetProperty("state")

@@ -30,15 +30,24 @@ cleanup() {
   local exit_code=$?
   trap - EXIT
   if [[ "$exit_code" -ne 0 && -n "${evidence_root:-}" && -d "$evidence_root" ]]; then
-    local failed_case_found=false
+    local failure_diagnostic_found=false
     while IFS= read -r result_path; do
       if [[ "$(tr -d '\r\n' < "$result_path")" == fail ]]; then
         local relative_result="${result_path#"$evidence_root"/}"
         echo "APR_ACTION_HOST_FRAMEWORK_FAILED_CASE ${relative_result%/case-result.txt}" >&2
-        failed_case_found=true
+        local diagnostic_path="${result_path%/case-result.txt}/case-diagnostic.json"
+        if [[ -f "$diagnostic_path" ]]; then
+          echo "APR_ACTION_HOST_FRAMEWORK_FAILED_DIAGNOSTIC $(tr -d '\r\n' < "$diagnostic_path")" >&2
+        fi
+        failure_diagnostic_found=true
       fi
     done < <(find "$evidence_root" -type f -name case-result.txt -print | sort)
-    if [[ "$failed_case_found" == false ]]; then
+    local global_diagnostic="$evidence_root/supervisor-global-diagnostic.json"
+    if [[ -f "$global_diagnostic" ]]; then
+      echo "APR_ACTION_HOST_FRAMEWORK_GLOBAL_DIAGNOSTIC $(tr -d '\r\n' < "$global_diagnostic")" >&2
+      failure_diagnostic_found=true
+    fi
+    if [[ "$failure_diagnostic_found" == false ]]; then
       echo "APR_ACTION_HOST_${mode^^}_SUPERVISOR_FAILED" >&2
     fi
     if [[ -f "$golden" && -f "$evidence_root/normalized-evidence.json" ]]; then

@@ -149,13 +149,13 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 break;
             }
 
+            Interlocked.Increment(ref inFlight);
             _ = Task.Run(() => HandleAsync(context), CancellationToken.None);
         }
     }
 
     private async Task HandleAsync(HttpListenerContext context)
     {
-        Interlocked.Increment(ref inFlight);
         try
         {
             var path = context.Request.Url?.AbsolutePath ?? "";

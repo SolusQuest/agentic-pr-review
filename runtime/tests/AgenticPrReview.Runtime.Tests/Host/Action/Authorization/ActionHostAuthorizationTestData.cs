@@ -60,7 +60,9 @@ internal sealed class ActionHostAuthorizationScenario
         bool includeToken = true,
         ActionHostCancellationState cancellation =
             ActionHostCancellationState.Active,
-        string tokenValue = "github-token-canary-value")
+        string tokenValue = "github-token-canary-value",
+        long pullRequestId = PullRequestId,
+        long pullRequestNumber = PullRequestNumber)
     {
         var repository = new ActionHostGitHubRepositoryFact(
             RepositoryId,
@@ -74,8 +76,8 @@ internal sealed class ActionHostAuthorizationScenario
             RepositoryShortName);
         var actor = new ActionHostGitHubActorFact(7, "maintainer");
         var reference = new ActionHostGitHubPullRequestReferenceFact(
-            PullRequestId,
-            PullRequestNumber,
+            pullRequestId,
+            pullRequestNumber,
             BaseSha,
             repositoryReference,
             HeadSha,
@@ -113,8 +115,8 @@ internal sealed class ActionHostAuthorizationScenario
             actor,
             []);
         var pullRequest = new ActionHostGitHubPullRequestFact(
-            PullRequestId,
-            PullRequestNumber,
+            pullRequestId,
+            pullRequestNumber,
             "open",
             false,
             null,
@@ -131,12 +133,16 @@ internal sealed class ActionHostAuthorizationScenario
             workflowBytes);
         var eventBytes = route == ActionHostAuthorizationRoute.WorkflowRun
             ? WorkflowRunEventJson(trigger)
-            : WorkflowDispatchEventJson(actor);
+            : WorkflowDispatchEventJson(actor, pullRequestNumber);
         var launch = CreateLaunch(
             eventBytes,
             route,
             includeToken,
             cancellation,
+            pullRequestNumber: route ==
+                ActionHostAuthorizationRoute.WorkflowDispatch
+                    ? pullRequestNumber
+                    : null,
             tokenValue: tokenValue);
         var transport = new FakeGitHubTransport
         {
@@ -213,9 +219,10 @@ internal sealed class ActionHostAuthorizationScenario
         ActionHostTrustedWorkflowContract.Render(actionSha, PayloadSha);
 
     private static byte[] WorkflowDispatchEventJson(
-        ActionHostGitHubActorFact actor) => Encoding.UTF8.GetBytes($$"""
+        ActionHostGitHubActorFact actor,
+        long pullRequestNumber) => Encoding.UTF8.GetBytes($$"""
         {
-          "inputs": { "pr-number": "{{PullRequestNumber}}" },
+          "inputs": { "pr-number": "{{pullRequestNumber}}" },
           "repository": {
             "id": {{RepositoryId}},
             "full_name": "{{RepositoryName}}"

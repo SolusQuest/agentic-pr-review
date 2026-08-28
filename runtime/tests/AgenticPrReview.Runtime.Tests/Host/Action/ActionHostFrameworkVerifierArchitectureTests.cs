@@ -94,6 +94,10 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_ACTION_HOST_FRAMEWORK_EVIDENCE_MISMATCH", verifier,
             StringComparison.Ordinal);
+        Assert.Contains("APR_ACTION_HOST_FRAMEWORK_FAILED_DIAGNOSTIC", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("APR_ACTION_HOST_FRAMEWORK_GLOBAL_DIAGNOSTIC", verifier,
+            StringComparison.Ordinal);
         var goldenAssignment =
             "golden=\"$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden\"";
         Assert.True(verifier.IndexOf(goldenAssignment, StringComparison.Ordinal) <
@@ -130,6 +134,119 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_R4_W13_SOURCE_TREE", runner,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FrameworkSupervisorGlobalDiagnosticsNameEveryFailedInvariant()
+    {
+        Assert.Equal(
+            [
+                "host-pid-diversity",
+                "canary-routes",
+                "official-artifact-name",
+                "official-delete-count",
+                "official-signed-download-count",
+                "official-finalize-count",
+            ],
+            global::AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor
+                .FailedGlobalGateNames(1, false, 0, false, false, false));
+        Assert.Empty(
+            global::AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor
+                .FailedGlobalGateNames(2, true, 1, true, true, true));
+    }
+
+    [Fact]
+    public void FrameworkKillGatesWaitForAtomicCanaryInitializationReceipt()
+    {
+        var root = FindRepositoryRoot();
+        var host = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkHost.cs"));
+        var supervisor = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkSupervisor.cs"));
+
+        var providerCount = host.IndexOf("host-provider-credential-count",
+            StringComparison.Ordinal);
+        var githubCount = host.IndexOf("host-github-credential-count",
+            StringComparison.Ordinal);
+        var initialization = host.IndexOf("host-initialization-complete",
+            StringComparison.Ordinal);
+        Assert.True(providerCount >= 0 && providerCount < initialization);
+        Assert.True(githubCount >= 0 && githubCount < initialization);
+        Assert.Contains("hostInitializationObserved = await WaitForFileAsync(",
+            supervisor, StringComparison.Ordinal);
+        Assert.Contains("hostInitializationObserved &&", supervisor,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CanaryRouteDiagnosticsNameCardinalityWithoutEchoingUnknownInput()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-canary-route-diagnostic-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var table = Path.Join(root, "routes.tsv");
+            File.WriteAllText(table,
+                "class\tsource\tapproved_private_sinks\tterminal_sinks\t" +
+                "forbidden_sinks\tcardinality\n" +
+                "public-result\tprovider.response\tagent.validation\t-\t" +
+                "public.*\texactly-one\n");
+            var failures = new List<string>();
+
+            Assert.False(global::AgenticPrReview.Runtime
+                .ActionHostVerifierFixture.FrameworkSupervisor
+                .EvaluateCanaryRoutes(root, table, failures));
+            Assert.Equal(
+                ["cardinality:public-result:exactly-one:actual=0:expected=1"],
+                failures);
+            File.WriteAllText(Path.Join(root, "canary-observations.tsv"),
+                "lowercasesecret\tpublic.output\n");
+            failures.Clear();
+            Assert.False(global::AgenticPrReview.Runtime
+                .ActionHostVerifierFixture.FrameworkSupervisor
+                .EvaluateCanaryRoutes(root, table, failures));
+            Assert.Single(failures);
+            Assert.StartsWith("observation-class:sha256-", failures[0],
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("lowercasesecret", failures[0],
+                StringComparison.Ordinal);
+
+            File.WriteAllText(Path.Join(root, "canary-route-violation"),
+                "artifact-ciphertext\tlowercasesecret\t" +
+                "plaintext_in_artifact_archive\n");
+            var violation = Assert.Single(global::AgenticPrReview.Runtime
+                .ActionHostVerifierFixture.FrameworkSupervisor
+                .CanaryRouteViolationFailures(root));
+            Assert.StartsWith("route-violation:artifact-ciphertext:" +
+                "plaintext_in_artifact_archive:sha256-", violation,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("lowercasesecret", violation,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SyntheticPlatformCountsAcceptedRequestsBeforeSchedulingHandlers()
+    {
+        var root = FindRepositoryRoot();
+        var platform = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "SyntheticOfficialPlatform.cs"));
+        var pumpStart = platform.IndexOf("private async Task PumpAsync()",
+            StringComparison.Ordinal);
+        var handlerStart = platform.IndexOf("private async Task HandleAsync(",
+            StringComparison.Ordinal);
+        Assert.True(pumpStart >= 0 && handlerStart > pumpStart);
+        var pump = platform[pumpStart..handlerStart];
+
+        Assert.True(pump.IndexOf("Interlocked.Increment(ref inFlight);",
+                StringComparison.Ordinal) <
+            pump.IndexOf("Task.Run(() => HandleAsync(context)",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1124,6 +1241,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             fixtureProject, StringComparison.Ordinal);
         Assert.Equal(2, Count(workflow,
             "bash runtime/scripts/verify-action-host.sh aot"));
+        Assert.Equal(2, Count(workflow, "set -o pipefail"));
         Assert.Contains("cmp \"$RUNNER_TEMP/r4-e2-aot-first.receipt\"",
             workflow, StringComparison.Ordinal);
         Assert.Contains("reflection_json_enabled !== false", composer,

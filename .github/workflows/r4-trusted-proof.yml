@@ -47,7 +47,8 @@ jobs:
           REPOSITORY_ID: ${{ github.repository_id }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ACTION_SOURCE_SHA: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613
-          PAYLOAD_SHA256: 97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc
+          PAYLOAD_SOURCE_SHA: edc594c29a8a6b5fdacfab48643bf221277af200
+          PAYLOAD_SHA256: b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e
           R4_TRUSTED_PROOF_AUTHORIZATION: ${{ vars.R4_TRUSTED_PROOF_AUTHORIZATION }}
         run: |
           node <<'APR_R4_E2P_PREFLIGHT' >> "$GITHUB_OUTPUT"
@@ -101,6 +102,7 @@ jobs:
             const repositoryId = required('REPOSITORY_ID', positiveInteger);
             const workflowSha = required('WORKFLOW_SHA', lowerHex40);
             const actionSourceSha = required('ACTION_SOURCE_SHA', lowerHex40);
+            const payloadSourceSha = required('PAYLOAD_SOURCE_SHA', lowerHex40);
             const payloadSha256 = required('PAYLOAD_SHA256', lowerHex64);
             const authorization = required(
               'R4_TRUSTED_PROOF_AUTHORIZATION',
@@ -169,8 +171,11 @@ jobs:
               String(pull.number) !== prNumber ||
               pull.state !== 'open' ||
               pull.draft !== false ||
+              pull.merged_at !== null ||
               pull.base?.repo?.full_name !== repository ||
               String(pull.base?.repo?.id) !== repositoryId ||
+              pull.base?.ref !== 'main' ||
+              pull.base?.sha !== workflowSha ||
               pull.head?.repo?.full_name !== repository ||
               String(pull.head?.repo?.id) !== repositoryId ||
               !lowerHex40.test(pull.head?.sha ?? '') ||
@@ -188,7 +193,7 @@ jobs:
             }
             const operationId = pull.head.ref.slice('r4-trusted-proof/'.length);
             const manifest = JSON.stringify({
-              kind: 'apr-r4-e2p-authorization-manifest-v1',
+              kind: 'apr-r4-e2p-authorization-manifest-v2',
               repository_id: repositoryId,
               repository,
               pr_number: prNumber,
@@ -196,6 +201,7 @@ jobs:
               operation_id: operationId,
               workflow_sha: workflowSha,
               action_source_sha: actionSourceSha,
+              payload_source_sha: payloadSourceSha,
               payload_sha256: payloadSha256,
             });
             const digest = Array.from(
@@ -243,7 +249,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: SolusQuest/agentic-pr-review
-          ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613
+          ref: edc594c29a8a6b5fdacfab48643bf221277af200
           path: payload-source
           persist-credentials: false
       - id: setup-node
@@ -262,7 +268,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang zlib1g-dev
       - id: prepare
         run: |
-          bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt.json" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
+          bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-hold
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -273,7 +279,8 @@ jobs:
           OPERATION_ID: ${{ needs.authorization-preflight.outputs.operation-id }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ACTION_SOURCE_SHA: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613
-          PAYLOAD_SHA256: 97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc
+          PAYLOAD_SOURCE_SHA: edc594c29a8a6b5fdacfab48643bf221277af200
+          PAYLOAD_SHA256: b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -315,7 +322,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: SolusQuest/agentic-pr-review
-          ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613
+          ref: edc594c29a8a6b5fdacfab48643bf221277af200
           path: payload-source
           persist-credentials: false
       - id: setup-node
@@ -334,7 +341,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang zlib1g-dev
       - id: prepare
         run: |
-          bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt.json" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
+          bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-verify-completed
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -345,7 +352,8 @@ jobs:
           OPERATION_ID: ${{ needs.authorization-preflight.outputs.operation-id }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ACTION_SOURCE_SHA: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613
-          PAYLOAD_SHA256: 97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc
+          PAYLOAD_SOURCE_SHA: edc594c29a8a6b5fdacfab48643bf221277af200
+          PAYLOAD_SHA256: b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |

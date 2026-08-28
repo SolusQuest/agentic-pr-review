@@ -6,11 +6,13 @@ import Ajv from 'ajv';
 import { parseDocument } from 'yaml';
 import { extractPreflight } from './check-r4-e2p-preflight.mjs';
 import { verifyReceipt } from './check-r4-e2p-receipt.mjs';
+import { verifyReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
+import { generateCleanupPlan, projectTrustedProofEvidence } from './r4-trusted-proof-contract.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const fixtureRelative = 'runtime/tests/fixtures/action-host/trusted-proof';
 const templateRelative =
-  'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof.yml.template';
+  'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template';
 const workflowRelative = '.github/workflows/r4-trusted-proof.yml';
 const stagedTemplateRelative =
   'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template';
@@ -20,56 +22,95 @@ const stagedPreparationRelative =
   'runtime/tests/fixtures/action-host/trusted-proof-payload/preparation-contract-v2.json';
 const stagedPreparationScriptRelative = 'runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh';
 const actionSourceSha = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
-const payloadSha256 = '97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc';
-const templateSha256 = 'fa458399a93c0dc71d0f071eeea3abb7670382c5545f58dae90ca1cf9649c03a';
-const renderedWorkflowSha256 = 'd62625f4fd4cb0c3e327a80a9dcd3dfb0aca957f9e63171fa0f12a553033b603';
-const receiptLineSha256 = '3fa55211baa43da955a2eb083b2188a1fde193e6684cb129ec99f5f35374ad49';
-const receiptJsonSha256 = '9b95a87e5f40d7b506e25426e3905aaaf0510ad28d79c8a7ca3737a3952a7b34';
+const payloadSourceSha = 'edc594c29a8a6b5fdacfab48643bf221277af200';
+const payloadSourceTree = '8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089';
+const payloadSha256 = 'b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e';
+const templateSha256 = '46ff02fc0e107bdff5d4d4fbe185d8a4f97b8cb8059b99485a285c8d11a45768';
+const renderedWorkflowSha256 = '1dcf42e6c3890614d13ef1a0e6f98ca35e0029c2c78e85d4afdd4f32e29aebd9';
+const receiptLineSha256 = '346cf753a0657ba4e25c5271df21afb1a95d2574c3ca8eb2a1f2e772ec776242';
+const receiptJsonSha256 = '3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1';
 const normalCanarySha256 = 'bc58613e9f389b973f1e44de64021a7acc748fafd857b7fa99466493670db446';
 const staleCanarySha256 = '20580dc6193f607a3a1d1b6949013796f8a8c9714d3e5586e4e509a473f1382a';
 const fixtureInventory = [
   'authorization-environment-contract.json',
+  'authorizations/cleanup.json',
+  'authorizations/execution.json',
+  'authorizations/setup.json',
   'cleanup-contract.json',
+  'cleanup-plan.json',
+  'expected-success-role-contract.json',
   'fixture-pr-contract.json',
-  'receipt-provenance.json',
+  'historical/v1/receipt-provenance.json',
+  'historical/v1/trusted-proof-payload-receipt.json',
+  'receipt-provenance-v2.json',
   'schemas/host-restricted-evidence.schema.json',
   'schemas/public-safe-evidence.schema.json',
+  'source-map.json',
   'templates/host-restricted-evidence.json',
   'templates/public-safe-evidence.json',
   'traces/normal-two-run.json',
   'traces/stale-head.json',
-  'trusted-proof-payload-receipt.json',
+  'trusted-proof-payload-receipt-v2.json',
 ];
 const fixtureDigests = new Map([
   [
     'authorization-environment-contract.json',
-    '87d0050fa7e2171b38eba4035e8c176fcf14299a0152b54efcb5ddde06d7e73e',
+    '0eabf9d8f706ea54ac28e901d3810839ed1dd70ab98688958db85d535c8bceb4',
   ],
-  ['cleanup-contract.json', '5d7a26d40d9e41d3d195e8dfb8496703fd40084c1fd687f22306c51575c4cdce'],
+  [
+    'authorizations/cleanup.json',
+    'e74589c1312eb16217cf25e715f958debdf529aea03ef2d6aef09e43c5af9163',
+  ],
+  [
+    'authorizations/execution.json',
+    'e2d50bc9b1ad589a32a4010583b58765b41dc0c1a526cfe0b3ca34e32afd08ce',
+  ],
+  ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
+  ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
+  ['cleanup-plan.json', '0c10481d6edd7638f0bec869c968ff1614206618aa3dca07fd52b4119960643f'],
+  [
+    'expected-success-role-contract.json',
+    '8d601c863d184f8f8cf3cdae5e1b447eb9fa7aea25fd94d00390a3ac786a92ba',
+  ],
   ['fixture-pr-contract.json', '347a2cdf30bd4a28e15f74d939d6c61519d6694022be03c4d5c3cb1c05224efc'],
-  ['receipt-provenance.json', 'e0e83ca4c461197c4f4cd3ed37cd5fdafb137398c188068025179664943665b2'],
+  [
+    'historical/v1/receipt-provenance.json',
+    'dbcdf90d09de0d65e8dc6129e8c847fba23c4b1fef0f5379ace40b25063ff80b',
+  ],
+  [
+    'historical/v1/trusted-proof-payload-receipt.json',
+    '9b95a87e5f40d7b506e25426e3905aaaf0510ad28d79c8a7ca3737a3952a7b34',
+  ],
+  [
+    'receipt-provenance-v2.json',
+    '4dbb79b76dbfe41d8a7e8402e1b58b49af3e74620d75472b868cb07623016bc2',
+  ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '354faff22e2976efa450a9e6a8dc8b6b2ec8bdc07c827026af8775e5540352f5',
+    'e965471374b4cfab408494db8b1d94bccbcad21b3457c514170cf86baad0a4de',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
-    'cfd733c71312ddd9e4d6539f512eef2c3c631b6d785e8c610d16f90aeac3f47d',
+    'fab487f9274857335cd976414f070957c812d528f69841caa52c8ab31e836594',
   ],
+  ['source-map.json', '612c10ed04ee0545a0cd36869ca83cbed75eae687a3131513c2969d791003281'],
   [
     'templates/host-restricted-evidence.json',
-    'ab71e1e7f8d201bb7af32a3a628391db9058a2402bc87d7b9f45930949050bbd',
+    'da2a7573b3b94c607585ee5825f7229b6a40fae0ff0fe2fb912a742756ce67f4',
   ],
   [
     'templates/public-safe-evidence.json',
-    'dd768d3cde2ef180b2ec0f73b41ccf17484d53d089660ba59ed9bb3afb3bb4e3',
+    '1e92721e6d49168f114a9313cb369e6c562c6ae7ac322c5ecb86929a08e32956',
   ],
   [
     'traces/normal-two-run.json',
-    '7e946753efd19a1483e29306966a8d9f783d4c8b3136ddc8af39c88a898be2a8',
+    '802c3c3392455babd7a54236eb1fca531c40fa81e5ad695a1ed519343c12c28c',
   ],
-  ['traces/stale-head.json', '8a2a34659c0c9593bf48132d7728c98340019b85d4bad20d8bf58579b58b7a40'],
-  ['trusted-proof-payload-receipt.json', receiptJsonSha256],
+  ['traces/stale-head.json', '7f8b47b419df4a2a134a703e40bc8b966ba7e15fa5d789b734a389f61b51d539'],
+  [
+    'trusted-proof-payload-receipt-v2.json',
+    '3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1',
+  ],
 ]);
 
 function fail(code) {
@@ -511,6 +552,7 @@ function validateFixtureContracts(fixtureRoot) {
   for (const [relative, expected] of fixtureDigests) {
     if (sha256(documents.get(relative).bytes) !== expected) fail('fixture-digest');
   }
+
   const fixture = documents.get('fixture-pr-contract.json').value;
   const normalBytes = Buffer.concat([
     Buffer.from(fixture.normal.content_utf8, 'utf8'),
@@ -523,173 +565,93 @@ function validateFixtureContracts(fixtureRoot) {
   if (
     fixture.base_source !== 'exact-authorized-default-branch-workflow-commit' ||
     fixture.base_requires_canary_absent !== true ||
-    fixture.inherited_repository_tree !== 'unchanged' ||
     fixture.only_changed_path !== 'proof/apr178-path-canary.txt' ||
     fixture.normal.terminator_hex !== '0a' ||
     fixture.stale.advanced_terminator_hex !== '0a' ||
     sha256(normalBytes) !== normalCanarySha256 ||
-    fixture.normal.content_sha256 !== normalCanarySha256 ||
-    sha256(staleBytes) !== staleCanarySha256 ||
-    fixture.stale.advanced_content_sha256 !== staleCanarySha256
+    sha256(staleBytes) !== staleCanarySha256
   ) {
     fail('fixture-byte-identity');
   }
+
   const authorization = documents.get('authorization-environment-contract.json').value;
   if (
-    authorization.authorization_variable?.name !== 'R4_TRUSTED_PROOF_AUTHORIZATION' ||
-    authorization.authorization_variable?.default !== 'absent' ||
-    authorization.authorization_variable?.manifest_kind !==
-      'apr-r4-e2p-authorization-manifest-v1' ||
-    authorization.authorization_variable?.normal_and_stale_phases_independently_observed !== true ||
-    authorization.environment?.name !== 'r4-trusted-proof' ||
-    authorization.environment?.must_preexist !== true ||
-    authorization.environment?.deployment_branch !== 'main-only' ||
-    authorization.environment?.required_reviewer_rule_enabled !== true ||
-    JSON.stringify(authorization.environment?.required_reviewers) !==
-      JSON.stringify([{ type: 'User', id: '16307884' }]) ||
-    authorization.environment?.required_maintainer_approvals_minimum !== 1 ||
+    authorization.checkpoints?.map((item) => item.phase).join(',') !== 'setup,execution,cleanup' ||
     authorization.environment?.prevent_self_review !== false ||
-    authorization.environment?.administrator_bypass !== false ||
-    authorization.environment?.per_protected_job_approval_required !== true ||
-    authorization.environment?.phase_order !==
-      'exact-snapshot-readback < reviewer-approval <= protected-job-start' ||
-    authorization.environment?.normal_and_stale_phases_independently_observed !== true ||
-    authorization.environment?.required_evidence?.includes('required_reviewer_rule_enabled') !==
-      true ||
-    authorization.environment?.required_evidence?.includes('exact_required_reviewer_set') !==
-      true ||
-    authorization.environment?.required_evidence?.includes(
-      'required_maintainer_approvals_minimum',
-    ) !== true ||
-    authorization.environment?.required_evidence?.includes(
-      'bootstrap_required_reviewer_approval',
-    ) !== true ||
-    authorization.environment?.required_evidence?.includes(
-      'continuation_required_reviewer_approval',
-    ) !== true ||
-    authorization.environment?.required_evidence?.includes('stale_required_reviewer_approval') !==
-      true ||
-    authorization.canary_matrix_requires_exact_authorized_credential_per_sink !== true ||
-    authorization.host_restricted_destination_requires_kind_and_identity_sha256 !== true ||
+    authorization.environment?.administrator_bypass_source !== 'closed-ui-attestation' ||
+    authorization.approval_transition?.run_attempt !== 1 ||
+    authorization.approval_transition?.approved_at_available !== false ||
+    authorization.concurrency?.api_version !== '2026-03-10' ||
     authorization.live_mutation_owner !== 'issue-181'
   ) {
     fail('authorization-environment-contract');
   }
   const cleanup = documents.get('cleanup-contract.json').value;
   if (
-    cleanup.pre_state?.required !== 'empty' ||
-    cleanup.pre_state?.complete_pagination !== true ||
-    cleanup.pre_state?.required_scopes?.length !== 3 ||
-    cleanup.pre_state?.scope_digests_must_be_distinct !== true ||
-    cleanup.operation_state?.reject_unowned_addition !== true ||
-    cleanup.pre_state?.repository_root_family !== 'locator_root' ||
-    cleanup.pre_state?.scoped_families?.length !== 9 ||
-    cleanup.pre_state?.scoped_families?.includes('locator_root') !== false ||
-    cleanup.operation_state?.creation_phases?.includes('stale-setup') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('scope') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('scope_digest') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('archive_sha256') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('encrypted_object_sha256') !==
-      true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('expires_at_unix_seconds') !==
-      true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('size') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('decoded_record') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_disposition') !==
-      true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_phase') !== true ||
-    cleanup.operation_state?.physical_record_exact_fields?.includes('terminal_at_unix_seconds') !==
-      true ||
-    cleanup.operation_state?.archive_and_encrypted_digests_independent !== true ||
-    cleanup.operation_state?.complete_created_physical_artifact_count !== 35 ||
-    cleanup.operation_state?.transient_record_contract?.opaque_write_anchors !== 6 ||
-    cleanup.operation_state?.transient_record_contract?.p5_anchor_cleanup_records !== 6 ||
-    cleanup.operation_state?.transient_record_contract?.p5_completed_record_cleanup_records !== 6 ||
-    cleanup.operation_state?.transient_record_contract?.predecessor_copy_candidates !== 1 ||
-    cleanup.operation_state?.transient_record_contract?.s6_internal_cleanup_records !== 2 ||
-    cleanup.operation_state?.transient_record_contract?.s6_final_cleanup_records !== 1 ||
-    cleanup.operation_state?.canonical_scoped_envelope_required !== true ||
-    cleanup.operation_state?.cleanup_inventory_binding !==
-      'exact-active-physical-inventory-before-cleanup-record-creation' ||
-    cleanup.operation_state?.scoped_header_exact_fields?.includes('epoch') !== true ||
-    cleanup.operation_state?.scoped_header_exact_fields?.includes('session_id') !== true ||
-    cleanup.operation_state?.decoded_record_contract !==
-      'exact-class-specific-production-fields-with-distinct-session-digests-and-content-derived-cleanup-identity' ||
-    cleanup.operation_state?.normal_lineage_head_rule !==
-      'single-initialized-head-reused-across-accepted-generations-unless-reset-or-expiry' ||
-    JSON.stringify(cleanup.operation_state?.successful_publication_recovery_subtypes) !==
-      JSON.stringify(['initial_intent', 'sticky_readback', 'acceptance_recovery']) ||
-    JSON.stringify(cleanup.operation_state?.terminal_disposition_partition) !==
-      JSON.stringify(['internally-reconciled-deleted', 'e4-deleted', 'cleanup-self-deleted']) ||
-    cleanup.operation_state?.artifact_id_contract !==
-      'canonical-positive-decimal-javascript-safe-github-artifact-id' ||
-    cleanup.public_projection_gate !==
-      'exact-empty-final-state-complete-resource-readback-and-proof-control-cleanup' ||
-    cleanup.invalid_terminal_states?.includes('delete-or-retain') !== true
+    cleanup.successful_inventory?.exact_product_anchor_count !== 7 ||
+    cleanup.successful_inventory?.synthetic_inventory_is_authority !== false ||
+    cleanup.observed_cleanup_inventory?.authenticated_operation_owned_extra !==
+      'recovery-only-delete' ||
+    cleanup.observed_cleanup_inventory?.ambiguous_or_cross_operation !==
+      'non-deletable-maintainer-handoff' ||
+    cleanup.recovery_only_public_projection !== false ||
+    cleanup.execution_capability !== 'none'
   ) {
     fail('cleanup-contract');
   }
-  const normalTrace = documents.get('traces/normal-two-run.json').value;
+
+  const host = documents.get('templates/host-restricted-evidence.json').value;
+  const expectedPublic = documents.get('templates/public-safe-evidence.json').value;
   if (
-    normalTrace.run_one?.run_id === normalTrace.run_two?.run_id ||
-    normalTrace.run_one?.run_attempt < 1 ||
-    normalTrace.run_two?.run_attempt < 1 ||
-    normalTrace.concurrency_group !== 'agentic-pr-review-r4-42-pr-1001' ||
-    normalTrace.run_one?.pr_number !== '1001' ||
-    normalTrace.run_two?.pr_number !== '1001' ||
-    !(
-      normalTrace.workflow_sha === normalTrace.reviewed_base_sha &&
-      normalTrace.normal_parent_sha === normalTrace.reviewed_base_sha &&
-      normalTrace.run_one.protected_job_started_at < normalTrace.run_one.barrier_ready_at &&
-      normalTrace.run_one.barrier_ready_at <= normalTrace.run_two.created_at &&
-      normalTrace.run_two.created_at <= normalTrace.observation.observed_at &&
-      normalTrace.observation.observed_at < normalTrace.run_one.barrier_released_at &&
-      normalTrace.run_one.barrier_released_at < normalTrace.run_one.completed_at &&
-      normalTrace.run_one.completed_at < normalTrace.run_two.protected_job_started_at
-    ) ||
-    normalTrace.run_two.privileged_job_allocated_at_observation !== false ||
-    normalTrace.run_two.environment_admission_started_at_observation !== false ||
-    normalTrace.run_two.protected_step_started_at_observation !== null
+    JSON.stringify(documents.get('source-map.json').value) !== JSON.stringify(host.source_map) ||
+    JSON.stringify(documents.get('authorizations/setup.json').value) !==
+      JSON.stringify(host.authorizations.setup) ||
+    JSON.stringify(documents.get('authorizations/execution.json').value) !==
+      JSON.stringify(host.authorizations.execution) ||
+    JSON.stringify(documents.get('authorizations/cleanup.json').value) !==
+      JSON.stringify(host.authorizations.cleanup)
   ) {
-    fail('normal-trace');
+    fail('fixture-cross-binding');
   }
+  const roleContract = documents.get('expected-success-role-contract.json').value;
+  if (
+    roleContract.exact_count !== 7 ||
+    roleContract.synthetic_fixture_authority !== false ||
+    JSON.stringify(roleContract.roles) !==
+      JSON.stringify(host.inventories.expected_success.map((item) => item.role))
+  ) {
+    fail('success-role-contract');
+  }
+  const generated = generateCleanupPlan({
+    operation_ids: host.identities.operation_ids,
+    proof_control: host.proof_control,
+    observed_cleanup: host.inventories.observed_cleanup,
+    resources: host.cleanup.resources,
+  });
+  if (
+    generated.digest !== host.cleanup.plan_sha256 ||
+    generated.canonical !== documents.get('cleanup-plan.json').bytes.toString('utf8')
+  ) {
+    fail('cleanup-plan-contract');
+  }
+  if (JSON.stringify(host).includes('approved_at')) fail('unobservable-approval-time');
+
+  const normalTrace = documents.get('traces/normal-two-run.json').value;
   const staleTrace = documents.get('traces/stale-head.json').value;
   if (
-    staleTrace.operation_id !== '7'.repeat(64) ||
-    staleTrace.workflow_sha !== staleTrace.reviewed_base_sha ||
-    staleTrace.admitted_parent_sha !== staleTrace.reviewed_base_sha ||
-    staleTrace.advanced_parent_sha !== staleTrace.admitted_head_sha ||
-    staleTrace.changed_paths?.length !== 1 ||
-    staleTrace.changed_paths[0] !== 'proof/apr178-path-canary.txt' ||
-    staleTrace.advanced_content_sha256 !== staleCanarySha256 ||
-    staleTrace.authorized_stale_run?.privileged_job_allocated !== true ||
-    staleTrace.authorized_stale_run?.provider_constructed !== true ||
-    staleTrace.authorized_stale_run?.pr_number !== '1002' ||
-    staleTrace.unauthorized_follow_on_run?.pr_number !== '1002' ||
-    staleTrace.authorized_stale_run?.concurrency_group !== 'agentic-pr-review-r4-42-pr-1002' ||
-    staleTrace.unauthorized_follow_on_run?.concurrency_group !==
-      'agentic-pr-review-r4-42-pr-1002' ||
-    staleTrace.authorized_stale_run?.value_free_signal_count !== 1 ||
-    staleTrace.authorized_stale_run?.host_exact_head_result !== 'stale-head-rejected' ||
-    staleTrace.unauthorized_follow_on_run?.old_authorization_matches !== false ||
-    staleTrace.unauthorized_follow_on_run?.privileged_job_allocated !== false ||
-    staleTrace.unauthorized_follow_on_run?.pending_observation?.job_allocated !== false ||
-    !(
-      staleTrace.unauthorized_follow_on_run?.created_at <=
-        staleTrace.unauthorized_follow_on_run?.pending_observation?.observed_at &&
-      staleTrace.unauthorized_follow_on_run?.pending_observation?.observed_at <
-        staleTrace.authorized_stale_run?.completed_at &&
-      staleTrace.authorized_stale_run?.completed_at <
-        staleTrace.unauthorized_follow_on_run?.workflow_started_at &&
-      staleTrace.unauthorized_follow_on_run?.workflow_started_at <=
-        staleTrace.unauthorized_follow_on_run?.completed_at
-    ) ||
-    staleTrace.unauthorized_follow_on_run?.state_mutated !== false ||
-    staleTrace.unauthorized_follow_on_run?.status !== 'completed-inert' ||
-    staleTrace.all_follow_on_runs_terminal !== true
+    normalTrace.api_version !== '2026-03-10' ||
+    normalTrace.pagination_complete !== true ||
+    JSON.stringify(normalTrace.ahead_of_run) !==
+      JSON.stringify(host.concurrency.normal.ahead_of_run) ||
+    staleTrace.api_version !== '2026-03-10' ||
+    staleTrace.pagination_complete !== true ||
+    staleTrace.proof_control.comments.length !== 4 ||
+    staleTrace.follow_on_terminal_inert !== true ||
+    JSON.stringify(staleTrace.ahead_of_run) !== JSON.stringify(host.concurrency.stale.ahead_of_run)
   ) {
-    fail('stale-trace');
+    fail('trace-contract');
   }
+
   const ajv = new Ajv({ allErrors: true, strict: true });
   const validateHost = ajv.compile(
     documents.get('schemas/host-restricted-evidence.schema.json').value,
@@ -697,15 +659,18 @@ function validateFixtureContracts(fixtureRoot) {
   const validatePublic = ajv.compile(
     documents.get('schemas/public-safe-evidence.schema.json').value,
   );
-  if (!validateHost(documents.get('templates/host-restricted-evidence.json').value)) {
-    fail('host-template-schema');
+  if (!validateHost(host)) fail('host-template-schema');
+  let projected;
+  try {
+    projected = projectTrustedProofEvidence(host);
+  } catch {
+    fail('host-template-contract');
   }
-  if (!validatePublic(documents.get('templates/public-safe-evidence.json').value)) {
-    fail('public-template-schema');
+  if (!validatePublic(projected) || JSON.stringify(projected) !== JSON.stringify(expectedPublic)) {
+    fail('public-template-contract');
   }
   return documents;
 }
-
 function validateRepositorySecretRoutes(workflowsRoot) {
   const workflowFiles = fs
     .readdirSync(workflowsRoot)
@@ -773,7 +738,8 @@ export function checkR4TrustedProof(options = {}) {
     templateBytes.includes(0x0d) ||
     workflowBytes.includes(0x0d) ||
     sha256(templateBytes) !== templateSha256 ||
-    count(templateBytes.toString('utf8'), '__ACTION_SOURCE_SHA__') !== 7 ||
+    count(templateBytes.toString('utf8'), '__ACTION_SOURCE_SHA__') !== 5 ||
+    count(templateBytes.toString('utf8'), '__PAYLOAD_SOURCE_SHA__') !== 5 ||
     count(templateBytes.toString('utf8'), '__PAYLOAD_SHA256__') !== 3
   ) {
     fail('template-identity');
@@ -781,6 +747,7 @@ export function checkR4TrustedProof(options = {}) {
   const rendered = templateBytes
     .toString('utf8')
     .replaceAll('__ACTION_SOURCE_SHA__', actionSourceSha)
+    .replaceAll('__PAYLOAD_SOURCE_SHA__', payloadSourceSha)
     .replaceAll('__PAYLOAD_SHA256__', payloadSha256);
   if (
     workflowBytes.toString('utf8') !== rendered ||
@@ -791,31 +758,167 @@ export function checkR4TrustedProof(options = {}) {
   }
   parseWorkflow(workflowPath);
   const documents = validateFixtureContracts(fixtureRoot);
-  const receiptPath = path.join(fixtureRoot, 'trusted-proof-payload-receipt.json');
-  const receipt = verifyReceipt({ receiptPath, sourceRoot: root });
-  const receiptBytes = documents.get('trusted-proof-payload-receipt.json').bytes;
+  const capturePlanSource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofCapture', 'CapturePlan.cs'),
+    'utf8',
+  );
+  if (!capturePlanSource.includes(fixtureDigests.get('source-map.json'))) {
+    fail('capture-plan-source-map-identity');
+  }
+  const oracleProject = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofEvidenceOracle',
+      'AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.csproj',
+    ),
+    'utf8',
+  );
+  const oracleSource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofEvidenceOracle', 'Program.cs'),
+    'utf8',
+  );
+  const oracleBuildProject = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofOracleBuild',
+      'AgenticPrReview.Runtime.ActionHostTrustedProofOracleBuild.csproj',
+    ),
+    'utf8',
+  );
+  const oracleBuildSource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofOracleBuild', 'Program.cs'),
+    'utf8',
+  );
+  const authorizedSnapshotSource = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofOracleBuild',
+      'AuthorizedGitSnapshot.cs',
+    ),
+    'utf8',
+  );
+  const assemblerSource = fs.readFileSync(
+    path.join(root, 'scripts', 'assemble-r4-trusted-proof-evidence.mjs'),
+    'utf8',
+  );
+  const assemblerBoundarySource = fs.readFileSync(
+    path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofEvidenceAssembler', 'Program.cs'),
+    'utf8',
+  );
+  const publicCorpusSource = fs.readFileSync(
+    path.join(
+      root,
+      'runtime',
+      'tests',
+      'ActionHostTrustedProofEvidenceAssembler',
+      'PublicSurfaceCorpusLease.cs',
+    ),
+    'utf8',
+  );
+  if (
+    !oracleProject.includes('TrustedProofOracleSourceSha') ||
+    !oracleProject.includes('TrustedProofOracleSourceTree') ||
+    oracleProject.includes('TrustedProofOracleBuildReceiptArgument') ||
+    oracleSource.includes('OracleBuildReceipt') ||
+    !oracleBuildProject.includes('TrustedProofOracleBuildSourceRootArgument') ||
+    !oracleBuildProject.includes('TrustedProofOracleBuildSourceTreeCommand') ||
+    !oracleBuildSource.includes('--source-commit') ||
+    !oracleBuildSource.includes('--source-tree') ||
+    !oracleBuildSource.includes('--git-executable') ||
+    !oracleBuildSource.includes('--dotnet-executable') ||
+    !oracleBuildSource.includes('--build-receipt-output') ||
+    !oracleBuildSource.includes('--snapshot-directory') ||
+    !oracleBuildSource.includes('--intermediate-directory') ||
+    !oracleBuildSource.includes('AuthorizedGitSnapshot.Materialize') ||
+    !oracleBuildSource.includes('CreateFreshBuildDirectory') ||
+    !oracleBuildSource.includes('snapshot.Validate()') ||
+    !oracleBuildSource.includes('"--artifacts-path"') ||
+    !oracleBuildSource.includes('"--configfile"') ||
+    !oracleBuildSource.includes('"-p:ActionHostVerifierFrameworkReference=true"') ||
+    !oracleBuildSource.includes('start.Environment.Clear()') ||
+    !oracleBuildSource.includes('DOTNET_CLI_HOME') ||
+    !oracleBuildSource.includes('USERPROFILE') ||
+    !authorizedSnapshotSource.includes('"ls-tree", "-rz", "--full-tree"') ||
+    !authorizedSnapshotSource.includes('"cat-file", "--batch"') ||
+    !authorizedSnapshotSource.includes('FileMode.CreateNew') ||
+    !authorizedSnapshotSource.includes('lease.Validate()') ||
+    !authorizedSnapshotSource.includes('GIT_NO_REPLACE_OBJECTS') ||
+    !authorizedSnapshotSource.includes('IncrementalHash.CreateHash(HashAlgorithmName.SHA1)') ||
+    !authorizedSnapshotSource.includes('SetWindowsAccess') ||
+    !oracleBuildSource.includes('"apr-r4-e3-independent-oracle-build-receipt-v2"') ||
+    assemblerSource.includes('--assembly-input') ||
+    !assemblerSource.includes('--source-bundle') ||
+    !assemblerSource.includes('--post-cleanup-capture-manifest') ||
+    !assemblerSource.includes('--cleanup-execution') ||
+    !assemblerSource.includes('--oracle-assembly') ||
+    !assemblerSource.includes('--production-assembly') ||
+    !assemblerSource.includes('--public-scan-output') ||
+    !assemblerSource.includes('--public-candidate-output') ||
+    !assemblerSource.includes('--public-log-root') ||
+    !assemblerBoundarySource.includes('AcquirePinnedFile') ||
+    !assemblerBoundarySource.includes('lease.Validate()') ||
+    !assemblerBoundarySource.includes('AssertCredentialCopiesAbsent') ||
+    !assemblerBoundarySource.includes('Console.OpenStandardInput()') ||
+    !assemblerBoundarySource.includes('ReadProtectedScanInput') ||
+    !assemblerBoundarySource.includes('RedirectStandardInput = true') ||
+    !assemblerBoundarySource.includes('process.StandardInput.Close()') ||
+    !assemblerBoundarySource.includes('PublicSurfaceCorpusLease.Open') ||
+    !assemblerBoundarySource.includes('publicCorpus.AssertAbsent') ||
+    !assemblerBoundarySource.includes('publicCorpus.AssertExactDocumentAbsent') ||
+    !assemblerBoundarySource.includes('publicCorpus.ValidateComplete') ||
+    !assemblerBoundarySource.includes('WritePublicCreateNew') ||
+    !assemblerBoundarySource.includes('CreatedEvidenceFileReceipt') ||
+    publicCorpusSource.includes('ContainsProtectedFragment') ||
+    !publicCorpusSource.includes('IndexOf(protectedValue)') ||
+    !publicCorpusSource.includes('EnumerateDigests') ||
+    !assemblerBoundarySource.includes('ValidatePrivateManifest') ||
+    !assemblerBoundarySource.includes('assemble-r4-trusted-proof-evidence.mjs')
+  ) {
+    fail('evidence-authority-chain');
+  }
+  const historicalReceiptPath = path.join(
+    fixtureRoot,
+    'historical',
+    'v1',
+    'trusted-proof-payload-receipt.json',
+  );
+  verifyReceipt({ receiptPath: historicalReceiptPath, sourceRoot: root });
+  const receiptPath = path.join(fixtureRoot, 'trusted-proof-payload-receipt-v2.json');
+  const receipt = verifyReceiptV2({ receiptPath, sourceRoot: root });
+  const receiptBytes = documents.get('trusted-proof-payload-receipt-v2.json').bytes;
   if (
     sha256(receiptBytes) !== receiptJsonSha256 ||
-    sha256(Buffer.concat([Buffer.from('APR_R4_E2P_RECEIPT '), receiptBytes])) !==
+    sha256(Buffer.concat([Buffer.from('APR_R4_E2P_RECEIPT_V2 '), receiptBytes])) !==
       receiptLineSha256 ||
-    receipt.source_commit !== actionSourceSha ||
-    receipt.source_tree !== '9e1f7fbd9d0924331aeef4defe12ec7b47021742' ||
+    receipt.source_commit !== payloadSourceSha ||
+    receipt.source_tree !== payloadSourceTree ||
+    receipt.compiled_payload_source_commit !== payloadSourceSha ||
+    receipt.compiled_payload_source_tree !== payloadSourceTree ||
+    receipt.action_source_sha !== actionSourceSha ||
     receipt.payload_sha256 !== payloadSha256 ||
     receipt.workflow_topology_sha256 !== templateSha256 ||
     receipt.result !== 'passed'
   ) {
     fail('receipt-identity');
   }
-  const provenance = documents.get('receipt-provenance.json').value;
+  const provenance = documents.get('receipt-provenance-v2.json').value;
   exactKeys(
     provenance,
     [
       'kind',
       'issue',
-      'comment_id',
-      'comment_url',
-      'merge_sha',
+      'predecessor_issue',
+      'predecessor_pr',
+      'source_commit',
       'source_tree',
+      'materialization_run_id',
+      'materialization_job_id',
       'receipt_line_sha256',
       'receipt_json_sha256',
       'workflow_template_sha256',
@@ -827,12 +930,19 @@ export function checkR4TrustedProof(options = {}) {
     'receipt-provenance-shape',
   );
   if (
-    provenance.comment_id !== 5380622921 ||
-    provenance.merge_sha !== actionSourceSha ||
+    provenance.kind !== 'apr-r4-e3-receipt-provenance-v2' ||
+    provenance.issue !== 222 ||
+    provenance.predecessor_issue !== 221 ||
+    provenance.predecessor_pr !== 223 ||
+    provenance.source_commit !== payloadSourceSha ||
+    provenance.source_tree !== payloadSourceTree ||
+    provenance.materialization_run_id !== '32846692929' ||
+    provenance.materialization_job_id !== '97797924152' ||
     provenance.receipt_line_sha256 !== receiptLineSha256 ||
     provenance.receipt_json_sha256 !== receiptJsonSha256 ||
     provenance.workflow_template_sha256 !== templateSha256 ||
     provenance.rendered_workflow_sha256 !== renderedWorkflowSha256 ||
+    provenance.action_source_sha !== actionSourceSha ||
     provenance.payload_sha256 !== payloadSha256 ||
     provenance.result !== 'passed'
   ) {

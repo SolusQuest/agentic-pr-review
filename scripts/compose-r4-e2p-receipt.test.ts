@@ -84,7 +84,7 @@ function compose() {
 }
 
 describe('R4 E2P supplemental receipt', () => {
-  it('retains the synthetic handoff and admits the exact authoritative E3 receipt', () => {
+  it('retains the exact synthetic v1 handoff as a historical baseline', () => {
     const fixtureRoot = path.join(
       process.cwd(),
       'runtime/tests/fixtures/action-host/trusted-proof-payload/two-root-consumer',
@@ -97,7 +97,7 @@ describe('R4 E2P supplemental receipt', () => {
 
     const authoritativePath = path.join(
       process.cwd(),
-      'runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt.json',
+      'runtime/tests/fixtures/action-host/trusted-proof/historical/v1/trusted-proof-payload-receipt.json',
     );
     const authoritativeBytes = fs.readFileSync(authoritativePath);
     expect(authoritativeBytes.at(-1)).toBe(0x0a);

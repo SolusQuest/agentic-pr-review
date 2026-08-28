@@ -29,6 +29,10 @@ internal sealed class AuthorizedLocatorAccess : IDisposable
             ? new AuthorizedLocatorAccess(repositoryId)
             : null;
 
+    internal static AuthorizedLocatorAccess IssueTrustedProofEvidenceOracle(
+        string repositoryId) =>
+        new(repositoryId);
+
     internal bool Allows(
         AuthorizedLocatorAccess? candidate,
         string expectedRepositoryId) =>
