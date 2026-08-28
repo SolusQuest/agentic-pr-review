@@ -44,6 +44,7 @@ const fixtureInventory = [
   'historical/v1/trusted-proof-payload-receipt.json',
   'receipt-provenance-v2.json',
   'schemas/host-restricted-evidence.schema.json',
+  'schemas/private-package-manifest.schema.json',
   'schemas/public-safe-evidence.schema.json',
   'source-map.json',
   'templates/host-restricted-evidence.json',
@@ -63,7 +64,7 @@ const fixtureDigests = new Map([
   ],
   [
     'authorizations/execution.json',
-    '6c122152e01297d11af4324f22794bc1909bc8b7dd6ce1e03f5d72fa95110af7',
+    '07bb9b554a95407c9f8793afce85731168702c0f21a212550b14df569ac08f42',
   ],
   ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
   ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
@@ -87,16 +88,20 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '0487577f96e328fedb3eb85d484cea9370b0b93d95b403ba9b2934b98e3b0ba4',
+    '7d0ca7869f1886a290735376501c936808b3ee0bdf6292ba96b5bb9802f0b804',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
     'fab487f9274857335cd976414f070957c812d528f69841caa52c8ab31e836594',
   ],
+  [
+    'schemas/private-package-manifest.schema.json',
+    '01d1ede4e23398a88f5080fca175157363c8cf639aed8cb61185d1e41d878b8f',
+  ],
   ['source-map.json', '3b0514159cb1145fd8ca96c52cef6e415760a5c230f8949f773257d6c325545a'],
   [
     'templates/host-restricted-evidence.json',
-    '5f39bb5793aaab723e9d5a233fedbeaf332cd4944a8f3f0bcb4cc52ee7db9ec0',
+    '31b9795c491f51b313215afd93cfba55e82f3ab01b304752acff166a62d57d4d',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -659,6 +664,7 @@ function validateFixtureContracts(fixtureRoot) {
   const validatePublic = ajv.compile(
     documents.get('schemas/public-safe-evidence.schema.json').value,
   );
+  ajv.compile(documents.get('schemas/private-package-manifest.schema.json').value);
   if (!validateHost(host)) fail('host-template-schema');
   let projected;
   try {

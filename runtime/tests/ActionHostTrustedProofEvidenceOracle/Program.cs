@@ -55,9 +55,10 @@ internal static class Program
         byte[] current = [];
         byte[]? previous = null;
         RestrictedEvidenceRoot? root = null;
+        CredentialAdmissionMaterialization? admission = null;
+        var completed = false;
         string? currentCredentialPath = null;
         string? previousCredentialPath = null;
-        var credentialLeaseLaunchAttempted = false;
         CredentialFileRepresentations? currentRepresentations = null;
         CredentialFileRepresentations? previousRepresentations = null;
         var operation = Stopwatch.StartNew();
@@ -145,10 +146,21 @@ internal static class Program
                     throw new InvalidDataException("capture_manifest_invalid");
                 }
                 PhaseFragmentJournal.Validate(root, options["--capture-manifest"], manifest);
+                ProducerOutcomeJournal.ValidateCapture(root, manifest);
             }
             finally
             {
                 CryptographicOperations.ZeroMemory(manifestBytes);
+            }
+
+            admission = CredentialAdmissionReceipt.Read(
+                root,
+                options["--credential-admission-receipt"],
+                manifest.OperationIds);
+            var oracleIdentity = admission.Document.Consumers.Single(item => item.Component == "oracle");
+            if (oracleIdentity.BuildSha256 != AssemblyDigest(oracleAssembly))
+            {
+                throw new InvalidDataException("credential_admission_invalid");
             }
 
             currentCredentialPath = options["--current-state-key-file"];
@@ -169,6 +181,15 @@ internal static class Program
                 {
                     throw new InvalidDataException("state_keys_duplicate");
                 }
+            }
+            var admittedIdentities = CredentialAdmissionReceipt.AuthorizedIdentities(admission.Document);
+            if (!admittedIdentities.TryGetValue("current-state-key", out var expectedCurrent) ||
+                expectedCurrent != currentRepresentations.PhysicalIdentitySha256 ||
+                (previousRepresentations is null) != !admittedIdentities.ContainsKey("previous-state-key") ||
+                previousRepresentations is not null &&
+                    admittedIdentities["previous-state-key"] != previousRepresentations.PhysicalIdentitySha256)
+            {
+                throw new InvalidDataException("credential_admission_invalid");
             }
 
             var encrypted = new List<TrustedProofEncryptedArtifact>(manifest.Artifacts.Length);
@@ -315,35 +336,7 @@ internal static class Program
                 {
                     throw new InvalidDataException("codec_oracle_timeout");
                 }
-                var specs = new List<CredentialLeaseSpec>
-                {
-                    new(currentCredentialPath, Base64Key: true),
-                };
-                var representations = new List<CredentialFileRepresentations>
-                {
-                    currentRepresentations,
-                };
-                if (previousCredentialPath is not null && previousRepresentations is not null)
-                {
-                    specs.Add(new(previousCredentialPath, Base64Key: true));
-                    representations.Add(previousRepresentations);
-                }
-                credentialLeaseLaunchAttempted = true;
-                CredentialLeaseAuthorityClient.LaunchCurrentProcess(
-                    root,
-                    options["--destination-identity"],
-                    [options["--repository-root"], options["--worktree-root"]],
-                    CredentialLeaseAuthorityClient.StateKeyDescriptorName,
-                    specs,
-                    representations,
-                    timeouts: CredentialLeaseAuthorityTimeouts.OracleSuccessor);
-
-                currentCredentialPath = null;
-                if (previousCredentialPath is not null)
-                {
-                    previousCredentialPath = null;
-                }
-
+                completed = true;
                 Console.Out.WriteLine("APR_R4_E3_CODEC_ORACLE_OK");
                 return 0;
             }
@@ -382,65 +375,39 @@ internal static class Program
             {
                 CryptographicOperations.ZeroMemory(previous);
             }
-            if (root is not null && currentCredentialPath is not null)
+            if (!completed && root is not null && admission is not null)
             {
-                if (credentialLeaseLaunchAttempted)
-                {
-                    try
-                    {
-                        var specs = new List<CredentialLeaseSpec>
-                        {
-                            new(currentCredentialPath, Base64Key: true),
-                        };
-                        if (previousCredentialPath is not null)
-                        {
-                            specs.Add(new(previousCredentialPath, Base64Key: true));
-                        }
-                        CredentialLeaseAuthorityClient.DeleteAbandoned(
-                            root,
-                            CredentialLeaseAuthorityClient.StateKeyDescriptorName,
-                            specs);
-                    }
-                    catch (Exception exception) when (
-                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
-                    {
-                        // Never fall back to pathname deletion after lease authority was attempted.
-                    }
-                }
-                else
-                {
-                    if (currentRepresentations is not null)
-                    {
-                        TryDeleteExactCredential(currentRepresentations);
-                    }
-                    if (previousRepresentations is not null)
-                    {
-                        TryDeleteExactCredential(previousRepresentations);
-                    }
-                }
+                DeleteAbandonedCredentials(root, admission.Document);
             }
             currentRepresentations?.Dispose();
             previousRepresentations?.Dispose();
         }
     }
 
-    private static void TryDeleteExactCredential(CredentialFileRepresentations value)
+    private static void DeleteAbandonedCredentials(
+        RestrictedEvidenceRoot root,
+        CredentialAdmissionDocument admission)
     {
-        try
+        var keySpecs = admission.CreatedSlots
+            .Where(slot => slot.Name != "github-token")
+            .Select(slot => new CredentialLeaseSpec(slot.Name, Base64Key: true))
+            .ToArray();
+        foreach (var item in new[]
         {
-            value.DeleteExactIdentity();
-        }
-        catch (InvalidDataException)
+            (Descriptor: CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                Specs: new[] { new CredentialLeaseSpec("github-token", Base64Key: false) }),
+            (Descriptor: CredentialLeaseAuthorityClient.StateKeyDescriptorName, Specs: keySpecs),
+        })
         {
-            // Failure is already terminal; do not replace the stable non-leaking error marker.
-        }
-        catch (IOException)
-        {
-            // Failure is already terminal; do not replace the stable non-leaking error marker.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Failure is already terminal; do not replace the stable non-leaking error marker.
+            try
+            {
+                CredentialLeaseAuthorityClient.DeleteAbandoned(root, item.Descriptor, item.Specs);
+            }
+            catch (Exception exception) when (
+                exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                // Never fall back to pathname deletion after guardian admission.
+            }
         }
     }
 
@@ -468,6 +435,7 @@ internal static class Program
             "--capture-manifest-sha256",
             "--oracle-source-sha",
             "--oracle-source-tree",
+            "--credential-admission-receipt",
             "--current-state-key-file",
             "--output",
         };

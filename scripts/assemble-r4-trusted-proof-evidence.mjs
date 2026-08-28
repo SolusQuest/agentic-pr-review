@@ -261,6 +261,9 @@ function parseArgs(args) {
     '--source-bundle',
     '--capture-manifest',
     '--post-cleanup-capture-manifest',
+    '--correction-gate-receipt',
+    '--credential-admission-receipt',
+    '--credential-disposition-receipt-output',
     '--oracle-result',
     '--oracle-build-receipt',
     '--ui-attestation',
@@ -352,6 +355,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       options['--post-cleanup-capture-manifest'],
     );
     const postCleanupCapture = readCanonical(postCleanupCapturePath, rootDevice);
+    const producerJournalSeal = readCanonical(
+      resolveExisting(
+        restrictedRoot,
+        path.join(capture.value.producer_journal_directory, 'seal.json'),
+      ),
+      rootDevice,
+    );
+    if (
+      sha256(producerJournalSeal.bytes) !== capture.value.producer_journal_seal_sha256 ||
+      producerJournalSeal.identity !== capture.value.producer_journal_seal_file_identity
+    ) {
+      invalid();
+    }
     const oracle = readCanonical(
       resolveExisting(restrictedRoot, options['--oracle-result']),
       rootDevice,
@@ -376,6 +392,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       false,
     );
     const retainedInputs = [
+      ['correction-gate-receipt', '--correction-gate-receipt'],
+      ['credential-admission-receipt', '--credential-admission-receipt'],
+      ['credential-disposition-receipt', '--credential-disposition-receipt-output'],
       ['cleanup-execution', '--cleanup-execution'],
       ['cleanup-plan', '--cleanup-plan'],
       ['oracle-build-receipt', '--oracle-build-receipt'],
@@ -429,6 +448,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       uiAttestationSha256: sha256(uiAttestation.bytes),
       retainedDocuments: new Map([
         ['trusted-proof-payload-receipt-v2', payloadReceipt.value],
+        ['producer-journal-seal', producerJournalSeal.value],
         ...retainedInputs,
       ]),
       oracleBinaries,
@@ -451,6 +471,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       postCleanupCaptureManifestSha256: sha256(postCleanupCapture.bytes),
       oracleResultSha256: sha256(oracle.bytes),
       cleanupPlan: assembled.cleanupPlan,
+      credentialAdmissionReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('credential-admission-receipt')),
+      ),
+      credentialDispositionReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('credential-disposition-receipt')),
+      ),
+      correctionGateReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('correction-gate-receipt')),
+      ),
+      producerJournalSealSha256: capture.value.producer_journal_seal_sha256,
+      producerJournalSealFileIdentity: capture.value.producer_journal_seal_file_identity,
       oracleBuildReceiptSha256: sha256(
         canonicalJson(new Map(retainedInputs).get('oracle-build-receipt')),
       ),
@@ -473,6 +504,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       postCleanupCaptureManifestSha256: sha256(postCleanupCapture.bytes),
       oracleResultSha256: sha256(oracle.bytes),
       cleanupPlan: assembled.cleanupPlan,
+      credentialAdmissionReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('credential-admission-receipt')),
+      ),
+      credentialDispositionReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('credential-disposition-receipt')),
+      ),
+      correctionGateReceiptSha256: sha256(
+        canonicalJson(new Map(retainedInputs).get('correction-gate-receipt')),
+      ),
+      producerJournalSealSha256: capture.value.producer_journal_seal_sha256,
+      producerJournalSealFileIdentity: capture.value.producer_journal_seal_file_identity,
       oracleBuildReceiptSha256: sha256(
         canonicalJson(new Map(retainedInputs).get('oracle-build-receipt')),
       ),
@@ -498,6 +540,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
         postCleanupCaptureManifestSha256: sha256(postCleanupCapture.bytes),
         oracleResultSha256: sha256(oracle.bytes),
         cleanupPlan: assembled.cleanupPlan,
+        credentialAdmissionReceiptSha256: sha256(
+          canonicalJson(new Map(retainedInputs).get('credential-admission-receipt')),
+        ),
+        credentialDispositionReceiptSha256: sha256(
+          canonicalJson(new Map(retainedInputs).get('credential-disposition-receipt')),
+        ),
+        correctionGateReceiptSha256: sha256(
+          canonicalJson(new Map(retainedInputs).get('correction-gate-receipt')),
+        ),
+        producerJournalSealSha256: capture.value.producer_journal_seal_sha256,
+        producerJournalSealFileIdentity: capture.value.producer_journal_seal_file_identity,
         oracleBuildReceiptSha256: sha256(
           canonicalJson(new Map(retainedInputs).get('oracle-build-receipt')),
         ),

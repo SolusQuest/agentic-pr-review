@@ -38,6 +38,8 @@ public sealed record CaptureManifestObservedRun(
 
 public sealed record CaptureManifestSource(
     string SourceId,
+    string OperationId,
+    string Phase,
     string Route,
     int Page,
     int Status,
@@ -55,6 +57,11 @@ public sealed record CaptureManifestDocument(
     string RepositoryId,
     string Repository,
     string[] OperationIds,
+    string ExecutionAuthorizationSha256,
+    string ProducerJournalDirectory,
+    string ProducerJournalSealSha256,
+    string ProducerJournalSealFileIdentity,
+    string Disposition,
     CaptureManifestExpectedRole[] ExpectedRoles,
     CaptureManifestObservedRun[] ObservedRuns,
     string SourceMapSha256,

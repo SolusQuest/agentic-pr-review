@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -52,12 +53,20 @@ internal static partial class Program
                 throw new InvalidDataException("assembly_capture_invalid");
             }
             PhaseFragmentJournal.Validate(root, options["--capture-manifest"], capture);
+            ProducerOutcomeJournal.ValidateCapture(root, capture);
             var credentialAdmission = CredentialAdmissionReceipt.Read(
                 root,
                 options["--credential-admission-receipt"],
                 capture.OperationIds);
             var authorizedCredentialIdentities = CredentialAdmissionReceipt.AuthorizedIdentities(
-                credentialAdmission);
+                credentialAdmission.Document);
+            var assemblerIdentity = credentialAdmission.Document.Consumers.Single(
+                item => item.Component == "assembler");
+            if (assemblerIdentity.BuildSha256 != AssemblySha256())
+            {
+                throw new InvalidDataException("credential_admission_invalid");
+            }
+            var credentialDeletionStarted = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             AcquireAndDeleteLeasedCredentials(
                 root,
                 options,
@@ -66,12 +75,24 @@ internal static partial class Program
                 out githubCredentialAuthority,
                 out stateKeyCredentialAuthority,
                 out leasedCredentialValues);
+            var credentialDeletionFinished = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            CredentialAdmissionReceipt.MaterializeDispositionCreateNew(
+                root,
+                options["--credential-disposition-receipt-output"],
+                capture.OperationIds,
+                credentialAdmission,
+                credentialDeletionStarted,
+                credentialDeletionFinished,
+                ["github-token-guardian-absence", "state-key-guardian-absence"]);
 
             publicCorpus = PublicSurfaceCorpusLease.Open(repositoryRoot, worktreeRoot, publicLogRoot);
 
             foreach (var option in new[]
             {
                 "--source-bundle",
+                "--correction-gate-receipt",
+                "--credential-admission-receipt",
+                "--credential-disposition-receipt-output",
                 "--post-cleanup-capture-manifest",
                 "--oracle-result",
                 "--oracle-build-receipt",
@@ -132,6 +153,7 @@ internal static partial class Program
             var postCleanupCapture = ParseCanonical<CaptureManifestDocument>(
                 postCleanupCaptureLease.Bytes);
             if (postCleanupCapture is null || !postCleanupCapture.Finalized ||
+                postCleanupCapture.Kind != "apr-r4-e3-post-cleanup-capture-manifest-v1" ||
                 postCleanupCapture.Artifacts.Length != 0 ||
                 !StringComparer.Ordinal.Equals(
                     postCleanupCapture.DestinationIdentitySha256,
@@ -143,6 +165,7 @@ internal static partial class Program
                 root,
                 options["--post-cleanup-capture-manifest"],
                 postCleanupCapture);
+            ProducerOutcomeJournal.ValidateCapture(root, postCleanupCapture);
             foreach (var source in postCleanupCapture.Sources)
             {
                 leases.Add(AcquireExpected(
@@ -192,6 +215,11 @@ internal static partial class Program
                 CanonicalEvidence.Sha256(leasesByOption["--post-cleanup-capture-manifest"].Bytes),
                 CanonicalEvidence.Sha256(leasesByOption["--oracle-result"].Bytes),
                 CanonicalEvidence.Sha256(leasesByOption["--cleanup-plan"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--credential-admission-receipt"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--credential-disposition-receipt-output"].Bytes),
+                CanonicalEvidence.Sha256(leasesByOption["--correction-gate-receipt"].Bytes),
+                capture.ProducerJournalSealSha256,
+                capture.ProducerJournalSealFileIdentity,
                 CanonicalEvidence.Sha256(leasesByOption["--oracle-build-receipt"].Bytes),
                 CanonicalEvidence.Sha256(leasesByOption["--oracle-assembly"].Bytes),
                 CanonicalEvidence.Sha256(leasesByOption["--production-assembly"].Bytes),
@@ -1141,6 +1169,11 @@ internal static partial class Program
         string postCleanupCaptureManifestSha256,
         string oracleResultSha256,
         string cleanupPlanSha256,
+        string credentialAdmissionReceiptSha256,
+        string credentialDispositionReceiptSha256,
+        string correctionGateReceiptSha256,
+        string producerJournalSealSha256,
+        string producerJournalSealFileIdentity,
         string oracleBuildReceiptSha256,
         string oracleAssemblySha256,
         string productionAssemblySha256,
@@ -1164,6 +1197,11 @@ internal static partial class Program
             "public_candidate_sha256",
             "public_scan_manifest_sha256",
             "cleanup_plan_sha256",
+            "credential_admission_receipt_sha256",
+            "credential_disposition_receipt_sha256",
+            "correction_gate_receipt_sha256",
+            "producer_journal_seal_sha256",
+            "producer_journal_seal_file_identity",
             "credential_absence",
             "projection_eligible",
             "finalized",
@@ -1184,6 +1222,16 @@ internal static partial class Program
             root.GetProperty("public_candidate_sha256").GetString() != publicCandidateSha256 ||
             root.GetProperty("public_scan_manifest_sha256").GetString() != publicScanManifestSha256 ||
             root.GetProperty("cleanup_plan_sha256").GetString() != cleanupPlanSha256 ||
+            root.GetProperty("credential_admission_receipt_sha256").GetString() !=
+                credentialAdmissionReceiptSha256 ||
+            root.GetProperty("credential_disposition_receipt_sha256").GetString() !=
+                credentialDispositionReceiptSha256 ||
+            root.GetProperty("correction_gate_receipt_sha256").GetString() !=
+                correctionGateReceiptSha256 ||
+            root.GetProperty("producer_journal_seal_sha256").GetString() !=
+                producerJournalSealSha256 ||
+            root.GetProperty("producer_journal_seal_file_identity").GetString() !=
+                producerJournalSealFileIdentity ||
             credentials.EnumerateObject().Any(item => item.Value.ValueKind != JsonValueKind.True) ||
             root.GetProperty("projection_eligible").GetBoolean() != projectionEligible ||
             !root.GetProperty("finalized").GetBoolean())
@@ -1288,6 +1336,7 @@ internal static partial class Program
         var required = NodeArgumentNames.Append("--node-executable").Append("--public-output")
             .Append("--github-token-file").Append("--current-state-key-file")
             .Append("--credential-admission-receipt")
+            .Append("--credential-disposition-receipt-output")
             .ToHashSet(StringComparer.Ordinal);
         var allowed = required.Append("--previous-state-key-file").ToHashSet(StringComparer.Ordinal);
         if (args.Length % 2 != 0)
@@ -1309,6 +1358,14 @@ internal static partial class Program
         return result;
     }
 
+    private static string AssemblySha256()
+    {
+        var location = Assembly.GetExecutingAssembly().Location;
+        if (string.IsNullOrWhiteSpace(location)) throw new InvalidDataException("assembler_build_invalid");
+        using var stream = new FileStream(location, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
+
     internal static readonly string[] NodeArgumentNames =
     [
         "--restricted-root",
@@ -1319,6 +1376,9 @@ internal static partial class Program
         "--source-bundle",
         "--capture-manifest",
         "--post-cleanup-capture-manifest",
+        "--correction-gate-receipt",
+        "--credential-admission-receipt",
+        "--credential-disposition-receipt-output",
         "--oracle-result",
         "--oracle-build-receipt",
         "--ui-attestation",

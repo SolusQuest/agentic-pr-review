@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Reflection;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 
@@ -19,12 +20,26 @@ internal static class Program
         {
             return await CredentialLeaseAuthorityClient.RunGuardianAsync(args).ConfigureAwait(false);
         }
+        if (CredentialMaterializer.IsCommand(args))
+        {
+            return CredentialMaterializer.Run(args);
+        }
+        if (CorrectionGateMaterializer.IsCommand(args))
+        {
+            return CorrectionGateMaterializer.Run(args);
+        }
+        if (ProducerJournalMaterializer.IsCommand(args))
+        {
+            return ProducerJournalMaterializer.Run(args);
+        }
+        if (PhaseFragmentMaterializer.IsCommand(args))
+        {
+            return PhaseFragmentMaterializer.Run(args);
+        }
         RestrictedEvidenceRoot? root = null;
-        string? credentialPath = null;
-        var credentialLeaseLaunchAttempted = false;
+        CredentialAdmissionMaterialization? admission = null;
+        var completed = false;
         CredentialFileRepresentations? token = null;
-        CredentialFileRepresentations? currentKey = null;
-        CredentialFileRepresentations? previousKey = null;
         try
         {
             var options = Parse(args);
@@ -33,52 +48,85 @@ internal static class Program
                 options["--destination-identity"],
                 [options["--repository-root"], options["--worktree-root"]]);
             var plan = CapturePlan.Read(root, options["--capture-plan"]);
-            credentialPath = options["--github-token-file"];
-            var creationStarted = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            admission = CredentialAdmissionReceipt.Read(
+                root,
+                options["--credential-admission-receipt"],
+                plan.OperationIds);
             token = root.ReadCredentialFileRepresentations(
                 options["--github-token-file"],
                 base64Key: false,
                 deleteExactIdentityOnFailure: true);
-            currentKey = root.ReadCredentialFileRepresentations(
-                options["--current-state-key-file"],
-                base64Key: true,
-                deleteExactIdentityOnFailure: true);
-            previousKey = options.TryGetValue("--previous-state-key-file", out var previousPath)
-                ? root.ReadCredentialFileRepresentations(
-                    previousPath,
-                    base64Key: true,
-                    deleteExactIdentityOnFailure: true)
-                : null;
-            var createdCredentials = new Dictionary<string, CredentialFileRepresentations>(
-                StringComparer.Ordinal)
-            {
-                ["github-token"] = token,
-                ["current-state-key"] = currentKey,
-            };
-            if (previousKey is not null)
-            {
-                createdCredentials.Add("previous-state-key", previousKey);
-            }
-            var creationFinished = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var admission = CredentialAdmissionReceipt.MaterializeCreateNew(
-                root,
-                options["--credential-admission-receipt-output"],
-                plan.OperationIds,
-                createdCredentials,
-                creationStarted,
-                creationFinished);
-            if (CredentialAdmissionReceipt.AuthorizedIdentities(admission)["github-token"] !=
-                token.PhysicalIdentitySha256)
+            var captureIdentity = admission.Document.Consumers.Single(item => item.Component == "capture");
+            if (captureIdentity.BuildSha256 != AssemblySha256() ||
+                CredentialAdmissionReceipt.AuthorizedIdentities(admission.Document)["github-token"] !=
+                    token.PhysicalIdentitySha256)
             {
                 throw new InvalidDataException("credential_admission_invalid");
             }
             using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
             using var timeout = new CancellationTokenSource(
                 EvidenceLimits.LogicalOperationTimeout);
-            var writer = new CapturePackageWriter(root, plan.PackageName, plan.OperationIds);
+            var writer = new CapturePackageWriter(
+                root,
+                plan.PackageName,
+                plan.OperationIds,
+                plan.ExecutionAuthorizationSha256,
+                plan.PhaseMaterializerSourceSha256,
+                plan.PhaseMaterializerBuildSha256,
+                plan.ProducerJournalSealSha256,
+                plan.Kind);
             var artifactMetadata = new Dictionary<string, CapturedArtifactMetadata>(StringComparer.Ordinal);
             foreach (var source in plan.Sources)
             {
+                if (source.Phase == "producer-discovery" && !writer.HasAnySource(source.SourceId))
+                {
+                    var producerJournal = ProducerOutcomeJournal.Open(
+                        root,
+                        plan.ProducerJournalDirectory,
+                        plan.ExecutionAuthorizationSha256);
+                    var producerSeal = producerJournal.ReadSeal();
+                    foreach (var discovery in producerSeal.Document.DiscoverySources)
+                    {
+                        using var lease = root.AcquirePinnedFile(
+                            discovery.BodyPath,
+                            EvidenceLimits.MaximumDocumentBytes);
+                        writer.AddSource(
+                            discovery.SourceId,
+                            source.OperationId,
+                            source.Phase,
+                            new SafeResponseCapture(
+                                discovery.Route,
+                                discovery.Page,
+                                discovery.Status,
+                                discovery.BodySha256,
+                                long.Parse(
+                                    discovery.BodySize,
+                                    System.Globalization.CultureInfo.InvariantCulture),
+                                discovery.SafeHeadersSha256,
+                                discovery.RequestStartedUnixMilliseconds,
+                                discovery.ResponseReceivedUnixMilliseconds,
+                                discovery.NextRoute),
+                            lease.Bytes);
+                    }
+                    if (!writer.HasCompleteSource(source))
+                    {
+                        throw new InvalidDataException("producer_discovery_source_invalid");
+                    }
+                    continue;
+                }
+                if (writer.HasAnySource(source.SourceId))
+                {
+                    if (!writer.HasCompleteSource(source) || plan.Artifacts.Any(item =>
+                            StringComparer.Ordinal.Equals(item.MetadataSourceId, source.SourceId)))
+                    {
+                        throw new InvalidDataException("retained_phase_source_invalid");
+                    }
+                    continue;
+                }
+                if (PhaseFragmentMaterializer.RequiresRetained(source.Phase))
+                {
+                    throw new InvalidDataException("retained_phase_source_missing");
+                }
                 var pages = await client.GetPaginatedAsync(
                     source.Route,
                     source.EndpointFamily,
@@ -89,6 +137,8 @@ internal static class Program
                     {
                         writer.AddSource(
                             $"{source.SourceId}:page:{index + 1}",
+                            source.OperationId,
+                            source.Phase,
                             pages.Captures[index],
                             pages.Bodies[index]);
                     }
@@ -142,6 +192,11 @@ internal static class Program
                 plan.RepositoryId,
                 plan.Repository,
                 plan.OperationIds,
+                plan.ExecutionAuthorizationSha256,
+                plan.ProducerJournalDirectory,
+                plan.ProducerJournalSealSha256,
+                plan.ProducerJournalSealFileIdentity,
+                plan.Disposition,
                 plan.ExpectedRoles.Select(item => new CaptureManifestExpectedRole(
                     item.Role,
                     item.OperationId,
@@ -155,16 +210,7 @@ internal static class Program
                     item.RunId,
                     item.RunAttempt)).ToArray(),
                 plan.SourceMapSha256);
-            credentialLeaseLaunchAttempted = true;
-            CredentialLeaseAuthorityClient.LaunchCurrentProcess(
-                root,
-                options["--destination-identity"],
-                [options["--repository-root"], options["--worktree-root"]],
-                CredentialLeaseAuthorityClient.GitHubDescriptorName,
-                [new CredentialLeaseSpec(options["--github-token-file"], Base64Key: false)],
-                [token],
-                timeouts: CredentialLeaseAuthorityTimeouts.CaptureSuccessor);
-            credentialPath = null;
+            completed = true;
             Console.Out.WriteLine($"APR_R4_E3_CAPTURE_OK {finalized.Sha256}");
             return 0;
         }
@@ -194,48 +240,47 @@ internal static class Program
         }
         finally
         {
-            if (root is not null && credentialPath is not null)
+            if (!completed && root is not null && admission is not null)
             {
-                if (credentialLeaseLaunchAttempted)
-                {
-                    try
-                    {
-                        CredentialLeaseAuthorityClient.DeleteAbandoned(
-                            root,
-                            CredentialLeaseAuthorityClient.GitHubDescriptorName,
-                            [new CredentialLeaseSpec(credentialPath, Base64Key: false)]);
-                    }
-                    catch (Exception exception) when (
-                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
-                    {
-                        // Never fall back to a pathname delete after lease authority was attempted.
-                    }
-                }
-                else if (token is not null)
-                {
-                    TryDeleteExactCredential(token);
-                    if (currentKey is not null) TryDeleteExactCredential(currentKey);
-                    if (previousKey is not null) TryDeleteExactCredential(previousKey);
-                }
+                DeleteAbandonedCredentials(root, admission.Document);
             }
             token?.Dispose();
-            currentKey?.Dispose();
-            previousKey?.Dispose();
         }
     }
 
-    private static void TryDeleteExactCredential(CredentialFileRepresentations value)
+    private static void DeleteAbandonedCredentials(
+        RestrictedEvidenceRoot root,
+        CredentialAdmissionDocument admission)
     {
-        try
+        var keySpecs = admission.CreatedSlots
+            .Where(slot => slot.Name != "github-token")
+            .Select(slot => new CredentialLeaseSpec(slot.Name, Base64Key: true))
+            .ToArray();
+        foreach (var item in new[]
         {
-            value.DeleteExactIdentity();
-        }
-        catch (Exception exception) when (
-            exception is InvalidDataException or IOException or UnauthorizedAccessException or
-            ObjectDisposedException)
+            (Descriptor: CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                Specs: new[] { new CredentialLeaseSpec("github-token", Base64Key: false) }),
+            (Descriptor: CredentialLeaseAuthorityClient.StateKeyDescriptorName, Specs: keySpecs),
+        })
         {
-            // Failure remains terminal and a replacement pathname is never deletion authority.
+            try
+            {
+                CredentialLeaseAuthorityClient.DeleteAbandoned(root, item.Descriptor, item.Specs);
+            }
+            catch (Exception exception) when (
+                exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                // Never fall back to pathname deletion after guardian admission.
+            }
         }
+    }
+
+    private static string AssemblySha256()
+    {
+        var location = Assembly.GetExecutingAssembly().Location;
+        if (string.IsNullOrWhiteSpace(location)) throw new InvalidDataException("capture_build_invalid");
+        using var stream = new FileStream(location, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
     }
 
     private static Dictionary<string, string> Parse(string[] args)
@@ -247,12 +292,11 @@ internal static class Program
             "--repository-root",
             "--worktree-root",
             "--github-token-file",
-            "--current-state-key-file",
             "--capture-plan",
-            "--credential-admission-receipt-output",
+            "--credential-admission-receipt",
         };
-        var allowed = names.Append("--previous-state-key-file").ToHashSet(StringComparer.Ordinal);
-        if (args.Length % 2 != 0)
+        var allowed = names.ToHashSet(StringComparer.Ordinal);
+        if (args.Length != names.Length * 2)
         {
             throw new InvalidDataException("arguments_invalid");
         }
@@ -268,10 +312,7 @@ internal static class Program
         }
 
         if (names.Any(name => !result.ContainsKey(name)) ||
-            !StringComparer.Ordinal.Equals(result["--github-token-file"], "github-token") ||
-            !StringComparer.Ordinal.Equals(result["--current-state-key-file"], "current-state-key") ||
-            (result.TryGetValue("--previous-state-key-file", out var previous) &&
-                !StringComparer.Ordinal.Equals(previous, "previous-state-key")))
+            !StringComparer.Ordinal.Equals(result["--github-token-file"], "github-token"))
         {
             throw new InvalidDataException("arguments_invalid");
         }

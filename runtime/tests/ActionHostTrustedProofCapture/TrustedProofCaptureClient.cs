@@ -22,6 +22,10 @@ public sealed record CapturePageSet(
     ImmutableArray<SafeResponseCapture> Captures,
     ImmutableArray<byte[]> Bodies);
 
+public sealed record ProducerResponseCapture(
+    SafeResponseCapture Capture,
+    byte[] Body);
+
 public sealed class TrustedProofCaptureClient : IDisposable
 {
     public const string ApiVersion = "2026-03-10";
@@ -143,6 +147,64 @@ public sealed class TrustedProofCaptureClient : IDisposable
         }
     }
 
+    public async Task<ProducerResponseCapture> SendProducerAsync(
+        HttpMethod method,
+        string route,
+        byte[]? body,
+        HttpStatusCode expectedStatus,
+        CancellationToken cancellationToken)
+    {
+        if (method != HttpMethod.Post && method != HttpMethod.Patch || !ValidApiRoute(route))
+        {
+            throw new InvalidDataException("github_producer_request_invalid");
+        }
+        using var request = CreateApiRequest(route, method);
+        if (body is not null)
+        {
+            request.Content = new ByteArrayContent(body);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        }
+        var started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using var response = await api.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (response.StatusCode != expectedStatus || response.Headers.Location is not null)
+        {
+            throw new InvalidDataException("github_producer_response_invalid");
+        }
+        byte[] responseBody;
+        if (expectedStatus == HttpStatusCode.NoContent ||
+            response.Content.Headers.ContentLength == 0)
+        {
+            if (response.Content.Headers.ContentLength is > 0)
+            {
+                throw new InvalidDataException("github_producer_response_invalid");
+            }
+            responseBody = [];
+        }
+        else
+        {
+            responseBody = await ReadBoundedAsync(
+                response.Content,
+                EvidenceLimits.MaximumDocumentBytes,
+                cancellationToken);
+        }
+        var received = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        return new ProducerResponseCapture(
+            new SafeResponseCapture(
+                request.RequestUri!.PathAndQuery,
+                1,
+                (int)response.StatusCode,
+                CanonicalEvidence.Sha256(responseBody),
+                responseBody.Length,
+                SafeHeadersSha256(response, null),
+                started,
+                received,
+                null),
+            responseBody);
+    }
+
     public async Task<(byte[] Archive, SafeResponseCapture Capture)> DownloadArtifactAsync(
         string apiRoute,
         CancellationToken cancellationToken)
@@ -220,9 +282,9 @@ public sealed class TrustedProofCaptureClient : IDisposable
         CryptographicOperations.ZeroMemory(token);
     }
 
-    private HttpRequestMessage CreateApiRequest(string route)
+    private HttpRequestMessage CreateApiRequest(string route, HttpMethod? method = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, route);
+        var request = new HttpRequestMessage(method ?? HttpMethod.Get, route);
         request.Headers.Accept.ParseAdd("application/vnd.github+json");
         request.Headers.Add("X-GitHub-Api-Version", ApiVersion);
         request.Headers.UserAgent.ParseAdd("agentic-pr-review-r4-evidence/1");

@@ -41,6 +41,15 @@ function projectMutation(mutator: (candidate: any) => void) {
 
 function syntheticAssembly(input = host) {
   const candidate = copy(input);
+  const recoveryMode = candidate.inventories.observed_cleanup.some(
+    (record: any) => record.disposition === 'recovery-only-delete',
+  );
+  if (recoveryMode) {
+    for (const record of candidate.inventories.observed_cleanup) {
+      record.disposition = 'recovery-only-delete';
+    }
+    candidate.cleanup.projection_gate.exact_seven_success = false;
+  }
   const stickyBody = '<!-- apr-r4-e3-sticky {"result":"retained"} -->';
   candidate.cleanup.resources.sticky.body_sha256 = sha256(Buffer.from(stickyBody, 'utf8'));
   candidate.cleanup.resources.sticky.marker_sha256 = sha256(
@@ -103,6 +112,7 @@ function syntheticAssembly(input = host) {
       buildProtectedScanInput(candidate.authorizations, candidate.identities.repository),
     ),
   );
+  const executionAuthorizationSha256 = sha256(canonicalJson(candidate.authorizations.execution));
   const roleById = new Map(
     candidate.inventories.expected_success.map((record: any) => [record.artifact_id, record.role]),
   );
@@ -387,8 +397,43 @@ function syntheticAssembly(input = host) {
       }
     }
   }
+  const sourceOperation = (sourceId: string) => {
+    if (sourceId.startsWith('proof-control-comment-')) {
+      const response = JSON.parse(capturedSourceBodies.get(sourceId)!.text);
+      const prefix = '<!-- apr-r4-e2p-control ';
+      return JSON.parse(response.body.slice(prefix.length, -4)).operation_id;
+    }
+    return sourceId.includes('stale')
+      ? candidate.identities.operation_ids[1]
+      : candidate.identities.operation_ids[0];
+  };
+  const producerDiscoverySourceId = 'producer-discovery-final:page:1';
+  const producerDiscoveryText = canonicalJson({
+    total_count: 4,
+    workflow_runs: candidate.authorizations.execution.trigger_plan.map(
+      (trigger: any, index: number) => ({
+        id: 9001 + index,
+        run_attempt: 1,
+        event: trigger.expected_event,
+        created_at: new Date(1_000 + index * 2_000).toISOString(),
+      }),
+    ),
+  });
+  capturedSourceBodies.set(producerDiscoverySourceId, { text: producerDiscoveryText });
+  sourceDigests.set(producerDiscoverySourceId, sha256(Buffer.from(producerDiscoveryText, 'utf8')));
+  sourceRoutes.set(
+    producerDiscoverySourceId,
+    `/repos/${candidate.identities.repository}/actions/workflows/r4-trusted-proof.yml/runs?per_page=100`,
+  );
+  sourceObservations.set(producerDiscoverySourceId, { request_started: 10, response_received: 11 });
   const evidenceSources = [...sourceDigests].map(([sourceId, bodySha256], index) => ({
     source_id: sourceId,
+    operation_id: sourceOperation(sourceId),
+    phase: sourceId.startsWith('authorization-')
+      ? `authorization-${sourceId.split('-')[1]}`
+      : sourceId.startsWith('producer-discovery-')
+        ? 'producer-discovery'
+        : 'pre-cleanup-observation',
     route:
       sourceRoutes.get(sourceId) ??
       `/repos/SolusQuest/agentic-pr-review/evidence/${encodeURIComponent(sourceId)}`,
@@ -413,50 +458,58 @@ function syntheticAssembly(input = host) {
       run_attempt: '1',
     }),
   );
-  const producerSourceIdsByRole = new Map<string, string[]>([
-    [
-      'normal-bootstrap',
-      [
-        'transition-bootstrap-pending-run-9001:page:1',
-        'transition-bootstrap-approvals-run-9001:page:1',
-        'transition-bootstrap-jobs-run-9001:page:1',
-        'concurrency-normal-run-9001:page:1',
-        'run-terminal-9001:page:1',
-      ],
-    ],
-    [
-      'normal-continuation',
-      [
-        'transition-continuation-pending-run-9002:page:1',
-        'transition-continuation-approvals-run-9002:page:1',
-        'transition-continuation-jobs-run-9002:page:1',
-        'run-terminal-9002:page:1',
-      ],
-    ],
-    [
-      'stale-protected',
-      [
-        'transition-stale-pending-run-9003:page:1',
-        'transition-stale-approvals-run-9003:page:1',
-        'transition-stale-jobs-run-9003:page:1',
-        'concurrency-stale-run-9003:page:1',
-        'run-terminal-9003:page:1',
-      ],
-    ],
-    ['stale-follow-on', ['run-terminal-9004:page:1']],
-  ]);
-  const expectedRoles = candidate.authorizations.execution.trigger_plan.map(
+  const producerSourceIdsByRole = new Map<string, string[]>(
+    candidate.authorizations.execution.trigger_plan.map((trigger: any) => [
+      trigger.role,
+      [producerDiscoverySourceId],
+    ]),
+  );
+  const expectedRoles = (recoveryMode ? [] : candidate.authorizations.execution.trigger_plan).map(
     (trigger: any, index: number) => ({
       role: trigger.role,
       ...observedRuns[index],
       producer_source_ids: producerSourceIdsByRole.get(trigger.role),
     }),
   );
+  const producerJournalSeal = {
+    kind: 'apr-r4-e3-producer-outcome-journal-seal-v1',
+    destination_identity_sha256: candidate.restricted_package.destination_identity_sha256,
+    execution_authorization_sha256: executionAuthorizationSha256,
+    authority_sha256: '1'.repeat(64),
+    authority_physical_identity_sha256: '2'.repeat(64),
+    operation_ids: candidate.identities.operation_ids,
+    entry_sha256s: ['3'.repeat(64)],
+    discovery_sources: [
+      {
+        source_id: producerDiscoverySourceId,
+        route: sourceRoutes.get(producerDiscoverySourceId),
+        page: 1,
+        status: 200,
+        body_path: 'producer-journal-synthetic/discovery-final-page-0001.json',
+        body_sha256: sourceDigests.get(producerDiscoverySourceId),
+        body_size: String(Buffer.byteLength(producerDiscoveryText, 'utf8')),
+        body_physical_identity_sha256: '7'.repeat(64),
+        safe_headers_sha256: '2'.repeat(64),
+        request_started_unix_milliseconds: 10,
+        response_received_unix_milliseconds: 11,
+        next_route: null,
+      },
+    ],
+    derived_roles: expectedRoles,
+    observed_runs: observedRuns,
+    disposition: recoveryMode ? 'recovery-only' : 'success-candidate',
+    finalized: true,
+  };
   const captureManifest = {
     kind: 'apr-r4-e3-capture-manifest-v1',
     repository_id: candidate.identities.repository_id,
     repository: candidate.identities.repository,
     operation_ids: candidate.identities.operation_ids,
+    execution_authorization_sha256: executionAuthorizationSha256,
+    producer_journal_directory: 'producer-journal-synthetic',
+    producer_journal_seal_sha256: sha256(canonicalJson(producerJournalSeal)),
+    producer_journal_seal_file_identity: '4'.repeat(64),
+    disposition: recoveryMode ? 'recovery-only' : 'success-candidate',
     expected_roles: expectedRoles,
     observed_runs: observedRuns,
     source_map_sha256: sha256(canonicalJson(candidate.source_map)),
@@ -467,6 +520,8 @@ function syntheticAssembly(input = host) {
     sources: [
       ...metadataRunIds.map((runId, index) => ({
         source_id: `artifacts-run-${runId}:page:1`,
+        operation_id: observedRuns.find(({ run_id }: any) => run_id === runId)!.operation_id,
+        phase: 'terminal-artifact-inventory',
         route: `/repos/SolusQuest/agentic-pr-review/actions/runs/${runId}/artifacts?per_page=100`,
         page: 1,
         status: 200,
@@ -511,12 +566,8 @@ function syntheticAssembly(input = host) {
     oracle_source_tree: candidate.identities.oracle_source_tree,
     oracle_assembly_sha256: 'b'.repeat(64),
     production_assembly_sha256: 'c'.repeat(64),
-    exact_seven_success: !candidate.inventories.observed_cleanup.some(
-      (record: any) => record.disposition === 'recovery-only-delete',
-    ),
-    recovery_only: candidate.inventories.observed_cleanup.some(
-      (record: any) => record.disposition === 'recovery-only-delete',
-    ),
+    exact_seven_success: !recoveryMode,
+    recovery_only: recoveryMode,
     records: candidate.inventories.observed_cleanup.map((record: any) => {
       const ownershipEvidenceSha256 = sha256(
         canonicalJson({
@@ -534,7 +585,9 @@ function syntheticAssembly(input = host) {
       );
       return {
         artifact_id: record.artifact_id,
-        role: roleById.get(record.artifact_id) ?? 'internal-record',
+        role: recoveryMode
+          ? 'internal-record'
+          : (roleById.get(record.artifact_id) ?? 'internal-record'),
         scope: record.scope,
         base_scope_digest:
           record.scope === 'repository' ? '' : (record.scope === 'normal' ? 'd' : 'e').repeat(64),
@@ -559,6 +612,12 @@ function syntheticAssembly(input = host) {
     postCleanupCapturedSourceBodies.set(`${sourceId}:page:1`, { text });
     postCleanupSources.push({
       source_id: `${sourceId}:page:1`,
+      operation_id: sourceId.includes('stale')
+        ? candidate.identities.operation_ids[1]
+        : candidate.identities.operation_ids[0],
+      phase: sourceId.startsWith('post-cleanup-final-run-')
+        ? 'post-cleanup-terminal-run'
+        : 'post-cleanup-readback',
       route,
       page: 1,
       status: 200,
@@ -645,10 +704,15 @@ function syntheticAssembly(input = host) {
     );
   }
   const postCleanupCaptureManifest = {
-    kind: 'apr-r4-e3-capture-manifest-v1',
+    kind: 'apr-r4-e3-post-cleanup-capture-manifest-v1',
     repository_id: captureManifest.repository_id,
     repository: captureManifest.repository,
     operation_ids: captureManifest.operation_ids,
+    execution_authorization_sha256: captureManifest.execution_authorization_sha256,
+    producer_journal_directory: captureManifest.producer_journal_directory,
+    producer_journal_seal_sha256: captureManifest.producer_journal_seal_sha256,
+    producer_journal_seal_file_identity: captureManifest.producer_journal_seal_file_identity,
+    disposition: captureManifest.disposition,
     expected_roles: captureManifest.expected_roles,
     observed_runs: captureManifest.observed_runs,
     source_map_sha256: captureManifest.source_map_sha256,
@@ -661,6 +725,108 @@ function syntheticAssembly(input = host) {
     finalized: true,
   };
   const postCleanupCaptureManifestSha256 = sha256(canonicalJson(postCleanupCaptureManifest));
+  const authorityIdentities = new Map(
+    candidate.authorizations.execution.correction_gate.authority_identities.map((identity: any) => [
+      identity.component,
+      identity,
+    ]),
+  );
+  const credentialSlotNames =
+    candidate.authorizations.execution.active_secret_profile.credential_slot_names;
+  const correctionGateReceipt = {
+    kind: 'apr-r4-e3-correction-gate-readiness-v1',
+    destination_identity_sha256: captureManifest.destination_identity_sha256,
+    execution_authorization_sha256: captureManifest.execution_authorization_sha256,
+    correction_gate_sha256: sha256(
+      canonicalJson(candidate.authorizations.execution.correction_gate),
+    ),
+    repository: candidate.authorizations.execution.correction_gate.repository,
+    pull_request_number: candidate.authorizations.execution.correction_gate.pull_request_number,
+    branch: candidate.authorizations.execution.correction_gate.branch,
+    commit: candidate.authorizations.execution.correction_gate.commit,
+    tree: candidate.authorizations.execution.correction_gate.tree,
+    remote_readbacks: [
+      {
+        source_id: 'correction-gate-pr',
+        body_path: 'correction-gate-pr.json',
+        body_sha256: '1'.repeat(64),
+        body_physical_identity_sha256: '2'.repeat(64),
+        request_started_unix_milliseconds: 0,
+        response_received_unix_milliseconds: 1,
+      },
+      {
+        source_id: 'correction-gate-commit',
+        body_path: 'correction-gate-commit.json',
+        body_sha256: '3'.repeat(64),
+        body_physical_identity_sha256: '4'.repeat(64),
+        request_started_unix_milliseconds: 2,
+        response_received_unix_milliseconds: 3,
+      },
+    ],
+    authority_identities: candidate.authorizations.execution.correction_gate.authority_identities,
+    contract_digests: candidate.authorizations.execution.correction_gate.contract_digests,
+    worktree_clean: true,
+    finalized: true,
+  };
+  const credentialAdmission = {
+    kind: 'apr-r4-e3-credential-admission-v1',
+    destination_identity_sha256: captureManifest.destination_identity_sha256,
+    operation_ids: captureManifest.operation_ids,
+    execution_authorization_sha256: captureManifest.execution_authorization_sha256,
+    correction_gate_sha256: sha256(
+      canonicalJson(candidate.authorizations.execution.correction_gate),
+    ),
+    correction_gate_receipt_sha256: sha256(canonicalJson(correctionGateReceipt)),
+    correction_gate_receipt_physical_identity_sha256: 'f'.repeat(64),
+    materializer_source_sha256:
+      candidate.authorizations.execution.credential_materializer.source_sha256,
+    materializer_build_sha256:
+      candidate.authorizations.execution.credential_materializer.build_sha256,
+    consumers: [
+      'producer-journal-materializer',
+      'phase-fragment-materializer',
+      'capture',
+      'oracle',
+      'assembler',
+    ].map((component) => ({
+      component,
+      build_sha256: (authorityIdentities.get(component) as any).build_sha256,
+    })),
+    created_slots: credentialSlotNames.map((name: string, index: number) => ({
+      name,
+      required: name !== 'previous-state-key',
+      base64_key: name !== 'github-token',
+      physical_identity_sha256: String(index + 1).repeat(64),
+      initial_state: 'created',
+    })),
+    omitted_slots: credentialSlotNames.includes('previous-state-key')
+      ? []
+      : [{ name: 'previous-state-key', final_state: 'not-created' }],
+    admission_observation: {
+      request_started_unix_milliseconds: 0,
+      response_received_unix_milliseconds: 1,
+    },
+    finalized: true,
+  };
+  const credentialDisposition = {
+    kind: 'apr-r4-e3-credential-disposition-v1',
+    destination_identity_sha256: credentialAdmission.destination_identity_sha256,
+    operation_ids: credentialAdmission.operation_ids,
+    admission_receipt_sha256: sha256(canonicalJson(credentialAdmission)),
+    admission_receipt_physical_identity_sha256: 'e'.repeat(64),
+    created_slots: credentialAdmission.created_slots.map(({ name, physical_identity_sha256 }) => ({
+      name,
+      physical_identity_sha256,
+      final_state: 'created-then-deleted',
+    })),
+    omitted_slots: credentialAdmission.omitted_slots,
+    absence_observation: {
+      request_started_unix_milliseconds: 300,
+      response_received_unix_milliseconds: 301,
+    },
+    absence_source_ids: ['github-token-guardian-absence', 'state-key-guardian-absence'],
+    finalized: true,
+  };
   const phaseSources = new Map<string, string[]>([
     ['settle-runs', []],
     [
@@ -817,8 +983,15 @@ function syntheticAssembly(input = host) {
   const publicSurfaceCorpus = new Map<string, Buffer>([
     ['worktree:public-log.txt', Buffer.from('public execution log\n', 'utf8')],
   ]);
+  const publicProjectionCandidate = recoveryMode
+    ? {
+        kind: 'apr-r4-e3-public-projection-closed-v1',
+        operation_ids: captureManifest.operation_ids,
+        reason: 'recovery-only',
+      }
+    : expectedPublic;
   const publicScanManifest = scanPublicCandidate({
-    candidate: expectedPublic,
+    candidate: publicProjectionCandidate,
     corpus: publicSurfaceCorpus,
     protectedDocuments: new Map(),
     protectedCategories: protectedCanaryCategories(
@@ -849,6 +1022,14 @@ function syntheticAssembly(input = host) {
           { source_id: 'capture-manifest', sha256: captureManifestSha256 },
           { source_id: 'oracle-build-receipt', sha256: sha256(canonicalJson(oracleBuildReceipt)) },
           { source_id: 'oracle-result', sha256: oracleResultSha256 },
+          {
+            source_id: 'correction-gate-receipt',
+            sha256: sha256(canonicalJson(correctionGateReceipt)),
+          },
+          {
+            source_id: 'producer-journal-seal',
+            sha256: sha256(canonicalJson(producerJournalSeal)),
+          },
           {
             source_id: 'trusted-proof-payload-receipt-v2',
             sha256: payloadReceiptSha256,
@@ -935,6 +1116,14 @@ function syntheticAssembly(input = host) {
         '/canaries/live',
         [
           { source_id: 'capture-manifest', sha256: captureManifestSha256 },
+          {
+            source_id: 'credential-admission-receipt',
+            sha256: sha256(canonicalJson(credentialAdmission)),
+          },
+          {
+            source_id: 'credential-disposition-receipt',
+            sha256: sha256(canonicalJson(credentialDisposition)),
+          },
           { source_id: 'oracle-result', sha256: oracleResultSha256 },
           ...Object.values<any>(candidate.proof_control)
             .flatMap((family) => family.comments)
@@ -1007,6 +1196,10 @@ function syntheticAssembly(input = host) {
     postCleanupCapturedSourceBodies,
     retainedDocuments: new Map([
       ['trusted-proof-payload-receipt-v2', payloadReceipt],
+      ['correction-gate-receipt', correctionGateReceipt],
+      ['credential-admission-receipt', credentialAdmission],
+      ['credential-disposition-receipt', credentialDisposition],
+      ['producer-journal-seal', producerJournalSeal],
       ['oracle-build-receipt', oracleBuildReceipt],
       ['cleanup-plan', generatedCleanup.plan],
       ['cleanup-execution', cleanupExecution],
@@ -1016,6 +1209,11 @@ function syntheticAssembly(input = host) {
     oracleBinaries,
     publicSurfaceCorpus,
     credentialCopiesAbsent: true,
+    credentialAdmissionReceiptSha256: sha256(canonicalJson(credentialAdmission)),
+    credentialDispositionReceiptSha256: sha256(canonicalJson(credentialDisposition)),
+    correctionGateReceiptSha256: sha256(canonicalJson(correctionGateReceipt)),
+    producerJournalSealSha256: captureManifest.producer_journal_seal_sha256,
+    producerJournalSealFileIdentity: captureManifest.producer_journal_seal_file_identity,
   };
 }
 
@@ -1207,6 +1405,11 @@ describe('R4 E3 executable evidence contract', () => {
       postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
       oracleResultSha256: input.oracleResultSha256,
       cleanupPlan: assembled.cleanupPlan,
+      credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+      credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+      correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+      producerJournalSealSha256: input.producerJournalSealSha256,
+      producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
       oracleBuildReceiptSha256:
         assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
       oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
@@ -1222,6 +1425,11 @@ describe('R4 E3 executable evidence contract', () => {
         postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
         oracleResultSha256: input.oracleResultSha256,
         cleanupPlan: assembled.cleanupPlan,
+        credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+        credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+        correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+        producerJournalSealSha256: input.producerJournalSealSha256,
+        producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
         oracleBuildReceiptSha256:
           assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
         oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
@@ -1293,6 +1501,11 @@ describe('R4 E3 executable evidence contract', () => {
       postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
       oracleResultSha256: input.oracleResultSha256,
       cleanupPlan: assembled.cleanupPlan,
+      credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+      credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+      correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+      producerJournalSealSha256: input.producerJournalSealSha256,
+      producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
       oracleBuildReceiptSha256:
         assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
       oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
@@ -1309,6 +1522,11 @@ describe('R4 E3 executable evidence contract', () => {
         postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
         oracleResultSha256: input.oracleResultSha256,
         cleanupPlan: assembled.cleanupPlan,
+        credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+        credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+        correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+        producerJournalSealSha256: input.producerJournalSealSha256,
+        producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
         oracleBuildReceiptSha256:
           assembled.host.authorizations.execution.oracle_build.build_receipt_sha256,
         oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
@@ -1358,10 +1576,96 @@ describe('R4 E3 executable evidence contract', () => {
     candidate.authorizations.cleanup.plan_sha256 = generated.digest;
     candidate.cleanup.projection_gate.exact_seven_success = false;
 
-    const assembled = assembleTrustedProofEvidence(syntheticAssembly(candidate));
+    const input = syntheticAssembly(candidate);
+    const assembled = assembleTrustedProofEvidence(input);
     expect(assembled.recoveryOnly).toBe(true);
     expect(assembled.publicEvidence).toBeNull();
     expect(assembled.cleanupPlan.targets.state_artifacts).toHaveLength(16);
+    const privatePackageManifest = buildFinalizedPrivatePackageManifest({
+      host: assembled.host,
+      sourceBundle: input.sourceBundle,
+      captureManifestSha256: input.captureManifestSha256,
+      postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
+      oracleResultSha256: input.oracleResultSha256,
+      cleanupPlan: assembled.cleanupPlan,
+      credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+      credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+      correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+      producerJournalSealSha256: input.producerJournalSealSha256,
+      producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
+      oracleBuildReceiptSha256:
+        candidate.authorizations.execution.oracle_build.build_receipt_sha256,
+      oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+      productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+      publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+      publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
+    });
+    expect(privatePackageManifest.projection_eligible).toBe(false);
+    expect(() =>
+      projectFinalizedTrustedProofEvidence({
+        host: assembled.host,
+        sourceBundle: input.sourceBundle,
+        captureManifestSha256: input.captureManifestSha256,
+        postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
+        oracleResultSha256: input.oracleResultSha256,
+        cleanupPlan: assembled.cleanupPlan,
+        credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+        credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+        correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+        producerJournalSealSha256: input.producerJournalSealSha256,
+        producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
+        oracleBuildReceiptSha256:
+          candidate.authorizations.execution.oracle_build.build_receipt_sha256,
+        oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+        productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+        publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+        publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
+        privatePackageManifest,
+      }),
+    ).toThrow(/recovery-only-no-projection/u);
+  });
+
+  test('rejects omitted or substituted correction and producer authorities before assembly', () => {
+    const omitted = syntheticAssembly();
+    omitted.retainedDocuments.delete('correction-gate-receipt');
+    expect(() => assembleTrustedProofEvidence(omitted)).toThrow(/credential-lifecycle/u);
+
+    const substituted = syntheticAssembly();
+    substituted.retainedDocuments.get(
+      'credential-admission-receipt',
+    ).correction_gate_receipt_sha256 = '0'.repeat(64);
+    expect(() => assembleTrustedProofEvidence(substituted)).toThrow(/credential-admission-values/u);
+
+    const producer = syntheticAssembly();
+    producer.retainedDocuments.get('producer-journal-seal').entry_sha256s.push('f'.repeat(64));
+    expect(() => assembleTrustedProofEvidence(producer)).toThrow(/credential-lifecycle/u);
+  });
+
+  test('generates a zero-run recovery cleanup plan without inventing comments or sticky state', () => {
+    const operationIds = host.identities.operation_ids;
+    const generated = generateCleanupPlan({
+      operation_ids: operationIds,
+      proof_control: {
+        normal: { operation_id: operationIds[0], comments: [], cleanup_outcomes: [] },
+        stale: { operation_id: operationIds[1], comments: [], cleanup_outcomes: [] },
+      },
+      observed_cleanup: [],
+      resources: {
+        authorization_variable: 'R4_TRUSTED_PROOF_AUTHORIZATION',
+        secret_names: ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+        environment: 'r4-trusted-proof',
+        fixture_refs: host.cleanup.resources.fixture_refs,
+        fixture_pr_numbers: host.cleanup.resources.fixture_pr_numbers,
+        credential_copies: ['github-token', 'current-state-key'],
+        environment_snapshot_sha256: host.cleanup.resources.environment_snapshot_sha256,
+        run_ids: [],
+        sticky: null,
+      },
+    });
+    expect(generated.plan.targets.control_comments).toEqual([]);
+    expect(generated.plan.targets.state_artifacts).toEqual([]);
+    expect(generated.plan.targets.runs).toEqual([]);
+    expect(generated.plan.targets.sticky).toBeNull();
   });
 
   test.each([
