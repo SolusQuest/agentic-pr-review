@@ -11,7 +11,10 @@ internal static class ProducerJournalMaterializer
     private static readonly string[] Commands =
     [
         "producer-journal-create",
+        "producer-journal-begin",
         "producer-journal-execute",
+        "producer-journal-mark-unknown",
+        "producer-journal-record",
         "producer-journal-reconcile",
         "producer-journal-seal",
     ];
@@ -51,7 +54,7 @@ internal static class ProducerJournalMaterializer
                     authorization.MaterializerBuildSha256,
                     authorization.Repository,
                     authorization.OperationIds,
-                    authorization.Commands.Select(item => item.Target).ToArray(),
+                    authorization.Targets,
                     DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                 Console.Out.WriteLine("APR_R4_E3_PRODUCER_JOURNAL_CREATED");
                 return 0;
@@ -61,10 +64,10 @@ internal static class ProducerJournalMaterializer
                 root,
                 options["--journal-directory"],
                 options["--execution-authorization-sha256"]);
-            token = ReadAuthorizedToken(root, options, authorization, materializerBuildSha256);
-            using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
             if (command == "producer-journal-seal")
             {
+                token = ReadAuthorizedToken(root, options, authorization, materializerBuildSha256);
+                using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
                 var sources = CaptureDiscovery(
                     root,
                     journal.Authority,
@@ -78,12 +81,27 @@ internal static class ProducerJournalMaterializer
                 return 0;
             }
 
-            var producer = authorization.Commands.SingleOrDefault(item =>
-                item.Target.AuthorityId == options["--authority-id"]) ??
+            var target = authorization.Targets.SingleOrDefault(item =>
+                item.AuthorityId == options["--authority-id"]) ??
                 throw new InvalidDataException("producer_materializer_authority_invalid");
+            if (command == "producer-journal-begin")
+            {
+                EnsurePreconditions(root, options, authorization, journal, target);
+                return Begin(journal, target);
+            }
+            if (command == "producer-journal-mark-unknown") return MarkUnknown(journal, target);
+            if (command == "producer-journal-record")
+            {
+                return Record(root, options, authorization, journal, target);
+            }
+            var producer = authorization.Commands.SingleOrDefault(item =>
+                item.Target.AuthorityId == target.AuthorityId) ??
+                throw new InvalidDataException("producer_materializer_command_invalid");
+            token = ReadAuthorizedToken(root, options, authorization, materializerBuildSha256);
+            using var producerClient = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
             return command == "producer-journal-reconcile"
-                ? Reconcile(root, options, journal, producer, client)
-                : Execute(journal, producer, client);
+                ? Reconcile(root, options, journal, producer, producerClient)
+                : Execute(root, options, authorization, journal, producer, producerClient);
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or
             UnauthorizedAccessException or CryptographicException or JsonException or
@@ -100,11 +118,153 @@ internal static class ProducerJournalMaterializer
         }
     }
 
+    private static int Begin(ProducerOutcomeJournal journal, ProducerTargetAuthority target)
+    {
+        var prior = journal.Entries.LastOrDefault(item => item.AuthorityId == target.AuthorityId);
+        var attempt = prior is null ? 1 : checked(prior.Attempt + 1);
+        var observed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        journal.AppendCreateNew(
+            target.AuthorityId,
+            attempt,
+            "before-dispatch",
+            observed,
+            observed,
+            []);
+        Console.Out.WriteLine("APR_R4_E3_PRODUCER_BEGUN");
+        return 0;
+    }
+
+    private static int MarkUnknown(ProducerOutcomeJournal journal, ProducerTargetAuthority target)
+    {
+        var prior = journal.Entries.LastOrDefault(item => item.AuthorityId == target.AuthorityId);
+        if (prior is null || prior.Outcome != "before-dispatch")
+        {
+            throw new InvalidDataException("producer_materializer_unknown_invalid");
+        }
+        var observed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        journal.AppendCreateNew(
+            target.AuthorityId,
+            prior.Attempt,
+            "outcome-unknown",
+            prior.Observation.RequestStartedUnixMilliseconds,
+            observed,
+            []);
+        Console.Out.WriteLine("APR_R4_E3_PRODUCER_OUTCOME_UNKNOWN");
+        return 2;
+    }
+
+    private static int Record(
+        RestrictedEvidenceRoot root,
+        IReadOnlyDictionary<string, string> options,
+        ProducerAuthorization authorization,
+        ProducerOutcomeJournal journal,
+        ProducerTargetAuthority target)
+    {
+        if (target.TargetKind == "trigger")
+        {
+            throw new InvalidDataException("producer_materializer_record_invalid");
+        }
+        var prior = journal.Entries.LastOrDefault(item => item.AuthorityId == target.AuthorityId);
+        if (prior is null || prior.Outcome is not ("before-dispatch" or "outcome-unknown"))
+        {
+            throw new InvalidDataException("producer_materializer_record_invalid");
+        }
+        var partial = PhaseFragmentJournal.ReadPartial(
+            root,
+            options["--package-name"],
+            authorization.OperationIds,
+            options["--execution-authorization-sha256"],
+            authorization.PhaseMaterializerSourceSha256,
+            authorization.PhaseMaterializerBuildSha256,
+            journal);
+        var source = partial.Sources.SingleOrDefault(item =>
+            item.OperationId == target.OperationId &&
+            item.Phase == target.RequiredReadbackPhase &&
+            item.SourceId == options["--source-id"] &&
+            item.SourceId.StartsWith(target.RequiredSourcePrefix, StringComparison.Ordinal)) ??
+            throw new InvalidDataException("producer_materializer_record_invalid");
+        ValidateProducerReadback(root, options["--package-name"], target, source);
+        journal.AppendCreateNew(
+            target.AuthorityId,
+            prior.Attempt,
+            prior.Outcome == "outcome-unknown" ? "reconciled-committed" : "committed",
+            source.RequestStartedUnixMilliseconds,
+            source.ResponseReceivedUnixMilliseconds,
+            [source.BodySha256]);
+        Console.Out.WriteLine("APR_R4_E3_PRODUCER_RECORDED");
+        return 0;
+    }
+
+    private static void ValidateProducerReadback(
+        RestrictedEvidenceRoot root,
+        string packageName,
+        ProducerTargetAuthority target,
+        CaptureManifestSource source)
+    {
+        using var lease = root.AcquirePinnedFile(
+            $"{packageName}/{source.BodyPath}",
+            EvidenceLimits.MaximumDocumentBytes);
+        using var document = JsonDocument.Parse(lease.Bytes);
+        var value = document.RootElement;
+        if (target.TargetKind == "environment-secret")
+        {
+            var names = value.GetProperty("secrets").EnumerateArray()
+                .Select(item => item.GetProperty("name").GetString() ?? string.Empty).ToArray();
+            if (value.GetProperty("total_count").GetInt32() != names.Length ||
+                !names.Contains(target.Role, StringComparer.Ordinal))
+            {
+                throw new InvalidDataException("producer_materializer_record_invalid");
+            }
+            return;
+        }
+        if (target.TargetKind == "authorization-variable")
+        {
+            if (value.GetProperty("name").GetString() != "R4_TRUSTED_PROOF_AUTHORIZATION" ||
+                string.IsNullOrWhiteSpace(value.GetProperty("value").GetString()))
+            {
+                throw new InvalidDataException("producer_materializer_record_invalid");
+            }
+            return;
+        }
+        if (target.TargetKind == "deployment-approval")
+        {
+            if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() != 1 ||
+                value[0].GetProperty("state").GetString() != "approved")
+            {
+                throw new InvalidDataException("producer_materializer_record_invalid");
+            }
+            return;
+        }
+        if (target.TargetKind == "proof-control-comment")
+        {
+            var body = value.GetProperty("body").GetString() ?? string.Empty;
+            const string prefix = "<!-- apr-r4-e2p-control ";
+            const string suffix = " -->";
+            if (!body.StartsWith(prefix, StringComparison.Ordinal) ||
+                !body.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("producer_materializer_record_invalid");
+            }
+            using var marker = JsonDocument.Parse(body[prefix.Length..^suffix.Length]);
+            if (marker.RootElement.GetProperty("kind").GetString() != target.Role ||
+                marker.RootElement.GetProperty("operation_id").GetString() != target.OperationId)
+            {
+                throw new InvalidDataException("producer_materializer_record_invalid");
+            }
+            return;
+        }
+        throw new InvalidDataException("producer_materializer_record_invalid");
+    }
+
     private static int Execute(
+        RestrictedEvidenceRoot root,
+        IReadOnlyDictionary<string, string> options,
+        ProducerAuthorization authorization,
         ProducerOutcomeJournal journal,
         ProducerCommand producer,
         TrustedProofCaptureClient client)
     {
+        EnsurePreconditions(root, options, authorization, journal, producer.Target);
         var prior = journal.Entries.LastOrDefault(item => item.AuthorityId == producer.Target.AuthorityId);
         var attempt = prior is null ? 1 : checked(prior.Attempt + 1);
         var before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -169,6 +329,38 @@ internal static class ProducerJournalMaterializer
         }
     }
 
+    private static void EnsurePreconditions(
+        RestrictedEvidenceRoot root,
+        IReadOnlyDictionary<string, string> options,
+        ProducerAuthorization authorization,
+        ProducerOutcomeJournal journal,
+        ProducerTargetAuthority target)
+    {
+        var phases = target.RequiredPreconditionPhases ?? [];
+        var prefixes = target.RequiredPreconditionSourcePrefixes ?? [];
+        if (phases.Length == 0 || phases.Length != prefixes.Length)
+        {
+            throw new InvalidDataException("producer_materializer_precondition_invalid");
+        }
+        var partial = PhaseFragmentJournal.ReadPartial(
+            root,
+            options["--package-name"],
+            authorization.OperationIds,
+            options["--execution-authorization-sha256"],
+            authorization.PhaseMaterializerSourceSha256,
+            authorization.PhaseMaterializerBuildSha256,
+            journal);
+        for (var index = 0; index < phases.Length; index++)
+        {
+            if (!partial.Sources.Any(source =>
+                    source.Phase == phases[index] &&
+                    source.SourceId.StartsWith(prefixes[index], StringComparison.Ordinal)))
+            {
+                throw new InvalidDataException("producer_materializer_precondition_invalid");
+            }
+        }
+    }
+
     private static int Reconcile(
         RestrictedEvidenceRoot root,
         IReadOnlyDictionary<string, string> options,
@@ -190,7 +382,12 @@ internal static class ProducerJournalMaterializer
             options["--journal-directory"],
             phase,
             client);
-        if (!DiscoveryContainsCandidate(root, sources, unknown.Observation.RequestStartedUnixMilliseconds))
+        if (!DiscoveryContainsCandidate(
+                root,
+                sources,
+                journal.Authority.Repository,
+                producer.Target,
+                unknown.Observation.RequestStartedUnixMilliseconds))
         {
             Console.Error.WriteLine("APR_R4_E3_PRODUCER_OUTCOME_STILL_UNKNOWN");
             return 2;
@@ -253,8 +450,11 @@ internal static class ProducerJournalMaterializer
     private static bool DiscoveryContainsCandidate(
         RestrictedEvidenceRoot root,
         IReadOnlyList<ProducerDiscoverySource> sources,
+        string repository,
+        ProducerTargetAuthority target,
         long notBefore)
     {
+        var matches = 0;
         foreach (var source in sources)
         {
             using var lease = root.AcquirePinnedFile(source.BodyPath, EvidenceLimits.MaximumDocumentBytes);
@@ -270,10 +470,29 @@ internal static class ProducerJournalMaterializer
                 {
                     throw new InvalidDataException("producer_reconciliation_invalid");
                 }
-                if (created.ToUnixTimeMilliseconds() + 999 >= notBefore) return true;
+                var pullRequests = run.TryGetProperty("pull_requests", out var pulls) &&
+                    pulls.ValueKind == JsonValueKind.Array
+                    ? pulls.EnumerateArray().Select(item => item.GetProperty("number").GetRawText()).ToArray()
+                    : [];
+                var runRepository = run.GetProperty("head_repository").GetProperty("full_name")
+                    .GetString() ?? string.Empty;
+                var workflowPath = run.GetProperty("path").GetString() ?? string.Empty;
+                if (created.ToUnixTimeMilliseconds() + 999 >= notBefore &&
+                    runRepository == repository &&
+                    workflowPath == ".github/workflows/r4-trusted-proof.yml" &&
+                    run.GetProperty("event").GetString() == target.ExpectedEvent &&
+                    (target.ExpectedHeadSha.Length == 0 ||
+                        run.GetProperty("head_sha").GetString() == target.ExpectedHeadSha) &&
+                    (target.ExpectedHeadBranch.Length == 0 ||
+                        run.GetProperty("head_branch").GetString() == target.ExpectedHeadBranch) &&
+                    (target.ExpectedEvent == "workflow_dispatch" ||
+                        pullRequests.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal)))
+                {
+                    matches++;
+                }
             }
         }
-        return false;
+        return matches == 1;
     }
 
     private static CredentialFileRepresentations ReadAuthorizedToken(
@@ -350,6 +569,16 @@ internal static class ProducerJournalMaterializer
         {
             throw new InvalidDataException("producer_materializer_authorization_invalid");
         }
+        var phaseIdentity = execution.GetProperty("correction_gate")
+            .GetProperty("authority_identities").EnumerateArray()
+            .Single(item => item.GetProperty("component").GetString() ==
+                "phase-fragment-materializer");
+        var phaseSourceSha256 = phaseIdentity.GetProperty("source_sha256").GetString() ?? string.Empty;
+        var phaseBuildSha256 = phaseIdentity.GetProperty("build_sha256").GetString() ?? string.Empty;
+        if (!Sha256(phaseSourceSha256) || !Sha256(phaseBuildSha256))
+        {
+            throw new InvalidDataException("producer_materializer_authorization_invalid");
+        }
         var roles = new[]
         {
             "normal-bootstrap",
@@ -375,14 +604,26 @@ internal static class ProducerJournalMaterializer
                 var expectedEvent = trigger.GetProperty("expected_event").GetString() ?? string.Empty;
                 var prNumber = trigger.GetProperty("pr_number").GetString() ?? string.Empty;
                 var reference = trigger.GetProperty("ref").GetString() ?? string.Empty;
+                var authorizedHeadSha = trigger.GetProperty("authorized_head_sha").GetString() ?? string.Empty;
                 var source = trigger.GetProperty("source_coordinate");
                 if (role != roles[index] || !operationIds.Contains(operationId, StringComparer.Ordinal) ||
                     scope is not ("normal" or "stale") ||
                     expectedEvent is not ("workflow_run" or "workflow_dispatch") ||
-                    !PositiveDecimal(prNumber) || !reference.StartsWith("refs/heads/", StringComparison.Ordinal))
+                    !PositiveDecimal(prNumber) || !reference.StartsWith("refs/heads/", StringComparison.Ordinal) ||
+                    authorizedHeadSha.Length != 40)
                 {
                     throw new InvalidDataException("producer_materializer_authorization_invalid");
                 }
+                var (preconditionPhase, preconditionPrefix) = role switch
+                {
+                    "normal-bootstrap" =>
+                        ("bootstrap-readiness", "readiness-bootstrap-authorization-variable:"),
+                    "normal-continuation" =>
+                        ("continuation-readiness", "readiness-continuation-authorization-variable:"),
+                    "stale-protected" =>
+                        ("stale-readiness", "readiness-stale-authorization-variable:"),
+                    _ => ("stale-jobs", "transition-stale-jobs-"),
+                };
                 var target = new ProducerTargetAuthority(
                     descriptorSha256,
                     operationId,
@@ -390,7 +631,16 @@ internal static class ProducerJournalMaterializer
                     scope,
                     producer,
                     expectedEvent,
-                    descriptorSha256);
+                    descriptorSha256,
+                    producer == "advance-stale-ref"
+                        ? RequiredHex40(source, "value")
+                        : producer == "dispatch-proof-workflow" ? "" : authorizedHeadSha,
+                    producer == "dispatch-proof-workflow"
+                        ? RequiredText(source, "value")
+                        : reference["refs/heads/".Length..],
+                    prNumber,
+                    RequiredPreconditionPhases: [preconditionPhase],
+                    RequiredPreconditionSourcePrefixes: [preconditionPrefix]);
                 return producer switch
                 {
                     "rerun-upstream-ci" => new ProducerCommand(
@@ -430,7 +680,153 @@ internal static class ProducerJournalMaterializer
                 CryptographicOperations.ZeroMemory(bytes);
             }
         }).ToArray();
-        return new ProducerAuthorization(repository, operationIds, sourceSha256, buildSha256, commands);
+        var mutationTargets = BuildMutationTargets(execution, operationIds);
+        return new ProducerAuthorization(
+            repository,
+            operationIds,
+            sourceSha256,
+            buildSha256,
+            phaseSourceSha256,
+            phaseBuildSha256,
+            commands.Select(item => item.Target).Concat(mutationTargets).ToArray(),
+            commands);
+    }
+
+    private static ProducerTargetAuthority[] BuildMutationTargets(
+        JsonElement execution,
+        string[] operationIds)
+    {
+        var targets = new List<ProducerTargetAuthority>();
+        foreach (var secret in execution.GetProperty("active_secret_profile")
+                     .GetProperty("environment_secret_names").EnumerateArray()
+                     .Select(item => item.GetString() ?? string.Empty))
+        {
+            targets.Add(MutationTarget(
+                "environment-secret",
+                secret,
+                operationIds[0],
+                "normal",
+                "bootstrap-readiness",
+                "readiness-bootstrap-environment-secret-inventory:"));
+        }
+        targets.Add(MutationTarget(
+            "authorization-variable",
+            "normal",
+            operationIds[0],
+            "normal",
+            "bootstrap-readiness",
+            "readiness-bootstrap-authorization-variable:"));
+        targets.Add(MutationTarget(
+            "authorization-variable",
+            "stale",
+            operationIds[1],
+            "stale",
+            "stale-readiness",
+            "readiness-stale-authorization-variable:"));
+        foreach (var phase in new[] { "bootstrap", "continuation", "stale" })
+        {
+            var stale = phase == "stale";
+            targets.Add(MutationTarget(
+                "deployment-approval",
+                phase,
+                operationIds[stale ? 1 : 0],
+                stale ? "stale" : "normal",
+                $"{phase}-approval",
+                $"transition-{phase}-approvals-"));
+        }
+        foreach (var kind in new[] { "ready", "release" })
+        {
+            targets.Add(MutationTarget(
+                "proof-control-comment",
+                kind,
+                operationIds[0],
+                "normal",
+                "bootstrap-approval",
+                "proof-control-bootstrap-comment-"));
+        }
+        foreach (var kind in new[] { "ready", "release", "stale-ready", "stale-release" })
+        {
+            targets.Add(MutationTarget(
+                "proof-control-comment",
+                kind,
+                operationIds[1],
+                "stale",
+                "stale-approval",
+                "proof-control-stale-comment-"));
+        }
+        return [.. targets];
+    }
+
+    private static ProducerTargetAuthority MutationTarget(
+        string targetKind,
+        string role,
+        string operationId,
+        string scope,
+        string phase,
+        string sourcePrefix)
+    {
+        var (preconditionPhases, preconditionPrefixes) = targetKind switch
+        {
+            "environment-secret" => (
+                new[] { "baseline-normal", "baseline-stale" },
+                new[]
+                {
+                    "baseline-normal-environment-secret-inventory:",
+                    "baseline-stale-environment-secret-inventory:",
+                }),
+            "authorization-variable" => (
+                [scope == "normal" ? "baseline-normal" : "baseline-stale"],
+                [scope == "normal"
+                    ? "baseline-normal-authorization-variable:"
+                    : "baseline-stale-authorization-variable:"]),
+            "deployment-approval" => (
+                new[]
+                {
+                    $"{role}-readiness",
+                    $"{role}-pending",
+                },
+                new[]
+                {
+                    $"readiness-{role}-environment-protection:",
+                    $"transition-{role}-pending-",
+                }),
+            _ => (
+                [phase],
+                [phase.StartsWith("bootstrap", StringComparison.Ordinal)
+                    ? "transition-bootstrap-approvals-"
+                    : "transition-stale-approvals-"]),
+        };
+        var descriptor = new MutationTargetDescriptor(
+            targetKind,
+            operationId,
+            role,
+            scope,
+            phase,
+            sourcePrefix,
+            preconditionPhases,
+            preconditionPrefixes);
+        var bytes = CanonicalEvidence.Encode(descriptor, EvidenceJson.Options);
+        try
+        {
+            var sha256 = CanonicalEvidence.Sha256(bytes);
+            return new ProducerTargetAuthority(
+                sha256,
+                operationId,
+                role,
+                scope,
+                targetKind,
+                string.Empty,
+                sha256,
+                TargetKind: targetKind,
+                RequiredReadbackPhase: phase,
+                RequiredSourcePrefix: sourcePrefix,
+                RequiredPreconditionPhases: preconditionPhases,
+                RequiredPreconditionSourcePrefixes: preconditionPrefixes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
     }
 
     private static byte[] EncodeBody(object value) => CanonicalEvidence.Encode(value, EvidenceJson.Options);
@@ -472,7 +868,13 @@ internal static class ProducerJournalMaterializer
         {
             "producer-journal-create" => common,
             "producer-journal-seal" => common.Concat(credential).ToArray(),
-            _ => common.Concat(credential).Append("--authority-id").ToArray(),
+            "producer-journal-begin" or "producer-journal-mark-unknown" =>
+                command == "producer-journal-begin"
+                    ? common.Concat(["--authority-id", "--package-name"]).ToArray()
+                    : common.Append("--authority-id").ToArray(),
+            "producer-journal-record" => common.Concat(
+                ["--authority-id", "--package-name", "--source-id"]).ToArray(),
+            _ => common.Concat(credential).Concat(["--authority-id", "--package-name"]).ToArray(),
         };
         if (args.Length != names.Length * 2) throw new InvalidDataException("arguments_invalid");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -487,7 +889,11 @@ internal static class ProducerJournalMaterializer
         if (names.Any(name => !result.ContainsKey(name)) ||
             !Sha256(result["--execution-authorization-sha256"]) ||
             (names.Contains("--authority-id", StringComparer.Ordinal) &&
-                !Sha256(result["--authority-id"])))
+                !Sha256(result["--authority-id"])) ||
+            (names.Contains("--package-name", StringComparer.Ordinal) &&
+                !RestrictedEvidenceRoot.IsSinglePathSegment(result["--package-name"])) ||
+            (names.Contains("--source-id", StringComparer.Ordinal) &&
+                string.IsNullOrWhiteSpace(result["--source-id"])))
         {
             throw new InvalidDataException("arguments_invalid");
         }
@@ -517,7 +923,20 @@ internal static class ProducerJournalMaterializer
         string[] OperationIds,
         string MaterializerSourceSha256,
         string MaterializerBuildSha256,
+        string PhaseMaterializerSourceSha256,
+        string PhaseMaterializerBuildSha256,
+        ProducerTargetAuthority[] Targets,
         ProducerCommand[] Commands);
+
+    private sealed record MutationTargetDescriptor(
+        string TargetKind,
+        string OperationId,
+        string Role,
+        string Scope,
+        string RequiredReadbackPhase,
+        string RequiredSourcePrefix,
+        string[] RequiredPreconditionPhases,
+        string[] RequiredPreconditionSourcePrefixes);
 
     private sealed record ProducerCommand(
         ProducerTargetAuthority Target,

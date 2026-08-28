@@ -13,7 +13,15 @@ public sealed record ProducerTargetAuthority(
     string Scope,
     string Producer,
     string ExpectedEvent,
-    string TargetDescriptorSha256);
+    string TargetDescriptorSha256,
+    string ExpectedHeadSha = "",
+    string ExpectedHeadBranch = "",
+    string ExpectedPullRequestNumber = "",
+    string TargetKind = "trigger",
+    string RequiredReadbackPhase = "",
+    string RequiredSourcePrefix = "",
+    string[]? RequiredPreconditionPhases = null,
+    string[]? RequiredPreconditionSourcePrefixes = null);
 
 public sealed record ProducerAuthorityDocument(
     string Kind,
@@ -69,6 +77,19 @@ public sealed record ProducerDiscoverySource(
     long ResponseReceivedUnixMilliseconds,
     string? NextRoute);
 
+public sealed record ProducerJournalCheckpointDocument(
+    string Kind,
+    string DestinationIdentitySha256,
+    string ExecutionAuthorizationSha256,
+    string AuthoritySha256,
+    int EntryCount,
+    string EntryHeadSha256,
+    bool Finalized);
+
+public sealed record ProducerJournalCheckpoint(
+    ProducerJournalCheckpointDocument Document,
+    string Sha256);
+
 public sealed record ProducerOutcomeJournalSealDocument(
     string Kind,
     string DestinationIdentitySha256,
@@ -93,6 +114,7 @@ public sealed class ProducerOutcomeJournal
     public const string AuthorityKind = "apr-r4-e3-producer-authority-v1";
     public const string EntryKind = "apr-r4-e3-producer-outcome-v1";
     public const string SealKind = "apr-r4-e3-producer-outcome-journal-seal-v1";
+    public const string CheckpointKind = "apr-r4-e3-producer-outcome-journal-checkpoint-v1";
     public const string AuthorityName = "authority.json";
     public const string SealName = "seal.json";
     private static readonly string[] Outcomes =
@@ -234,6 +256,53 @@ public sealed class ProducerOutcomeJournal
 
     public IReadOnlyList<ProducerOutcomeEntry> Entries => entries;
     public ProducerAuthorityDocument Authority => authority;
+
+    public ProducerJournalCheckpoint CurrentCheckpoint()
+    {
+        var document = new ProducerJournalCheckpointDocument(
+            CheckpointKind,
+            root.DestinationIdentitySha256,
+            authority.ExecutionAuthorizationSha256,
+            authoritySha256,
+            digests.Count,
+            digests.Count == 0 ? authoritySha256 : digests[^1],
+            Finalized: true);
+        var bytes = CanonicalEvidence.Encode(document, EvidenceJson.Options);
+        try
+        {
+            return new ProducerJournalCheckpoint(document, CanonicalEvidence.Sha256(bytes));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    public void ValidateCheckpoint(ProducerJournalCheckpointDocument document, string sha256)
+    {
+        if (document.Kind != CheckpointKind || !document.Finalized ||
+            document.DestinationIdentitySha256 != root.DestinationIdentitySha256 ||
+            document.ExecutionAuthorizationSha256 != authority.ExecutionAuthorizationSha256 ||
+            document.AuthoritySha256 != authoritySha256 ||
+            document.EntryCount < 0 || document.EntryCount > digests.Count ||
+            document.EntryHeadSha256 !=
+                (document.EntryCount == 0 ? authoritySha256 : digests[document.EntryCount - 1]))
+        {
+            throw new InvalidDataException("producer_journal_checkpoint_invalid");
+        }
+        var bytes = CanonicalEvidence.Encode(document, EvidenceJson.Options);
+        try
+        {
+            if (CanonicalEvidence.Sha256(bytes) != sha256)
+            {
+                throw new InvalidDataException("producer_journal_checkpoint_invalid");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
 
     public void AppendCreateNew(
         string authorityId,
@@ -387,11 +456,14 @@ public sealed class ProducerOutcomeJournal
             "stale-protected",
             "stale-follow-on",
         };
-        var windows = authority.Targets.Select((target, index) =>
+        var triggerTargets = authority.Targets
+            .Where(target => target.TargetKind == "trigger")
+            .ToArray();
+        var windows = triggerTargets.Select((target, index) =>
         {
             var before = entries.LastOrDefault(entry =>
                 entry.AuthorityId == target.AuthorityId && entry.Outcome == "before-dispatch");
-            var nextBefore = authority.Targets.Skip(index + 1)
+            var nextBefore = triggerTargets.Skip(index + 1)
                 .Select(next => entries.FirstOrDefault(entry =>
                     entry.AuthorityId == next.AuthorityId && entry.Outcome == "before-dispatch"))
                 .FirstOrDefault(entry => entry is not null);
@@ -413,6 +485,7 @@ public sealed class ProducerOutcomeJournal
                 window = windows[0];
             }
             if (window.End is not null && run.CreatedUnixMilliseconds >= window.End.Value) continue;
+            if (!RunMatchesTarget(run, window.Target)) continue;
             mapped.Add((window.Target, run));
         }
         var runs = mapped
@@ -447,6 +520,8 @@ public sealed class ProducerOutcomeJournal
             roles.All(item => item.RunAttempt == "1") &&
             roles.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() == roles.Length &&
             runs.Length == roles.Length &&
+            terminal.All(entry => entry is not null &&
+                entry.Outcome is "committed" or "reconciled-committed") &&
             mapped.All(item => item.Run.Event == item.Target.ExpectedEvent);
         return new ProducerOutcomeJournalSealDocument(
             SealKind,
@@ -519,9 +594,25 @@ public sealed class ProducerOutcomeJournal
                     var runId = run.GetProperty("id").GetRawText();
                     var runAttempt = run.GetProperty("run_attempt").GetRawText();
                     var runEvent = run.GetProperty("event").GetString() ?? string.Empty;
+                    var headSha = run.TryGetProperty("head_sha", out var headShaElement)
+                        ? headShaElement.GetString() ?? string.Empty
+                        : string.Empty;
+                    var headBranch = run.TryGetProperty("head_branch", out var headBranchElement)
+                        ? headBranchElement.GetString() ?? string.Empty
+                        : string.Empty;
+                    var pullRequestNumbers = run.TryGetProperty("pull_requests", out var pulls) &&
+                        pulls.ValueKind == System.Text.Json.JsonValueKind.Array
+                        ? pulls.EnumerateArray().Select(item =>
+                            item.GetProperty("number").GetRawText()).ToArray()
+                        : [];
+                    var repository = run.GetProperty("head_repository").GetProperty("full_name")
+                        .GetString() ?? string.Empty;
+                    var workflowPath = run.GetProperty("path").GetString() ?? string.Empty;
                     var createdText = run.GetProperty("created_at").GetString() ?? string.Empty;
                     if (!PositiveDecimal(runId) || !PositiveDecimal(runAttempt) ||
                         runEvent is not ("workflow_run" or "workflow_dispatch") ||
+                        repository != authority.Repository ||
+                        workflowPath != ".github/workflows/r4-trusted-proof.yml" ||
                         !DateTimeOffset.TryParse(
                             createdText,
                             System.Globalization.CultureInfo.InvariantCulture,
@@ -535,6 +626,11 @@ public sealed class ProducerOutcomeJournal
                         runId,
                         runAttempt,
                         runEvent,
+                        headSha,
+                        headBranch,
+                        pullRequestNumbers,
+                        repository,
+                        workflowPath,
                         created.ToUnixTimeMilliseconds()));
                 }
             }
@@ -576,7 +672,24 @@ public sealed class ProducerOutcomeJournal
                 !value.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
                 string.IsNullOrWhiteSpace(item.Role) || string.IsNullOrWhiteSpace(item.Scope) ||
                 string.IsNullOrWhiteSpace(item.Producer) ||
-                item.ExpectedEvent is not ("workflow_run" or "workflow_dispatch")) ||
+                item.TargetKind is not ("trigger" or "environment-secret" or
+                    "authorization-variable" or "deployment-approval" or
+                    "proof-control-comment") ||
+                (item.TargetKind == "trigger"
+                    ? item.ExpectedEvent is not ("workflow_run" or "workflow_dispatch") ||
+                        item.RequiredReadbackPhase.Length != 0 ||
+                        item.RequiredSourcePrefix.Length != 0
+                    : item.ExpectedEvent.Length != 0 ||
+                        string.IsNullOrWhiteSpace(item.RequiredReadbackPhase) ||
+                        string.IsNullOrWhiteSpace(item.RequiredSourcePrefix)) ||
+                ((item.RequiredPreconditionPhases is null) !=
+                    (item.RequiredPreconditionSourcePrefixes is null)) ||
+                item.RequiredPreconditionPhases is { } phases &&
+                    (item.RequiredPreconditionSourcePrefixes is null ||
+                        phases.Length == 0 ||
+                        phases.Length != item.RequiredPreconditionSourcePrefixes.Length ||
+                        phases.Any(string.IsNullOrWhiteSpace) ||
+                        item.RequiredPreconditionSourcePrefixes.Any(string.IsNullOrWhiteSpace))) ||
             value.CreatedUnixMilliseconds < 0)
         {
             throw new InvalidDataException("producer_journal_invalid");
@@ -692,9 +805,23 @@ public sealed class ProducerOutcomeJournal
         value.Length > 0 && value.All(character => character is >= '0' and <= '9') &&
         (value.Length == 1 || value[0] != '0') && value != "0";
 
+    private static bool RunMatchesTarget(DiscoveredRun run, ProducerTargetAuthority target) =>
+        run.Event == target.ExpectedEvent &&
+        run.Repository.Length > 0 &&
+        run.WorkflowPath == ".github/workflows/r4-trusted-proof.yml" &&
+        (target.ExpectedHeadSha.Length == 0 || run.HeadSha == target.ExpectedHeadSha) &&
+        (target.ExpectedHeadBranch.Length == 0 || run.HeadBranch == target.ExpectedHeadBranch) &&
+        (target.ExpectedPullRequestNumber.Length == 0 || target.ExpectedEvent == "workflow_dispatch" ||
+            run.PullRequestNumbers.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal));
+
     private sealed record DiscoveredRun(
         string RunId,
         string RunAttempt,
         string Event,
+        string HeadSha,
+        string HeadBranch,
+        string[] PullRequestNumbers,
+        string Repository,
+        string WorkflowPath,
         long CreatedUnixMilliseconds);
 }

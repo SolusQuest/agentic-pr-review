@@ -117,34 +117,7 @@ internal static class Program
                 {
                     CryptographicOperations.ZeroMemory(canonical);
                 }
-                if (manifest.Kind != "apr-r4-e3-capture-manifest-v1" ||
-                     manifest.OperationIds.Length != 2 ||
-                     manifest.OperationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
-                     manifest.ExpectedRoles.Length != 4 ||
-                     manifest.ExpectedRoles.Select(item => item.Role).Distinct(StringComparer.Ordinal).Count() != 4 ||
-                     manifest.ExpectedRoles.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() != 4 ||
-                     manifest.ObservedRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=
-                         manifest.ObservedRuns.Length ||
-                     manifest.ObservedRuns.Any(item =>
-                          !manifest.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
-                          !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
-                          !PositiveDecimal(item.RunId) ||
-                          item.RunAttempt != "1") ||
-                     manifest.ExpectedRoles.GroupBy(item => item.OperationId, StringComparer.Ordinal)
-                          .Any(group => group.Count() != 2 ||
-                              group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
-                     manifest.ExpectedRoles.Any(role => !manifest.ObservedRuns.Any(run =>
-                         StringComparer.Ordinal.Equals(run.OperationId, role.OperationId) &&
-                         StringComparer.Ordinal.Equals(run.Scope, role.Scope) &&
-                         StringComparer.Ordinal.Equals(run.RunId, role.RunId) &&
-                         StringComparer.Ordinal.Equals(run.RunAttempt, role.RunAttempt))) ||
-                     manifest.Sources.Length == 0 ||
-                    manifest.Artifacts.Length == 0 ||
-                    manifest.Artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() != manifest.Artifacts.Length ||
-                    manifest.Artifacts.Select(item => item.ArtifactName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Artifacts.Length)
-                {
-                    throw new InvalidDataException("capture_manifest_invalid");
-                }
+                OracleCaptureAdmission.Validate(manifest);
                 PhaseFragmentJournal.Validate(root, options["--capture-manifest"], manifest);
                 ProducerOutcomeJournal.ValidateCapture(root, manifest);
             }

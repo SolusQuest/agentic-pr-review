@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -44,14 +45,17 @@ internal static class CorrectionGateMaterializer
             }
             var expected = ReadExpected(execution, gate, options["--destination-identity"]);
             var worktree = System.IO.Path.GetFullPath(options["--worktree-root"]);
+            var worktreeIdentity = WorktreeIdentity(worktree);
             var commit = Git(worktree, "rev-parse", "HEAD");
             var tree = Git(worktree, "rev-parse", "HEAD^{tree}");
             var clean = Git(worktree, "status", "--porcelain", "--untracked-files=no").Length == 0;
-            if (!clean || commit != expected.Commit || tree != expected.Tree)
+            if (!clean || commit != expected.Commit || tree != expected.Tree ||
+                worktreeIdentity != expected.WorktreeIdentitySha256)
             {
                 throw new InvalidDataException("correction_gate_git_invalid");
             }
-            VerifyLocalIdentities(options, expected);
+            var gateAssemblySha256 = DigestFile(Assembly.GetExecutingAssembly().Location);
+            VerifyLocalIdentities(options, expected, gateAssemblySha256);
 
             token = ReadToken(Console.OpenStandardInput());
             using var client = TrustedProofCaptureClient.CreateProduction(token);
@@ -64,14 +68,21 @@ internal static class CorrectionGateMaterializer
                 $"/repos/{expected.Repository}/git/commits/{expected.Commit}",
                 $"/repos/{expected.Repository}/git/commits/{expected.Commit}",
                 timeout.Token).GetAwaiter().GetResult();
+            var authorizationComment = client.GetPaginatedAsync(
+                $"/repos/{expected.Repository}/issues/comments/{expected.AuthorizationCommentId}",
+                $"/repos/{expected.Repository}/issues/comments/{expected.AuthorizationCommentId}",
+                timeout.Token).GetAwaiter().GetResult();
+            CapturePageSet? permission = null;
             try
             {
-                if (pr.Bodies.Length != 1 || remoteCommit.Bodies.Length != 1)
+                if (pr.Bodies.Length != 1 || remoteCommit.Bodies.Length != 1 ||
+                    authorizationComment.Bodies.Length != 1)
                 {
                     throw new InvalidDataException("correction_gate_remote_invalid");
                 }
                 using var prJson = JsonDocument.Parse(pr.Bodies[0]);
                 using var commitJson = JsonDocument.Parse(remoteCommit.Bodies[0]);
+                using var commentJson = JsonDocument.Parse(authorizationComment.Bodies[0]);
                 if (prJson.RootElement.GetProperty("number").GetRawText() != expected.PullRequestNumber ||
                     prJson.RootElement.GetProperty("state").GetString() != "open" ||
                     prJson.RootElement.GetProperty("head").GetProperty("ref").GetString() != expected.Branch ||
@@ -81,10 +92,29 @@ internal static class CorrectionGateMaterializer
                 {
                     throw new InvalidDataException("correction_gate_remote_invalid");
                 }
+                var authorLogin = ValidateAuthorizationComment(
+                    execution,
+                    authorizationComment.Bodies[0],
+                    commentJson.RootElement,
+                    expected);
+                permission = client.GetPaginatedAsync(
+                    $"/repos/{expected.Repository}/collaborators/{authorLogin}/permission",
+                    $"/repos/{expected.Repository}/collaborators/{authorLogin}/permission",
+                    timeout.Token).GetAwaiter().GetResult();
+                if (permission.Bodies.Length != 1)
+                {
+                    throw new InvalidDataException("correction_gate_authorization_invalid");
+                }
+                using var permissionJson = JsonDocument.Parse(permission.Bodies[0]);
+                ValidateAuthorizationPermission(permissionJson.RootElement, authorLogin, expected);
                 var readbacks = new[]
                 {
                     WriteReadback(root, "correction-gate-pr", "correction-gate-pr.json", pr, 0),
                     WriteReadback(root, "correction-gate-commit", "correction-gate-commit.json", remoteCommit, 0),
+                    WriteReadback(root, "correction-gate-authorization-comment",
+                        "correction-gate-authorization-comment.json", authorizationComment, 0),
+                    WriteReadback(root, "correction-gate-authorization-permission",
+                        "correction-gate-authorization-permission.json", permission, 0),
                 };
                 var receipt = CorrectionGateReceipt.MaterializeCreateNew(
                     root,
@@ -99,6 +129,8 @@ internal static class CorrectionGateMaterializer
                         expected.Branch,
                         expected.Commit,
                         expected.Tree,
+                        worktreeIdentity,
+                        gateAssemblySha256,
                         readbacks,
                         expected.AuthorityIdentities,
                         expected.ContractDigests,
@@ -110,7 +142,8 @@ internal static class CorrectionGateMaterializer
             }
             finally
             {
-                foreach (var body in pr.Bodies.Concat(remoteCommit.Bodies))
+                foreach (var body in pr.Bodies.Concat(remoteCommit.Bodies).Concat(
+                    authorizationComment.Bodies).Concat(permission?.Bodies ?? []))
                 {
                     CryptographicOperations.ZeroMemory(body);
                 }
@@ -147,33 +180,128 @@ internal static class CorrectionGateMaterializer
             pages.Captures[index].ResponseReceivedUnixMilliseconds);
     }
 
+    internal static string ValidateAuthorizationComment(
+        JsonElement localExecution,
+        byte[] commentResponseBytes,
+        JsonElement response,
+        ExpectedGate expected)
+    {
+        if (response.GetProperty("id").GetRawText() != expected.AuthorizationCommentId ||
+            response.GetProperty("user").GetProperty("id").GetRawText() !=
+                expected.AuthorizationAuthorId ||
+            response.GetProperty("body").GetString() is not { } body ||
+            response.GetProperty("user").GetProperty("login").GetString() is not { Length: > 0 } login)
+        {
+            throw new InvalidDataException("correction_gate_authorization_invalid");
+        }
+        const string prefix = "<!-- apr-r4-e3-authorization ";
+        const string suffix = " -->";
+        if (!body.StartsWith(prefix, StringComparison.Ordinal) ||
+            !body.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("correction_gate_authorization_invalid");
+        }
+        using var marker = JsonDocument.Parse(body[prefix.Length..^suffix.Length]);
+        var markerRoot = marker.RootElement;
+        if (markerRoot.GetProperty("contract").GetString() !=
+                "apr-r4-e3-maintainer-authorization-v1" ||
+            markerRoot.GetProperty("phase").GetString() != "execution" ||
+            markerRoot.GetProperty("repository").GetString() != expected.Repository ||
+            markerRoot.GetProperty("issue_number").GetRawText() != expected.AuthorizationIssueNumber)
+        {
+            throw new InvalidDataException("correction_gate_authorization_invalid");
+        }
+        var localWithoutSource = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var property in localExecution.EnumerateObject())
+        {
+            if (property.Name != "source") localWithoutSource.Add(property.Name, property.Value.Clone());
+        }
+        var localCanonical = CanonicalEvidence.Encode(localWithoutSource, EvidenceJson.Options);
+        var markerCanonical = CanonicalEvidence.Encode(
+            markerRoot.GetProperty("authorization"),
+            EvidenceJson.Options);
+        try
+        {
+            if (!localCanonical.AsSpan().SequenceEqual(markerCanonical))
+            {
+                throw new InvalidDataException("correction_gate_authorization_invalid");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(localCanonical);
+            CryptographicOperations.ZeroMemory(markerCanonical);
+        }
+        var source = localExecution.GetProperty("source");
+        var bodyBytes = Encoding.UTF8.GetBytes(body);
+        try
+        {
+            if (source.GetProperty("comment_id").GetString() != expected.AuthorizationCommentId ||
+                source.GetProperty("author_id").GetString() != expected.AuthorizationAuthorId ||
+                source.GetProperty("author_permission").GetString() != expected.AuthorizationPermission ||
+                source.GetProperty("body_sha256").GetString() != CanonicalEvidence.Sha256(bodyBytes) ||
+                source.GetProperty("readback_sha256").GetString() != CanonicalEvidence.Sha256(bodyBytes) ||
+                source.GetProperty("capture_body_sha256").GetString() !=
+                    CanonicalEvidence.Sha256(commentResponseBytes))
+            {
+                throw new InvalidDataException("correction_gate_authorization_invalid");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bodyBytes);
+        }
+        return login;
+    }
+
+    internal static void ValidateAuthorizationPermission(
+        JsonElement permission,
+        string authorLogin,
+        ExpectedGate expected)
+    {
+        if (permission.GetProperty("permission").GetString() is not ("write" or "admin") ||
+            permission.GetProperty("permission").GetString() != expected.AuthorizationPermission ||
+            permission.GetProperty("user").GetProperty("id").GetRawText() !=
+                expected.AuthorizationAuthorId ||
+            permission.GetProperty("user").GetProperty("login").GetString() != authorLogin)
+        {
+            throw new InvalidDataException("correction_gate_authorization_invalid");
+        }
+    }
+
+    internal static string WorktreeIdentity(string path)
+    {
+        var worktree = System.IO.Path.GetFullPath(path);
+        return CanonicalEvidence.Sha256(Encoding.UTF8.GetBytes(worktree.Replace('\\', '/')));
+    }
+
     private static void VerifyLocalIdentities(
         IReadOnlyDictionary<string, string> options,
-        ExpectedGate expected)
+        ExpectedGate expected,
+        string gateAssemblySha256)
     {
         var repositoryRoot = System.IO.Path.GetFullPath(options["--repository-root"]);
         var sourceGroups = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            ["capture"] = ["runtime/tests/ActionHostTrustedProofCapture/Program.cs", "runtime/tests/ActionHostTrustedProofCapture/CapturePlan.cs", "runtime/tests/ActionHostTrustedProofCapture/CapturePackageWriter.cs", "runtime/tests/ActionHostTrustedProofCapture/CorrectionGateMaterializer.cs", "runtime/tests/ActionHostTrustedProofCapture/TrustedProofCaptureClient.cs"],
+            ["capture"] = ["runtime/tests/ActionHostTrustedProofCapture/Program.cs", "runtime/tests/ActionHostTrustedProofCapture/CapturePlan.cs", "runtime/tests/ActionHostTrustedProofCapture/CapturePackageWriter.cs", "runtime/tests/ActionHostTrustedProofCapture/CorrectionGateMaterializer.cs", "runtime/tests/ActionHostTrustedProofCapture/CleanupAuthorizationMaterializer.cs", "runtime/tests/ActionHostTrustedProofCapture/TrustedProofCaptureClient.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/CredentialAdmissionReceipt.cs"],
             ["credential-materializer"] = ["runtime/tests/ActionHostTrustedProofCapture/CredentialMaterializer.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/CredentialAdmissionReceipt.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/CredentialLeaseAuthority.cs"],
-            ["producer-journal-materializer"] = ["runtime/tests/ActionHostTrustedProofCapture/ProducerJournalMaterializer.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/ProducerOutcomeJournal.cs"],
+            ["producer-journal-materializer"] = ["runtime/tests/ActionHostTrustedProofCapture/ProducerJournalMaterializer.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/ProducerOutcomeJournal.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/PhaseFragmentJournal.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/CaptureManifest.cs"],
             ["phase-fragment-materializer"] = ["runtime/tests/ActionHostTrustedProofCapture/PhaseFragmentMaterializer.cs", "runtime/tests/ActionHostTrustedProofEvidenceContracts/PhaseFragmentJournal.cs"],
-            ["oracle"] = ["runtime/tests/ActionHostTrustedProofEvidenceOracle/Program.cs"],
-            ["assembler"] = ["runtime/tests/ActionHostTrustedProofEvidenceAssembler/Program.cs", "scripts/assemble-r4-trusted-proof-evidence.mjs"],
+            ["oracle"] = ["runtime/tests/ActionHostTrustedProofEvidenceOracle/Program.cs", "runtime/tests/ActionHostTrustedProofEvidenceOracle/OracleCaptureAdmission.cs"],
+            ["assembler"] = ["runtime/tests/ActionHostTrustedProofEvidenceAssembler/Program.cs", "scripts/assemble-r4-trusted-proof-evidence.mjs", "scripts/r4-trusted-proof-contract.mjs"],
         };
         var assemblyByComponent = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["capture"] = options["--capture-assembly"],
-            ["credential-materializer"] = options["--capture-assembly"],
-            ["producer-journal-materializer"] = options["--capture-assembly"],
-            ["phase-fragment-materializer"] = options["--capture-assembly"],
             ["oracle"] = options["--oracle-assembly"],
             ["assembler"] = options["--assembler-assembly"],
         };
         foreach (var identity in expected.AuthorityIdentities)
         {
+            var actualBuild = assemblyByComponent.TryGetValue(identity.Component, out var assemblyPath)
+                ? DigestFile(assemblyPath)
+                : gateAssemblySha256;
             if (identity.SourceSha256 != DigestSourceGroup(repositoryRoot, sourceGroups[identity.Component]) ||
-                identity.BuildSha256 != DigestFile(assemblyByComponent[identity.Component]))
+                identity.BuildSha256 != actualBuild)
             {
                 throw new InvalidDataException("correction_gate_local_identity_invalid");
             }
@@ -234,12 +362,19 @@ internal static class CorrectionGateMaterializer
         var contracts = gate.GetProperty("contract_digests").EnumerateArray().Select(item => new CorrectionGateContract(
             item.GetProperty("component").GetString() ?? "",
             item.GetProperty("sha256").GetString() ?? "")).ToArray();
+        var source = execution.GetProperty("source");
         return new(
             gate.GetProperty("repository").GetString() ?? "",
             gate.GetProperty("pull_request_number").GetString() ?? "",
             gate.GetProperty("branch").GetString() ?? "",
             gate.GetProperty("commit").GetString() ?? "",
             gate.GetProperty("tree").GetString() ?? "",
+            execution.GetProperty("destinations").GetProperty("public")
+                .GetProperty("worktree_identity_sha256").GetString() ?? "",
+            source.GetProperty("issue_number").GetString() ?? "",
+            source.GetProperty("comment_id").GetString() ?? "",
+            source.GetProperty("author_id").GetString() ?? "",
+            source.GetProperty("author_permission").GetString() ?? "",
             identities,
             contracts);
     }
@@ -282,7 +417,7 @@ internal static class CorrectionGateMaterializer
         var names = new[]
         {
             "--restricted-root", "--destination-identity", "--repository-root", "--worktree-root",
-            "--execution-authorization", "--execution-authorization-sha256", "--capture-assembly",
+            "--execution-authorization", "--execution-authorization-sha256",
             "--oracle-assembly", "--assembler-assembly", "--correction-gate-receipt-output",
         };
         if (args.Length != names.Length * 2) throw new InvalidDataException("arguments_invalid");
@@ -296,12 +431,17 @@ internal static class CorrectionGateMaterializer
         return result;
     }
 
-    private sealed record ExpectedGate(
+    internal sealed record ExpectedGate(
         string Repository,
         string PullRequestNumber,
         string Branch,
         string Commit,
         string Tree,
+        string WorktreeIdentitySha256,
+        string AuthorizationIssueNumber,
+        string AuthorizationCommentId,
+        string AuthorizationAuthorId,
+        string AuthorizationPermission,
         CorrectionGateIdentity[] AuthorityIdentities,
         CorrectionGateContract[] ContractDigests);
 }

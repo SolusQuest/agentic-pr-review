@@ -15,6 +15,8 @@ public sealed class CapturePackageWriter
     private readonly string executionAuthorizationSha256;
     private readonly string phaseMaterializerSourceSha256;
     private readonly string phaseMaterializerBuildSha256;
+    private readonly ProducerOutcomeJournal? producerJournal;
+    private readonly ProducerJournalCheckpoint producerJournalCheckpoint;
     private readonly string producerJournalSealSha256;
     private readonly List<CaptureManifestSource> sources = [];
     private readonly List<CaptureManifestArtifact> artifacts = [];
@@ -28,6 +30,23 @@ public sealed class CapturePackageWriter
         string executionAuthorizationSha256,
         string phaseMaterializerSourceSha256,
         string phaseMaterializerBuildSha256,
+        string producerJournalSealSha256,
+        string planKind = "apr-r4-e3-capture-plan-v1")
+        : this(
+            root, packageName, operationIds, executionAuthorizationSha256,
+            phaseMaterializerSourceSha256, phaseMaterializerBuildSha256, null,
+            producerJournalSealSha256, planKind)
+    {
+    }
+
+    public CapturePackageWriter(
+        RestrictedEvidenceRoot root,
+        string packageName,
+        string[] operationIds,
+        string executionAuthorizationSha256,
+        string phaseMaterializerSourceSha256,
+        string phaseMaterializerBuildSha256,
+        ProducerOutcomeJournal? producerJournal,
         string producerJournalSealSha256,
         string planKind = "apr-r4-e3-capture-plan-v1")
     {
@@ -50,6 +69,9 @@ public sealed class CapturePackageWriter
         this.executionAuthorizationSha256 = executionAuthorizationSha256;
         this.phaseMaterializerSourceSha256 = phaseMaterializerSourceSha256;
         this.phaseMaterializerBuildSha256 = phaseMaterializerBuildSha256;
+        this.producerJournal = producerJournal;
+        producerJournalCheckpoint = producerJournal?.CurrentCheckpoint() ??
+            SyntheticCheckpoint(root, executionAuthorizationSha256, producerJournalSealSha256);
         this.producerJournalSealSha256 = producerJournalSealSha256;
         manifestKind = planKind switch
         {
@@ -78,7 +100,7 @@ public sealed class CapturePackageWriter
                 executionAuthorizationSha256,
                 phaseMaterializerSourceSha256,
                 phaseMaterializerBuildSha256,
-                producerJournalSealSha256);
+                producerJournal);
             if (partial.Fragments.Length == 0)
             {
                 throw new InvalidDataException("capture_package_exists");
@@ -187,17 +209,15 @@ public sealed class CapturePackageWriter
             capture.ResponseReceivedUnixMilliseconds,
             capture.NextRoute);
         var predecessor = fragments.Count == 0 ? null : fragments[^1].Sha256;
-        fragments.Add(PhaseFragmentJournal.AppendCreateNew(
-            root,
-            packageName,
-            operationIds,
-            this.executionAuthorizationSha256,
-            this.phaseMaterializerSourceSha256,
-            this.phaseMaterializerBuildSha256,
-            this.producerJournalSealSha256,
-            fragments.Count + 1,
-            predecessor,
-            source));
+        fragments.Add(producerJournal is null
+            ? PhaseFragmentJournal.AppendCreateNew(
+                root, packageName, operationIds, this.executionAuthorizationSha256,
+                this.phaseMaterializerSourceSha256, this.phaseMaterializerBuildSha256,
+                producerJournalCheckpoint, fragments.Count + 1, predecessor, source)
+            : PhaseFragmentJournal.AppendCreateNew(
+                root, packageName, operationIds, this.executionAuthorizationSha256,
+                this.phaseMaterializerSourceSha256, this.phaseMaterializerBuildSha256,
+                producerJournal, fragments.Count + 1, predecessor, source));
         sources.Add(source);
     }
 
@@ -396,6 +416,7 @@ public sealed class CapturePackageWriter
             this.executionAuthorizationSha256,
             this.phaseMaterializerSourceSha256,
             this.phaseMaterializerBuildSha256,
+            this.producerJournal,
             this.producerJournalSealSha256,
             fragments,
             sources);
@@ -451,6 +472,30 @@ public sealed class CapturePackageWriter
     private static bool Sha256(string value) =>
         value.Length == 64 &&
         value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static ProducerJournalCheckpoint SyntheticCheckpoint(
+        RestrictedEvidenceRoot root,
+        string executionAuthorizationSha256,
+        string authoritySha256)
+    {
+        var document = new ProducerJournalCheckpointDocument(
+            ProducerOutcomeJournal.CheckpointKind,
+            root.DestinationIdentitySha256,
+            executionAuthorizationSha256,
+            authoritySha256,
+            0,
+            authoritySha256,
+            Finalized: true);
+        var bytes = CanonicalEvidence.Encode(document, EvidenceJson.Options);
+        try
+        {
+            return new ProducerJournalCheckpoint(document, CanonicalEvidence.Sha256(bytes));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
 
     private bool ReopenedDigestEquals(string path, string expected)
     {

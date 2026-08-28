@@ -147,6 +147,55 @@ public sealed class TrustedProofCaptureClient : IDisposable
         }
     }
 
+    public async Task<CapturePageSet> GetExpectedAsync(
+        string route,
+        HttpStatusCode expectedStatus,
+        CancellationToken cancellationToken)
+    {
+        if (!ValidApiRoute(route) || expectedStatus is not (HttpStatusCode.OK or HttpStatusCode.NotFound))
+        {
+            throw new InvalidDataException("github_request_invalid");
+        }
+        using var request = CreateApiRequest(route);
+        var started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using var response = await api.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (response.StatusCode != expectedStatus)
+        {
+            throw new InvalidDataException("github_response_invalid");
+        }
+        var body = await ReadBoundedAsync(
+            response.Content,
+            EvidenceLimits.MaximumDocumentBytes,
+            cancellationToken);
+        try
+        {
+            if (NextRoute(response.Headers) is not null)
+            {
+                throw new InvalidDataException("github_pagination_invalid");
+            }
+            var received = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var capture = new SafeResponseCapture(
+                request.RequestUri!.PathAndQuery,
+                1,
+                (int)response.StatusCode,
+                CanonicalEvidence.Sha256(body),
+                body.Length,
+                SafeHeadersSha256(response, null),
+                started,
+                received,
+                null);
+            return new CapturePageSet([capture], [body]);
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(body);
+            throw;
+        }
+    }
+
     public async Task<ProducerResponseCapture> SendProducerAsync(
         HttpMethod method,
         string route,

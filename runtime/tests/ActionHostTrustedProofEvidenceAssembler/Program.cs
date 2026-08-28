@@ -90,6 +90,7 @@ internal static partial class Program
             foreach (var option in new[]
             {
                 "--source-bundle",
+                "--cleanup-authorization-readback",
                 "--correction-gate-receipt",
                 "--credential-admission-receipt",
                 "--credential-disposition-receipt-output",
@@ -1376,6 +1377,7 @@ internal static partial class Program
         "--source-bundle",
         "--capture-manifest",
         "--post-cleanup-capture-manifest",
+        "--cleanup-authorization-readback",
         "--correction-gate-receipt",
         "--credential-admission-receipt",
         "--credential-disposition-receipt-output",

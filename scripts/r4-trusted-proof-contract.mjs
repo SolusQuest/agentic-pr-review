@@ -77,6 +77,18 @@ function invalid(code) {
   throw new Error(`APR_R4_E3_EVIDENCE_INVALID ${code}`);
 }
 
+function proofControlPhase(host, comment) {
+  return comment.operation_id === host.identities.operation_ids[0] ? 'bootstrap' : 'stale';
+}
+
+function proofControlCommentSourceId(host, comment) {
+  return `proof-control-${proofControlPhase(host, comment)}-comment-${comment.comment_id}:page:1`;
+}
+
+function proofControlPermissionSourceId(host, comment) {
+  return `proof-control-${proofControlPhase(host, comment)}-permission-${comment.comment_id}-maintainer:page:1`;
+}
+
 export function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -119,6 +131,31 @@ function sourceTimestamp(value, code) {
   }
 }
 
+function expectedCaptureSourcePhase(sourceId, operationId, operationIds) {
+  const family = sourceId.replace(/:page:[1-9][0-9]*$/u, '');
+  let match = /^authorization-(setup|execution)-(?:comment|permission)-(normal|stale)-/u.exec(
+    family,
+  );
+  if (match) return `baseline-${match[2]}`;
+  match = /^(baseline-(?:normal|stale))-/u.exec(family);
+  if (match) return match[1];
+  match = /^readiness-(bootstrap|continuation|stale)-/u.exec(family);
+  if (match) return `${match[1]}-readiness`;
+  match = /^transition-(bootstrap|continuation|stale)-(pending|approvals|jobs)-/u.exec(family);
+  if (match) return `${match[1]}-${match[2] === 'approvals' ? 'approval' : match[2]}`;
+  match = /^proof-control-comments-(normal|stale)-pr-/u.exec(family);
+  if (match) return `terminal-${match[1]}`;
+  match = /^proof-control-(bootstrap|stale)-(?:comment|permission)-/u.exec(family);
+  if (match) return `${match[1]}-approval`;
+  match = /^concurrency-(normal|stale)-run-/u.exec(family);
+  if (match) return match[1] === 'normal' ? 'bootstrap-concurrency' : 'stale-concurrency';
+  if (family === 'producer-discovery-final') return 'producer-discovery';
+  if (/^(?:artifacts-run|run-terminal)-[1-9][0-9]*$/u.test(family)) {
+    return operationId === operationIds[1] ? 'terminal-stale' : 'terminal-normal';
+  }
+  return null;
+}
+
 function validateSourceMap(value) {
   exactKeys(value, ['kind', 'api_version', 'entries'], 'source-map-shape');
   if (
@@ -141,9 +178,9 @@ function validateSourceMap(value) {
       '/authorizations',
       'durable-maintainer-authorization',
       'authorization-readbacks',
-      'issue-comment-readback',
+      'paired-baseline-comments-permissions-and-post-plan-cleanup-readback',
       'none',
-      'authorizations/*.json',
+      'paired setup/execution baseline phase fragments and checked post-plan cleanup authorization readback',
     ],
     [
       '/environment',
@@ -368,17 +405,23 @@ function validateSourceEvidenceBindings(
     if (value === undefined) invalid('source-evidence-retained-missing');
     return { source_id: sourceId, sha256: sha256(canonicalJson(value)) };
   };
-  const authorizationReferences = ['cleanup', 'execution', 'setup']
+  const authorizationReferences = ['execution', 'setup']
     .flatMap((phase) => {
       const source = host.authorizations[phase].source;
-      const comment = captureReference(
-        `authorization-${phase}-comment-${source.comment_id}:page:1`,
-      );
-      if (comment.sha256 !== source.capture_body_sha256) {
-        invalid('source-evidence-authorization-digest');
-      }
-      return [comment, captureReference(`authorization-${phase}-permission-maintainer:page:1`)];
+      return ['normal', 'stale'].flatMap((scope) => {
+        const comment = captureReference(
+          `authorization-${phase}-comment-${scope}-${source.comment_id}:page:1`,
+        );
+        if (scope === 'normal' && comment.sha256 !== source.capture_body_sha256) {
+          invalid('source-evidence-authorization-digest');
+        }
+        return [
+          comment,
+          captureReference(`authorization-${phase}-permission-${scope}-maintainer:page:1`),
+        ];
+      });
     })
+    .concat(retainedReference('cleanup-authorization-readback'))
     .sort((a, b) => a.source_id.localeCompare(b.source_id));
   const approvalReferences = Object.entries(host.approval_transitions)
     .flatMap(([phase, transition]) => [
@@ -390,17 +433,23 @@ function validateSourceEvidenceBindings(
   const proofReferences = Object.values(host.proof_control)
     .flatMap((family) => family.comments)
     .flatMap((comment) => {
-      const reference = captureReference(`proof-control-comment-${comment.comment_id}:page:1`);
+      const reference = captureReference(proofControlCommentSourceId(host, comment));
       if (reference.sha256 !== comment.capture_body_sha256) {
         invalid('source-evidence-proof-control-digest');
       }
       return comment.kind === 'release' || comment.kind === 'stale-release'
-        ? [
-            reference,
-            captureReference(`proof-control-permission-${comment.comment_id}-maintainer:page:1`),
-          ]
+        ? [reference, captureReference(proofControlPermissionSourceId(host, comment))]
         : [reference];
     })
+    .concat(
+      captureManifest.sources
+        .filter((source) =>
+          /^proof-control-comments-(normal|stale)-pr-[1-9][0-9]*:page:[1-9][0-9]*$/u.test(
+            source.source_id,
+          ),
+        )
+        .map((source) => captureReference(source.source_id)),
+    )
     .sort((a, b) => a.source_id.localeCompare(b.source_id));
   const receiptReference = {
     source_id: 'trusted-proof-payload-receipt-v2',
@@ -411,7 +460,7 @@ function validateSourceEvidenceBindings(
       '/identities',
       [
         captureReference(
-          `authorization-execution-comment-${host.authorizations.execution.source.comment_id}:page:1`,
+          `authorization-execution-comment-normal-${host.authorizations.execution.source.comment_id}:page:1`,
         ),
         { source_id: 'capture-manifest', sha256: captureManifestSha256 },
         retainedReference('correction-gate-receipt'),
@@ -425,9 +474,9 @@ function validateSourceEvidenceBindings(
     [
       '/environment',
       [
-        captureReference('environment-branch-policies:page:1'),
-        captureReference('environment-protection:page:1'),
-        captureReference('environment-secret-inventory:page:1'),
+        captureReference('readiness-stale-environment-branch-policies:page:1'),
+        captureReference('readiness-stale-environment-protection:page:1'),
+        captureReference('readiness-stale-environment-secret-inventory:page:1'),
       ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
     ],
     ['/approval_transitions', approvalReferences],
@@ -461,7 +510,7 @@ function validateSourceEvidenceBindings(
         ...Object.values(host.proof_control)
           .flatMap((family) => family.comments)
           .filter((comment) => comment.kind === 'ready' || comment.kind === 'stale-ready')
-          .map((comment) => captureReference(`proof-control-comment-${comment.comment_id}:page:1`)),
+          .map((comment) => captureReference(proofControlCommentSourceId(host, comment))),
       ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
     ],
     ['/canaries/cross_sink', [receiptReference]],
@@ -518,9 +567,9 @@ function validateEnvironmentDerivation(
       invalid('environment-source-json');
     }
   };
-  const environment = read('environment-protection:page:1');
-  const branches = read('environment-branch-policies:page:1');
-  const secrets = read('environment-secret-inventory:page:1');
+  const environment = read('readiness-stale-environment-protection:page:1');
+  const branches = read('readiness-stale-environment-branch-policies:page:1');
+  const secrets = read('readiness-stale-environment-secret-inventory:page:1');
   const response = environment.value;
   const reviewersRule = response.protection_rules?.find(
     (rule) => rule?.type === 'required_reviewers',
@@ -569,9 +618,9 @@ function validateEnvironmentDerivation(
     name: response.name,
     readiness_snapshot: {
       source_ids: {
-        environment: 'environment-protection',
-        branch_policies: 'environment-branch-policies',
-        environment_secrets: 'environment-secret-inventory',
+        environment: 'readiness-stale-environment-protection',
+        branch_policies: 'readiness-stale-environment-branch-policies',
+        environment_secrets: 'readiness-stale-environment-secret-inventory',
       },
       environment_id: String(response.id),
       can_admins_bypass: response.can_admins_bypass,
@@ -682,187 +731,156 @@ function deriveIdentities(
   };
 }
 
-function validateAuthorizationDerivation(host, captureManifest, capturedSourceBodies) {
-  if (!(capturedSourceBodies instanceof Map)) invalid('captured-source-bodies');
-  const manifestById = new Map(captureManifest.sources.map((source) => [source.source_id, source]));
-  const read = (sourceId) => {
-    const retained = capturedSourceBodies.get(sourceId);
-    const manifest = manifestById.get(sourceId);
+function deriveAuthorizationReadback(phase, response, permission, captureBodySha256, observation) {
+  if (
+    response === null ||
+    typeof response !== 'object' ||
+    !Number.isSafeInteger(response.id) ||
+    response.id < 1 ||
+    typeof response.body !== 'string' ||
+    response.user === null ||
+    typeof response.user !== 'object' ||
+    !Number.isSafeInteger(response.user.id) ||
+    response.user.id < 1 ||
+    typeof response.user.login !== 'string' ||
+    permission === null ||
+    typeof permission !== 'object' ||
+    !['admin', 'write'].includes(permission.permission) ||
+    permission.user === null ||
+    typeof permission.user !== 'object' ||
+    String(permission.user.id) !== String(response.user.id) ||
+    permission.user.login !== response.user.login
+  ) {
+    invalid(`authorization-${phase}-raw-response`);
+  }
+  interval(observation, `authorization-${phase}-observation`);
+  const prefix = '<!-- apr-r4-e3-authorization ';
+  const suffix = ' -->';
+  if (!response.body.startsWith(prefix) || !response.body.endsWith(suffix)) {
+    invalid(`authorization-${phase}-marker`);
+  }
+  let marker;
+  try {
+    marker = JSON.parse(response.body.slice(prefix.length, -suffix.length));
+  } catch {
+    invalid(`authorization-${phase}-marker`);
+  }
+  exactKeys(
+    marker,
+    ['contract', 'phase', 'repository', 'issue_number', 'authorization'],
+    `authorization-${phase}-marker-shape`,
+  );
+  if (
+    marker.contract !== 'apr-r4-e3-maintainer-authorization-v1' ||
+    marker.phase !== phase ||
+    typeof marker.repository !== 'string' ||
+    !Number.isSafeInteger(marker.issue_number) ||
+    marker.issue_number < 1 ||
+    response.body !== `${prefix}${JSON.stringify(marker)}${suffix}` ||
+    !hex64.test(captureBodySha256)
+  ) {
+    invalid(`authorization-${phase}-marker-values`);
+  }
+  const bodySha256 = sha256(Buffer.from(response.body, 'utf8'));
+  return {
+    kind: marker.authorization?.kind,
+    phase: marker.authorization?.phase,
+    source: {
+      kind: 'maintainer-comment-readback',
+      phase,
+      repository: marker.repository,
+      issue_number: String(marker.issue_number),
+      comment_id: String(response.id),
+      author_id: String(response.user.id),
+      author_permission: permission.permission,
+      capture_body_sha256: captureBodySha256,
+      body_sha256: bodySha256,
+      readback_sha256: bodySha256,
+      observation,
+    },
+    ...Object.fromEntries(
+      Object.entries(marker.authorization ?? {}).filter(
+        ([key]) => key !== 'kind' && key !== 'phase',
+      ),
+    ),
+  };
+}
+
+function deriveAuthorizations(captureManifest, capturedSourceBodies, retainedDocuments) {
+  const authorizations = {};
+  const read = (source) => {
+    const retained = capturedSourceBodies.get(source.source_id);
     if (
       retained === undefined ||
-      manifest === undefined ||
       typeof retained.text !== 'string' ||
-      sha256(Buffer.from(retained.text, 'utf8')) !== manifest.body_sha256 ||
-      String(Buffer.byteLength(retained.text, 'utf8')) !== manifest.body_size
+      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
+      String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size
     ) {
       invalid('authorization-capture-binding');
     }
-    let value;
     try {
-      value = JSON.parse(retained.text);
+      return JSON.parse(retained.text);
     } catch {
       invalid('authorization-capture-json');
     }
-    return { value, manifest };
   };
-
-  for (const phase of ['setup', 'execution', 'cleanup']) {
-    const expected = host.authorizations[phase];
-    const commentSourceId = `authorization-${phase}-comment-${expected.source.comment_id}:page:1`;
-    const permissionSourceId = `authorization-${phase}-permission-maintainer:page:1`;
-    const commentCapture = read(commentSourceId);
-    const permissionCapture = read(permissionSourceId);
-    const response = commentCapture.value;
-    const permission = permissionCapture.value;
-    if (
-      response === null ||
-      typeof response !== 'object' ||
-      String(response.id) !== expected.source.comment_id ||
-      typeof response.body !== 'string' ||
-      response.user === null ||
-      typeof response.user !== 'object' ||
-      String(response.user.id) !== expected.source.author_id ||
-      typeof response.user.login !== 'string' ||
-      permission === null ||
-      typeof permission !== 'object' ||
-      !['admin', 'maintain'].includes(permission.permission) ||
-      permission.user === null ||
-      typeof permission.user !== 'object' ||
-      String(permission.user.id) !== expected.source.author_id ||
-      permission.user.login !== response.user.login
-    ) {
-      invalid(`authorization-${phase}-raw-response`);
-    }
-    const prefix = '<!-- apr-r4-e3-authorization ';
-    const suffix = ' -->';
-    if (!response.body.startsWith(prefix) || !response.body.endsWith(suffix)) {
-      invalid(`authorization-${phase}-marker`);
-    }
-    let marker;
-    try {
-      marker = JSON.parse(response.body.slice(prefix.length, -suffix.length));
-    } catch {
-      invalid(`authorization-${phase}-marker`);
-    }
-    exactKeys(
-      marker,
-      ['contract', 'phase', 'repository', 'issue_number', 'authorization'],
-      `authorization-${phase}-marker-shape`,
-    );
-    if (
-      marker.contract !== 'apr-r4-e3-maintainer-authorization-v1' ||
-      marker.phase !== phase ||
-      marker.repository !== host.identities.repository ||
-      String(marker.issue_number) !== expected.source.issue_number ||
-      response.body !== `${prefix}${JSON.stringify(marker)}${suffix}`
-    ) {
-      invalid(`authorization-${phase}-marker-values`);
-    }
-    const bodySha256 = sha256(Buffer.from(response.body, 'utf8'));
-    const derived = {
-      kind: marker.authorization.kind,
-      phase: marker.authorization.phase,
-      source: {
-        kind: 'maintainer-comment-readback',
-        phase,
-        repository: marker.repository,
-        issue_number: String(marker.issue_number),
-        comment_id: String(response.id),
-        author_id: String(response.user.id),
-        author_permission: permission.permission,
-        capture_body_sha256: commentCapture.manifest.body_sha256,
-        body_sha256: bodySha256,
-        readback_sha256: bodySha256,
-        observation: {
-          request_started: commentCapture.manifest.request_started_unix_milliseconds,
-          response_received: commentCapture.manifest.response_received_unix_milliseconds,
-        },
-      },
-      ...Object.fromEntries(
-        Object.entries(marker.authorization).filter(([key]) => key !== 'kind' && key !== 'phase'),
-      ),
-    };
-    if (canonicalJson(derived) !== canonicalJson(expected)) {
-      invalid(`authorization-${phase}-derivation`);
-    }
-  }
-}
-
-function deriveAuthorizations(captureManifest, capturedSourceBodies) {
-  const authorizations = {};
-  const manifestById = new Map(captureManifest.sources.map((source) => [source.source_id, source]));
-  for (const phase of ['setup', 'execution', 'cleanup']) {
-    const pattern = new RegExp(`^authorization-${phase}-comment-([1-9][0-9]*):page:1$`, 'u');
-    const matches = captureManifest.sources.filter((source) => pattern.test(source.source_id));
-    if (matches.length !== 1) invalid(`authorization-${phase}-source-cardinality`);
-    const source = matches[0];
-    const retained = capturedSourceBodies.get(source.source_id);
-    const permissionSourceId = `authorization-${phase}-permission-maintainer:page:1`;
-    const permissionSource = manifestById.get(permissionSourceId);
-    const permissionRetained = capturedSourceBodies.get(permissionSourceId);
-    if (
-      retained === undefined ||
-      permissionSource === undefined ||
-      permissionRetained === undefined ||
-      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
-      sha256(Buffer.from(permissionRetained.text, 'utf8')) !== permissionSource.body_sha256
-    ) {
-      invalid(`authorization-${phase}-source-binding`);
-    }
-    let response;
-    let permission;
-    try {
-      response = JSON.parse(retained.text);
-      permission = JSON.parse(permissionRetained.text);
-    } catch {
-      invalid(`authorization-${phase}-source-json`);
-    }
-    const prefix = '<!-- apr-r4-e3-authorization ';
-    const suffix = ' -->';
-    if (
-      typeof response.body !== 'string' ||
-      !response.body.startsWith(prefix) ||
-      !response.body.endsWith(suffix)
-    ) {
-      invalid(`authorization-${phase}-marker`);
-    }
-    let marker;
-    try {
-      marker = JSON.parse(response.body.slice(prefix.length, -suffix.length));
-    } catch {
-      invalid(`authorization-${phase}-marker`);
-    }
-    authorizations[phase] = {
-      kind: marker.authorization?.kind,
-      phase: marker.authorization?.phase,
-      source: {
-        kind: 'maintainer-comment-readback',
-        phase,
-        repository: marker.repository,
-        issue_number: String(marker.issue_number),
-        comment_id: String(response.id),
-        author_id: String(response.user?.id),
-        author_permission: permission.permission,
-        capture_body_sha256: source.body_sha256,
-        body_sha256: sha256(Buffer.from(response.body, 'utf8')),
-        readback_sha256: sha256(Buffer.from(response.body, 'utf8')),
-        observation: {
-          request_started: source.request_started_unix_milliseconds,
-          response_received: source.response_received_unix_milliseconds,
-        },
-      },
-      ...Object.fromEntries(
-        Object.entries(marker.authorization ?? {}).filter(
-          ([key]) => key !== 'kind' && key !== 'phase',
+  for (const phase of ['setup', 'execution']) {
+    const derivedByScope = [];
+    for (const scope of ['normal', 'stale']) {
+      const comments = captureManifest.sources.filter((source) =>
+        new RegExp(`^authorization-${phase}-comment-${scope}-[1-9][0-9]*:page:1$`, 'u').test(
+          source.source_id,
         ),
-      ),
-    };
+      );
+      const permissions = captureManifest.sources.filter((source) =>
+        new RegExp(`^authorization-${phase}-permission-${scope}-[A-Za-z0-9-]+:page:1$`, 'u').test(
+          source.source_id,
+        ),
+      );
+      if (comments.length !== 1 || permissions.length !== 1) {
+        invalid(`authorization-${phase}-${scope}-source-cardinality`);
+      }
+      const comment = comments[0];
+      const permission = permissions[0];
+      derivedByScope.push({
+        response: read(comment),
+        permission: read(permission),
+        authorization: deriveAuthorizationReadback(
+          phase,
+          read(comment),
+          read(permission),
+          comment.body_sha256,
+          {
+            request_started: comment.request_started_unix_milliseconds,
+            response_received: comment.response_received_unix_milliseconds,
+          },
+        ),
+      });
+    }
+    if (
+      canonicalJson(derivedByScope[0].response) !== canonicalJson(derivedByScope[1].response) ||
+      canonicalJson(derivedByScope[0].permission) !== canonicalJson(derivedByScope[1].permission)
+    ) {
+      invalid(`authorization-${phase}-paired-baseline-drift`);
+    }
+    authorizations[phase] = derivedByScope[0].authorization;
   }
-  const provisional = {
-    authorizations,
-    identities: { repository: authorizations.execution.coordinates?.repository },
-  };
-  validateAuthorizationDerivation(provisional, captureManifest, capturedSourceBodies);
+  const cleanup = retainedDocuments.get('cleanup-authorization-readback');
+  exactKeys(
+    cleanup,
+    ['kind', 'comment', 'permission', 'observation'],
+    'cleanup-authorization-readback-shape',
+  );
+  if (cleanup.kind !== 'apr-r4-e3-cleanup-authorization-readback-v1') {
+    invalid('cleanup-authorization-readback-values');
+  }
+  authorizations.cleanup = deriveAuthorizationReadback(
+    'cleanup',
+    cleanup.comment,
+    cleanup.permission,
+    sha256(canonicalJson(cleanup.comment)),
+    cleanup.observation,
+  );
   return authorizations;
 }
 
@@ -890,7 +908,7 @@ function validateProofControlDerivation(host, captureManifest, capturedSourceBod
 
   for (const family of Object.values(host.proof_control)) {
     for (const expected of family.comments) {
-      const capture = read(`proof-control-comment-${expected.comment_id}:page:1`);
+      const capture = read(proofControlCommentSourceId(host, expected));
       const response = capture.value;
       if (
         response === null ||
@@ -965,9 +983,7 @@ function validateProofControlDerivation(host, captureManifest, capturedSourceBod
           invalid('proof-control-ready-actor');
         }
       } else {
-        const permission = read(
-          `proof-control-permission-${expected.comment_id}-maintainer:page:1`,
-        ).value;
+        const permission = read(proofControlPermissionSourceId(host, expected)).value;
         if (
           String(response.user.id) !== '16307884' ||
           response.user.login !== 'maintainer' ||
@@ -1017,7 +1033,7 @@ function deriveProofControl(authorizations, identities, captureManifest, capture
   const byOperation = new Map(authorizations.execution.operation_ids.map((id) => [id, []]));
   const manifestById = new Map(captureManifest.sources.map((source) => [source.source_id, source]));
   const sources = captureManifest.sources.filter((source) =>
-    /^proof-control-comment-[1-9][0-9]*:page:1$/u.test(source.source_id),
+    /^proof-control-(bootstrap|stale)-comment-[1-9][0-9]*:page:1$/u.test(source.source_id),
   );
   for (const source of sources) {
     const retained = capturedSourceBodies.get(source.source_id);
@@ -1043,7 +1059,8 @@ function deriveProofControl(authorizations, identities, captureManifest, capture
     const readyActor = marker.kind === 'ready' || marker.kind === 'stale-ready';
     let actorPermission = 'workflow-token';
     if (!readyActor) {
-      const permissionSourceId = `proof-control-permission-${response.id}-maintainer:page:1`;
+      const phase = source.source_id.split('-')[2];
+      const permissionSourceId = `proof-control-${phase}-permission-${response.id}-maintainer:page:1`;
       const permissionSource = manifestById.get(permissionSourceId);
       const permissionRetained = capturedSourceBodies.get(permissionSourceId);
       if (
@@ -1087,6 +1104,63 @@ function deriveProofControl(authorizations, identities, captureManifest, capture
       body_sha256: marker.body_sha256,
       readback_sha256: sha256(Buffer.from(response.body, 'utf8')),
     });
+  }
+  for (const scope of ['normal', 'stale']) {
+    const pattern = new RegExp(`^proof-control-comments-${scope}-pr-[1-9][0-9]*:page:`, 'u');
+    const inventorySources = captureManifest.sources
+      .filter((source) => pattern.test(source.source_id))
+      .sort((left, right) => left.page - right.page);
+    if (
+      inventorySources.length === 0 ||
+      inventorySources.some(
+        (source, index) =>
+          source.page !== index + 1 ||
+          (index === inventorySources.length - 1
+            ? source.next_route !== null
+            : source.next_route !== inventorySources[index + 1].route),
+      )
+    ) {
+      invalid('proof-control-inventory-pagination');
+    }
+    const operationId = authorizations.execution.operation_ids[scope === 'normal' ? 0 : 1];
+    const inventoryIds = [];
+    for (const inventorySource of inventorySources) {
+      const retained = capturedSourceBodies.get(inventorySource.source_id);
+      if (
+        retained === undefined ||
+        sha256(Buffer.from(retained.text, 'utf8')) !== inventorySource.body_sha256
+      ) {
+        invalid('proof-control-inventory-binding');
+      }
+      let responses;
+      try {
+        responses = JSON.parse(retained.text);
+      } catch {
+        invalid('proof-control-inventory-json');
+      }
+      if (!Array.isArray(responses)) invalid('proof-control-inventory-json');
+      for (const response of responses) {
+        if (
+          typeof response?.body !== 'string' ||
+          !response.body.startsWith('<!-- apr-r4-e2p-control ')
+        ) {
+          continue;
+        }
+        try {
+          const marker = JSON.parse(response.body.slice('<!-- apr-r4-e2p-control '.length, -4));
+          if (marker.operation_id === operationId) inventoryIds.push(String(response.id));
+        } catch {
+          invalid('proof-control-inventory-marker');
+        }
+      }
+    }
+    const derivedIds = (byOperation.get(operationId) ?? []).map((comment) => comment.comment_id);
+    if (
+      new Set(inventoryIds).size !== inventoryIds.length ||
+      canonicalJson([...inventoryIds].sort()) !== canonicalJson([...derivedIds].sort())
+    ) {
+      invalid('proof-control-inventory-completeness');
+    }
   }
   const operationForScope = (scope) =>
     captureManifest.expected_roles.find((run) => run.scope === scope)?.operation_id;
@@ -1191,13 +1265,42 @@ function validateApprovalDerivation(host, captureManifest, capturedSourceBodies,
       }
       return page.value.jobs;
     });
-    if (jobPages[0].value.total_count !== jobs.length || jobs.length !== 1) {
+    if (
+      jobPages.some((page) => page.value.total_count !== jobs.length) ||
+      jobs.length !== 3 ||
+      new Set(jobs.map((job) => job?.name)).size !== jobs.length
+    ) {
       invalid(`approval-${phase}-jobs-cardinality`);
     }
-    const job = jobs[0];
+    const selectedName =
+      phase === 'continuation' ? 'workflow-dispatch-review' : 'workflow-run-review';
+    const otherProtectedName =
+      selectedName === 'workflow-run-review' ? 'workflow-dispatch-review' : 'workflow-run-review';
+    const expectedJobs = new Map([
+      ['authorization-preflight', 'success'],
+      [selectedName, 'success'],
+      [otherProtectedName, 'skipped'],
+    ]);
+    for (const candidate of jobs) {
+      if (
+        candidate === null ||
+        typeof candidate !== 'object' ||
+        !Number.isSafeInteger(candidate.id) ||
+        String(candidate.run_id) !== runId ||
+        candidate.run_attempt !== 1 ||
+        candidate.status !== 'completed' ||
+        expectedJobs.get(candidate.name) !== candidate.conclusion
+      ) {
+        invalid(`approval-${phase}-jobs-topology`);
+      }
+    }
+    if (!jobs.every((candidate) => expectedJobs.has(candidate.name))) {
+      invalid(`approval-${phase}-jobs-topology`);
+    }
+    const job = jobs.find((candidate) => candidate.name === selectedName);
     const reviewers = pending.reviewers?.map((reviewer) => String(reviewer.reviewer?.id));
     const environments = approval.environments;
-    const started = Date.parse(job.started_at);
+    const started = Date.parse(job?.started_at);
     if (
       pending.environment === null ||
       typeof pending.environment !== 'object' ||
@@ -1207,11 +1310,7 @@ function validateApprovalDerivation(host, captureManifest, capturedSourceBodies,
       String(approval.user?.id) !== '16307884' ||
       !Array.isArray(environments) ||
       environments.length !== 1 ||
-      !Number.isSafeInteger(job.id) ||
-      String(job.run_id) !== runId ||
-      job.run_attempt !== 1 ||
-      job.name !==
-        (phase === 'continuation' ? 'workflow-dispatch-review' : 'workflow-run-review') ||
+      job === undefined ||
       !Number.isSafeInteger(started)
     ) {
       invalid(`approval-${phase}-raw-values`);
@@ -1405,7 +1504,7 @@ function validateAuthorizationSource(value, phase) {
     value.issue_number !== '181' ||
     !decimal.test(value.comment_id) ||
     value.author_id !== '16307884' ||
-    !['admin', 'maintain'].includes(value.author_permission) ||
+    !['admin', 'write'].includes(value.author_permission) ||
     !hex64.test(value.capture_body_sha256) ||
     !hex64.test(value.body_sha256) ||
     value.readback_sha256 !== value.body_sha256
@@ -2563,9 +2662,9 @@ export function validateHostEvidence(input) {
     input.environment.name !== 'r4-trusted-proof' ||
     canonicalJson(readiness.source_ids) !==
       canonicalJson({
-        environment: 'environment-protection',
-        branch_policies: 'environment-branch-policies',
-        environment_secrets: 'environment-secret-inventory',
+        environment: 'readiness-stale-environment-protection',
+        branch_policies: 'readiness-stale-environment-branch-policies',
+        environment_secrets: 'readiness-stale-environment-secret-inventory',
       }) ||
     !decimal.test(readiness.environment_id) ||
     readiness.can_admins_bypass !== false ||
@@ -2827,7 +2926,7 @@ export function validateHostEvidence(input) {
   return { cleanupPlan: generated.plan, inventory, projectionEligible };
 }
 
-function validateCaptureManifest(value, host, captureManifestSha256) {
+export function validateCaptureManifest(value, host, captureManifestSha256) {
   exactKeys(
     value,
     [
@@ -2959,6 +3058,9 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
   const sourcePaths = new Set();
   for (const source of value.sources) {
     const sourceIdentity = /^(?<family>.+):page:(?<page>[1-9][0-9]*)$/u.exec(source.source_id);
+    const expectedVariableAbsence =
+      /^baseline-(normal|stale)-authorization-variable:page:1$/u.test(source.source_id) &&
+      source.status === 404;
     exactKeys(
       source,
       [
@@ -2983,13 +3085,14 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
       sourceIds.has(source.source_id) ||
       sourcePaths.has(source.body_path) ||
       !value.operation_ids.includes(source.operation_id) ||
-      !/^[a-z0-9][a-z0-9-]*$/u.test(source.phase) ||
+      source.phase !==
+        expectedCaptureSourcePhase(source.source_id, source.operation_id, value.operation_ids) ||
       sourceIdentity === null ||
       Number(sourceIdentity.groups.page) !== source.page ||
       !source.route.startsWith(`/repos/${host.identities.repository}/`) ||
       !Number.isSafeInteger(source.page) ||
       source.page < 1 ||
-      source.status !== 200 ||
+      (source.status !== 200 && !expectedVariableAbsence) ||
       !/^source-[0-9]{4}\.json$/u.test(source.body_path) ||
       !decimal.test(source.body_size) ||
       !hex64.test(source.body_sha256) ||
@@ -3536,8 +3639,7 @@ function validateCleanupExecution({
     canonicalJson(cleanupExecution.operation_ids) !==
       canonicalJson(captureManifest.operation_ids) ||
     cleanupExecution.plan_sha256 !== sha256(canonicalJson(cleanupPlan)) ||
-    cleanupExecution.entry.cleanup_authorization_source_id !==
-      `authorization-cleanup-comment-${authorizations.cleanup.source.comment_id}:page:1` ||
+    cleanupExecution.entry.cleanup_authorization_source_id !== 'cleanup-authorization-readback' ||
     cleanupExecution.entry.capture_manifest_sha256 !== captureManifestSha256 ||
     cleanupExecution.entry.oracle_result_sha256 !== oracleResultSha256 ||
     canonicalJson(cleanupExecution.entry.run_terminal_source_ids) !==
@@ -4128,6 +4230,8 @@ function validateCredentialLifecycle(
       'branch',
       'commit',
       'tree',
+      'worktree_identity_sha256',
+      'gate_assembly_sha256',
       'remote_readbacks',
       'authority_identities',
       'contract_digests',
@@ -4148,12 +4252,15 @@ function validateCredentialLifecycle(
     correctionGateReceipt.branch !== gate.branch ||
     correctionGateReceipt.commit !== gate.commit ||
     correctionGateReceipt.tree !== gate.tree ||
+    correctionGateReceipt.worktree_identity_sha256 !==
+      execution.destinations.public.worktree_identity_sha256 ||
+    correctionGateReceipt.gate_assembly_sha256 !== identities.get('capture')?.build_sha256 ||
     canonicalJson(correctionGateReceipt.authority_identities) !==
       canonicalJson(gate.authority_identities) ||
     canonicalJson(correctionGateReceipt.contract_digests) !==
       canonicalJson(gate.contract_digests) ||
     !Array.isArray(correctionGateReceipt.remote_readbacks) ||
-    correctionGateReceipt.remote_readbacks.length !== 2 ||
+    correctionGateReceipt.remote_readbacks.length !== 4 ||
     correctionGateReceipt.worktree_clean !== true ||
     correctionGateReceipt.finalized !== true
   ) {
@@ -4268,7 +4375,7 @@ function deriveRecoveryProofControl(authorizations, captureManifest, capturedSou
   ]);
   const grouped = new Map([...kinds.keys()].map((operationId) => [operationId, []]));
   for (const source of captureManifest.sources.filter(({ source_id }) =>
-    /^proof-control-comment-[1-9][0-9]*:page:1$/u.test(source_id),
+    /^proof-control-(bootstrap|stale)-comment-[1-9][0-9]*:page:1$/u.test(source_id),
   )) {
     const retained = capturedSourceBodies.get(source.source_id);
     if (
@@ -4298,7 +4405,9 @@ function deriveRecoveryProofControl(authorizations, captureManifest, capturedSou
       marker.contract !== 'apr-r4-e2p-proof-control-v1' ||
       marker.repository !== captureManifest.repository ||
       String(response.id) !==
-        /^proof-control-comment-([1-9][0-9]*):page:1$/u.exec(source.source_id)?.[1] ||
+        /^proof-control-(?:bootstrap|stale)-comment-([1-9][0-9]*):page:1$/u.exec(
+          source.source_id,
+        )?.[1] ||
       marker.body_sha256 !== sha256(Buffer.from(preimage, 'utf8')) ||
       response.body !== `<!-- apr-r4-e2p-control ${JSON.stringify(marker)} -->`
     ) {
@@ -4508,6 +4617,10 @@ function assembleRecoveryEvidence({
       ['source-bundle', canonicalJson(sourceBundle)],
       ['oracle-result', canonicalJson(oracleResult)],
       ['cleanup-plan', canonicalJson(cleanupPlan)],
+      [
+        'cleanup-authorization-readback',
+        canonicalJson(retainedDocuments.get('cleanup-authorization-readback')),
+      ],
       ['credential-admission-receipt', canonicalJson(credentialAdmission)],
       ['credential-disposition-receipt', canonicalJson(credentialDisposition)],
       ['producer-journal-seal', canonicalJson(producerJournalSeal)],
@@ -4608,7 +4721,11 @@ export function assembleTrustedProofEvidence({
     invalid('assembler-oracle-binaries-values');
   }
   const documents = validateSourceBundle(sourceMap, sourceBundle);
-  const authorizations = deriveAuthorizations(captureManifest, capturedSourceBodies);
+  const authorizations = deriveAuthorizations(
+    captureManifest,
+    capturedSourceBodies,
+    retainedDocuments,
+  );
   const credentialAdmission = retainedDocuments.get('credential-admission-receipt');
   const credentialDisposition = retainedDocuments.get('credential-disposition-receipt');
   const correctionGateReceipt = retainedDocuments.get('correction-gate-receipt');
@@ -4799,6 +4916,10 @@ export function assembleTrustedProofEvidence({
       ['source-bundle', canonicalJson(sourceBundle)],
       ['oracle-result', canonicalJson(oracleResult)],
       ['cleanup-plan', canonicalJson(cleanupPlan)],
+      [
+        'cleanup-authorization-readback',
+        canonicalJson(retainedDocuments.get('cleanup-authorization-readback')),
+      ],
       ['credential-admission-receipt', canonicalJson(credentialAdmission)],
       ['credential-disposition-receipt', canonicalJson(credentialDisposition)],
       ['correction-gate-receipt', canonicalJson(correctionGateReceipt)],

@@ -24,6 +24,8 @@ public sealed record CorrectionGateReceiptDocument(
     string Branch,
     string Commit,
     string Tree,
+    string WorktreeIdentitySha256,
+    string GateAssemblySha256,
     CorrectionGateReadback[] RemoteReadbacks,
     CorrectionGateIdentity[] AuthorityIdentities,
     CorrectionGateContract[] ContractDigests,
@@ -105,8 +107,9 @@ public static class CorrectionGateReceipt
             !Sha256(value.ExecutionAuthorizationSha256) || !Sha256(value.CorrectionGateSha256) ||
             string.IsNullOrWhiteSpace(value.Repository) || !Decimal(value.PullRequestNumber) ||
             string.IsNullOrWhiteSpace(value.Branch) || !Hex40(value.Commit) || !Hex40(value.Tree) ||
-            value.RemoteReadbacks.Length != 2 ||
-            value.RemoteReadbacks.Select(item => item.SourceId).Distinct(StringComparer.Ordinal).Count() != 2 ||
+            !Sha256(value.WorktreeIdentitySha256) || !Sha256(value.GateAssemblySha256) ||
+            value.RemoteReadbacks.Length != 4 ||
+            value.RemoteReadbacks.Select(item => item.SourceId).Distinct(StringComparer.Ordinal).Count() != 4 ||
             value.RemoteReadbacks.Any(item => !Sha256(item.BodySha256) ||
                 !Sha256(item.BodyPhysicalIdentitySha256) ||
                 item.ResponseReceivedUnixMilliseconds < item.RequestStartedUnixMilliseconds) ||

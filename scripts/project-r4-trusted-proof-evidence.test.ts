@@ -18,6 +18,7 @@ import {
   scanPublicCandidate,
   sha256,
   validateHostEvidence,
+  validateCaptureManifest,
 } from './r4-trusted-proof-contract.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -25,12 +26,29 @@ const fixtureRoot = path.join(root, 'runtime', 'tests', 'fixtures', 'action-host
 const host = JSON.parse(
   fs.readFileSync(path.join(fixtureRoot, 'templates', 'host-restricted-evidence.json'), 'utf8'),
 );
+host.environment.readiness_snapshot.source_ids = {
+  environment: 'readiness-stale-environment-protection',
+  branch_policies: 'readiness-stale-environment-branch-policies',
+  environment_secrets: 'readiness-stale-environment-secret-inventory',
+};
 const expectedPublic = JSON.parse(
   fs.readFileSync(path.join(fixtureRoot, 'templates', 'public-safe-evidence.json'), 'utf8'),
 );
 
 function copy<T>(value: T): T {
   return structuredClone(value);
+}
+
+function proofPhase(candidate: any, comment: any) {
+  return comment.operation_id === candidate.identities.operation_ids[0] ? 'bootstrap' : 'stale';
+}
+
+function proofCommentSource(candidate: any, comment: any) {
+  return `proof-control-${proofPhase(candidate, comment)}-comment-${comment.comment_id}:page:1`;
+}
+
+function proofPermissionSource(candidate: any, comment: any) {
+  return `proof-control-${proofPhase(candidate, comment)}-permission-${comment.comment_id}-maintainer:page:1`;
 }
 
 function projectMutation(mutator: (candidate: any) => void) {
@@ -147,6 +165,7 @@ function syntheticAssembly(input = host) {
   ];
   const sourceDigests = new Map<string, string>();
   const sourceRoutes = new Map<string, string>();
+  const sourceStatuses = new Map<string, number>();
   const sourceObservations = new Map<
     string,
     { request_started: number; response_received: number }
@@ -166,6 +185,7 @@ function syntheticAssembly(input = host) {
     capturedSourceBodies.set(sourceId, { text: bytes.toString('utf8') });
     return digest;
   };
+  let cleanupAuthorizationReadback: any;
   for (const phase of ['cleanup', 'execution', 'setup']) {
     const expected = candidate.authorizations[phase];
     const { source: oldSource, ...authorization } = expected;
@@ -177,70 +197,118 @@ function syntheticAssembly(input = host) {
       authorization,
     };
     const body = `<!-- apr-r4-e3-authorization ${JSON.stringify(marker)} -->`;
-    const commentSourceId = `authorization-${phase}-comment-${oldSource.comment_id}:page:1`;
-    const permissionSourceId = `authorization-${phase}-permission-maintainer:page:1`;
-    const commentDigest = registerCapture(
-      commentSourceId,
-      `/repos/${candidate.identities.repository}/issues/comments/${oldSource.comment_id}`,
-      {
-        id: Number(oldSource.comment_id),
-        body,
-        user: { id: Number(oldSource.author_id), login: 'maintainer' },
-        created_at: '2026-08-25T00:00:00Z',
-        updated_at: '2026-08-25T00:00:00Z',
-      },
-      oldSource.observation,
-    );
-    registerCapture(
-      permissionSourceId,
-      `/repos/${candidate.identities.repository}/collaborators/maintainer/permission`,
-      {
-        permission: oldSource.author_permission,
-        user: { id: Number(oldSource.author_id), login: 'maintainer' },
-      },
-    );
-    expected.source.capture_body_sha256 = commentDigest;
+    const commentResponse = {
+      id: Number(oldSource.comment_id),
+      body,
+      user: { id: Number(oldSource.author_id), login: 'maintainer' },
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-25T00:00:00Z',
+    };
+    const permissionResponse = {
+      permission: oldSource.author_permission,
+      user: { id: Number(oldSource.author_id), login: 'maintainer' },
+    };
+    if (phase === 'cleanup') {
+      cleanupAuthorizationReadback = {
+        kind: 'apr-r4-e3-cleanup-authorization-readback-v1',
+        comment: commentResponse,
+        permission: permissionResponse,
+        observation: oldSource.observation,
+      };
+      expected.source.capture_body_sha256 = sha256(canonicalJson(commentResponse));
+    } else {
+      for (const scope of ['normal', 'stale']) {
+        const commentDigest = registerCapture(
+          `authorization-${phase}-comment-${scope}-${oldSource.comment_id}:page:1`,
+          `/repos/${candidate.identities.repository}/issues/comments/${oldSource.comment_id}`,
+          commentResponse,
+          oldSource.observation,
+        );
+        registerCapture(
+          `authorization-${phase}-permission-${scope}-maintainer:page:1`,
+          `/repos/${candidate.identities.repository}/collaborators/maintainer/permission`,
+          permissionResponse,
+          oldSource.observation,
+        );
+        if (scope === 'normal') expected.source.capture_body_sha256 = commentDigest;
+      }
+    }
     expected.source.body_sha256 = sha256(Buffer.from(body, 'utf8'));
     expected.source.readback_sha256 = expected.source.body_sha256;
   }
-  const environmentDigest = registerCapture(
-    'environment-protection:page:1',
-    `/repos/${candidate.identities.repository}/environments/r4-trusted-proof`,
-    restoredEnvironment,
-    readiness.observation,
-  );
-  const branchPoliciesDigest = registerCapture(
-    'environment-branch-policies:page:1',
-    `/repos/${candidate.identities.repository}/environments/r4-trusted-proof/deployment-branch-policies?per_page=100`,
-    {
-      total_count: readiness.branch_policies.length,
-      branch_policies: readiness.branch_policies.map((policy: any) => ({
-        ...policy,
-        id: Number(policy.id),
-        node_id: 'EBP_synthetic',
-      })),
-    },
-    {
-      request_started: readiness.observation.response_received + 1,
-      response_received: readiness.observation.response_received + 2,
-    },
-  );
-  const environmentSecretsDigest = registerCapture(
-    'environment-secret-inventory:page:1',
-    `/repos/${candidate.identities.repository}/environments/r4-trusted-proof/secrets?per_page=100`,
-    {
-      total_count: readiness.secret_names.length,
-      secrets: readiness.secret_names.map((name: string) => ({
-        name,
-        created_at: '2026-08-25T00:00:00Z',
-        updated_at: '2026-08-25T00:00:00Z',
-      })),
-    },
-    {
-      request_started: readiness.observation.response_received + 3,
-      response_received: readiness.observation.response_received + 4,
-    },
-  );
+  let environmentDigest = '';
+  let branchPoliciesDigest = '';
+  let environmentSecretsDigest = '';
+  for (const phase of [
+    'baseline-normal',
+    'baseline-stale',
+    'readiness-bootstrap',
+    'readiness-continuation',
+    'readiness-stale',
+  ]) {
+    const baseline = phase.startsWith('baseline-');
+    const environmentId = `${phase}-environment-protection:page:1`;
+    const branchesId = `${phase}-environment-branch-policies:page:1`;
+    const secretsId = `${phase}-environment-secret-inventory:page:1`;
+    const variableId = `${phase}-authorization-variable:page:1`;
+    const capturedEnvironment = registerCapture(
+      environmentId,
+      `/repos/${candidate.identities.repository}/environments/r4-trusted-proof`,
+      restoredEnvironment,
+      readiness.observation,
+    );
+    const capturedBranches = registerCapture(
+      branchesId,
+      `/repos/${candidate.identities.repository}/environments/r4-trusted-proof/deployment-branch-policies`,
+      {
+        total_count: readiness.branch_policies.length,
+        branch_policies: readiness.branch_policies.map((policy: any) => ({
+          ...policy,
+          id: Number(policy.id),
+          node_id: 'EBP_synthetic',
+        })),
+      },
+      readiness.observation,
+    );
+    const secretNames = baseline ? [] : readiness.secret_names;
+    const capturedSecrets = registerCapture(
+      secretsId,
+      `/repos/${candidate.identities.repository}/environments/r4-trusted-proof/secrets`,
+      {
+        total_count: secretNames.length,
+        secrets: secretNames.map((name: string) => ({
+          name,
+          created_at: '2026-08-25T00:00:00Z',
+          updated_at: '2026-08-25T00:00:00Z',
+        })),
+      },
+      readiness.observation,
+    );
+    registerCapture(
+      variableId,
+      `/repos/${candidate.identities.repository}/actions/variables/R4_TRUSTED_PROOF_AUTHORIZATION`,
+      baseline
+        ? { message: 'Not Found' }
+        : {
+            name: 'R4_TRUSTED_PROOF_AUTHORIZATION',
+            value:
+              candidate.authorizations.execution.authorization_manifests[
+                phase === 'readiness-stale' ? 1 : 0
+              ],
+          },
+    );
+    if (baseline) sourceStatuses.set(variableId, 404);
+    if (phase === 'readiness-stale') {
+      environmentDigest = capturedEnvironment;
+      branchPoliciesDigest = capturedBranches;
+      environmentSecretsDigest = capturedSecrets;
+    }
+  }
+  readiness.source_ids = {
+    environment: 'readiness-stale-environment-protection',
+    branch_policies: 'readiness-stale-environment-branch-policies',
+    environment_secrets: 'readiness-stale-environment-secret-inventory',
+  };
   readiness.readback_sha256 = sha256(
     canonicalJson({
       environment: environmentDigest,
@@ -288,8 +356,17 @@ function syntheticAssembly(input = host) {
       `transition-${phase}-jobs-run-${runId}:page:1`,
       `/repos/${candidate.identities.repository}/actions/runs/${runId}/attempts/1/jobs`,
       {
-        total_count: 1,
+        total_count: 3,
         jobs: [
+          {
+            id: Number(`90${runId}`),
+            run_id: Number(runId),
+            run_attempt: 1,
+            name: 'authorization-preflight',
+            status: 'completed',
+            conclusion: 'success',
+            started_at: new Date(transition.protected_job.started.value - 1).toISOString(),
+          },
           {
             id: Number(`91${runId}`),
             run_id: Number(runId),
@@ -298,6 +375,18 @@ function syntheticAssembly(input = host) {
             status: 'completed',
             conclusion: 'success',
             started_at: new Date(transition.protected_job.started.value).toISOString(),
+          },
+          {
+            id: Number(`92${runId}`),
+            run_id: Number(runId),
+            run_attempt: 1,
+            name:
+              transition.protected_job.name === 'workflow-run-review'
+                ? 'workflow-dispatch-review'
+                : 'workflow-run-review',
+            status: 'completed',
+            conclusion: 'skipped',
+            started_at: null,
           },
         ],
       },
@@ -368,7 +457,7 @@ function syntheticAssembly(input = host) {
         body_sha256: comment.body_sha256,
       })} -->`;
       const readyActor = comment.kind === 'ready' || comment.kind === 'stale-ready';
-      const sourceId = `proof-control-comment-${comment.comment_id}:page:1`;
+      const sourceId = proofCommentSource(candidate, comment);
       comment.capture_body_sha256 = registerCapture(
         sourceId,
         `/repos/${candidate.identities.repository}/issues/comments/${comment.comment_id}`,
@@ -386,7 +475,7 @@ function syntheticAssembly(input = host) {
       );
       if (!readyActor) {
         registerCapture(
-          `proof-control-permission-${comment.comment_id}-maintainer:page:1`,
+          proofPermissionSource(candidate, comment),
           `/repos/${candidate.identities.repository}/collaborators/maintainer/permission`,
           {
             permission: comment.actor_permission,
@@ -397,8 +486,22 @@ function syntheticAssembly(input = host) {
       }
     }
   }
+  for (const [scope, family] of Object.entries<any>(candidate.proof_control)) {
+    const prNumber =
+      scope === 'normal'
+        ? candidate.identities.normal_pr_number
+        : candidate.identities.stale_pr_number;
+    const responses = family.comments.map((comment: any) =>
+      JSON.parse(capturedSourceBodies.get(proofCommentSource(candidate, comment))!.text),
+    );
+    registerCapture(
+      `proof-control-comments-${scope}-pr-${prNumber}:page:1`,
+      `/repos/${candidate.identities.repository}/issues/${prNumber}/comments?per_page=100`,
+      responses,
+    );
+  }
   const sourceOperation = (sourceId: string) => {
-    if (sourceId.startsWith('proof-control-comment-')) {
+    if (/^proof-control-(bootstrap|stale)-comment-/u.test(sourceId)) {
       const response = JSON.parse(capturedSourceBodies.get(sourceId)!.text);
       const prefix = '<!-- apr-r4-e2p-control ';
       return JSON.parse(response.body.slice(prefix.length, -4)).operation_id;
@@ -415,6 +518,20 @@ function syntheticAssembly(input = host) {
         id: 9001 + index,
         run_attempt: 1,
         event: trigger.expected_event,
+        path: '.github/workflows/r4-trusted-proof.yml',
+        head_repository: { full_name: candidate.identities.repository },
+        head_sha:
+          trigger.producer === 'advance-stale-ref'
+            ? trigger.source_coordinate.value
+            : trigger.authorized_head_sha,
+        head_branch:
+          trigger.producer === 'dispatch-proof-workflow'
+            ? trigger.source_coordinate.value
+            : trigger.ref.slice('refs/heads/'.length),
+        pull_requests:
+          trigger.expected_event === 'workflow_dispatch'
+            ? []
+            : [{ number: Number(trigger.pr_number) }],
         created_at: new Date(1_000 + index * 2_000).toISOString(),
       }),
     ),
@@ -426,19 +543,42 @@ function syntheticAssembly(input = host) {
     `/repos/${candidate.identities.repository}/actions/workflows/r4-trusted-proof.yml/runs?per_page=100`,
   );
   sourceObservations.set(producerDiscoverySourceId, { request_started: 10, response_received: 11 });
+  const sourcePhase = (sourceId: string) => {
+    const family = sourceId.replace(/:page:[1-9][0-9]*$/u, '');
+    let match = /^authorization-(setup|execution)-(?:comment|permission)-(normal|stale)-/u.exec(
+      family,
+    );
+    if (match) return `baseline-${match[2]}`;
+    match = /^(baseline-(?:normal|stale))-/u.exec(family);
+    if (match) return match[1];
+    match = /^readiness-(bootstrap|continuation|stale)-/u.exec(family);
+    if (match) return `${match[1]}-readiness`;
+    match = /^transition-(bootstrap|continuation|stale)-(pending|approvals|jobs)-/u.exec(family);
+    if (match) return `${match[1]}-${match[2] === 'approvals' ? 'approval' : match[2]}`;
+    match = /^proof-control-comments-(normal|stale)-pr-/u.exec(family);
+    if (match) return `terminal-${match[1]}`;
+    match = /^proof-control-(bootstrap|stale)-(?:comment|permission)-/u.exec(family);
+    if (match) return `${match[1]}-approval`;
+    match = /^concurrency-(normal|stale)-run-/u.exec(family);
+    if (match) return match[1] === 'normal' ? 'bootstrap-concurrency' : 'stale-concurrency';
+    if (family === 'producer-discovery-final') return 'producer-discovery';
+    match = /^(?:artifacts-run|run-terminal)-([1-9][0-9]*)$/u.exec(family);
+    if (match) {
+      return sourceOperation(sourceId) === candidate.identities.operation_ids[1]
+        ? 'terminal-stale'
+        : 'terminal-normal';
+    }
+    throw new Error(`unclassified synthetic capture source: ${sourceId}`);
+  };
   const evidenceSources = [...sourceDigests].map(([sourceId, bodySha256], index) => ({
     source_id: sourceId,
     operation_id: sourceOperation(sourceId),
-    phase: sourceId.startsWith('authorization-')
-      ? `authorization-${sourceId.split('-')[1]}`
-      : sourceId.startsWith('producer-discovery-')
-        ? 'producer-discovery'
-        : 'pre-cleanup-observation',
+    phase: sourcePhase(sourceId),
     route:
       sourceRoutes.get(sourceId) ??
       `/repos/SolusQuest/agentic-pr-review/evidence/${encodeURIComponent(sourceId)}`,
     page: 1,
-    status: 200,
+    status: sourceStatuses.get(sourceId) ?? 200,
     body_path: `source-${String(metadataRunIds.length + index + 1).padStart(4, '0')}.json`,
     body_sha256: bodySha256,
     body_size: capturedSourceBodies.has(sourceId)
@@ -521,7 +661,11 @@ function syntheticAssembly(input = host) {
       ...metadataRunIds.map((runId, index) => ({
         source_id: `artifacts-run-${runId}:page:1`,
         operation_id: observedRuns.find(({ run_id }: any) => run_id === runId)!.operation_id,
-        phase: 'terminal-artifact-inventory',
+        phase:
+          observedRuns.find(({ run_id }: any) => run_id === runId)!.operation_id ===
+          candidate.identities.operation_ids[1]
+            ? 'terminal-stale'
+            : 'terminal-normal',
         route: `/repos/SolusQuest/agentic-pr-review/actions/runs/${runId}/artifacts?per_page=100`,
         page: 1,
         status: 200,
@@ -745,6 +889,9 @@ function syntheticAssembly(input = host) {
     branch: candidate.authorizations.execution.correction_gate.branch,
     commit: candidate.authorizations.execution.correction_gate.commit,
     tree: candidate.authorizations.execution.correction_gate.tree,
+    worktree_identity_sha256:
+      candidate.authorizations.execution.destinations.public.worktree_identity_sha256,
+    gate_assembly_sha256: (authorityIdentities.get('capture') as any).build_sha256,
     remote_readbacks: [
       {
         source_id: 'correction-gate-pr',
@@ -761,6 +908,22 @@ function syntheticAssembly(input = host) {
         body_physical_identity_sha256: '4'.repeat(64),
         request_started_unix_milliseconds: 2,
         response_received_unix_milliseconds: 3,
+      },
+      {
+        source_id: 'correction-gate-authorization-comment',
+        body_path: 'correction-gate-authorization-comment.json',
+        body_sha256: '5'.repeat(64),
+        body_physical_identity_sha256: '6'.repeat(64),
+        request_started_unix_milliseconds: 4,
+        response_received_unix_milliseconds: 5,
+      },
+      {
+        source_id: 'correction-gate-authorization-permission',
+        body_path: 'correction-gate-authorization-permission.json',
+        body_sha256: '7'.repeat(64),
+        body_physical_identity_sha256: '8'.repeat(64),
+        request_started_unix_milliseconds: 6,
+        response_received_unix_milliseconds: 7,
       },
     ],
     authority_identities: candidate.authorizations.execution.correction_gate.authority_identities,
@@ -964,7 +1127,7 @@ function syntheticAssembly(input = host) {
     operation_ids: candidate.identities.operation_ids,
     plan_sha256: generatedCleanup.digest,
     entry: {
-      cleanup_authorization_source_id: `authorization-cleanup-comment-${candidate.authorizations.cleanup.source.comment_id}:page:1`,
+      cleanup_authorization_source_id: 'cleanup-authorization-readback',
       capture_manifest_sha256: captureManifestSha256,
       oracle_result_sha256: oracleResultSha256,
       run_terminal_source_ids: runTerminalSources,
@@ -1017,7 +1180,7 @@ function syntheticAssembly(input = host) {
         '/identities',
         [
           captureReference(
-            `authorization-execution-comment-${candidate.authorizations.execution.source.comment_id}:page:1`,
+            `authorization-execution-comment-normal-${candidate.authorizations.execution.source.comment_id}:page:1`,
           ),
           { source_id: 'capture-manifest', sha256: captureManifestSha256 },
           { source_id: 'oracle-build-receipt', sha256: sha256(canonicalJson(oracleBuildReceipt)) },
@@ -1038,22 +1201,28 @@ function syntheticAssembly(input = host) {
       ],
       [
         '/authorizations',
-        ['cleanup', 'execution', 'setup']
+        ['execution', 'setup']
           .flatMap((phase) => {
             const source = candidate.authorizations[phase].source;
-            return [
-              captureReference(`authorization-${phase}-comment-${source.comment_id}:page:1`),
-              captureReference(`authorization-${phase}-permission-maintainer:page:1`),
-            ];
+            return ['normal', 'stale'].flatMap((scope) => [
+              captureReference(
+                `authorization-${phase}-comment-${scope}-${source.comment_id}:page:1`,
+              ),
+              captureReference(`authorization-${phase}-permission-${scope}-maintainer:page:1`),
+            ]);
+          })
+          .concat({
+            source_id: 'cleanup-authorization-readback',
+            sha256: sha256(canonicalJson(cleanupAuthorizationReadback)),
           })
           .sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
         '/environment',
         [
-          captureReference('environment-branch-policies:page:1'),
-          captureReference('environment-protection:page:1'),
-          captureReference('environment-secret-inventory:page:1'),
+          captureReference('readiness-stale-environment-branch-policies:page:1'),
+          captureReference('readiness-stale-environment-protection:page:1'),
+          captureReference('readiness-stale-environment-secret-inventory:page:1'),
         ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
@@ -1083,18 +1252,21 @@ function syntheticAssembly(input = host) {
         Object.values<any>(candidate.proof_control)
           .flatMap((family) => family.comments)
           .flatMap((comment) => {
-            const references = [
-              captureReference(`proof-control-comment-${comment.comment_id}:page:1`),
-            ];
+            const references = [captureReference(proofCommentSource(candidate, comment))];
             if (comment.kind === 'release' || comment.kind === 'stale-release') {
-              references.push(
-                captureReference(
-                  `proof-control-permission-${comment.comment_id}-maintainer:page:1`,
-                ),
-              );
+              references.push(captureReference(proofPermissionSource(candidate, comment)));
             }
             return references;
           })
+          .concat(
+            ['normal', 'stale'].map((scope) => {
+              const prNumber =
+                scope === 'normal'
+                  ? candidate.identities.normal_pr_number
+                  : candidate.identities.stale_pr_number;
+              return captureReference(`proof-control-comments-${scope}-pr-${prNumber}:page:1`);
+            }),
+          )
           .sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
@@ -1128,9 +1300,7 @@ function syntheticAssembly(input = host) {
           ...Object.values<any>(candidate.proof_control)
             .flatMap((family) => family.comments)
             .filter((comment) => comment.kind === 'ready' || comment.kind === 'stale-ready')
-            .map((comment) =>
-              captureReference(`proof-control-comment-${comment.comment_id}:page:1`),
-            ),
+            .map((comment) => captureReference(proofCommentSource(candidate, comment))),
         ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
@@ -1199,6 +1369,7 @@ function syntheticAssembly(input = host) {
       ['correction-gate-receipt', correctionGateReceipt],
       ['credential-admission-receipt', credentialAdmission],
       ['credential-disposition-receipt', credentialDisposition],
+      ['cleanup-authorization-readback', cleanupAuthorizationReadback],
       ['producer-journal-seal', producerJournalSeal],
       ['oracle-build-receipt', oracleBuildReceipt],
       ['cleanup-plan', generatedCleanup.plan],
@@ -1257,6 +1428,31 @@ function refreshPostCleanupCapture(assembly: any, sourceId: string, value?: any)
       references: cleanupDocument.evidence.references,
     }),
   );
+}
+
+function refreshCapture(assembly: any, sourceId: string, value: any) {
+  const source = assembly.captureManifest.sources.find(
+    (candidate: any) => candidate.source_id === sourceId,
+  );
+  if (source === undefined) throw new Error(`missing synthetic capture source ${sourceId}`);
+  const text = canonicalJson(value);
+  assembly.capturedSourceBodies.set(sourceId, { text });
+  source.body_sha256 = sha256(Buffer.from(text, 'utf8'));
+  source.body_size = String(Buffer.byteLength(text, 'utf8'));
+  assembly.captureManifestSha256 = sha256(canonicalJson(assembly.captureManifest));
+  for (const document of assembly.sourceBundle.documents) {
+    for (const reference of document.evidence.references) {
+      if (reference.source_id === sourceId) {
+        reference.sha256 = source.body_sha256;
+      }
+      if (reference.source_id === 'capture-manifest') {
+        reference.sha256 = assembly.captureManifestSha256;
+      }
+    }
+    document.evidence.set_sha256 = sha256(
+      canonicalJson({ kind: document.evidence.kind, references: document.evidence.references }),
+    );
+  }
 }
 
 describe('R4 E3 executable evidence contract', () => {
@@ -1641,6 +1837,35 @@ describe('R4 E3 executable evidence contract', () => {
     expect(() => assembleTrustedProofEvidence(producer)).toThrow(/credential-lifecycle/u);
   });
 
+  test('rejects paired authorization drift, late cleanup edits, and generic source phases', () => {
+    const paired = syntheticAssembly();
+    const staleSetup = 'authorization-setup-comment-stale-8201:page:1';
+    const staleResponse = JSON.parse(paired.capturedSourceBodies.get(staleSetup).text);
+    staleResponse.updated_at = '2026-08-25T00:00:01Z';
+    refreshCapture(paired, staleSetup, staleResponse);
+    expect(() => assembleTrustedProofEvidence(paired)).toThrow(/paired-baseline-drift/u);
+
+    const cleanup = syntheticAssembly();
+    const cleanupReadback = cleanup.retainedDocuments.get('cleanup-authorization-readback');
+    cleanupReadback.comment.body = cleanupReadback.comment.body.replace(
+      'apr-r4-e3-cleanup-authorization-v1',
+      'apr-r4-e3-cleanup-authorization-edited-v1',
+    );
+    refreshRetainedDocument(cleanup, '/authorizations', 'cleanup-authorization-readback');
+    expect(() => assembleTrustedProofEvidence(cleanup)).toThrow(/cleanup-authorization/u);
+
+    const phase = syntheticAssembly();
+    phase.captureManifest.sources.find(
+      (source: any) => source.source_id === 'readiness-stale-environment-protection:page:1',
+    ).phase = 'pre-cleanup-observation';
+    const phaseHost = structuredClone(host);
+    const phaseManifestSha256 = sha256(canonicalJson(phase.captureManifest));
+    phaseHost.restricted_package.capture_manifest_sha256 = phaseManifestSha256;
+    expect(() =>
+      validateCaptureManifest(phase.captureManifest, phaseHost, phaseManifestSha256),
+    ).toThrow(/capture-source-values/u);
+  });
+
   test('generates a zero-run recovery cleanup plan without inventing comments or sticky state', () => {
     const operationIds = host.identities.operation_ids;
     const generated = generateCleanupPlan({
@@ -1830,6 +2055,95 @@ describe('R4 E3 executable evidence contract', () => {
       response_received: 16,
     };
     expect(() => validateHostEvidence(candidate)).toThrow();
+  });
+
+  test.each([
+    [
+      'missing preflight',
+      (jobs: any[]) => jobs.filter((job) => job.name !== 'authorization-preflight'),
+    ],
+    ['missing skipped route', (jobs: any[]) => jobs.filter((job) => job.conclusion !== 'skipped')],
+    [
+      'both protected routes admitted',
+      (jobs: any[]) =>
+        jobs.map((job) =>
+          job.name === 'workflow-dispatch-review' ? { ...job, conclusion: 'success' } : job,
+        ),
+    ],
+    [
+      'wrong protected route skipped',
+      (jobs: any[]) =>
+        jobs.map((job) =>
+          job.name === 'workflow-run-review'
+            ? { ...job, conclusion: 'skipped' }
+            : job.name === 'workflow-dispatch-review'
+              ? { ...job, conclusion: 'success' }
+              : job,
+        ),
+    ],
+    [
+      'extra job',
+      (jobs: any[]) => [...jobs, { ...jobs[0], id: jobs[0].id + 100, name: 'unexpected-job' }],
+    ],
+    ['duplicate job', (jobs: any[]) => [...jobs, { ...jobs[0], id: jobs[0].id + 100 }]],
+  ])('rejects complete job topology with %s', (_name, mutate) => {
+    const input = syntheticAssembly();
+    const sourceId = 'transition-bootstrap-jobs-run-9001:page:1';
+    const response = JSON.parse(input.capturedSourceBodies.get(sourceId).text);
+    response.jobs = mutate(response.jobs);
+    response.total_count = response.jobs.length;
+    refreshCapture(input, sourceId, response);
+    expect(() => assembleTrustedProofEvidence(input)).toThrow(/approval-bootstrap-jobs/u);
+  });
+
+  test('accepts a reorder-equivalent complete three-job topology', () => {
+    const input = syntheticAssembly();
+    const sourceId = 'transition-bootstrap-jobs-run-9001:page:1';
+    const response = JSON.parse(input.capturedSourceBodies.get(sourceId).text);
+    response.jobs.reverse();
+    refreshCapture(input, sourceId, response);
+    expect(() => assembleTrustedProofEvidence(input)).toThrow(/cleanup-execution-entry/u);
+  });
+
+  test('accepts the complete three-job topology split across cursor pages', () => {
+    const input = syntheticAssembly();
+    const firstId = 'transition-bootstrap-jobs-run-9001:page:1';
+    const firstSource = input.captureManifest.sources.find(
+      (candidate: any) => candidate.source_id === firstId,
+    );
+    const response = JSON.parse(input.capturedSourceBodies.get(firstId).text);
+    const nextRoute = `${firstSource.route}?page=2`;
+    const firstPage = { total_count: 3, jobs: response.jobs.slice(0, 1) };
+    const secondPage = { total_count: 3, jobs: response.jobs.slice(1) };
+    firstSource.next_route = nextRoute;
+    refreshCapture(input, firstId, firstPage);
+    const secondId = 'transition-bootstrap-jobs-run-9001:page:2';
+    const secondText = canonicalJson(secondPage);
+    input.captureManifest.sources.push({
+      ...firstSource,
+      source_id: secondId,
+      page: 2,
+      route: nextRoute,
+      next_route: null,
+      body_path: 'source-pagination-page-2.json',
+      body_sha256: sha256(Buffer.from(secondText, 'utf8')),
+      body_size: String(Buffer.byteLength(secondText, 'utf8')),
+      body_file_identity: '9'.repeat(64),
+    });
+    input.capturedSourceBodies.set(secondId, { text: secondText });
+    refreshCapture(input, secondId, secondPage);
+    expect(() => assembleTrustedProofEvidence(input)).toThrow(/cleanup-execution-entry/u);
+  });
+
+  test('rejects an operation-owned proof-control comment omitted from exact capture', () => {
+    const input = syntheticAssembly();
+    const sourceId = 'proof-control-comments-normal-pr-1001:page:1';
+    const responses = JSON.parse(input.capturedSourceBodies.get(sourceId).text);
+    responses.push({ ...responses[0], id: 8999 });
+    refreshCapture(input, sourceId, responses);
+    expect(() => assembleTrustedProofEvidence(input)).toThrow(
+      /proof-control-inventory-completeness/u,
+    );
   });
 
   test('recursively closes both schemas against nested extra properties', () => {

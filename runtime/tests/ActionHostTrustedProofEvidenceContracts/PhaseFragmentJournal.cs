@@ -9,7 +9,8 @@ public sealed record PhaseFragmentDocument(
     string OperationId,
     string MaterializerSourceSha256,
     string MaterializerBuildSha256,
-    string ProducerJournalSealSha256,
+    ProducerJournalCheckpointDocument ProducerJournalCheckpoint,
+    string ProducerJournalCheckpointSha256,
     int Sequence,
     string Phase,
     string? PredecessorSha256,
@@ -61,7 +62,7 @@ public static class PhaseFragmentJournal
         string executionAuthorizationSha256,
         string materializerSourceSha256,
         string materializerBuildSha256,
-        string producerJournalSealSha256)
+        ProducerOutcomeJournal? producerJournal)
     {
         var packagePath = RestrictedEvidenceRoot.ResolveChildPath(root.Path, packageName);
         var directory = new DirectoryInfo(packagePath);
@@ -133,7 +134,7 @@ public static class PhaseFragmentJournal
                 executionAuthorizationSha256,
                 materializerSourceSha256,
                 materializerBuildSha256,
-                producerJournalSealSha256,
+                producerJournal,
                 source,
                 fragments.Count + 1,
                 predecessor);
@@ -169,7 +170,42 @@ public static class PhaseFragmentJournal
         string executionAuthorizationSha256,
         string materializerSourceSha256,
         string materializerBuildSha256,
-        string producerJournalSealSha256,
+        ProducerOutcomeJournal producerJournal,
+        int sequence,
+        string? predecessorSha256,
+        CaptureManifestSource source)
+    {
+        var producerJournalCheckpoint = producerJournal.CurrentCheckpoint();
+        return AppendCreateNew(
+            root, packageName, operationIds, executionAuthorizationSha256,
+            materializerSourceSha256, materializerBuildSha256, producerJournalCheckpoint,
+            producerJournal, sequence, predecessorSha256, source);
+    }
+
+    public static PhaseFragmentReference AppendCreateNew(
+        RestrictedEvidenceRoot root,
+        string packageName,
+        IReadOnlyList<string> operationIds,
+        string executionAuthorizationSha256,
+        string materializerSourceSha256,
+        string materializerBuildSha256,
+        ProducerJournalCheckpoint producerJournalCheckpoint,
+        int sequence,
+        string? predecessorSha256,
+        CaptureManifestSource source) => AppendCreateNew(
+            root, packageName, operationIds, executionAuthorizationSha256,
+            materializerSourceSha256, materializerBuildSha256, producerJournalCheckpoint,
+            null, sequence, predecessorSha256, source);
+
+    private static PhaseFragmentReference AppendCreateNew(
+        RestrictedEvidenceRoot root,
+        string packageName,
+        IReadOnlyList<string> operationIds,
+        string executionAuthorizationSha256,
+        string materializerSourceSha256,
+        string materializerBuildSha256,
+        ProducerJournalCheckpoint producerJournalCheckpoint,
+        ProducerOutcomeJournal? producerJournal,
         int sequence,
         string? predecessorSha256,
         CaptureManifestSource source)
@@ -182,7 +218,8 @@ public static class PhaseFragmentJournal
             source.OperationId,
             materializerSourceSha256,
             materializerBuildSha256,
-            producerJournalSealSha256,
+            producerJournalCheckpoint.Document,
+            producerJournalCheckpoint.Sha256,
             sequence,
             source.Phase,
             predecessorSha256,
@@ -206,7 +243,7 @@ public static class PhaseFragmentJournal
             executionAuthorizationSha256,
             materializerSourceSha256,
             materializerBuildSha256,
-            producerJournalSealSha256,
+            producerJournal,
             source,
             sequence,
             predecessorSha256);
@@ -233,10 +270,16 @@ public static class PhaseFragmentJournal
         string executionAuthorizationSha256,
         string materializerSourceSha256,
         string materializerBuildSha256,
+        ProducerOutcomeJournal? producerJournal,
         string producerJournalSealSha256,
         IReadOnlyList<PhaseFragmentReference> fragments,
         IReadOnlyList<CaptureManifestSource> sources)
     {
+        var producerSeal = producerJournal?.ReadSeal();
+        if (producerSeal is not null && producerSeal.Sha256 != producerJournalSealSha256)
+        {
+            throw new InvalidDataException("phase_fragment_journal_invalid");
+        }
         ValidateReferences(
             root,
             packageName,
@@ -244,6 +287,7 @@ public static class PhaseFragmentJournal
             executionAuthorizationSha256,
             materializerSourceSha256,
             materializerBuildSha256,
+            producerJournal,
             producerJournalSealSha256,
             fragments,
             sources);
@@ -311,6 +355,10 @@ public static class PhaseFragmentJournal
             {
                 CryptographicOperations.ZeroMemory(canonical);
             }
+            var producerJournal = ProducerOutcomeJournal.Open(
+                root,
+                capture.ProducerJournalDirectory,
+                capture.ExecutionAuthorizationSha256);
             ValidateReferences(
                 root,
                 packageName,
@@ -318,6 +366,7 @@ public static class PhaseFragmentJournal
                 value.ExecutionAuthorizationSha256,
                 value.MaterializerSourceSha256,
                 value.MaterializerBuildSha256,
+                producerJournal,
                 value.ProducerJournalSealSha256,
                 value.Fragments,
                 capture.Sources);
@@ -335,6 +384,7 @@ public static class PhaseFragmentJournal
         string executionAuthorizationSha256,
         string materializerSourceSha256,
         string materializerBuildSha256,
+        ProducerOutcomeJournal? producerJournal,
         string producerJournalSealSha256,
         IReadOnlyList<PhaseFragmentReference> fragments,
         IReadOnlyList<CaptureManifestSource> sources)
@@ -386,7 +436,7 @@ public static class PhaseFragmentJournal
                     executionAuthorizationSha256,
                     materializerSourceSha256,
                     materializerBuildSha256,
-                    producerJournalSealSha256,
+                    producerJournal,
                     source,
                     index + 1,
                     predecessor);
@@ -406,7 +456,7 @@ public static class PhaseFragmentJournal
         string executionAuthorizationSha256,
         string materializerSourceSha256,
         string materializerBuildSha256,
-        string producerJournalSealSha256,
+        ProducerOutcomeJournal? producerJournal,
         CaptureManifestSource source,
         int sequence,
         string? predecessorSha256)
@@ -418,7 +468,15 @@ public static class PhaseFragmentJournal
             !operationIds.Contains(value.OperationId, StringComparer.Ordinal) ||
             value.MaterializerSourceSha256 != materializerSourceSha256 ||
             value.MaterializerBuildSha256 != materializerBuildSha256 ||
-            value.ProducerJournalSealSha256 != producerJournalSealSha256 ||
+            !Sha256(value.ProducerJournalCheckpointSha256) ||
+            value.ProducerJournalCheckpoint.Kind != ProducerOutcomeJournal.CheckpointKind ||
+            !value.ProducerJournalCheckpoint.Finalized ||
+            value.ProducerJournalCheckpoint.DestinationIdentitySha256 != destinationIdentitySha256 ||
+            value.ProducerJournalCheckpoint.ExecutionAuthorizationSha256 !=
+                executionAuthorizationSha256 ||
+            !Sha256(value.ProducerJournalCheckpoint.AuthoritySha256) ||
+            value.ProducerJournalCheckpoint.EntryCount < 0 ||
+            !Sha256(value.ProducerJournalCheckpoint.EntryHeadSha256) ||
             !Sha256(value.MaterializerSourceSha256) || !Sha256(value.MaterializerBuildSha256) ||
             value.Sequence != sequence || value.Phase != source.Phase ||
             value.PredecessorSha256 != predecessorSha256 || value.SourceId != source.SourceId ||
@@ -433,6 +491,9 @@ public static class PhaseFragmentJournal
         {
             throw new InvalidDataException("phase_fragment_journal_invalid");
         }
+        producerJournal?.ValidateCheckpoint(
+            value.ProducerJournalCheckpoint,
+            value.ProducerJournalCheckpointSha256);
     }
 
     private static bool Sha256(string value) =>

@@ -261,6 +261,7 @@ function parseArgs(args) {
     '--source-bundle',
     '--capture-manifest',
     '--post-cleanup-capture-manifest',
+    '--cleanup-authorization-readback',
     '--correction-gate-receipt',
     '--credential-admission-receipt',
     '--credential-disposition-receipt-output',
@@ -392,6 +393,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       false,
     );
     const retainedInputs = [
+      ['cleanup-authorization-readback', '--cleanup-authorization-readback'],
       ['correction-gate-receipt', '--correction-gate-receipt'],
       ['credential-admission-receipt', '--credential-admission-receipt'],
       ['credential-disposition-receipt', '--credential-disposition-receipt-output'],

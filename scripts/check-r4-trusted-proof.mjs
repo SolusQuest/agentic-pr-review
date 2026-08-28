@@ -98,10 +98,10 @@ const fixtureDigests = new Map([
     'schemas/private-package-manifest.schema.json',
     '01d1ede4e23398a88f5080fca175157363c8cf639aed8cb61185d1e41d878b8f',
   ],
-  ['source-map.json', '3b0514159cb1145fd8ca96c52cef6e415760a5c230f8949f773257d6c325545a'],
+  ['source-map.json', '90d3c02ae36f4472a8d8a15b49481c5c6eb4162f0da827a1efdd32ba1bc02d47'],
   [
     'templates/host-restricted-evidence.json',
-    '31b9795c491f51b313215afd93cfba55e82f3ab01b304752acff166a62d57d4d',
+    '270e813da23cd540d994c9255c9da1de6842bccbb2a2c8ef1c6dda66fe2aa382',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -861,6 +861,7 @@ export function checkR4TrustedProof(options = {}) {
     assemblerSource.includes('--assembly-input') ||
     !assemblerSource.includes('--source-bundle') ||
     !assemblerSource.includes('--post-cleanup-capture-manifest') ||
+    !assemblerSource.includes('--cleanup-authorization-readback') ||
     !assemblerSource.includes('--cleanup-execution') ||
     !assemblerSource.includes('--oracle-assembly') ||
     !assemblerSource.includes('--production-assembly') ||

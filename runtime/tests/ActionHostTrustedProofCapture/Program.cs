@@ -28,6 +28,10 @@ internal static class Program
         {
             return CorrectionGateMaterializer.Run(args);
         }
+        if (CleanupAuthorizationMaterializer.IsCommand(args))
+        {
+            return CleanupAuthorizationMaterializer.Run(args);
+        }
         if (ProducerJournalMaterializer.IsCommand(args))
         {
             return ProducerJournalMaterializer.Run(args);
@@ -66,6 +70,10 @@ internal static class Program
             using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
             using var timeout = new CancellationTokenSource(
                 EvidenceLimits.LogicalOperationTimeout);
+            var producerJournal = ProducerOutcomeJournal.Open(
+                root,
+                plan.ProducerJournalDirectory,
+                plan.ExecutionAuthorizationSha256);
             var writer = new CapturePackageWriter(
                 root,
                 plan.PackageName,
@@ -73,6 +81,7 @@ internal static class Program
                 plan.ExecutionAuthorizationSha256,
                 plan.PhaseMaterializerSourceSha256,
                 plan.PhaseMaterializerBuildSha256,
+                producerJournal,
                 plan.ProducerJournalSealSha256,
                 plan.Kind);
             var artifactMetadata = new Dictionary<string, CapturedArtifactMetadata>(StringComparer.Ordinal);
@@ -80,10 +89,6 @@ internal static class Program
             {
                 if (source.Phase == "producer-discovery" && !writer.HasAnySource(source.SourceId))
                 {
-                    var producerJournal = ProducerOutcomeJournal.Open(
-                        root,
-                        plan.ProducerJournalDirectory,
-                        plan.ExecutionAuthorizationSha256);
                     var producerSeal = producerJournal.ReadSeal();
                     foreach (var discovery in producerSeal.Document.DiscoverySources)
                     {
@@ -116,8 +121,8 @@ internal static class Program
                 }
                 if (writer.HasAnySource(source.SourceId))
                 {
-                    if (!writer.HasCompleteSource(source) || plan.Artifacts.Any(item =>
-                            StringComparer.Ordinal.Equals(item.MetadataSourceId, source.SourceId)))
+                    if (!writer.HasCompleteSource(source) ||
+                        source.SourceId.StartsWith("artifacts-run-", StringComparison.Ordinal))
                     {
                         throw new InvalidDataException("retained_phase_source_invalid");
                     }
@@ -133,6 +138,15 @@ internal static class Program
                     timeout.Token);
                 try
                 {
+                    if (source.Phase.StartsWith("terminal-", StringComparison.Ordinal))
+                    {
+                        PhaseFragmentMaterializer.ValidateTerminalSemantics(
+                            source,
+                            pages,
+                            plan.Repository,
+                            plan.OperationIds,
+                            plan.Disposition);
+                    }
                     for (var index = 0; index < pages.Captures.Length; index++)
                     {
                         writer.AddSource(
@@ -142,8 +156,7 @@ internal static class Program
                             pages.Captures[index],
                             pages.Bodies[index]);
                     }
-                    if (plan.Artifacts.Any(item =>
-                            StringComparer.Ordinal.Equals(item.MetadataSourceId, source.SourceId)))
+                    if (source.SourceId.StartsWith("artifacts-run-", StringComparison.Ordinal))
                     {
                         IndexArtifactMetadata(source, pages, artifactMetadata);
                     }
@@ -157,29 +170,26 @@ internal static class Program
                 }
             }
 
-            foreach (var artifact in plan.Artifacts)
+            foreach (var metadata in artifactMetadata.Values.OrderBy(item =>
+                ulong.Parse(item.ArtifactId, System.Globalization.CultureInfo.InvariantCulture)))
             {
-                if (!artifactMetadata.TryGetValue(artifact.ArtifactId, out var metadata) ||
-                    !StringComparer.Ordinal.Equals(metadata.ArtifactName, artifact.ArtifactName) ||
-                    !StringComparer.Ordinal.Equals(metadata.ProducingRunId, artifact.ProducingRunId) ||
-                    !StringComparer.Ordinal.Equals(metadata.SourceId, artifact.MetadataSourceId))
-                {
+                var observedRun = plan.ObservedRuns.SingleOrDefault(item =>
+                    StringComparer.Ordinal.Equals(item.RunId, metadata.ProducingRunId)) ??
                     throw new InvalidDataException("artifact_metadata_invalid");
-                }
                 var downloaded = await client.DownloadArtifactAsync(
-                    artifact.DownloadRoute,
+                    $"/repos/{plan.Repository}/actions/artifacts/{metadata.ArtifactId}/zip",
                     timeout.Token);
                 try
                 {
                     writer.AddArtifact(
-                        artifact.ArtifactId,
+                        metadata.ArtifactId,
                         metadata.ArtifactName,
                         metadata.SourceId,
                         metadata.BodySha256,
                         downloaded.Archive,
                         CanonicalEvidence.Sha256(downloaded.Archive),
-                        artifact.ProducingRunId,
-                        artifact.ProducingRunAttempt,
+                        metadata.ProducingRunId,
+                        observedRun.RunAttempt,
                         downloaded.Capture);
                 }
                 finally

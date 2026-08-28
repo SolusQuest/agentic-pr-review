@@ -58,7 +58,7 @@ public sealed record CapturePlanDocument(
 public static class CapturePlan
 {
     public const string CheckedSourceMapSha256 =
-        "3b0514159cb1145fd8ca96c52cef6e415760a5c230f8949f773257d6c325545a";
+        "90d3c02ae36f4472a8d8a15b49481c5c6eb4162f0da827a1efdd32ba1bc02d47";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     public static CapturePlanDocument Read(RestrictedEvidenceRoot root, string relativePath)
     {
@@ -75,6 +75,16 @@ public static class CapturePlan
                 value.ProducerJournalDirectory,
                 value.ExecutionAuthorizationSha256);
             var producerSeal = producerJournal.ReadSeal();
+            var partial = preCleanup
+                ? PhaseFragmentJournal.ReadPartial(
+                    root,
+                    value.PackageName,
+                    value.OperationIds,
+                    value.ExecutionAuthorizationSha256,
+                    value.PhaseMaterializerSourceSha256,
+                    value.PhaseMaterializerBuildSha256,
+                    producerJournal)
+                : null;
             var canonical = CanonicalEvidence.Encode(value, EvidenceJson.Options);
             try
             {
@@ -153,15 +163,13 @@ public static class CapturePlan
                     !RestrictedEvidenceRoot.IsSinglePathSegment(value.PackageName) ||
                     (postCleanup && value.Sources.Length !=
                         15 + (3 * value.ObservedRuns.Length)) ||
-                    (postCleanup && value.Artifacts.Length != 0) ||
-                    (preCleanup && value.Disposition == "success-candidate" &&
-                        value.Artifacts.Length == 0) ||
-                    value.Artifacts.Length > EvidenceLimits.MaximumRecords ||
+                    value.Artifacts.Length != 0 ||
                     value.Sources.Select(item => item.SourceId).Distinct(StringComparer.Ordinal).Count() != value.Sources.Length ||
                     value.Sources.Any(item =>
                         !value.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
                         !BoundedText(item.Phase, EvidenceLimits.MaximumNameBytes) ||
                         !ValidPhase(item.Phase, item.OperationId, value.OperationIds)) ||
+                    (preCleanup && !ExactRetainedSources(value, partial!.Sources)) ||
                     !(preCleanup ? ExactSources(value) : ExactPostCleanupSources(value)) ||
                     value.Artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() != value.Artifacts.Length ||
                     value.Artifacts.Any(item =>
@@ -310,6 +318,7 @@ public static class CapturePlan
             expected.Add($"baseline-{scope}-environment-branch-policies");
             expected.Add($"baseline-{scope}-environment-secret-inventory");
             expected.Add($"baseline-{scope}-authorization-variable");
+            expected.Add($"proof-control-comments-{scope}");
         }
         foreach (var (phase, role) in new[]
         {
@@ -326,9 +335,21 @@ public static class CapturePlan
             expected.Add($"transition-{phase}-pending-run-{run}");
             expected.Add($"transition-{phase}-approvals-run-{run}");
             expected.Add($"transition-{phase}-jobs-run-{run}");
-            expected.Add($"proof-control-{phase}-comment");
-            expected.Add($"proof-control-{phase}-comment");
-            expected.Add($"proof-control-{phase}-permission");
+        }
+        if (roleRuns.ContainsKey("normal-bootstrap"))
+        {
+            expected.Add("proof-control-bootstrap-comment");
+            expected.Add("proof-control-bootstrap-comment");
+            expected.Add("proof-control-bootstrap-permission");
+        }
+        if (roleRuns.ContainsKey("stale-protected"))
+        {
+            expected.Add("proof-control-stale-comment");
+            expected.Add("proof-control-stale-comment");
+            expected.Add("proof-control-stale-comment");
+            expected.Add("proof-control-stale-comment");
+            expected.Add("proof-control-stale-permission");
+            expected.Add("proof-control-stale-permission");
         }
         if (roleRuns.TryGetValue("normal-bootstrap", out var normalOwner) &&
             roleRuns.ContainsKey("normal-continuation"))
@@ -351,6 +372,7 @@ public static class CapturePlan
             if (!TryClassifyExactSource(
                     source,
                     value.Repository,
+                    value.OperationIds,
                     runs,
                     roleRuns,
                     out var classification) ||
@@ -362,9 +384,51 @@ public static class CapturePlan
         return expected.Count == 0;
     }
 
+    private static bool ExactRetainedSources(
+        CapturePlanDocument value,
+        IReadOnlyList<CaptureManifestSource> retained)
+    {
+        var planned = value.Sources.Where(source =>
+            source.Phase != "producer-discovery" &&
+            PhaseFragmentMaterializer.RequiresRetained(source.Phase)).ToArray();
+        var groups = retained.GroupBy(source =>
+        {
+            var match = Regex.Match(source.SourceId, "^(.*):page:([1-9][0-9]*)$");
+            return match.Success ? match.Groups[1].Value : string.Empty;
+        }, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.OrderBy(
+            source => source.Page).ToArray(), StringComparer.Ordinal);
+        if (groups.ContainsKey(string.Empty) || groups.Count != planned.Length ||
+            planned.Select(source => source.SourceId).Distinct(StringComparer.Ordinal).Count() !=
+                planned.Length)
+        {
+            return false;
+        }
+        foreach (var source in planned)
+        {
+            if (!groups.Remove(source.SourceId, out var pages) || pages.Length == 0 ||
+                pages.Select((page, index) => (page, index)).Any(item =>
+                    item.page.SourceId != $"{source.SourceId}:page:{item.index + 1}" ||
+                    item.page.Page != item.index + 1 ||
+                    item.page.OperationId != source.OperationId ||
+                    item.page.Phase != source.Phase) ||
+                pages[0].Route != source.Route ||
+                (source.Pagination == "none"
+                    ? pages.Length != 1 || pages[0].NextRoute is not null
+                    : pages.Select((page, index) => (page, index)).Any(item =>
+                        item.page.NextRoute != (item.index == pages.Length - 1
+                            ? null
+                            : pages[item.index + 1].Route))))
+            {
+                return false;
+            }
+        }
+        return groups.Count == 0;
+    }
+
     private static bool TryClassifyExactSource(
         CapturePlanSource source,
         string repository,
+        string[] operationIds,
         string[] runs,
         IReadOnlyDictionary<string, string> roleRuns,
         out string classification)
@@ -490,16 +554,28 @@ public static class CapturePlan
             return source.Phase == $"{phase}-approval" &&
                 Exact(source, $"{root}/issues/comments/{proofComment.Groups[2].Value}", "none");
         }
+        var proofCommentInventory = Regex.Match(
+            source.SourceId,
+            "^proof-control-comments-(normal|stale)-pr-([1-9][0-9]*)$");
+        if (proofCommentInventory.Success)
+        {
+            var scope = proofCommentInventory.Groups[1].Value;
+            classification = $"proof-control-comments-{scope}";
+            return source.Phase == $"terminal-{scope}" && Exact(
+                source,
+                $"{root}/issues/{proofCommentInventory.Groups[2].Value}/comments",
+                "complete-cursor");
+        }
         var proofPermission = Regex.Match(
             source.SourceId,
-            "^proof-control-(bootstrap|continuation|stale)-permission-([A-Za-z0-9-]+)$");
+            "^proof-control-(bootstrap|stale)-permission-([1-9][0-9]*)-([A-Za-z0-9-]+)$");
         if (proofPermission.Success)
         {
             var phase = proofPermission.Groups[1].Value;
             classification = $"proof-control-{phase}-permission";
             return Exact(
                 source,
-                $"{root}/collaborators/{proofPermission.Groups[2].Value}/permission",
+                $"{root}/collaborators/{proofPermission.Groups[3].Value}/permission",
                 "none") && source.Phase == $"{phase}-approval";
         }
         var runSource = Regex.Match(source.SourceId, "^(artifacts-run|run-terminal)-([1-9][0-9]*)$");
@@ -508,7 +584,9 @@ public static class CapturePlan
             var family = runSource.Groups[1].Value;
             var run = runSource.Groups[2].Value;
             classification = $"{family}-{run}";
-            return Exact(
+            return source.OperationId == operationIds[
+                    source.Phase == "terminal-stale" ? 1 : 0] &&
+                source.Phase is "terminal-normal" or "terminal-stale" && Exact(
                 source,
                 family == "artifacts-run"
                     ? $"{root}/actions/runs/{run}/artifacts"
