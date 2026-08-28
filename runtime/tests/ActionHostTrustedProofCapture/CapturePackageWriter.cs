@@ -8,14 +8,18 @@ public sealed class CapturePackageWriter
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly RestrictedEvidenceRoot root;
+    private readonly string packageName;
     private readonly string packagePath;
+    private readonly string[] operationIds;
     private readonly List<CaptureManifestSource> sources = [];
     private readonly List<CaptureManifestArtifact> artifacts = [];
+    private readonly List<PhaseFragmentReference> fragments = [];
     private bool finalized;
 
     public CapturePackageWriter(
         RestrictedEvidenceRoot root,
-        string packageName)
+        string packageName,
+        string[] operationIds)
     {
         this.root = root;
         if (!BoundedText(packageName, EvidenceLimits.MaximumNameBytes) ||
@@ -23,7 +27,14 @@ public sealed class CapturePackageWriter
         {
             throw new InvalidDataException("capture_package_name_invalid");
         }
+        if (operationIds.Length != 2 || operationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
+            operationIds.Any(item => !Sha256(item)))
+        {
+            throw new InvalidDataException("capture_package_operation_invalid");
+        }
 
+        this.packageName = packageName;
+        this.operationIds = [.. operationIds];
         packagePath = RestrictedEvidenceRoot.ResolveChildPath(root.Path, packageName);
         if (!RestrictedEvidenceRoot.IsWithin(packagePath, root.Path) ||
             Directory.Exists(packagePath) || File.Exists(packagePath))
@@ -69,7 +80,7 @@ public sealed class CapturePackageWriter
             CryptographicOperations.ZeroMemory(reopened);
         }
 
-        sources.Add(new CaptureManifestSource(
+        var source = new CaptureManifestSource(
             sourceId,
             capture.Route,
             capture.Page,
@@ -81,7 +92,16 @@ public sealed class CapturePackageWriter
             capture.SafeHeadersSha256,
             capture.RequestStartedUnixMilliseconds,
             capture.ResponseReceivedUnixMilliseconds,
-            capture.NextRoute));
+            capture.NextRoute);
+        var predecessor = fragments.Count == 0 ? null : fragments[^1].Sha256;
+        fragments.Add(PhaseFragmentJournal.AppendCreateNew(
+            root,
+            packageName,
+            operationIds,
+            fragments.Count + 1,
+            predecessor,
+            source));
+        sources.Add(source);
     }
 
     public void AddArtifact(
@@ -174,26 +194,40 @@ public sealed class CapturePackageWriter
         string repositoryId,
         string repository,
         string[] operationIds,
-        CaptureManifestOperationRun[] operationRuns,
+        CaptureManifestExpectedRole[] expectedRoles,
+        CaptureManifestObservedRun[] observedRuns,
         string sourceMapSha256)
     {
-        if (finalized || sources.Count == 0 || artifacts.Count == 0 ||
+        if (finalized || sources.Count == 0 ||
             !PositiveDecimal(repositoryId) ||
             !BoundedText(repository, EvidenceLimits.MaximumRelativePathBytes) ||
             operationIds.Length != 2 ||
             operationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
             operationIds.Any(item => !Sha256(item)) ||
-            operationRuns.Length != 4 ||
-            operationRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() != 4 ||
-            operationRuns.Any(item =>
+            expectedRoles.Length > 4 ||
+            expectedRoles.Select(item => item.Role).Distinct(StringComparer.Ordinal).Count() !=
+                expectedRoles.Length ||
+            expectedRoles.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=
+                expectedRoles.Length ||
+            observedRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=
+                observedRuns.Length ||
+            observedRuns.Any(item =>
                 !operationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
                 !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
                 !PositiveDecimal(item.RunId) ||
                 item.RunAttempt != "1") ||
-            operationRuns.GroupBy(item => item.OperationId, StringComparer.Ordinal)
-                .Any(group => group.Count() != 2 ||
-                    group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
-            artifacts.Any(artifact => !operationRuns.Any(run =>
+            expectedRoles.Any(item =>
+                !observedRuns.Any(run =>
+                    StringComparer.Ordinal.Equals(run.OperationId, item.OperationId) &&
+                    StringComparer.Ordinal.Equals(run.Scope, item.Scope) &&
+                    StringComparer.Ordinal.Equals(run.RunId, item.RunId) &&
+                    StringComparer.Ordinal.Equals(run.RunAttempt, item.RunAttempt)) ||
+                item.ProducerSourceIds.Length == 0 ||
+                item.ProducerSourceIds.Distinct(StringComparer.Ordinal).Count() !=
+                    item.ProducerSourceIds.Length ||
+                item.ProducerSourceIds.Any(sourceId =>
+                    !sources.Any(source => StringComparer.Ordinal.Equals(source.SourceId, sourceId)))) ||
+            artifacts.Any(artifact => !observedRuns.Any(run =>
                 StringComparer.Ordinal.Equals(run.RunId, artifact.ProducingRunId) &&
                 StringComparer.Ordinal.Equals(run.RunAttempt, artifact.ProducingRunAttempt))) ||
             !Sha256(sourceMapSha256))
@@ -245,14 +279,25 @@ public sealed class CapturePackageWriter
             }
         }
 
+        var phaseJournal = PhaseFragmentJournal.FinalizeCreateNew(
+            root,
+            packageName,
+            operationIds,
+            fragments,
+            sources);
+
         var document = new CaptureManifestDocument(
             "apr-r4-e3-capture-manifest-v1",
             repositoryId,
             repository,
             operationIds,
-            operationRuns,
+            expectedRoles,
+            observedRuns,
             sourceMapSha256,
             root.DestinationIdentitySha256,
+            phaseJournal.Path,
+            phaseJournal.Sha256,
+            phaseJournal.PhysicalIdentitySha256,
             sources.ToArray(),
             artifacts.ToArray(),
             Finalized: true);

@@ -156,6 +156,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             .Append("--public-output")
             .Append("--github-token-file")
             .Append("--current-state-key-file")
+            .Append("--credential-admission-receipt")
             .SelectMany(name => new[]
             {
                 name,
@@ -174,6 +175,121 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         }
         var options = EvidenceAssemblerProgram.ParseArgs([.. arguments]);
         Assert.Equal(includePrevious, options.ContainsKey("--previous-state-key-file"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CredentialAdmissionBindsOnlyTheTwoAllowedSlotSets(bool includePrevious)
+    {
+        var root = CreateRestrictedRoot();
+        WriteRestrictedText(Path.Join(root.Path, "github-token"), "synthetic-admission-token");
+        WriteRestrictedText(
+            Path.Join(root.Path, "current-state-key"),
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        if (includePrevious)
+        {
+            WriteRestrictedText(
+                Path.Join(root.Path, "previous-state-key"),
+                Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        }
+        using var token = root.ReadCredentialFileRepresentations("github-token", base64Key: false);
+        using var current = root.ReadCredentialFileRepresentations("current-state-key", base64Key: true);
+        using var previous = includePrevious
+            ? root.ReadCredentialFileRepresentations("previous-state-key", base64Key: true)
+            : null;
+        var created = new Dictionary<string, CredentialFileRepresentations>(StringComparer.Ordinal)
+        {
+            ["github-token"] = token,
+            ["current-state-key"] = current,
+        };
+        if (previous is not null)
+        {
+            created.Add("previous-state-key", previous);
+        }
+        var operationIds = new[] { new string('6', 64), new string('8', 64) };
+
+        var receipt = CredentialAdmissionReceipt.MaterializeCreateNew(
+            root,
+            "credential-admission.json",
+            operationIds,
+            created,
+            100,
+            101);
+
+        Assert.Equal(includePrevious ? 3 : 2, receipt.CreatedSlots.Length);
+        Assert.All(receipt.CreatedSlots, slot => Assert.Equal("created-then-deleted", slot.FinalState));
+        if (includePrevious)
+        {
+            Assert.Empty(receipt.OmittedSlots);
+        }
+        else
+        {
+            var omitted = Assert.Single(receipt.OmittedSlots);
+            Assert.Equal("previous-state-key", omitted.Name);
+            Assert.Equal("not-created", omitted.FinalState);
+        }
+        Assert.Throws<InvalidDataException>(() => CredentialAdmissionReceipt.Read(
+            root,
+            "credential-admission.json",
+            [operationIds[1], operationIds[0]]));
+    }
+
+    [Fact]
+    public void ProducerJournalRequiresUnknownOutcomeReconciliationBeforeRetry()
+    {
+        var root = CreateRestrictedRoot();
+        var operationIds = new[] { new string('6', 64), new string('8', 64) };
+        var journal = ProducerOutcomeJournal.CreateNew(root, "producer-journal", operationIds);
+        journal.AppendCreateNew(
+            "set-authorization-variable",
+            "variable:R4_TRUSTED_PROOF_AUTHORIZATION",
+            1,
+            "before-dispatch",
+            100,
+            101,
+            []);
+        journal.AppendCreateNew(
+            "set-authorization-variable",
+            "variable:R4_TRUSTED_PROOF_AUTHORIZATION",
+            1,
+            "outcome-unknown",
+            102,
+            103,
+            []);
+
+        Assert.Throws<InvalidDataException>(() => journal.AppendCreateNew(
+            "set-authorization-variable",
+            "variable:R4_TRUSTED_PROOF_AUTHORIZATION",
+            2,
+            "before-dispatch",
+            104,
+            105,
+            []));
+
+        journal.AppendCreateNew(
+            "set-authorization-variable",
+            "variable:R4_TRUSTED_PROOF_AUTHORIZATION",
+            1,
+            "reconciled-not-committed",
+            106,
+            107,
+            ["authorization-variable-readback:page:1"]);
+        journal.AppendCreateNew(
+            "set-authorization-variable",
+            "variable:R4_TRUSTED_PROOF_AUTHORIZATION",
+            2,
+            "before-dispatch",
+            108,
+            109,
+            []);
+
+        var reopened = ProducerOutcomeJournal.Open(root, "producer-journal", operationIds);
+        Assert.Equal(4, reopened.Entries.Count);
+        Assert.Throws<InvalidDataException>(() => ProducerOutcomeJournal.Open(
+            root,
+            "producer-journal",
+            [operationIds[1], operationIds[0]]));
     }
 
     [Fact]
@@ -1820,7 +1936,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     public void PackageFinalizationRejectsSameBytesAtAReplacementIdentity()
     {
         var root = CreateRestrictedRoot();
-        var writer = new CapturePackageWriter(root, "identity-replacement");
+        var writer = new CapturePackageWriter(
+            root,
+            "identity-replacement",
+            [new string('6', 64), new string('8', 64)]);
         var sourceBody = Encoding.UTF8.GetBytes("{}\n");
         writer.AddSource(
             "runs:page:1",
@@ -1856,7 +1975,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "42",
             "SolusQuest/agentic-pr-review",
             [new string('6', 64), new string('8', 64)],
-            OperationRuns(),
+            ExpectedRoles(),
+            ObservedRuns(),
             new string('7', 64)));
     }
 
@@ -1937,7 +2057,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     public void PackageWriterAdmitsBeforePersistenceAndFinalizesOnce()
     {
         var root = CreateRestrictedRoot();
-        var writer = new CapturePackageWriter(root, "operation");
+        var writer = new CapturePackageWriter(
+            root,
+            "operation",
+            [new string('6', 64), new string('8', 64)]);
         var sourceBody = Encoding.UTF8.GetBytes("{}\n");
         writer.AddSource(
             "runs:page:1",
@@ -1983,15 +2106,27 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "42",
             "SolusQuest/agentic-pr-review",
             [new string('6', 64), new string('8', 64)],
-            OperationRuns(),
+            ExpectedRoles(),
+            ObservedRuns(),
             new string('7', 64));
         Assert.True(File.Exists(finalized.Path));
         Assert.Equal(finalized.Sha256, CanonicalEvidence.Sha256(File.ReadAllBytes(finalized.Path)));
+        var manifest = JsonSerializer.Deserialize<CaptureManifestDocument>(
+            File.ReadAllBytes(finalized.Path),
+            EvidenceJson.Options)!;
+        PhaseFragmentJournal.Validate(root, "operation/capture-manifest.json", manifest);
+        var fragmentPath = Path.Join(root.Path, "operation", "phase-fragment-0001.json");
+        var fragmentBytes = File.ReadAllBytes(fragmentPath);
+        File.Move(fragmentPath, Path.Join(root.Path, "operation", "phase-fragment-0001.displaced"));
+        CanonicalEvidence.WriteCreateNew(fragmentPath, fragmentBytes);
+        Assert.Throws<InvalidDataException>(() =>
+            PhaseFragmentJournal.Validate(root, "operation/capture-manifest.json", manifest));
         Assert.Throws<InvalidDataException>(() => writer.Finalize(
             "42",
             "SolusQuest/agentic-pr-review",
             [new string('6', 64), new string('8', 64)],
-            OperationRuns(),
+            ExpectedRoles(),
+            ObservedRuns(),
             new string('7', 64)));
     }
 
@@ -1999,10 +2134,16 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     public void PackageWriterCreatesItsPackageDirectoryExclusively()
     {
         var root = CreateRestrictedRoot();
-        _ = new CapturePackageWriter(root, "exclusive-operation");
+        _ = new CapturePackageWriter(
+            root,
+            "exclusive-operation",
+            [new string('6', 64), new string('8', 64)]);
 
         Assert.Throws<InvalidDataException>(() =>
-            new CapturePackageWriter(root, "exclusive-operation"));
+            new CapturePackageWriter(
+                root,
+                "exclusive-operation",
+                [new string('6', 64), new string('8', 64)]));
     }
 
     [Theory]
@@ -2021,7 +2162,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         var root = CreateRestrictedRoot();
 
         Assert.Throws<InvalidDataException>(() =>
-            new CapturePackageWriter(root, packageName));
+            new CapturePackageWriter(
+                root,
+                packageName,
+                [new string('6', 64), new string('8', 64)]));
     }
 
     [Fact]
@@ -2568,7 +2712,18 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         }
     }
 
-    private static CaptureManifestOperationRun[] OperationRuns() =>
+    private static CaptureManifestExpectedRole[] ExpectedRoles() =>
+    [
+        new(
+            "normal-bootstrap",
+            new string('6', 64),
+            "normal",
+            "9001",
+            "1",
+            ["runs:page:1"]),
+    ];
+
+    private static CaptureManifestObservedRun[] ObservedRuns() =>
     [
         new(new string('6', 64), "normal", "9001", "1"),
         new(new string('6', 64), "normal", "9002", "1"),
@@ -2655,7 +2810,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             Source("post-cleanup-sticky-comments-normal-pr-1001", $"{root}/issues/1001/comments", "complete-cursor"),
             Source("post-cleanup-sticky-comments-stale-pr-1002", $"{root}/issues/1002/comments", "complete-cursor"),
             Source("post-cleanup-variables", $"{root}/actions/variables", "complete-cursor"),
-            Source("post-cleanup-secrets", $"{root}/actions/secrets", "complete-cursor"),
+            Source(
+                "post-cleanup-secrets",
+                $"{root}/environments/r4-trusted-proof/secrets",
+                "complete-cursor"),
             Source("post-cleanup-environment", $"{root}/environments/r4-trusted-proof"),
             Source("post-cleanup-ref-normal", $"{root}/git/matching-refs/heads/r4-trusted-proof/{operationIds[0]}", "complete-cursor"),
             Source("post-cleanup-ref-stale", $"{root}/git/matching-refs/heads/r4-trusted-proof/{operationIds[1]}", "complete-cursor"),
@@ -2673,12 +2831,12 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "42",
             repository,
             operationIds,
-            [
-                new(operationIds[0], "normal", runs[0], "1"),
-                new(operationIds[0], "normal", runs[1], "1"),
-                new(operationIds[1], "stale", runs[2], "1"),
-                new(operationIds[1], "stale", runs[3], "1"),
-            ],
+            [],
+            runs.Select((run, index) => new CapturePlanObservedRun(
+                operationIds[index < 2 ? 0 : 1],
+                index < 2 ? "normal" : "stale",
+                run,
+                "1")).ToArray(),
             CapturePlan.CheckedSourceMapSha256,
             "post-cleanup-capture",
             sources.ToArray(),

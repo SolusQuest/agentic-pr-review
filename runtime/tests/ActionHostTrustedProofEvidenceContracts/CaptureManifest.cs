@@ -22,7 +22,15 @@ public sealed record CaptureManifestArtifact(
     string EncryptedObjectSize,
     string EncryptedObjectFileIdentity);
 
-public sealed record CaptureManifestOperationRun(
+public sealed record CaptureManifestExpectedRole(
+    string Role,
+    string OperationId,
+    string Scope,
+    string RunId,
+    string RunAttempt,
+    string[] ProducerSourceIds);
+
+public sealed record CaptureManifestObservedRun(
     string OperationId,
     string Scope,
     string RunId,
@@ -47,9 +55,13 @@ public sealed record CaptureManifestDocument(
     string RepositoryId,
     string Repository,
     string[] OperationIds,
-    CaptureManifestOperationRun[] OperationRuns,
+    CaptureManifestExpectedRole[] ExpectedRoles,
+    CaptureManifestObservedRun[] ObservedRuns,
     string SourceMapSha256,
     string DestinationIdentitySha256,
+    string PhaseFragmentJournalPath,
+    string PhaseFragmentJournalSha256,
+    string PhaseFragmentJournalFileIdentity,
     CaptureManifestSource[] Sources,
     CaptureManifestArtifact[] Artifacts,
     bool Finalized);

@@ -23,6 +23,8 @@ internal static class Program
         string? credentialPath = null;
         var credentialLeaseLaunchAttempted = false;
         CredentialFileRepresentations? token = null;
+        CredentialFileRepresentations? currentKey = null;
+        CredentialFileRepresentations? previousKey = null;
         try
         {
             var options = Parse(args);
@@ -32,14 +34,48 @@ internal static class Program
                 [options["--repository-root"], options["--worktree-root"]]);
             var plan = CapturePlan.Read(root, options["--capture-plan"]);
             credentialPath = options["--github-token-file"];
+            var creationStarted = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             token = root.ReadCredentialFileRepresentations(
                 options["--github-token-file"],
                 base64Key: false,
                 deleteExactIdentityOnFailure: true);
+            currentKey = root.ReadCredentialFileRepresentations(
+                options["--current-state-key-file"],
+                base64Key: true,
+                deleteExactIdentityOnFailure: true);
+            previousKey = options.TryGetValue("--previous-state-key-file", out var previousPath)
+                ? root.ReadCredentialFileRepresentations(
+                    previousPath,
+                    base64Key: true,
+                    deleteExactIdentityOnFailure: true)
+                : null;
+            var createdCredentials = new Dictionary<string, CredentialFileRepresentations>(
+                StringComparer.Ordinal)
+            {
+                ["github-token"] = token,
+                ["current-state-key"] = currentKey,
+            };
+            if (previousKey is not null)
+            {
+                createdCredentials.Add("previous-state-key", previousKey);
+            }
+            var creationFinished = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var admission = CredentialAdmissionReceipt.MaterializeCreateNew(
+                root,
+                options["--credential-admission-receipt-output"],
+                plan.OperationIds,
+                createdCredentials,
+                creationStarted,
+                creationFinished);
+            if (CredentialAdmissionReceipt.AuthorizedIdentities(admission)["github-token"] !=
+                token.PhysicalIdentitySha256)
+            {
+                throw new InvalidDataException("credential_admission_invalid");
+            }
             using var client = TrustedProofCaptureClient.CreateProduction(token.FileBytes);
             using var timeout = new CancellationTokenSource(
                 EvidenceLimits.LogicalOperationTimeout);
-            var writer = new CapturePackageWriter(root, plan.PackageName);
+            var writer = new CapturePackageWriter(root, plan.PackageName, plan.OperationIds);
             var artifactMetadata = new Dictionary<string, CapturedArtifactMetadata>(StringComparer.Ordinal);
             foreach (var source in plan.Sources)
             {
@@ -106,7 +142,14 @@ internal static class Program
                 plan.RepositoryId,
                 plan.Repository,
                 plan.OperationIds,
-                plan.OperationRuns.Select(item => new CaptureManifestOperationRun(
+                plan.ExpectedRoles.Select(item => new CaptureManifestExpectedRole(
+                    item.Role,
+                    item.OperationId,
+                    item.Scope,
+                    item.RunId,
+                    item.RunAttempt,
+                    item.ProducerSourceIds)).ToArray(),
+                plan.ObservedRuns.Select(item => new CaptureManifestObservedRun(
                     item.OperationId,
                     item.Scope,
                     item.RunId,
@@ -171,9 +214,13 @@ internal static class Program
                 else if (token is not null)
                 {
                     TryDeleteExactCredential(token);
+                    if (currentKey is not null) TryDeleteExactCredential(currentKey);
+                    if (previousKey is not null) TryDeleteExactCredential(previousKey);
                 }
             }
             token?.Dispose();
+            currentKey?.Dispose();
+            previousKey?.Dispose();
         }
     }
 
@@ -200,9 +247,12 @@ internal static class Program
             "--repository-root",
             "--worktree-root",
             "--github-token-file",
+            "--current-state-key-file",
             "--capture-plan",
+            "--credential-admission-receipt-output",
         };
-        if (args.Length != names.Length * 2)
+        var allowed = names.Append("--previous-state-key-file").ToHashSet(StringComparer.Ordinal);
+        if (args.Length % 2 != 0)
         {
             throw new InvalidDataException("arguments_invalid");
         }
@@ -210,14 +260,18 @@ internal static class Program
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
         {
-            if (!names.Contains(args[index], StringComparer.Ordinal) ||
+            if (!allowed.Contains(args[index]) ||
                 !result.TryAdd(args[index], args[index + 1]))
             {
                 throw new InvalidDataException("arguments_invalid");
             }
         }
 
-        if (!StringComparer.Ordinal.Equals(result["--github-token-file"], "github-token"))
+        if (names.Any(name => !result.ContainsKey(name)) ||
+            !StringComparer.Ordinal.Equals(result["--github-token-file"], "github-token") ||
+            !StringComparer.Ordinal.Equals(result["--current-state-key-file"], "current-state-key") ||
+            (result.TryGetValue("--previous-state-key-file", out var previous) &&
+                !StringComparer.Ordinal.Equals(previous, "previous-state-key")))
         {
             throw new InvalidDataException("arguments_invalid");
         }

@@ -20,7 +20,15 @@ public sealed record CapturePlanArtifact(
     string ProducingRunAttempt,
     string DownloadRoute);
 
-public sealed record CapturePlanOperationRun(
+public sealed record CapturePlanExpectedRole(
+    string Role,
+    string OperationId,
+    string Scope,
+    string RunId,
+    string RunAttempt,
+    string[] ProducerSourceIds);
+
+public sealed record CapturePlanObservedRun(
     string OperationId,
     string Scope,
     string RunId,
@@ -31,7 +39,8 @@ public sealed record CapturePlanDocument(
     string RepositoryId,
     string Repository,
     string[] OperationIds,
-    CapturePlanOperationRun[] OperationRuns,
+    CapturePlanExpectedRole[] ExpectedRoles,
+    CapturePlanObservedRun[] ObservedRuns,
     string SourceMapSha256,
     string PackageName,
     CapturePlanSource[] Sources,
@@ -40,7 +49,7 @@ public sealed record CapturePlanDocument(
 public static class CapturePlan
 {
     public const string CheckedSourceMapSha256 =
-        "612c10ed04ee0545a0cd36869ca83cbed75eae687a3131513c2969d791003281";
+        "3b0514159cb1145fd8ca96c52cef6e415760a5c230f8949f773257d6c325545a";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     public static CapturePlanDocument Read(RestrictedEvidenceRoot root, string relativePath)
     {
@@ -63,30 +72,43 @@ public static class CapturePlan
                     value.OperationIds.Length != 2 ||
                     value.OperationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
                     value.OperationIds.Any(item => !Sha256(item)) ||
-                    value.OperationRuns.Length != 4 ||
-                    value.OperationRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() != 4 ||
-                    value.OperationRuns.Any(item =>
+                    (preCleanup ? value.ExpectedRoles.Length != 4 : value.ExpectedRoles.Length > 4) ||
+                    value.ExpectedRoles.Select(item => item.Role).Distinct(StringComparer.Ordinal).Count() !=
+                        value.ExpectedRoles.Length ||
+                    value.ExpectedRoles.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=
+                        value.ExpectedRoles.Length ||
+                    value.ObservedRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=
+                        value.ObservedRuns.Length ||
+                    value.ObservedRuns.Any(item =>
                         !value.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
                         !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
                         !PositiveDecimal(item.RunId) ||
                         item.RunAttempt != "1") ||
-                    value.OperationRuns.GroupBy(item => item.OperationId, StringComparer.Ordinal)
-                        .Any(group => group.Count() != 2 ||
-                            group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
-                    value.OperationRuns.Count(item => item.Scope == "normal") != 2 ||
-                    value.OperationRuns.Count(item => item.Scope == "stale") != 2 ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[0].OperationId, value.OperationIds[0]) ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[0].Scope, "normal") ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[1].OperationId, value.OperationIds[0]) ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[1].Scope, "normal") ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[2].OperationId, value.OperationIds[1]) ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[2].Scope, "stale") ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[3].OperationId, value.OperationIds[1]) ||
-                    !StringComparer.Ordinal.Equals(value.OperationRuns[3].Scope, "stale") ||
+                    value.ExpectedRoles.Any(item =>
+                        !value.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
+                        !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
+                        !PositiveDecimal(item.RunId) ||
+                        item.RunAttempt != "1" ||
+                        item.ProducerSourceIds.Length == 0 ||
+                        item.ProducerSourceIds.Distinct(StringComparer.Ordinal).Count() !=
+                            item.ProducerSourceIds.Length ||
+                        item.ProducerSourceIds.Any(sourceId =>
+                            !Regex.IsMatch(sourceId, ":page:[1-9][0-9]*$") ||
+                            !value.Sources.Any(source => sourceId.StartsWith(
+                                $"{source.SourceId}:page:",
+                                StringComparison.Ordinal))) ||
+                        !value.ObservedRuns.Any(run =>
+                            StringComparer.Ordinal.Equals(run.OperationId, item.OperationId) &&
+                            StringComparer.Ordinal.Equals(run.Scope, item.Scope) &&
+                            StringComparer.Ordinal.Equals(run.RunId, item.RunId) &&
+                            StringComparer.Ordinal.Equals(run.RunAttempt, item.RunAttempt))) ||
+                    (preCleanup && !ExactExpectedRoles(value)) ||
                     value.SourceMapSha256 != CheckedSourceMapSha256 ||
                     !BoundedText(value.PackageName, EvidenceLimits.MaximumNameBytes) ||
                     !RestrictedEvidenceRoot.IsSinglePathSegment(value.PackageName) ||
-                    value.Sources.Length != (preCleanup ? 35 : 23) ||
+                    value.Sources.Length != (preCleanup
+                        ? 29 + (2 * value.ObservedRuns.Length)
+                        : 11 + (3 * value.ObservedRuns.Length)) ||
                     (preCleanup ? value.Artifacts.Length == 0 : value.Artifacts.Length != 0) ||
                     value.Artifacts.Length > EvidenceLimits.MaximumRecords ||
                     value.Sources.Select(item => item.SourceId).Distinct(StringComparer.Ordinal).Count() != value.Sources.Length ||
@@ -106,7 +128,7 @@ public static class CapturePlan
                             source.Pagination == "complete-cursor") ||
                         !PositiveDecimal(item.ProducingRunId) ||
                         !PositiveDecimal(item.ProducingRunAttempt) ||
-                        !value.OperationRuns.Any(run =>
+                        !value.ObservedRuns.Any(run =>
                             StringComparer.Ordinal.Equals(run.RunId, item.ProducingRunId) &&
                             StringComparer.Ordinal.Equals(run.RunAttempt, item.ProducingRunAttempt)) ||
                         item.DownloadRoute != $"/repos/{value.Repository}/actions/artifacts/{item.ArtifactId}/zip"))
@@ -131,6 +153,24 @@ public static class CapturePlan
         }
     }
 
+    private static bool ExactExpectedRoles(CapturePlanDocument value)
+    {
+        var roles = new[]
+        {
+            "normal-bootstrap",
+            "normal-continuation",
+            "stale-protected",
+            "stale-follow-on",
+        };
+        return value.ExpectedRoles.Select(item => item.Role).SequenceEqual(roles, StringComparer.Ordinal) &&
+            value.ExpectedRoles.Take(2).All(item =>
+                StringComparer.Ordinal.Equals(item.OperationId, value.OperationIds[0]) &&
+                StringComparer.Ordinal.Equals(item.Scope, "normal")) &&
+            value.ExpectedRoles.Skip(2).All(item =>
+                StringComparer.Ordinal.Equals(item.OperationId, value.OperationIds[1]) &&
+                StringComparer.Ordinal.Equals(item.Scope, "stale"));
+    }
+
     private static bool PositiveDecimal(string value) =>
         value.Length > 0 && value.Length <= 20 &&
         value.All(character => character is >= '0' and <= '9') &&
@@ -144,26 +184,29 @@ public static class CapturePlan
     private static bool ExactSources(CapturePlanDocument value)
     {
         var expected = new List<string>();
-        var runs = value.OperationRuns.Select(item => item.RunId).ToArray();
+        var successfulRuns = value.ExpectedRoles.Select(item => item.RunId).ToArray();
+        var runs = value.ObservedRuns.Select(item => item.RunId).ToArray();
         foreach (var phase in new[] { "setup", "execution", "cleanup" })
         {
             expected.Add($"authorization-{phase}-comment");
             expected.Add($"authorization-{phase}-permission");
         }
         expected.Add("environment-protection");
+        expected.Add("environment-branch-policies");
+        expected.Add("environment-secret-inventory");
         foreach (var (phase, run) in new[]
         {
-            ("bootstrap", runs[0]),
-            ("continuation", runs[1]),
-            ("stale", runs[2]),
+            ("bootstrap", successfulRuns[0]),
+            ("continuation", successfulRuns[1]),
+            ("stale", successfulRuns[2]),
         })
         {
             expected.Add($"transition-{phase}-pending-run-{run}");
             expected.Add($"transition-{phase}-approvals-run-{run}");
             expected.Add($"transition-{phase}-jobs-run-{run}");
         }
-        expected.Add($"concurrency-normal-run-{runs[0]}");
-        expected.Add($"concurrency-stale-run-{runs[2]}");
+        expected.Add($"concurrency-normal-run-{successfulRuns[0]}");
+        expected.Add($"concurrency-stale-run-{successfulRuns[2]}");
         for (var index = 0; index < 6; index++)
         {
             expected.Add("proof-control-comment");
@@ -228,6 +271,22 @@ public static class CapturePlan
             classification = source.SourceId;
             return Exact(source, $"{root}/environments/r4-trusted-proof", "none");
         }
+        if (source.SourceId == "environment-branch-policies")
+        {
+            classification = source.SourceId;
+            return Exact(
+                source,
+                $"{root}/environments/r4-trusted-proof/deployment-branch-policies",
+                "complete-cursor");
+        }
+        if (source.SourceId == "environment-secret-inventory")
+        {
+            classification = source.SourceId;
+            return Exact(
+                source,
+                $"{root}/environments/r4-trusted-proof/secrets",
+                "complete-cursor");
+        }
         var transition = Regex.Match(
             source.SourceId,
             "^transition-(bootstrap|continuation|stale)-(pending|approvals|jobs)-run-([1-9][0-9]*)$");
@@ -260,10 +319,11 @@ public static class CapturePlan
             var expectedRun = scope == "normal" ? runs[0] : runs[2];
             if (!StringComparer.Ordinal.Equals(run, expectedRun)) return false;
             classification = $"concurrency-{scope}-run-{run}";
-            return Exact(
-                source,
-                $"{root}/actions/runs/{run}/concurrency_group",
-                "complete-cursor");
+            var waiter = scope == "normal" ? runs[1] : runs[3];
+            return source.Pagination == "none" &&
+                Regex.IsMatch(
+                    source.Route,
+                    $"^{Regex.Escape(root)}/actions/concurrency_groups/agentic-pr-review-r4-[1-9][0-9]*-pr-[1-9][0-9]*\\?ahead_of_run={Regex.Escape(waiter)}$");
         }
         var proofComment = Regex.Match(source.SourceId, "^proof-control-comment-([1-9][0-9]*)$");
         if (proofComment.Success)
@@ -300,7 +360,7 @@ public static class CapturePlan
 
     private static bool ExactPostCleanupSources(CapturePlanDocument value)
     {
-        var runs = value.OperationRuns.Select(item => item.RunId).ToArray();
+        var runs = value.ObservedRuns.Select(item => item.RunId).ToArray();
         var expected = new List<string>
         {
             "control-comments-normal",
@@ -381,7 +441,10 @@ public static class CapturePlan
         if (source.SourceId == "post-cleanup-secrets")
         {
             classification = "secrets";
-            return Exact(source, $"{root}/actions/secrets", "complete-cursor");
+            return Exact(
+                source,
+                $"{root}/environments/r4-trusted-proof/secrets",
+                "complete-cursor");
         }
         if (source.SourceId == "post-cleanup-environment")
         {

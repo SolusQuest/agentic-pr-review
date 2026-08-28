@@ -147,11 +147,11 @@ function validateSourceMap(value) {
     ],
     [
       '/environment',
-      'github-rest-and-ui-attestation',
-      'environment-protection',
-      'environment-and-ui',
-      'none',
-      'environment protection plus UI attestation',
+      'github-rest',
+      'environment-readiness',
+      'environment-branch-policies-environment-secrets',
+      'complete-cursor',
+      'environment, deployment branch policies, and environment secret inventory',
     ],
     [
       '/approval_transitions',
@@ -165,9 +165,9 @@ function validateSourceMap(value) {
       '/concurrency',
       'github-rest',
       'concurrency-groups',
-      'run-concurrency-group',
-      'complete-cursor',
-      'normal and stale ahead_of_run',
+      'active-repository-concurrency-group',
+      'none',
+      'normal and stale active group_members and ahead_of_run',
     ],
     [
       '/proof_control',
@@ -352,7 +352,6 @@ function validateSourceEvidenceBindings(
   captureManifest,
   captureManifestSha256,
   oracleResultSha256,
-  uiAttestationSha256,
   retainedDocuments,
   host,
 ) {
@@ -424,11 +423,9 @@ function validateSourceEvidenceBindings(
     [
       '/environment',
       [
+        captureReference('environment-branch-policies:page:1'),
         captureReference('environment-protection:page:1'),
-        {
-          source_id: 'environment-ui-attestation',
-          sha256: uiAttestationSha256,
-        },
+        captureReference('environment-secret-inventory:page:1'),
       ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
     ],
     ['/approval_transitions', approvalReferences],
@@ -497,43 +494,41 @@ function validateEnvironmentDerivation(
   host,
   captureManifest,
   capturedSourceBodies,
-  uiAttestation,
-  uiAttestationSha256,
   authorizations,
 ) {
-  const source = captureManifest.sources.find(
-    (candidate) => candidate.source_id === 'environment-protection:page:1',
-  );
-  const retained = capturedSourceBodies.get('environment-protection:page:1');
-  if (
-    source === undefined ||
-    retained === undefined ||
-    typeof retained.text !== 'string' ||
-    sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
-    String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size ||
-    sha256(canonicalJson(uiAttestation)) !== uiAttestationSha256
-  ) {
-    invalid('environment-source-binding');
-  }
-  let response;
-  try {
-    response = JSON.parse(retained.text);
-  } catch {
-    invalid('environment-source-json');
-  }
-  exactKeys(
-    response,
-    ['id', 'name', 'protection_rules', 'deployment_branch_policy'],
-    'environment-response-shape',
-  );
+  const read = (sourceId) => {
+    const source = captureManifest.sources.find((candidate) => candidate.source_id === sourceId);
+    const retained = capturedSourceBodies.get(sourceId);
+    if (
+      source === undefined ||
+      retained === undefined ||
+      typeof retained.text !== 'string' ||
+      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
+      String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size
+    ) {
+      invalid('environment-source-binding');
+    }
+    try {
+      return { value: JSON.parse(retained.text), source };
+    } catch {
+      invalid('environment-source-json');
+    }
+  };
+  const environment = read('environment-protection:page:1');
+  const branches = read('environment-branch-policies:page:1');
+  const secrets = read('environment-secret-inventory:page:1');
+  const response = environment.value;
   const reviewersRule = response.protection_rules?.find(
     (rule) => rule?.type === 'required_reviewers',
   );
   const branchPolicy = response.deployment_branch_policy;
   if (
     response.name !== 'r4-trusted-proof' ||
+    String(response.id) !== authorizations.execution.environment_baseline.environment_id ||
+    response.can_admins_bypass !== false ||
     !Array.isArray(response.protection_rules) ||
     reviewersRule === undefined ||
+    reviewersRule.prevent_self_review !== false ||
     !Array.isArray(reviewersRule.reviewers) ||
     branchPolicy === null ||
     typeof branchPolicy !== 'object' ||
@@ -542,62 +537,72 @@ function validateEnvironmentDerivation(
   ) {
     invalid('environment-response-values');
   }
-  exactKeys(
-    uiAttestation,
-    [
-      'repository',
-      'environment',
-      'source_kind',
-      'observation',
-      'capture_sha256',
-      'maintainer_id',
-      'prevent_self_review',
-      'administrator_bypass',
-    ],
-    'environment-ui-source-shape',
+  exactKeys(branches.value, ['total_count', 'branch_policies'], 'environment-branches-shape');
+  exactKeys(secrets.value, ['total_count', 'secrets'], 'environment-secrets-shape');
+  if (
+    !Number.isSafeInteger(branches.value.total_count) ||
+    branches.value.total_count !== branches.value.branch_policies?.length ||
+    branches.value.total_count !== 1 ||
+    String(branches.value.branch_policies[0]?.id) !== '58463845' ||
+    branches.value.branch_policies[0]?.name !== 'main' ||
+    branches.value.branch_policies[0]?.type !== 'branch' ||
+    !Number.isSafeInteger(secrets.value.total_count) ||
+    secrets.value.total_count !== secrets.value.secrets?.length
+  ) {
+    invalid('environment-inventory-values');
+  }
+  const allowedSecretSets = [
+    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY', 'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY'],
+  ];
+  const unorderedSecretNames = secrets.value.secrets.map((secret) => secret?.name);
+  const selectedSecretSet = allowedSecretSets.find(
+    (allowed) =>
+      allowed.length === unorderedSecretNames.length &&
+      allowed.every((name) => unorderedSecretNames.includes(name)) &&
+      new Set(unorderedSecretNames).size === unorderedSecretNames.length,
   );
-  interval(uiAttestation.observation, 'environment-ui-source-observation');
+  if (selectedSecretSet === undefined) {
+    invalid('environment-secret-profile');
+  }
+  const secretNames = selectedSecretSet;
   const derived = {
     name: response.name,
-    prevent_self_review: uiAttestation.prevent_self_review,
-    protection_snapshot: {
-      source_id: 'environment-protection',
+    readiness_snapshot: {
+      source_ids: {
+        environment: 'environment-protection',
+        branch_policies: 'environment-branch-policies',
+        environment_secrets: 'environment-secret-inventory',
+      },
       environment_id: String(response.id),
-      deployment_branch_policy: 'main-only',
+      can_admins_bypass: response.can_admins_bypass,
+      deployment_branch_policy: branchPolicy,
       required_reviewer_ids: reviewersRule.reviewers.map((reviewer) =>
         String(reviewer?.reviewer?.id),
       ),
-      required_approvals: reviewersRule.required_approvals,
-      secret_names: [],
+      prevent_self_review: reviewersRule.prevent_self_review,
+      branch_policies: branches.value.branch_policies.map((policy) => ({
+        id: String(policy.id),
+        name: policy.name,
+        type: policy.type,
+      })),
+      secret_names: secretNames,
       token_permissions: { actions: 'write', contents: 'read', pull_requests: 'write' },
-      readback_sha256: source.body_sha256,
+      readback_sha256: sha256(
+        canonicalJson({
+          environment: environment.source.body_sha256,
+          branch_policies: branches.source.body_sha256,
+          environment_secrets: secrets.source.body_sha256,
+        }),
+      ),
       observation: {
-        request_started: source.request_started_unix_milliseconds,
-        response_received: source.response_received_unix_milliseconds,
+        request_started: environment.source.request_started_unix_milliseconds,
+        response_received: secrets.source.response_received_unix_milliseconds,
       },
     },
-    ui_attestation: {
-      repository: uiAttestation.repository,
-      environment: uiAttestation.environment,
-      source_kind: uiAttestation.source_kind,
-      observation: uiAttestation.observation,
-      capture_sha256: uiAttestation.capture_sha256,
-      maintainer_id: uiAttestation.maintainer_id,
-      administrator_bypass: uiAttestation.administrator_bypass,
-    },
   };
-  derived.protection_snapshot.secret_names = [
-    'DEEPSEEK_API_KEY',
-    'AGENTIC_PR_REVIEW_STATE_KEY',
-    'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
-  ];
   if (
-    uiAttestation.repository !== authorizations.execution.coordinates.repository ||
-    uiAttestation.environment !== response.name ||
-    uiAttestation.source_kind !== 'github-environment-ui' ||
-    uiAttestation.maintainer_id !== '16307884' ||
-    uiAttestation.prevent_self_review !== false ||
-    uiAttestation.administrator_bypass !== false ||
+    authorizations.execution.coordinates.repository !== captureManifest.repository ||
     (host && canonicalJson(derived) !== canonicalJson(host.environment))
   ) {
     invalid('environment-derivation');
@@ -614,10 +619,10 @@ function deriveIdentities(
   concurrency,
 ) {
   const execution = authorizations.execution;
-  const normalOperation = execution.operation_runs.find(
+  const normalOperation = captureManifest.expected_roles.find(
     (run) => run.scope === 'normal',
   )?.operation_id;
-  const staleOperation = execution.operation_runs.find(
+  const staleOperation = captureManifest.expected_roles.find(
     (run) => run.scope === 'stale',
   )?.operation_id;
   const normalFixture = execution.fixture_prs.find((fixture) =>
@@ -1085,7 +1090,7 @@ function deriveProofControl(authorizations, identities, captureManifest, capture
     });
   }
   const operationForScope = (scope) =>
-    authorizations.execution.operation_runs.find((run) => run.scope === scope)?.operation_id;
+    captureManifest.expected_roles.find((run) => run.scope === scope)?.operation_id;
   const makeFamily = (scope, kinds) => {
     const operationId = operationForScope(scope);
     const comments = byOperation.get(operationId) ?? [];
@@ -1284,7 +1289,7 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
         if (matches.length !== 1) invalid(`concurrency-${scope}-source-cardinality`);
         const holderRunId = matches[0].source_id.match(pattern)[1];
         const first = read(matches[0].source_id).value;
-        if (!Array.isArray(first.ahead_of_run) || first.ahead_of_run.length !== 2) {
+        if (!Array.isArray(first.group_members) || first.group_members.length !== 2) {
           invalid(`concurrency-${scope}-member-cardinality`);
         }
         return [
@@ -1292,7 +1297,7 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
           {
             terminal: {
               holder_run_id: holderRunId,
-              waiter_run_id: String(first.ahead_of_run[1]?.run_id),
+              waiter_run_id: String(first.group_members[1]?.run_id),
             },
           },
         ];
@@ -1305,14 +1310,8 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
       .filter((source) => source.source_id.startsWith(`${base}:page:`))
       .sort((left, right) => left.page - right.page);
     if (
-      pageSources.length === 0 ||
-      pageSources.some(
-        (source, index) =>
-          source.page !== index + 1 ||
-          (index === pageSources.length - 1
-            ? source.next_route !== null
-            : source.next_route !== pageSources[index + 1].route),
-      )
+      pageSources.length !== 1 ||
+      pageSources.some((source, index) => source.page !== index + 1 || source.next_route !== null)
     ) {
       invalid(`concurrency-${scope}-pagination`);
     }
@@ -1323,14 +1322,21 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
         ({ value }) =>
           value === null ||
           typeof value !== 'object' ||
-          value.group !== first.group ||
-          value.cancel_in_progress !== false ||
-          !Array.isArray(value.ahead_of_run),
+          value.group_name !== first.group_name ||
+          !Number.isSafeInteger(value.total_count) ||
+          !Array.isArray(value.group_members) ||
+          value.total_count !== value.group_members.length,
       )
     ) {
       invalid(`concurrency-${scope}-raw-values`);
     }
-    const members = pageCaptures.flatMap(({ value }) => value.ahead_of_run);
+    if (
+      pageSources[0].route !==
+      `/repos/${captureManifest.repository}/actions/concurrency_groups/${encodeURIComponent(first.group_name)}?ahead_of_run=${expected.terminal.waiter_run_id}`
+    ) {
+      invalid(`concurrency-${scope}-route`);
+    }
+    const members = pageCaptures.flatMap(({ value }) => value.group_members);
     const holderCapture = read(`run-terminal-${expected.terminal.holder_run_id}:page:1`).value;
     const waiterCapture = read(`run-terminal-${expected.terminal.waiter_run_id}:page:1`).value;
     const holderCompleted = Date.parse(holderCapture.updated_at);
@@ -1347,7 +1353,7 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
     }
     const derived = {
       api_version: '2026-03-10',
-      group: first.group,
+      group: first.group_name,
       pagination_complete: true,
       observation: {
         request_started: pageSources[0].request_started_unix_milliseconds,
@@ -1472,12 +1478,14 @@ function validateAuthorization(value, identities) {
       'coordinates',
       'fixture_prs',
       'operation_ids',
-      'operation_runs',
+      'trigger_plan',
       'authorization_manifests',
-      'environment_snapshot_sha256',
+      'environment_baseline',
+      'authorization_variable_baseline',
       'actors',
-      'credential_files',
-      'destination_identity',
+      'credential_slots',
+      'destinations',
+      'provider_mode',
       'oracle_build',
       'commands',
       'protected_scan_input',
@@ -1522,24 +1530,10 @@ function validateAuthorization(value, identities) {
     }) ||
     value.execution.operation_ids.length !== 2 ||
     value.execution.operation_ids.some((item) => !hex64.test(item)) ||
-    !Array.isArray(value.execution.operation_runs) ||
-    value.execution.operation_runs.length !== 4 ||
-    value.execution.operation_runs.some(
-      (run, index) =>
-        JSON.stringify(Object.keys(run)) !==
-          JSON.stringify(['operation_id', 'scope', 'run_id', 'run_attempt']) ||
-        run.operation_id !== value.execution.operation_ids[index < 2 ? 0 : 1] ||
-        run.scope !== (index < 2 ? 'normal' : 'stale') ||
-        !decimal.test(run.run_id) ||
-        run.run_attempt !== 1,
-    ) ||
-    new Set(value.execution.operation_runs.map(({ run_id }) => run_id)).size !== 4 ||
     value.execution.authorization_manifests.length !== 2 ||
     value.execution.authorization_manifests.some((item) => !hex64.test(item)) ||
-    !hex64.test(value.execution.environment_snapshot_sha256) ||
     JSON.stringify(value.execution.actors) !==
       JSON.stringify([{ id: '16307884', permission: 'admin' }]) ||
-    !hex64.test(value.execution.destination_identity) ||
     JSON.stringify(Object.keys(value.execution.oracle_build)) !==
       JSON.stringify([
         'source_commit',
@@ -1566,14 +1560,165 @@ function validateAuthorization(value, identities) {
   ) {
     invalid('execution-authorization-values');
   }
-  exactArray(
-    value.execution.credential_files.map(({ name }) => name),
-    ['github-token', 'current-state-key', 'previous-state-key'],
-    'execution-authorization-credentials',
+  const triggerRoles = [
+    'normal-bootstrap',
+    'normal-continuation',
+    'stale-protected',
+    'stale-follow-on',
+  ];
+  if (!Array.isArray(value.execution.trigger_plan) || value.execution.trigger_plan.length !== 4) {
+    invalid('execution-trigger-plan');
+  }
+  value.execution.trigger_plan.forEach((trigger, index) => {
+    exactKeys(
+      trigger,
+      [
+        'role',
+        'operation_id',
+        'scope',
+        'producer',
+        'expected_event',
+        'pr_number',
+        'ref',
+        'authorized_head_sha',
+        'source_coordinate',
+      ],
+      'execution-trigger-shape',
+    );
+    const fixture = value.execution.fixture_prs[index < 2 ? 0 : 1];
+    const expectedProducer =
+      index === 1
+        ? 'dispatch-proof-workflow'
+        : index === 3
+          ? 'advance-stale-ref'
+          : 'rerun-upstream-ci';
+    const expectedEvent = index === 1 ? 'workflow_dispatch' : 'workflow_run';
+    const coordinateKeys = index === 0 || index === 2 ? ['kind', 'id'] : ['kind', 'value'];
+    exactKeys(
+      trigger.source_coordinate,
+      coordinateKeys,
+      'execution-trigger-source-coordinate-shape',
+    );
+    if (
+      trigger.role !== triggerRoles[index] ||
+      trigger.operation_id !== value.execution.operation_ids[index < 2 ? 0 : 1] ||
+      trigger.scope !== (index < 2 ? 'normal' : 'stale') ||
+      trigger.producer !== expectedProducer ||
+      trigger.expected_event !== expectedEvent ||
+      trigger.pr_number !== fixture.number ||
+      trigger.ref !== fixture.ref ||
+      trigger.authorized_head_sha !== fixture.head_sha ||
+      (index === 0 || index === 2
+        ? trigger.source_coordinate.kind !== 'upstream-workflow-run' ||
+          !decimal.test(trigger.source_coordinate.id)
+        : index === 1
+          ? trigger.source_coordinate.kind !== 'workflow-dispatch-ref' ||
+            trigger.source_coordinate.value !== 'main'
+          : trigger.source_coordinate.kind !== 'advanced-ref-head' ||
+            !hex40.test(trigger.source_coordinate.value))
+    ) {
+      invalid('execution-trigger-values');
+    }
+  });
+  exactKeys(
+    value.execution.environment_baseline,
+    [
+      'environment_id',
+      'name',
+      'secret_names',
+      'deployment_branch_policy',
+      'required_reviewer_ids',
+      'prevent_self_review',
+      'can_admins_bypass',
+    ],
+    'execution-environment-baseline-shape',
   );
-  for (const credential of value.execution.credential_files) {
-    exactKeys(credential, ['name', 'file_identity_sha256'], 'execution-credential-shape');
-    if (!hex64.test(credential.file_identity_sha256)) invalid('execution-credential-values');
+  if (
+    value.execution.environment_baseline.environment_id !== '20766359842' ||
+    value.execution.environment_baseline.name !== 'r4-trusted-proof' ||
+    JSON.stringify(value.execution.environment_baseline.secret_names) !== '[]' ||
+    value.execution.environment_baseline.deployment_branch_policy !== 'main-only' ||
+    JSON.stringify(value.execution.environment_baseline.required_reviewer_ids) !== '["16307884"]' ||
+    value.execution.environment_baseline.prevent_self_review !== false ||
+    value.execution.environment_baseline.can_admins_bypass !== false
+  ) {
+    invalid('execution-environment-baseline-values');
+  }
+  exactKeys(
+    value.execution.authorization_variable_baseline,
+    ['name', 'state'],
+    'execution-variable-baseline-shape',
+  );
+  if (
+    value.execution.authorization_variable_baseline.name !== 'R4_TRUSTED_PROOF_AUTHORIZATION' ||
+    value.execution.authorization_variable_baseline.state !== 'absent'
+  ) {
+    invalid('execution-variable-baseline-values');
+  }
+  const expectedSlots = [
+    ['github-token', true, false],
+    ['current-state-key', true, true],
+    ['previous-state-key', false, true],
+  ];
+  if (
+    !Array.isArray(value.execution.credential_slots) ||
+    value.execution.credential_slots.length !== 3
+  ) {
+    invalid('execution-credential-slots');
+  }
+  value.execution.credential_slots.forEach((slot, index) => {
+    exactKeys(slot, ['name', 'required', 'base64_key'], 'execution-credential-slot-shape');
+    if (
+      canonicalJson([slot.name, slot.required, slot.base64_key]) !==
+      canonicalJson(expectedSlots[index])
+    ) {
+      invalid('execution-credential-slot-values');
+    }
+  });
+  exactKeys(value.execution.destinations, ['private', 'public'], 'execution-destinations-shape');
+  exactKeys(
+    value.execution.destinations.private,
+    ['kind', 'identity_sha256'],
+    'execution-private-destination-shape',
+  );
+  exactKeys(
+    value.execution.destinations.public,
+    ['repository', 'branch', 'pull_request_number', 'worktree_identity_sha256', 'allowed_paths'],
+    'execution-public-destination-shape',
+  );
+  if (
+    value.execution.destinations.private.kind !== 'maintainer-approved-host-restricted-location' ||
+    !hex64.test(value.execution.destinations.private.identity_sha256) ||
+    value.execution.destinations.public.repository !== identities.repository ||
+    value.execution.destinations.public.branch !== 'codex/issue-181-two-run-product-proof' ||
+    !decimal.test(value.execution.destinations.public.pull_request_number) ||
+    !hex64.test(value.execution.destinations.public.worktree_identity_sha256) ||
+    canonicalJson(value.execution.destinations.public.allowed_paths) !==
+      canonicalJson([
+        'docs/20_architecture/r4-product-proof.md',
+        'runtime/tests/fixtures/action-host/trusted-proof/r4-product-proof-public-safe.json',
+        'docs/20_architecture/r4-actionhost-wrapper-plan.md',
+        'docs/90_roadmap/roadmap-seed.md',
+      ])
+  ) {
+    invalid('execution-destination-values');
+  }
+  exactKeys(
+    value.execution.provider_mode,
+    ['provider', 'model', 'adapter', 'endpoint', 'transport', 'canary_contract_sha256'],
+    'execution-provider-mode-shape',
+  );
+  if (
+    value.execution.provider_mode.provider !== 'deepseek' ||
+    value.execution.provider_mode.model !== 'deepseek-v4-flash' ||
+    value.execution.provider_mode.adapter !==
+      '968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502' ||
+    value.execution.provider_mode.endpoint !== 'https://api.deepseek.com/chat/completions' ||
+    value.execution.provider_mode.transport !== 'production-https-json' ||
+    value.execution.provider_mode.canary_contract_sha256 !==
+      value.execution.protected_scan_input.sha256
+  ) {
+    invalid('execution-provider-mode-values');
   }
   exactKeys(
     value.execution.protected_scan_input,
@@ -2118,8 +2263,9 @@ export function generateCleanupPlan(input) {
         post_readback: 'variable-name-absent',
       },
       secrets: input.resources.secret_names.map((name) => ({
+        environment: input.resources.environment,
         name,
-        mutation: 'delete-actions-secret',
+        mutation: 'delete-environment-secret',
         expected_response: '204-or-404-after-reconciliation',
         outcome_unknown: 'read-exact-secret-name-before-retry',
         post_readback: 'secret-name-absent',
@@ -2251,70 +2397,64 @@ export function validateHostEvidence(input) {
   validateSourceMap(input.source_map);
   validateSourceBindings(input);
   validateAuthorization(input.authorizations, input.identities);
+  exactKeys(input.environment, ['name', 'readiness_snapshot'], 'environment-shape');
+  const readiness = input.environment.readiness_snapshot;
   exactKeys(
-    input.environment,
-    ['name', 'prevent_self_review', 'protection_snapshot', 'ui_attestation'],
-    'environment-shape',
-  );
-  exactKeys(
-    input.environment.protection_snapshot,
+    readiness,
     [
-      'source_id',
+      'source_ids',
       'environment_id',
+      'can_admins_bypass',
       'deployment_branch_policy',
       'required_reviewer_ids',
-      'required_approvals',
+      'prevent_self_review',
+      'branch_policies',
       'secret_names',
       'token_permissions',
       'readback_sha256',
       'observation',
     ],
-    'environment-protection-shape',
+    'environment-readiness-shape',
   );
-  interval(input.environment.protection_snapshot.observation, 'environment-protection-observation');
-  if (
-    input.environment.protection_snapshot.source_id !== 'environment-protection' ||
-    !decimal.test(input.environment.protection_snapshot.environment_id) ||
-    input.environment.protection_snapshot.deployment_branch_policy !== 'main-only' ||
-    JSON.stringify(input.environment.protection_snapshot.required_reviewer_ids) !==
-      JSON.stringify(['16307884']) ||
-    input.environment.protection_snapshot.required_approvals !== 1 ||
-    JSON.stringify(input.environment.protection_snapshot.secret_names) !==
-      JSON.stringify([
-        'DEEPSEEK_API_KEY',
-        'AGENTIC_PR_REVIEW_STATE_KEY',
-        'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
-      ]) ||
-    JSON.stringify(input.environment.protection_snapshot.token_permissions) !==
-      JSON.stringify({ actions: 'write', contents: 'read', pull_requests: 'write' }) ||
-    !hex64.test(input.environment.protection_snapshot.readback_sha256)
-  )
-    invalid('environment-protection-values');
   exactKeys(
-    input.environment.ui_attestation,
-    [
-      'repository',
-      'environment',
-      'source_kind',
-      'observation',
-      'capture_sha256',
-      'maintainer_id',
-      'administrator_bypass',
-    ],
-    'ui-attestation-shape',
+    readiness.source_ids,
+    ['environment', 'branch_policies', 'environment_secrets'],
+    'environment-source-ids-shape',
   );
-  interval(input.environment.ui_attestation.observation, 'ui-attestation-interval');
+  exactKeys(
+    readiness.deployment_branch_policy,
+    ['protected_branches', 'custom_branch_policies'],
+    'environment-deployment-policy-shape',
+  );
+  interval(readiness.observation, 'environment-readiness-observation');
+  const allowedSecretSets = [
+    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY', 'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY'],
+  ];
   if (
     input.environment.name !== 'r4-trusted-proof' ||
-    input.environment.prevent_self_review !== false ||
-    input.environment.ui_attestation.repository !== input.identities.repository ||
-    input.environment.ui_attestation.environment !== input.environment.name ||
-    input.environment.ui_attestation.source_kind !== 'github-environment-ui' ||
-    !hex64.test(input.environment.ui_attestation.capture_sha256) ||
-    input.environment.ui_attestation.maintainer_id !== '16307884' ||
-    input.environment.ui_attestation.administrator_bypass !== false
+    canonicalJson(readiness.source_ids) !==
+      canonicalJson({
+        environment: 'environment-protection',
+        branch_policies: 'environment-branch-policies',
+        environment_secrets: 'environment-secret-inventory',
+      }) ||
+    !decimal.test(readiness.environment_id) ||
+    readiness.can_admins_bypass !== false ||
+    readiness.deployment_branch_policy.protected_branches !== false ||
+    readiness.deployment_branch_policy.custom_branch_policies !== true ||
+    JSON.stringify(readiness.required_reviewer_ids) !== '["16307884"]' ||
+    readiness.prevent_self_review !== false ||
+    canonicalJson(readiness.branch_policies) !==
+      canonicalJson([{ id: '58463845', name: 'main', type: 'branch' }]) ||
+    !allowedSecretSets.some(
+      (allowed) => JSON.stringify(allowed) === JSON.stringify(readiness.secret_names),
+    ) ||
+    canonicalJson(readiness.token_permissions) !==
+      canonicalJson({ actions: 'write', contents: 'read', pull_requests: 'write' }) ||
+    !hex64.test(readiness.readback_sha256)
   ) {
-    invalid('ui-attestation-values');
+    invalid('environment-readiness-values');
   }
   exactKeys(input.approval_transitions, ['bootstrap', 'continuation', 'stale'], 'approval-shape');
   validateApproval(input.approval_transitions.bootstrap, 'bootstrap');
@@ -2566,9 +2706,13 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
       'repository_id',
       'repository',
       'operation_ids',
-      'operation_runs',
+      'expected_roles',
+      'observed_runs',
       'source_map_sha256',
       'destination_identity_sha256',
+      'phase_fragment_journal_path',
+      'phase_fragment_journal_sha256',
+      'phase_fragment_journal_file_identity',
       'sources',
       'artifacts',
       'finalized',
@@ -2580,17 +2724,15 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
     value.repository_id !== host.identities.repository_id ||
     value.repository !== host.identities.repository ||
     JSON.stringify(value.operation_ids) !== JSON.stringify(host.identities.operation_ids) ||
-    JSON.stringify(value.operation_runs) !==
-      JSON.stringify(
-        host.authorizations.execution.operation_runs.map((run) => ({
-          ...run,
-          run_attempt: String(run.run_attempt),
-        })),
-      ) ||
-    !Array.isArray(value.operation_runs) ||
-    value.operation_runs.length !== 4 ||
+    !Array.isArray(value.expected_roles) ||
+    value.expected_roles.length !== 4 ||
+    !Array.isArray(value.observed_runs) ||
+    value.observed_runs.length < 4 ||
     value.source_map_sha256 !== sha256(canonicalJson(host.source_map)) ||
     value.destination_identity_sha256 !== host.restricted_package.destination_identity_sha256 ||
+    value.phase_fragment_journal_path !== 'phase-fragment-journal.json' ||
+    !hex64.test(value.phase_fragment_journal_sha256) ||
+    !hex64.test(value.phase_fragment_journal_file_identity) ||
     value.finalized !== true ||
     !Array.isArray(value.sources) ||
     value.sources.length === 0 ||
@@ -2600,12 +2742,18 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
   ) {
     invalid('capture-manifest-values');
   }
+  const expectedRoleNames = [
+    'normal-bootstrap',
+    'normal-continuation',
+    'stale-protected',
+    'stale-follow-on',
+  ];
   const operationByRun = new Map();
-  for (const run of value.operation_runs) {
+  for (const run of value.observed_runs) {
     exactKeys(
       run,
       ['operation_id', 'scope', 'run_id', 'run_attempt'],
-      'capture-operation-run-shape',
+      'capture-observed-run-shape',
     );
     if (
       operationByRun.has(run.run_id) ||
@@ -2614,21 +2762,51 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
       !decimal.test(run.run_id) ||
       run.run_attempt !== '1'
     ) {
-      invalid('capture-operation-run-values');
+      invalid('capture-observed-run-values');
     }
     operationByRun.set(run.run_id, run);
   }
+  const successfulRunIds = new Set();
+  value.expected_roles.forEach((role, index) => {
+    exactKeys(
+      role,
+      ['role', 'operation_id', 'scope', 'run_id', 'run_attempt', 'producer_source_ids'],
+      'capture-expected-role-shape',
+    );
+    const trigger = host.authorizations.execution.trigger_plan[index];
+    if (
+      role.role !== expectedRoleNames[index] ||
+      role.operation_id !== trigger.operation_id ||
+      role.scope !== trigger.scope ||
+      role.run_attempt !== '1' ||
+      !decimal.test(role.run_id) ||
+      successfulRunIds.has(role.run_id) ||
+      !Array.isArray(role.producer_source_ids) ||
+      role.producer_source_ids.length === 0 ||
+      new Set(role.producer_source_ids).size !== role.producer_source_ids.length ||
+      !value.observed_runs.some(
+        (run) =>
+          run.operation_id === role.operation_id &&
+          run.scope === role.scope &&
+          run.run_id === role.run_id &&
+          run.run_attempt === role.run_attempt,
+      )
+    ) {
+      invalid('capture-expected-role-values');
+    }
+    successfulRunIds.add(role.run_id);
+  });
   for (const operationId of value.operation_ids) {
-    const runs = value.operation_runs.filter(({ operation_id }) => operation_id === operationId);
-    if (runs.length !== 2 || new Set(runs.map(({ scope }) => scope)).size !== 1) {
-      invalid('capture-operation-run-values');
+    const roles = value.expected_roles.filter(({ operation_id }) => operation_id === operationId);
+    if (roles.length !== 2 || new Set(roles.map(({ scope }) => scope)).size !== 1) {
+      invalid('capture-expected-role-values');
     }
   }
   if (
-    value.operation_runs.filter(({ scope }) => scope === 'normal').length !== 2 ||
-    value.operation_runs.filter(({ scope }) => scope === 'stale').length !== 2
+    value.expected_roles.filter(({ scope }) => scope === 'normal').length !== 2 ||
+    value.expected_roles.filter(({ scope }) => scope === 'stale').length !== 2
   ) {
-    invalid('capture-operation-run-values');
+    invalid('capture-expected-role-values');
   }
   const sourceIds = new Set();
   const sourcePaths = new Set();
@@ -2676,6 +2854,13 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
     }
     sourceIds.add(source.source_id);
     sourcePaths.add(source.body_path);
+  }
+  if (
+    value.expected_roles.some((role) =>
+      role.producer_source_ids.some((sourceId) => !sourceIds.has(sourceId)),
+    )
+  ) {
+    invalid('capture-expected-role-source');
   }
   const artifactIds = new Set();
   const artifactNames = new Set();
@@ -3055,7 +3240,7 @@ function validateCleanupExecution({
     'cleanup-execution-entry-shape',
   );
   interval(cleanupExecution.entry.observation, 'cleanup-execution-entry-observation');
-  const expectedRunSources = authorizations.execution.operation_runs.map(
+  const expectedRunSources = captureManifest.observed_runs.map(
     ({ run_id }) => `run-terminal-${run_id}:page:1`,
   );
   const captureSources = new Map(
@@ -3219,8 +3404,10 @@ export function derivePostCleanupEvidence({
     postCleanupCaptureManifest.repository !== captureManifest.repository ||
     canonicalJson(postCleanupCaptureManifest.operation_ids) !==
       canonicalJson(captureManifest.operation_ids) ||
-    canonicalJson(postCleanupCaptureManifest.operation_runs) !==
-      canonicalJson(captureManifest.operation_runs) ||
+    canonicalJson(postCleanupCaptureManifest.expected_roles) !==
+      canonicalJson(captureManifest.expected_roles) ||
+    canonicalJson(postCleanupCaptureManifest.observed_runs) !==
+      canonicalJson(captureManifest.observed_runs) ||
     postCleanupCaptureManifest.source_map_sha256 !== captureManifest.source_map_sha256 ||
     postCleanupCaptureManifest.destination_identity_sha256 !==
       captureManifest.destination_identity_sha256 ||
@@ -3230,7 +3417,7 @@ export function derivePostCleanupEvidence({
   }
   const repositoryRoute = `/repos/${captureManifest.repository}`;
   const fixtures = authorizations.execution.fixture_prs;
-  const runs = authorizations.execution.operation_runs.map(({ run_id }) => run_id);
+  const runs = captureManifest.observed_runs.map(({ run_id }) => run_id);
   const operations = authorizations.execution.operation_ids;
   const expectedSourceIds = new Set();
   const read = (sourceId, route, pagination = 'none') => {
@@ -3306,9 +3493,17 @@ export function derivePostCleanupEvidence({
   }
   const secrets = read(
     'post-cleanup-secrets',
-    `${repositoryRoute}/actions/secrets`,
+    `${repositoryRoute}/environments/${cleanupPlan.targets.environment.name}/secrets`,
     'complete-cursor',
   );
+  if (
+    cleanupPlan.targets.secrets.some(
+      ({ environment: targetEnvironment }) =>
+        targetEnvironment !== cleanupPlan.targets.environment.name,
+    )
+  ) {
+    invalid('post-cleanup-secret-scope');
+  }
   const secretNames = new Set(
     secrets.values.flatMap((page) => page.secrets ?? []).map(({ name }) => name),
   );
@@ -3598,8 +3793,6 @@ export function assembleTrustedProofEvidence({
   oracleResultSha256,
   capturedSourceBodies,
   postCleanupCapturedSourceBodies,
-  uiAttestation,
-  uiAttestationSha256,
   retainedDocuments,
   oracleBinaries,
   publicSurfaceCorpus,
@@ -3636,7 +3829,7 @@ export function assembleTrustedProofEvidence({
     null,
     captureManifest,
     capturedSourceBodies,
-    authorizations.execution.operation_runs,
+    captureManifest.expected_roles,
   );
   const concurrency = validateConcurrencyDerivation(null, captureManifest, capturedSourceBodies);
   const payloadReceipt = retainedDocuments.get('trusted-proof-payload-receipt-v2');
@@ -3698,8 +3891,6 @@ export function assembleTrustedProofEvidence({
     null,
     captureManifest,
     capturedSourceBodies,
-    uiAttestation,
-    uiAttestationSha256,
     authorizations,
   );
   const restrictedPackage = retainedDocuments.get('restricted-package-readback');
@@ -3814,7 +4005,6 @@ export function assembleTrustedProofEvidence({
     captureManifest,
     captureManifestSha256,
     oracleResultSha256,
-    uiAttestationSha256,
     bindingDocuments,
     host,
   );

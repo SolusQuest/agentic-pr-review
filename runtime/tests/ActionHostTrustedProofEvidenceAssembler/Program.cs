@@ -51,7 +51,13 @@ internal static partial class Program
             {
                 throw new InvalidDataException("assembly_capture_invalid");
             }
-            var authorizedCredentialIdentities = AuthorizedCredentialIdentities(root, capture);
+            PhaseFragmentJournal.Validate(root, options["--capture-manifest"], capture);
+            var credentialAdmission = CredentialAdmissionReceipt.Read(
+                root,
+                options["--credential-admission-receipt"],
+                capture.OperationIds);
+            var authorizedCredentialIdentities = CredentialAdmissionReceipt.AuthorizedIdentities(
+                credentialAdmission);
             AcquireAndDeleteLeasedCredentials(
                 root,
                 options,
@@ -85,7 +91,6 @@ internal static partial class Program
                 leases.Add(lease);
                 leasesByOption.Add(option, lease);
             }
-
             protectedScanValues = ReadProtectedScanInput(
                 Console.OpenStandardInput(),
                 root,
@@ -134,6 +139,10 @@ internal static partial class Program
             {
                 throw new InvalidDataException("assembly_post_cleanup_capture_invalid");
             }
+            PhaseFragmentJournal.Validate(
+                root,
+                options["--post-cleanup-capture-manifest"],
+                postCleanupCapture);
             foreach (var source in postCleanupCapture.Sources)
             {
                 leases.Add(AcquireExpected(
@@ -809,35 +818,6 @@ internal static partial class Program
         return false;
     }
 
-    private static IReadOnlyDictionary<string, string> AuthorizedCredentialIdentities(
-        RestrictedEvidenceRoot root,
-        CaptureManifestDocument capture)
-    {
-        return ReadExecutionAuthorization(root, capture, authorization =>
-        {
-            var credentials = authorization.GetProperty("credential_files").EnumerateArray().ToArray();
-            var expectedNames = new[] { "github-token", "current-state-key", "previous-state-key" };
-            if (credentials.Length != expectedNames.Length)
-            {
-                throw new InvalidDataException("public_scan_input_invalid");
-            }
-            var result = new Dictionary<string, string>(StringComparer.Ordinal);
-            for (var index = 0; index < credentials.Length; index++)
-            {
-                ExactProperties(credentials[index], ["name", "file_identity_sha256"]);
-                var name = credentials[index].GetProperty("name").GetString() ?? "";
-                var identity = credentials[index].GetProperty("file_identity_sha256").GetString() ?? "";
-                if (!StringComparer.Ordinal.Equals(name, expectedNames[index]) ||
-                    !Regex.IsMatch(identity, "^[0-9a-f]{64}$") ||
-                    !result.TryAdd(name, identity))
-                {
-                    throw new InvalidDataException("public_scan_input_invalid");
-                }
-            }
-            return result;
-        });
-    }
-
     private static void ZeroArrays(IEnumerable<byte[]> values)
     {
         foreach (var value in values)
@@ -1307,6 +1287,7 @@ internal static partial class Program
     {
         var required = NodeArgumentNames.Append("--node-executable").Append("--public-output")
             .Append("--github-token-file").Append("--current-state-key-file")
+            .Append("--credential-admission-receipt")
             .ToHashSet(StringComparer.Ordinal);
         var allowed = required.Append("--previous-state-key-file").ToHashSet(StringComparer.Ordinal);
         if (args.Length % 2 != 0)

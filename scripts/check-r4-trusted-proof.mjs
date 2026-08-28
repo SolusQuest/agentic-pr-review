@@ -59,15 +59,15 @@ const fixtureDigests = new Map([
   ],
   [
     'authorizations/cleanup.json',
-    'e74589c1312eb16217cf25e715f958debdf529aea03ef2d6aef09e43c5af9163',
+    '541f8015e85dc88e9d8e0b58a0aff80687313f2df54cd03540e7d8289c0d82bd',
   ],
   [
     'authorizations/execution.json',
-    'e2d50bc9b1ad589a32a4010583b58765b41dc0c1a526cfe0b3ca34e32afd08ce',
+    '6c122152e01297d11af4324f22794bc1909bc8b7dd6ce1e03f5d72fa95110af7',
   ],
   ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
   ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
-  ['cleanup-plan.json', '0c10481d6edd7638f0bec869c968ff1614206618aa3dca07fd52b4119960643f'],
+  ['cleanup-plan.json', '011c681b6b5105c46440d80dd67017a71ea13f01003fc499997b31f4d50b107e'],
   [
     'expected-success-role-contract.json',
     '8d601c863d184f8f8cf3cdae5e1b447eb9fa7aea25fd94d00390a3ac786a92ba',
@@ -87,16 +87,16 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    'e965471374b4cfab408494db8b1d94bccbcad21b3457c514170cf86baad0a4de',
+    '0487577f96e328fedb3eb85d484cea9370b0b93d95b403ba9b2934b98e3b0ba4',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
     'fab487f9274857335cd976414f070957c812d528f69841caa52c8ab31e836594',
   ],
-  ['source-map.json', '612c10ed04ee0545a0cd36869ca83cbed75eae687a3131513c2969d791003281'],
+  ['source-map.json', '3b0514159cb1145fd8ca96c52cef6e415760a5c230f8949f773257d6c325545a'],
   [
     'templates/host-restricted-evidence.json',
-    'da2a7573b3b94c607585ee5825f7229b6a40fae0ff0fe2fb912a742756ce67f4',
+    '5f39bb5793aaab723e9d5a233fedbeaf332cd4944a8f3f0bcb4cc52ee7db9ec0',
   ],
   [
     'templates/public-safe-evidence.json',
