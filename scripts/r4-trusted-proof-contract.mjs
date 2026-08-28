@@ -2559,10 +2559,6 @@ export function validateHostEvidence(input) {
     'environment-deployment-policy-shape',
   );
   interval(readiness.observation, 'environment-readiness-observation');
-  const allowedSecretSets = [
-    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
-    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY', 'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY'],
-  ];
   if (
     input.environment.name !== 'r4-trusted-proof' ||
     canonicalJson(readiness.source_ids) !==
