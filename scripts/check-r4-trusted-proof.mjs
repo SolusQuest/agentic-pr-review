@@ -98,10 +98,10 @@ const fixtureDigests = new Map([
     'schemas/private-package-manifest.schema.json',
     '01d1ede4e23398a88f5080fca175157363c8cf639aed8cb61185d1e41d878b8f',
   ],
-  ['source-map.json', '90d3c02ae36f4472a8d8a15b49481c5c6eb4162f0da827a1efdd32ba1bc02d47'],
+  ['source-map.json', 'f99fba6f95199833597957d1e7b79b47d6754bae3cbc37f2b0b45b4d72ed734e'],
   [
     'templates/host-restricted-evidence.json',
-    '270e813da23cd540d994c9255c9da1de6842bccbb2a2c8ef1c6dda66fe2aa382',
+    'c6a6f57841384d1bbe52b5228cc7464262d30a2c0fdd5a5789a72d7be58607a6',
   ],
   [
     'templates/public-safe-evidence.json',

@@ -501,7 +501,13 @@ internal static class ProducerJournalMaterializer
                         run.GetProperty("head_sha").GetString() == target.ExpectedHeadSha) &&
                     (target.ExpectedHeadBranch.Length == 0 ||
                         run.GetProperty("head_branch").GetString() == target.ExpectedHeadBranch) &&
-                    pullRequests.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal))
+                    (target.ExpectedEvent == "workflow_dispatch"
+                        ? pullRequests.Length == 0
+                        : target.ExpectedPullRequestNumber.Length == 0
+                            ? pullRequests.Length == 0
+                            : pullRequests.Contains(
+                                target.ExpectedPullRequestNumber,
+                                StringComparer.Ordinal)))
                 {
                     matches++;
                 }
@@ -648,13 +654,9 @@ internal static class ProducerJournalMaterializer
                     producer,
                     expectedEvent,
                     descriptorSha256,
-                    producer == "advance-stale-ref"
-                        ? RequiredHex40(source, "value")
-                        : producer == "dispatch-proof-workflow" ? workflowSha : authorizedHeadSha,
-                    producer == "dispatch-proof-workflow"
-                        ? RequiredText(source, "value")
-                        : reference["refs/heads/".Length..],
-                    prNumber,
+                    workflowSha,
+                    producer == "dispatch-proof-workflow" ? RequiredText(source, "value") : "main",
+                    string.Empty,
                     RequiredPreconditionPhases: [preconditionPhase],
                     RequiredPreconditionSourcePrefixes: [preconditionPrefix]);
                 return producer switch

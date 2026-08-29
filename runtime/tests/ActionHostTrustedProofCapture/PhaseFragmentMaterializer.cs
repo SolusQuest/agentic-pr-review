@@ -249,7 +249,7 @@ public static partial class PhaseFragmentMaterializer
             "bootstrap-jobs", "bootstrap-concurrency", "continuation-readiness",
             "continuation-pending", "continuation-approval", "continuation-jobs",
             "stale-variable-readback", "stale-readiness", "stale-pending", "stale-approval",
-            "stale-jobs", "stale-concurrency", "terminal-normal",
+            "stale-jobs", "stale-follow-on-jobs", "stale-concurrency", "terminal-normal",
             "terminal-stale", "post-cleanup-normal", "post-cleanup-stale",
         };
         var stale = phase.Contains("stale", StringComparison.Ordinal);
@@ -839,17 +839,33 @@ public static partial class PhaseFragmentMaterializer
         CapturePageSet pages)
     {
         var names = new Dictionary<string, (string Status, string Conclusion)>(StringComparer.Ordinal);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
         int? total = null;
         string? runId = null;
+        var source = Regex.Match(
+            options["--source-id"],
+            "^transition-(?:bootstrap|continuation|stale|stale-follow-on)-jobs-run-([1-9][0-9]*)$");
+        if (!source.Success)
+        {
+            throw new InvalidDataException("phase_materializer_semantics_invalid");
+        }
         foreach (var body in pages.Bodies)
         {
             using var document = JsonDocument.Parse(body);
-            total ??= document.RootElement.GetProperty("total_count").GetInt32();
+            var currentTotal = document.RootElement.GetProperty("total_count").GetInt32();
+            total ??= currentTotal;
+            if (currentTotal != total)
+            {
+                throw new InvalidDataException("phase_materializer_semantics_invalid");
+            }
             foreach (var job in document.RootElement.GetProperty("jobs").EnumerateArray())
             {
                 var currentRun = job.GetProperty("run_id").GetRawText();
                 runId ??= currentRun;
-                if (currentRun != runId || job.GetProperty("run_attempt").GetInt32() != 1 ||
+                var jobId = job.GetProperty("id").GetRawText();
+                if (!PositiveDecimal(jobId) || !ids.Add(jobId) ||
+                    currentRun != runId || currentRun != source.Groups[1].Value ||
+                    job.GetProperty("run_attempt").GetInt32() != 1 ||
                     !names.TryAdd(
                         job.GetProperty("name").GetString() ?? string.Empty,
                         (job.GetProperty("status").GetString() ?? string.Empty,
@@ -859,17 +875,25 @@ public static partial class PhaseFragmentMaterializer
                 }
             }
         }
+        var rejectedFollowOn = options["--phase"] == "stale-follow-on-jobs";
         var selected = options["--phase"].StartsWith("continuation-", StringComparison.Ordinal)
             ? "workflow-dispatch-review"
             : "workflow-run-review";
         var other = selected == "workflow-run-review"
             ? "workflow-dispatch-review"
             : "workflow-run-review";
-        if (total != 3 || names.Count != 3 ||
+        if (total != 3 || names.Count != total ||
             !names.TryGetValue("authorization-preflight", out var preflight) ||
             preflight != ("completed", "success") ||
-            !names.TryGetValue(selected, out var admitted) || admitted != ("completed", "success") ||
-            !names.TryGetValue(other, out var skipped) || skipped != ("completed", "skipped"))
+            (rejectedFollowOn
+                ? !names.TryGetValue("workflow-run-review", out var workflowRun) ||
+                    workflowRun != ("completed", "skipped") ||
+                    !names.TryGetValue("workflow-dispatch-review", out var workflowDispatch) ||
+                    workflowDispatch != ("completed", "skipped")
+                : !names.TryGetValue(selected, out var admitted) ||
+                    admitted != ("completed", "success") ||
+                    !names.TryGetValue(other, out var skipped) ||
+                    skipped != ("completed", "skipped")))
         {
             throw new InvalidDataException("phase_materializer_semantics_invalid");
         }

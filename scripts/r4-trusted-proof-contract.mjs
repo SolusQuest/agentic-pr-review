@@ -141,7 +141,10 @@ function expectedCaptureSourcePhase(sourceId, operationId, operationIds) {
   if (match) return match[1];
   match = /^readiness-(bootstrap|continuation|stale)-/u.exec(family);
   if (match) return `${match[1]}-readiness`;
-  match = /^transition-(bootstrap|continuation|stale)-(pending|approvals|jobs)-/u.exec(family);
+  match =
+    /^transition-(bootstrap|continuation|stale|stale-follow-on)-(pending|approvals|jobs)-/u.exec(
+      family,
+    );
   if (match) return `${match[1]}-${match[2] === 'approvals' ? 'approval' : match[2]}`;
   match = /^proof-control-comments-(normal|stale)-pr-/u.exec(family);
   if (match) return `terminal-${match[1]}`;
@@ -194,9 +197,9 @@ function validateSourceMap(value) {
       '/approval_transitions',
       'github-rest',
       'deployment-transitions',
-      'pending-approvals-jobs',
-      'none',
-      'three exact run transitions',
+      'pending-deployments-approvals-and-attempt-jobs',
+      'complete-cursor',
+      'three exact admitted pending and approval transitions with complete attempt-one jobs plus one rejected follow-on job topology',
     ],
     [
       '/concurrency',
@@ -429,6 +432,15 @@ function validateSourceEvidenceBindings(
       captureReference(`transition-${phase}-pending-run-${transition.run_id}:page:1`),
       captureReference(`transition-${phase}-jobs-run-${transition.run_id}:page:1`),
     ])
+    .concat(
+      captureManifest.sources
+        .filter((source) =>
+          /^transition-stale-follow-on-jobs-run-[1-9][0-9]*:page:[1-9][0-9]*$/u.test(
+            source.source_id,
+          ),
+        )
+        .map((source) => captureReference(source.source_id)),
+    )
     .sort((a, b) => a.source_id.localeCompare(b.source_id));
   const proofReferences = Object.values(host.proof_control)
     .flatMap((family) => family.comments)
@@ -680,6 +692,9 @@ function deriveIdentities(
     fixture.ref.endsWith(staleOperation),
   );
   const followOnRunId = concurrency.stale.terminal.waiter_run_id;
+  const followOnTrigger = execution.trigger_plan.find(
+    (trigger) => trigger.role === 'stale-follow-on',
+  );
   const followOnSource = captureManifest.sources.find(
     (source) => source.source_id === `run-terminal-${followOnRunId}:page:1`,
   );
@@ -690,6 +705,57 @@ function deriveIdentities(
   } catch {
     invalid('identity-follow-on-json');
   }
+  const followOnJobPrefix = `transition-stale-follow-on-jobs-run-${followOnRunId}:page:`;
+  const followOnJobSources = captureManifest.sources
+    .filter((source) => source.source_id.startsWith(followOnJobPrefix))
+    .sort((left, right) => left.page - right.page);
+  const followOnJobs = [];
+  let followOnJobTotal;
+  for (const [index, source] of followOnJobSources.entries()) {
+    const retained = capturedSourceBodies.get(source.source_id);
+    let page;
+    try {
+      page = JSON.parse(retained?.text ?? '');
+    } catch {
+      invalid('identity-follow-on-jobs-json');
+    }
+    if (
+      source.page !== index + 1 ||
+      retained === undefined ||
+      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
+      page === null ||
+      typeof page !== 'object' ||
+      !Number.isSafeInteger(page.total_count) ||
+      page.total_count < 0 ||
+      !Array.isArray(page.jobs) ||
+      (followOnJobTotal !== undefined && page.total_count !== followOnJobTotal)
+    ) {
+      invalid('identity-follow-on-jobs-source');
+    }
+    followOnJobTotal ??= page.total_count;
+    followOnJobs.push(...page.jobs);
+  }
+  const followOnJobTopology = new Map();
+  const followOnJobIds = new Set();
+  for (const job of followOnJobs) {
+    if (
+      job === null ||
+      typeof job !== 'object' ||
+      !Number.isSafeInteger(job.id) ||
+      job.id < 1 ||
+      followOnJobIds.has(job.id) ||
+      String(job.run_id) !== followOnRunId ||
+      job.run_attempt !== 1 ||
+      typeof job.name !== 'string' ||
+      followOnJobTopology.has(job.name)
+    ) {
+      invalid('identity-follow-on-jobs-values');
+    }
+    followOnJobIds.add(job.id);
+    followOnJobTopology.set(job.name, [job.status, job.conclusion]);
+  }
+  const exactJob = (name, status, conclusion) =>
+    canonicalJson(followOnJobTopology.get(name)) === canonicalJson([status, conclusion]);
   if (
     payloadReceipt.kind !== 'apr-r4-e2p-trusted-proof-payload-v2' ||
     payloadReceipt.source_commit !== 'edc594c29a8a6b5fdacfab48643bf221277af200' ||
@@ -701,10 +767,27 @@ function deriveIdentities(
     followOnSource === undefined ||
     followOnRetained === undefined ||
     sha256(Buffer.from(followOnRetained.text, 'utf8')) !== followOnSource.body_sha256 ||
+    followOnTrigger === undefined ||
+    followOnTrigger.operation_id !== staleOperation ||
+    followOnTrigger.pr_number !== staleFixture.number ||
+    followOnTrigger.source_coordinate?.kind !== 'advanced-ref-head' ||
+    !hex40.test(followOnTrigger.source_coordinate.value) ||
     followOn.event !== 'workflow_run' ||
+    String(followOn.id) !== followOnRunId ||
+    followOn.run_attempt !== 1 ||
     followOn.status !== 'completed' ||
-    followOn.conclusion !== 'failure' ||
-    !hex40.test(followOn.head_sha)
+    followOn.conclusion !== 'success' ||
+    followOn.head_sha !== execution.coordinates.workflow_sha ||
+    followOn.head_branch !== 'main' ||
+    !Array.isArray(followOn.pull_requests) ||
+    followOn.pull_requests.length !== 0 ||
+    followOnJobSources.length === 0 ||
+    followOnJobTotal !== 3 ||
+    followOnJobs.length !== followOnJobTotal ||
+    followOnJobTopology.size !== 3 ||
+    !exactJob('authorization-preflight', 'completed', 'success') ||
+    !exactJob('workflow-run-review', 'completed', 'skipped') ||
+    !exactJob('workflow-dispatch-review', 'completed', 'skipped')
   ) {
     invalid('identity-source-values');
   }
@@ -724,7 +807,7 @@ function deriveIdentities(
       run_attempt: 1,
       event: followOn.event,
       pr_number: staleFixture.number,
-      advanced_head_sha: followOn.head_sha,
+      advanced_head_sha: followOnTrigger.source_coordinate.value,
       terminal_result: 'inert-unauthorized',
     },
     operation_ids: [normalOperation, staleOperation],

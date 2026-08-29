@@ -815,6 +815,45 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public void ProducerSealMapsProductionShapedWorkflowRunIdentityAndRetainsAmbiguity()
+    {
+        var root = CreateRestrictedRoot();
+        var operations = new[] { new string('6', 64), new string('8', 64) };
+        var workflowSha = new string('a', 40);
+        var target = new ProducerTargetAuthority(
+            new string('b', 64),
+            operations[0],
+            "normal-bootstrap",
+            "normal",
+            "rerun-upstream-ci",
+            "workflow_run",
+            new string('c', 64),
+            workflowSha,
+            "main",
+            string.Empty);
+        var journal = ProducerOutcomeJournal.CreateNew(
+            root,
+            "production-shaped-workflow-run-journal",
+            new string('4', 64), new string('5', 64), new string('6', 64),
+            "SolusQuest/agentic-pr-review", operations, [target], 0);
+        journal.AppendCreateNew(target.AuthorityId, 1, "before-dispatch", 0, 1, []);
+        journal.AppendCreateNew(target.AuthorityId, 1, "committed", 2, 3, [new string('d', 64)]);
+
+        var seal = journal.SealCreateNew(CreateBoundProducerDiscovery(
+            root,
+            "production-shaped-workflow-run-journal",
+            [
+                ("9001", workflowSha, "main", string.Empty),
+                ("9002", workflowSha, "main", string.Empty),
+                ("9003", workflowSha, "main", "1001"),
+            ]));
+
+        Assert.Empty(seal.Document.DerivedRoles);
+        Assert.Equal(["9001", "9002"], seal.Document.ObservedRuns.Select(run => run.RunId));
+        Assert.Equal("recovery-only", seal.Document.Disposition);
+    }
+
+    [Fact]
     public void ProducerSealMapsDispatchOnlyByTheAuthenticatedReturnedRunId()
     {
         var operations = new[] { new string('6', 64), new string('8', 64) };
@@ -2932,6 +2971,37 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             authorization,
             concurrency.Replace("in_progress", "completed", StringComparison.Ordinal)));
 
+        options["--phase"] = "stale-follow-on-jobs";
+        options["--source-id"] = "transition-stale-follow-on-jobs-run-9004";
+        options["--route"] = "/repos/SolusQuest/agentic-pr-review/actions/runs/9004/attempts/1/jobs";
+        var rejectedFollowOnJobs = "{\"total_count\":3,\"jobs\":[" +
+            "{\"id\":1,\"run_id\":9004,\"run_attempt\":1,\"name\":\"authorization-preflight\"," +
+            "\"status\":\"completed\",\"conclusion\":\"success\"}," +
+            "{\"id\":2,\"run_id\":9004,\"run_attempt\":1,\"name\":\"workflow-run-review\"," +
+            "\"status\":\"completed\",\"conclusion\":\"skipped\"}," +
+            "{\"id\":3,\"run_id\":9004,\"run_attempt\":1,\"name\":\"workflow-dispatch-review\"," +
+            "\"status\":\"completed\",\"conclusion\":\"skipped\"}]}";
+        ValidatePhase(options, authorization, rejectedFollowOnJobs);
+        Assert.Throws<InvalidDataException>(() => ValidatePhase(
+            options,
+            authorization,
+            rejectedFollowOnJobs.Replace(
+                "\"name\":\"workflow-run-review\",\"status\":\"completed\",\"conclusion\":\"skipped\"",
+                "\"name\":\"workflow-run-review\",\"status\":\"completed\",\"conclusion\":\"success\"",
+                StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ValidatePhase(
+            options,
+            authorization,
+            rejectedFollowOnJobs.Replace("\"run_id\":9004", "\"run_id\":9003", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ValidatePhase(
+            options,
+            authorization,
+            rejectedFollowOnJobs.Replace("\"total_count\":3", "\"total_count\":4", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ValidatePhase(
+            options,
+            authorization,
+            rejectedFollowOnJobs.Replace("\"id\":3", "\"id\":2", StringComparison.Ordinal)));
+
         options["--phase"] = "terminal-normal";
         options["--source-id"] = "run-terminal-9001";
         options["--route"] = "/repos/SolusQuest/agentic-pr-review/actions/runs/9001";
@@ -4094,7 +4164,9 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 head_repository = new { full_name = repository },
                 head_sha = run.HeadSha,
                 head_branch = run.HeadBranch,
-                pull_requests = new[] { new { number = ulong.Parse(run.PullRequestNumber) } },
+                pull_requests = run.PullRequestNumber.Length == 0
+                    ? Array.Empty<object>()
+                    : [new { number = ulong.Parse(run.PullRequestNumber) }],
                 created_at = DateTimeOffset.FromUnixTimeMilliseconds(1_000 + index)
                     .ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             }).ToArray(),

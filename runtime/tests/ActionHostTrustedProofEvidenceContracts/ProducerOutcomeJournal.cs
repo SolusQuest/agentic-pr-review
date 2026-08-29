@@ -833,10 +833,9 @@ public sealed class ProducerOutcomeJournal
         run.WorkflowPath == ".github/workflows/r4-trusted-proof.yml" &&
         (target.ExpectedHeadSha.Length == 0 || run.HeadSha == target.ExpectedHeadSha) &&
         (target.ExpectedHeadBranch.Length == 0 || run.HeadBranch == target.ExpectedHeadBranch) &&
-        (target.ExpectedEvent == "workflow_dispatch"
+        (target.ExpectedEvent == "workflow_dispatch" || target.ExpectedPullRequestNumber.Length == 0
             ? run.PullRequestNumbers.Length == 0
-            : target.ExpectedPullRequestNumber.Length == 0 ||
-                run.PullRequestNumbers.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal));
+            : run.PullRequestNumbers.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal));
 
     private sealed record DiscoveredRun(
         string RunId,

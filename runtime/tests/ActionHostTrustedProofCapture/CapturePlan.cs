@@ -58,7 +58,7 @@ public sealed record CapturePlanDocument(
 public static class CapturePlan
 {
     public const string CheckedSourceMapSha256 =
-        "90d3c02ae36f4472a8d8a15b49481c5c6eb4162f0da827a1efdd32ba1bc02d47";
+        "f99fba6f95199833597957d1e7b79b47d6754bae3cbc37f2b0b45b4d72ed734e";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     public static CapturePlanDocument Read(RestrictedEvidenceRoot root, string relativePath)
     {
@@ -287,7 +287,7 @@ public static class CapturePlan
             "bootstrap-jobs", "bootstrap-concurrency", "continuation-readiness",
             "continuation-pending", "continuation-approval", "continuation-jobs",
             "stale-variable-readback", "stale-readiness", "stale-pending", "stale-approval",
-            "stale-jobs", "stale-concurrency", "terminal-normal",
+            "stale-jobs", "stale-follow-on-jobs", "stale-concurrency", "terminal-normal",
             "terminal-stale", "post-cleanup-normal", "post-cleanup-stale",
         };
         return allowed.Contains(phase, StringComparer.Ordinal) &&
@@ -360,6 +360,10 @@ public static class CapturePlan
             roleRuns.ContainsKey("stale-follow-on"))
         {
             expected.Add($"concurrency-stale-run-{staleOwner}");
+        }
+        if (roleRuns.TryGetValue("stale-follow-on", out var staleFollowOn))
+        {
+            expected.Add($"transition-stale-follow-on-jobs-run-{staleFollowOn}");
         }
         foreach (var run in runs)
         {
@@ -499,14 +503,20 @@ public static class CapturePlan
         }
         var transition = Regex.Match(
             source.SourceId,
-            "^transition-(bootstrap|continuation|stale)-(pending|approvals|jobs)-run-([1-9][0-9]*)$");
+            "^transition-(bootstrap|continuation|stale|stale-follow-on)-(pending|approvals|jobs)-run-([1-9][0-9]*)$");
         if (transition.Success)
         {
             var phase = transition.Groups[1].Value;
             var kind = transition.Groups[2].Value;
             var run = transition.Groups[3].Value;
-            var role = phase == "bootstrap" ? "normal-bootstrap" :
-                phase == "continuation" ? "normal-continuation" : "stale-protected";
+            var role = phase switch
+            {
+                "bootstrap" => "normal-bootstrap",
+                "continuation" => "normal-continuation",
+                "stale" => "stale-protected",
+                _ => "stale-follow-on",
+            };
+            if (phase == "stale-follow-on" && kind != "jobs") return false;
             if (!roleRuns.TryGetValue(role, out var expectedRun) ||
                 !StringComparer.Ordinal.Equals(run, expectedRun) ||
                 source.Phase != $"{phase}-{(kind == "approvals" ? "approval" : kind)}") return false;

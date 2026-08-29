@@ -402,6 +402,30 @@ function syntheticAssembly(input = host) {
       },
     );
   }
+  const staleFollowOnRunId = String(
+    9001 +
+      candidate.authorizations.execution.trigger_plan.findIndex(
+        (trigger: any) => trigger.role === 'stale-follow-on',
+      ),
+  );
+  registerCapture(
+    `transition-stale-follow-on-jobs-run-${staleFollowOnRunId}:page:1`,
+    `/repos/${candidate.identities.repository}/actions/runs/${staleFollowOnRunId}/attempts/1/jobs`,
+    {
+      total_count: 3,
+      jobs: ['authorization-preflight', 'workflow-run-review', 'workflow-dispatch-review'].map(
+        (name, index) => ({
+          id: Number(`93${index}${staleFollowOnRunId}`),
+          run_id: Number(staleFollowOnRunId),
+          run_attempt: 1,
+          name,
+          status: 'completed',
+          conclusion: name === 'authorization-preflight' ? 'success' : 'skipped',
+          started_at: name === 'authorization-preflight' ? '2026-08-25T00:00:00.000Z' : null,
+        }),
+      ),
+    },
+  );
   for (const [scope, concurrency] of Object.entries<any>(candidate.concurrency)) {
     const holderRunId = concurrency.terminal.holder_run_id;
     registerCapture(
@@ -439,12 +463,12 @@ function syntheticAssembly(input = host) {
           : {
               id: Number(runId),
               status: 'completed',
-              conclusion: scope === 'stale' ? 'failure' : 'success',
+              conclusion: 'success',
               event: scope === 'stale' ? 'workflow_run' : 'workflow_dispatch',
-              head_sha:
-                scope === 'stale'
-                  ? candidate.identities.unauthorized_follow_on.advanced_head_sha
-                  : candidate.authorizations.execution.fixture_prs[0].head_sha,
+              run_attempt: 1,
+              head_sha: candidate.identities.workflow_sha,
+              head_branch: 'main',
+              pull_requests: [],
               run_started_at: new Date(concurrency.terminal.waiter_started.value).toISOString(),
               updated_at: new Date(concurrency.terminal.waiter_started.value + 1).toISOString(),
             };
@@ -526,20 +550,9 @@ function syntheticAssembly(input = host) {
         event: trigger.expected_event,
         path: '.github/workflows/r4-trusted-proof.yml',
         head_repository: { full_name: candidate.identities.repository },
-        head_sha:
-          trigger.producer === 'advance-stale-ref'
-            ? trigger.source_coordinate.value
-            : trigger.producer === 'dispatch-proof-workflow'
-              ? candidate.identities.workflow_sha
-              : trigger.authorized_head_sha,
-        head_branch:
-          trigger.producer === 'dispatch-proof-workflow'
-            ? trigger.source_coordinate.value
-            : trigger.ref.slice('refs/heads/'.length),
-        pull_requests:
-          trigger.expected_event === 'workflow_dispatch'
-            ? []
-            : [{ number: Number(trigger.pr_number) }],
+        head_sha: candidate.identities.workflow_sha,
+        head_branch: 'main',
+        pull_requests: [],
         created_at: new Date(1_000 + index * 2_000).toISOString(),
       }),
     ),
@@ -561,7 +574,10 @@ function syntheticAssembly(input = host) {
     if (match) return match[1];
     match = /^readiness-(bootstrap|continuation|stale)-/u.exec(family);
     if (match) return `${match[1]}-readiness`;
-    match = /^transition-(bootstrap|continuation|stale)-(pending|approvals|jobs)-/u.exec(family);
+    match =
+      /^transition-(bootstrap|continuation|stale|stale-follow-on)-(pending|approvals|jobs)-/u.exec(
+        family,
+      );
     if (match) return `${match[1]}-${match[2] === 'approvals' ? 'approval' : match[2]}`;
     match = /^proof-control-comments-(normal|stale)-pr-/u.exec(family);
     if (match) return `terminal-${match[1]}`;
@@ -1254,6 +1270,11 @@ function syntheticAssembly(input = host) {
             captureReference(`transition-${phase}-pending-run-${transition.run_id}:page:1`),
             captureReference(`transition-${phase}-jobs-run-${transition.run_id}:page:1`),
           ])
+          .concat(
+            captureReference(
+              `transition-stale-follow-on-jobs-run-${candidate.identities.unauthorized_follow_on.run_id}:page:1`,
+            ),
+          )
           .sort((a, b) => a.source_id.localeCompare(b.source_id)),
       ],
       [
@@ -2289,6 +2310,69 @@ describe('R4 E3 executable evidence contract', () => {
     input.capturedSourceBodies.set(secondId, { text: secondText });
     refreshCapture(input, secondId, secondPage);
     expect(() => assembleTrustedProofEvidence(input)).toThrow(/cleanup-execution-entry/u);
+  });
+
+  test('accepts the production-shaped rejected follow-on and derives the advanced fixture head from its trigger', () => {
+    const input = syntheticAssembly();
+    const terminal = JSON.parse(input.capturedSourceBodies.get('run-terminal-9004:page:1').text);
+    expect(terminal).toMatchObject({
+      event: 'workflow_run',
+      status: 'completed',
+      conclusion: 'success',
+      head_sha: host.identities.workflow_sha,
+      head_branch: 'main',
+      pull_requests: [],
+    });
+    expect(terminal.head_sha).not.toBe(host.identities.unauthorized_follow_on.advanced_head_sha);
+    expect(assembleTrustedProofEvidence(input).host.identities.unauthorized_follow_on).toEqual(
+      host.identities.unauthorized_follow_on,
+    );
+  });
+
+  test.each([
+    [
+      'failed downstream run',
+      (input: any) => {
+        const sourceId = 'run-terminal-9004:page:1';
+        const terminal = JSON.parse(input.capturedSourceBodies.get(sourceId).text);
+        terminal.conclusion = 'failure';
+        refreshCapture(input, sourceId, terminal);
+      },
+    ],
+    [
+      'protected workflow-run admission',
+      (input: any) => {
+        const sourceId = 'transition-stale-follow-on-jobs-run-9004:page:1';
+        const response = JSON.parse(input.capturedSourceBodies.get(sourceId).text);
+        response.jobs.find((job: any) => job.name === 'workflow-run-review').conclusion = 'success';
+        refreshCapture(input, sourceId, response);
+      },
+    ],
+    [
+      'missing protected job',
+      (input: any) => {
+        const sourceId = 'transition-stale-follow-on-jobs-run-9004:page:1';
+        const response = JSON.parse(input.capturedSourceBodies.get(sourceId).text);
+        response.jobs.pop();
+        response.total_count = response.jobs.length;
+        refreshCapture(input, sourceId, response);
+      },
+    ],
+    [
+      'duplicate job id',
+      (input: any) => {
+        const sourceId = 'transition-stale-follow-on-jobs-run-9004:page:1';
+        const response = JSON.parse(input.capturedSourceBodies.get(sourceId).text);
+        response.jobs[2].id = response.jobs[1].id;
+        refreshCapture(input, sourceId, response);
+      },
+    ],
+  ])('rejects the stale follow-on proof with %s', (_name, mutate) => {
+    const input = syntheticAssembly();
+    mutate(input);
+    expect(() => assembleTrustedProofEvidence(input)).toThrow(
+      /identity-(?:source-values|follow-on-jobs-values)/u,
+    );
   });
 
   test('rejects an operation-owned proof-control comment omitted from exact capture', () => {
