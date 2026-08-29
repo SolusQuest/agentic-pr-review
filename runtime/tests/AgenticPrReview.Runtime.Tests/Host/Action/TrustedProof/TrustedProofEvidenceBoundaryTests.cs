@@ -3420,6 +3420,67 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public async Task DispatchRequestMatchesThePinnedApiVersionSchema()
+    {
+        Assert.Equal("2026-03-10", TrustedProofCaptureClient.ApiVersion);
+        var body = ProducerJournalMaterializer.BuildDispatchRequestBody("main", "181");
+        var responseBody = Encoding.UTF8.GetBytes(
+            "{\"workflow_run_id\":9002," +
+            "\"run_url\":\"https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs/9002\"," +
+            "\"html_url\":\"https://github.com/SolusQuest/agentic-pr-review/actions/runs/9002\"}");
+        var token = Encoding.UTF8.GetBytes("synthetic-token");
+        var handler = new RecordingHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(
+                "/repos/SolusQuest/agentic-pr-review/actions/workflows/r4-trusted-proof.yml/dispatches",
+                request.RequestUri!.PathAndQuery);
+            Assert.Equal(
+                TrustedProofCaptureClient.ApiVersion,
+                request.Headers.GetValues("X-GitHub-Api-Version").Single());
+            using var document = JsonDocument.Parse(
+                request.Content!.ReadAsByteArrayAsync().GetAwaiter().GetResult());
+            var root = document.RootElement;
+            Assert.Equal(new[] { "ref", "inputs" },
+                root.EnumerateObject().Select(item => item.Name).ToArray());
+            Assert.Equal("main", root.GetProperty("ref").GetString());
+            var inputs = root.GetProperty("inputs");
+            Assert.Equal(new[] { "pr-number" },
+                inputs.EnumerateObject().Select(item => item.Name).ToArray());
+            Assert.Equal("181", inputs.GetProperty("pr-number").GetString());
+            Assert.False(root.TryGetProperty("return_run_details", out _));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(responseBody),
+            };
+        });
+        using var client = new TrustedProofCaptureClient(
+            token,
+            handler,
+            new RecordingHandler(_ => throw new InvalidOperationException()));
+
+        var response = await client.SendProducerAsync(
+            HttpMethod.Post,
+            "/repos/SolusQuest/agentic-pr-review/actions/workflows/r4-trusted-proof.yml/dispatches",
+            body,
+            HttpStatusCode.OK,
+            CancellationToken.None);
+        try
+        {
+            Assert.Equal("9002", ProducerJournalMaterializer.ReadDispatchRunId(
+                response.Body,
+                "SolusQuest/agentic-pr-review"));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(response.Body);
+            CryptographicOperations.ZeroMemory(body);
+            CryptographicOperations.ZeroMemory(responseBody);
+            CryptographicOperations.ZeroMemory(token);
+        }
+    }
+
+    [Fact]
     public async Task ProducerClientRejectsUnexpectedStatus()
     {
         var token = Encoding.UTF8.GetBytes("synthetic-token");
@@ -3432,7 +3493,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             HttpMethod.Post,
             "/repos/SolusQuest/agentic-pr-review/actions/workflows/r4-trusted-proof.yml/dispatches",
             null,
-            HttpStatusCode.NoContent,
+            HttpStatusCode.OK,
             CancellationToken.None));
         CryptographicOperations.ZeroMemory(token);
     }

@@ -669,15 +669,7 @@ internal static class ProducerJournalMaterializer
                         target,
                         HttpMethod.Post,
                         $"/repos/{repository}/actions/workflows/r4-trusted-proof.yml/dispatches",
-                        EncodeBody(new Dictionary<string, object>(StringComparer.Ordinal)
-                        {
-                            ["ref"] = RequiredText(source, "value"),
-                            ["inputs"] = new Dictionary<string, string>(StringComparer.Ordinal)
-                            {
-                                ["pr-number"] = prNumber,
-                            },
-                            ["return_run_details"] = true,
-                        }),
+                        BuildDispatchRequestBody(RequiredText(source, "value"), prNumber),
                         HttpStatusCode.OK),
                     "advance-stale-ref" => new ProducerCommand(
                         target,
@@ -934,6 +926,22 @@ internal static class ProducerJournalMaterializer
     private static bool PositiveDecimal(string value) => value.Length > 0 && value != "0" &&
         value.All(character => character is >= '0' and <= '9') &&
         (value.Length == 1 || value[0] != '0');
+
+    internal static byte[] BuildDispatchRequestBody(string reference, string pullRequestNumber)
+    {
+        if (string.IsNullOrWhiteSpace(reference) || !PositiveDecimal(pullRequestNumber))
+        {
+            throw new InvalidDataException("producer_dispatch_request_invalid");
+        }
+        return EncodeBody(new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["ref"] = reference,
+            ["inputs"] = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["pr-number"] = pullRequestNumber,
+            },
+        });
+    }
 
     internal static string ReadDispatchRunId(byte[] responseBody, string repository)
     {
