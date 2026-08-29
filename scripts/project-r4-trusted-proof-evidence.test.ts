@@ -1488,6 +1488,18 @@ describe('R4 E3 executable evidence contract', () => {
     ).toBe(true);
   });
 
+  test('admits four derived roles as recovery-only when another authority blocks success', () => {
+    const assembly = syntheticAssembly();
+    assembly.captureManifest.disposition = 'recovery-only';
+    const recoveryHost = structuredClone(host);
+    const captureManifestSha256 = sha256(canonicalJson(assembly.captureManifest));
+    recoveryHost.restricted_package.capture_manifest_sha256 = captureManifestSha256;
+
+    expect(() =>
+      validateCaptureManifest(assembly.captureManifest, recoveryHost, captureManifestSha256),
+    ).not.toThrow();
+  });
+
   test('freezes empty mutation baselines and exact destinations', () => {
     const execution = host.authorizations.execution;
 

@@ -2981,7 +2981,7 @@ export function validateCaptureManifest(value, host, captureManifestSha256) {
   }
   const successCandidate = value.disposition === 'success-candidate';
   if (
-    successCandidate !== (value.expected_roles.length === 4) ||
+    (successCandidate && value.expected_roles.length !== 4) ||
     (successCandidate && (value.observed_runs.length !== 4 || value.artifacts.length === 0))
   ) {
     invalid('capture-manifest-disposition');

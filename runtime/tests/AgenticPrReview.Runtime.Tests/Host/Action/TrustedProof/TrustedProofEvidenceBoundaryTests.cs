@@ -2641,7 +2641,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             producerSeal.Sha256,
             producerSeal.PhysicalIdentitySha256,
             "recovery-only",
-            ExpectedRoles(),
+            ExpectedRolesFour(),
             ObservedRuns(),
             new string('7', 64));
         Assert.True(File.Exists(finalized.Path));
@@ -2649,6 +2649,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         var manifest = JsonSerializer.Deserialize<CaptureManifestDocument>(
             File.ReadAllBytes(finalized.Path),
             EvidenceJson.Options)!;
+        Assert.Equal(4, manifest.ExpectedRoles.Length);
+        Assert.Equal("recovery-only", manifest.Disposition);
         PhaseFragmentJournal.Validate(root, "operation/capture-manifest.json", manifest);
         var fragmentPath = Path.Join(root.Path, "operation", "phase-fragment-0001.json");
         var fragmentBytes = File.ReadAllBytes(fragmentPath);
@@ -2665,7 +2667,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             producerSeal.Sha256,
             producerSeal.PhysicalIdentitySha256,
             "recovery-only",
-            ExpectedRoles(),
+            ExpectedRolesFour(),
             ObservedRuns(),
             new string('7', 64)));
     }
@@ -3194,6 +3196,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     [InlineData(0, 0)]
     [InlineData(1, 1)]
     [InlineData(3, 3)]
+    [InlineData(4, 4)]
     [InlineData(5, 3)]
     public void OracleAdmissionAcceptsCanonicalRecoveryInventoriesWithoutArtifacts(
         int observedCount,
@@ -3209,6 +3212,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         var roleNames = new[]
         {
             "normal-bootstrap", "normal-continuation", "stale-protected",
+            "stale-follow-on",
         };
         var roles = Enumerable.Range(0, roleCount).Select(index =>
             new CaptureManifestExpectedRole(
@@ -3762,6 +3766,38 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             new string('6', 64),
             "normal",
             "9001",
+            "1",
+            ["runs:page:1"]),
+    ];
+
+    private static CaptureManifestExpectedRole[] ExpectedRolesFour() =>
+    [
+        new(
+            "normal-bootstrap",
+            new string('6', 64),
+            "normal",
+            "9001",
+            "1",
+            ["runs:page:1"]),
+        new(
+            "normal-continuation",
+            new string('6', 64),
+            "normal",
+            "9002",
+            "1",
+            ["runs:page:1"]),
+        new(
+            "stale-protected",
+            new string('8', 64),
+            "stale",
+            "9003",
+            "1",
+            ["runs:page:1"]),
+        new(
+            "stale-follow-on",
+            new string('8', 64),
+            "stale",
+            "9004",
             "1",
             ["runs:page:1"]),
     ];

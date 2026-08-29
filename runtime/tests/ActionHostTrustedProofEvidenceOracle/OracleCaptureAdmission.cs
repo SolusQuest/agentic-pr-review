@@ -13,7 +13,7 @@ public static class OracleCaptureAdmission
             manifest.OperationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
             (!success && !recovery) ||
             (success && manifest.ExpectedRoles.Length != 4) ||
-            (recovery && manifest.ExpectedRoles.Length >= 4) ||
+            (recovery && manifest.ExpectedRoles.Length > 4) ||
             manifest.ExpectedRoles.Select(item => item.Role).Distinct(StringComparer.Ordinal).Count() !=
                 manifest.ExpectedRoles.Length ||
             manifest.ExpectedRoles.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=

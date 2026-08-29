@@ -333,7 +333,6 @@ public sealed class CapturePackageWriter
             !Sha256(producerJournalSealSha256) || !Sha256(producerJournalSealFileIdentity) ||
             disposition is not ("success-candidate" or "recovery-only") ||
             (disposition == "success-candidate" && expectedRoles.Length != 4) ||
-            (disposition == "recovery-only" && expectedRoles.Length == 4) ||
             expectedRoles.Length > 4 ||
             expectedRoles.Select(item => item.Role).Distinct(StringComparer.Ordinal).Count() !=
                 expectedRoles.Length ||
