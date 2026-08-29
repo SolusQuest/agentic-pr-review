@@ -34,7 +34,8 @@ public sealed record CapturePlanObservedRun(
     string OperationId,
     string Scope,
     string RunId,
-    string RunAttempt);
+    string RunAttempt,
+    string Ownership);
 
 public sealed record CapturePlanDocument(
     string Kind,
@@ -117,7 +118,7 @@ public static class CapturePlan
                                 .Select(DigestAndZero),
                             StringComparer.Ordinal) ||
                     !value.ObservedRuns.Select(item => new ProducerJournalObservedRun(
-                            item.OperationId, item.Scope, item.RunId, item.RunAttempt))
+                            item.OperationId, item.Scope, item.RunId, item.RunAttempt, item.Ownership))
                         .Select(item => CanonicalEvidence.Encode(item, EvidenceJson.Options))
                         .Select(DigestAndZero)
                         .SequenceEqual(
@@ -135,6 +136,7 @@ public static class CapturePlan
                     value.ObservedRuns.Any(item =>
                         !value.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
                         !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
+                        item.Ownership is not ("operation-owned" or "ownership-ambiguous") ||
                         !PositiveDecimal(item.RunId) ||
                         !PositiveDecimal(item.RunAttempt)) ||
                     value.ExpectedRoles.Any(item =>
@@ -154,7 +156,8 @@ public static class CapturePlan
                             StringComparer.Ordinal.Equals(run.OperationId, item.OperationId) &&
                             StringComparer.Ordinal.Equals(run.Scope, item.Scope) &&
                             StringComparer.Ordinal.Equals(run.RunId, item.RunId) &&
-                            StringComparer.Ordinal.Equals(run.RunAttempt, item.RunAttempt))) ||
+                            StringComparer.Ordinal.Equals(run.RunAttempt, item.RunAttempt) &&
+                            run.Ownership == "operation-owned")) ||
                     (value.Disposition == "success-candidate"
                         ? !ExactExpectedRoles(value)
                         : !ValidRecoveryRoles(value)) ||

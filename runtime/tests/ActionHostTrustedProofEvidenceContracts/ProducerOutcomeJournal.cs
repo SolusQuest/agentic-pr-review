@@ -62,7 +62,8 @@ public sealed record ProducerJournalObservedRun(
     string OperationId,
     string Scope,
     string RunId,
-    string RunAttempt);
+    string RunAttempt,
+    string Ownership);
 
 public sealed record ProducerDiscoverySource(
     string SourceId,
@@ -433,7 +434,8 @@ public sealed class ProducerOutcomeJournal
             var expected = seal.Document.ObservedRuns[index];
             var actual = capture.ObservedRuns[index];
             if (expected.OperationId != actual.OperationId || expected.Scope != actual.Scope ||
-                expected.RunId != actual.RunId || expected.RunAttempt != actual.RunAttempt)
+                expected.RunId != actual.RunId || expected.RunAttempt != actual.RunAttempt ||
+                expected.Ownership != actual.Ownership)
             {
                 throw new InvalidDataException("producer_journal_invalid");
             }
@@ -500,12 +502,19 @@ public sealed class ProducerOutcomeJournal
             if (!RunMatchesTarget(run, window.Target)) continue;
             mapped.Add((window.Target, run));
         }
+        var candidateCounts = mapped
+            .GroupBy(item => item.Target.AuthorityId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
         var runs = mapped
             .Select(item => new ProducerJournalObservedRun(
                 item.Target.OperationId,
                 item.Target.Scope,
                 item.Run.RunId,
-                item.Run.RunAttempt))
+                item.Run.RunAttempt,
+                committed.ContainsKey(item.Target.AuthorityId) &&
+                    candidateCounts[item.Target.AuthorityId] == 1
+                    ? "operation-owned"
+                    : "ownership-ambiguous"))
             .ToArray();
         var producerSourceIds = discoverySources.Select(item => item.SourceId).ToArray();
         var roles = windows.Select(window =>
@@ -513,7 +522,8 @@ public sealed class ProducerOutcomeJournal
                 var candidates = mapped.Where(item =>
                     item.Target.AuthorityId == window.Target.AuthorityId &&
                     item.Run.Event == window.Target.ExpectedEvent).ToArray();
-                return committed.ContainsKey(window.Target.AuthorityId) && candidates.Length == 1
+                return committed.ContainsKey(window.Target.AuthorityId) && candidates.Length == 1 &&
+                    candidates[0].Run.RunAttempt == "1"
                     ? new ProducerJournalExpectedRole(
                         window.Target.Role,
                         window.Target.OperationId,

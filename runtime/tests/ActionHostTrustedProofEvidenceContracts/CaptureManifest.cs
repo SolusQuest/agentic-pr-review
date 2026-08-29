@@ -34,7 +34,8 @@ public sealed record CaptureManifestObservedRun(
     string OperationId,
     string Scope,
     string RunId,
-    string RunAttempt);
+    string RunAttempt,
+    string Ownership);
 
 public sealed record CaptureManifestSource(
     string SourceId,

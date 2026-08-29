@@ -1922,6 +1922,52 @@ describe('R4 E3 executable evidence contract', () => {
     expect(privatePackageManifest.finalized).toBe(true);
   });
 
+  test('keeps an ownership-ambiguous artifact out of cleanup and proves both readbacks retain it', () => {
+    const candidate = copy(host);
+    const artifact = {
+      artifact_id: '1016',
+      artifact_name: 'apr-r4-ownership-ambiguous-1016',
+      producing_run_id: '9003',
+      producing_run_attempt: 1,
+      archive_sha256: '8'.repeat(64),
+      encrypted_object_sha256: '9'.repeat(64),
+      encrypted_object_size: '2016',
+      disposition: 'non-deletable-maintainer-handoff',
+      reason: 'operation-ownership-unverified',
+    };
+    candidate.inventories.maintainer_handoff = [artifact];
+
+    const input = syntheticAssembly(candidate);
+    const assembled = assembleTrustedProofEvidence(input);
+    expect(input.oracleResult.records.map((item: any) => item.artifact_id)).not.toContain(
+      artifact.artifact_id,
+    );
+    expect(input.oracleResult.maintainer_handoff).toEqual([
+      {
+        artifact_id: artifact.artifact_id,
+        disposition: artifact.disposition,
+        reason: artifact.reason,
+      },
+    ]);
+    expect(
+      assembled.cleanupPlan.targets.state_artifacts.map((item: any) => item.artifact_id),
+    ).not.toContain(artifact.artifact_id);
+    expect(assembled.host.inventories.maintainer_handoff).toEqual([artifact]);
+
+    const retained = {
+      total_count: 1,
+      artifacts: [{ id: Number(artifact.artifact_id), name: artifact.artifact_name }],
+    };
+    for (const sourceId of [
+      'post-cleanup-state-delete-run-9003:page:1',
+      'post-cleanup-state-empty-run-9003:page:1',
+    ]) {
+      const source = input.postCleanupCapturedSourceBodies.get(sourceId);
+      expect(source).toBeDefined();
+      expect(JSON.parse(source!.text)).toEqual(retained);
+    }
+  });
+
   test('rejects a recovery readback that hides a non-deletable maintainer handoff', () => {
     const candidate = copy(host);
     candidate.inventories.maintainer_handoff = [

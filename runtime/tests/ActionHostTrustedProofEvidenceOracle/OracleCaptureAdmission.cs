@@ -24,6 +24,7 @@ public static class OracleCaptureAdmission
             manifest.ObservedRuns.Any(item =>
                 !manifest.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
                 item.Scope is not ("normal" or "stale") ||
+                item.Ownership is not ("operation-owned" or "ownership-ambiguous") ||
                 !PositiveDecimal(item.RunId) || !PositiveDecimal(item.RunAttempt)) ||
             (success && manifest.ObservedRuns.Any(item => item.RunAttempt != "1")) ||
             (success && manifest.ExpectedRoles.GroupBy(item => item.OperationId, StringComparer.Ordinal)
@@ -31,7 +32,8 @@ public static class OracleCaptureAdmission
                     group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1)) ||
             manifest.ExpectedRoles.Any(role => !manifest.ObservedRuns.Any(run =>
                 run.OperationId == role.OperationId && run.Scope == role.Scope &&
-                run.RunId == role.RunId && run.RunAttempt == role.RunAttempt)) ||
+                run.RunId == role.RunId && run.RunAttempt == role.RunAttempt &&
+                run.Ownership == "operation-owned")) ||
             manifest.Sources.Length == 0 ||
             (success && manifest.Artifacts.Length == 0) ||
             manifest.Artifacts.Length > EvidenceLimits.MaximumRecords ||

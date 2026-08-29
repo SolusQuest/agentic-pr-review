@@ -218,7 +218,8 @@ internal static class Program
                     item.OperationId,
                     item.Scope,
                     item.RunId,
-                    item.RunAttempt)).ToArray(),
+                    item.RunAttempt,
+                    item.Ownership)).ToArray(),
                 plan.SourceMapSha256);
             completed = true;
             Console.Out.WriteLine($"APR_R4_E3_CAPTURE_OK {finalized.Sha256}");

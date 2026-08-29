@@ -1968,6 +1968,27 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(15, decodedRecovery.Records.Length);
         Assert.Empty(decodedRecovery.MaintainerHandoff);
 
+        var locatorInput = oracleInputs[0];
+        var ambiguousInput = oracleInputs.Skip(1).First(item =>
+            item.ProducingRunIdentity != locatorInput.ProducingRunIdentity);
+        var authorityWithoutAmbiguousRun = operationRuns.Where(run =>
+            run.RunIdentity != ambiguousInput.ProducingRunIdentity).ToArray();
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            [locatorInput, ambiguousInput],
+            authorityWithoutAmbiguousRun,
+            out var ambiguousRecoveryResult));
+        Assert.DoesNotContain(
+            ambiguousRecoveryResult!.Records,
+            record => record.ArtifactId == ambiguousInput.ArtifactId);
+        Assert.Contains(
+            ambiguousRecoveryResult.MaintainerHandoff,
+            item => item.ArtifactId == ambiguousInput.ArtifactId &&
+                item.Reason == "operation-ownership-unverified");
+
         Assert.True(OracleProgram.TryDecodeForDisposition(
             "recovery-only",
             continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),

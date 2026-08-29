@@ -258,11 +258,7 @@ internal static class Program
                         Convert.ToBase64String(current),
                         previous is null ? null : Convert.ToBase64String(previous),
                         encrypted,
-                        manifest.ObservedRuns.Select(item => new TrustedProofOperationRun(
-                            item.OperationId,
-                            item.Scope,
-                            item.RunId,
-                            long.Parse(item.RunAttempt))).ToArray(),
+                        OperationAuthority(manifest),
                         out var decoded) ||
                     decoded is null)
                 {
@@ -393,6 +389,16 @@ internal static class Program
                 out result),
             _ => InvalidDisposition(out result),
         };
+
+    internal static TrustedProofOperationRun[] OperationAuthority(CaptureManifestDocument manifest) =>
+        manifest.ObservedRuns
+            .Where(item => item.Ownership == "operation-owned")
+            .Select(item => new TrustedProofOperationRun(
+                item.OperationId,
+                item.Scope,
+                item.RunId,
+                long.Parse(item.RunAttempt)))
+            .ToArray();
 
     private static bool InvalidDisposition(out TrustedProofCodecOracleResult? result)
     {

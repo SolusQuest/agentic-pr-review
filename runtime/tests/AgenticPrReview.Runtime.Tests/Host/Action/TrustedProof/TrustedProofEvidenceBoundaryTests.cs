@@ -780,6 +780,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.Single(seal.Document.DerivedRoles);
         Assert.Single(seal.Document.ObservedRuns);
         Assert.Equal("9001", seal.Document.ObservedRuns[0].RunId);
+        Assert.Equal("operation-owned", seal.Document.ObservedRuns[0].Ownership);
 
         var duplicateRoot = CreateRestrictedRoot();
         var duplicate = ProducerOutcomeJournal.CreateNew(
@@ -798,6 +799,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             ]));
         Assert.Empty(duplicateSeal.Document.DerivedRoles);
         Assert.Equal(2, duplicateSeal.Document.ObservedRuns.Length);
+        Assert.All(duplicateSeal.Document.ObservedRuns,
+            run => Assert.Equal("ownership-ambiguous", run.Ownership));
         Assert.Equal("recovery-only", duplicateSeal.Document.Disposition);
 
         var wrongRepositoryRoot = CreateRestrictedRoot();
@@ -850,6 +853,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
 
         Assert.Empty(seal.Document.DerivedRoles);
         Assert.Equal(["9001", "9002"], seal.Document.ObservedRuns.Select(run => run.RunId));
+        Assert.All(seal.Document.ObservedRuns,
+            run => Assert.Equal("ownership-ambiguous", run.Ownership));
         Assert.Equal("recovery-only", seal.Document.Disposition);
     }
 
@@ -891,7 +896,33 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             ]));
 
         Assert.Equal("9001", Assert.Single(seal.Document.ObservedRuns).RunId);
+        Assert.Equal("operation-owned", Assert.Single(seal.Document.ObservedRuns).Ownership);
         Assert.Equal("9001", Assert.Single(seal.Document.DerivedRoles).RunId);
+
+        var retryRoot = CreateRestrictedRoot();
+        var retry = ProducerOutcomeJournal.CreateNew(
+            retryRoot,
+            "dispatch-retry-producer-journal",
+            new string('4', 64), new string('5', 64), new string('6', 64),
+            "SolusQuest/agentic-pr-review", operations, [target], 0);
+        retry.AppendCreateNew(target.AuthorityId, 1, "before-dispatch", 0, 1, []);
+        retry.AppendCreateNew(
+            target.AuthorityId,
+            1,
+            "committed",
+            2,
+            3,
+            [new string('c', 64), new string('d', 64)],
+            "9003");
+        var retrySeal = retry.SealCreateNew(CreateProducerDiscovery(
+            retryRoot,
+            "dispatch-retry-producer-journal",
+            [("9003", "2", "workflow_dispatch", 1_000L)]));
+        var retryRun = Assert.Single(retrySeal.Document.ObservedRuns);
+        Assert.Equal("2", retryRun.RunAttempt);
+        Assert.Equal("operation-owned", retryRun.Ownership);
+        Assert.Empty(retrySeal.Document.DerivedRoles);
+        Assert.Equal("recovery-only", retrySeal.Document.Disposition);
 
         var unknownRoot = CreateRestrictedRoot();
         var unknown = ProducerOutcomeJournal.CreateNew(
@@ -3357,7 +3388,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 operations[index < 2 ? 0 : 1],
                 index < 2 ? "normal" : "stale",
                 (9001 + index).ToString(),
-                index == 0 ? "2" : "1")).ToArray();
+                index == 0 ? "2" : "1",
+                "operation-owned")).ToArray();
         var roleNames = new[]
         {
             "normal-bootstrap", "normal-continuation", "stale-protected",
@@ -3387,6 +3419,43 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         OracleCaptureAdmission.Validate(manifest);
         Assert.Throws<InvalidDataException>(() =>
             OracleCaptureAdmission.Validate(manifest with { Disposition = "unknown" }));
+    }
+
+    [Fact]
+    public void OracleAuthorityExcludesAmbiguousRunsAndRetainsAuthenticatedExtras()
+    {
+        var operations = new[] { new string('6', 64), new string('8', 64) };
+        var observed = new[]
+        {
+            new CaptureManifestObservedRun(
+                operations[0], "normal", "9001", "1", "operation-owned"),
+            new CaptureManifestObservedRun(
+                operations[0], "normal", "9002", "1", "ownership-ambiguous"),
+            new CaptureManifestObservedRun(
+                operations[1], "stale", "9003", "2", "operation-owned"),
+        };
+        var manifest = new CaptureManifestDocument(
+            "apr-r4-e3-capture-manifest-v1", "42", "SolusQuest/agentic-pr-review",
+            operations, new string('1', 64), "producer-journal", new string('2', 64),
+            new string('3', 64), "recovery-only",
+            [new CaptureManifestExpectedRole(
+                "normal-bootstrap", operations[0], "normal", "9001", "1",
+                ["producer-discovery-final:page:1"])],
+            observed, new string('4', 64), new string('5', 64),
+            "phase-fragment-journal.json", new string('6', 64), new string('7', 64),
+            [new CaptureManifestSource(
+                "producer-discovery-final:page:1", operations[0], "producer-discovery",
+                "/repos/SolusQuest/agentic-pr-review/actions/runs", 1, 200, "source.json",
+                new string('8', 64), "2", new string('9', 64), new string('a', 64), 0, 1, null)],
+            [],
+            Finalized: true);
+
+        OracleCaptureAdmission.Validate(manifest);
+        var authority = AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.Program
+            .OperationAuthority(manifest);
+        Assert.Equal(["9001", "9003"], authority.Select(item => item.RunIdentity));
+        Assert.Equal(2, authority.Single(item => item.RunIdentity == "9003").RunAttempt);
+        Assert.DoesNotContain(authority, item => item.RunIdentity == "9002");
     }
 
     [Fact]
@@ -4039,10 +4108,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
 
     private static CaptureManifestObservedRun[] ObservedRuns() =>
     [
-        new(new string('6', 64), "normal", "9001", "1"),
-        new(new string('6', 64), "normal", "9002", "1"),
-        new(new string('8', 64), "stale", "9003", "1"),
-        new(new string('8', 64), "stale", "9004", "1"),
+        new(new string('6', 64), "normal", "9001", "1", "operation-owned"),
+        new(new string('6', 64), "normal", "9002", "1", "operation-owned"),
+        new(new string('8', 64), "stale", "9003", "1", "operation-owned"),
+        new(new string('8', 64), "stale", "9004", "1", "operation-owned"),
     ];
 
     private static Dictionary<string, IReadOnlyList<byte[]>> SyntheticProtectedCategories() =>
@@ -4320,7 +4389,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 operationIds[index < 2 ? 0 : 1],
                 index < 2 ? "normal" : "stale",
                 run,
-                "1")).ToArray(),
+                "1",
+                "operation-owned")).ToArray(),
             CapturePlan.CheckedSourceMapSha256,
             "post-cleanup-capture",
             sources.ToArray(),
