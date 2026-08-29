@@ -47,6 +47,7 @@ public sealed record ProducerOutcomeEntry(
     string Outcome,
     ProducerOutcomeObservation Observation,
     string[] ReconciliationSourceIds,
+    string? CommittedRunId,
     bool Finalized);
 
 public sealed record ProducerJournalExpectedRole(
@@ -310,7 +311,8 @@ public sealed class ProducerOutcomeJournal
         string outcome,
         long requestStartedUnixMilliseconds,
         long responseReceivedUnixMilliseconds,
-        string[] reconciliationSourceIds)
+        string[] reconciliationSourceIds,
+        string? committedRunId = null)
     {
         if (EvidenceFileHandle.PathEntryExists(
                 RestrictedEvidenceRoot.ResolveChildPath(
@@ -335,6 +337,7 @@ public sealed class ProducerOutcomeJournal
                 requestStartedUnixMilliseconds,
                 responseReceivedUnixMilliseconds),
             reconciliationSourceIds,
+            committedRunId,
             Finalized: true);
         var proposedEntries = entries.Append(entry).ToArray();
         var bytes = CanonicalEvidence.Encode(entry, EvidenceJson.Options);
@@ -477,12 +480,21 @@ public sealed class ProducerOutcomeJournal
         var mapped = new List<(ProducerTargetAuthority Target, DiscoveredRun Run)>();
         foreach (var run in discovered)
         {
-            var window = windows.LastOrDefault(candidate =>
-                candidate.Start is not null && run.CreatedUnixMilliseconds + 999 >= candidate.Start.Value);
+            var window = windows.SingleOrDefault(candidate =>
+                committed.GetValueOrDefault(candidate.Target.AuthorityId)?.CommittedRunId == run.RunId);
+            if (window is null)
+            {
+                window = windows.LastOrDefault(candidate =>
+                    candidate.Target.ExpectedEvent != "workflow_dispatch" &&
+                    candidate.Start is not null &&
+                    run.CreatedUnixMilliseconds + 999 >= candidate.Start.Value);
+            }
             if (window is null)
             {
                 if (run.CreatedUnixMilliseconds + 999 < authority.CreatedUnixMilliseconds) continue;
-                window = windows[0];
+                window = windows.FirstOrDefault(candidate =>
+                    candidate.Target.ExpectedEvent != "workflow_dispatch");
+                if (window is null) continue;
             }
             if (window.End is not null && run.CreatedUnixMilliseconds >= window.End.Value) continue;
             if (!RunMatchesTarget(run, window.Target)) continue;
@@ -705,6 +717,13 @@ public sealed class ProducerOutcomeJournal
         {
             throw new InvalidDataException("producer_journal_invalid");
         }
+        if (entries.Where(item => item.CommittedRunId is not null)
+                .Select(item => item.CommittedRunId)
+                .Distinct(StringComparer.Ordinal).Count() !=
+            entries.Count(item => item.CommittedRunId is not null))
+        {
+            throw new InvalidDataException("producer_journal_invalid");
+        }
         var byTarget = new Dictionary<string, ProducerOutcomeEntry>(StringComparer.Ordinal);
         for (var index = 0; index < entries.Count; index++)
         {
@@ -724,6 +743,9 @@ public sealed class ProducerOutcomeJournal
                 entry.ReconciliationSourceIds.Distinct(StringComparer.Ordinal).Count() !=
                     entry.ReconciliationSourceIds.Length ||
                 entry.ReconciliationSourceIds.Any(item => !Sha256(item)) ||
+                (target.ExpectedEvent == "workflow_dispatch" && entry.Outcome == "committed"
+                    ? !PositiveDecimal(entry.CommittedRunId ?? string.Empty)
+                    : entry.CommittedRunId is not null) ||
                 !ValidTransition(prior, entry))
             {
                 throw new InvalidDataException("producer_journal_invalid");
@@ -811,8 +833,10 @@ public sealed class ProducerOutcomeJournal
         run.WorkflowPath == ".github/workflows/r4-trusted-proof.yml" &&
         (target.ExpectedHeadSha.Length == 0 || run.HeadSha == target.ExpectedHeadSha) &&
         (target.ExpectedHeadBranch.Length == 0 || run.HeadBranch == target.ExpectedHeadBranch) &&
-        (target.ExpectedPullRequestNumber.Length == 0 || target.ExpectedEvent == "workflow_dispatch" ||
-            run.PullRequestNumbers.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal));
+        (target.ExpectedEvent == "workflow_dispatch"
+            ? run.PullRequestNumbers.Length == 0
+            : target.ExpectedPullRequestNumber.Length == 0 ||
+                run.PullRequestNumbers.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal));
 
     private sealed record DiscoveredRun(
         string RunId,

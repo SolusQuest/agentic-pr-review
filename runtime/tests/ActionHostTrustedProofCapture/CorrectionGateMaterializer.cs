@@ -48,7 +48,7 @@ internal static class CorrectionGateMaterializer
             var worktreeIdentity = WorktreeIdentity(worktree);
             var commit = Git(worktree, "rev-parse", "HEAD");
             var tree = Git(worktree, "rev-parse", "HEAD^{tree}");
-            var clean = Git(worktree, "status", "--porcelain", "--untracked-files=no").Length == 0;
+            var clean = IsWorktreeClean(worktree);
             if (!clean || commit != expected.Commit || tree != expected.Tree ||
                 worktreeIdentity != expected.WorktreeIdentitySha256)
             {
@@ -396,6 +396,9 @@ internal static class CorrectionGateMaterializer
         if (process.ExitCode != 0) throw new InvalidDataException("correction_gate_git_invalid");
         return output.Trim();
     }
+
+    internal static bool IsWorktreeClean(string worktree) =>
+        Git(worktree, "status", "--porcelain=v1", "--untracked-files=all").Length == 0;
 
     private static byte[] ReadToken(Stream stream)
     {

@@ -286,16 +286,27 @@ internal static class ProducerJournalMaterializer
                 timeout.Token).GetAwaiter().GetResult();
             try
             {
+                var committedRunId = producer.Target.ExpectedEvent == "workflow_dispatch"
+                    ? ReadDispatchRunId(response.Body, journal.Authority.Repository)
+                    : null;
                 var captureBytes = CanonicalEvidence.Encode(response.Capture, EvidenceJson.Options);
                 try
                 {
+                    var sourceIds = committedRunId is null
+                        ? new[] { CanonicalEvidence.Sha256(captureBytes) }
+                        : new[]
+                        {
+                            CanonicalEvidence.Sha256(captureBytes),
+                            response.Capture.BodySha256,
+                        };
                     journal.AppendCreateNew(
                         producer.Target.AuthorityId,
                         attempt,
                         "committed",
                         response.Capture.RequestStartedUnixMilliseconds,
                         response.Capture.ResponseReceivedUnixMilliseconds,
-                        [CanonicalEvidence.Sha256(captureBytes)]);
+                        sourceIds,
+                        committedRunId);
                 }
                 finally
                 {
@@ -374,6 +385,11 @@ internal static class ProducerJournalMaterializer
                 item.AuthorityId == producer.Target.AuthorityId) != unknown)
         {
             throw new InvalidDataException("producer_reconciliation_invalid");
+        }
+        if (producer.Target.ExpectedEvent == "workflow_dispatch")
+        {
+            Console.Error.WriteLine("APR_R4_E3_PRODUCER_OUTCOME_STILL_UNKNOWN");
+            return 2;
         }
         var phase = $"reconcile-{journal.Entries.Count + 1:D4}";
         var sources = CaptureDiscovery(
@@ -485,8 +501,7 @@ internal static class ProducerJournalMaterializer
                         run.GetProperty("head_sha").GetString() == target.ExpectedHeadSha) &&
                     (target.ExpectedHeadBranch.Length == 0 ||
                         run.GetProperty("head_branch").GetString() == target.ExpectedHeadBranch) &&
-                    (target.ExpectedEvent == "workflow_dispatch" ||
-                        pullRequests.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal)))
+                    pullRequests.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal))
                 {
                     matches++;
                 }
@@ -587,6 +602,7 @@ internal static class ProducerJournalMaterializer
             "stale-follow-on",
         };
         var triggers = execution.GetProperty("trigger_plan").EnumerateArray().ToArray();
+        var workflowSha = RequiredHex40(execution.GetProperty("coordinates"), "workflow_sha");
         if (triggers.Length != roles.Length)
         {
             throw new InvalidDataException("producer_materializer_authorization_invalid");
@@ -634,7 +650,7 @@ internal static class ProducerJournalMaterializer
                     descriptorSha256,
                     producer == "advance-stale-ref"
                         ? RequiredHex40(source, "value")
-                        : producer == "dispatch-proof-workflow" ? "" : authorizedHeadSha,
+                        : producer == "dispatch-proof-workflow" ? workflowSha : authorizedHeadSha,
                     producer == "dispatch-proof-workflow"
                         ? RequiredText(source, "value")
                         : reference["refs/heads/".Length..],
@@ -660,8 +676,9 @@ internal static class ProducerJournalMaterializer
                             {
                                 ["pr-number"] = prNumber,
                             },
+                            ["return_run_details"] = true,
                         }),
-                        HttpStatusCode.NoContent),
+                        HttpStatusCode.OK),
                     "advance-stale-ref" => new ProducerCommand(
                         target,
                         HttpMethod.Patch,
@@ -917,6 +934,40 @@ internal static class ProducerJournalMaterializer
     private static bool PositiveDecimal(string value) => value.Length > 0 && value != "0" &&
         value.All(character => character is >= '0' and <= '9') &&
         (value.Length == 1 || value[0] != '0');
+
+    internal static string ReadDispatchRunId(byte[] responseBody, string repository)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            var root = document.RootElement;
+            var names = root.ValueKind == JsonValueKind.Object
+                ? root.EnumerateObject().Select(item => item.Name).ToArray()
+                : [];
+            var runId = root.ValueKind == JsonValueKind.Object &&
+                root.TryGetProperty("workflow_run_id", out var runIdElement)
+                    ? runIdElement.GetRawText()
+                    : string.Empty;
+            if (names.Length != 3 || names.Distinct(StringComparer.Ordinal).Count() != 3 ||
+                !names.Order(StringComparer.Ordinal).SequenceEqual(
+                    new[] { "html_url", "run_url", "workflow_run_id" },
+                    StringComparer.Ordinal) ||
+                !PositiveDecimal(runId) ||
+                root.GetProperty("run_url").GetString() !=
+                    $"https://api.github.com/repos/{repository}/actions/runs/{runId}" ||
+                root.GetProperty("html_url").GetString() !=
+                    $"https://github.com/{repository}/actions/runs/{runId}")
+            {
+                throw new InvalidDataException("producer_dispatch_response_invalid");
+            }
+            return runId;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or
+            KeyNotFoundException)
+        {
+            throw new InvalidDataException("producer_dispatch_response_invalid", exception);
+        }
+    }
 
     private sealed record ProducerAuthorization(
         string Repository,

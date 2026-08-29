@@ -529,7 +529,9 @@ function syntheticAssembly(input = host) {
         head_sha:
           trigger.producer === 'advance-stale-ref'
             ? trigger.source_coordinate.value
-            : trigger.authorized_head_sha,
+            : trigger.producer === 'dispatch-proof-workflow'
+              ? candidate.identities.workflow_sha
+              : trigger.authorized_head_sha,
         head_branch:
           trigger.producer === 'dispatch-proof-workflow'
             ? trigger.source_coordinate.value

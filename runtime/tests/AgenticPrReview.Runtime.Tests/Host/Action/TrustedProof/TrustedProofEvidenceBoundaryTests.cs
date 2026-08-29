@@ -551,6 +551,26 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             "181"));
     }
 
+    [Fact]
+    public void CorrectionGateCleanlinessRejectsTrackedAndNonignoredUntrackedState()
+    {
+        var repository = CreateGitRepository();
+        var git = FindExecutable("git");
+        Assert.True(CorrectionGateMaterializer.IsWorktreeClean(repository));
+
+        File.WriteAllText(Path.Join(repository, ".git", "info", "exclude"), "ignored.tmp\n");
+        File.WriteAllText(Path.Join(repository, "ignored.tmp"), "ignored\n");
+        Assert.True(CorrectionGateMaterializer.IsWorktreeClean(repository));
+
+        File.WriteAllText(Path.Join(repository, "untracked.txt"), "untracked\n");
+        Assert.False(CorrectionGateMaterializer.IsWorktreeClean(repository));
+        _ = RunProcess(git, repository, "add", "untracked.txt");
+        Assert.False(CorrectionGateMaterializer.IsWorktreeClean(repository));
+
+        File.WriteAllText(Path.Join(repository, "source.txt"), "modified\n");
+        Assert.False(CorrectionGateMaterializer.IsWorktreeClean(repository));
+    }
+
     [Theory]
     [InlineData(3, 3, "recovery-only")]
     [InlineData(4, 4, "success-candidate")]
@@ -599,7 +619,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 "committed",
                 before + 2,
                 before + 3,
-                [new string((char)('a' + index), 64)]);
+                [new string((char)('a' + index), 64)],
+                index == 1 ? "9002" : null);
         }
         var runs = Enumerable.Range(0, runCount).Select(index => (
             RunId: (9001 + index).ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -666,7 +687,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 "committed",
                 before + 2,
                 before + 3,
-                [new string((char)('a' + index), 64)]);
+                [new string((char)('a' + index), 64)],
+                index == 1 ? "9002" : null);
         }
         var runs = Enumerable.Range(0, 4).Select(index => (
             RunId: (9001 + index).ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -790,6 +812,63 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 "wrong-repository-producer-journal",
                 [("9001", new string('c', 40), "r4-trusted-proof/normal", "1001")],
                 repository: "SolusQuest/other")));
+    }
+
+    [Fact]
+    public void ProducerSealMapsDispatchOnlyByTheAuthenticatedReturnedRunId()
+    {
+        var operations = new[] { new string('6', 64), new string('8', 64) };
+        var target = new ProducerTargetAuthority(
+            new string('a', 64),
+            operations[0],
+            "normal-continuation",
+            "normal",
+            "dispatch-proof-workflow",
+            "workflow_dispatch",
+            new string('b', 64),
+            ExpectedPullRequestNumber: "1001");
+        var root = CreateRestrictedRoot();
+        var journal = ProducerOutcomeJournal.CreateNew(
+            root,
+            "dispatch-bound-producer-journal",
+            new string('4', 64), new string('5', 64), new string('6', 64),
+            "SolusQuest/agentic-pr-review", operations, [target], 0);
+        journal.AppendCreateNew(target.AuthorityId, 1, "before-dispatch", 0, 1, []);
+        journal.AppendCreateNew(
+            target.AuthorityId,
+            1,
+            "committed",
+            2,
+            3,
+            [new string('c', 64), new string('d', 64)],
+            "9001");
+
+        var seal = journal.SealCreateNew(CreateProducerDiscovery(
+            root,
+            "dispatch-bound-producer-journal",
+            [
+                ("9001", "1", "workflow_dispatch", 1_000L),
+                ("9002", "1", "workflow_dispatch", 1_001L),
+            ]));
+
+        Assert.Equal("9001", Assert.Single(seal.Document.ObservedRuns).RunId);
+        Assert.Equal("9001", Assert.Single(seal.Document.DerivedRoles).RunId);
+
+        var unknownRoot = CreateRestrictedRoot();
+        var unknown = ProducerOutcomeJournal.CreateNew(
+            unknownRoot,
+            "dispatch-unknown-producer-journal",
+            new string('4', 64), new string('5', 64), new string('6', 64),
+            "SolusQuest/agentic-pr-review", operations, [target], 0);
+        unknown.AppendCreateNew(target.AuthorityId, 1, "before-dispatch", 0, 1, []);
+        unknown.AppendCreateNew(target.AuthorityId, 1, "outcome-unknown", 0, 2, []);
+        var unknownSeal = unknown.SealCreateNew(CreateProducerDiscovery(
+            unknownRoot,
+            "dispatch-unknown-producer-journal",
+            [("9001", "1", "workflow_dispatch", 1_000L)]));
+        Assert.Empty(unknownSeal.Document.ObservedRuns);
+        Assert.Empty(unknownSeal.Document.DerivedRoles);
+        Assert.Equal("recovery-only", unknownSeal.Document.Disposition);
     }
 
     [Fact]
@@ -3316,6 +3395,31 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public void DispatchRunDetailsBindTheAuthenticatedResponseToTheRepository()
+    {
+        const string repository = "SolusQuest/agentic-pr-review";
+        var valid = Encoding.UTF8.GetBytes(
+            "{\"workflow_run_id\":9002," +
+            "\"run_url\":\"https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs/9002\"," +
+            "\"html_url\":\"https://github.com/SolusQuest/agentic-pr-review/actions/runs/9002\"}");
+        Assert.Equal("9002", ProducerJournalMaterializer.ReadDispatchRunId(valid, repository));
+
+        foreach (var invalid in new[]
+        {
+            "{}",
+            "{\"workflow_run_id\":0,\"run_url\":\"https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs/0\",\"html_url\":\"https://github.com/SolusQuest/agentic-pr-review/actions/runs/0\"}",
+            "{\"workflow_run_id\":9002,\"run_url\":\"https://api.github.com/repos/SolusQuest/other/actions/runs/9002\",\"html_url\":\"https://github.com/SolusQuest/other/actions/runs/9002\"}",
+            "{\"workflow_run_id\":9002,\"run_url\":\"https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs/9002\",\"html_url\":\"https://github.com/SolusQuest/agentic-pr-review/actions/runs/9002\",\"extra\":true}",
+        })
+        {
+            Assert.Throws<InvalidDataException>(() =>
+                ProducerJournalMaterializer.ReadDispatchRunId(
+                    Encoding.UTF8.GetBytes(invalid),
+                    repository));
+        }
+    }
+
+    [Fact]
     public async Task ProducerClientRejectsUnexpectedStatus()
     {
         var token = Encoding.UTF8.GetBytes("synthetic-token");
@@ -4007,7 +4111,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 "committed",
                 before + 2,
                 before + 3,
-                [new string((char)('a' + index), 64)]);
+                [new string((char)('a' + index), 64)],
+                index == 1 ? runs[index] : null);
         }
         var producerSeal = producerJournal.SealCreateNew(CreateProducerDiscovery(
             restrictedRoot,
