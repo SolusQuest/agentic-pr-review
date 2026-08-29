@@ -6,11 +6,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
+using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Canonical;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
@@ -24,6 +26,50 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action;
 
 public sealed class ActionHostFrameworkVerifierArchitectureTests
 {
+    [Fact]
+    public async Task StateEvidenceRecorderSerializesConcurrentOperationPairs()
+    {
+        var root = Path.Join(Path.GetTempPath(), "apr-state-evidence-" +
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var recorder = new FrameworkStateEvidenceRecorder(root);
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, 256),
+                async (index, _) =>
+                {
+                    await Task.Yield();
+                    var operation = "operation-" + index.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture);
+                    recorder.Record(
+                        operation,
+                        OpaqueStoreFailure.None,
+                        index,
+                        "name",
+                        "identity",
+                        "digest",
+                        "None",
+                        "Committed",
+                        "result");
+                });
+
+            var operations = File.ReadAllLines(
+                Path.Join(root, "state-operations.tsv"));
+            var identities = File.ReadAllLines(
+                Path.Join(root, "state-operation-identities.tsv"));
+            Assert.Equal(256, operations.Length);
+            Assert.Equal(256, identities.Length);
+            Assert.Equal(
+                operations.Select(value => value.Split('\t')[0]),
+                identities.Select(value => value.Split('\t')[0]));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void ProductionCompositionWiresTheRealPostAcceptanceInlineHook()
     {
