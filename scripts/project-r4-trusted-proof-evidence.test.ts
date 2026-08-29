@@ -614,12 +614,20 @@ function syntheticAssembly(input = host) {
     response_received_unix_milliseconds: sourceObservations.get(sourceId)?.response_received ?? 2,
     next_route: null,
   }));
+  const ownershipAmbiguousRunIds = new Set(
+    maintainerHandoff
+      .filter((item: any) => item.reason === 'operation-ownership-unverified')
+      .map((item: any) => item.producing_run_id),
+  );
   const observedRuns = candidate.authorizations.execution.trigger_plan.map(
     (trigger: any, index: number) => ({
       operation_id: trigger.operation_id,
       scope: trigger.scope,
       run_id: String(9001 + index),
       run_attempt: '1',
+      ownership: ownershipAmbiguousRunIds.has(String(9001 + index))
+        ? 'ownership-ambiguous'
+        : 'operation-owned',
     }),
   );
   const producerSourceIdsByRole = new Map<string, string[]>(
@@ -629,11 +637,14 @@ function syntheticAssembly(input = host) {
     ]),
   );
   const expectedRoles = (recoveryMode ? [] : candidate.authorizations.execution.trigger_plan).map(
-    (trigger: any, index: number) => ({
-      role: trigger.role,
-      ...observedRuns[index],
-      producer_source_ids: producerSourceIdsByRole.get(trigger.role),
-    }),
+    (trigger: any, index: number) => {
+      const { ownership: _ownership, ...run } = observedRuns[index];
+      return {
+        role: trigger.role,
+        ...run,
+        producer_source_ids: producerSourceIdsByRole.get(trigger.role),
+      };
+    },
   );
   const producerJournalSeal = {
     kind: 'apr-r4-e3-producer-outcome-journal-seal-v1',
@@ -1528,6 +1539,33 @@ describe('R4 E3 executable evidence contract', () => {
         Array.isArray(entry.producer_source_ids),
       ),
     ).toBe(true);
+    expect(assembly.captureManifest.observed_runs.map((entry: any) => entry.ownership)).toEqual([
+      'operation-owned',
+      'operation-owned',
+      'operation-owned',
+      'operation-owned',
+    ]);
+  });
+
+  test('requires explicit run ownership and prevents ambiguous runs from satisfying roles', () => {
+    const validate = (captureManifest: any) => {
+      const candidateHost = structuredClone(host);
+      const captureManifestSha256 = sha256(canonicalJson(captureManifest));
+      candidateHost.restricted_package.capture_manifest_sha256 = captureManifestSha256;
+      return () => validateCaptureManifest(captureManifest, candidateHost, captureManifestSha256);
+    };
+
+    const missing = syntheticAssembly().captureManifest;
+    delete missing.observed_runs[0].ownership;
+    expect(validate(missing)).toThrow(/capture-observed-run-shape/u);
+
+    const unknown = syntheticAssembly().captureManifest;
+    unknown.observed_runs[0].ownership = 'repository-owned';
+    expect(validate(unknown)).toThrow(/capture-observed-run-values/u);
+
+    const ambiguousRole = syntheticAssembly().captureManifest;
+    ambiguousRole.observed_runs[0].ownership = 'ownership-ambiguous';
+    expect(validate(ambiguousRole)).toThrow(/capture-expected-role-values/u);
   });
 
   test('admits four derived roles as recovery-only when another authority blocks success', () => {
@@ -1938,6 +1976,12 @@ describe('R4 E3 executable evidence contract', () => {
     candidate.inventories.maintainer_handoff = [artifact];
 
     const input = syntheticAssembly(candidate);
+    expect(
+      input.captureManifest.observed_runs.find((run: any) => run.run_id === '9003').ownership,
+    ).toBe('ownership-ambiguous');
+    expect(input.captureManifest.expected_roles.some((role: any) => role.run_id === '9003')).toBe(
+      false,
+    );
     const assembled = assembleTrustedProofEvidence(input);
     expect(input.oracleResult.records.map((item: any) => item.artifact_id)).not.toContain(
       artifact.artifact_id,

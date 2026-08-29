@@ -3080,7 +3080,7 @@ export function validateCaptureManifest(value, host, captureManifestSha256) {
   for (const run of value.observed_runs) {
     exactKeys(
       run,
-      ['operation_id', 'scope', 'run_id', 'run_attempt'],
+      ['operation_id', 'scope', 'run_id', 'run_attempt', 'ownership'],
       'capture-observed-run-shape',
     );
     if (
@@ -3088,7 +3088,8 @@ export function validateCaptureManifest(value, host, captureManifestSha256) {
       !value.operation_ids.includes(run.operation_id) ||
       !['normal', 'stale'].includes(run.scope) ||
       !decimal.test(run.run_id) ||
-      !decimal.test(run.run_attempt)
+      !decimal.test(run.run_attempt) ||
+      !['operation-owned', 'ownership-ambiguous'].includes(run.ownership)
     ) {
       invalid('capture-observed-run-values');
     }
@@ -3120,7 +3121,8 @@ export function validateCaptureManifest(value, host, captureManifestSha256) {
           run.operation_id === role.operation_id &&
           run.scope === role.scope &&
           run.run_id === role.run_id &&
-          run.run_attempt === role.run_attempt,
+          run.run_attempt === role.run_attempt &&
+          run.ownership === 'operation-owned',
       )
     ) {
       invalid('capture-expected-role-values');
