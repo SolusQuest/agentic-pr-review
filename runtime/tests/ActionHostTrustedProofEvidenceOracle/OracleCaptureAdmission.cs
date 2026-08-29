@@ -18,6 +18,7 @@ public static class OracleCaptureAdmission
                 manifest.ExpectedRoles.Length ||
             manifest.ExpectedRoles.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=
                 manifest.ExpectedRoles.Length ||
+            manifest.ObservedRuns.Length > 64 ||
             manifest.ObservedRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() !=
                 manifest.ObservedRuns.Length ||
             manifest.ObservedRuns.Any(item =>
@@ -33,8 +34,13 @@ public static class OracleCaptureAdmission
                 run.RunId == role.RunId && run.RunAttempt == role.RunAttempt)) ||
             manifest.Sources.Length == 0 ||
             (success && manifest.Artifacts.Length == 0) ||
+            manifest.Artifacts.Length > EvidenceLimits.MaximumRecords ||
             manifest.Artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() !=
                 manifest.Artifacts.Length ||
+            manifest.Artifacts.Any(item =>
+                !PositiveDecimal(item.ArtifactId) ||
+                !PositiveDecimal(item.ProducingRunId) ||
+                !PositiveDecimal(item.ProducingRunAttempt)) ||
             manifest.Artifacts.Select(item => item.ArtifactName)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Artifacts.Length)
         {
@@ -43,7 +49,8 @@ public static class OracleCaptureAdmission
     }
 
     private static bool PositiveDecimal(string value) =>
-        value.Length > 0 && value != "0" &&
+        value.Length > 0 &&
         value.All(character => character is >= '0' and <= '9') &&
-        (value.Length == 1 || value[0] != '0');
+        (value.Length == 1 || value[0] != '0') &&
+        long.TryParse(value, out var parsed) && parsed > 0;
 }

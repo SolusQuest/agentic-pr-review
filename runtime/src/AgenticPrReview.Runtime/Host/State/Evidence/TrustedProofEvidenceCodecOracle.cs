@@ -37,7 +37,12 @@ internal sealed record TrustedProofDecodedArtifact(
 internal sealed record TrustedProofCodecOracleResult(
     bool ExactSevenSuccess,
     bool RecoveryOnly,
-    ImmutableArray<TrustedProofDecodedArtifact> Records);
+    ImmutableArray<TrustedProofDecodedArtifact> Records,
+    ImmutableArray<TrustedProofCodecHandoff> MaintainerHandoff);
+
+internal sealed record TrustedProofCodecHandoff(
+    string ArtifactId,
+    string Reason);
 
 internal sealed record TrustedProofLineageFact(
     string ArtifactId,
@@ -270,7 +275,8 @@ internal static class TrustedProofEvidenceCodecOracle
                     result = new TrustedProofCodecOracleResult(
                         exact,
                         RecoveryOnly: !exact,
-                        classified);
+                        classified,
+                        []);
                     return true;
                 }
             }
@@ -279,6 +285,236 @@ internal static class TrustedProofEvidenceCodecOracle
                 CryptographicOperations.ZeroMemory(sentinel.Root);
             }
         }
+    }
+
+    internal static bool TryDecodeRecovery(
+        string repositoryId,
+        string currentKeyBase64,
+        string? previousKeyBase64,
+        IReadOnlyList<TrustedProofEncryptedArtifact> artifacts,
+        IReadOnlyList<TrustedProofOperationRun> operationRuns,
+        out TrustedProofCodecOracleResult? result)
+    {
+        result = null;
+        if (artifacts.Count > 256 ||
+            artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() !=
+                artifacts.Count ||
+            !TryIndexRecoveryOperationRuns(operationRuns, out var operationByRun))
+        {
+            return false;
+        }
+        if (artifacts.Count == 0)
+        {
+            result = RecoveryResult([], []);
+            return true;
+        }
+
+        using var access = AuthorizedLocatorAccess.IssueTrustedProofEvidenceOracle(repositoryId);
+        if (!LocatorStateKeyRing.TryCreate(
+                access,
+                repositoryId,
+                currentKeyBase64,
+                previousKeyBase64,
+                out var keys,
+                out _) ||
+            keys is null)
+        {
+            return false;
+        }
+
+        using (keys)
+        {
+            var locatorIndexes = artifacts
+                .Select((artifact, index) => (artifact, index))
+                .Where(item => item.artifact.OpaqueName == LocatorRootFormat.StoreName)
+                .Select(item => item.index)
+                .ToArray();
+            if (locatorIndexes.Length != 1)
+            {
+                result = RecoveryResult(
+                    [],
+                    artifacts.Select(item => new TrustedProofCodecHandoff(
+                        item.ArtifactId,
+                        "locator-context-unavailable")));
+                return true;
+            }
+
+            var locatorIndex = locatorIndexes[0];
+            var locator = artifacts[locatorIndex];
+            if (!LocatorRootSentinelCodec.TryDecrypt(
+                    access,
+                    keys,
+                    locator.Envelope,
+                    out var sentinel,
+                    out _) ||
+                sentinel is null)
+            {
+                result = RecoveryResult(
+                    [],
+                    artifacts.Select(item => new TrustedProofCodecHandoff(
+                        item.ArtifactId,
+                        "codec-authentication-failed")));
+                return true;
+            }
+
+            try
+            {
+                if (!LocatorContext.TryCreate(
+                        access,
+                        keys,
+                        sentinel.Root,
+                        currentSingletonProven: true,
+                        sentinel.RequiredExpiresAtUnixSeconds,
+                        TimeProvider.System,
+                        out var context) ||
+                    context is null)
+                {
+                    result = RecoveryResult(
+                        [],
+                        artifacts.Select(item => new TrustedProofCodecHandoff(
+                            item.ArtifactId,
+                            "locator-context-unavailable")));
+                    return true;
+                }
+
+                using (context)
+                {
+                    var records = ImmutableArray.CreateBuilder<TrustedProofDecodedArtifact>();
+                    var handoff = ImmutableArray.CreateBuilder<TrustedProofCodecHandoff>();
+                    if (TryResolveRecoveryAuthority(locator, operationByRun, out var locatorAuthority))
+                    {
+                        records.Add(new TrustedProofDecodedArtifact(
+                            locator.ArtifactId,
+                            "internal-record",
+                            "repository",
+                            string.Empty,
+                            "locator_root",
+                            sentinel.WriterKeyId,
+                            CanonicalHash(sentinel.Root),
+                            locator.ProducingRunIdentity,
+                            locator.ProducingRunAttempt,
+                            locatorAuthority!.OperationId,
+                            CanonicalHash(sentinel.Root)));
+                    }
+                    else
+                    {
+                        handoff.Add(new TrustedProofCodecHandoff(
+                            locator.ArtifactId,
+                            "operation-ownership-unverified"));
+                    }
+
+                    for (var index = 0; index < artifacts.Count; index++)
+                    {
+                        if (index == locatorIndex)
+                        {
+                            continue;
+                        }
+                        var artifact = artifacts[index];
+                        if (!TryResolveRecoveryAuthority(artifact, operationByRun, out var authority))
+                        {
+                            handoff.Add(new TrustedProofCodecHandoff(
+                                artifact.ArtifactId,
+                                "operation-ownership-unverified"));
+                            continue;
+                        }
+
+                        var name = new OpaqueStoreName(artifact.OpaqueName);
+                        if (!OpaqueStoreValidation.IsValid(name) ||
+                            !StateControlEnvelopeV1Codec.TryDecrypt(
+                                context,
+                                access,
+                                name,
+                                artifact.Envelope,
+                                out var header,
+                                out var payload,
+                                out _) ||
+                            header is null)
+                        {
+                            handoff.Add(new TrustedProofCodecHandoff(
+                                artifact.ArtifactId,
+                                "codec-authentication-failed"));
+                            continue;
+                        }
+
+                        try
+                        {
+                            if (!StringComparer.Ordinal.Equals(
+                                    header.ProducingRunIdentity,
+                                    artifact.ProducingRunIdentity) ||
+                                header.ProducingRunAttempt != artifact.ProducingRunAttempt)
+                            {
+                                handoff.Add(new TrustedProofCodecHandoff(
+                                    artifact.ArtifactId,
+                                    "operation-ownership-unverified"));
+                                continue;
+                            }
+
+                            if (!CaptureProductFact(
+                                    artifact.ArtifactId,
+                                    header,
+                                    payload,
+                                    [],
+                                    [],
+                                    []))
+                            {
+                                handoff.Add(new TrustedProofCodecHandoff(
+                                    artifact.ArtifactId,
+                                    "codec-payload-invalid"));
+                                continue;
+                            }
+
+                            records.Add(new TrustedProofDecodedArtifact(
+                                artifact.ArtifactId,
+                                "internal-record",
+                                authority!.Scope,
+                                header.BaseScopeDigest,
+                                StateObjectClasses.ToWireName(header.ObjectClass),
+                                header.KeyId,
+                                header.ObjectIdentity,
+                                header.ProducingRunIdentity,
+                                header.ProducingRunAttempt,
+                                authority.OperationId,
+                                CanonicalHash(payload)));
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(payload);
+                        }
+                    }
+
+                    result = RecoveryResult(records, handoff);
+                    return true;
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(sentinel.Root);
+            }
+        }
+    }
+
+    private static TrustedProofCodecOracleResult RecoveryResult(
+        IEnumerable<TrustedProofDecodedArtifact> records,
+        IEnumerable<TrustedProofCodecHandoff> handoff) =>
+        new(
+            ExactSevenSuccess: false,
+            RecoveryOnly: true,
+            records.ToImmutableArray(),
+            handoff.ToImmutableArray());
+
+    private static bool TryResolveRecoveryAuthority(
+        TrustedProofEncryptedArtifact artifact,
+        IReadOnlyDictionary<string, TrustedProofOperationRun> operationByRun,
+        out TrustedProofOperationRun? authority)
+    {
+        if (operationByRun.TryGetValue(artifact.ProducingRunIdentity, out var observed) &&
+            observed.RunAttempt == artifact.ProducingRunAttempt)
+        {
+            authority = observed;
+            return true;
+        }
+        authority = null;
+        return false;
     }
 
     private static bool CaptureProductFact(
@@ -455,6 +691,26 @@ internal static class TrustedProofEvidenceCodecOracle
                     group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
             operationRuns.Count(item => item.Scope == "normal") != 2 ||
             operationRuns.Count(item => item.Scope == "stale") != 2)
+        {
+            byRun = new Dictionary<string, TrustedProofOperationRun>(StringComparer.Ordinal);
+            return false;
+        }
+        byRun = indexed;
+        return true;
+    }
+
+    private static bool TryIndexRecoveryOperationRuns(
+        IReadOnlyList<TrustedProofOperationRun> operationRuns,
+        out Dictionary<string, TrustedProofOperationRun> byRun)
+    {
+        var indexed = new Dictionary<string, TrustedProofOperationRun>(StringComparer.Ordinal);
+        if (operationRuns.Count > 64 ||
+            operationRuns.Any(item =>
+                !Sha256(item.OperationId) ||
+                !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
+                !PositiveDecimal(item.RunIdentity) ||
+                item.RunAttempt <= 0 ||
+                !indexed.TryAdd(item.RunIdentity, item)))
         {
             byRun = new Dictionary<string, TrustedProofOperationRun>(StringComparer.Ordinal);
             return false;

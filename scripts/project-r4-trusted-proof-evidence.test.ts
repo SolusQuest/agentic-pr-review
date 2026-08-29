@@ -59,9 +59,13 @@ function projectMutation(mutator: (candidate: any) => void) {
 
 function syntheticAssembly(input = host) {
   const candidate = copy(input);
-  const recoveryMode = candidate.inventories.observed_cleanup.some(
-    (record: any) => record.disposition === 'recovery-only-delete',
-  );
+  const maintainerHandoff = candidate.inventories.maintainer_handoff ?? [];
+  const recoveryMode =
+    maintainerHandoff.length > 0 ||
+    candidate.inventories.expected_success.length === 0 ||
+    candidate.inventories.observed_cleanup.some(
+      (record: any) => record.disposition === 'recovery-only-delete',
+    );
   if (recoveryMode) {
     for (const record of candidate.inventories.observed_cleanup) {
       record.disposition = 'recovery-only-delete';
@@ -160,7 +164,9 @@ function syntheticAssembly(input = host) {
   candidate.authorizations.cleanup.plan_sha256 = generatedCleanup.digest;
   const metadataRunIds = [
     ...new Set(
-      candidate.inventories.observed_cleanup.map((record: any) => record.producing_run_id),
+      [...candidate.inventories.observed_cleanup, ...maintainerHandoff].map(
+        (record: any) => record.producing_run_id,
+      ),
     ),
   ];
   const sourceDigests = new Map<string, string>();
@@ -680,26 +686,28 @@ function syntheticAssembly(input = host) {
       })),
       ...evidenceSources,
     ],
-    artifacts: candidate.inventories.observed_cleanup.map((record: any) => ({
-      artifact_id: record.artifact_id,
-      artifact_name: record.artifact_name,
-      metadata_source_id: `artifacts-run-${record.producing_run_id}`,
-      metadata_body_sha256: '1'.repeat(64),
-      producing_run_id: record.producing_run_id,
-      producing_run_attempt: '1',
-      download_route: `/repos/SolusQuest/agentic-pr-review/actions/artifacts/${record.artifact_id}/zip`,
-      download_safe_headers_sha256: '7'.repeat(64),
-      download_request_started_unix_milliseconds: 3,
-      download_response_received_unix_milliseconds: 4,
-      archive_path: `artifact-${record.artifact_id}.zip`,
-      archive_sha256: record.archive_sha256,
-      archive_size: '100',
-      archive_file_identity: '9'.repeat(64),
-      encrypted_object_path: `artifact-${record.artifact_id}.bin`,
-      encrypted_object_sha256: record.encrypted_object_sha256,
-      encrypted_object_size: record.encrypted_object_size,
-      encrypted_object_file_identity: 'a'.repeat(64),
-    })),
+    artifacts: [...candidate.inventories.observed_cleanup, ...maintainerHandoff].map(
+      (record: any) => ({
+        artifact_id: record.artifact_id,
+        artifact_name: record.artifact_name,
+        metadata_source_id: `artifacts-run-${record.producing_run_id}`,
+        metadata_body_sha256: '1'.repeat(64),
+        producing_run_id: record.producing_run_id,
+        producing_run_attempt: String(record.producing_run_attempt),
+        download_route: `/repos/SolusQuest/agentic-pr-review/actions/artifacts/${record.artifact_id}/zip`,
+        download_safe_headers_sha256: '7'.repeat(64),
+        download_request_started_unix_milliseconds: 3,
+        download_response_received_unix_milliseconds: 4,
+        archive_path: `artifact-${record.artifact_id}.zip`,
+        archive_sha256: record.archive_sha256,
+        archive_size: '100',
+        archive_file_identity: '9'.repeat(64),
+        encrypted_object_path: `artifact-${record.artifact_id}.bin`,
+        encrypted_object_sha256: record.encrypted_object_sha256,
+        encrypted_object_size: record.encrypted_object_size,
+        encrypted_object_file_identity: 'a'.repeat(64),
+      }),
+    ),
     finalized: true,
   };
   const captureManifestSha256 = sha256(canonicalJson(captureManifest));
@@ -721,7 +729,7 @@ function syntheticAssembly(input = host) {
           object_class: record.object_class,
           operation_id: record.operation_id,
           producing_run_id: record.producing_run_id,
-          producing_run_attempt: '1',
+          producing_run_attempt: String(record.producing_run_attempt),
           archive_sha256: record.archive_sha256,
           encrypted_object_sha256: record.encrypted_object_sha256,
           encrypted_object_size: record.encrypted_object_size,
@@ -738,12 +746,17 @@ function syntheticAssembly(input = host) {
         object_class: record.object_class,
         object_identity: '5'.repeat(64),
         producing_run_identity: record.producing_run_id,
-        producing_run_attempt: '1',
+        producing_run_attempt: String(record.producing_run_attempt),
         operation_id: record.operation_id,
         ownership_evidence_sha256: ownershipEvidenceSha256,
         payload_sha256: '6'.repeat(64),
       };
     }),
+    maintainer_handoff: maintainerHandoff.map((item: any) => ({
+      artifact_id: item.artifact_id,
+      disposition: item.disposition,
+      reason: item.reason,
+    })),
   };
   const oracleResultSha256 = sha256(canonicalJson(oracleResult));
   const postCleanupCapturedSourceBodies = new Map<string, { text: string }>();
@@ -788,17 +801,23 @@ function syntheticAssembly(input = host) {
     [],
   );
   for (const run of captureManifest.observed_runs) {
+    const remainingArtifacts = maintainerHandoff
+      .filter((item: any) => item.producing_run_id === run.run_id)
+      .map((item: any) => ({ id: Number(item.artifact_id), name: item.artifact_name }));
     registerPostCleanup(
       `post-cleanup-state-delete-run-${run.run_id}`,
       `/repos/${candidate.identities.repository}/actions/runs/${run.run_id}/artifacts`,
-      { total_count: 0, artifacts: [] },
+      { total_count: remainingArtifacts.length, artifacts: remainingArtifacts },
     );
   }
   for (const run of captureManifest.observed_runs) {
+    const remainingArtifacts = maintainerHandoff
+      .filter((item: any) => item.producing_run_id === run.run_id)
+      .map((item: any) => ({ id: Number(item.artifact_id), name: item.artifact_name }));
     registerPostCleanup(
       `post-cleanup-state-empty-run-${run.run_id}`,
       `/repos/${candidate.identities.repository}/actions/runs/${run.run_id}/artifacts`,
-      { total_count: 0, artifacts: [] },
+      { total_count: remainingArtifacts.length, artifacts: remainingArtifacts },
     );
   }
   registerPostCleanup(
@@ -1833,6 +1852,116 @@ describe('R4 E3 executable evidence contract', () => {
     ).toThrow(/recovery-only-no-projection/u);
   });
 
+  test('finalizes undecodable recovery artifacts as private maintainer handoff without deletion authority', () => {
+    const candidate = copy(host);
+    candidate.inventories.maintainer_handoff = [
+      {
+        artifact_id: '1016',
+        artifact_name: 'apr-r4-undecodable-1016',
+        producing_run_id: '9003',
+        producing_run_attempt: 1,
+        archive_sha256: '8'.repeat(64),
+        encrypted_object_sha256: '9'.repeat(64),
+        encrypted_object_size: '2016',
+        disposition: 'non-deletable-maintainer-handoff',
+        reason: 'codec-authentication-failed',
+      },
+    ];
+
+    const input = syntheticAssembly(candidate);
+    const assembled = assembleTrustedProofEvidence(input);
+    expect(assembled.recoveryOnly).toBe(true);
+    expect(assembled.publicEvidence).toBeNull();
+    expect(assembled.cleanupPlan.targets.state_artifacts).toHaveLength(15);
+    expect(assembled.host.inventories.maintainer_handoff).toEqual(
+      candidate.inventories.maintainer_handoff,
+    );
+    const privatePackageManifest = buildFinalizedPrivatePackageManifest({
+      host: assembled.host,
+      sourceBundle: input.sourceBundle,
+      captureManifestSha256: input.captureManifestSha256,
+      postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
+      oracleResultSha256: input.oracleResultSha256,
+      cleanupPlan: assembled.cleanupPlan,
+      credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+      credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+      correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+      producerJournalSealSha256: input.producerJournalSealSha256,
+      producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
+      oracleBuildReceiptSha256:
+        candidate.authorizations.execution.oracle_build.build_receipt_sha256,
+      oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+      productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+      publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+      publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
+    });
+    expect(privatePackageManifest.projection_eligible).toBe(false);
+    expect(privatePackageManifest.finalized).toBe(true);
+  });
+
+  test('rejects a recovery readback that hides a non-deletable maintainer handoff', () => {
+    const candidate = copy(host);
+    candidate.inventories.maintainer_handoff = [
+      {
+        artifact_id: '1016',
+        artifact_name: 'apr-r4-undecodable-1016',
+        producing_run_id: '9003',
+        producing_run_attempt: 1,
+        archive_sha256: '8'.repeat(64),
+        encrypted_object_sha256: '9'.repeat(64),
+        encrypted_object_size: '2016',
+        disposition: 'non-deletable-maintainer-handoff',
+        reason: 'codec-authentication-failed',
+      },
+    ];
+    const input = syntheticAssembly(candidate);
+    refreshPostCleanupCapture(input, 'post-cleanup-state-empty-run-9003:page:1', {
+      total_count: 0,
+      artifacts: [],
+    });
+    expect(() => assembleTrustedProofEvidence(input)).toThrow(
+      /recovery-post-cleanup-state-inventory/u,
+    );
+  });
+
+  test('finalizes a zero-artifact recovery package without inventing deletion authority', () => {
+    const candidate = copy(host);
+    candidate.inventories.expected_success = [];
+    candidate.inventories.observed_cleanup = [];
+
+    const input = syntheticAssembly(candidate);
+    const assembled = assembleTrustedProofEvidence(input);
+    expect(assembled.recoveryOnly).toBe(true);
+    expect(assembled.publicEvidence).toBeNull();
+    expect(assembled.host.inventories).toEqual({
+      expected_success: [],
+      observed_cleanup: [],
+      maintainer_handoff: [],
+    });
+    expect(assembled.cleanupPlan.targets.state_artifacts).toEqual([]);
+    const privatePackageManifest = buildFinalizedPrivatePackageManifest({
+      host: assembled.host,
+      sourceBundle: input.sourceBundle,
+      captureManifestSha256: input.captureManifestSha256,
+      postCleanupCaptureManifestSha256: input.postCleanupCaptureManifestSha256,
+      oracleResultSha256: input.oracleResultSha256,
+      cleanupPlan: assembled.cleanupPlan,
+      credentialAdmissionReceiptSha256: input.credentialAdmissionReceiptSha256,
+      credentialDispositionReceiptSha256: input.credentialDispositionReceiptSha256,
+      correctionGateReceiptSha256: input.correctionGateReceiptSha256,
+      producerJournalSealSha256: input.producerJournalSealSha256,
+      producerJournalSealFileIdentity: input.producerJournalSealFileIdentity,
+      oracleBuildReceiptSha256:
+        candidate.authorizations.execution.oracle_build.build_receipt_sha256,
+      oracleAssemblySha256: input.oracleBinaries.oracle_assembly_sha256,
+      productionAssemblySha256: input.oracleBinaries.production_assembly_sha256,
+      publicCandidateSha256: sha256(canonicalJson(assembled.publicCandidate)),
+      publicScanManifestSha256: sha256(canonicalJson(assembled.publicScanManifest)),
+    });
+    expect(privatePackageManifest.projection_eligible).toBe(false);
+    expect(privatePackageManifest.finalized).toBe(true);
+  });
+
   test('rejects omitted or substituted correction and producer authorities before assembly', () => {
     const omitted = syntheticAssembly();
     omitted.retainedDocuments.delete('correction-gate-receipt');
@@ -1903,6 +2032,19 @@ describe('R4 E3 executable evidence contract', () => {
     expect(generated.plan.targets.state_artifacts).toEqual([]);
     expect(generated.plan.targets.runs).toEqual([]);
     expect(generated.plan.targets.sticky).toBeNull();
+  });
+
+  test('preserves a positive retry attempt in an authenticated recovery cleanup target', () => {
+    const observed = copy(host.inventories.observed_cleanup[0]);
+    observed.producing_run_attempt = 2;
+    observed.disposition = 'recovery-only-delete';
+    const generated = generateCleanupPlan({
+      operation_ids: host.identities.operation_ids,
+      proof_control: host.proof_control,
+      observed_cleanup: [observed],
+      resources: host.cleanup.resources,
+    });
+    expect(generated.plan.targets.state_artifacts[0].producing_run_attempt).toBe(2);
   });
 
   test.each([

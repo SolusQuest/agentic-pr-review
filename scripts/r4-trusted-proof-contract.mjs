@@ -2326,7 +2326,8 @@ export function generateCleanupPlan(input) {
         !['repository', 'normal', 'stale'].includes(record.scope) ||
         typeof record.artifact_name !== 'string' ||
         !decimal.test(record.producing_run_id) ||
-        record.producing_run_attempt !== 1 ||
+        !Number.isSafeInteger(record.producing_run_attempt) ||
+        record.producing_run_attempt <= 0 ||
         !hex64.test(record.archive_sha256) ||
         !hex64.test(record.encrypted_object_sha256) ||
         !decimal.test(record.encrypted_object_size) ||
@@ -3119,6 +3120,11 @@ export function validateCaptureManifest(value, host, captureManifestSha256) {
   const artifactIds = new Set();
   const artifactNames = new Set();
   const artifactsById = new Map();
+  const handoffArtifactIds = new Set(
+    host.capture_disposition === 'recovery-only'
+      ? host.inventories.maintainer_handoff.map(({ artifact_id }) => artifact_id)
+      : [],
+  );
   for (const artifact of value.artifacts) {
     exactKeys(
       artifact,
@@ -3154,9 +3160,10 @@ export function validateCaptureManifest(value, host, captureManifestSha256) {
       !decimal.test(artifact.artifact_id) ||
       !decimal.test(artifact.producing_run_id) ||
       !decimal.test(artifact.producing_run_attempt) ||
-      !operationByRun.has(artifact.producing_run_id) ||
-      operationByRun.get(artifact.producing_run_id).run_attempt !==
-        artifact.producing_run_attempt ||
+      (!handoffArtifactIds.has(artifact.artifact_id) &&
+        (!operationByRun.has(artifact.producing_run_id) ||
+          operationByRun.get(artifact.producing_run_id).run_attempt !==
+            artifact.producing_run_attempt)) ||
       !sourceIds.has(`${artifact.metadata_source_id}:page:1`) ||
       metadataSources.length === 0 ||
       metadataSources.some(
@@ -3199,7 +3206,10 @@ export function validateCaptureManifest(value, host, captureManifestSha256) {
     artifactNames.add(artifact.artifact_name.toLowerCase());
     artifactsById.set(artifact.artifact_id, artifact);
   }
-  const expectedIds = host.inventories.observed_cleanup.map(({ artifact_id }) => artifact_id);
+  const expectedIds = [
+    ...host.inventories.observed_cleanup.map(({ artifact_id }) => artifact_id),
+    ...handoffArtifactIds,
+  ];
   exactArray(
     [...artifactIds].sort((a, b) => a.localeCompare(b, 'en', { numeric: true })),
     [...expectedIds].sort((a, b) => a.localeCompare(b, 'en', { numeric: true })),
@@ -3376,6 +3386,21 @@ function deriveRecoveryInventoriesFromOracle(value, capturedArtifacts, operation
         disposition: 'recovery-only-delete',
       };
     }),
+    maintainer_handoff: value.maintainer_handoff.map((item) => {
+      const captured = capturedArtifacts.get(item.artifact_id);
+      if (captured === undefined) invalid('oracle-handoff-capture-missing');
+      return {
+        artifact_id: item.artifact_id,
+        artifact_name: captured.artifact_name,
+        producing_run_id: captured.producing_run_id,
+        producing_run_attempt: Number(captured.producing_run_attempt),
+        archive_sha256: captured.archive_sha256,
+        encrypted_object_sha256: captured.encrypted_object_sha256,
+        encrypted_object_size: captured.encrypted_object_size,
+        disposition: item.disposition,
+        reason: item.reason,
+      };
+    }),
   };
 }
 
@@ -3386,6 +3411,7 @@ function validateOracleResult(
   oracleResultSha256,
   capturedArtifacts,
 ) {
+  const recoveryCapture = host.capture_disposition === 'recovery-only';
   exactKeys(
     value,
     [
@@ -3398,6 +3424,7 @@ function validateOracleResult(
       'exact_seven_success',
       'recovery_only',
       'records',
+      'maintainer_handoff',
     ],
     'oracle-result-shape',
   );
@@ -3408,17 +3435,12 @@ function validateOracleResult(
     value.oracle_source_tree !== host.identities.oracle_source_tree ||
     !hex64.test(value.oracle_assembly_sha256) ||
     !hex64.test(value.production_assembly_sha256) ||
-    value.exact_seven_success !==
-      !host.inventories.observed_cleanup.some(
-        ({ disposition }) => disposition === 'recovery-only-delete',
-      ) ||
-    value.recovery_only !==
-      host.inventories.observed_cleanup.some(
-        ({ disposition }) => disposition === 'recovery-only-delete',
-      ) ||
+    value.exact_seven_success !== !recoveryCapture ||
+    value.recovery_only !== recoveryCapture ||
     oracleResultSha256 !== host.restricted_package.oracle_result_sha256 ||
     !Array.isArray(value.records) ||
-    value.records.length !== host.inventories.observed_cleanup.length
+    value.records.length !== host.inventories.observed_cleanup.length ||
+    !Array.isArray(value.maintainer_handoff)
   ) {
     invalid('oracle-result-values');
   }
@@ -3457,6 +3479,26 @@ function validateOracleResult(
       invalid('oracle-record-values');
     }
     byId.set(record.artifact_id, record);
+  }
+  const handoffById = new Map();
+  for (const item of value.maintainer_handoff) {
+    exactKeys(item, ['artifact_id', 'disposition', 'reason'], 'oracle-handoff-shape');
+    if (
+      handoffById.has(item.artifact_id) ||
+      byId.has(item.artifact_id) ||
+      !decimal.test(item.artifact_id) ||
+      item.disposition !== 'non-deletable-maintainer-handoff' ||
+      ![
+        'codec-authentication-failed',
+        'codec-payload-invalid',
+        'locator-context-unavailable',
+        'operation-ownership-unverified',
+      ].includes(item.reason) ||
+      !capturedArtifacts.has(item.artifact_id)
+    ) {
+      invalid('oracle-handoff-values');
+    }
+    handoffById.set(item.artifact_id, item);
   }
   for (const expected of host.inventories.observed_cleanup) {
     const observed = byId.get(expected.artifact_id);
@@ -3501,7 +3543,27 @@ function validateOracleResult(
     const observed = byId.get(expected.artifact_id);
     if (!observed || observed.role !== expected.role) invalid('oracle-success-inventory');
   }
-  const recoveryCapture = host.capture_disposition === 'recovery-only';
+  const expectedHandoff = recoveryCapture
+    ? host.inventories.maintainer_handoff.map(({ artifact_id, disposition, reason }) => ({
+        artifact_id,
+        disposition,
+        reason,
+      }))
+    : [];
+  if (canonicalJson(value.maintainer_handoff) !== canonicalJson(expectedHandoff)) {
+    invalid('oracle-handoff-inventory');
+  }
+  if (
+    recoveryCapture &&
+    [...capturedArtifacts.keys()].some(
+      (artifactId) => !byId.has(artifactId) && !handoffById.has(artifactId),
+    )
+  ) {
+    invalid('oracle-recovery-inventory-incomplete');
+  }
+  if (!recoveryCapture && value.maintainer_handoff.length !== 0) {
+    invalid('oracle-success-handoff');
+  }
   if (!recoveryCapture) {
     exactArray(
       value.records
@@ -4441,6 +4503,67 @@ function deriveRecoveryProofControl(authorizations, captureManifest, capturedSou
   };
 }
 
+function validateRecoveryPostCleanupArtifactInventory({
+  captureManifest,
+  postCleanupCaptureManifest,
+  postCleanupCapturedSourceBodies,
+  inventories,
+  cleanupPlan,
+}) {
+  const repositoryRoute = `/repos/${captureManifest.repository}`;
+  const deletedIds = new Set(
+    cleanupPlan.targets.state_artifacts.map(({ artifact_id }) => artifact_id),
+  );
+  const expectedByRun = new Map(captureManifest.observed_runs.map(({ run_id }) => [run_id, []]));
+  for (const item of inventories.maintainer_handoff) {
+    const expected = expectedByRun.get(item.producing_run_id);
+    if (expected === undefined) invalid('recovery-handoff-run-unobserved');
+    expected.push(item);
+  }
+  for (const [runId, expected] of expectedByRun) {
+    const expectedIds = expected
+      .map(({ artifact_id }) => artifact_id)
+      .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
+    for (const phase of ['delete', 'empty']) {
+      const pages = capturedPages(
+        postCleanupCaptureManifest,
+        postCleanupCapturedSourceBodies,
+        `post-cleanup-state-${phase}-run-${runId}`,
+        `${repositoryRoute}/actions/runs/${runId}/artifacts`,
+        'complete-cursor',
+      ).values;
+      if (
+        pages.some(
+          (page) =>
+            page.total_count !== expected.length ||
+            !Array.isArray(page.artifacts) ||
+            page.artifacts.some(
+              (artifact) =>
+                !decimal.test(String(artifact.id)) ||
+                typeof artifact.name !== 'string' ||
+                deletedIds.has(String(artifact.id)),
+            ),
+        )
+      ) {
+        invalid('recovery-post-cleanup-state-inventory');
+      }
+      const observed = pages.flatMap(({ artifacts }) => artifacts);
+      const observedIds = observed
+        .map(({ id }) => String(id))
+        .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
+      if (
+        canonicalJson(observedIds) !== canonicalJson(expectedIds) ||
+        expected.some((item) => {
+          const artifact = observed.find(({ id }) => String(id) === item.artifact_id);
+          return artifact === undefined || artifact.name !== item.artifact_name;
+        })
+      ) {
+        invalid('recovery-post-cleanup-handoff-inventory');
+      }
+    }
+  }
+}
+
 function assembleRecoveryEvidence({
   sourceMap,
   sourceBundle,
@@ -4452,6 +4575,7 @@ function assembleRecoveryEvidence({
   oracleResult,
   oracleResultSha256,
   capturedSourceBodies,
+  postCleanupCapturedSourceBodies,
   retainedDocuments,
   authorizations,
   credentialAdmission,
@@ -4550,14 +4674,36 @@ function assembleRecoveryEvidence({
     postCleanupCaptureManifest.kind !== 'apr-r4-e3-post-cleanup-capture-manifest-v1' ||
     postCleanupCaptureManifest.disposition !== 'recovery-only' ||
     postCleanupCaptureManifest.repository !== captureManifest.repository ||
+    postCleanupCaptureManifest.repository_id !== captureManifest.repository_id ||
     canonicalJson(postCleanupCaptureManifest.operation_ids) !==
       canonicalJson(captureManifest.operation_ids) ||
+    postCleanupCaptureManifest.execution_authorization_sha256 !==
+      captureManifest.execution_authorization_sha256 ||
+    postCleanupCaptureManifest.producer_journal_directory !==
+      captureManifest.producer_journal_directory ||
     postCleanupCaptureManifest.producer_journal_seal_sha256 !==
       captureManifest.producer_journal_seal_sha256 ||
+    postCleanupCaptureManifest.producer_journal_seal_file_identity !==
+      captureManifest.producer_journal_seal_file_identity ||
+    canonicalJson(postCleanupCaptureManifest.expected_roles) !==
+      canonicalJson(captureManifest.expected_roles) ||
+    canonicalJson(postCleanupCaptureManifest.observed_runs) !==
+      canonicalJson(captureManifest.observed_runs) ||
+    postCleanupCaptureManifest.source_map_sha256 !== captureManifest.source_map_sha256 ||
+    postCleanupCaptureManifest.destination_identity_sha256 !==
+      captureManifest.destination_identity_sha256 ||
+    postCleanupCaptureManifest.finalized !== true ||
     postCleanupCaptureManifest.artifacts.length !== 0
   ) {
     invalid('recovery-post-cleanup-capture');
   }
+  validateRecoveryPostCleanupArtifactInventory({
+    captureManifest,
+    postCleanupCaptureManifest,
+    postCleanupCapturedSourceBodies,
+    inventories,
+    cleanupPlan,
+  });
   validateCleanupExecution({
     cleanupExecution,
     cleanupPlan,
@@ -4800,6 +4946,7 @@ export function assembleTrustedProofEvidence({
       oracleResult,
       oracleResultSha256,
       capturedSourceBodies,
+      postCleanupCapturedSourceBodies,
       retainedDocuments,
       authorizations,
       credentialAdmission,

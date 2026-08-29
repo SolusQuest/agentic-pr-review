@@ -33,6 +33,11 @@ internal sealed record OracleOwnershipEvidence(
     string EncryptedObjectSha256,
     string EncryptedObjectSize);
 
+internal sealed record OracleMaintainerHandoff(
+    string ArtifactId,
+    string Disposition,
+    string Reason);
+
 internal sealed record OracleDocument(
     string Kind,
     string CaptureManifestSha256,
@@ -42,7 +47,8 @@ internal sealed record OracleDocument(
     string ProductionAssemblySha256,
     bool ExactSevenSuccess,
     bool RecoveryOnly,
-    OracleRecord[] Records);
+    OracleRecord[] Records,
+    OracleMaintainerHandoff[] MaintainerHandoff);
 
 internal static class Program
 {
@@ -246,17 +252,18 @@ internal static class Program
                         CryptographicOperations.ZeroMemory(archive.Bytes);
                     }
                 }
-                if (!TrustedProofEvidenceCodecOracle.TryDecode(
+                if (!TryDecodeForDisposition(
+                        manifest.Disposition,
                         manifest.RepositoryId,
                         Convert.ToBase64String(current),
-                         previous is null ? null : Convert.ToBase64String(previous),
-                         encrypted,
-                         manifest.ObservedRuns.Select(item => new TrustedProofOperationRun(
-                             item.OperationId,
-                             item.Scope,
-                             item.RunId,
-                             long.Parse(item.RunAttempt))).ToArray(),
-                         out var decoded) ||
+                        previous is null ? null : Convert.ToBase64String(previous),
+                        encrypted,
+                        manifest.ObservedRuns.Select(item => new TrustedProofOperationRun(
+                            item.OperationId,
+                            item.Scope,
+                            item.RunId,
+                            long.Parse(item.RunAttempt))).ToArray(),
+                        out var decoded) ||
                     decoded is null)
                 {
                     throw new InvalidDataException("codec_oracle_invalid");
@@ -273,23 +280,27 @@ internal static class Program
                     productionAssemblySha256,
                     decoded.ExactSevenSuccess,
                     decoded.RecoveryOnly,
-                     decoded.Records.Select(record =>
-                     {
-                         var artifact = manifest.Artifacts.Single(item =>
-                             StringComparer.Ordinal.Equals(item.ArtifactId, record.ArtifactId));
-                         return new OracleRecord(
-                             record.ArtifactId,
-                             record.Role,
-                             record.Scope,
-                             record.BaseScopeDigest,
-                             record.ObjectClass,
-                             record.ObjectIdentity,
-                             record.ProducingRunIdentity,
-                             record.ProducingRunAttempt.ToString(),
-                             record.OperationId,
-                             OwnershipEvidenceSha256(record, artifact),
-                             record.PayloadSha256);
-                     }).ToArray());
+                    decoded.Records.Select(record =>
+                    {
+                        var artifact = manifest.Artifacts.Single(item =>
+                            StringComparer.Ordinal.Equals(item.ArtifactId, record.ArtifactId));
+                        return new OracleRecord(
+                            record.ArtifactId,
+                            record.Role,
+                            record.Scope,
+                            record.BaseScopeDigest,
+                            record.ObjectClass,
+                            record.ObjectIdentity,
+                            record.ProducingRunIdentity,
+                            record.ProducingRunAttempt.ToString(),
+                            record.OperationId,
+                            OwnershipEvidenceSha256(record, artifact),
+                            record.PayloadSha256);
+                    }).ToArray(),
+                    decoded.MaintainerHandoff.Select(item => new OracleMaintainerHandoff(
+                        item.ArtifactId,
+                        "non-deletable-maintainer-handoff",
+                        item.Reason)).ToArray());
                 var output = CanonicalEvidence.Encode(document, EvidenceJson.Options);
                 try
                 {
@@ -355,6 +366,38 @@ internal static class Program
             currentRepresentations?.Dispose();
             previousRepresentations?.Dispose();
         }
+    }
+
+    internal static bool TryDecodeForDisposition(
+        string disposition,
+        string repositoryId,
+        string currentKeyBase64,
+        string? previousKeyBase64,
+        IReadOnlyList<TrustedProofEncryptedArtifact> artifacts,
+        IReadOnlyList<TrustedProofOperationRun> operationRuns,
+        out TrustedProofCodecOracleResult? result) => disposition switch
+        {
+            "success-candidate" => TrustedProofEvidenceCodecOracle.TryDecode(
+                repositoryId,
+                currentKeyBase64,
+                previousKeyBase64,
+                artifacts,
+                operationRuns,
+                out result),
+            "recovery-only" => TrustedProofEvidenceCodecOracle.TryDecodeRecovery(
+                repositoryId,
+                currentKeyBase64,
+                previousKeyBase64,
+                artifacts,
+                operationRuns,
+                out result),
+            _ => InvalidDisposition(out result),
+        };
+
+    private static bool InvalidDisposition(out TrustedProofCodecOracleResult? result)
+    {
+        result = null;
+        return false;
     }
 
     private static void DeleteAbandonedCredentials(
