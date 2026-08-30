@@ -101161,7 +101161,7 @@ function canonicalGitHubRequestBudget(line) {
     "remaining_tail_reserve",
     "host_head_source_rest",
     "host_other_github_rest"
-  ]) || !boundedInteger(value.authenticated_rest_requests, 0, 216) || value.authenticated_rest_limit !== 216 || !boundedInteger(value.anonymous_codeload_requests, 0, 1) || value.anonymous_codeload_limit !== 1 || value.rejected_requests !== 0 || value.measurement_only !== true || value.invalid_remaining_header !== false || value.terminal_rate_limited !== false || value.low_remaining_guard !== false || value.remaining_tail_reserve !== 1 || !validGitHubBudgetRole(value.host_head_source_rest) || !validGitHubBudgetRole(value.host_other_github_rest) || value.host_head_source_rest.raw + value.host_other_github_rest.raw !== value.authenticated_rest_requests) {
+  ]) || !boundedInteger(value.authenticated_rest_requests, 0, 216) || value.authenticated_rest_limit !== 216 || !boundedInteger(value.anonymous_codeload_requests, 0, 1) || value.anonymous_codeload_limit !== 1 || value.rejected_requests !== 0 || value.measurement_only !== true || value.invalid_remaining_header !== false || value.terminal_rate_limited !== false || value.low_remaining_guard !== false || value.remaining_tail_reserve !== 1 || !validGitHubBudgetRole(value.host_head_source_rest) || !validGitHubBudgetRole(value.host_other_github_rest) || value.host_head_source_rest.raw + value.host_other_github_rest.raw !== value.authenticated_rest_requests || value.host_head_source_rest.primary_rate_limited !== 0 || value.host_head_source_rest.secondary_rate_limited !== 0 || value.host_head_source_rest.combined_rate_limited !== 0 || value.host_head_source_rest.invalid_rate_headers !== 0 || value.host_other_github_rest.primary_rate_limited !== 0 || value.host_other_github_rest.secondary_rate_limited !== 0 || value.host_other_github_rest.combined_rate_limited !== 0 || value.host_other_github_rest.invalid_rate_headers !== 0) {
     return void 0;
   }
   return GITHUB_REQUEST_BUDGET_PREFIX + JSON.stringify({
@@ -101186,12 +101186,16 @@ function validGitHubBudgetRole(value) {
     "not_modified",
     "secondary_points",
     "permission",
+    "primary_rate_limited",
+    "secondary_rate_limited",
+    "combined_rate_limited",
+    "invalid_rate_headers",
     "remaining_tail_required"
   ])) {
     return false;
   }
   const role = value;
-  return boundedInteger(role.raw, 0, 216) && boundedInteger(role.primary, 0, 216) && boundedInteger(role.not_modified, 0, 216) && boundedInteger(role.secondary_points, 0, 216 * 5) && boundedInteger(role.permission, 0, 216) && role.remaining_tail_required === 0 && role.raw === role.primary + role.not_modified && role.secondary_points >= role.raw && role.secondary_points <= role.raw * 5 && (role.secondary_points - role.raw) % 4 === 0 && role.permission <= role.primary;
+  return boundedInteger(role.raw, 0, 216) && boundedInteger(role.primary, 0, 216) && boundedInteger(role.not_modified, 0, 216) && boundedInteger(role.secondary_points, 0, 216 * 5) && boundedInteger(role.permission, 0, 216) && boundedInteger(role.primary_rate_limited, 0, 216) && boundedInteger(role.secondary_rate_limited, 0, 216) && boundedInteger(role.combined_rate_limited, 0, 216) && boundedInteger(role.invalid_rate_headers, 0, 216) && role.remaining_tail_required === 0 && role.raw === role.primary + role.not_modified && role.secondary_points >= role.raw && role.secondary_points <= role.raw * 5 && (role.secondary_points - role.raw) % 4 === 0 && role.permission + role.primary_rate_limited + role.secondary_rate_limited + role.combined_rate_limited + role.invalid_rate_headers <= role.primary;
 }
 function canonicalGitHubBudgetRole(value) {
   return {
@@ -101200,6 +101204,10 @@ function canonicalGitHubBudgetRole(value) {
     not_modified: value.not_modified,
     secondary_points: value.secondary_points,
     permission: value.permission,
+    primary_rate_limited: value.primary_rate_limited,
+    secondary_rate_limited: value.secondary_rate_limited,
+    combined_rate_limited: value.combined_rate_limited,
+    invalid_rate_headers: value.invalid_rate_headers,
     remaining_tail_required: value.remaining_tail_required
   };
 }
@@ -101215,10 +101223,13 @@ function canonicalControlRequestBudget(line) {
     "remaining_tail_required",
     "remaining_tail_reserve",
     "permission_denied",
+    "primary_rate_limited",
+    "secondary_rate_limited",
+    "combined_rate_limited",
     "invalid_remaining_header",
     "measurement_only",
     "rate_limited"
-  ]) || !boundedInteger(value.consumed, 0, 64) || value.limit !== 64 || !boundedInteger(value.primary, 0, 64) || !boundedInteger(value.not_modified, 0, 64) || !boundedInteger(value.secondary_points, 0, 64 * 5) || !boundedInteger(value.mutation_count, 0, 64) || value.remaining_tail_required !== 0 || value.remaining_tail_reserve !== 1 || !boundedInteger(value.permission_denied, 0, 64) || value.consumed !== value.primary + value.not_modified || value.secondary_points !== value.consumed + 4 * value.mutation_count || value.mutation_count > value.consumed || value.permission_denied > value.primary || value.invalid_remaining_header !== false || value.measurement_only !== true || value.rate_limited !== false) {
+  ]) || !boundedInteger(value.consumed, 0, 64) || value.limit !== 64 || !boundedInteger(value.primary, 0, 64) || !boundedInteger(value.not_modified, 0, 64) || !boundedInteger(value.secondary_points, 0, 64 * 5) || !boundedInteger(value.mutation_count, 0, 64) || value.remaining_tail_required !== 0 || value.remaining_tail_reserve !== 1 || !boundedInteger(value.permission_denied, 0, 64) || !boundedInteger(value.primary_rate_limited, 0, 64) || !boundedInteger(value.secondary_rate_limited, 0, 64) || !boundedInteger(value.combined_rate_limited, 0, 64) || value.consumed !== value.primary + value.not_modified || value.secondary_points !== value.consumed + 4 * value.mutation_count || value.mutation_count > value.consumed || value.permission_denied > value.primary || value.primary_rate_limited + value.secondary_rate_limited + value.combined_rate_limited + value.permission_denied > value.primary || value.invalid_remaining_header !== false || value.measurement_only !== true || value.rate_limited !== false || value.primary_rate_limited !== 0 || value.secondary_rate_limited !== 0 || value.combined_rate_limited !== 0) {
     return void 0;
   }
   return CONTROL_REQUEST_BUDGET_PREFIX + JSON.stringify({
@@ -101231,6 +101242,9 @@ function canonicalControlRequestBudget(line) {
     remaining_tail_required: value.remaining_tail_required,
     remaining_tail_reserve: value.remaining_tail_reserve,
     permission_denied: value.permission_denied,
+    primary_rate_limited: value.primary_rate_limited,
+    secondary_rate_limited: value.secondary_rate_limited,
+    combined_rate_limited: value.combined_rate_limited,
     invalid_remaining_header: value.invalid_remaining_header,
     measurement_only: value.measurement_only,
     rate_limited: value.rate_limited
@@ -102031,4 +102045,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 0c0207c8e3d54c6978cccda41a6e4fbfa1147cc5a12126dd17cae147322d8376
+// Action source inventory sha256: 8a6e67909342c277a1fc7fb0992154e498171b3fe1c4b10acef49012e9d4eaf0

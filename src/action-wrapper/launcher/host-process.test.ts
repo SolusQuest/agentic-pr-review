@@ -31,9 +31,9 @@ import { verifyPreparedPayload } from './prepared-payload.js';
 const roots: string[] = [];
 const handles: FileHandle[] = [];
 const githubBudgetReceipt =
-  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"remaining_tail_required":0}}\n';
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0}}\n';
 const controlBudgetReceipt =
-  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
 
 afterEach(async () => {
   await Promise.all(handles.splice(0).map(async (handle) => await handle.close()));
@@ -118,8 +118,25 @@ describe('W1 private Host framing', () => {
     githubBudgetReceipt.replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":0') +
       controlBudgetReceipt,
     githubBudgetReceipt.replace('"raw":180', '"raw":179') + controlBudgetReceipt,
+    githubBudgetReceipt.replace(',"primary_rate_limited":0', '') + controlBudgetReceipt,
+    githubBudgetReceipt.replace('"primary_rate_limited":0', '"primary_rate_limited":1') +
+      controlBudgetReceipt,
+    githubBudgetReceipt.replace(
+      '"remaining_tail_required":0}',
+      '"remaining_tail_required":0,"unexpected":0}',
+    ) + controlBudgetReceipt,
     githubBudgetReceipt +
       controlBudgetReceipt.replace('"measurement_only":true', '"measurement_only":false'),
+    githubBudgetReceipt + controlBudgetReceipt.replace(',"primary_rate_limited":0', ''),
+    githubBudgetReceipt +
+      controlBudgetReceipt.replace('"primary_rate_limited":0', '"primary_rate_limited":1'),
+    githubBudgetReceipt +
+      controlBudgetReceipt.replace('"rate_limited":false', '"rate_limited":true'),
+    githubBudgetReceipt +
+      controlBudgetReceipt.replace(
+        '"measurement_only":true',
+        '"measurement_only":true,"unexpected":0',
+      ),
     githubBudgetReceipt +
       controlBudgetReceipt.replace('"secondary_points":13', '"secondary_points":12'),
     githubBudgetReceipt +

@@ -38,9 +38,9 @@ const roots: string[] = [];
 const fullWorkflowRef =
   'SolusQuest/agentic-pr-review/.github/workflows/r4-trusted-proof.yml@refs/heads/main';
 const githubBudgetReceipt =
-  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"remaining_tail_required":0}}\n';
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0}}\n';
 const controlBudgetReceipt =
-  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
 
 afterEach(async () => {
   vi.unstubAllEnvs();

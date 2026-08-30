@@ -227,7 +227,15 @@ function canonicalGitHubRequestBudget(line: string): string | undefined {
     !validGitHubBudgetRole(value.host_head_source_rest) ||
     !validGitHubBudgetRole(value.host_other_github_rest) ||
     value.host_head_source_rest.raw + value.host_other_github_rest.raw !==
-      value.authenticated_rest_requests
+      value.authenticated_rest_requests ||
+    value.host_head_source_rest.primary_rate_limited !== 0 ||
+    value.host_head_source_rest.secondary_rate_limited !== 0 ||
+    value.host_head_source_rest.combined_rate_limited !== 0 ||
+    value.host_head_source_rest.invalid_rate_headers !== 0 ||
+    value.host_other_github_rest.primary_rate_limited !== 0 ||
+    value.host_other_github_rest.secondary_rate_limited !== 0 ||
+    value.host_other_github_rest.combined_rate_limited !== 0 ||
+    value.host_other_github_rest.invalid_rate_headers !== 0
   ) {
     return undefined;
   }
@@ -256,6 +264,10 @@ interface GitHubBudgetRole {
   readonly not_modified: number;
   readonly secondary_points: number;
   readonly permission: number;
+  readonly primary_rate_limited: number;
+  readonly secondary_rate_limited: number;
+  readonly combined_rate_limited: number;
+  readonly invalid_rate_headers: number;
   readonly remaining_tail_required: number;
 }
 
@@ -270,6 +282,10 @@ function validGitHubBudgetRole(value: unknown): value is GitHubBudgetRole {
       'not_modified',
       'secondary_points',
       'permission',
+      'primary_rate_limited',
+      'secondary_rate_limited',
+      'combined_rate_limited',
+      'invalid_rate_headers',
       'remaining_tail_required',
     ])
   ) {
@@ -282,12 +298,21 @@ function validGitHubBudgetRole(value: unknown): value is GitHubBudgetRole {
     boundedInteger(role.not_modified, 0, 216) &&
     boundedInteger(role.secondary_points, 0, 216 * 5) &&
     boundedInteger(role.permission, 0, 216) &&
+    boundedInteger(role.primary_rate_limited, 0, 216) &&
+    boundedInteger(role.secondary_rate_limited, 0, 216) &&
+    boundedInteger(role.combined_rate_limited, 0, 216) &&
+    boundedInteger(role.invalid_rate_headers, 0, 216) &&
     role.remaining_tail_required === 0 &&
     role.raw === role.primary + role.not_modified &&
     role.secondary_points >= role.raw &&
     role.secondary_points <= role.raw * 5 &&
     (role.secondary_points - role.raw) % 4 === 0 &&
-    role.permission <= role.primary
+    role.permission +
+      role.primary_rate_limited +
+      role.secondary_rate_limited +
+      role.combined_rate_limited +
+      role.invalid_rate_headers <=
+      role.primary
   );
 }
 
@@ -298,6 +323,10 @@ function canonicalGitHubBudgetRole(value: GitHubBudgetRole): GitHubBudgetRole {
     not_modified: value.not_modified,
     secondary_points: value.secondary_points,
     permission: value.permission,
+    primary_rate_limited: value.primary_rate_limited,
+    secondary_rate_limited: value.secondary_rate_limited,
+    combined_rate_limited: value.combined_rate_limited,
+    invalid_rate_headers: value.invalid_rate_headers,
     remaining_tail_required: value.remaining_tail_required,
   };
 }
@@ -316,6 +345,9 @@ function canonicalControlRequestBudget(line: string): string | undefined {
       'remaining_tail_required',
       'remaining_tail_reserve',
       'permission_denied',
+      'primary_rate_limited',
+      'secondary_rate_limited',
+      'combined_rate_limited',
       'invalid_remaining_header',
       'measurement_only',
       'rate_limited',
@@ -329,13 +361,24 @@ function canonicalControlRequestBudget(line: string): string | undefined {
     value.remaining_tail_required !== 0 ||
     value.remaining_tail_reserve !== 1 ||
     !boundedInteger(value.permission_denied, 0, 64) ||
+    !boundedInteger(value.primary_rate_limited, 0, 64) ||
+    !boundedInteger(value.secondary_rate_limited, 0, 64) ||
+    !boundedInteger(value.combined_rate_limited, 0, 64) ||
     value.consumed !== value.primary + value.not_modified ||
     value.secondary_points !== value.consumed + 4 * value.mutation_count ||
     value.mutation_count > value.consumed ||
     value.permission_denied > value.primary ||
+    value.primary_rate_limited +
+      value.secondary_rate_limited +
+      value.combined_rate_limited +
+      value.permission_denied >
+      value.primary ||
     value.invalid_remaining_header !== false ||
     value.measurement_only !== true ||
-    value.rate_limited !== false
+    value.rate_limited !== false ||
+    value.primary_rate_limited !== 0 ||
+    value.secondary_rate_limited !== 0 ||
+    value.combined_rate_limited !== 0
   ) {
     return undefined;
   }
@@ -351,6 +394,9 @@ function canonicalControlRequestBudget(line: string): string | undefined {
       remaining_tail_required: value.remaining_tail_required,
       remaining_tail_reserve: value.remaining_tail_reserve,
       permission_denied: value.permission_denied,
+      primary_rate_limited: value.primary_rate_limited,
+      secondary_rate_limited: value.secondary_rate_limited,
+      combined_rate_limited: value.combined_rate_limited,
       invalid_remaining_header: value.invalid_remaining_header,
       measurement_only: value.measurement_only,
       rate_limited: value.rate_limited,

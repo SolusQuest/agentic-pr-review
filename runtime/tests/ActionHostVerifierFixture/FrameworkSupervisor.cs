@@ -4947,7 +4947,8 @@ internal static class FrameworkSupervisor
                 receipt.GetProperty("invalid_remaining_header").GetBoolean(),
                 receipt.GetProperty("measurement_only").GetBoolean());
         }
-        catch (JsonException)
+        catch (Exception error) when (error is JsonException or
+            InvalidOperationException or KeyNotFoundException or FormatException)
         {
             return null;
         }
