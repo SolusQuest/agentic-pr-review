@@ -161,7 +161,28 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("trusted-proof-payload-v2:\n", workflow,
             StringComparison.Ordinal);
-        Assert.Equal(2, workflow.Split(
+        var v2JobStart = workflow.IndexOf("  trusted-proof-payload-v2:\n",
+            StringComparison.Ordinal);
+        var v2JobEnd = workflow.IndexOf("\n  integration:\n", v2JobStart,
+            StringComparison.Ordinal);
+        Assert.True(v2JobStart >= 0 && v2JobEnd > v2JobStart);
+        var v2Job = workflow[v2JobStart..v2JobEnd];
+        var checkout = v2Job.IndexOf("uses: actions/checkout@v6",
+            StringComparison.Ordinal);
+        var setupNode = v2Job.IndexOf("uses: actions/setup-node@v6",
+            StringComparison.Ordinal);
+        var installDependencies = v2Job.IndexOf("- run: npm ci",
+            StringComparison.Ordinal);
+        var firstProof = v2Job.IndexOf(
+            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-first.log\"",
+            StringComparison.Ordinal);
+        var secondProof = v2Job.IndexOf(
+            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-second.log\"",
+            StringComparison.Ordinal);
+        Assert.True(checkout >= 0 && checkout < setupNode &&
+            setupNode < installDependencies && installDependencies < firstProof &&
+            firstProof < secondProof);
+        Assert.Equal(2, v2Job.Split(
             "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh",
             StringSplitOptions.None).Length - 1);
         Assert.Contains(

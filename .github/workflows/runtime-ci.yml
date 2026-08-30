@@ -62,23 +62,11 @@ jobs:
       - name: R4 framework ActionHost replacement proof second fresh process
         run: bash runtime/scripts/verify-action-host.sh framework
 
-      - name: R4 Linux x64 Native AOT ActionHost proof first fresh process
-        run: |
-          set -o pipefail
-          bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-first.log"
+      - name: R4 generic Linux x64 Native AOT ActionHost conformance first fresh process
+        run: bash runtime/scripts/verify-action-host.sh aot
 
-      - name: R4 Linux x64 Native AOT ActionHost proof second fresh process
-        run: |
-          set -o pipefail
-          bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-second.log"
-
-      - name: R4 Native AOT receipts are byte-identical
-        run: |
-          grep '^APR_R4_E2_RECEIPT ' "$RUNNER_TEMP/r4-e2-aot-first.log" > "$RUNNER_TEMP/r4-e2-aot-first.receipt"
-          grep '^APR_R4_E2_RECEIPT ' "$RUNNER_TEMP/r4-e2-aot-second.log" > "$RUNNER_TEMP/r4-e2-aot-second.receipt"
-          test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-first.receipt")" -eq 1
-          test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-second.receipt")" -eq 1
-          cmp "$RUNNER_TEMP/r4-e2-aot-first.receipt" "$RUNNER_TEMP/r4-e2-aot-second.receipt"
+      - name: R4 generic Linux x64 Native AOT ActionHost conformance second fresh process
+        run: bash runtime/scripts/verify-action-host.sh aot
 
   trusted-proof-payload:
     runs-on: ubuntu-24.04
@@ -142,6 +130,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - run: npm ci
 
       - name: Install current-head E2P Native AOT and network-audit dependencies
         run: |

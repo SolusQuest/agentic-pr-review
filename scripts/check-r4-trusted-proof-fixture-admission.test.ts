@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { parseDocument } from 'yaml';
 import {
   FROZEN_FIXTURES,
   PROSPECTIVE_FIXTURE_CONTRACT,
@@ -14,6 +16,16 @@ import {
 
 const root = path.resolve(import.meta.dirname, '..');
 
+function ciCheckJob() {
+  const workflowPath = path.join(root, '.github', 'workflows', 'ci.yml');
+  const document = parseDocument(fs.readFileSync(workflowPath, 'utf8'));
+  expect(document.errors).toEqual([]);
+  expect(document.warnings).toEqual([]);
+  return document.toJS() as {
+    jobs?: { check?: { steps?: Array<Record<string, unknown>> } };
+  };
+}
+
 function runGit(args: string[], input?: Buffer) {
   return execFileSync('git', args, {
     cwd: root,
@@ -25,6 +37,21 @@ function runGit(args: string[], input?: Buffer) {
 }
 
 describe('R4 exact frozen-fixture admission', () => {
+  test('keeps the check job checkout deep and credential-free for frozen ancestry admission', () => {
+    const steps = ciCheckJob().jobs?.check?.steps;
+    expect(steps).toBeDefined();
+    const checkStepIndex = steps!.findIndex((step) => step.run === 'npm run check');
+    const checkoutStepIndex = steps!.findIndex((step) => step.uses === 'actions/checkout@v6');
+
+    expect(checkStepIndex).toBeGreaterThan(0);
+    expect(checkoutStepIndex).toBeGreaterThanOrEqual(0);
+    expect(checkoutStepIndex).toBeLessThan(checkStepIndex);
+    expect(steps![checkoutStepIndex]).toEqual({
+      uses: 'actions/checkout@v6',
+      with: { 'fetch-depth': 0, 'persist-credentials': false },
+    });
+  });
+
   test('materializes both immutable heads through the exact shared tree and production limits', () => {
     const statusBefore = runGit(['status', '--porcelain=v1', '--untracked-files=all']).toString(
       'utf8',

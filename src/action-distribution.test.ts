@@ -23,6 +23,11 @@ const repoRoot = path.resolve('.');
 const guardRelativePath = 'scripts/check-action-distribution.mjs';
 const actionRootRelativePath = '.github/actions/agentic-pr-review';
 const bundleRelativePath = `${actionRootRelativePath}/dist/index.js`;
+const artifactBudgetReceiptPrefix = 'APR_R4_E2P_ARTIFACT_REST_BUDGET ';
+const finalGitHubBudgetReceipt =
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":0,"authenticated_rest_limit":216,"anonymous_codeload_requests":0,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":false,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":64,"host_head_source_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":863},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":878}}\n';
+const finalControlBudgetReceipt =
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":0,"limit":64,"primary":0,"not_modified":0,"secondary_points":0,"mutation_count":0,"remaining_tail_required":888,"remaining_tail_reserve":64,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":false,"rate_limited":false}\n';
 const temporaryPaths: string[] = [];
 
 afterEach(async () => {
@@ -63,6 +68,26 @@ describe('R4 Action distribution', () => {
     expect(bundle).toContain('WRAPPER_BUILD_DISCRIMINATOR = "r4-w2"');
     expect(bundle).toMatch(/\/\/ Action source inventory sha256: [0-9a-f]{64}\n$/u);
     expect(bundle).not.toContain('require("supports-color")');
+  });
+
+  it('generates a fixed non-production framework fixture wrapper', async () => {
+    const buildModule = (await import(
+      pathToFileURL(path.join(repoRoot, 'scripts/build-action.mjs')).href
+    )) as {
+      generateActionBundle(root: string): Promise<{ bytes: Buffer }>;
+      generateFrameworkFixtureActionBundle(root: string): Promise<{ bytes: Buffer }>;
+    };
+
+    const [production, frameworkFixture] = await Promise.all([
+      buildModule.generateActionBundle(repoRoot),
+      buildModule.generateFrameworkFixtureActionBundle(repoRoot),
+    ]);
+
+    expect(production.bytes.toString('utf8')).toContain('WRAPPER_BUILD_DISCRIMINATOR = "r4-w2"');
+    expect(frameworkFixture.bytes.toString('utf8')).toContain(
+      'WRAPPER_BUILD_DISCRIMINATOR = "r4-h1"',
+    );
+    expect(frameworkFixture.bytes).not.toEqual(production.bytes);
   });
 
   it('changes the source inventory identity for wrapper or build-script drift', async () => {
@@ -160,7 +185,39 @@ describe('R4 Action distribution', () => {
       expect(execution.result.status).toBe(0);
       expect(await readFile(execution.markerPath, 'utf8')).toBe('executor-reached\n');
       expect(await readFile(execution.summaryPath, 'utf8')).toContain('skipped_untrusted_event');
-      expect(execution.result.stderr).toBe('');
+      const receiptLines = execution.result.stderr.trimEnd().split('\n');
+      expect(receiptLines.slice(0, 2)).toEqual([
+        finalGitHubBudgetReceipt.trimEnd(),
+        finalControlBudgetReceipt.trimEnd(),
+      ]);
+      expect(receiptLines).toHaveLength(3);
+      expect(receiptLines[2]).toMatch(new RegExp(`^${artifactBudgetReceiptPrefix}`, 'u'));
+      expect(JSON.parse(receiptLines[2]!.slice(artifactBudgetReceiptPrefix.length))).toEqual({
+        kind: 'apr-r4-trusted-proof-artifact-rest-budget-v2',
+        protected_route: true,
+        maximum_total_authenticated_api_requests: 2_130,
+        total_authenticated_api_requests: 0,
+        maximum_primary_rate_limit_requests: 136,
+        primary_rate_limit_requests: 0,
+        conditional_not_modified_requests: 0,
+        secondary_limit_points: 0,
+        permission_denied: 0,
+        remaining_total_authenticated_api_requests: 2_130,
+        remaining_primary_rate_limit_requests: 136,
+        disposition: 'active',
+        repository: 'owner/repository',
+        repository_id: '123',
+        workflow_sha: 'b'.repeat(40),
+        action_source_sha: 'a'.repeat(40),
+        payload_sha256: execution.payloadSha256,
+        build_discriminator: 'r4-w2',
+        run_id: '456',
+        run_attempt: '1',
+        cap_profile: 'apr-r4-artifact-rest-request-budget-v2',
+        measurement_only: false,
+        remaining_tail_required: 679,
+        remaining_tail_reserve: 64,
+      });
     },
     30_000,
   );
@@ -220,6 +277,7 @@ async function runIsolatedBundle(buildDiscriminator: string) {
     AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: payloadSha256,
     AGENTIC_PR_REVIEW_ACTION_SOURCE_SHA: 'a'.repeat(40),
     AGENTIC_PR_REVIEW_PAYLOAD_BUILD_DISCRIMINATOR: buildDiscriminator,
+    AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: 'final',
     GITHUB_EVENT_PATH: eventPath,
     GITHUB_REPOSITORY: 'owner/repository',
     GITHUB_REPOSITORY_ID: '123',
@@ -287,6 +345,7 @@ process.stdin.on('end', async () => {
       },
       annotations: []
     };
+    process.stderr.write(${JSON.stringify(finalGitHubBudgetReceipt + finalControlBudgetReceipt)});
     process.stdout.write(encode(completion));
   } catch {
     process.exitCode = 1;

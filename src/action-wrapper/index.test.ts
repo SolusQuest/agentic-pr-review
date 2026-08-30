@@ -605,7 +605,7 @@ describe('W1 production composition', () => {
       expect(Date.now() - started).toBeLessThan(8_000);
       expect(result.stdout).toBe('');
       expect(result.stderr).toBe('');
-      await expect(access(path.join(root, 'cleanup-called'))).rejects.toThrow();
+      await expect(access(path.join(root, 'cleanup-called'))).resolves.toBeUndefined();
     },
     10_000,
   );

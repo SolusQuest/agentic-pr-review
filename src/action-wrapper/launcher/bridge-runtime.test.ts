@@ -52,7 +52,13 @@ describe.runIf(process.platform === 'linux')('W1 S2 bridge composition', () => {
     await expect(ArtifactBridgeStaging.create(runtime.stagingRoot)).resolves.toBeInstanceOf(
       ArtifactBridgeStaging,
     );
-    await expect(executeListExact(runtime)).resolves.toEqual({ failure: 'none' });
+    await expect(executeListExact(runtime)).resolves.toEqual({
+      operation: 'list_exact',
+      correlation_id: 'w1-correlation',
+      failure: 'none',
+      complete: true,
+      objects: [],
+    });
     expect(factories).toBe(1);
     expect(executions).toBe(1);
     await runtime.stopAndDrain();
@@ -81,7 +87,13 @@ describe.runIf(process.platform === 'linux')('W1 S2 bridge composition', () => {
     });
     const activeRuntime = runtime;
     const tempRoot = activeRuntime.tempRoot;
-    await expect(executeListExact(activeRuntime)).resolves.toEqual({ failure: 'none' });
+    await expect(executeListExact(activeRuntime)).resolves.toEqual({
+      operation: 'list_exact',
+      correlation_id: 'w1-correlation',
+      failure: 'none',
+      complete: true,
+      objects: [],
+    });
     await activeRuntime.stopAndDrain();
     await expect(activeRuntime.cleanup()).rejects.toThrow('dispose-failure');
     await expect(stat(tempRoot)).rejects.toThrow();

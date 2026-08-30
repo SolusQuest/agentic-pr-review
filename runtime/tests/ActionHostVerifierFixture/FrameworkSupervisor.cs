@@ -1967,7 +1967,9 @@ internal static class FrameworkSupervisor
         info.Environment["AGENTIC_PR_REVIEW_ACTION_SOURCE_SHA"] =
             LaunchActionSourceSha(spec);
         info.Environment["AGENTIC_PR_REVIEW_PAYLOAD_BUILD_DISCRIMINATOR"] =
-            FrameworkCanaries.BuildDiscriminator;
+            spec.TrustedProofPayload
+                ? FrameworkCanaries.TrustedProofBuildDiscriminator
+                : FrameworkCanaries.FrameworkFixtureBuildDiscriminator;
         info.Environment["GITHUB_EVENT_PATH"] = eventPath;
         info.Environment["GITHUB_REPOSITORY"] = FrameworkCanaries.Repository;
         info.Environment["GITHUB_REPOSITORY_ID"] =
@@ -1989,8 +1991,11 @@ internal static class FrameworkSupervisor
         info.Environment["ACTIONS_RESULTS_URL"] = platform.BaseUrl;
         info.Environment["ACTIONS_RUNTIME_TOKEN"] = RuntimeToken;
         info.Environment["ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY"] = "1";
-        info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
-            "final";
+        if (spec.TrustedProofPayload)
+        {
+            info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
+                "final";
+        }
         info.Environment["INPUT_GITHUB-TOKEN"] = FrameworkCanaries.GitHubToken;
         info.Environment["INPUT_PROVIDER-API-KEY"] = spec.MissingProvider
             ? ""
@@ -4249,7 +4254,7 @@ internal static class FrameworkSupervisor
             ("dynamic_code_supported", RuntimeFeature.IsDynamicCodeSupported),
             ("launch_action_source_sha", FrameworkGitHubHandler.ActionSha),
             ("wrapper_build_discriminator",
-                FrameworkCanaries.BuildDiscriminator),
+                FrameworkCanaries.FrameworkFixtureBuildDiscriminator),
             ("payload_sha256", context.PayloadSha256),
             ("managed_intermediate_sha256",
                 context.ManagedIntermediateSha256),
@@ -5045,7 +5050,7 @@ internal static class FrameworkSupervisor
         StringComparer.Ordinal.Equals(receipt.PayloadSha256,
             ReadOptionalText(scenario, "payload-sha256").Trim()) &&
         StringComparer.Ordinal.Equals(receipt.BuildDiscriminator,
-            FrameworkCanaries.BuildDiscriminator) &&
+            FrameworkCanaries.TrustedProofBuildDiscriminator) &&
         StringComparer.Ordinal.Equals(receipt.RunId,
             ReadLong(scenario, "run-id").ToString(CultureInfo.InvariantCulture)) &&
         StringComparer.Ordinal.Equals(receipt.RunAttempt,
