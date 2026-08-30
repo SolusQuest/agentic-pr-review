@@ -25,6 +25,7 @@ internal sealed class TrustedProofControlRequestBudget
     internal const int MaximumRequests = 64;
     private readonly int maximumRequests;
     private readonly TrustedProofRemainingTailGuard remainingTailGuard;
+    private readonly TrustedProofPrimaryRemainingLedger remainingLedger;
     private readonly Func<long> epochSeconds;
     private int consumed;
     private int rateLimited;
@@ -40,7 +41,8 @@ internal sealed class TrustedProofControlRequestBudget
 
     internal TrustedProofControlRequestBudget(int maximumRequests = MaximumRequests,
         TrustedProofRemainingTailGuard? remainingTailGuard = null,
-        Func<long>? epochSeconds = null)
+        Func<long>? epochSeconds = null,
+        TrustedProofPrimaryRemainingLedger? remainingLedger = null)
     {
         if (maximumRequests <= 0)
         {
@@ -50,6 +52,7 @@ internal sealed class TrustedProofControlRequestBudget
         this.maximumRequests = maximumRequests;
         this.remainingTailGuard = remainingTailGuard ??
             TrustedProofRemainingTailGuard.Measurement;
+        this.remainingLedger = remainingLedger ?? new TrustedProofPrimaryRemainingLedger();
         this.epochSeconds = epochSeconds ??
             (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     }
@@ -58,14 +61,22 @@ internal sealed class TrustedProofControlRequestBudget
 
     internal bool IsExhausted => Consumed >= maximumRequests;
 
-    internal bool IsRateLimited => Volatile.Read(ref rateLimited) != 0;
+    internal bool IsRateLimited => Volatile.Read(ref rateLimited) != 0 ||
+        remainingLedger.IsClosed;
 
-    internal void MarkRateLimited() => Volatile.Write(ref rateLimited, 1);
+    internal void MarkRateLimited()
+    {
+        Volatile.Write(ref rateLimited, 1);
+        remainingLedger.Close();
+    }
 
     // A malformed remaining header is not a benign observability gap: accepting
     // another authenticated request would make the proof's rate accounting
     // unverifiable, so it closes this control budget just like a real limit.
-    internal void Observe(HttpResponseMessage response, HttpMethod method)
+    internal void Observe(
+        HttpResponseMessage response,
+        HttpMethod method,
+        TrustedProofPrimaryRemainingLease? lease = null)
     {
         ArgumentNullException.ThrowIfNull(response);
         ArgumentNullException.ThrowIfNull(method);
@@ -82,8 +93,9 @@ internal sealed class TrustedProofControlRequestBudget
             Interlocked.Increment(ref primary);
         }
 
-        switch (TrustedProofOperationRequestAccounting.ResponseClassify(
-            response, epochSeconds()))
+        var responseClass = TrustedProofOperationRequestAccounting.ResponseClassify(
+            response, epochSeconds());
+        switch (responseClass)
         {
             case TrustedProofResponseClass.PermissionDenied:
                 Interlocked.Increment(ref permissionDenied);
@@ -106,28 +118,31 @@ internal sealed class TrustedProofControlRequestBudget
                 break;
         }
 
-        if (TrustedProofOperationRequestAccounting.RemainingRequiresFailClosed(response,
-                remainingTailGuard,
-                TrustedProofRequestDomain.TrustedControlRest))
-        {
-            MarkRateLimited();
-        }
+        remainingLedger.Observe(lease, response, responseClass,
+            TrustedProofRequestDomain.TrustedControlRest, remainingTailGuard);
+        if (remainingLedger.IsClosed) Volatile.Write(ref rateLimited, 1);
     }
 
     internal long CurrentUnixSeconds => epochSeconds();
 
-    internal bool TryClaim()
+    internal bool TryClaim(out TrustedProofPrimaryRemainingLease? lease)
     {
+        lease = null;
+        if (IsRateLimited || !remainingLedger.TryLease(
+                TrustedProofRequestDomain.TrustedControlRest,
+                remainingTailGuard, out lease))
+        {
+            Volatile.Write(ref rateLimited, 1);
+            return false;
+        }
+
         while (true)
         {
-            if (IsRateLimited)
-            {
-                return false;
-            }
-
             var current = Volatile.Read(ref consumed);
             if (current >= maximumRequests)
             {
+                remainingLedger.AbortBeforeWire(lease!);
+                lease = null;
                 return false;
             }
 
@@ -227,7 +242,8 @@ internal sealed class TrustedProofControlTransport : IDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
         using var client = CreateClient(handler, token, disposeHandler: true);
-        if (!requestBudget.TryClaim())
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!requestBudget.TryClaim(out var lease))
         {
             return null;
         }
@@ -239,15 +255,27 @@ internal sealed class TrustedProofControlTransport : IDisposable
             TrustedProofOperationRequestAccounting.WitnessDomainOption,
             TrustedProofOperationRequestAccounting.WitnessDomain(
                 TrustedProofRequestDomain.TrustedControlRest));
-        using var response = await client.SendAsync(request, cancellationToken)
-            .ConfigureAwait(false);
-        requestBudget.Observe(response, HttpMethod.Get);
-        if (requestBudget.IsRateLimited) return null;
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            lease!.Ledger.CloseOutcomeUnknown(lease);
+            throw;
+        }
+        using (response)
+        {
+            requestBudget.Observe(response, HttpMethod.Get, lease);
+            if (requestBudget.IsRateLimited) return null;
 
-        return response.IsSuccessStatusCode
-            ? await ReadBoundedBytesAsync(response, 64 * 1024, cancellationToken)
-                .ConfigureAwait(false)
-            : null;
+            return response.IsSuccessStatusCode
+                ? await ReadBoundedBytesAsync(response, 64 * 1024, cancellationToken)
+                    .ConfigureAwait(false)
+                : null;
+        }
     }
 
     internal async Task<IReadOnlyList<TrustedProofIssueComment>?> ListAsync(
@@ -529,7 +557,8 @@ internal sealed class TrustedProofControlTransport : IDisposable
         HttpContent? content,
         CancellationToken cancellationToken)
     {
-        if (!requestBudget.TryClaim())
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!requestBudget.TryClaim(out var lease))
         {
             return null;
         }
@@ -542,9 +571,18 @@ internal sealed class TrustedProofControlTransport : IDisposable
             TrustedProofOperationRequestAccounting.WitnessDomainOption,
             TrustedProofOperationRequestAccounting.WitnessDomain(
                 TrustedProofRequestDomain.TrustedControlRest));
-        var response = await client.SendAsync(request, cancellationToken)
-            .ConfigureAwait(false);
-        requestBudget.Observe(response, method);
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            lease!.Ledger.CloseOutcomeUnknown(lease);
+            throw;
+        }
+        requestBudget.Observe(response, method, lease);
         if (requestBudget.IsRateLimited)
         {
             response.Dispose();

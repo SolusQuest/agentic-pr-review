@@ -304,9 +304,13 @@ execute_proof() {
   normalized_evidence="$temporary_root/trusted-proof-payload-evidence.normalized.json"
   node --input-type=module - \
     "$proof_evidence/trusted-proof-payload-evidence.json" \
-    "$normalized_evidence" <<'NODE'
+    "$normalized_evidence" \
+    "$payload_source_commit" \
+    "$payload_source_tree" <<'NODE'
 import fs from 'node:fs';
-const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const [inputPath, outputPath, expectedSourceCommit, expectedSourceTree] =
+  process.argv.slice(2);
+const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
 const expectedCases = [
   'dispatch-bootstrap',
   'dispatch-continuation',
@@ -319,19 +323,27 @@ const expectedFields = [
   'compiled_payload_proof_kind',
   'compiled_payload_source_commit',
   'compiled_payload_source_tree',
+  'launch_workflow_sha',
+  'launch_action_source_sha',
+  'fixture_base_sha',
+  'trusted_authority_exact',
   'trusted_proof_request_budget_satisfied',
   'cases',
 ];
 if (input === null || Array.isArray(input) || typeof input !== 'object' ||
     JSON.stringify(Object.keys(input)) !== JSON.stringify(expectedFields) ||
-    input.passed !== true || input.trusted_proof_request_budget_satisfied !== true ||
+    input.passed !== true || input.trusted_authority_exact !== true ||
+    input.trusted_proof_request_budget_satisfied !== true ||
     !Array.isArray(input.cases) ||
     input.cases.length !== expectedCases.length ||
     !/^[0-9a-f]{64}$/.test(input.verifier_executable_sha256 ?? '') ||
     input.compiled_payload_proof_kind !==
       'apr-r4-e2p-trusted-proof-payload-v2' ||
-    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_commit ?? '') ||
-    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_tree ?? '')) {
+    input.compiled_payload_source_commit !== expectedSourceCommit ||
+    input.compiled_payload_source_tree !== expectedSourceTree ||
+    input.launch_workflow_sha !== expectedSourceCommit ||
+    input.launch_action_source_sha !== expectedSourceCommit ||
+    input.fixture_base_sha !== expectedSourceCommit) {
   throw new Error('The trusted-proof evidence envelope is invalid.');
 }
 const cases = input.cases.map((item, index) => {
@@ -345,12 +357,16 @@ const cases = input.cases.map((item, index) => {
   const { HostPid: _hostPid, ...stable } = item;
   return stable;
 });
-fs.writeFileSync(process.argv[3], JSON.stringify({
+fs.writeFileSync(outputPath, JSON.stringify({
   passed: input.passed,
   verifier_executable_sha256: input.verifier_executable_sha256,
   compiled_payload_proof_kind: input.compiled_payload_proof_kind,
   compiled_payload_source_commit: input.compiled_payload_source_commit,
   compiled_payload_source_tree: input.compiled_payload_source_tree,
+  launch_workflow_sha: input.launch_workflow_sha,
+  launch_action_source_sha: input.launch_action_source_sha,
+  fixture_base_sha: input.fixture_base_sha,
+  trusted_authority_exact: input.trusted_authority_exact,
   trusted_proof_request_budget_satisfied: input.trusted_proof_request_budget_satisfied,
   cases,
 }) + '\n');

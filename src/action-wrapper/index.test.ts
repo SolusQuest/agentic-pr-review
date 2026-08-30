@@ -29,6 +29,7 @@ import { HostProcessTerminationUnconfirmedError } from './launcher/host-process.
 import { OfficialCallTracker } from './launcher/official-calls.js';
 import type { PreparedPayloadProof } from './launcher/prepared-payload.js';
 import {
+  artifactRestRequestBudgetProfile,
   R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE,
   readTrustedProofRequestBudgetProfile,
 } from './launcher/request-budget-profile.js';
@@ -370,7 +371,6 @@ describe('W1 production composition', () => {
   it.each([
     ['missing', undefined, 'wrapper_request_budget_profile_invalid'],
     ['invalid', 'wide-open', 'wrapper_request_budget_profile_invalid'],
-    ['final before allocations freeze', 'final', 'wrapper_request_budget_profile_unfrozen'],
   ])(
     'fails closed before bridge or Host for a protected %s request-budget profile',
     async (_caseName, profile, expectedCode) => {
@@ -418,6 +418,27 @@ describe('W1 production composition', () => {
       ).toThrow(expectedCode);
     },
   );
+
+  it('selects the frozen final profile only from the verified protected environment', () => {
+    expect(
+      readTrustedProofRequestBudgetProfile('r4-h1', {
+        [R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]: 'final',
+      }),
+    ).toBeUndefined();
+    const profile = readTrustedProofRequestBudgetProfile('r4-w2', {
+      [R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]: 'final',
+    });
+    expect(profile).toBe('final');
+    expect(artifactRestRequestBudgetProfile(profile!)).toMatchObject({
+      limits: {
+        maximumTotalAuthenticatedApiRequests: 2_130,
+        maximumPrimaryRateLimitRequests: 136,
+      },
+      remainingTailRequired: 679,
+      remainingTailReserve: 64,
+      measurementOnly: false,
+    });
+  });
 
   it('fails closed on malformed Host output without forwarding canaries', async () => {
     const fixture = await wrapperFixture();

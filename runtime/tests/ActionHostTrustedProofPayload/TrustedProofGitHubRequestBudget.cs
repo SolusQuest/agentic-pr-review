@@ -12,6 +12,7 @@ internal sealed class TrustedProofGitHubRequestBudget
     private readonly int _maximumAnonymousCodeloadRequests;
     private readonly Func<HttpMessageHandler> _innerFactory;
     private readonly TrustedProofRemainingTailGuard _remainingTailGuard;
+    private readonly TrustedProofPrimaryRemainingLedger _remainingLedger;
     private readonly Func<long> _epochSeconds;
     private int _authenticatedRestRequests;
     private int _anonymousCodeloadRequests;
@@ -43,7 +44,8 @@ internal sealed class TrustedProofGitHubRequestBudget
             MaximumAuthenticatedRestRequests,
             MaximumAnonymousCodeloadRequests,
             static () => CreateInnerHandler(),
-            TrustedProofRemainingTailGuard.Measurement)
+            TrustedProofRemainingTailGuard.Measurement,
+            remainingLedger: new TrustedProofPrimaryRemainingLedger())
     {
     }
 
@@ -52,7 +54,8 @@ internal sealed class TrustedProofGitHubRequestBudget
         int maximumAnonymousCodeloadRequests,
         Func<HttpMessageHandler> innerFactory,
         TrustedProofRemainingTailGuard? remainingTailGuard = null,
-        Func<long>? epochSeconds = null)
+        Func<long>? epochSeconds = null,
+        TrustedProofPrimaryRemainingLedger? remainingLedger = null)
     {
         _maximumAuthenticatedRestRequests =
             maximumAuthenticatedRestRequests > 0
@@ -68,6 +71,7 @@ internal sealed class TrustedProofGitHubRequestBudget
             throw new ArgumentNullException(nameof(innerFactory));
         _remainingTailGuard = remainingTailGuard ??
             TrustedProofRemainingTailGuard.Measurement;
+        _remainingLedger = remainingLedger ?? new TrustedProofPrimaryRemainingLedger();
         _epochSeconds = epochSeconds ??
             (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     }
@@ -90,7 +94,8 @@ internal sealed class TrustedProofGitHubRequestBudget
             _innerFactory(),
             TrustedProofRequestDomain.HostHeadSourceRest);
 
-    internal bool IsRateLimited => Volatile.Read(ref _rateLimited) != 0;
+    internal bool IsRateLimited => Volatile.Read(ref _rateLimited) != 0 ||
+        _remainingLedger.IsClosed;
 
     internal TrustedProofGitHubRequestBudgetReceipt Snapshot() => new(
         Volatile.Read(ref _authenticatedRestRequests),
@@ -183,6 +188,33 @@ internal sealed class TrustedProofGitHubRequestBudget
         }
     }
 
+    private bool TryClaimAuthenticated(
+        TrustedProofRequestDomain domain,
+        out TrustedProofPrimaryRemainingLease? lease)
+    {
+        if (!_remainingLedger.TryLease(domain, _remainingTailGuard, out lease))
+        {
+            if (_remainingLedger.CloseReason ==
+                TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining)
+            {
+                Interlocked.Exchange(ref _lowRemainingGuard, 1);
+            }
+            Interlocked.Exchange(ref _rateLimited, 1);
+            Interlocked.Increment(ref _rejectedRequests);
+            return false;
+        }
+
+        if (TryClaim(ref _authenticatedRestRequests,
+                _maximumAuthenticatedRestRequests))
+        {
+            return true;
+        }
+
+        _remainingLedger.AbortBeforeWire(lease!);
+        lease = null;
+        return false;
+    }
+
     private static SocketsHttpHandler CreateInnerHandler() => new()
     {
         ActivityHeadersPropagator =
@@ -201,7 +233,8 @@ internal sealed class TrustedProofGitHubRequestBudget
     private void Observe(
         TrustedProofRequestDomain domain,
         HttpRequestMessage request,
-        HttpResponseMessage response)
+        HttpResponseMessage response,
+        TrustedProofPrimaryRemainingLease lease)
     {
         var head = domain == TrustedProofRequestDomain.HostHeadSourceRest;
         if (head) Interlocked.Increment(ref _headSourceRaw);
@@ -221,8 +254,9 @@ internal sealed class TrustedProofGitHubRequestBudget
         else Interlocked.Add(ref _otherGitHubSecondaryPoints,
             IsRead(request.Method) ? 1 : 5);
 
-        switch (TrustedProofOperationRequestAccounting.ResponseClassify(
-            response, _epochSeconds()))
+        var responseClass = TrustedProofOperationRequestAccounting.ResponseClassify(
+            response, _epochSeconds());
+        switch (responseClass)
         {
             case TrustedProofResponseClass.PermissionDenied:
                 if (head) Interlocked.Increment(ref _headSourcePermission);
@@ -251,11 +285,16 @@ internal sealed class TrustedProofGitHubRequestBudget
                 break;
         }
 
-        if (TrustedProofOperationRequestAccounting.RemainingRequiresFailClosed(response,
-                _remainingTailGuard,
-                domain))
+        _remainingLedger.Observe(lease, response, responseClass, domain,
+            _remainingTailGuard);
+        if (_remainingLedger.CloseReason ==
+            TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining)
         {
             Interlocked.Exchange(ref _lowRemainingGuard, 1);
+            Interlocked.Exchange(ref _rateLimited, 1);
+        }
+        else if (_remainingLedger.IsClosed)
+        {
             Interlocked.Exchange(ref _rateLimited, 1);
         }
     }
@@ -290,8 +329,7 @@ internal sealed class TrustedProofGitHubRequestBudget
                     return budget.ProtocolRejected(request, HttpStatusCode.Unauthorized);
                 }
 
-                if (!budget.TryClaim(ref budget._authenticatedRestRequests,
-                        budget._maximumAuthenticatedRestRequests))
+                if (!budget.TryClaimAuthenticated(domain, out var lease))
                 {
                     return budget.RateLimited(request);
                 }
@@ -299,9 +337,18 @@ internal sealed class TrustedProofGitHubRequestBudget
                 request.Options.Set(
                     TrustedProofOperationRequestAccounting.WitnessDomainOption,
                     TrustedProofOperationRequestAccounting.WitnessDomain(domain));
-                var response = await base.SendAsync(request, cancellationToken)
-                    .ConfigureAwait(false);
-                budget.Observe(domain, request, response);
+                HttpResponseMessage response;
+                try
+                {
+                    response = await base.SendAsync(request, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    budget._remainingLedger.CloseOutcomeUnknown(lease!);
+                    throw;
+                }
+                budget.Observe(domain, request, response, lease!);
                 if (!budget.IsRateLimited)
                 {
                     return response;
@@ -331,23 +378,23 @@ internal sealed class TrustedProofGitHubRequestBudget
         internal static HttpResponseMessage Rejected(
             HttpRequestMessage request,
             HttpStatusCode status) => new(status)
-        {
-            RequestMessage = request,
-            Content = new ByteArrayContent([]),
-        };
+            {
+                RequestMessage = request,
+                Content = new ByteArrayContent([]),
+            };
 
     }
 
     private HttpResponseMessage RateLimited(
             HttpRequestMessage request)
     {
-            var response = BudgetHandler.Rejected(
-                request, HttpStatusCode.TooManyRequests);
-            response.Headers.TryAddWithoutValidation(
-                "x-ratelimit-remaining", "0");
-            response.Headers.TryAddWithoutValidation("x-ratelimit-reset",
-                checked(_epochSeconds() + 1).ToString(CultureInfo.InvariantCulture));
-            return response;
+        var response = BudgetHandler.Rejected(
+            request, HttpStatusCode.TooManyRequests);
+        response.Headers.TryAddWithoutValidation(
+            "x-ratelimit-remaining", "0");
+        response.Headers.TryAddWithoutValidation("x-ratelimit-reset",
+            checked(_epochSeconds() + 1).ToString(CultureInfo.InvariantCulture));
+        return response;
     }
 
     private HttpResponseMessage ProtocolRejected(

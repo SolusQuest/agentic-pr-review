@@ -5,7 +5,10 @@ import { finished } from 'node:stream/promises';
 import { TextDecoder } from 'node:util';
 
 import { H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES } from './contracts.js';
-import type { TrustedProofRequestBudgetProfile } from './request-budget-profile.js';
+import {
+  trustedProofHostReceiptProfile,
+  type TrustedProofRequestBudgetProfile,
+} from './request-budget-profile.js';
 import { fail } from './validation.js';
 
 export const HOST_CANCELLATION_RECONCILIATION_GRACE_MS = 130_000;
@@ -34,7 +37,7 @@ export interface HostProcessRequest {
   readonly launchBytes: Uint8Array;
   readonly tempRoot: string;
   readonly signal: AbortSignal;
-  /** Present only for a verified r4-w2 measurement proof. */
+  /** Present only for a verified r4-w2 proof. */
   readonly requestBudgetProfile?: TrustedProofRequestBudgetProfile;
   readonly cancellationKillGraceMs?: number;
   readonly postKillCloseGraceMs?: number;
@@ -123,7 +126,10 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   request.signal.addEventListener('abort', forwardCancellation, { once: true });
   if (request.signal.aborted) forwardCancellation();
   const outputPromise = readSingleFrame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
-  const receiptPromise = readTrustedProofBudgetReceiptLines(child.stderr!);
+  const receiptPromise = readTrustedProofBudgetReceiptLines(
+    child.stderr!,
+    request.requestBudgetProfile,
+  );
   try {
     child.stdin!.end(encodeFrame(request.launchBytes));
     const [, completionBytes, trustedProofBudgetReceiptLines, closed] = await Promise.race([
@@ -157,9 +163,11 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
  */
 export async function readTrustedProofBudgetReceiptLines(
   stream: Readable,
+  profile: TrustedProofRequestBudgetProfile | undefined,
   maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
 ): Promise<readonly string[]> {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return [];
+  const expected = profile === undefined ? undefined : trustedProofHostReceiptProfile(profile);
   const chunks: Buffer[] = [];
   let total = 0;
   let overflow = false;
@@ -169,7 +177,7 @@ export async function readTrustedProofBudgetReceiptLines(
     if (total <= maximumBytes) chunks.push(chunk);
     else overflow = true;
   }
-  if (overflow) return [];
+  if (overflow || expected === undefined) return [];
 
   let decoded: string;
   try {
@@ -184,11 +192,11 @@ export async function readTrustedProofBudgetReceiptLines(
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     if (line.startsWith(GITHUB_REQUEST_BUDGET_PREFIX)) {
       if (github !== undefined) return [];
-      github = canonicalGitHubRequestBudget(line);
+      github = canonicalGitHubRequestBudget(line, expected);
       if (github === undefined) return [];
     } else if (line.startsWith(CONTROL_REQUEST_BUDGET_PREFIX)) {
       if (control !== undefined) return [];
-      control = canonicalControlRequestBudget(line);
+      control = canonicalControlRequestBudget(line, expected);
       if (control === undefined) return [];
     }
   }
@@ -196,7 +204,10 @@ export async function readTrustedProofBudgetReceiptLines(
   return github === undefined || control === undefined ? [] : [`${github}\n`, `${control}\n`];
 }
 
-function canonicalGitHubRequestBudget(line: string): string | undefined {
+function canonicalGitHubRequestBudget(
+  line: string,
+  expected: ReturnType<typeof trustedProofHostReceiptProfile>,
+): string | undefined {
   const value = parseRecord(line.slice(GITHUB_REQUEST_BUDGET_PREFIX.length));
   if (
     value === undefined ||
@@ -219,13 +230,13 @@ function canonicalGitHubRequestBudget(line: string): string | undefined {
     !boundedInteger(value.anonymous_codeload_requests, 0, 1) ||
     value.anonymous_codeload_limit !== 1 ||
     value.rejected_requests !== 0 ||
-    value.measurement_only !== true ||
+    value.measurement_only !== expected.measurementOnly ||
     value.invalid_remaining_header !== false ||
     value.terminal_rate_limited !== false ||
     value.low_remaining_guard !== false ||
-    value.remaining_tail_reserve !== 1 ||
-    !validGitHubBudgetRole(value.host_head_source_rest) ||
-    !validGitHubBudgetRole(value.host_other_github_rest) ||
+    value.remaining_tail_reserve !== expected.remainingTailReserve ||
+    !validGitHubBudgetRole(value.host_head_source_rest, expected.hostHeadSourceRestTail) ||
+    !validGitHubBudgetRole(value.host_other_github_rest, expected.hostOtherGitHubRestTail) ||
     value.host_head_source_rest.raw + value.host_other_github_rest.raw !==
       value.authenticated_rest_requests ||
     value.host_head_source_rest.primary_rate_limited !== 0 ||
@@ -271,7 +282,7 @@ interface GitHubBudgetRole {
   readonly remaining_tail_required: number;
 }
 
-function validGitHubBudgetRole(value: unknown): value is GitHubBudgetRole {
+function validGitHubBudgetRole(value: unknown, expectedTail: number): value is GitHubBudgetRole {
   if (
     value === null ||
     typeof value !== 'object' ||
@@ -302,7 +313,7 @@ function validGitHubBudgetRole(value: unknown): value is GitHubBudgetRole {
     boundedInteger(role.secondary_rate_limited, 0, 216) &&
     boundedInteger(role.combined_rate_limited, 0, 216) &&
     boundedInteger(role.invalid_rate_headers, 0, 216) &&
-    role.remaining_tail_required === 0 &&
+    role.remaining_tail_required === expectedTail &&
     role.raw === role.primary + role.not_modified &&
     role.secondary_points >= role.raw &&
     role.secondary_points <= role.raw * 5 &&
@@ -331,7 +342,10 @@ function canonicalGitHubBudgetRole(value: GitHubBudgetRole): GitHubBudgetRole {
   };
 }
 
-function canonicalControlRequestBudget(line: string): string | undefined {
+function canonicalControlRequestBudget(
+  line: string,
+  expected: ReturnType<typeof trustedProofHostReceiptProfile>,
+): string | undefined {
   const value = parseRecord(line.slice(CONTROL_REQUEST_BUDGET_PREFIX.length));
   if (
     value === undefined ||
@@ -358,8 +372,8 @@ function canonicalControlRequestBudget(line: string): string | undefined {
     !boundedInteger(value.not_modified, 0, 64) ||
     !boundedInteger(value.secondary_points, 0, 64 * 5) ||
     !boundedInteger(value.mutation_count, 0, 64) ||
-    value.remaining_tail_required !== 0 ||
-    value.remaining_tail_reserve !== 1 ||
+    value.remaining_tail_required !== expected.trustedControlRestTail ||
+    value.remaining_tail_reserve !== expected.remainingTailReserve ||
     !boundedInteger(value.permission_denied, 0, 64) ||
     !boundedInteger(value.primary_rate_limited, 0, 64) ||
     !boundedInteger(value.secondary_rate_limited, 0, 64) ||
@@ -374,7 +388,7 @@ function canonicalControlRequestBudget(line: string): string | undefined {
       value.permission_denied >
       value.primary ||
     value.invalid_remaining_header !== false ||
-    value.measurement_only !== true ||
+    value.measurement_only !== expected.measurementOnly ||
     value.rate_limited !== false ||
     value.primary_rate_limited !== 0 ||
     value.secondary_rate_limited !== 0 ||

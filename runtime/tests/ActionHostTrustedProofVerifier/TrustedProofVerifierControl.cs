@@ -16,9 +16,16 @@ internal static class TrustedProofVerifierControl
         {
             return 1;
         }
+        if (!TrustedProofRequestBudgetProfile.TrySelectProduction(
+                Environment.GetEnvironmentVariable, out var requestBudgetProfile) ||
+            requestBudgetProfile is null)
+        {
+            return 1;
+        }
 
         var scenarioRoot = Directory.GetCurrentDirectory();
-        var requestBudget = new TrustedProofControlRequestBudget();
+        var requestBudget = new TrustedProofControlRequestBudget(
+            remainingTailGuard: requestBudgetProfile.RemainingTailGuard);
         try
         {
             return await TrustedProofControlService.RunAsync(

@@ -61,13 +61,20 @@ internal static class TrustedProofPayloadHost
         var ports = await createPortsAsync(launch!).ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(ports);
 
+        // The host's head/other transports and embedded control requests use
+        // one token bucket.  Give all three views the same operation ledger;
+        // a standalone control transport still creates its own ledger by
+        // default for its independent caller boundary.
+        var primaryRemainingLedger = new TrustedProofPrimaryRemainingLedger();
         var githubBudget = new TrustedProofGitHubRequestBudget(
             TrustedProofGitHubRequestBudget.MaximumAuthenticatedRestRequests,
             TrustedProofGitHubRequestBudget.MaximumAnonymousCodeloadRequests,
             ports.CreateGitHubInnerHandler,
-            requestBudgetProfile.RemainingTailGuard);
+            requestBudgetProfile.RemainingTailGuard,
+            remainingLedger: primaryRemainingLedger);
         var controlBudget = new TrustedProofControlRequestBudget(
-            remainingTailGuard: requestBudgetProfile.RemainingTailGuard);
+            remainingTailGuard: requestBudgetProfile.RemainingTailGuard,
+            remainingLedger: primaryRemainingLedger);
         TrustedProofStaleWindowCoordinator? coordinator = null;
         Task<bool>? coordinatorTask = null;
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(

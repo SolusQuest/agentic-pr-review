@@ -8,10 +8,10 @@ const TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = 'r4-w2';
 
 /**
  * The only profile admitted while the trusted proof is measuring its request
- * envelope. `final` is deliberately named and rejected: it cannot be enabled
- * until the later freeze supplies the corresponding immutable allocations.
+ * envelope. Both variants are closed: callers cannot supply a wider or
+ * partially specified allocation.
  */
-export type TrustedProofRequestBudgetProfile = 'measurement';
+export type TrustedProofRequestBudgetProfile = 'measurement' | 'final';
 
 export const TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: ArtifactRestRequestBudgetProfile =
   Object.freeze({
@@ -29,10 +29,47 @@ export const TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: Art
     measurementOnly: true,
   });
 
+/** The reviewed two-run allocation, including the Node domain's shared-token tail. */
+export const TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: ArtifactRestRequestBudgetProfile =
+  Object.freeze({
+    capProfile: 'apr-r4-artifact-rest-request-budget-v2',
+    limits: Object.freeze({
+      maximumTotalAuthenticatedApiRequests: 2_130,
+      maximumPrimaryRateLimitRequests: 136,
+    }),
+    remainingTailRequired: 679,
+    remainingTailReserve: 64,
+    measurementOnly: false,
+  });
+
+export interface TrustedProofHostReceiptProfile {
+  readonly measurementOnly: boolean;
+  readonly remainingTailReserve: number;
+  readonly hostHeadSourceRestTail: number;
+  readonly hostOtherGitHubRestTail: number;
+  readonly trustedControlRestTail: number;
+}
+
+const TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE: TrustedProofHostReceiptProfile =
+  Object.freeze({
+    measurementOnly: true,
+    remainingTailReserve: 1,
+    hostHeadSourceRestTail: 0,
+    hostOtherGitHubRestTail: 0,
+    trustedControlRestTail: 0,
+  });
+
+const TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE: TrustedProofHostReceiptProfile = Object.freeze({
+  measurementOnly: false,
+  remainingTailReserve: 64,
+  hostHeadSourceRestTail: 863,
+  hostOtherGitHubRestTail: 878,
+  trustedControlRestTail: 888,
+});
+
 /**
  * This remains the single selection boundary between the verified payload and
- * the process-wide artifact REST budget. `final` intentionally has no
- * definition until exact measured allocations are frozen.
+ * the process-wide artifact REST budget.
  */
 export function artifactRestRequestBudgetProfile(
   profile: TrustedProofRequestBudgetProfile,
@@ -40,6 +77,23 @@ export function artifactRestRequestBudgetProfile(
   switch (profile) {
     case 'measurement':
       return TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case 'final':
+      return TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+  }
+}
+
+/**
+ * Host stderr is private and untrusted. Its receipt is admitted only against
+ * the same verified profile that configured the child process.
+ */
+export function trustedProofHostReceiptProfile(
+  profile: TrustedProofRequestBudgetProfile,
+): TrustedProofHostReceiptProfile {
+  switch (profile) {
+    case 'measurement':
+      return TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE;
+    case 'final':
+      return TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE;
   }
 }
 
@@ -55,7 +109,7 @@ export function readTrustedProofRequestBudgetProfile(
     case 'measurement':
       return 'measurement';
     case 'final':
-      return fail('wrapper_request_budget_profile_unfrozen');
+      return 'final';
     default:
       return fail('wrapper_request_budget_profile_invalid');
   }

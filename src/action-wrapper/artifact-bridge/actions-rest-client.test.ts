@@ -8,7 +8,10 @@ import {
   type ArtifactRestSecondaryRateLimitOptions,
   TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS,
 } from './artifact-rest-request-budget.js';
-import { TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE } from '../launcher/request-budget-profile.js';
+import {
+  TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+  TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+} from '../launcher/request-budget-profile.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -89,6 +92,21 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
+  it('uses the frozen final profile with the Node tail and operation reserve', () => {
+    const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile: TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+    });
+    expect(budget.receipt()).toMatchObject({
+      maximum_total_authenticated_api_requests: 2_130,
+      maximum_primary_rate_limit_requests: 136,
+      remaining_tail_required: 679,
+      remaining_tail_reserve: 64,
+      measurement_only: false,
+    });
+  });
+
   it('allows 2304 measured raw requests and rejects the 2305th before wire dispatch', async () => {
     let now = 0;
     const budget = trustedProofBudget(undefined, {
@@ -142,7 +160,7 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('fails closed immediately at the observed tail-plus-reserve boundary', async () => {
+  it('permits equality only when the following dispatch leaves the exact tail and reserve', async () => {
     const profile = {
       ...TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
       remainingTailRequired: 3,
@@ -164,16 +182,14 @@ describe('trusted proof artifact REST budget', () => {
 
     const atBoundary = budget();
     await observeRemaining(atBoundary, 8);
-    expect(atBoundary.receipt()).toMatchObject({ disposition: 'primary_exhausted' });
+    expect(atBoundary.receipt()).toMatchObject({ disposition: 'active' });
     await expect(runGet(atBoundary)).rejects.toThrow(
       'trusted_proof_artifact_rest_budget_primary_exhausted',
     );
 
     const allocation = budget();
     await observeRemaining(allocation, 9);
-    expect(() => allocation.requireObservedPrimaryAllocation(1)).toThrow(
-      'trusted_proof_artifact_rest_budget_primary_exhausted',
-    );
+    expect(() => allocation.requireObservedPrimaryAllocation(1)).not.toThrow();
 
     const mutation = budget();
     await observeRemaining(mutation, 9);
@@ -183,23 +199,35 @@ describe('trusted proof artifact REST budget', () => {
         primaryRequests: 1,
         secondaryPoints: 1,
       }),
-    ).toThrow('trusted_proof_artifact_rest_budget_primary_exhausted');
+    ).not.toThrow();
 
     const dispatch = budget();
     await observeRemaining(dispatch, 9);
-    await expect(runGet(dispatch)).rejects.toThrow(
-      'trusted_proof_artifact_rest_budget_primary_exhausted',
-    );
+    await expect(runGet(dispatch)).resolves.toMatchObject({ status: 200 });
     expect(dispatch.receipt()).toMatchObject({
       measurement_only: false,
       remaining_tail_required: 3,
       remaining_tail_reserve: 5,
     });
 
-    const boundaryPlusOne = budget();
-    await observeRemaining(boundaryPlusOne, 10);
-    expect(() => boundaryPlusOne.requireObservedPrimaryAllocation(1)).not.toThrow();
-    await expect(runGet(boundaryPlusOne)).resolves.toMatchObject({ status: 200 });
+    const frozenFinal = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile: TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+    });
+    await observeRemaining(frozenFinal, 743);
+    expect(frozenFinal.receipt()).toMatchObject({ disposition: 'active' });
+    await expect(runGet(frozenFinal)).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+
+    const frozenFinalEquality = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile: TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+    });
+    await observeRemaining(frozenFinalEquality, 744);
+    await expect(runGet(frozenFinalEquality)).resolves.toMatchObject({ status: 200 });
   });
 
   it.each([

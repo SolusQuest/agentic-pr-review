@@ -18,6 +18,19 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
 public sealed class TrustedProofVerifierFixtureTests
 {
+    [Theory]
+    [InlineData("dispatch-bootstrap", 1)]
+    [InlineData("dispatch-continuation", 2)]
+    [InlineData("stale-head", 1)]
+    public void ProtectedRequestJoinFreezesTheContinuationHeadRevalidation(
+        string scenario,
+        int expectedCommitRequests)
+    {
+        Assert.Equal(expectedCommitRequests,
+            FrameworkSupervisor.ExpectedTrustedProofHeadCommitRequestsForTest(
+                scenario));
+    }
+
     [Fact]
     public void RequestBudgetTailsUseTheLargestFutureChargedSuffixPerDomain()
     {

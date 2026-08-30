@@ -357,7 +357,7 @@ jobs:
           bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-hold
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: measurement
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -383,7 +383,7 @@ jobs:
           pr-number: ''
           state-mode: auto
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: measurement
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
           AGENTIC_PR_REVIEW_PREPARED_ROOT: ${{ steps.prepare.outputs.prepared_root }}
           AGENTIC_PR_REVIEW_PREPARED_EXECUTABLE: ${{ steps.prepare.outputs.prepared_executable }}
           AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}
@@ -458,7 +458,7 @@ jobs:
           bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-verify-completed
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: measurement
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -484,7 +484,7 @@ jobs:
           pr-number: ${{ inputs.pr-number }}
           state-mode: auto
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: measurement
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
           AGENTIC_PR_REVIEW_PREPARED_ROOT: ${{ steps.prepare.outputs.prepared_root }}
           AGENTIC_PR_REVIEW_PREPARED_EXECUTABLE: ${{ steps.prepare.outputs.prepared_executable }}
           AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}

@@ -997,7 +997,7 @@ internal static class FrameworkSupervisor
         info.Environment["ACTION_SOURCE_SHA"] = LaunchActionSourceSha(spec);
         info.Environment["PAYLOAD_SHA256"] = Sha256(payload);
         info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
-            "measurement";
+            "final";
         info.Environment["RUN_ID"] = RunId(spec).ToString(
             CultureInfo.InvariantCulture);
         info.Environment["RUN_ATTEMPT"] = "1";
@@ -1696,17 +1696,26 @@ internal static class FrameworkSupervisor
     private static bool RemainingTailProfileIsExact(
         FrameworkExternalControlRequestBudgetReceipt receipt) => receipt.MeasurementOnly
         ? receipt.RemainingTailReserve ==
-            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
+            TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.RemainingTailRequired == 0
         : FrozenTailReceiptIsExact(TrustedProofRequestDomain.TrustedControlRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve);
 
-    // Empty until the first complete AOT measurement is reviewed.  Keeping the
-    // final map unpopulated is fail-closed: no measurement profile can become
-    // a live verdict merely because its wide local guard happened to pass.
+    // These exact role totals are frozen from two byte-identical clean AOT
+    // measurements.  The final verifier rejects either a new charged role
+    // or a change to an existing role, rather than treating this as a broad
+    // upper-bound budget.
     private static readonly IReadOnlyDictionary<string, int>
         FrozenOperationPrimaryRoleCaps = new Dictionary<string, int>(
-            StringComparer.Ordinal);
+            StringComparer.Ordinal)
+            {
+                ["node_artifact_rest"] = 224,
+                ["host_head_source_rest"] = 540,
+                ["host_other_github_rest"] = 82,
+                ["embedded_control"] = 12,
+                ["external_control"] = 23,
+                ["cleanup_control"] = 8,
+            };
 
     private static IReadOnlyDictionary<string, int> ObservedRoleTotals(
         FrameworkRequestBudgetReceipt?[] host,
@@ -1981,7 +1990,7 @@ internal static class FrameworkSupervisor
         info.Environment["ACTIONS_RUNTIME_TOKEN"] = RuntimeToken;
         info.Environment["ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY"] = "1";
         info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
-            "measurement";
+            "final";
         info.Environment["INPUT_GITHUB-TOKEN"] = FrameworkCanaries.GitHubToken;
         info.Environment["INPUT_PROVIDER-API-KEY"] = spec.MissingProvider
             ? ""
@@ -4688,7 +4697,8 @@ internal static class FrameworkSupervisor
             external.Sum(value => value.MutationCount) +
             cleanup.Sum(value => value.MutationCount);
         return head.Raw == ProductionShapedReviewedHeadRequests &&
-            ReadInt(scenario, "head-commit-api-count") == 1 &&
+            ReadInt(scenario, "head-commit-api-count") ==
+                ExpectedTrustedProofHeadCommitRequests(result.Name) &&
             ReadInt(scenario, "head-tree-api-count") == 178 &&
             ReadInt(scenario, "head-archive-api-count") == 1 &&
             ReadInt(scenario, "base-api-count") ==
@@ -4720,6 +4730,21 @@ internal static class FrameworkSupervisor
             result.AnonymousSignedDownloads >= 0 &&
             results.Raw > 0;
     }
+
+    private static int ExpectedTrustedProofHeadCommitRequests(string scenario) =>
+        scenario switch
+        {
+            // Continuation revalidates the exact reviewed head after it restores
+            // the predecessor.  It remains in the already-frozen 180-request
+            // head role: the second commit GET replaces one other head request,
+            // it does not expand the role or relax the join.
+            "dispatch-continuation" => 2,
+            "dispatch-bootstrap" or "stale-head" => 1,
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+    internal static int ExpectedTrustedProofHeadCommitRequestsForTest(
+        string scenario) => ExpectedTrustedProofHeadCommitRequests(scenario);
 
     private static bool TryReadScenarioEvents(
         string scenario,
@@ -4968,11 +4993,11 @@ internal static class FrameworkSupervisor
         receipt.Kind == "apr-r4-trusted-proof-artifact-rest-budget-v2" &&
         ArtifactRestReceiptIdentityIsExact(receipt, scenario) &&
         receipt.ProtectedRoute &&
-        receipt.MaximumTotalAuthenticatedApiRequests == 2304 &&
+        receipt.MaximumTotalAuthenticatedApiRequests == 2130 &&
         receipt.TotalAuthenticatedApiRequests >= 0 &&
         receipt.TotalAuthenticatedApiRequests <=
             receipt.MaximumTotalAuthenticatedApiRequests &&
-        receipt.MaximumPrimaryRateLimitRequests == 256 &&
+        receipt.MaximumPrimaryRateLimitRequests == 136 &&
         receipt.PrimaryRateLimitRequests >= 0 &&
         receipt.PrimaryRateLimitRequests <=
             receipt.MaximumPrimaryRateLimitRequests &&
@@ -4994,10 +5019,9 @@ internal static class FrameworkSupervisor
                 receipt.PrimaryRateLimitRequests &&
         receipt.Disposition == "active" &&
         receipt.CapProfile == "apr-r4-artifact-rest-request-budget-v2" &&
-        receipt.MeasurementOnly &&
-        receipt.RemainingTailRequired == 0 &&
-        receipt.RemainingTailReserve ==
-            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
+        !receipt.MeasurementOnly &&
+        FrozenTailReceiptIsExact(TrustedProofRequestDomain.NodeArtifactRest,
+            receipt.RemainingTailRequired, receipt.RemainingTailReserve) &&
         artifactRestRequests == receipt.TotalAuthenticatedApiRequests &&
         artifactRestNotModified == receipt.ConditionalNotModifiedRequests &&
         artifactRestPrimary == receipt.PrimaryRateLimitRequests &&
@@ -5048,7 +5072,7 @@ internal static class FrameworkSupervisor
     private static bool RemainingTailProfileIsExact(
         FrameworkRequestBudgetReceipt receipt) => receipt.MeasurementOnly
         ? receipt.RemainingTailReserve ==
-            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
+            TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.HostHeadSourceRemainingTailRequired == 0 &&
             receipt.HostOtherGitHubRemainingTailRequired == 0
         : FrozenTailReceiptIsExact(TrustedProofRequestDomain.HostHeadSourceRest,
@@ -5061,7 +5085,7 @@ internal static class FrameworkSupervisor
     private static bool RemainingTailProfileIsExact(
         FrameworkControlRequestBudgetReceipt receipt) => receipt.MeasurementOnly
         ? receipt.RemainingTailReserve ==
-            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
+            TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.RemainingTailRequired == 0
         : FrozenTailReceiptIsExact(TrustedProofRequestDomain.TrustedControlRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve);

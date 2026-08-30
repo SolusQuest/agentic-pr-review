@@ -28,6 +28,12 @@ internal static class TrustedProofVerifierHost
         {
             return 1;
         }
+        if (!TrustedProofRequestBudgetProfile.TrySelectProduction(
+                Environment.GetEnvironmentVariable, out var requestBudgetProfile) ||
+            requestBudgetProfile is null)
+        {
+            return 1;
+        }
 
         using var cancellation = new CancellationTokenSource();
         using var sigterm = Register(PosixSignal.SIGTERM, cancellation);
@@ -36,7 +42,8 @@ internal static class TrustedProofVerifierHost
                 Console.OpenStandardInput(),
                 Console.OpenStandardOutput(),
                 CreateRuntimePortsAsync,
-                cancellation.Token)
+                cancellation.Token,
+                requestBudgetProfile)
             .ConfigureAwait(false);
     }
 

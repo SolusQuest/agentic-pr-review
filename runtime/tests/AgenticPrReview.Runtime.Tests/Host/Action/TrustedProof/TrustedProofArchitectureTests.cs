@@ -284,6 +284,23 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("item.HostPid !== expectedHostPid", source,
             StringComparison.Ordinal);
+        Assert.Contains("AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final",
+            File.ReadAllText(Path.Join(FindRepositoryRoot(), ".github",
+                "workflows", "r4-trusted-proof.yml")), StringComparison.Ordinal);
+        Assert.Contains("'launch_workflow_sha',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'launch_action_source_sha',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'fixture_base_sha',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.launch_workflow_sha !== expectedSourceCommit",
+            source, StringComparison.Ordinal);
+        Assert.Contains("input.launch_action_source_sha !== expectedSourceCommit",
+            source, StringComparison.Ordinal);
+        Assert.Contains("input.fixture_base_sha !== expectedSourceCommit",
+            source, StringComparison.Ordinal);
+        Assert.Contains("input.trusted_authority_exact !== true", source,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -532,6 +549,11 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("new TrustedProofControlRequestBudget", payload,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "var primaryRemainingLedger = new TrustedProofPrimaryRemainingLedger();",
+            payload, StringComparison.Ordinal);
+        Assert.Contains("remainingLedger: primaryRemainingLedger", payload,
+            StringComparison.Ordinal);
         Assert.Contains("ports.CreateGitHubInnerHandler", payload,
             StringComparison.Ordinal);
         Assert.Contains("controlBudget", payload, StringComparison.Ordinal);
@@ -541,7 +563,9 @@ public sealed class TrustedProofArchitectureTests
             coordinator, StringComparison.Ordinal);
         Assert.DoesNotContain("new TrustedProofControlRequestBudget", coordinator,
             StringComparison.Ordinal);
-        Assert.Contains("if (!requestBudget.TryClaim())", transport,
+        Assert.Contains("if (!requestBudget.TryClaim(out var lease))", transport,
+            StringComparison.Ordinal);
+        Assert.Contains("CloseOutcomeUnknown(lease)", transport,
             StringComparison.Ordinal);
         Assert.Contains("TrustedProofPayloadHost.RunCoreAsync", verifier,
             StringComparison.Ordinal);
@@ -597,6 +621,9 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("FrozenRemainingTailByDomain", supervisor,
             StringComparison.Ordinal);
+        Assert.Equal(3, supervisor.Split(
+            "TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve",
+            StringSplitOptions.None).Length - 1);
     }
 
     [Fact]

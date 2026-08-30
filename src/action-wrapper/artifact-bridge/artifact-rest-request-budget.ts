@@ -284,7 +284,7 @@ export class ArtifactRestRequestBudget {
     }
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining <= input.primaryRequests + this.requiredTailAndReserve()
+      this.observedPrimaryRemaining < input.primaryRequests + this.requiredTailAndReserve()
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -322,7 +322,7 @@ export class ArtifactRestRequestBudget {
     const requiredWithFinalProfileTail = required + this.requiredTailAndReserve();
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining <= requiredWithFinalProfileTail
+      this.observedPrimaryRemaining < requiredWithFinalProfileTail
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -489,7 +489,7 @@ export class ArtifactRestRequestBudget {
     }
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining <= 1 + this.requiredTailAndReserve()
+      this.observedPrimaryRemaining < 1 + this.requiredTailAndReserve()
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -584,7 +584,7 @@ export class ArtifactRestRequestBudget {
             : undefined;
     if (remaining.value !== undefined) {
       this.observedPrimaryRemaining = remaining.value;
-      if (remaining.value <= this.requiredTailAndReserve() && disposition === undefined) {
+      if (remaining.value < this.requiredTailAndReserve() && disposition === undefined) {
         this.disposition = 'primary_exhausted';
       }
     }

@@ -34,6 +34,15 @@ const githubBudgetReceipt =
   'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0}}\n';
 const controlBudgetReceipt =
   'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
+const finalGitHubBudgetReceipt = githubBudgetReceipt
+  .replace('"measurement_only":true', '"measurement_only":false')
+  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":64')
+  .replace('"remaining_tail_required":0', '"remaining_tail_required":863')
+  .replace('"remaining_tail_required":0', '"remaining_tail_required":878');
+const finalControlBudgetReceipt = controlBudgetReceipt
+  .replace('"remaining_tail_required":0', '"remaining_tail_required":888')
+  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":64')
+  .replace('"measurement_only":true', '"measurement_only":false');
 
 afterEach(async () => {
   await Promise.all(handles.splice(0).map(async (handle) => await handle.close()));
@@ -76,7 +85,7 @@ describe('W1 private Host framing', () => {
     delete process.env.R4_AMBIENT_SECRET_CANARY;
   });
 
-  it('forwards only the verified measurement profile to a protected child', () => {
+  it('forwards only the verified profile to a protected child', () => {
     expect(closedChildEnvironment('/tmp/apr-private', 'measurement')).toEqual({
       TMPDIR: '/tmp/apr-private',
       NO_COLOR: '1',
@@ -84,6 +93,10 @@ describe('W1 private Host framing', () => {
       DOTNET_CLI_TELEMETRY_OPTOUT: '1',
       AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: 'measurement',
     });
+    expect(closedChildEnvironment('/tmp/apr-private', 'final')).toHaveProperty(
+      'AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE',
+      'final',
+    );
   });
 
   it('keeps the production cancellation grace beyond the complete S2 operation bound', () => {
@@ -92,12 +105,59 @@ describe('W1 private Host framing', () => {
 
   it('admits only canonical proof-budget records from otherwise private Host stderr', async () => {
     const stream = new PassThrough();
-    const reading = readTrustedProofBudgetReceiptLines(stream);
+    const reading = readTrustedProofBudgetReceiptLines(stream, 'measurement');
     stream.end(
       `private-provider-canary\n${controlBudgetReceipt}${githubBudgetReceipt}private-tail\n`,
     );
 
     await expect(reading).resolves.toEqual([githubBudgetReceipt, controlBudgetReceipt]);
+  });
+
+  it('never admits Host stderr receipts without the verified profile capability', async () => {
+    const stream = new PassThrough();
+    const reading = readTrustedProofBudgetReceiptLines(stream, undefined);
+    stream.end(`${githubBudgetReceipt}${controlBudgetReceipt}`);
+    await expect(reading).resolves.toEqual([]);
+    expect(stream.readableLength).toBe(0);
+  });
+
+  it('admits a final receipt only under the verified final profile', async () => {
+    const stream = new PassThrough();
+    const reading = readTrustedProofBudgetReceiptLines(stream, 'final');
+    stream.end(`${finalControlBudgetReceipt}${finalGitHubBudgetReceipt}`);
+    await expect(reading).resolves.toEqual([finalGitHubBudgetReceipt, finalControlBudgetReceipt]);
+  });
+
+  it.each([
+    finalGitHubBudgetReceipt.replace(
+      '"authenticated_rest_limit":216',
+      '"authenticated_rest_limit":217',
+    ) + finalControlBudgetReceipt,
+    finalGitHubBudgetReceipt + finalControlBudgetReceipt.replace('"limit":64', '"limit":63'),
+    finalGitHubBudgetReceipt.replace('"measurement_only":false', '"measurement_only":true') +
+      finalControlBudgetReceipt,
+    finalGitHubBudgetReceipt.replace('"remaining_tail_reserve":64', '"remaining_tail_reserve":63') +
+      finalControlBudgetReceipt,
+    finalGitHubBudgetReceipt.replace(
+      '"remaining_tail_required":863',
+      '"remaining_tail_required":862',
+    ) + finalControlBudgetReceipt,
+    finalGitHubBudgetReceipt.replace(
+      '"remaining_tail_required":878',
+      '"remaining_tail_required":877',
+    ) + finalControlBudgetReceipt,
+    finalGitHubBudgetReceipt +
+      finalControlBudgetReceipt.replace(
+        '"remaining_tail_required":888',
+        '"remaining_tail_required":887',
+      ),
+    finalGitHubBudgetReceipt +
+      finalControlBudgetReceipt.replace('"measurement_only":false', '"measurement_only":true'),
+  ])('rejects mismatched final cap, tail, reserve, or measurement receipts', async (body) => {
+    const stream = new PassThrough();
+    const reading = readTrustedProofBudgetReceiptLines(stream, 'final');
+    stream.end(body);
+    await expect(reading).resolves.toEqual([]);
   });
 
   it.each([
@@ -147,7 +207,7 @@ describe('W1 private Host framing', () => {
     'suppresses incomplete, duplicate, malformed, or oversized Host stderr receipts',
     async (body) => {
       const stream = new PassThrough();
-      const reading = readTrustedProofBudgetReceiptLines(stream);
+      const reading = readTrustedProofBudgetReceiptLines(stream, 'measurement');
       stream.end(body);
       await expect(reading).resolves.toEqual([]);
     },

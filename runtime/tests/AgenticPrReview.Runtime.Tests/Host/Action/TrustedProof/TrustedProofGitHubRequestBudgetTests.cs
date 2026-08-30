@@ -124,7 +124,8 @@ public sealed class TrustedProofGitHubRequestBudgetTests
     public void ControlReceiptIsSafeAndReportsTheNestedLimit()
     {
         var budget = new TrustedProofControlRequestBudget(maximumRequests: 2);
-        Assert.True(budget.TryClaim());
+        Assert.True(budget.TryClaim(out var lease));
+        lease!.Ledger.AbortBeforeWire(lease);
         budget.MarkRateLimited();
         using var output = new StringWriter(
             System.Globalization.CultureInfo.InvariantCulture);
@@ -575,24 +576,86 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         using var denied = new HttpResponseMessage(HttpStatusCode.Forbidden);
         permission.Observe(denied, HttpMethod.Get);
         Assert.False(permission.IsRateLimited);
-        Assert.True(permission.TryClaim());
+        Assert.True(permission.TryClaim(out var permissionLease));
+        permissionLease!.Ledger.AbortBeforeWire(permissionLease);
 
         var malformed = new TrustedProofControlRequestBudget(2);
         using var response = new HttpResponseMessage(HttpStatusCode.OK);
         response.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "not-a-number");
         malformed.Observe(response, HttpMethod.Get);
         Assert.True(malformed.IsRateLimited);
-        Assert.False(malformed.TryClaim());
+        Assert.False(malformed.TryClaim(out _));
 
         var lowRemaining = new TrustedProofControlRequestBudget(2);
         using var success = new HttpResponseMessage(HttpStatusCode.OK);
         success.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "1");
         lowRemaining.Observe(success, HttpMethod.Get);
-        Assert.False(lowRemaining.TryClaim());
+        Assert.False(lowRemaining.TryClaim(out _));
+
+        var oneRequestAbove = new TrustedProofControlRequestBudget(2);
+        using var sufficient = new HttpResponseMessage(HttpStatusCode.OK);
+        sufficient.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "2");
+        oneRequestAbove.Observe(sufficient, HttpMethod.Get);
+        Assert.True(oneRequestAbove.TryClaim(out var sufficientLease));
+        sufficientLease!.Ledger.AbortBeforeWire(sufficientLease);
     }
 
     [Fact]
-    public void RemainingGuardUsesTheCrossRoleTailAndReserveNotOnlyTheNextRequest()
+    public async Task ExactRemainingTailIsAcceptedButTheNextHostDispatchIsRejectedBeforeWire()
+    {
+        var sent = 0;
+        var budget = new TrustedProofGitHubRequestBudget(
+            maximumAuthenticatedRestRequests: 2,
+            maximumAnonymousCodeloadRequests: 1,
+            innerFactory: () => new ResponseHandler(() =>
+            {
+                Interlocked.Increment(ref sent);
+                var response = new HttpResponseMessage(HttpStatusCode.OK);
+                response.Headers.TryAddWithoutValidation(
+                    "x-ratelimit-remaining", "1");
+                return response;
+            }));
+        using var client = new HttpClient(budget.CreateOtherGitHubHandler());
+
+        using var accepted = await client.SendAsync(ApiRequest("/repos/o/r"));
+        using var rejected = await client.SendAsync(ApiRequest("/repos/o/r/issues/1"));
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.Equal(1, sent);
+        Assert.Equal(1, budget.Snapshot().AuthenticatedRestRequests);
+        Assert.Equal(1, budget.Snapshot().RejectedRequests);
+    }
+
+    [Fact]
+    public async Task OneRequestAboveRemainingTailAllowsTheNextHostDispatch()
+    {
+        var sent = 0;
+        var budget = new TrustedProofGitHubRequestBudget(
+            maximumAuthenticatedRestRequests: 2,
+            maximumAnonymousCodeloadRequests: 1,
+            innerFactory: () => new ResponseHandler(() =>
+            {
+                var remaining = Interlocked.Increment(ref sent) == 1 ? "2" : "1";
+                var response = new HttpResponseMessage(HttpStatusCode.OK);
+                response.Headers.TryAddWithoutValidation(
+                    "x-ratelimit-remaining", remaining);
+                return response;
+            }));
+        using var client = new HttpClient(budget.CreateOtherGitHubHandler());
+
+        using var first = await client.SendAsync(ApiRequest("/repos/o/r"));
+        using var second = await client.SendAsync(ApiRequest("/repos/o/r/issues/1"));
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(2, sent);
+        Assert.Equal(2, budget.Snapshot().AuthenticatedRestRequests);
+        Assert.Equal(0, budget.Snapshot().RejectedRequests);
+    }
+
+    [Fact]
+    public void RemainingGuardAllowsExactTailAndReserveButRejectsOneRequestBelow()
     {
         var tails = new Dictionary<TrustedProofRequestDomain, int>
         {
@@ -603,31 +666,449 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         };
         var guard = new TrustedProofRemainingTailGuard(tails, reserve: 5,
             measurementOnly: false);
+        using var belowTail = new HttpResponseMessage(HttpStatusCode.OK);
+        belowTail.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "6");
         using var atTail = new HttpResponseMessage(HttpStatusCode.OK);
         atTail.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "7");
-        using var aboveTail = new HttpResponseMessage(HttpStatusCode.OK);
-        aboveTail.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "8");
 
         Assert.True(TrustedProofOperationRequestAccounting.RemainingRequiresFailClosed(
-            atTail, guard, TrustedProofRequestDomain.HostHeadSourceRest));
+            belowTail, guard, TrustedProofRequestDomain.HostHeadSourceRest));
         Assert.False(TrustedProofOperationRequestAccounting.RemainingRequiresFailClosed(
-            aboveTail, guard, TrustedProofRequestDomain.HostHeadSourceRest));
+            atTail, guard, TrustedProofRequestDomain.HostHeadSourceRest));
     }
 
     [Fact]
-    public void ProductionProfileCannotSilentlyUseMeasurementBeforeTheFreeze()
+    public async Task ExactRemainingEqualityIsSharedAcrossHostAndControlBeforeTheNextWire()
+    {
+        var guard = Guard(reserve: 1);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        var host = new TrustedProofGitHubRequestBudget(3, 1,
+            () => new ResponseHandler(() => RemainingResponse("2")), guard,
+            remainingLedger: ledger);
+        var control = new TrustedProofControlRequestBudget(3, guard,
+            remainingLedger: ledger);
+        using var client = new HttpClient(host.CreateOtherGitHubHandler());
+
+        using var first = await client.SendAsync(ApiRequest("/repos/o/r"));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.True(control.TryClaim(out var controlLease));
+        using var controlResponse = RemainingResponse("1");
+        control.Observe(controlResponse, HttpMethod.Get, controlLease);
+
+        using var rejected = await client.SendAsync(ApiRequest("/repos/o/r/issues/1"));
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.True(host.IsRateLimited);
+        Assert.True(control.IsRateLimited);
+    }
+
+    [Fact]
+    public async Task HeadOtherAndEmbeddedControlShareDynamicLowRemaining()
+    {
+        var guard = Guard(reserve: 1);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        var remaining = 4;
+        var host = new TrustedProofGitHubRequestBudget(4, 1,
+            () => new ResponseHandler(() => RemainingResponse(
+                Interlocked.Decrement(ref remaining).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture))),
+            guard, remainingLedger: ledger);
+        var control = new TrustedProofControlRequestBudget(4, guard,
+            remainingLedger: ledger);
+        using var headClient = new HttpClient(host.CreateHeadSourceHandler());
+        using var otherClient = new HttpClient(host.CreateOtherGitHubHandler());
+
+        using var head = await headClient.SendAsync(ApiRequest(
+            "/repos/o/r/git/commits/" + new string('a', 40)));
+        using var other = await otherClient.SendAsync(ApiRequest("/repos/o/r"));
+        Assert.Equal(HttpStatusCode.OK, head.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, other.StatusCode);
+        Assert.True(control.TryClaim(out var controlLease));
+        using var controlResponse = RemainingResponse("1");
+        control.Observe(controlResponse, HttpMethod.Get, controlLease);
+
+        using var rejected = await headClient.SendAsync(ApiRequest(
+            "/repos/o/r/git/trees/" + new string('a', 40)));
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.True(host.IsRateLimited);
+        Assert.True(control.IsRateLimited);
+    }
+
+    [Fact]
+    public async Task StandaloneControlTerminalDoesNotCloseAnIndependentHostLedger()
+    {
+        var guard = Guard(reserve: 1);
+        var host = new TrustedProofGitHubRequestBudget(2, 1,
+            () => new ResponseHandler(() => RemainingResponse("2")), guard);
+        var standaloneControl = new TrustedProofControlRequestBudget(2, guard);
+        using var client = new HttpClient(host.CreateOtherGitHubHandler());
+
+        standaloneControl.MarkRateLimited();
+        using var response = await client.SendAsync(ApiRequest("/repos/o/r"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(standaloneControl.IsRateLimited);
+        Assert.False(host.IsRateLimited);
+    }
+
+    [Fact]
+    public void Headerless304RefundsOnlyItsLeaseWhileOrdinaryHeaderlessResponseStaysDebited()
+    {
+        var guard = Guard();
+        var normalLedger = new TrustedProofPrimaryRemainingLedger();
+        using (var initial = RemainingResponse("1"))
+        {
+            normalLedger.Observe(null, initial, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.True(normalLedger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var normalLease));
+        using (var ordinary = new HttpResponseMessage(HttpStatusCode.OK))
+        {
+            normalLedger.Observe(normalLease, ordinary,
+                TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.False(normalLedger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out _));
+
+        var notModifiedLedger = new TrustedProofPrimaryRemainingLedger();
+        using (var initial = RemainingResponse("1"))
+        {
+            notModifiedLedger.Observe(null, initial,
+                TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.True(notModifiedLedger.TryLease(
+            TrustedProofRequestDomain.HostOtherGitHubRest, guard,
+            out var notModifiedLease));
+        using (var notModified = new HttpResponseMessage(HttpStatusCode.NotModified))
+        {
+            notModifiedLedger.Observe(notModifiedLease, notModified,
+                TrustedProofResponseClass.NotModified,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.True(notModifiedLedger.TryLease(
+            TrustedProofRequestDomain.HostOtherGitHubRest, guard, out _));
+    }
+
+    [Fact]
+    public void NotModifiedWithRemainingHeaderRefundsItsKnownPreDebitBeforeWaveMinimum()
+    {
+        var guard = Guard();
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        using (var initial = RemainingResponse("1"))
+        {
+            ledger.Observe(null, initial, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var lease));
+        using (var notModified = RemainingResponse("1"))
+        {
+            notModified.StatusCode = HttpStatusCode.NotModified;
+            ledger.Observe(lease, notModified,
+                TrustedProofResponseClass.NotModified,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out _));
+        Assert.False(ledger.IsClosed);
+    }
+
+    [Fact]
+    public void Headerless304RefundsAnEarlierHeaderConservativeConcurrentDebit()
+    {
+        var guard = Guard(otherTail: 4);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var first));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var pending304));
+        using (var observed = RemainingResponse("5"))
+        {
+            ledger.Observe(first, observed, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        using (var notModified = new HttpResponseMessage(HttpStatusCode.NotModified))
+        {
+            ledger.Observe(pending304, notModified,
+                TrustedProofResponseClass.NotModified,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out _));
+        Assert.False(ledger.IsClosed);
+    }
+
+    [Fact]
+    public void LeaseCannotBeSettledByAnotherLedgerOrDomain()
+    {
+        var guard = Guard();
+        var owner = new TrustedProofPrimaryRemainingLedger();
+        var other = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(owner.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var lease));
+        using var response = RemainingResponse("1");
+
+        Assert.Throws<InvalidOperationException>(() => other.Observe(lease,
+            response, TrustedProofResponseClass.Success,
+            TrustedProofRequestDomain.HostOtherGitHubRest, guard));
+        Assert.True(other.IsClosed);
+        owner.AbortBeforeWire(lease!);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ForeignLeaseAbortOrOutcomeUnknownFailClosesTheReceivingLedger(
+        bool outcomeUnknown)
+    {
+        var guard = Guard();
+        var owner = new TrustedProofPrimaryRemainingLedger();
+        var receiving = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(owner.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var lease));
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            if (outcomeUnknown) receiving.CloseOutcomeUnknown(lease!);
+            else receiving.AbortBeforeWire(lease!);
+        });
+
+        Assert.True(receiving.IsClosed);
+        Assert.Equal(TrustedProofPrimaryRemainingLedgerCloseReason.Terminal,
+            receiving.CloseReason);
+        owner.AbortBeforeWire(lease!);
+    }
+
+    [Fact]
+    public async Task MalformedRemainingHeaderClosesTheSharedLedgerForControl()
+    {
+        var guard = Guard();
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        var host = new TrustedProofGitHubRequestBudget(2, 1,
+            () => new ResponseHandler(() => RemainingResponse("malformed")), guard,
+            remainingLedger: ledger);
+        var control = new TrustedProofControlRequestBudget(2, guard,
+            remainingLedger: ledger);
+        using var client = new HttpClient(host.CreateOtherGitHubHandler());
+
+        using var response = await client.SendAsync(ApiRequest("/repos/o/r"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.True(ledger.IsClosed);
+        Assert.False(control.TryClaim(out _));
+    }
+
+    [Fact]
+    public void LateHigherHeaderCannotLiftAnEarlierConcurrentLowerObservation()
+    {
+        var guard = Guard(otherTail: 4);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var first));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var second));
+        using (var lower = RemainingResponse("5"))
+        {
+            ledger.Observe(second, lower, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        using (var lateHigher = RemainingResponse("100"))
+        {
+            ledger.Observe(first, lateHigher, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+
+        Assert.False(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out _));
+        Assert.True(ledger.IsClosed);
+    }
+
+    [Fact]
+    public void LateFirstHeaderCannotEraseAnEarlierHeaderlessPrimaryCharge()
+    {
+        var guard = Guard(otherTail: 4);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var headerless));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var delayedHeader));
+        using (var ordinary = new HttpResponseMessage(HttpStatusCode.OK))
+        {
+            ledger.Observe(headerless, ordinary, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        using (var later = RemainingResponse("5"))
+        {
+            ledger.Observe(delayedHeader, later, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+
+        Assert.False(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out _));
+        Assert.Equal(TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining,
+            ledger.CloseReason);
+    }
+
+    [Fact]
+    public async Task ThrownAuthenticatedSendClosesTheSharedLedgerAsOutcomeUnknown()
+    {
+        var guard = Guard();
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        var host = new TrustedProofGitHubRequestBudget(2, 1,
+            static () => new ThrowingHandler(), guard, remainingLedger: ledger);
+        var control = new TrustedProofControlRequestBudget(2, guard,
+            remainingLedger: ledger);
+        using var client = new HttpClient(host.CreateOtherGitHubHandler());
+
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.SendAsync(ApiRequest("/repos/o/r")));
+
+        Assert.True(ledger.IsClosed);
+        Assert.False(control.TryClaim(out _));
+        using var output = new StringWriter(
+            System.Globalization.CultureInfo.InvariantCulture);
+        host.WriteReceipt(output);
+        using var document = JsonDocument.Parse(output.ToString()[
+            "APR_R4_E2P_GITHUB_REQUEST_BUDGET ".Length..].Trim());
+        Assert.False(document.RootElement.GetProperty(
+            "terminal_rate_limited").GetBoolean());
+        Assert.False(document.RootElement.GetProperty(
+            "low_remaining_guard").GetBoolean());
+    }
+
+    [Fact]
+    public async Task LocalHostCapFailureRollsBackItsUnsentSharedLease()
+    {
+        var guard = Guard();
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        var host = new TrustedProofGitHubRequestBudget(1, 1,
+            () => new ResponseHandler(() => RemainingResponse("2")), guard,
+            remainingLedger: ledger);
+        var control = new TrustedProofControlRequestBudget(2, guard,
+            remainingLedger: ledger);
+        using var client = new HttpClient(host.CreateOtherGitHubHandler());
+
+        using var first = await client.SendAsync(ApiRequest("/repos/o/r"));
+        using var rejected = await client.SendAsync(ApiRequest("/repos/o/r/issues/1"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.True(control.TryClaim(out var controlLease));
+        controlLease!.Ledger.AbortBeforeWire(controlLease);
+        Assert.False(ledger.IsClosed);
+    }
+
+    [Fact]
+    public void AbortBeforeWireRefundsAnUnbackedLeaseCoveredByAConcurrentHeader()
+    {
+        var guard = Guard(otherTail: 1);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var dispatched));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var unsent));
+        using (var response = RemainingResponse("2"))
+        {
+            ledger.Observe(dispatched, response, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+
+        ledger.AbortBeforeWire(unsent!);
+
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var next));
+        ledger.AbortBeforeWire(next!);
+        Assert.False(ledger.IsClosed);
+    }
+
+    [Fact]
+    public async Task CancellationBeforeClaimDoesNotOccupyTheSharedLedger()
+    {
+        var guard = Guard();
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        var host = new TrustedProofGitHubRequestBudget(1, 1,
+            static () => new RecordingHandler(static () => { }), guard,
+            remainingLedger: ledger);
+        var control = new TrustedProofControlRequestBudget(1, guard,
+            remainingLedger: ledger);
+        using var client = new HttpClient(host.CreateOtherGitHubHandler());
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.SendAsync(ApiRequest("/repos/o/r"), cancelled.Token));
+
+        Assert.Equal(0, host.Snapshot().AuthenticatedRestRequests);
+        Assert.True(control.TryClaim(out var controlLease));
+        controlLease!.Ledger.AbortBeforeWire(controlLease);
+        Assert.False(ledger.IsClosed);
+    }
+
+    [Fact]
+    public void ProductionProfileSelectsOnlyTheExplicitMeasurementOrFrozenFinalProfile()
     {
         Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
             name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
                 ? "measurement" : null,
             out var measurement));
         Assert.True(measurement!.MeasurementOnly);
+        Assert.Equal(TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve,
+            measurement.RemainingTailGuard.Reserve);
+        Assert.All(new[]
+        {
+            TrustedProofRequestDomain.NodeArtifactRest,
+            TrustedProofRequestDomain.HostHeadSourceRest,
+            TrustedProofRequestDomain.HostOtherGitHubRest,
+            TrustedProofRequestDomain.TrustedControlRest,
+        }, domain => Assert.Equal(0,
+            measurement.RemainingTailGuard.RequiredTail(domain)));
 
-        Assert.False(TrustedProofRequestBudgetProfile.TrySelectProduction(
+        Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
             name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
                 ? "final" : null,
             out var final));
-        Assert.Null(final);
+        Assert.False(final!.MeasurementOnly);
+        Assert.Equal(TrustedProofOperationRequestAccounting.OperationPrimaryReserve,
+            final.RemainingTailGuard.Reserve);
+        Assert.Equal(679, final.RemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.NodeArtifactRest));
+        Assert.Equal(863, final.RemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.HostHeadSourceRest));
+        Assert.Equal(878, final.RemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.HostOtherGitHubRest));
+        Assert.Equal(888, final.RemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.TrustedControlRest));
+
+        Assert.False(TrustedProofRequestBudgetProfile.TrySelectProduction(
+            _ => null,
+            out var missing));
+        Assert.Null(missing);
+        Assert.False(TrustedProofRequestBudgetProfile.TrySelectProduction(
+            name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
+                ? "FINAL" : null,
+            out var invalid));
+        Assert.Null(invalid);
+    }
+
+    private static TrustedProofRemainingTailGuard Guard(
+        int reserve = 0,
+        int otherTail = 0) => new(
+        new Dictionary<TrustedProofRequestDomain, int>
+        {
+            [TrustedProofRequestDomain.NodeArtifactRest] = 0,
+            [TrustedProofRequestDomain.HostHeadSourceRest] = 0,
+            [TrustedProofRequestDomain.HostOtherGitHubRest] = otherTail,
+            [TrustedProofRequestDomain.TrustedControlRest] = 0,
+        }, reserve, measurementOnly: false);
+
+    private static HttpResponseMessage RemainingResponse(string remaining)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK);
+        response.Headers.TryAddWithoutValidation("x-ratelimit-remaining", remaining);
+        return response;
     }
 
     private static HttpRequestMessage ApiRequest(string path)
@@ -698,5 +1179,12 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             response.RequestMessage = request;
             return Task.FromResult(response);
         }
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => throw new HttpRequestException();
     }
 }

@@ -98075,7 +98075,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining <= input.primaryRequests + this.requiredTailAndReserve()) {
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < input.primaryRequests + this.requiredTailAndReserve()) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98109,7 +98109,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
     }
     if (this.disposition !== "active") throw new ArtifactRestRequestBudgetError(this.disposition);
     const requiredWithFinalProfileTail = required2 + this.requiredTailAndReserve();
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining <= requiredWithFinalProfileTail) {
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < requiredWithFinalProfileTail) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98244,7 +98244,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       this.disposition = "total_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining <= 1 + this.requiredTailAndReserve()) {
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < 1 + this.requiredTailAndReserve()) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98301,7 +98301,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
     const disposition = primary && secondary ? "primary_and_secondary_rate_limited" : primary ? "primary_exhausted" : secondary ? "rate_limited" : void 0;
     if (remaining.value !== void 0) {
       this.observedPrimaryRemaining = remaining.value;
-      if (remaining.value <= this.requiredTailAndReserve() && disposition === void 0) {
+      if (remaining.value < this.requiredTailAndReserve() && disposition === void 0) {
         this.disposition = "primary_exhausted";
       }
     }
@@ -101031,6 +101031,79 @@ function repositoryName(value) {
 import { spawn } from "node:child_process";
 import { finished } from "node:stream/promises";
 import { TextDecoder as TextDecoder2 } from "node:util";
+
+// src/action-wrapper/launcher/request-budget-profile.ts
+var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
+var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
+var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
+  capProfile: "apr-r4-artifact-rest-request-budget-v2",
+  limits: Object.freeze({
+    // Bootstrap completed at 1,096 raw requests, while continuation's
+    // frozen 2,042 state operations were still reconciling at 1,280 raw.
+    // This measurement-only window covers those bounded operations plus 262
+    // authenticated verification slots; final freezes the completed count.
+    maximumTotalAuthenticatedApiRequests: 2304,
+    maximumPrimaryRateLimitRequests: 256
+  }),
+  remainingTailRequired: 0,
+  remainingTailReserve: 1,
+  measurementOnly: true
+});
+var TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
+  capProfile: "apr-r4-artifact-rest-request-budget-v2",
+  limits: Object.freeze({
+    maximumTotalAuthenticatedApiRequests: 2130,
+    maximumPrimaryRateLimitRequests: 136
+  }),
+  remainingTailRequired: 679,
+  remainingTailReserve: 64,
+  measurementOnly: false
+});
+var TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE = Object.freeze({
+  measurementOnly: true,
+  remainingTailReserve: 1,
+  hostHeadSourceRestTail: 0,
+  hostOtherGitHubRestTail: 0,
+  trustedControlRestTail: 0
+});
+var TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE = Object.freeze({
+  measurementOnly: false,
+  remainingTailReserve: 64,
+  hostHeadSourceRestTail: 863,
+  hostOtherGitHubRestTail: 878,
+  trustedControlRestTail: 888
+});
+function artifactRestRequestBudgetProfile(profile) {
+  switch (profile) {
+    case "measurement":
+      return TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case "final":
+      return TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+  }
+}
+function trustedProofHostReceiptProfile(profile) {
+  switch (profile) {
+    case "measurement":
+      return TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE;
+    case "final":
+      return TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE;
+  }
+}
+function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment = process.env) {
+  if (buildDiscriminator2 !== TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2) {
+    return void 0;
+  }
+  switch (environment[R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]) {
+    case "measurement":
+      return "measurement";
+    case "final":
+      return "final";
+    default:
+      return fail("wrapper_request_budget_profile_invalid");
+  }
+}
+
+// src/action-wrapper/launcher/host-process.ts
 var HOST_CANCELLATION_RECONCILIATION_GRACE_MS = 13e4;
 var HOST_POST_KILL_CLOSE_GRACE_MS = 5e3;
 var HOST_STDERR_CAPTURE_MAXIMUM_BYTES = 8 * 1024;
@@ -101119,7 +101192,10 @@ async function runHostProcess(request2) {
   request2.signal.addEventListener("abort", forwardCancellation, { once: true });
   if (request2.signal.aborted) forwardCancellation();
   const outputPromise = readSingleFrame(child.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
-  const receiptPromise = readTrustedProofBudgetReceiptLines(child.stderr);
+  const receiptPromise = readTrustedProofBudgetReceiptLines(
+    child.stderr,
+    request2.requestBudgetProfile
+  );
   try {
     child.stdin.end(encodeFrame(request2.launchBytes));
     const [, completionBytes, trustedProofBudgetReceiptLines, closed] = await Promise.race([
@@ -101145,8 +101221,9 @@ async function runHostProcess(request2) {
     child.off("error", onError);
   }
 }
-async function readTrustedProofBudgetReceiptLines(stream4, maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES) {
+async function readTrustedProofBudgetReceiptLines(stream4, profile, maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES) {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return [];
+  const expected = profile === void 0 ? void 0 : trustedProofHostReceiptProfile(profile);
   const chunks = [];
   let total = 0;
   let overflow = false;
@@ -101156,7 +101233,7 @@ async function readTrustedProofBudgetReceiptLines(stream4, maximumBytes = HOST_S
     if (total <= maximumBytes) chunks.push(chunk);
     else overflow = true;
   }
-  if (overflow) return [];
+  if (overflow || expected === void 0) return [];
   let decoded;
   try {
     decoded = new TextDecoder2("utf-8", { fatal: true }).decode(Buffer.concat(chunks, total));
@@ -101169,11 +101246,11 @@ async function readTrustedProofBudgetReceiptLines(stream4, maximumBytes = HOST_S
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     if (line.startsWith(GITHUB_REQUEST_BUDGET_PREFIX)) {
       if (github !== void 0) return [];
-      github = canonicalGitHubRequestBudget(line);
+      github = canonicalGitHubRequestBudget(line, expected);
       if (github === void 0) return [];
     } else if (line.startsWith(CONTROL_REQUEST_BUDGET_PREFIX)) {
       if (control !== void 0) return [];
-      control = canonicalControlRequestBudget(line);
+      control = canonicalControlRequestBudget(line, expected);
       if (control === void 0) return [];
     }
   }
@@ -101181,7 +101258,7 @@ async function readTrustedProofBudgetReceiptLines(stream4, maximumBytes = HOST_S
 `, `${control}
 `];
 }
-function canonicalGitHubRequestBudget(line) {
+function canonicalGitHubRequestBudget(line, expected) {
   const value = parseRecord(line.slice(GITHUB_REQUEST_BUDGET_PREFIX.length));
   if (value === void 0 || !hasExactKeys(value, [
     "authenticated_rest_requests",
@@ -101196,7 +101273,7 @@ function canonicalGitHubRequestBudget(line) {
     "remaining_tail_reserve",
     "host_head_source_rest",
     "host_other_github_rest"
-  ]) || !boundedInteger(value.authenticated_rest_requests, 0, 216) || value.authenticated_rest_limit !== 216 || !boundedInteger(value.anonymous_codeload_requests, 0, 1) || value.anonymous_codeload_limit !== 1 || value.rejected_requests !== 0 || value.measurement_only !== true || value.invalid_remaining_header !== false || value.terminal_rate_limited !== false || value.low_remaining_guard !== false || value.remaining_tail_reserve !== 1 || !validGitHubBudgetRole(value.host_head_source_rest) || !validGitHubBudgetRole(value.host_other_github_rest) || value.host_head_source_rest.raw + value.host_other_github_rest.raw !== value.authenticated_rest_requests || value.host_head_source_rest.primary_rate_limited !== 0 || value.host_head_source_rest.secondary_rate_limited !== 0 || value.host_head_source_rest.combined_rate_limited !== 0 || value.host_head_source_rest.invalid_rate_headers !== 0 || value.host_other_github_rest.primary_rate_limited !== 0 || value.host_other_github_rest.secondary_rate_limited !== 0 || value.host_other_github_rest.combined_rate_limited !== 0 || value.host_other_github_rest.invalid_rate_headers !== 0) {
+  ]) || !boundedInteger(value.authenticated_rest_requests, 0, 216) || value.authenticated_rest_limit !== 216 || !boundedInteger(value.anonymous_codeload_requests, 0, 1) || value.anonymous_codeload_limit !== 1 || value.rejected_requests !== 0 || value.measurement_only !== expected.measurementOnly || value.invalid_remaining_header !== false || value.terminal_rate_limited !== false || value.low_remaining_guard !== false || value.remaining_tail_reserve !== expected.remainingTailReserve || !validGitHubBudgetRole(value.host_head_source_rest, expected.hostHeadSourceRestTail) || !validGitHubBudgetRole(value.host_other_github_rest, expected.hostOtherGitHubRestTail) || value.host_head_source_rest.raw + value.host_other_github_rest.raw !== value.authenticated_rest_requests || value.host_head_source_rest.primary_rate_limited !== 0 || value.host_head_source_rest.secondary_rate_limited !== 0 || value.host_head_source_rest.combined_rate_limited !== 0 || value.host_head_source_rest.invalid_rate_headers !== 0 || value.host_other_github_rest.primary_rate_limited !== 0 || value.host_other_github_rest.secondary_rate_limited !== 0 || value.host_other_github_rest.combined_rate_limited !== 0 || value.host_other_github_rest.invalid_rate_headers !== 0) {
     return void 0;
   }
   return GITHUB_REQUEST_BUDGET_PREFIX + JSON.stringify({
@@ -101214,7 +101291,7 @@ function canonicalGitHubRequestBudget(line) {
     host_other_github_rest: canonicalGitHubBudgetRole(value.host_other_github_rest)
   });
 }
-function validGitHubBudgetRole(value) {
+function validGitHubBudgetRole(value, expectedTail) {
   if (value === null || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, [
     "raw",
     "primary",
@@ -101230,7 +101307,7 @@ function validGitHubBudgetRole(value) {
     return false;
   }
   const role = value;
-  return boundedInteger(role.raw, 0, 216) && boundedInteger(role.primary, 0, 216) && boundedInteger(role.not_modified, 0, 216) && boundedInteger(role.secondary_points, 0, 216 * 5) && boundedInteger(role.permission, 0, 216) && boundedInteger(role.primary_rate_limited, 0, 216) && boundedInteger(role.secondary_rate_limited, 0, 216) && boundedInteger(role.combined_rate_limited, 0, 216) && boundedInteger(role.invalid_rate_headers, 0, 216) && role.remaining_tail_required === 0 && role.raw === role.primary + role.not_modified && role.secondary_points >= role.raw && role.secondary_points <= role.raw * 5 && (role.secondary_points - role.raw) % 4 === 0 && role.permission + role.primary_rate_limited + role.secondary_rate_limited + role.combined_rate_limited + role.invalid_rate_headers <= role.primary;
+  return boundedInteger(role.raw, 0, 216) && boundedInteger(role.primary, 0, 216) && boundedInteger(role.not_modified, 0, 216) && boundedInteger(role.secondary_points, 0, 216 * 5) && boundedInteger(role.permission, 0, 216) && boundedInteger(role.primary_rate_limited, 0, 216) && boundedInteger(role.secondary_rate_limited, 0, 216) && boundedInteger(role.combined_rate_limited, 0, 216) && boundedInteger(role.invalid_rate_headers, 0, 216) && role.remaining_tail_required === expectedTail && role.raw === role.primary + role.not_modified && role.secondary_points >= role.raw && role.secondary_points <= role.raw * 5 && (role.secondary_points - role.raw) % 4 === 0 && role.permission + role.primary_rate_limited + role.secondary_rate_limited + role.combined_rate_limited + role.invalid_rate_headers <= role.primary;
 }
 function canonicalGitHubBudgetRole(value) {
   return {
@@ -101246,7 +101323,7 @@ function canonicalGitHubBudgetRole(value) {
     remaining_tail_required: value.remaining_tail_required
   };
 }
-function canonicalControlRequestBudget(line) {
+function canonicalControlRequestBudget(line, expected) {
   const value = parseRecord(line.slice(CONTROL_REQUEST_BUDGET_PREFIX.length));
   if (value === void 0 || !hasExactKeys(value, [
     "consumed",
@@ -101264,7 +101341,7 @@ function canonicalControlRequestBudget(line) {
     "invalid_remaining_header",
     "measurement_only",
     "rate_limited"
-  ]) || !boundedInteger(value.consumed, 0, 64) || value.limit !== 64 || !boundedInteger(value.primary, 0, 64) || !boundedInteger(value.not_modified, 0, 64) || !boundedInteger(value.secondary_points, 0, 64 * 5) || !boundedInteger(value.mutation_count, 0, 64) || value.remaining_tail_required !== 0 || value.remaining_tail_reserve !== 1 || !boundedInteger(value.permission_denied, 0, 64) || !boundedInteger(value.primary_rate_limited, 0, 64) || !boundedInteger(value.secondary_rate_limited, 0, 64) || !boundedInteger(value.combined_rate_limited, 0, 64) || value.consumed !== value.primary + value.not_modified || value.secondary_points !== value.consumed + 4 * value.mutation_count || value.mutation_count > value.consumed || value.permission_denied > value.primary || value.primary_rate_limited + value.secondary_rate_limited + value.combined_rate_limited + value.permission_denied > value.primary || value.invalid_remaining_header !== false || value.measurement_only !== true || value.rate_limited !== false || value.primary_rate_limited !== 0 || value.secondary_rate_limited !== 0 || value.combined_rate_limited !== 0) {
+  ]) || !boundedInteger(value.consumed, 0, 64) || value.limit !== 64 || !boundedInteger(value.primary, 0, 64) || !boundedInteger(value.not_modified, 0, 64) || !boundedInteger(value.secondary_points, 0, 64 * 5) || !boundedInteger(value.mutation_count, 0, 64) || value.remaining_tail_required !== expected.trustedControlRestTail || value.remaining_tail_reserve !== expected.remainingTailReserve || !boundedInteger(value.permission_denied, 0, 64) || !boundedInteger(value.primary_rate_limited, 0, 64) || !boundedInteger(value.secondary_rate_limited, 0, 64) || !boundedInteger(value.combined_rate_limited, 0, 64) || value.consumed !== value.primary + value.not_modified || value.secondary_points !== value.consumed + 4 * value.mutation_count || value.mutation_count > value.consumed || value.permission_denied > value.primary || value.primary_rate_limited + value.secondary_rate_limited + value.combined_rate_limited + value.permission_denied > value.primary || value.invalid_remaining_header !== false || value.measurement_only !== expected.measurementOnly || value.rate_limited !== false || value.primary_rate_limited !== 0 || value.secondary_rate_limited !== 0 || value.combined_rate_limited !== 0) {
     return void 0;
   }
   return CONTROL_REQUEST_BUDGET_PREFIX + JSON.stringify({
@@ -101465,43 +101542,6 @@ async function within(promise, timeoutMs) {
     ]);
   } finally {
     if (timer) clearTimeout(timer);
-  }
-}
-
-// src/action-wrapper/launcher/request-budget-profile.ts
-var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
-var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
-var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
-  capProfile: "apr-r4-artifact-rest-request-budget-v2",
-  limits: Object.freeze({
-    // Bootstrap completed at 1,096 raw requests, while continuation's
-    // frozen 2,042 state operations were still reconciling at 1,280 raw.
-    // This measurement-only window covers those bounded operations plus 262
-    // authenticated verification slots; final freezes the completed count.
-    maximumTotalAuthenticatedApiRequests: 2304,
-    maximumPrimaryRateLimitRequests: 256
-  }),
-  remainingTailRequired: 0,
-  remainingTailReserve: 1,
-  measurementOnly: true
-});
-function artifactRestRequestBudgetProfile(profile) {
-  switch (profile) {
-    case "measurement":
-      return TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
-  }
-}
-function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment = process.env) {
-  if (buildDiscriminator2 !== TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2) {
-    return void 0;
-  }
-  switch (environment[R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]) {
-    case "measurement":
-      return "measurement";
-    case "final":
-      return fail("wrapper_request_budget_profile_unfrozen");
-    default:
-      return fail("wrapper_request_budget_profile_invalid");
   }
 }
 
@@ -102101,4 +102141,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 88f125c7e7c487703aef5fb977ff4ff584615cf5da382e37007ee1ca29082202
+// Action source inventory sha256: dc9a6262576a6fc83987a66e2745d424c2621eb5bf80a534be742a7fc5a54da2

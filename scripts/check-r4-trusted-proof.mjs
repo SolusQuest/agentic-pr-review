@@ -25,8 +25,8 @@ const actionSourceSha = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
 const payloadSourceSha = 'edc594c29a8a6b5fdacfab48643bf221277af200';
 const payloadSourceTree = '8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089';
 const payloadSha256 = 'b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e';
-const templateSha256 = 'efa1c282c6339e6b51fd4774ca5e650e5e3bcc07aae6cd76464cddc155956c8a';
-const renderedWorkflowSha256 = 'efa1c282c6339e6b51fd4774ca5e650e5e3bcc07aae6cd76464cddc155956c8a';
+const templateSha256 = 'cf21915932b11fae99cdc28bf16d89844a9e50c17adaf149967d30a6e885fccc';
+const renderedWorkflowSha256 = 'cf21915932b11fae99cdc28bf16d89844a9e50c17adaf149967d30a6e885fccc';
 const sealedReceiptTemplateSha256 =
   '46ff02fc0e107bdff5d4d4fbe185d8a4f97b8cb8059b99485a285c8d11a45768';
 const sealedRenderedWorkflowSha256 =
