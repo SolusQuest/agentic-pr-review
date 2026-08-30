@@ -57,22 +57,29 @@ describe('W1 official SDK quiescence', () => {
     expect(() => client.read()).toThrow('wrapper_official_calls_sealed');
   });
 
-  it('allows only local cache cleanup after sealing', async () => {
+  it('allows only precise local cache invalidation after sealing', async () => {
     const tracker = new OfficialCallTracker();
-    let invalidated = 0;
+    const invalidations: unknown[] = [];
     const client = tracker.wrap({
       async read() {
         return 'remote';
       },
-      invalidateRepository() {
-        invalidated += 1;
+      invalidateArtifactMutation(input: unknown) {
+        invalidations.push(input);
       },
     });
 
     await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
-    client.invalidateRepository();
+    client.invalidateArtifactMutation({
+      owner: 'owner',
+      repo: 'repo',
+      name: 'target',
+      artifact_id: 7,
+    });
 
-    expect(invalidated).toBe(1);
+    expect(invalidations).toEqual([
+      { owner: 'owner', repo: 'repo', name: 'target', artifact_id: 7 },
+    ]);
     expect(() => client.read()).toThrow('wrapper_official_calls_sealed');
   });
 });

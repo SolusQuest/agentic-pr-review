@@ -724,8 +724,10 @@ describe('delete mutation phase matrix', () => {
       const expected = metadataFixture();
       let getCalls = 0;
       let deleteCalls = 0;
+      const invalidations: Array<Record<string, unknown>> = [];
       const controller = new AbortController();
       const operations = await createOperations({
+        invalidateArtifactMutation: (input) => invalidations.push(input),
         getArtifact: async () => {
           getCalls += 1;
           if (scenario === 'preflight_404' || (scenario === 'verified_absent' && getCalls === 2)) {
@@ -769,8 +771,111 @@ describe('delete mutation phase matrix', () => {
         mutation_state: expectedMutation,
       });
       expect(deleteCalls).toBe(scenario === 'preflight_404' ? 0 : 1);
+      const invalidationCount =
+        scenario === 'verified_absent' || scenario === 'still_present'
+          ? 2
+          : scenario === 'delete_404' || scenario === 'delete_cancelled'
+            ? 1
+            : 0;
+      expect(invalidations).toEqual(
+        Array.from({ length: invalidationCount }, () => ({
+          owner: 'owner',
+          repo: 'repository',
+          name: expected.name,
+          artifact_id: 42,
+        })),
+      );
     },
   );
+});
+
+describe('precise conditional-representation invalidation', () => {
+  it('invalidates the named list representation before an outcome-unknown upload', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'apr-upload-invalidation-test-'));
+    roots.push(root);
+    const sourceDirectory = path.join(root, 'source');
+    await mkdir(sourceDirectory, { mode: 0o700 });
+    const encrypted = Buffer.from('outcome-unknown-ciphertext');
+    await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
+    await writeFile(path.join(sourceDirectory, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
+    const invalidations: Array<Record<string, unknown>> = [];
+    const unsupported = async (): Promise<never> => {
+      throw new Error('unexpected official call');
+    };
+    const operations = new OfficialArtifactOperations({
+      owner: 'owner',
+      repository: 'repository',
+      currentRunId: '7001',
+      currentRunAttempt: '2',
+      artifactClient: {
+        uploadArtifact: async () => {
+          throw Object.assign(new Error('synthetic ambiguous upload'), { status: 503 });
+        },
+        downloadArtifact: unsupported,
+        listArtifacts: unsupported,
+        getArtifact: unsupported,
+        deleteArtifact: unsupported,
+      },
+      actions: {
+        invalidateArtifactMutation: (input) => invalidations.push(input),
+        listArtifactsForRepo: unsupported,
+        getArtifact: unsupported,
+        downloadArtifactArchive: unsupported,
+        getWorkflowRunAttempt: unsupported,
+        deleteArtifact: unsupported,
+      },
+      staging: await ArtifactBridgeStaging.create(root),
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'upload_immutable',
+        correlation_id: 'upload-outcome-unknown-invalidation',
+        name: 'opaque-state',
+        source_relative_path: 'source/object.bin',
+        encrypted_object_digest: digestBytes(encrypted),
+        minimum_expires_at_unix_seconds: '1',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'outcome_unknown', mutation_state: 'outcome_unknown' });
+    expect(invalidations).toEqual([{ owner: 'owner', repo: 'repository', name: 'opaque-state' }]);
+  });
+
+  it('invalidates the target before the delete postcondition requires a fresh 404', async () => {
+    const expected = metadataFixture();
+    const invalidations: Array<Record<string, unknown>> = [];
+    let getCalls = 0;
+    const operations = await createOperations({
+      invalidateArtifactMutation: (input) => invalidations.push(input),
+      getArtifact: async () => {
+        getCalls += 1;
+        if (getCalls === 1) return { status: 200, data: platformRecord(expected) };
+        expect(invalidations).toEqual([
+          { owner: 'owner', repo: 'repository', name: expected.name, artifact_id: 42 },
+          { owner: 'owner', repo: 'repository', name: expected.name, artifact_id: 42 },
+        ]);
+        throw Object.assign(new Error('fresh synthetic absence'), { status: 404 });
+      },
+      deleteArtifact: async (_input, _signal, _latestAttemptStartAt, onDispatched) => {
+        onDispatched?.();
+        return { status: 204 };
+      },
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'delete_exact',
+        correlation_id: 'delete-fresh-404-invalidation',
+        expected,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'none', mutation_state: 'committed' });
+    expect(getCalls).toBe(2);
+  });
 });
 
 describe('delete dispatch marker', () => {
@@ -851,7 +956,12 @@ describe('official artifact lifecycle', () => {
     let downloadCalls = 0;
     let getArtifactCalls = 0;
     let deleteCalls = 0;
-    let conditionalCacheInvalidations = 0;
+    const conditionalCacheInvalidations: Array<{
+      readonly owner: string;
+      readonly repo: string;
+      readonly name: string;
+      readonly artifact_id?: number;
+    }> = [];
 
     const artifactClient: ArtifactClient = {
       uploadArtifact: async (name, files, operationRoot, options) => {
@@ -892,8 +1002,8 @@ describe('official artifact lifecycle', () => {
       },
     };
     const actions: ArtifactActionsRestClient = {
-      invalidateRepository: () => {
-        conditionalCacheInvalidations += 1;
+      invalidateArtifactMutation: (input) => {
+        conditionalCacheInvalidations.push(input);
       },
       listArtifactsForRepo: async () => {
         throw new Error('unexpected repository list');
@@ -927,9 +1037,10 @@ describe('official artifact lifecycle', () => {
         status: 200,
         data: { id: input.run_id, run_attempt: input.attempt_number },
       }),
-      deleteArtifact: async (input) => {
+      deleteArtifact: async (input, _signal, _latestAttemptStartAt, onDispatched) => {
         deleteCalls += 1;
         expect(input.artifact_id).toBe(stored?.id);
+        onDispatched?.();
         deleted = true;
         return { status: 204, data: undefined };
       },
@@ -970,7 +1081,9 @@ describe('official artifact lifecycle', () => {
     expect(uploaded.metadata?.archive_digest).not.toBe(digestBytes(encrypted));
     expect(uploadSourceBytes?.every((byte) => byte === 0)).toBe(true);
     expect(uploadEnvelopeBytes?.every((byte) => byte === 0)).toBe(true);
-    expect(conditionalCacheInvalidations).toBe(1);
+    expect(conditionalCacheInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', name: 'opaque-state' },
+    ]);
     expect(downloadCalls).toBe(1);
     expect(getArtifactCalls).toBe(1);
 
@@ -1060,6 +1173,11 @@ describe('official artifact lifecycle', () => {
     expect(deleteCalls).toBe(1);
     expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
     expect(getArtifactCalls).toBe(9);
+    expect(conditionalCacheInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', name: 'opaque-state' },
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
+    ]);
     await operations.dispose();
     await expect(
       operations.execute(

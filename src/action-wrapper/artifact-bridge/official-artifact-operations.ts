@@ -47,7 +47,16 @@ interface RepositoryArtifact {
 }
 
 export interface ArtifactActionsRestClient {
-  invalidateRepository?(input: { readonly owner: string; readonly repo: string }): void;
+  /**
+   * Clears only representations made stale by an artifact mutation. This is
+   * process-local cache maintenance: it never performs an HTTP request.
+   */
+  invalidateArtifactMutation?(input: {
+    readonly owner: string;
+    readonly repo: string;
+    readonly name: string;
+    readonly artifact_id?: number;
+  }): void;
   dispose?(): void | Promise<void>;
 
   listArtifactsForRepo(
@@ -386,13 +395,18 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       // verification.  Reserve those three authenticated REST observations
       // (and a conservative upload-mutative point) before irreversible work.
       reservation = this.reserveMutation(3, 8);
-      this.context.actions.invalidateRepository?.({
-        owner: this.context.owner,
-        repo: this.context.repository,
-      });
       const upload = async (markDispatched: () => void) =>
         await this.callOfficial(
           () => {
+            // An outcome-unknown upload may still have changed the named
+            // collection. Clear its list pages immediately before the SDK can
+            // start its wire work; unrelated artifact and attempt validators
+            // remain conditionally reusable.
+            this.context.actions.invalidateArtifactMutation?.({
+              owner: this.context.owner,
+              repo: this.context.repository,
+              name: command.name,
+            });
             const pending = this.artifactClient.uploadArtifact(
               command.name,
               [envelopePath],
@@ -550,6 +564,16 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
             requestSignal,
             budget.latestHttpAttemptStartAt(),
             () => {
+              // Admission and pacing have completed. Invalidate at the exact
+              // pre-wire boundary so a rejected attempt preserves its valid
+              // representations, while every outcome-unknown wire attempt
+              // forces later observations to revalidate the mutated target.
+              this.context.actions.invalidateArtifactMutation?.({
+                owner: this.context.owner,
+                repo: this.context.repository,
+                name: command.expected.name,
+                artifact_id: Number(command.expected.object_id),
+              });
               phase = 'dispatched';
             },
           ),
@@ -559,6 +583,14 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       if (response.status !== 204) {
         throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
       }
+      // The postcondition must be a fresh wire observation of absence, not a
+      // conditional reuse of the pre-delete representation.
+      this.context.actions.invalidateArtifactMutation?.({
+        owner: this.context.owner,
+        repo: this.context.repository,
+        name: command.expected.name,
+        artifact_id: Number(command.expected.object_id),
+      });
       try {
         await this.loadPlatformArtifact(command.expected.name, command.expected.object_id, budget);
       } catch (error) {

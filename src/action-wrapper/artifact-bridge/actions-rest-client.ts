@@ -32,8 +32,8 @@ export function createArtifactActionsRestClient(
 ): ArtifactActionsRestClient {
   const cache = new ConditionalGetCache(cacheLimits, ledger);
   return {
-    invalidateRepository: (input) => {
-      cache.deleteRepository(input.owner, input.repo);
+    invalidateArtifactMutation: (input) => {
+      cache.deleteArtifactMutation(input);
     },
     dispose: () => cache.dispose(),
     listArtifactsForRepo: async (input, signal, latestAttemptStartAt) => {
@@ -142,7 +142,6 @@ export function createArtifactActionsRestClient(
       );
     },
     deleteArtifact: async (input, signal, latestAttemptStartAt, onDispatched) => {
-      cache.deleteRepository(input.owner, input.repo);
       return await authenticatedApiCall(
         budget,
         { signal, secondaryLimitPoints: 5, mutative: true, latestAttemptStartAt },
@@ -223,10 +222,19 @@ class ConditionalGetCache {
     this.deleteEntry(key);
   }
 
-  deleteRepository(owner: string, repo: string): void {
-    const suffix = '\u0000' + owner + '\u0000' + repo + '\u0000';
+  deleteArtifactMutation(input: {
+    readonly owner: string;
+    readonly repo: string;
+    readonly name: string;
+    readonly artifact_id?: number;
+  }): void {
+    const listPrefix = ['list', input.owner, input.repo, input.name].join('\u0000') + '\u0000';
+    const artifactKey =
+      input.artifact_id === undefined
+        ? undefined
+        : ['artifact', input.owner, input.repo, input.artifact_id].join('\u0000');
     for (const key of this.entries.keys()) {
-      if (key.includes(suffix)) this.deleteEntry(key);
+      if (key.startsWith(listPrefix) || key === artifactKey) this.deleteEntry(key);
     }
   }
 

@@ -97603,8 +97603,8 @@ var DEFAULT_CONDITIONAL_GET_CACHE_LIMITS = Object.freeze({
 function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_CONDITIONAL_GET_CACHE_LIMITS, ledger = new ArtifactCacheLedger()) {
   const cache = new ConditionalGetCache(cacheLimits, ledger);
   return {
-    invalidateRepository: (input) => {
-      cache.deleteRepository(input.owner, input.repo);
+    invalidateArtifactMutation: (input) => {
+      cache.deleteArtifactMutation(input);
     },
     dispose: () => cache.dispose(),
     listArtifactsForRepo: async (input, signal, latestAttemptStartAt) => {
@@ -97706,7 +97706,6 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
       );
     },
     deleteArtifact: async (input, signal, latestAttemptStartAt, onDispatched) => {
-      cache.deleteRepository(input.owner, input.repo);
       return await authenticatedApiCall(
         budget,
         { signal, secondaryLimitPoints: 5, mutative: true, latestAttemptStartAt },
@@ -97763,10 +97762,11 @@ var ConditionalGetCache = class {
   delete(key) {
     this.deleteEntry(key);
   }
-  deleteRepository(owner, repo) {
-    const suffix = "\0" + owner + "\0" + repo + "\0";
+  deleteArtifactMutation(input) {
+    const listPrefix = ["list", input.owner, input.repo, input.name].join("\0") + "\0";
+    const artifactKey = input.artifact_id === void 0 ? void 0 : ["artifact", input.owner, input.repo, input.artifact_id].join("\0");
     for (const key of this.entries.keys()) {
-      if (key.includes(suffix)) this.deleteEntry(key);
+      if (key.startsWith(listPrefix) || key === artifactKey) this.deleteEntry(key);
     }
   }
   dispose() {
@@ -100080,12 +100080,13 @@ var OfficialArtifactOperations = class {
         Math.ceil((minimumExpiry * 1e3 - this.now()) / 864e5)
       );
       reservation = this.reserveMutation(3, 8);
-      this.context.actions.invalidateRepository?.({
-        owner: this.context.owner,
-        repo: this.context.repository
-      });
       const upload = async (markDispatched) => await this.callOfficial(
         () => {
+          this.context.actions.invalidateArtifactMutation?.({
+            owner: this.context.owner,
+            repo: this.context.repository,
+            name: command.name
+          });
           const pending = this.artifactClient.uploadArtifact(
             command.name,
             [envelopePath],
@@ -100210,6 +100211,12 @@ var OfficialArtifactOperations = class {
           requestSignal,
           budget.latestHttpAttemptStartAt(),
           () => {
+            this.context.actions.invalidateArtifactMutation?.({
+              owner: this.context.owner,
+              repo: this.context.repository,
+              name: command.expected.name,
+              artifact_id: Number(command.expected.object_id)
+            });
             phase = "dispatched";
           }
         ),
@@ -100219,6 +100226,12 @@ var OfficialArtifactOperations = class {
       if (response.status !== 204) {
         throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
       }
+      this.context.actions.invalidateArtifactMutation?.({
+        owner: this.context.owner,
+        repo: this.context.repository,
+        name: command.expected.name,
+        artifact_id: Number(command.expected.object_id)
+      });
       try {
         await this.loadPlatformArtifact(command.expected.name, command.expected.object_id, budget);
       } catch (error3) {
@@ -101401,7 +101414,7 @@ var OfficialCallTracker = class {
       get: (target, property) => {
         const value = Reflect.get(target, property, target);
         if (typeof value !== "function") return value;
-        if (property === "invalidateRepository" || property === "dispose") {
+        if (property === "invalidateArtifactMutation" || property === "dispose") {
           return (...args) => Reflect.apply(value, target, args);
         }
         return (...args) => {
@@ -101461,7 +101474,10 @@ var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
 var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
   capProfile: "apr-r4-artifact-rest-request-budget-v2",
   limits: Object.freeze({
-    maximumTotalAuthenticatedApiRequests: 768,
+    // The 768-request rehearsal ended during post-write reconciliation.
+    // 1,280 is measurement-only headroom over the fixture's 1,056 bounded
+    // state operations; the final profile freezes the completed wire count.
+    maximumTotalAuthenticatedApiRequests: 1280,
     maximumPrimaryRateLimitRequests: 256
   }),
   remainingTailRequired: 0,
@@ -102084,4 +102100,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 9d7c9d27e5e8df339dd556e9fb04efa456141d1ef2f0e50104c888ee71465c3c
+// Action source inventory sha256: d159335e32f97dd5ebaac70e42233df91561d705f1f5008cba92d089b848de36

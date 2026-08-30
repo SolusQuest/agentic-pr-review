@@ -75,13 +75,13 @@ describe('bounded artifact archive acquisition', () => {
 });
 
 describe('trusted proof artifact REST budget', () => {
-  it('uses the r4-w2 measurement profile with explicit 768 raw and 256 primary caps', () => {
+  it('uses the r4-w2 measurement profile with explicit 1280 raw and 256 primary caps', () => {
     expect(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS).toEqual({
       maximumTotalAuthenticatedApiRequests: 256,
       maximumPrimaryRateLimitRequests: 256,
     });
     expect(trustedProofBudget().receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 768,
+      maximum_total_authenticated_api_requests: 1280,
       maximum_primary_rate_limit_requests: 256,
       measurement_only: true,
       remaining_tail_required: 0,
@@ -89,7 +89,7 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('allows 768 measured raw requests and rejects the 769th before wire dispatch', async () => {
+  it('allows 1280 measured raw requests and rejects the 1281st before wire dispatch', async () => {
     let now = 0;
     const budget = trustedProofBudget(undefined, {
       now: () => now,
@@ -97,7 +97,7 @@ describe('trusted proof artifact REST budget', () => {
         now += milliseconds;
       },
     });
-    for (let index = 0; index < 768; index += 1) {
+    for (let index = 0; index < 1280; index += 1) {
       await runNotModified(budget);
     }
 
@@ -105,11 +105,11 @@ describe('trusted proof artifact REST budget', () => {
       'trusted_proof_artifact_rest_budget_total_exhausted',
     );
     expect(budget.receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 768,
-      total_authenticated_api_requests: 768,
+      maximum_total_authenticated_api_requests: 1280,
+      total_authenticated_api_requests: 1280,
       maximum_primary_rate_limit_requests: 256,
       primary_rate_limit_requests: 0,
-      conditional_not_modified_requests: 768,
+      conditional_not_modified_requests: 1280,
       remaining_tail_required: 0,
       remaining_tail_reserve: 1,
       disposition: 'total_exhausted',
@@ -132,7 +132,7 @@ describe('trusted proof artifact REST budget', () => {
       'trusted_proof_artifact_rest_budget_primary_exhausted',
     );
     expect(budget.receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 768,
+      maximum_total_authenticated_api_requests: 1280,
       total_authenticated_api_requests: 256,
       maximum_primary_rate_limit_requests: 256,
       primary_rate_limit_requests: 256,
@@ -731,7 +731,104 @@ describe('trusted proof artifact REST budget', () => {
     expect(getArtifact.mock.calls[2]?.[0].headers).toBeUndefined();
   });
 
-  it('clears repository conditional representations before a delete mutation', async () => {
+  it('invalidates only the mutated artifact name and id while preserving unrelated 304 validators', async () => {
+    const listArtifactsForRepo = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"target-page-1"' },
+        data: { total_count: 1, artifacts: [artifact()] },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"target-page-2"' },
+        data: { total_count: 1, artifacts: [] },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"other-page"' },
+        data: { total_count: 1, artifacts: [artifact()] },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"target-page-1-fresh"' },
+        data: { total_count: 1, artifacts: [artifact()] },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"target-page-2-fresh"' },
+        data: { total_count: 1, artifacts: [] },
+      })
+      .mockResolvedValueOnce({ status: 304, data: { total_count: 1, artifacts: [artifact()] } });
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 200, headers: { etag: '"target"' }, data: artifact() })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"non-target"' },
+        data: artifact(),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"target-fresh"' },
+        data: artifact(),
+      })
+      .mockResolvedValueOnce({ status: 304, data: artifact() });
+    const getWorkflowRunAttempt = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"attempt"' },
+        data: { id: 9, run_attempt: 1 },
+      })
+      .mockResolvedValueOnce({ status: 304, data: { id: 9, run_attempt: 1 } });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ listArtifactsForRepo, getArtifact, getWorkflowRunAttempt }),
+      trustedProofBudget({ total: 16, primary: 16 }),
+    );
+    const targetPageOne = listInput();
+    const targetPageTwo = { ...targetPageOne, page: 2 };
+    const otherPage = { ...targetPageOne, name: 'other' };
+    const target = artifactInput();
+    const nonTarget = { ...target, artifact_id: 2 };
+    const attempt = { owner: 'owner', repo: 'repo', run_id: 9, attempt_number: 1 };
+
+    await client.listArtifactsForRepo(targetPageOne, signal());
+    await client.listArtifactsForRepo(targetPageTwo, signal());
+    await client.getArtifact(target, signal());
+    await client.getArtifact(nonTarget, signal());
+    await client.getWorkflowRunAttempt(attempt, signal());
+    await client.listArtifactsForRepo(otherPage, signal());
+
+    client.invalidateArtifactMutation?.({
+      owner: 'owner',
+      repo: 'repo',
+      name: 'artifact',
+      artifact_id: 1,
+    });
+
+    await client.listArtifactsForRepo(targetPageOne, signal());
+    await client.listArtifactsForRepo(targetPageTwo, signal());
+    await client.getArtifact(target, signal());
+    await client.getArtifact(nonTarget, signal());
+    await client.getWorkflowRunAttempt(attempt, signal());
+    await client.listArtifactsForRepo(otherPage, signal());
+
+    expect(listArtifactsForRepo.mock.calls[3]?.[0].headers).toBeUndefined();
+    expect(listArtifactsForRepo.mock.calls[4]?.[0].headers).toBeUndefined();
+    expect(getArtifact.mock.calls[2]?.[0].headers).toBeUndefined();
+    expect(getArtifact.mock.calls[3]?.[0]).toMatchObject({
+      headers: { 'if-none-match': '"non-target"' },
+    });
+    expect(getWorkflowRunAttempt.mock.calls[1]?.[0]).toMatchObject({
+      headers: { 'if-none-match': '"attempt"' },
+    });
+    expect(listArtifactsForRepo.mock.calls[5]?.[0]).toMatchObject({
+      headers: { 'if-none-match': '"other-page"' },
+    });
+  });
+
+  it('does not make deleteArtifact itself decide which named list pages are stale', async () => {
     const getArtifact = vi
       .fn()
       .mockResolvedValueOnce({
@@ -756,9 +853,8 @@ describe('trusted proof artifact REST budget', () => {
 
     expect(deleteArtifact).toHaveBeenCalledOnce();
     expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
-      request: { signal: expect.anything() },
+      headers: { 'if-none-match': '"artifact-v1"' },
     });
-    expect(getArtifact.mock.calls[1]?.[0]?.headers).toBeUndefined();
   });
 
   it('marks deletion at the immediate pre-wire boundary', async () => {

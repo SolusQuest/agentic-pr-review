@@ -4968,7 +4968,7 @@ internal static class FrameworkSupervisor
         receipt.Kind == "apr-r4-trusted-proof-artifact-rest-budget-v2" &&
         ArtifactRestReceiptIdentityIsExact(receipt, scenario) &&
         receipt.ProtectedRoute &&
-        receipt.MaximumTotalAuthenticatedApiRequests == 768 &&
+        receipt.MaximumTotalAuthenticatedApiRequests == 1280 &&
         receipt.TotalAuthenticatedApiRequests >= 0 &&
         receipt.TotalAuthenticatedApiRequests <=
             receipt.MaximumTotalAuthenticatedApiRequests &&

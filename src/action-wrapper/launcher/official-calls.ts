@@ -11,7 +11,7 @@ export class OfficialCallTracker {
         if (typeof value !== 'function') return value;
         // These two methods only wipe process-local state. They deliberately
         // remain available during cleanup after the external-call gate seals.
-        if (property === 'invalidateRepository' || property === 'dispose') {
+        if (property === 'invalidateArtifactMutation' || property === 'dispose') {
           return (...args: unknown[]): unknown => Reflect.apply(value, target, args);
         }
         return (...args: unknown[]): unknown => {
