@@ -301,6 +301,25 @@ public sealed class TrustedProofArchitectureTests
             source, StringComparison.Ordinal);
         Assert.Contains("input.trusted_authority_exact !== true", source,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final",
+            source, StringComparison.Ordinal);
+        Assert.Contains(
+            "env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final",
+            source, StringComparison.Ordinal);
+        Assert.Contains("validate_missing_github_stderr", source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "github.host_head_source_rest.remaining_tail_required !== 863",
+            source, StringComparison.Ordinal);
+        Assert.Contains(
+            "github.host_other_github_rest.remaining_tail_required !== 878",
+            source, StringComparison.Ordinal);
+        Assert.Contains("control.remaining_tail_required !== 888", source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\"rejected_requests\":0}\\nAPR_R4_E2P_CONTROL_REQUEST_BUDGET",
+            source, StringComparison.Ordinal);
     }
 
     [Fact]

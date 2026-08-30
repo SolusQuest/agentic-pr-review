@@ -131,6 +131,128 @@ fs.writeFileSync(output, bytes, { flag: 'wx' });
 NODE
 }
 
+validate_missing_github_stderr() {
+  local stderr="$1"
+  node --input-type=module - "$stderr" <<'NODE'
+import fs from 'node:fs';
+
+const [stderrPath] = process.argv.slice(2);
+const bytes = fs.readFileSync(stderrPath);
+if (bytes.includes(0x00) || bytes.includes(0x0d) ||
+    bytes.length === 0 || bytes.at(-1) !== 0x0a) {
+  process.exit(1);
+}
+const lines = bytes.subarray(0, bytes.length - 1).toString('utf8').split('\n');
+if (lines.length !== 3) process.exit(1);
+
+function exactKeys(value, expected) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) ||
+      JSON.stringify(Object.keys(value)) !== JSON.stringify(expected)) {
+    process.exit(1);
+  }
+}
+function prefixed(line, prefix) {
+  if (!line.startsWith(prefix)) process.exit(1);
+  return JSON.parse(line.slice(prefix.length));
+}
+
+const github = prefixed(
+  lines[0],
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET ',
+);
+exactKeys(github, [
+  'authenticated_rest_requests',
+  'authenticated_rest_limit',
+  'anonymous_codeload_requests',
+  'anonymous_codeload_limit',
+  'rejected_requests',
+  'measurement_only',
+  'invalid_remaining_header',
+  'terminal_rate_limited',
+  'low_remaining_guard',
+  'remaining_tail_reserve',
+  'host_head_source_rest',
+  'host_other_github_rest',
+]);
+const roleKeys = [
+  'raw',
+  'primary',
+  'not_modified',
+  'secondary_points',
+  'permission',
+  'primary_rate_limited',
+  'secondary_rate_limited',
+  'combined_rate_limited',
+  'invalid_rate_headers',
+  'remaining_tail_required',
+];
+exactKeys(github.host_head_source_rest, roleKeys);
+exactKeys(github.host_other_github_rest, roleKeys);
+if (github.authenticated_rest_requests !== 0 ||
+    github.authenticated_rest_limit !== 216 ||
+    github.anonymous_codeload_requests !== 0 ||
+    github.anonymous_codeload_limit !== 1 ||
+    github.rejected_requests !== 0 ||
+    github.measurement_only !== false ||
+    github.invalid_remaining_header !== false ||
+    github.terminal_rate_limited !== false ||
+    github.low_remaining_guard !== false ||
+    github.remaining_tail_reserve !== 64 ||
+    github.host_head_source_rest.remaining_tail_required !== 863 ||
+    github.host_other_github_rest.remaining_tail_required !== 878) {
+  process.exit(1);
+}
+for (const role of [
+  github.host_head_source_rest,
+  github.host_other_github_rest,
+]) {
+  for (const key of roleKeys.slice(0, -1)) {
+    if (role[key] !== 0) process.exit(1);
+  }
+}
+
+const control = prefixed(
+  lines[1],
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET ',
+);
+exactKeys(control, [
+  'consumed',
+  'limit',
+  'primary',
+  'not_modified',
+  'secondary_points',
+  'mutation_count',
+  'remaining_tail_required',
+  'remaining_tail_reserve',
+  'permission_denied',
+  'primary_rate_limited',
+  'secondary_rate_limited',
+  'combined_rate_limited',
+  'invalid_remaining_header',
+  'measurement_only',
+  'rate_limited',
+]);
+if (control.consumed !== 0 ||
+    control.limit !== 64 ||
+    control.primary !== 0 ||
+    control.not_modified !== 0 ||
+    control.secondary_points !== 0 ||
+    control.mutation_count !== 0 ||
+    control.remaining_tail_required !== 888 ||
+    control.remaining_tail_reserve !== 64 ||
+    control.permission_denied !== 0 ||
+    control.primary_rate_limited !== 0 ||
+    control.secondary_rate_limited !== 0 ||
+    control.combined_rate_limited !== 0 ||
+    control.invalid_remaining_header !== false ||
+    control.measurement_only !== false ||
+    control.rate_limited !== false ||
+    lines[2] !== 'APR_R4_E2P_UNHANDLED InvalidOperationException') {
+  process.exit(1);
+}
+NODE
+}
+
 run_production_smoke() {
   command -v strace >/dev/null || return 1
   printf '{}\n' > "$temporary_root/smoke-event.json"
@@ -142,14 +264,15 @@ run_production_smoke() {
     trace="$temporary_root/smoke-$mode.network"
     write_smoke_frame "$mode" "$frame"
     set +e
-    strace -qq -f -e trace=network -o "$trace" \
+    AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final \
+      strace -qq -f -e trace=network -o "$trace" \
       "$payload" < "$frame" > "$stdout" 2> "$stderr"
     status=$?
     set -e
     [[ "$status" -eq 1 && ! -s "$stdout" ]] || return 1
     if [[ "$mode" == missing-github ]]; then
-      [[ "$(cat "$stderr")" == $'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":0,"authenticated_rest_limit":216,"anonymous_codeload_requests":0,"anonymous_codeload_limit":1,"rejected_requests":0}\nAPR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":0,"limit":64,"rate_limited":false}\nAPR_R4_E2P_UNHANDLED InvalidOperationException' &&
-          "$(wc -c < "$stderr")" -le 512 ]] || return 1
+      [[ "$(wc -c < "$stderr")" -le 4096 ]] &&
+        validate_missing_github_stderr "$stderr" || return 1
     else
       [[ ! -s "$stderr" && "$(wc -c < "$stderr")" -le 128 ]] || return 1
     fi
@@ -272,7 +395,9 @@ execute_proof() {
     --verifier-runtime "$verifier_runtime_intermediate" \
     --proof-output "$architecture" \
     --verifier-output "$verifier_architecture"
-  if printf '\000\000\000\001x' | "$payload" >/dev/null 2>&1; then
+  if printf '\000\000\000\001x' |
+      env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final \
+        "$payload" >/dev/null 2>&1; then
     echo APR_R4_E2P_AOT_MALFORMED_FRAME_ACCEPTED >&2
     return 1
   fi
@@ -579,7 +704,8 @@ export artifacts_root intermediate_root verifier_intermediate_root
 export architecture verifier_architecture identity publish_log verifier_publish_log
 export proof_evidence receipt_line receipt_json
 export payload_source_commit payload_source_tree
-export -f audit_warnings write_smoke_frame run_production_smoke
+export -f audit_warnings write_smoke_frame validate_missing_github_stderr
+export -f run_production_smoke
 export -f emit_safe_supervisor_failure verify_two_root_preparation execute_proof
 set +e
 node "$repo_root/scripts/run-clean-source-proof.mjs" --repo "$repo_root" -- \
