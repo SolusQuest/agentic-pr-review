@@ -60,6 +60,8 @@ internal sealed class FrameworkGitHubHandler(
     private readonly string payloadSha256 = payloadSha256;
     private readonly Func<string, string, string> workflowRenderer =
         workflowRenderer ?? ActionHostTrustedWorkflowContract.Render;
+    private readonly bool hasExplicitWorkflowRenderer =
+        workflowRenderer is not null;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -474,7 +476,7 @@ internal sealed class FrameworkGitHubHandler(
             ("name", "R4 trusted proof"),
             ("path", ".github/workflows/r4-trusted-proof.yml"),
             ("head_branch", "main"),
-            ("head_sha", WorkflowSha),
+            ("head_sha", CurrentWorkflowSha()),
             ("event", mode == "workflow-run" ||
                 IsTrustedProofPayload() && mode == "continuation-seed"
                     ? "workflow_run"
@@ -563,13 +565,22 @@ internal sealed class FrameworkGitHubHandler(
 
     private string Workflow(string mode)
     {
+        if (HasTrustedProofCurrentHeadAuthority() &&
+            !hasExplicitWorkflowRenderer)
+        {
+            throw new InvalidOperationException(
+                "Trusted proof current-head scenarios require the v2 renderer.");
+        }
+
         var workflow = workflowRenderer(
-            ActionSha,
+            CurrentActionSourceSha(),
             payloadSha256);
         return mode switch
         {
+            "wrong-action" when HasTrustedProofCurrentHeadAuthority() =>
+                workflow + "# trusted-proof-wrong-action\n",
             "wrong-action" => workflow.Replace(
-                ActionSha,
+                CurrentActionSourceSha(),
                 new string('9', 40),
                 StringComparison.Ordinal),
             "concurrency" => workflow.Replace(
@@ -593,7 +604,63 @@ internal sealed class FrameworkGitHubHandler(
         trustedProofPayload ? WorkflowSha : BaseSha;
 
     private string CurrentBaseSha() =>
-        PullRequestBaseSha(IsTrustedProofPayload());
+        IsTrustedProofPayload() ? CurrentWorkflowSha() : BaseSha;
+
+    private string CurrentWorkflowSha() =>
+        HasTrustedProofCurrentHeadAuthority()
+            ? ReadTrustedProofSourceCommit()
+            : WorkflowSha;
+
+    private string CurrentActionSourceSha() =>
+        HasTrustedProofCurrentHeadAuthority()
+            ? ReadTrustedProofSourceCommit()
+            : ActionSha;
+
+    private bool HasTrustedProofCurrentHeadAuthority() =>
+        IsTrustedProofPayload() && File.Exists(Path.Join(scenarioRoot,
+            "trusted-proof-authority.json"));
+
+    private string ReadTrustedProofSourceCommit()
+    {
+        var path = Path.Join(scenarioRoot, "trusted-proof-authority.json");
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "The trusted proof authority is invalid.");
+            }
+
+            var properties = document.RootElement.EnumerateObject().ToArray();
+            if (properties.Length != 1 ||
+                !StringComparer.Ordinal.Equals(properties[0].Name,
+                    "source_commit") ||
+                properties[0].Value.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidOperationException(
+                    "The trusted proof authority is invalid.");
+            }
+
+            var sourceCommit = properties[0].Value.GetString();
+            if (sourceCommit is null || !IsLowerHex(sourceCommit, 40))
+            {
+                throw new InvalidOperationException(
+                    "The trusted proof authority is invalid.");
+            }
+
+            return sourceCommit;
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException(
+                "The trusted proof authority is invalid.", exception);
+        }
+    }
+
+    private static bool IsLowerHex(string value, int length) =>
+        value.Length == length && value.All(static character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private long ReadCurrentRunId() => long.Parse(
         File.ReadAllText(Path.Join(scenarioRoot, "run-id")),
@@ -614,7 +681,7 @@ internal sealed class FrameworkGitHubHandler(
 
     private string Commit(string sha)
     {
-        var tree = sha == WorkflowSha ? WorkflowRoot :
+        var tree = sha == CurrentWorkflowSha() ? WorkflowRoot :
             sha == BaseSha ? BaseRoot : HeadRoot;
         var baseSha = CurrentBaseSha();
         var parents = sha == HeadSha ? new[] { baseSha } :

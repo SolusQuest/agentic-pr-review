@@ -77,9 +77,22 @@ internal static class FrameworkSupervisor
             return 1;
         }
 
-        await using var platform = SyntheticOfficialPlatform.Start(root);
-        if (values.TryGetValue("trusted-proof-only", out var trustedOnly) &&
-            trustedOnly == "true")
+        var trustedProofOnly =
+            values.TryGetValue("trusted-proof-only", out var trustedOnly) &&
+            trustedOnly == "true";
+        var sourceExpectation = trustedProofOnly
+            ? ReadCompiledPayloadSourceExpectation(values)
+            : null;
+        var trustedWorkflowRenderer = trustedProofOnly
+            ? CreateTrustedProofV2WorkflowRenderer(
+                repository,
+                sourceExpectation ?? throw new InvalidOperationException(
+                    "trusted proof payload requires source authority"))
+            : null;
+        await using var platform = SyntheticOfficialPlatform.Start(
+            root,
+            trustedWorkflowRenderer);
+        if (trustedProofOnly)
         {
             return await RunTrustedProofPayloadAsync(
                 root,
@@ -88,7 +101,7 @@ internal static class FrameworkSupervisor
                 bundle,
                 node,
                 platform,
-                ReadCompiledPayloadSourceExpectation(values))
+                sourceExpectation)
                 .ConfigureAwait(false);
         }
 
@@ -562,6 +575,18 @@ internal static class FrameworkSupervisor
         var signedUploadBefore = ReadInt(root, "official-blob-count");
         var signedDownloadBefore = ReadInt(root,
             "official-signed-download-count");
+        if (spec.TrustedProofPayload !=
+            (spec.TrustedProofSourceCommit is not null))
+        {
+            throw new InvalidOperationException(
+                "trusted proof scenarios require exactly one source authority");
+        }
+        if (spec.TrustedProofSourceCommit is not null &&
+            !IsLowerHex(spec.TrustedProofSourceCommit, 40))
+        {
+            throw new InvalidOperationException(
+                "trusted proof source authority must be lowercase sha1");
+        }
         platform.BeginScenario(spec.Mode, scenario, Sha256(payload));
         await File.WriteAllTextAsync(Path.Join(scenario, "mode"), spec.Mode)
             .ConfigureAwait(false);
@@ -570,6 +595,11 @@ internal static class FrameworkSupervisor
             await File.WriteAllTextAsync(
                 Path.Join(scenario, "trusted-proof-payload"),
                 "1").ConfigureAwait(false);
+            await File.WriteAllTextAsync(
+                Path.Join(scenario, "trusted-proof-authority.json"),
+                FrameworkJson.Serialize(FrameworkJson.Object(
+                    ("source_commit", spec.TrustedProofSourceCommit))) + "\n")
+                .ConfigureAwait(false);
         }
         await File.WriteAllTextAsync(Path.Join(scenario, "run-id"),
             RunId(spec).ToString(CultureInfo.InvariantCulture))
@@ -957,8 +987,8 @@ internal static class FrameworkSupervisor
         info.Environment["OPERATION_ID"] = spec.Mode == "stale"
             ? FrameworkCanaries.StaleProofOperationId
             : FrameworkCanaries.ProofOperationId;
-        info.Environment["WORKFLOW_SHA"] = FrameworkGitHubHandler.WorkflowSha;
-        info.Environment["ACTION_SOURCE_SHA"] = FrameworkGitHubHandler.ActionSha;
+        info.Environment["WORKFLOW_SHA"] = LaunchWorkflowSha(spec);
+        info.Environment["ACTION_SOURCE_SHA"] = LaunchActionSourceSha(spec);
         info.Environment["PAYLOAD_SHA256"] = Sha256(payload);
         info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
             "measurement";
@@ -1026,6 +1056,16 @@ internal static class FrameworkSupervisor
         false,
         false);
 
+    private static string LaunchWorkflowSha(CaseSpec spec) =>
+        spec.TrustedProofSourceCommit ?? FrameworkGitHubHandler.WorkflowSha;
+
+    private static string LaunchActionSourceSha(CaseSpec spec) =>
+        spec.TrustedProofSourceCommit ?? FrameworkGitHubHandler.ActionSha;
+
+    private static string FixtureBaseSha(CaseSpec spec) =>
+        spec.TrustedProofSourceCommit ?? FrameworkGitHubHandler.PullRequestBaseSha(
+            trustedProofPayload: false);
+
     private static async Task<int> RunTrustedProofPayloadAsync(
         string root,
         string repository,
@@ -1035,6 +1075,10 @@ internal static class FrameworkSupervisor
         SyntheticOfficialPlatform platform,
         CompiledPayloadSourceExpectation? sourceExpectation)
     {
+        var requiredSourceExpectation = sourceExpectation ?? throw new
+            InvalidOperationException(
+                "trusted proof payload requires source authority");
+
         var cases = new List<CaseResult>
         {
             await RunCaseAsync(new CaseSpec(
@@ -1044,6 +1088,7 @@ internal static class FrameworkSupervisor
                 WorkflowRun: true,
                 ExpectedStickyMutations: 1,
                 TrustedProofPayload: true,
+                TrustedProofSourceCommit: requiredSourceExpectation.SourceCommit,
                 RequiredScenarioEvidence: "head-archive-served",
                 BarrierBefore: "hold"),
                 root, repository, payload, bundle, node, platform)
@@ -1056,6 +1101,7 @@ internal static class FrameworkSupervisor
                 ExpectedStickyMutations: 1,
                 RequireSuccessfulContinuation: true,
                 TrustedProofPayload: true,
+                TrustedProofSourceCommit: requiredSourceExpectation.SourceCommit,
                 RequiredScenarioEvidence: "head-archive-served",
                 BarrierBefore: "verify-completed",
                 BarrierAfter: "cleanup"),
@@ -1069,6 +1115,7 @@ internal static class FrameworkSupervisor
             "stale_head",
             ExpectedStickyMutations: 0,
             TrustedProofPayload: true,
+            TrustedProofSourceCommit: requiredSourceExpectation.SourceCommit,
             RequiredScenarioEvidence: "head-archive-served",
             BarrierBefore: "hold"),
             root, repository, payload, bundle, node, platform)
@@ -1082,28 +1129,34 @@ internal static class FrameworkSupervisor
             .Select(result => ReadCompiledPayloadIdentity(root, result.Name))
             .ToArray();
         var compiledIdentity = compiledIdentities.FirstOrDefault();
-        var compiledIdentityValid = sourceExpectation is not null &&
-            compiledIdentity is not null &&
+        var compiledIdentityValid = compiledIdentity is not null &&
             compiledIdentities.All(value => value == compiledIdentity) &&
             StringComparer.Ordinal.Equals(
                 compiledIdentity.ProofKind,
                 "apr-r4-e2p-trusted-proof-payload-v2") &&
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceCommit,
-                sourceExpectation.SourceCommit) &&
+                requiredSourceExpectation.SourceCommit) &&
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceTree,
-                sourceExpectation.SourceTree);
+                requiredSourceExpectation.SourceTree);
         var requestBudgetValid = await VerifyTrustedProofRequestBudgetAsync(
             root, repository, cases).ConfigureAwait(false);
+        var authorityExact = payloadCases.All(result =>
+            TrustedProofAuthorityIsExact(root, result.Name,
+                requiredSourceExpectation.SourceCommit));
         var passed = cases.All(result => result.Passed) &&
-            compiledIdentityValid && requestBudgetValid;
+            compiledIdentityValid && requestBudgetValid && authorityExact;
         var evidence = FrameworkJson.Object(
             ("passed", passed),
             ("verifier_executable_sha256", Sha256(payload)),
             ("compiled_payload_proof_kind", compiledIdentity?.ProofKind),
             ("compiled_payload_source_commit", compiledIdentity?.SourceCommit),
             ("compiled_payload_source_tree", compiledIdentity?.SourceTree),
+            ("launch_workflow_sha", requiredSourceExpectation.SourceCommit),
+            ("launch_action_source_sha", requiredSourceExpectation.SourceCommit),
+            ("fixture_base_sha", requiredSourceExpectation.SourceCommit),
+            ("trusted_authority_exact", authorityExact),
             ("trusted_proof_request_budget_satisfied", requestBudgetValid),
             ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
         await File.WriteAllTextAsync(
@@ -1718,6 +1771,62 @@ internal static class FrameworkSupervisor
             ? new(commit, tree)
             : null;
 
+    private static Func<string, string, string>
+        CreateTrustedProofV2WorkflowRenderer(
+            string repository,
+            CompiledPayloadSourceExpectation sourceExpectation)
+    {
+        var templatePath = Path.Join(
+            repository,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof-payload",
+            "workflow",
+            "r4-trusted-proof-v2.yml.template");
+        var workflowPath = Path.Join(
+            repository,
+            ".github",
+            "workflows",
+            "r4-trusted-proof.yml");
+        var templateBytes = File.ReadAllBytes(templatePath);
+        if (!templateBytes.AsSpan().SequenceEqual(
+                File.ReadAllBytes(workflowPath)))
+        {
+            throw new InvalidOperationException(
+                "The trusted proof workflow and v2 template differ.");
+        }
+
+        var template = new UTF8Encoding(false, true).GetString(templateBytes);
+        if (template.Length == 0 || template[0] == '\ufeff' ||
+            !template.EndsWith('\n') || template.Contains('\r') ||
+            template.Contains("__ACTION_SOURCE_SHA__",
+                StringComparison.Ordinal) ||
+            template.Contains("__PAYLOAD_SOURCE_SHA__",
+                StringComparison.Ordinal) ||
+            template.Contains("__PAYLOAD_SHA256__",
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The trusted proof v2 workflow template is invalid.");
+        }
+
+        return (actionSourceSha, payloadSha256) =>
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    actionSourceSha,
+                    sourceExpectation.SourceCommit) ||
+                !IsLowerHex(payloadSha256, 64))
+            {
+                throw new InvalidOperationException(
+                    "The trusted proof v2 workflow identity is invalid.");
+            }
+
+            return template;
+        };
+    }
+
     private static CompiledPayloadIdentity? ReadCompiledPayloadIdentity(
         string root,
         string scenario)
@@ -1747,6 +1856,59 @@ internal static class FrameworkSupervisor
             proofKind,
             sourceCommit,
             sourceTree);
+    }
+
+    private static bool TrustedProofAuthorityIsExact(
+        string root,
+        string scenario,
+        string expectedSourceCommit)
+    {
+        var path = Path.Join(root, scenario, "trusted-proof-authority.json");
+        if (!File.Exists(path)) return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var authority = document.RootElement;
+            return authority.ValueKind == JsonValueKind.Object &&
+                authority.EnumerateObject().Count() == 1 &&
+                authority.TryGetProperty("source_commit", out var commit) &&
+                commit.ValueKind == JsonValueKind.String &&
+                StringComparer.Ordinal.Equals(commit.GetString(),
+                    expectedSourceCommit);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string ExpectedReceiptIdentitySha(string scenario,
+        string ordinaryIdentity)
+    {
+        var authorityPath = Path.Join(scenario, "trusted-proof-authority.json");
+        if (!File.Exists(authorityPath)) return ordinaryIdentity;
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(
+                authorityPath));
+            var authority = document.RootElement;
+            if (authority.ValueKind == JsonValueKind.Object &&
+                authority.EnumerateObject().Count() == 1 &&
+                authority.TryGetProperty("source_commit", out var commit) &&
+                commit.ValueKind == JsonValueKind.String &&
+                IsLowerHex(commit.GetString() ?? string.Empty, 40))
+            {
+                return commit.GetString()!;
+            }
+        }
+        catch (JsonException)
+        {
+            // A malformed authority file fails the matching comparison below.
+        }
+
+        return string.Empty;
     }
 
     private static Process StartWrapper(
@@ -1787,7 +1949,7 @@ internal static class FrameworkSupervisor
         info.Environment["AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256"] =
             Sha256(payload);
         info.Environment["AGENTIC_PR_REVIEW_ACTION_SOURCE_SHA"] =
-            FrameworkGitHubHandler.ActionSha;
+            LaunchActionSourceSha(spec);
         info.Environment["AGENTIC_PR_REVIEW_PAYLOAD_BUILD_DISCRIMINATOR"] =
             FrameworkCanaries.BuildDiscriminator;
         info.Environment["GITHUB_EVENT_PATH"] = eventPath;
@@ -1802,7 +1964,7 @@ internal static class FrameworkSupervisor
             FrameworkCanaries.Repository +
             "/.github/workflows/r4-trusted-proof.yml@refs/heads/main";
         info.Environment["GITHUB_WORKFLOW_SHA"] =
-            FrameworkGitHubHandler.WorkflowSha;
+            LaunchWorkflowSha(spec);
         info.Environment["GITHUB_STEP_SUMMARY"] = summaryPath;
         info.Environment["GITHUB_OUTPUT"] = outputPath;
         info.Environment["GITHUB_API_URL"] = platform.BaseUrl;
@@ -1920,8 +2082,7 @@ internal static class FrameworkSupervisor
                         ("id", 1000),
                         ("number", 147),
                         ("base", FrameworkJson.Object(
-                            ("sha", FrameworkGitHubHandler.PullRequestBaseSha(
-                                spec.TrustedProofPayload)),
+                            ("sha", FixtureBaseSha(spec)),
                             ("repo", RepositoryReference()))),
                         ("head", FrameworkJson.Object(
                             ("sha", FrameworkGitHubHandler.HeadSha),
@@ -4683,9 +4844,11 @@ internal static class FrameworkSupervisor
             FrameworkGitHubHandler.RepositoryId.ToString(
                 CultureInfo.InvariantCulture)) &&
         StringComparer.Ordinal.Equals(receipt.WorkflowSha,
-            FrameworkGitHubHandler.WorkflowSha) &&
+            ExpectedReceiptIdentitySha(scenario,
+                FrameworkGitHubHandler.WorkflowSha)) &&
         StringComparer.Ordinal.Equals(receipt.ActionSourceSha,
-            FrameworkGitHubHandler.ActionSha) &&
+            ExpectedReceiptIdentitySha(scenario,
+                FrameworkGitHubHandler.ActionSha)) &&
         StringComparer.Ordinal.Equals(receipt.PayloadSha256,
             ReadOptionalText(scenario, "payload-sha256").Trim()) &&
         StringComparer.Ordinal.Equals(receipt.BuildDiscriminator,
@@ -5128,6 +5291,7 @@ internal static class FrameworkSupervisor
         string? RequiredStateOperation = null,
         string? RequiredGlobalEvidence = null,
         bool TrustedProofPayload = false,
+        string? TrustedProofSourceCommit = null,
         string? BarrierBefore = null,
         string? BarrierAfter = null);
 

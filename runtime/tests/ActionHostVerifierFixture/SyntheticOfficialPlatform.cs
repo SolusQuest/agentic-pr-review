@@ -45,6 +45,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private readonly List<Task> handlers = [];
     private readonly object gate = new();
     private readonly string evidenceRoot;
+    private readonly Func<string, string, string>? workflowRenderer;
     private readonly Func<long> epochSeconds;
     private Task? pump;
     private string activeMode = "sticky";
@@ -56,9 +57,11 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private long nextId = 1000;
 
     private SyntheticOfficialPlatform(string evidenceRoot, int port,
+        Func<string, string, string>? workflowRenderer,
         Func<long>? epochSeconds = null)
     {
         this.evidenceRoot = evidenceRoot;
+        this.workflowRenderer = workflowRenderer;
         this.epochSeconds = epochSeconds ??
             (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         activeScenarioRoot = evidenceRoot;
@@ -106,13 +109,18 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     }
 
     internal static SyntheticOfficialPlatform Start(string evidenceRoot,
+        Func<string, string, string>? workflowRenderer = null,
         Func<long>? epochSeconds = null)
     {
         using var socket = new TcpListener(IPAddress.Loopback, 0);
         socket.Start();
         var port = ((IPEndPoint)socket.LocalEndpoint).Port;
         socket.Stop();
-        var platform = new SyntheticOfficialPlatform(evidenceRoot, port, epochSeconds);
+        var platform = new SyntheticOfficialPlatform(
+            evidenceRoot,
+            port,
+            workflowRenderer,
+            epochSeconds);
         platform.listener.Start();
         platform.pump = platform.PumpAsync();
         return platform;
@@ -671,7 +679,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
         using var handler = new FrameworkGitHubHandler(
             scenarioRoot,
-            payloadSha256);
+            payloadSha256,
+            workflowRenderer);
         using var invoker = new HttpMessageInvoker(handler);
         using var request = new HttpRequestMessage(
             new HttpMethod(context.Request.HttpMethod),

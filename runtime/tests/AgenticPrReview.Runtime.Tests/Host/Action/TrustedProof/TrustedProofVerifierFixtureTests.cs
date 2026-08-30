@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
@@ -302,6 +303,233 @@ public sealed class TrustedProofVerifierFixtureTests
             Assert.Contains(workflowTree, entry =>
                 entry.GetProperty("path").GetString() == ".github" &&
                 entry.GetProperty("type").GetString() == "tree");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TrustedProofCurrentHeadAuthorityBindsTheV2WorkflowAndGitFacts()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-current-head-authority-" + Guid.NewGuid().ToString("N"));
+        const string sourceCommit = "6666666666666666666666666666666666666666";
+        var payloadSha256 = new string('f', 64);
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "mode"),
+                "continuation-seed");
+            await File.WriteAllTextAsync(Path.Join(root,
+                "trusted-proof-payload"), "1");
+            await File.WriteAllTextAsync(Path.Join(root,
+                "trusted-proof-authority.json"),
+                "{\"source_commit\":\"" + sourceCommit + "\"}");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "900");
+            await File.WriteAllTextAsync(Path.Join(root, "run-attempt"), "1");
+            using var handler = new FrameworkGitHubHandler(
+                root,
+                payloadSha256,
+                TrustedProofV2WorkflowAdmission.Render);
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            using var runResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository +
+                "/actions/runs/900/attempts/1");
+            runResponse.EnsureSuccessStatusCode();
+            using var run = JsonDocument.Parse(
+                await runResponse.Content.ReadAsStringAsync());
+            Assert.Equal(sourceCommit,
+                run.RootElement.GetProperty("head_sha").GetString());
+
+            using var pullResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/pulls/147");
+            pullResponse.EnsureSuccessStatusCode();
+            using var pull = JsonDocument.Parse(
+                await pullResponse.Content.ReadAsStringAsync());
+            Assert.Equal(sourceCommit,
+                pull.RootElement.GetProperty("base").GetProperty("sha")
+                    .GetString());
+
+            using var commitResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/git/commits/" +
+                sourceCommit);
+            commitResponse.EnsureSuccessStatusCode();
+            using var commit = JsonDocument.Parse(
+                await commitResponse.Content.ReadAsStringAsync());
+            Assert.Equal(new string('1', 40),
+                commit.RootElement.GetProperty("tree").GetProperty("sha")
+                    .GetString());
+
+            using var workflowResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository +
+                "/contents/.github/workflows/r4-trusted-proof.yml");
+            workflowResponse.EnsureSuccessStatusCode();
+            using var workflow = JsonDocument.Parse(
+                await workflowResponse.Content.ReadAsStringAsync());
+            var source = Encoding.UTF8.GetString(Convert.FromBase64String(
+                workflow.RootElement.GetProperty("content").GetString()!));
+            Assert.Equal(TrustedProofV2WorkflowAdmission.Render(
+                    sourceCommit,
+                    payloadSha256),
+                source);
+            Assert.NotEqual(ActionHostTrustedWorkflowContract.Render(
+                sourceCommit,
+                payloadSha256), source);
+
+            await File.WriteAllTextAsync(Path.Join(root, "mode"),
+                "wrong-action");
+            using var wrongActionResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository +
+                "/contents/.github/workflows/r4-trusted-proof.yml");
+            wrongActionResponse.EnsureSuccessStatusCode();
+            using var wrongAction = JsonDocument.Parse(
+                await wrongActionResponse.Content.ReadAsStringAsync());
+            var wrongActionSource = Encoding.UTF8.GetString(
+                Convert.FromBase64String(wrongAction.RootElement
+                    .GetProperty("content").GetString()!));
+            Assert.NotEqual(source, wrongActionSource);
+            Assert.EndsWith("# trusted-proof-wrong-action\n",
+                wrongActionSource, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OrdinaryFixtureKeepsItsStaticV1IdentityWithoutAuthority()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-ordinary-static-identity-" + Guid.NewGuid().ToString("N"));
+        var payloadSha256 = new string('f', 64);
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "mode"), "sticky");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "900");
+            await File.WriteAllTextAsync(Path.Join(root, "run-attempt"), "1");
+            using var handler = new FrameworkGitHubHandler(root, payloadSha256);
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            using var runResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository +
+                "/actions/runs/900/attempts/1");
+            runResponse.EnsureSuccessStatusCode();
+            using var run = JsonDocument.Parse(
+                await runResponse.Content.ReadAsStringAsync());
+            Assert.Equal(FrameworkGitHubHandler.WorkflowSha,
+                run.RootElement.GetProperty("head_sha").GetString());
+
+            using var workflowResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository +
+                "/contents/.github/workflows/r4-trusted-proof.yml");
+            workflowResponse.EnsureSuccessStatusCode();
+            using var workflow = JsonDocument.Parse(
+                await workflowResponse.Content.ReadAsStringAsync());
+            var source = Encoding.UTF8.GetString(Convert.FromBase64String(
+                workflow.RootElement.GetProperty("content").GetString()!));
+            Assert.Equal(ActionHostTrustedWorkflowContract.Render(
+                FrameworkGitHubHandler.ActionSha,
+                payloadSha256), source);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InvalidTrustedProofCurrentHeadAuthorityFailsClosed()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-invalid-current-head-authority-" +
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "mode"), "sticky");
+            await File.WriteAllTextAsync(Path.Join(root,
+                "trusted-proof-payload"), "1");
+            await File.WriteAllTextAsync(Path.Join(root,
+                "trusted-proof-authority.json"),
+                "{\"source_commit\":\"ABCDEF\"}");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "900");
+            await File.WriteAllTextAsync(Path.Join(root, "run-attempt"), "1");
+            using var handler = new FrameworkGitHubHandler(
+                root,
+                new string('f', 64),
+                TrustedProofV2WorkflowAdmission.Render);
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.GetAsync("repos/" + FrameworkCanaries.Repository +
+                    "/actions/runs/900/attempts/1"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TrustedProofCurrentHeadAuthorityRejectsTheImplicitV1Renderer()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-implicit-v1-current-head-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "mode"), "sticky");
+            await File.WriteAllTextAsync(Path.Join(root,
+                "trusted-proof-payload"), "1");
+            await File.WriteAllTextAsync(Path.Join(root,
+                "trusted-proof-authority.json"),
+                "{\"source_commit\":\"" + new string('6', 40) + "\"}");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "900");
+            await File.WriteAllTextAsync(Path.Join(root, "run-attempt"), "1");
+            using var handler = new FrameworkGitHubHandler(root,
+                new string('f', 64));
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.GetAsync("repos/" + FrameworkCanaries.Repository +
+                    "/contents/.github/workflows/r4-trusted-proof.yml"));
         }
         finally
         {
