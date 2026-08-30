@@ -147,24 +147,39 @@ public sealed class TrustedProofGitHubRequestBudgetTests
     }
 
     [Fact]
-    public async Task AuthenticatedHostTrafficIsClassifiedOnceIntoDisjointDomains()
+    public async Task AuthenticatedHostTrafficIsClassifiedByTheControlledTransportRole()
     {
+        var witnessedDomains = new List<string?>();
         var budget = new TrustedProofGitHubRequestBudget(
-            5, 1, static () => new RecordingHandler(static () => { }));
-        using var client = new HttpClient(budget.CreateHandler());
+            7, 1, () => new DomainRecordingHandler(witnessedDomains));
+        using var headClient = new HttpClient(budget.CreateHeadSourceHandler());
+        using var otherClient = new HttpClient(budget.CreateOtherGitHubHandler());
 
-        using var head = await client.SendAsync(ApiRequest("/repos/o/r/git/trees/" + new string('a', 40)));
-        using var tarball = await client.SendAsync(ApiRequest("/repos/o/r/tarball/" + new string('a', 40)));
-        using var pulls = await client.SendAsync(ApiRequest("/repos/o/r/commits/" + new string('a', 40) + "/pulls"));
-        using var shortTree = await client.SendAsync(ApiRequest("/repos/o/r/git/trees/" + new string('a', 39)));
-        using var other = await client.SendAsync(ApiRequest("/repos/o/r/issues/1/comments"));
+        using var reviewedCommit = await headClient.SendAsync(ApiRequest("/repos/o/r/git/commits/" + new string('a', 40)));
+        using var head = await headClient.SendAsync(ApiRequest("/repos/o/r/git/trees/" + new string('a', 40)));
+        using var tarball = await headClient.SendAsync(ApiRequest("/repos/o/r/tarball/" + new string('a', 40)));
+        // A source workflow/action object uses the same Git object routes but
+        // is not reviewed-head acquisition.  Its controlled ordinary handler
+        // keeps it out of the exact-head receipt.
+        using var sourceWorkflow = await otherClient.SendAsync(ApiRequest("/repos/o/r/git/trees/" + new string('b', 40)));
+        using var sourceAction = await otherClient.SendAsync(ApiRequest("/repos/o/r/git/commits/" + new string('c', 40)));
+        using var pulls = await otherClient.SendAsync(ApiRequest("/repos/o/r/commits/" + new string('a', 40) + "/pulls"));
+        using var other = await otherClient.SendAsync(ApiRequest("/repos/o/r/issues/1/comments"));
         using var output = new StringWriter();
         budget.WriteReceipt(output);
         using var document = JsonDocument.Parse(output.ToString()[
             "APR_R4_E2P_GITHUB_REQUEST_BUDGET ".Length..].Trim());
         var root = document.RootElement;
-        Assert.Equal(2, root.GetProperty("host_head_source_rest").GetProperty("raw").GetInt32());
-        Assert.Equal(3, root.GetProperty("host_other_github_rest").GetProperty("raw").GetInt32());
+        Assert.Equal(3, root.GetProperty("host_head_source_rest").GetProperty("raw").GetInt32());
+        Assert.Equal(4, root.GetProperty("host_other_github_rest").GetProperty("raw").GetInt32());
+        Assert.Equal(
+            [
+                "host_head_source_rest", "host_head_source_rest",
+                "host_head_source_rest", "host_other_github_rest",
+                "host_other_github_rest", "host_other_github_rest",
+                "host_other_github_rest",
+            ],
+            witnessedDomains);
     }
 
     [Theory]
@@ -579,6 +594,22 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 RequestMessage = request,
                 Content = new ByteArrayContent([]),
             });
+        }
+    }
+
+    private sealed class DomainRecordingHandler(List<string?> domains) :
+        HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            request.Options.TryGetValue(
+                TrustedProofOperationRequestAccounting.WitnessDomainOption,
+                out string? domain);
+            domains.Add(domain);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
         }
     }
 

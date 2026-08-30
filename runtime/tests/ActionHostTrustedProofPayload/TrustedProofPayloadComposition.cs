@@ -18,7 +18,8 @@ internal static class TrustedProofPayloadComposition
         ArgumentNullException.ThrowIfNull(githubBudget);
         ArgumentNullException.ThrowIfNull(ports);
         var github = new ActionHostGitHubAuthorizationTransportFactory(
-            githubBudget.CreateHandler);
+            githubBudget.CreateOtherGitHubHandler,
+            githubBudget.CreateHeadSourceHandler);
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubBudget.CreateHandler);
         var provider = new ActionHostDeepSeekProviderRunnerFactory(

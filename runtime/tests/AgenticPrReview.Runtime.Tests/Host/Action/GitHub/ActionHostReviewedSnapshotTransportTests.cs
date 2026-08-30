@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using Xunit;
@@ -9,6 +10,24 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.GitHub;
 
 public sealed class ActionHostReviewedSnapshotTransportTests
 {
+    [Fact]
+    public void OneArgumentFactoryFallsBackToItsHandlerForReviewedObjects()
+    {
+        var handlerCalls = 0;
+        var factory = new ActionHostGitHubAuthorizationTransportFactory(() =>
+        {
+            handlerCalls++;
+            return new FailIfSentHandler();
+        });
+        Assert.True(ActionHostGitHubToken.TryCreate("token-canary", out var token));
+
+        using var transport = factory.CreateReviewedSnapshotTransport(token!);
+
+        // One handler serves reviewed PR/files and the other serves the nested
+        // object reader when no explicit reviewed-head factory was supplied.
+        Assert.Equal(2, handlerCalls);
+    }
+
     [Fact]
     public async Task PullRequestFilesUseBoundedPaginationAndGeneratedDto()
     {
@@ -289,6 +308,14 @@ public sealed class ActionHostReviewedSnapshotTransportTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class FailIfSentHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No request was expected.");
     }
 
     private sealed class MeasuringStream : Stream

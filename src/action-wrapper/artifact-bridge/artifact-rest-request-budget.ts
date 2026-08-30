@@ -3,7 +3,8 @@ const TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = 'r4-w2';
 /**
  * The r4-w2 bridge has a fixed per-route authenticated REST budget.  The
  * receipt remains measurement-only until the complete cross-role evidence is
- * accepted, but measurement must itself fail closed at the production cap.
+ * accepted. The measurement cap is intentionally explicit and is selected
+ * only through the verified r4-w2 profile.
  */
 export interface ArtifactRestRequestBudgetLimits {
   readonly maximumTotalAuthenticatedApiRequests: number;
@@ -12,21 +13,17 @@ export interface ArtifactRestRequestBudgetLimits {
 
 export const TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS: ArtifactRestRequestBudgetLimits =
   Object.freeze({
-    maximumTotalAuthenticatedApiRequests: 32,
-    maximumPrimaryRateLimitRequests: 32,
+    maximumTotalAuthenticatedApiRequests: 256,
+    maximumPrimaryRateLimitRequests: 256,
   });
 
-/**
- * Kept explicit during measurement: the current process can prove each
- * command's mandatory local tail, but it cannot infer the final AOT
- * cross-role sequence from a response header. The frozen non-measurement
- * profile replaces this placeholder with the evidence-derived reserve.
- */
-export const TRUSTED_PROOF_ARTIFACT_REST_FINAL_PROFILE_RESERVE = Object.freeze({
-  // A nonzero measurement sentinel keeps compound reservations from silently
-  // treating the future final-profile tail as available capacity.
-  crossRolePrimaryTail: 1,
-});
+export interface ArtifactRestRequestBudgetProfile {
+  readonly capProfile: string;
+  readonly limits: ArtifactRestRequestBudgetLimits;
+  readonly remainingTailRequired: number;
+  readonly remainingTailReserve: number;
+  readonly measurementOnly: boolean;
+}
 
 export interface ArtifactRestSecondaryRateLimitOptions {
   readonly now?: () => number;
@@ -90,6 +87,8 @@ export interface ArtifactRestRequestReceipt {
   readonly run_attempt: string | null;
   readonly cap_profile: string | null;
   readonly measurement_only: boolean | null;
+  readonly remaining_tail_required: number | null;
+  readonly remaining_tail_reserve: number | null;
 }
 
 export interface ArtifactRestReceiptIdentity {
@@ -171,6 +170,7 @@ export class ArtifactRestRequestBudget {
     private readonly limits: ArtifactRestRequestBudgetLimits,
     secondaryRateLimit: ArtifactRestSecondaryRateLimitOptions | undefined,
     private readonly identity: ArtifactRestReceiptIdentity | undefined,
+    private readonly profile: ArtifactRestRequestBudgetProfile | undefined,
   ) {
     this.epochSeconds = secondaryRateLimit?.epochSeconds ?? (() => Math.floor(Date.now() / 1_000));
     if (protectedRoute) {
@@ -183,16 +183,31 @@ export class ArtifactRestRequestBudget {
     readonly limits?: ArtifactRestRequestBudgetLimits;
     readonly secondaryRateLimit?: ArtifactRestSecondaryRateLimitOptions;
     readonly identity?: ArtifactRestReceiptIdentity;
+    readonly profile?: ArtifactRestRequestBudgetProfile;
   }): ArtifactRestRequestBudget {
-    const limits = input.limits ?? TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS;
+    const protectedRoute =
+      input.buildDiscriminator === TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR;
+    if (protectedRoute && !validProfile(input.profile)) {
+      throw new Error('artifact_rest_request_budget_profile_invalid');
+    }
+    if (!protectedRoute && input.profile !== undefined) {
+      throw new Error('artifact_rest_request_budget_profile_invalid');
+    }
+    if (protectedRoute && input.limits !== undefined) {
+      // A protected receipt must never report one profile while the ledger
+      // enforces another. Test cases that need a narrower cap construct the
+      // corresponding profile instead of overriding it here.
+      throw new Error('artifact_rest_request_budget_profile_invalid');
+    }
+    const limits = protectedRoute
+      ? input.profile!.limits
+      : (input.limits ?? TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS);
     if (
       !positiveInteger(limits.maximumTotalAuthenticatedApiRequests) ||
       !positiveInteger(limits.maximumPrimaryRateLimitRequests)
     ) {
       throw new Error('artifact_rest_request_budget_limits_invalid');
     }
-    const protectedRoute =
-      input.buildDiscriminator === TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR;
     if (protectedRoute && !validIdentity(input.identity)) {
       throw new Error('artifact_rest_request_budget_identity_invalid');
     }
@@ -201,6 +216,7 @@ export class ArtifactRestRequestBudget {
       limits,
       input.secondaryRateLimit,
       input.identity,
+      input.profile,
     );
   }
 
@@ -268,9 +284,7 @@ export class ArtifactRestRequestBudget {
     }
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining <
-        input.primaryRequests +
-          TRUSTED_PROOF_ARTIFACT_REST_FINAL_PROFILE_RESERVE.crossRolePrimaryTail
+      this.observedPrimaryRemaining <= input.primaryRequests + this.requiredTailAndReserve()
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -305,11 +319,10 @@ export class ArtifactRestRequestBudget {
       throw new ArtifactRestRateLimitHeadersError();
     }
     if (this.disposition !== 'active') throw new ArtifactRestRequestBudgetError(this.disposition);
-    const requiredWithFinalProfileTail =
-      required + TRUSTED_PROOF_ARTIFACT_REST_FINAL_PROFILE_RESERVE.crossRolePrimaryTail;
+    const requiredWithFinalProfileTail = required + this.requiredTailAndReserve();
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining < requiredWithFinalProfileTail
+      this.observedPrimaryRemaining <= requiredWithFinalProfileTail
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -395,10 +408,10 @@ export class ArtifactRestRequestBudget {
       build_discriminator: this.identity?.buildDiscriminator ?? null,
       run_id: this.identity?.runId ?? null,
       run_attempt: this.identity?.runAttempt ?? null,
-      cap_profile: this.protectedRoute ? TRUSTED_PROOF_ARTIFACT_REST_CAP_PROFILE : null,
-      // The exact route cap is recorded while the enclosing proof is still
-      // measurement-only; it does not claim a final cross-role allocation.
-      measurement_only: this.protectedRoute ? true : null,
+      cap_profile: this.profile?.capProfile ?? null,
+      measurement_only: this.profile?.measurementOnly ?? null,
+      remaining_tail_required: this.profile?.remainingTailRequired ?? null,
+      remaining_tail_reserve: this.profile?.remainingTailReserve ?? null,
     };
   }
 
@@ -474,7 +487,10 @@ export class ArtifactRestRequestBudget {
       this.disposition = 'total_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
-    if (this.observedPrimaryRemaining !== undefined && this.observedPrimaryRemaining < 1) {
+    if (
+      this.observedPrimaryRemaining !== undefined &&
+      this.observedPrimaryRemaining <= 1 + this.requiredTailAndReserve()
+    ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -551,7 +567,6 @@ export class ArtifactRestRequestBudget {
       this.disposition = 'invalid_rate_limit_headers';
       throw new ArtifactRestRateLimitHeadersError();
     }
-    if (remaining.value !== undefined) this.observedPrimaryRemaining = remaining.value;
     const primary = rateLimitStatus && primarySignalled && reset.value !== undefined;
     const secondary =
       rateLimitStatus && (retryAfter.value !== undefined || secondaryMessage.secondary);
@@ -559,17 +574,24 @@ export class ArtifactRestRequestBudget {
       this.disposition = 'invalid_rate_limit_headers';
       throw new ArtifactRestRateLimitHeadersError();
     }
+    const disposition =
+      primary && secondary
+        ? 'primary_and_secondary_rate_limited'
+        : primary
+          ? 'primary_exhausted'
+          : secondary
+            ? 'rate_limited'
+            : undefined;
+    if (remaining.value !== undefined) {
+      this.observedPrimaryRemaining = remaining.value;
+      if (remaining.value <= this.requiredTailAndReserve() && disposition === undefined) {
+        this.disposition = 'primary_exhausted';
+      }
+    }
     return {
       suppliedRemaining: remaining.value !== undefined,
       permissionDenied: status === 403 && !primary && !secondary,
-      disposition:
-        primary && secondary
-          ? 'primary_and_secondary_rate_limited'
-          : primary
-            ? 'primary_exhausted'
-            : secondary
-              ? 'rate_limited'
-              : undefined,
+      disposition,
     };
   }
 
@@ -581,6 +603,10 @@ export class ArtifactRestRequestBudget {
     this.reservedMutationPrimaryRequests -= reservation.remainingPrimaryRequests;
     this.reservedMutationSecondaryPoints -= reservation.remainingSecondaryPoints;
     this.activeMutationReservation = undefined;
+  }
+
+  private requiredTailAndReserve(): number {
+    return (this.profile?.remainingTailRequired ?? 0) + (this.profile?.remainingTailReserve ?? 0);
   }
 }
 
@@ -964,6 +990,20 @@ function lowerHex(value: string, length: number): boolean {
 
 function positiveInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
+}
+
+function validProfile(
+  value: ArtifactRestRequestBudgetProfile | undefined,
+): value is ArtifactRestRequestBudgetProfile {
+  return (
+    value !== undefined &&
+    value.capProfile === TRUSTED_PROOF_ARTIFACT_REST_CAP_PROFILE &&
+    typeof value.limits === 'object' &&
+    value.limits !== null &&
+    nonNegativeInteger(value.remainingTailRequired) &&
+    positiveInteger(value.remainingTailReserve) &&
+    typeof value.measurementOnly === 'boolean'
+  );
 }
 
 function nonNegativeInteger(value: number): boolean {

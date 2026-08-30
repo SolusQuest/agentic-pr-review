@@ -48,6 +48,205 @@ public sealed class TrustedProofVerifierFixtureTests
     }
 
     [Fact]
+    public void RequestWitnessJoinsPlatformGithubAndControlWithoutForwardingDuplicates()
+    {
+        var root = CreateWitnessScenario();
+        try
+        {
+            WriteWitnessSources(root,
+                [
+                    "node_artifact_rest\tgithub_rest\tGET\t1\t20\tsuccess",
+                ],
+                ["verifier_github\t1\thost_other_github_rest\tgithub_rest\tGET\t1\t10\tother_failure"],
+                ["verifier_control\t1\ttrusted_control_rest\tgithub_rest\tPOST\t5\t10\tsuccess"]);
+
+            Assert.True(FrameworkSupervisor.MaterializeScenarioRequestEventsForTest(root));
+            Assert.Equal(
+                [
+                    "host_other_github_rest\tgithub_rest\tGET\t1\t10\tother_failure",
+                    "trusted_control_rest\tgithub_rest\tPOST\t5\t10\tsuccess",
+                    "node_artifact_rest\tgithub_rest\tGET\t1\t20\tsuccess",
+                ],
+                File.ReadAllLines(Path.Join(root,
+                    "trusted-proof-request-events.tsv")));
+            Assert.Contains("host_head_source_rest\t0", File.ReadAllLines(
+                Path.Join(root, "trusted-proof-request-domains.tsv")));
+            Assert.Contains("host_other_github_rest\t1", File.ReadAllLines(
+                Path.Join(root, "trusted-proof-request-domains.tsv")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RequestWitnessFailsClosedWhenPlatformClaimsHostOrControlTraffic()
+    {
+        var host = CreateWitnessScenario();
+        var control = CreateWitnessScenario();
+        try
+        {
+            WriteWitnessSources(host,
+                ["host_head_source_rest\tgithub_rest\tGET\t1\t1\tsuccess"],
+                ["verifier_github\t1\thost_head_source_rest\tgithub_rest\tGET\t1\t2\tsuccess"],
+                ["verifier_control\t1\ttrusted_control_rest\tgithub_rest\tGET\t1\t3\tsuccess"]);
+            Assert.False(FrameworkSupervisor
+                .MaterializeScenarioRequestEventsForTest(host));
+
+            WriteWitnessSources(control,
+                ["trusted_control_rest\tgithub_rest\tGET\t1\t1\tsuccess"],
+                ["verifier_github\t1\thost_other_github_rest\tgithub_rest\tGET\t1\t2\tsuccess"],
+                ["verifier_control\t1\ttrusted_control_rest\tgithub_rest\tGET\t1\t3\tsuccess"]);
+            Assert.False(FrameworkSupervisor
+                .MaterializeScenarioRequestEventsForTest(control));
+        }
+        finally
+        {
+            Directory.Delete(host, recursive: true);
+            Directory.Delete(control, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RequestWitnessFailsClosedForMissingMalformedOrDuplicateSources()
+    {
+        var missing = CreateWitnessScenario();
+        var malformed = CreateWitnessScenario();
+        var duplicate = CreateWitnessScenario();
+        try
+        {
+            File.WriteAllText(Path.Join(missing,
+                "trusted-proof-request-events.tsv"),
+                "node_artifact_rest\tgithub_rest\tGET\t1\t1\tsuccess\n");
+            Assert.False(FrameworkSupervisor.MaterializeScenarioRequestEventsForTest(missing));
+
+            WriteWitnessSources(malformed,
+                ["node_artifact_rest\tgithub_rest\tGET\t1\t1\tsuccess"],
+                ["verifier_github\t1\thost_other_github_rest\tgithub_rest\tGET\t1\t2\tother_failure"],
+                ["verifier_control\t1\ttrusted_control_rest\tgithub_rest\tPOST\t5\t3\tsecret"]);
+            Assert.False(FrameworkSupervisor.MaterializeScenarioRequestEventsForTest(malformed));
+
+            WriteWitnessSources(duplicate,
+                ["node_artifact_rest\tgithub_rest\tGET\t1\t1\tsuccess"],
+                [
+                    "verifier_github\t1\thost_other_github_rest\tgithub_rest\tGET\t1\t2\tsuccess",
+                    "verifier_github\t1\thost_other_github_rest\tgithub_rest\tGET\t1\t3\tsuccess",
+                ],
+                ["verifier_control\t1\ttrusted_control_rest\tgithub_rest\tPOST\t5\t4\tsuccess"]);
+            Assert.False(FrameworkSupervisor.MaterializeScenarioRequestEventsForTest(duplicate));
+        }
+        finally
+        {
+            Directory.Delete(missing, recursive: true);
+            Directory.Delete(malformed, recursive: true);
+            Directory.Delete(duplicate, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RequestWitnessOrderingIsDeterministicWhenSourceInputIsReordered()
+    {
+        var first = CreateWitnessScenario();
+        var second = CreateWitnessScenario();
+        try
+        {
+            var platform = new[]
+            {
+                "node_artifact_rest\tgithub_rest\tGET\t1\t20\tsuccess",
+                "actions_results_service\tactions_results_twirp\tPOST\t5\t20\tsuccess",
+            };
+            var github = new[]
+            {
+                "verifier_github\t2\thost_head_source_rest\tgithub_rest\tGET\t1\t20\tsuccess",
+                "verifier_github\t1\thost_other_github_rest\tgithub_rest\tGET\t1\t20\tsuccess",
+            };
+            var control = new[]
+            {
+                "verifier_control\t2\ttrusted_control_rest\tgithub_rest\tPOST\t5\t20\tsuccess",
+                "verifier_control\t1\ttrusted_control_rest\tgithub_rest\tPOST\t5\t20\tsuccess",
+            };
+            WriteWitnessSources(first, platform, github, control);
+            WriteWitnessSources(second, platform.Reverse().ToArray(),
+                github.Reverse().ToArray(), control);
+            Assert.True(FrameworkSupervisor.MaterializeScenarioRequestEventsForTest(first));
+            Assert.True(FrameworkSupervisor.MaterializeScenarioRequestEventsForTest(second));
+            Assert.Equal(File.ReadAllText(Path.Join(first,
+                    "trusted-proof-request-events.tsv")),
+                File.ReadAllText(Path.Join(second,
+                    "trusted-proof-request-events.tsv")));
+        }
+        finally
+        {
+            Directory.Delete(first, recursive: true);
+            Directory.Delete(second, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RequestBudgetTailsAreDeterministicAfterWitnessReordering()
+    {
+        var ordered = new[]
+        {
+            Event("dispatch-bootstrap", 1, 1, "host_other_github_rest", "success"),
+            Event("dispatch-bootstrap", 1, 2, "node_artifact_rest", "success"),
+            Event("dispatch-continuation", 2, 3, "trusted_control_rest", "success"),
+            Event("stale-head", 3, 4, "host_head_source_rest", "success"),
+        };
+        var reordered = ordered.Reverse().ToArray();
+
+        var first = FrameworkSupervisor.DomainFuturePrimaryTails(
+            [ordered.Where(value => value.ScenarioOrdinal == 1),
+                ordered.Where(value => value.ScenarioOrdinal == 2),
+                ordered.Where(value => value.ScenarioOrdinal == 3)]);
+        var second = FrameworkSupervisor.DomainFuturePrimaryTails(
+            [reordered.Where(value => value.ScenarioOrdinal == 1),
+                reordered.Where(value => value.ScenarioOrdinal == 2),
+                reordered.Where(value => value.ScenarioOrdinal == 3)]);
+
+        Assert.Equal(first.OrderBy(pair => pair.Key), second.OrderBy(pair => pair.Key));
+        Assert.Equal(3, first["host_other_github_rest"]);
+        Assert.Equal(2, first["node_artifact_rest"]);
+        Assert.Equal(1, first["trusted_control_rest"]);
+        Assert.Equal(0, first["host_head_source_rest"]);
+    }
+
+    [Fact]
+    public void RequestBudgetTailsTreatSameTimestampAsAConcurrentCrossSourceBucket()
+    {
+        // These represent a platform Node request, a verifier-owned Host
+        // request, and a verifier-owned control request that all began on the
+        // same monotonic timer tick. Their append order must not change any
+        // profile tail: every response retains the other primary work in its
+        // concurrent bucket.
+        var first = new[]
+        {
+            Event("dispatch-bootstrap", 1, 1, "node_artifact_rest", "success",
+                timestamp: 10),
+            Event("dispatch-bootstrap", 1, 2, "host_head_source_rest", "success",
+                timestamp: 10),
+            Event("dispatch-bootstrap", 1, 3, "trusted_control_rest", "success",
+                timestamp: 10),
+            Event("dispatch-continuation", 2, 4, "host_other_github_rest", "success",
+                timestamp: 20),
+        };
+        var reordered = first.Reverse().ToArray();
+
+        var expected = FrameworkSupervisor.DomainFuturePrimaryTails(
+            [first.Where(value => value.ScenarioOrdinal == 1),
+                first.Where(value => value.ScenarioOrdinal == 2)]);
+        var actual = FrameworkSupervisor.DomainFuturePrimaryTails(
+            [reordered.Where(value => value.ScenarioOrdinal == 1),
+                reordered.Where(value => value.ScenarioOrdinal == 2)]);
+
+        Assert.Equal(expected.OrderBy(pair => pair.Key), actual.OrderBy(pair => pair.Key));
+        Assert.Equal(3, expected["node_artifact_rest"]);
+        Assert.Equal(3, expected["host_head_source_rest"]);
+        Assert.Equal(3, expected["trusted_control_rest"]);
+        Assert.Equal(0, expected["host_other_github_rest"]);
+    }
+
+    [Fact]
     public async Task ProofControlBarrierCompletesAcrossFreshProofScenarios()
     {
         var root = Path.Join(
@@ -769,6 +968,28 @@ public sealed class TrustedProofVerifierFixtureTests
         }
     }
 
+    private static string CreateWitnessScenario()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-r4-e2p-request-witness-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static void WriteWitnessSources(
+        string root,
+        IReadOnlyList<string> platform,
+        IReadOnlyList<string> github,
+        IReadOnlyList<string> control)
+    {
+        File.WriteAllLines(Path.Join(root, "trusted-proof-request-events.tsv"),
+            platform);
+        File.WriteAllLines(Path.Join(root, "verifier-github-requests.tsv"),
+            github);
+        File.WriteAllLines(Path.Join(root, "verifier-control-requests.tsv"),
+            control);
+    }
+
     private static async Task PrepareProofScenarioAsync(
         string scenario,
         string mode,
@@ -841,7 +1062,8 @@ public sealed class TrustedProofVerifierFixtureTests
         int scenarioOrdinal,
         int ordinal,
         string domain,
-        string responseClass) => new(
+        string responseClass,
+        long? timestamp = null) => new(
         scenario,
         scenarioOrdinal,
         ordinal,
@@ -849,7 +1071,7 @@ public sealed class TrustedProofVerifierFixtureTests
         "github_rest",
         "GET",
         1,
-        ordinal,
+        timestamp ?? ordinal,
         responseClass);
 
     private static Task<int> RunControlAsync(

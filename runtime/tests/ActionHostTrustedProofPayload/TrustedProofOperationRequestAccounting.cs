@@ -43,17 +43,33 @@ internal enum TrustedProofResponseClass
     OtherFailure,
 }
 
-// The operation-wide recorder is SyntheticOfficialPlatform's event stream.
-// It is the sole component that observes Node, payload Host, external control,
-// Actions Results, and anonymous transfer dispatches in one monotonic clock.
-// This type deliberately owns only the shared response/tail interpretation;
-// keeping a second in-process event queue here would create an orphaned source
-// of truth that cannot see the Node or data-plane routes.
+// The operation-wide witness merges platform-owned Node/data-plane dispatches
+// with verifier-owned Host/control dispatch traces after every case is quiet.
+// This type owns the shared response taxonomy and tail interpretation; it does
+// not own another event queue, which would omit one of those producer paths.
 internal static class TrustedProofOperationRequestAccounting
 {
     internal const int OperationPrimaryBudget = 1000;
     internal const int OperationPrimaryReserve = 1;
+    // The trusted payload attaches this secret-free semantic route label before
+    // its in-process verifier handler dispatches.  The independent verifier
+    // witness must consume this value rather than infer meaning from a SHA in
+    // an otherwise ambiguous GitHub URI.
+    internal static readonly HttpRequestOptionsKey<string> WitnessDomainOption =
+        new("agentic-pr-review.trusted-proof.request-domain");
     private const int MaximumRateLimitHeaderValue = 1_000_000;
+
+    internal static string WitnessDomain(TrustedProofRequestDomain domain) =>
+        domain switch
+        {
+            TrustedProofRequestDomain.HostHeadSourceRest =>
+                "host_head_source_rest",
+            TrustedProofRequestDomain.HostOtherGitHubRest =>
+                "host_other_github_rest",
+            TrustedProofRequestDomain.TrustedControlRest =>
+                "trusted_control_rest",
+            _ => throw new ArgumentOutOfRangeException(nameof(domain)),
+        };
 
     internal static TrustedProofRateClassification RateClassify(
         HttpResponseMessage response,

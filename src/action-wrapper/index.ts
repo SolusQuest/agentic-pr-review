@@ -27,7 +27,10 @@ import {
 } from './launcher/host-process.js';
 import { readAndMaskActionInputs } from './launcher/inputs.js';
 import { OfficialCallTracker } from './launcher/official-calls.js';
-import { readTrustedProofRequestBudgetProfile } from './launcher/request-budget-profile.js';
+import {
+  artifactRestRequestBudgetProfile,
+  readTrustedProofRequestBudgetProfile,
+} from './launcher/request-budget-profile.js';
 import {
   digestEventJson,
   verifyPreparedPayload,
@@ -151,6 +154,9 @@ export async function runPrivateActionWrapperWithSeams(
         runId: runtimeFacts.runId,
         runAttempt: runtimeFacts.runAttempt,
       },
+      ...(requestBudgetProfile === undefined
+        ? {}
+        : { profile: artifactRestRequestBudgetProfile(requestBudgetProfile) }),
     });
     try {
       const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);

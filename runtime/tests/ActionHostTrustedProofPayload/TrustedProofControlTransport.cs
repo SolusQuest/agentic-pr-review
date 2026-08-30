@@ -235,6 +235,10 @@ internal sealed class TrustedProofControlTransport : IDisposable
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
             $"repos/{repository}/pulls/{pullRequestNumber}");
+        request.Options.Set(
+            TrustedProofOperationRequestAccounting.WitnessDomainOption,
+            TrustedProofOperationRequestAccounting.WitnessDomain(
+                TrustedProofRequestDomain.TrustedControlRest));
         using var response = await client.SendAsync(request, cancellationToken)
             .ConfigureAwait(false);
         requestBudget.Observe(response, HttpMethod.Get);
@@ -534,6 +538,10 @@ internal sealed class TrustedProofControlTransport : IDisposable
         {
             Content = content,
         };
+        request.Options.Set(
+            TrustedProofOperationRequestAccounting.WitnessDomainOption,
+            TrustedProofOperationRequestAccounting.WitnessDomain(
+                TrustedProofRequestDomain.TrustedControlRest));
         var response = await client.SendAsync(request, cancellationToken)
             .ConfigureAwait(false);
         requestBudget.Observe(response, method);

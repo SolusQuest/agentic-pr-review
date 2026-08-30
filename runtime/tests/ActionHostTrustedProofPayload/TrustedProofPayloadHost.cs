@@ -77,7 +77,10 @@ internal static class TrustedProofPayloadHost
             coordinator = await TrustedProofStaleWindowCoordinator
                 .ResolveAsync(
                     launch!,
-                    githubBudget.CreateHandler,
+                    // Embedded stale control owns its separate ledger.  Giving
+                    // it a GitHub-budget handler would account each physical
+                    // request twice when the operation totals are assembled.
+                    ports.CreateGitHubInnerHandler,
                     controlBudget,
                     operation.Token).ConfigureAwait(false);
             var dependencies = TrustedProofPayloadComposition.CreateProductionLike(

@@ -532,7 +532,7 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("new TrustedProofControlRequestBudget", payload,
             StringComparison.Ordinal);
-        Assert.Contains("githubBudget.CreateHandler", payload,
+        Assert.Contains("ports.CreateGitHubInnerHandler", payload,
             StringComparison.Ordinal);
         Assert.Contains("controlBudget", payload, StringComparison.Ordinal);
         Assert.Contains("WriteReceipt(Console.Error)", payload,

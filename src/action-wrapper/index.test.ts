@@ -160,6 +160,7 @@ describe('W1 production composition', () => {
     const presentation = recordingToolkit({ 'github-token': 'github-canary' });
     const events = presentation.events;
     const receipts: string[] = [];
+    let artifactBudgetReceipt: ReturnType<ArtifactRestRequestBudget['receipt']> | undefined;
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
       preparedPayload: fixture.proof,
@@ -180,9 +181,10 @@ describe('W1 production composition', () => {
           },
         };
       },
-      createArtifactExecutor: async () => ({
-        execute: async () => ({ status: 'ok' }) as never,
-      }),
+      createArtifactExecutor: async (context) => {
+        artifactBudgetReceipt = context.artifactRestRequestBudget.receipt();
+        return { execute: async () => ({ status: 'ok' }) as never };
+      },
       hostProcessRunner: async (request) => {
         expect(request.requestBudgetProfile).toBe('measurement');
         return {
@@ -200,6 +202,13 @@ describe('W1 production composition', () => {
 
     expect(exit).toBe(0);
     expect(receipts).toHaveLength(1);
+    expect(artifactBudgetReceipt).toMatchObject({
+      maximum_total_authenticated_api_requests: 256,
+      maximum_primary_rate_limit_requests: 256,
+      remaining_tail_required: 0,
+      remaining_tail_reserve: 1,
+      measurement_only: true,
+    });
     const lines = receipts[0]!.trimEnd().split('\n');
     expect(lines.slice(0, 2)).toEqual([
       githubBudgetReceipt.trimEnd(),

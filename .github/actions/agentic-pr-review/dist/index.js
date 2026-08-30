@@ -50127,7 +50127,7 @@ var require_lib2 = __commonJS({
       return parsedUrl.protocol === "https:";
     }
     var HttpClient3 = class {
-      constructor(userAgent2, handlers, requestOptions2) {
+      constructor(userAgent2, handlers, requestOptions) {
         this._ignoreSslError = false;
         this._allowRedirects = true;
         this._allowRedirectDowngrade = false;
@@ -50138,29 +50138,29 @@ var require_lib2 = __commonJS({
         this._disposed = false;
         this.userAgent = this._getUserAgentWithOrchestrationId(userAgent2);
         this.handlers = handlers || [];
-        this.requestOptions = requestOptions2;
-        if (requestOptions2) {
-          if (requestOptions2.ignoreSslError != null) {
-            this._ignoreSslError = requestOptions2.ignoreSslError;
+        this.requestOptions = requestOptions;
+        if (requestOptions) {
+          if (requestOptions.ignoreSslError != null) {
+            this._ignoreSslError = requestOptions.ignoreSslError;
           }
-          this._socketTimeout = requestOptions2.socketTimeout;
-          if (requestOptions2.allowRedirects != null) {
-            this._allowRedirects = requestOptions2.allowRedirects;
+          this._socketTimeout = requestOptions.socketTimeout;
+          if (requestOptions.allowRedirects != null) {
+            this._allowRedirects = requestOptions.allowRedirects;
           }
-          if (requestOptions2.allowRedirectDowngrade != null) {
-            this._allowRedirectDowngrade = requestOptions2.allowRedirectDowngrade;
+          if (requestOptions.allowRedirectDowngrade != null) {
+            this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
           }
-          if (requestOptions2.maxRedirects != null) {
-            this._maxRedirects = Math.max(requestOptions2.maxRedirects, 0);
+          if (requestOptions.maxRedirects != null) {
+            this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
           }
-          if (requestOptions2.keepAlive != null) {
-            this._keepAlive = requestOptions2.keepAlive;
+          if (requestOptions.keepAlive != null) {
+            this._keepAlive = requestOptions.keepAlive;
           }
-          if (requestOptions2.allowRetries != null) {
-            this._allowRetries = requestOptions2.allowRetries;
+          if (requestOptions.allowRetries != null) {
+            this._allowRetries = requestOptions.allowRetries;
           }
-          if (requestOptions2.maxRetries != null) {
-            this._maxRetries = requestOptions2.maxRetries;
+          if (requestOptions.maxRetries != null) {
+            this._maxRetries = requestOptions.maxRetries;
           }
         }
       }
@@ -54237,7 +54237,7 @@ var HttpClientResponse = class {
   }
 };
 var HttpClient = class {
-  constructor(userAgent2, handlers, requestOptions2) {
+  constructor(userAgent2, handlers, requestOptions) {
     this._ignoreSslError = false;
     this._allowRedirects = true;
     this._allowRedirectDowngrade = false;
@@ -54248,29 +54248,29 @@ var HttpClient = class {
     this._disposed = false;
     this.userAgent = this._getUserAgentWithOrchestrationId(userAgent2);
     this.handlers = handlers || [];
-    this.requestOptions = requestOptions2;
-    if (requestOptions2) {
-      if (requestOptions2.ignoreSslError != null) {
-        this._ignoreSslError = requestOptions2.ignoreSslError;
+    this.requestOptions = requestOptions;
+    if (requestOptions) {
+      if (requestOptions.ignoreSslError != null) {
+        this._ignoreSslError = requestOptions.ignoreSslError;
       }
-      this._socketTimeout = requestOptions2.socketTimeout;
-      if (requestOptions2.allowRedirects != null) {
-        this._allowRedirects = requestOptions2.allowRedirects;
+      this._socketTimeout = requestOptions.socketTimeout;
+      if (requestOptions.allowRedirects != null) {
+        this._allowRedirects = requestOptions.allowRedirects;
       }
-      if (requestOptions2.allowRedirectDowngrade != null) {
-        this._allowRedirectDowngrade = requestOptions2.allowRedirectDowngrade;
+      if (requestOptions.allowRedirectDowngrade != null) {
+        this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
       }
-      if (requestOptions2.maxRedirects != null) {
-        this._maxRedirects = Math.max(requestOptions2.maxRedirects, 0);
+      if (requestOptions.maxRedirects != null) {
+        this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
       }
-      if (requestOptions2.keepAlive != null) {
-        this._keepAlive = requestOptions2.keepAlive;
+      if (requestOptions.keepAlive != null) {
+        this._keepAlive = requestOptions.keepAlive;
       }
-      if (requestOptions2.allowRetries != null) {
-        this._allowRetries = requestOptions2.allowRetries;
+      if (requestOptions.allowRetries != null) {
+        this._allowRetries = requestOptions.allowRetries;
       }
-      if (requestOptions2.maxRetries != null) {
-        this._maxRetries = requestOptions2.maxRetries;
+      if (requestOptions.maxRetries != null) {
+        this._maxRetries = requestOptions.maxRetries;
       }
     }
   }
@@ -61607,21 +61607,21 @@ var ServiceClient = class {
     }
     const options = operationArguments.options;
     if (options) {
-      const requestOptions2 = options.requestOptions;
-      if (requestOptions2) {
-        if (requestOptions2.timeout) {
-          request2.timeout = requestOptions2.timeout;
+      const requestOptions = options.requestOptions;
+      if (requestOptions) {
+        if (requestOptions.timeout) {
+          request2.timeout = requestOptions.timeout;
         }
-        if (requestOptions2.onUploadProgress) {
-          request2.onUploadProgress = requestOptions2.onUploadProgress;
+        if (requestOptions.onUploadProgress) {
+          request2.onUploadProgress = requestOptions.onUploadProgress;
         }
-        if (requestOptions2.onDownloadProgress) {
-          request2.onDownloadProgress = requestOptions2.onDownloadProgress;
+        if (requestOptions.onDownloadProgress) {
+          request2.onDownloadProgress = requestOptions.onDownloadProgress;
         }
-        if (requestOptions2.shouldDeserialize !== void 0) {
-          operationInfo.shouldDeserialize = requestOptions2.shouldDeserialize;
+        if (requestOptions.shouldDeserialize !== void 0) {
+          operationInfo.shouldDeserialize = requestOptions.shouldDeserialize;
         }
-        if (requestOptions2.allowInsecureConnection) {
+        if (requestOptions.allowInsecureConnection) {
           request2.allowInsecureConnection = true;
         }
       }
@@ -61699,7 +61699,7 @@ function isUuid(text) {
   return /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/.test(text);
 }
 var authorizeRequestOnTenantChallenge = async (challengeOptions) => {
-  const requestOptions2 = requestToOptions(challengeOptions.request);
+  const requestOptions = requestToOptions(challengeOptions.request);
   const challenge = getChallenge(challengeOptions.response);
   if (challenge) {
     const challengeInfo = parseChallenge(challenge);
@@ -61709,7 +61709,7 @@ var authorizeRequestOnTenantChallenge = async (challengeOptions) => {
       return false;
     }
     const accessToken = await challengeOptions.getAccessToken(challengeScopes, {
-      ...requestOptions2,
+      ...requestOptions,
       tenantId
     });
     if (!accessToken) {
@@ -93660,33 +93660,33 @@ function isPlainObject2(value) {
   return typeof Ctor === "function" && Ctor instanceof Ctor && Function.prototype.call(Ctor) === Function.prototype.call(value);
 }
 var noop = () => "";
-async function fetchWrapper(requestOptions2) {
-  const fetch3 = requestOptions2.request?.fetch || globalThis.fetch;
+async function fetchWrapper(requestOptions) {
+  const fetch3 = requestOptions.request?.fetch || globalThis.fetch;
   if (!fetch3) {
     throw new Error(
       "fetch is not set. Please pass a fetch implementation as new Octokit({ request: { fetch }}). Learn more at https://github.com/octokit/octokit.js/#fetch-missing"
     );
   }
-  const log2 = requestOptions2.request?.log || console;
-  const parseSuccessResponseBody = requestOptions2.request?.parseSuccessResponseBody !== false;
-  const body2 = isPlainObject2(requestOptions2.body) || Array.isArray(requestOptions2.body) ? JSONStringify(requestOptions2.body) : requestOptions2.body;
+  const log2 = requestOptions.request?.log || console;
+  const parseSuccessResponseBody = requestOptions.request?.parseSuccessResponseBody !== false;
+  const body2 = isPlainObject2(requestOptions.body) || Array.isArray(requestOptions.body) ? JSONStringify(requestOptions.body) : requestOptions.body;
   const requestHeaders = Object.fromEntries(
-    Object.entries(requestOptions2.headers).map(([name, value]) => [
+    Object.entries(requestOptions.headers).map(([name, value]) => [
       name,
       String(value)
     ])
   );
   let fetchResponse;
   try {
-    fetchResponse = await fetch3(requestOptions2.url, {
-      method: requestOptions2.method,
+    fetchResponse = await fetch3(requestOptions.url, {
+      method: requestOptions.method,
       body: body2,
-      redirect: requestOptions2.request?.redirect,
+      redirect: requestOptions.request?.redirect,
       headers: requestHeaders,
-      signal: requestOptions2.request?.signal,
+      signal: requestOptions.request?.signal,
       // duplex must be set if request.body is ReadableStream or Async Iterables.
       // See https://fetch.spec.whatwg.org/#dom-requestinit-duplex.
-      ...requestOptions2.body && { duplex: "half" }
+      ...requestOptions.body && { duplex: "half" }
     });
   } catch (error3) {
     let message = "Unknown Error";
@@ -93705,7 +93705,7 @@ async function fetchWrapper(requestOptions2) {
       }
     }
     const requestError = new RequestError(message, 500, {
-      request: requestOptions2
+      request: requestOptions
     });
     requestError.cause = error3;
     throw requestError;
@@ -93726,33 +93726,33 @@ async function fetchWrapper(requestOptions2) {
     const matches = responseHeaders.link && responseHeaders.link.match(/<([^<>]+)>; rel="deprecation"/);
     const deprecationLink = matches && matches.pop();
     log2.warn(
-      `[@octokit/request] "${requestOptions2.method} ${requestOptions2.url}" is deprecated. It is scheduled to be removed on ${responseHeaders.sunset}${deprecationLink ? `. See ${deprecationLink}` : ""}`
+      `[@octokit/request] "${requestOptions.method} ${requestOptions.url}" is deprecated. It is scheduled to be removed on ${responseHeaders.sunset}${deprecationLink ? `. See ${deprecationLink}` : ""}`
     );
   }
   if (status === 204 || status === 205) {
     return octokitResponse;
   }
-  if (requestOptions2.method === "HEAD") {
+  if (requestOptions.method === "HEAD") {
     if (status < 400) {
       return octokitResponse;
     }
     throw new RequestError(fetchResponse.statusText, status, {
       response: octokitResponse,
-      request: requestOptions2
+      request: requestOptions
     });
   }
   if (status === 304) {
     octokitResponse.data = await getResponseData(fetchResponse);
     throw new RequestError("Not modified", status, {
       response: octokitResponse,
-      request: requestOptions2
+      request: requestOptions
     });
   }
   if (status >= 400) {
     octokitResponse.data = await getResponseData(fetchResponse);
     throw new RequestError(toErrorMessage(octokitResponse.data), status, {
       response: octokitResponse,
-      request: requestOptions2
+      request: requestOptions
     });
   }
   octokitResponse.data = parseSuccessResponseBody ? await getResponseData(fetchResponse) : fetchResponse.body;
@@ -93873,7 +93873,7 @@ function graphql(request2, query, options) {
     }
   }
   const parsedOptions = typeof query === "string" ? Object.assign({ query }, options) : query;
-  const requestOptions2 = Object.keys(
+  const requestOptions = Object.keys(
     parsedOptions
   ).reduce((result, key) => {
     if (NON_VARIABLE_OPTIONS.includes(key)) {
@@ -93888,16 +93888,16 @@ function graphql(request2, query, options) {
   }, {});
   const baseUrl2 = parsedOptions.baseUrl || request2.endpoint.DEFAULTS.baseUrl;
   if (GHES_V3_SUFFIX_REGEX.test(baseUrl2)) {
-    requestOptions2.url = baseUrl2.replace(GHES_V3_SUFFIX_REGEX, "/api/graphql");
+    requestOptions.url = baseUrl2.replace(GHES_V3_SUFFIX_REGEX, "/api/graphql");
   }
-  return request2(requestOptions2).then((response) => {
+  return request2(requestOptions).then((response) => {
     if (response.data.errors) {
       const headers = {};
       for (const key of Object.keys(response.headers)) {
         headers[key] = response.headers[key];
       }
       throw new GraphqlResponseError(
-        requestOptions2,
+        requestOptions,
         headers,
         response.data
       );
@@ -96927,9 +96927,9 @@ function getRetryOptions(defaultOptions4, retries = defaultMaxRetryNumber, exemp
   if (exemptStatusCodes.length > 0) {
     retryOptions.doNotRetry = exemptStatusCodes;
   }
-  const requestOptions2 = Object.assign(Object.assign({}, defaultOptions4.request), { retries });
-  debug(`GitHub client configured with: (retries: ${requestOptions2.retries}, retry-exempt-status-code: ${(_a = retryOptions.doNotRetry) !== null && _a !== void 0 ? _a : "octokit default: [400, 401, 403, 404, 422]"})`);
-  return [retryOptions, requestOptions2];
+  const requestOptions = Object.assign(Object.assign({}, defaultOptions4.request), { retries });
+  debug(`GitHub client configured with: (retries: ${requestOptions.retries}, retry-exempt-status-code: ${(_a = retryOptions.doNotRetry) !== null && _a !== void 0 ? _a : "octokit default: [400, 401, 403, 404, 422]"})`);
+  return [retryOptions, requestOptions];
 }
 
 // node_modules/@octokit/plugin-request-log/dist-src/version.js
@@ -96940,18 +96940,18 @@ function requestLog(octokit) {
   octokit.hook.wrap("request", (request2, options) => {
     octokit.log.debug("request", options);
     const start = Date.now();
-    const requestOptions2 = octokit.request.endpoint.parse(options);
-    const path7 = requestOptions2.url.replace(options.baseUrl, "");
+    const requestOptions = octokit.request.endpoint.parse(options);
+    const path7 = requestOptions.url.replace(options.baseUrl, "");
     return request2(options).then((response) => {
       const requestId2 = response.headers["x-github-request-id"];
       octokit.log.info(
-        `${requestOptions2.method} ${path7} - ${response.status} with id ${requestId2} in ${Date.now() - start}ms`
+        `${requestOptions.method} ${path7} - ${response.status} with id ${requestId2} in ${Date.now() - start}ms`
       );
       return response;
     }).catch((error3) => {
       const requestId2 = error3.response?.headers["x-github-request-id"] || "UNKNOWN";
       octokit.log.error(
-        `${requestOptions2.method} ${path7} - ${error3.status} with id ${requestId2} in ${Date.now() - start}ms`
+        `${requestOptions.method} ${path7} - ${error3.status} with id ${requestId2} in ${Date.now() - start}ms`
       );
       throw error3;
     });
@@ -97618,7 +97618,7 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
         latestAttemptStartAt,
         async (etag) => await octokit.rest.actions.listArtifactsForRepo({
           ...input,
-          request: requestOptions(signal, etag)
+          ...conditionalRequestOptions(signal, etag)
         })
       );
     },
@@ -97632,7 +97632,7 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
           latestAttemptStartAt,
           async (etag) => await octokit.rest.actions.getArtifact({
             ...input,
-            request: requestOptions(signal, etag)
+            ...conditionalRequestOptions(signal, etag)
           })
         );
       } catch (error3) {
@@ -97701,7 +97701,7 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
         latestAttemptStartAt,
         async (etag) => await octokit.rest.actions.getWorkflowRunAttempt({
           ...input,
-          request: requestOptions(signal, etag)
+          ...conditionalRequestOptions(signal, etag)
         })
       );
     },
@@ -97819,8 +97819,11 @@ var ConditionalGetCacheError = class extends Error {
     this.name = "ConditionalGetCacheError";
   }
 };
-function requestOptions(signal, etag) {
-  return etag === void 0 ? { signal } : { signal, headers: { "if-none-match": etag } };
+function conditionalRequestOptions(signal, etag) {
+  return {
+    request: { signal },
+    ...etag === void 0 ? {} : { headers: { "if-none-match": etag } }
+  };
 }
 function validEtag(value) {
   return value !== void 0 && value.length > 0 && value.length <= 512 && /^[\x21-\x7e]+$/.test(value);
@@ -97948,13 +97951,8 @@ function abortError() {
 // src/action-wrapper/artifact-bridge/artifact-rest-request-budget.ts
 var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = "r4-w2";
 var TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS = Object.freeze({
-  maximumTotalAuthenticatedApiRequests: 32,
-  maximumPrimaryRateLimitRequests: 32
-});
-var TRUSTED_PROOF_ARTIFACT_REST_FINAL_PROFILE_RESERVE = Object.freeze({
-  // A nonzero measurement sentinel keeps compound reservations from silently
-  // treating the future final-profile tail as available capacity.
-  crossRolePrimaryTail: 1
+  maximumTotalAuthenticatedApiRequests: 256,
+  maximumPrimaryRateLimitRequests: 256
 });
 var DEFAULT_MAXIMUM_SECONDARY_POINTS_PER_ROLLING_MINUTE = 600;
 var DEFAULT_MINIMUM_MUTATIVE_SPACING_MS = 1e3;
@@ -97976,10 +97974,11 @@ var ArtifactRestRateLimitHeadersError = class extends Error {
   }
 };
 var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
-  constructor(protectedRoute, limits, secondaryRateLimit, identity2) {
+  constructor(protectedRoute, limits, secondaryRateLimit, identity2, profile) {
     this.protectedRoute = protectedRoute;
     this.limits = limits;
     this.identity = identity2;
+    this.profile = profile;
     this.epochSeconds = secondaryRateLimit?.epochSeconds ?? (() => Math.floor(Date.now() / 1e3));
     if (protectedRoute) {
       this.secondaryRateLimiter = new ArtifactRestSecondaryRateLimiter(secondaryRateLimit);
@@ -97988,6 +97987,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
   protectedRoute;
   limits;
   identity;
+  profile;
   totalRequests = 0;
   primaryRateLimitRequests = 0;
   primaryReservations = 0;
@@ -98011,11 +98011,20 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
   secondaryRateLimiter;
   epochSeconds;
   static forVerifiedPreparedPayload(input) {
-    const limits = input.limits ?? TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS;
+    const protectedRoute = input.buildDiscriminator === TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR;
+    if (protectedRoute && !validProfile(input.profile)) {
+      throw new Error("artifact_rest_request_budget_profile_invalid");
+    }
+    if (!protectedRoute && input.profile !== void 0) {
+      throw new Error("artifact_rest_request_budget_profile_invalid");
+    }
+    if (protectedRoute && input.limits !== void 0) {
+      throw new Error("artifact_rest_request_budget_profile_invalid");
+    }
+    const limits = protectedRoute ? input.profile.limits : input.limits ?? TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS;
     if (!positiveInteger2(limits.maximumTotalAuthenticatedApiRequests) || !positiveInteger2(limits.maximumPrimaryRateLimitRequests)) {
       throw new Error("artifact_rest_request_budget_limits_invalid");
     }
-    const protectedRoute = input.buildDiscriminator === TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR;
     if (protectedRoute && !validIdentity(input.identity)) {
       throw new Error("artifact_rest_request_budget_identity_invalid");
     }
@@ -98023,7 +98032,8 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       protectedRoute,
       limits,
       input.secondaryRateLimit,
-      input.identity
+      input.identity,
+      input.profile
     );
   }
   async runAuthenticatedApiCall(dispatch, call) {
@@ -98065,7 +98075,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < input.primaryRequests + TRUSTED_PROOF_ARTIFACT_REST_FINAL_PROFILE_RESERVE.crossRolePrimaryTail) {
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining <= input.primaryRequests + this.requiredTailAndReserve()) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98098,8 +98108,8 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       throw new ArtifactRestRateLimitHeadersError();
     }
     if (this.disposition !== "active") throw new ArtifactRestRequestBudgetError(this.disposition);
-    const requiredWithFinalProfileTail = required2 + TRUSTED_PROOF_ARTIFACT_REST_FINAL_PROFILE_RESERVE.crossRolePrimaryTail;
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < requiredWithFinalProfileTail) {
+    const requiredWithFinalProfileTail = required2 + this.requiredTailAndReserve();
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining <= requiredWithFinalProfileTail) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98167,10 +98177,10 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       build_discriminator: this.identity?.buildDiscriminator ?? null,
       run_id: this.identity?.runId ?? null,
       run_attempt: this.identity?.runAttempt ?? null,
-      cap_profile: this.protectedRoute ? TRUSTED_PROOF_ARTIFACT_REST_CAP_PROFILE : null,
-      // The exact route cap is recorded while the enclosing proof is still
-      // measurement-only; it does not claim a final cross-role allocation.
-      measurement_only: this.protectedRoute ? true : null
+      cap_profile: this.profile?.capProfile ?? null,
+      measurement_only: this.profile?.measurementOnly ?? null,
+      remaining_tail_required: this.profile?.remainingTailRequired ?? null,
+      remaining_tail_reserve: this.profile?.remainingTailReserve ?? null
     };
   }
   /** A protected-route receipt is safe to forward to the wrapper stderr sink. */
@@ -98234,7 +98244,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       this.disposition = "total_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < 1) {
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining <= 1 + this.requiredTailAndReserve()) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98282,17 +98292,23 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       this.disposition = "invalid_rate_limit_headers";
       throw new ArtifactRestRateLimitHeadersError();
     }
-    if (remaining.value !== void 0) this.observedPrimaryRemaining = remaining.value;
     const primary = rateLimitStatus && primarySignalled && reset.value !== void 0;
     const secondary = rateLimitStatus && (retryAfter.value !== void 0 || secondaryMessage.secondary);
     if (status === 429 && !primary && !secondary) {
       this.disposition = "invalid_rate_limit_headers";
       throw new ArtifactRestRateLimitHeadersError();
     }
+    const disposition = primary && secondary ? "primary_and_secondary_rate_limited" : primary ? "primary_exhausted" : secondary ? "rate_limited" : void 0;
+    if (remaining.value !== void 0) {
+      this.observedPrimaryRemaining = remaining.value;
+      if (remaining.value <= this.requiredTailAndReserve() && disposition === void 0) {
+        this.disposition = "primary_exhausted";
+      }
+    }
     return {
       suppliedRemaining: remaining.value !== void 0,
       permissionDenied: status === 403 && !primary && !secondary,
-      disposition: primary && secondary ? "primary_and_secondary_rate_limited" : primary ? "primary_exhausted" : secondary ? "rate_limited" : void 0
+      disposition
     };
   }
   releaseMutationReservation(reservation) {
@@ -98303,6 +98319,9 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
     this.reservedMutationPrimaryRequests -= reservation.remainingPrimaryRequests;
     this.reservedMutationSecondaryPoints -= reservation.remainingSecondaryPoints;
     this.activeMutationReservation = void 0;
+  }
+  requiredTailAndReserve() {
+    return (this.profile?.remainingTailRequired ?? 0) + (this.profile?.remainingTailReserve ?? 0);
   }
 };
 function header2(headers, name) {
@@ -98549,6 +98568,9 @@ function lowerHex(value, length) {
 }
 function positiveInteger2(value) {
   return Number.isSafeInteger(value) && value > 0;
+}
+function validProfile(value) {
+  return value !== void 0 && value.capProfile === TRUSTED_PROOF_ARTIFACT_REST_CAP_PROFILE && typeof value.limits === "object" && value.limits !== null && nonNegativeInteger(value.remainingTailRequired) && positiveInteger2(value.remainingTailReserve) && typeof value.measurementOnly === "boolean";
 }
 function nonNegativeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -101436,6 +101458,22 @@ async function within(promise, timeoutMs) {
 // src/action-wrapper/launcher/request-budget-profile.ts
 var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
 var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
+var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
+  capProfile: "apr-r4-artifact-rest-request-budget-v2",
+  limits: Object.freeze({
+    maximumTotalAuthenticatedApiRequests: 256,
+    maximumPrimaryRateLimitRequests: 256
+  }),
+  remainingTailRequired: 0,
+  remainingTailReserve: 1,
+  measurementOnly: true
+});
+function artifactRestRequestBudgetProfile(profile) {
+  switch (profile) {
+    case "measurement":
+      return TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+  }
+}
 function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment = process.env) {
   if (buildDiscriminator2 !== TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2) {
     return void 0;
@@ -101835,7 +101873,8 @@ async function runPrivateActionWrapperWithSeams(seams) {
         buildDiscriminator: prepared.buildDiscriminator,
         runId: runtimeFacts.runId,
         runAttempt: runtimeFacts.runAttempt
-      }
+      },
+      ...requestBudgetProfile === void 0 ? {} : { profile: artifactRestRequestBudgetProfile(requestBudgetProfile) }
     });
     try {
       const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
@@ -102045,4 +102084,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 8a6e67909342c277a1fc7fb0992154e498171b3fe1c4b10acef49012e9d4eaf0
+// Action source inventory sha256: 76dbace2c2f2ad50b88bbdd51bcd51f058e7cdac32718e41e3babc93beb12073

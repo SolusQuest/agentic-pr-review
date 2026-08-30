@@ -72,8 +72,23 @@ internal sealed class TrustedProofGitHubRequestBudget
             (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     }
 
-    internal HttpMessageHandler CreateHandler() =>
-        new BudgetHandler(this, _innerFactory());
+    // Keep CreateHandler as the ordinary route for the coordinator and older
+    // focused tests.  Reviewed-head acquisition must opt into the distinct
+    // handler below; a 40-character path segment alone is not semantic
+    // evidence of the reviewed head.
+    internal HttpMessageHandler CreateHandler() => CreateOtherGitHubHandler();
+
+    internal HttpMessageHandler CreateOtherGitHubHandler() =>
+        new BudgetHandler(
+            this,
+            _innerFactory(),
+            TrustedProofRequestDomain.HostOtherGitHubRest);
+
+    internal HttpMessageHandler CreateHeadSourceHandler() =>
+        new BudgetHandler(
+            this,
+            _innerFactory(),
+            TrustedProofRequestDomain.HostHeadSourceRest);
 
     internal bool IsRateLimited => Volatile.Read(ref _rateLimited) != 0;
 
@@ -184,11 +199,11 @@ internal sealed class TrustedProofGitHubRequestBudget
     };
 
     private void Observe(
-        Uri uri,
+        TrustedProofRequestDomain domain,
         HttpRequestMessage request,
         HttpResponseMessage response)
     {
-        var head = IsHeadSource(uri.AbsolutePath);
+        var head = domain == TrustedProofRequestDomain.HostHeadSourceRest;
         if (head) Interlocked.Increment(ref _headSourceRaw);
         else Interlocked.Increment(ref _otherGitHubRaw);
         if (response.StatusCode == HttpStatusCode.NotModified)
@@ -238,26 +253,11 @@ internal sealed class TrustedProofGitHubRequestBudget
 
         if (TrustedProofOperationRequestAccounting.RemainingRequiresFailClosed(response,
                 _remainingTailGuard,
-                head ? TrustedProofRequestDomain.HostHeadSourceRest :
-                    TrustedProofRequestDomain.HostOtherGitHubRest))
+                domain))
         {
             Interlocked.Exchange(ref _lowRemainingGuard, 1);
             Interlocked.Exchange(ref _rateLimited, 1);
         }
-    }
-
-    private static bool IsHeadSource(string path)
-    {
-        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var candidate = parts.Length switch
-        {
-            6 when parts[0] == "repos" && parts[3] == "git" &&
-                parts[4] is "commits" or "trees" => parts[5],
-            5 when parts[0] == "repos" && parts[3] == "tarball" => parts[4],
-            _ => null,
-        };
-        return candidate is not null && candidate.Length == 40 &&
-            candidate.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
     }
 
     private static bool IsRead(HttpMethod method) => method == HttpMethod.Get ||
@@ -265,7 +265,8 @@ internal sealed class TrustedProofGitHubRequestBudget
 
     private sealed class BudgetHandler(
         TrustedProofGitHubRequestBudget budget,
-        HttpMessageHandler inner) : DelegatingHandler(inner)
+        HttpMessageHandler inner,
+        TrustedProofRequestDomain domain) : DelegatingHandler(inner)
     {
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -295,9 +296,12 @@ internal sealed class TrustedProofGitHubRequestBudget
                     return budget.RateLimited(request);
                 }
 
+                request.Options.Set(
+                    TrustedProofOperationRequestAccounting.WitnessDomainOption,
+                    TrustedProofOperationRequestAccounting.WitnessDomain(domain));
                 var response = await base.SendAsync(request, cancellationToken)
                     .ConfigureAwait(false);
-                budget.Observe(uri, request, response);
+                budget.Observe(domain, request, response);
                 if (!budget.IsRateLimited)
                 {
                     return response;

@@ -1,11 +1,14 @@
+import { getOctokit } from '@actions/github';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createArtifactActionsRestClient } from './actions-rest-client.js';
 import {
   ArtifactRestRequestBudget,
+  type ArtifactRestRequestBudgetProfile,
   type ArtifactRestSecondaryRateLimitOptions,
   TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS,
 } from './artifact-rest-request-budget.js';
+import { TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE } from '../launcher/request-budget-profile.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -72,16 +75,104 @@ describe('bounded artifact archive acquisition', () => {
 });
 
 describe('trusted proof artifact REST budget', () => {
-  it('freezes the r4-w2 raw and primary production caps at 32 during measurement', () => {
+  it('uses the r4-w2 measurement profile with explicit 256 raw and primary caps', () => {
     expect(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS).toEqual({
-      maximumTotalAuthenticatedApiRequests: 32,
-      maximumPrimaryRateLimitRequests: 32,
+      maximumTotalAuthenticatedApiRequests: 256,
+      maximumPrimaryRateLimitRequests: 256,
     });
     expect(trustedProofBudget().receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 32,
-      maximum_primary_rate_limit_requests: 32,
+      maximum_total_authenticated_api_requests: 256,
+      maximum_primary_rate_limit_requests: 256,
       measurement_only: true,
+      remaining_tail_required: 0,
+      remaining_tail_reserve: 1,
     });
+  });
+
+  it('allows 256 measured authenticated requests and rejects the 257th before wire dispatch', async () => {
+    let now = 0;
+    const budget = trustedProofBudget(undefined, {
+      now: () => now,
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+    });
+    for (let index = 0; index < 256; index += 1) {
+      await runGet(budget);
+    }
+
+    await expect(runGet(budget)).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_total_exhausted',
+    );
+    expect(budget.receipt()).toMatchObject({
+      maximum_total_authenticated_api_requests: 256,
+      total_authenticated_api_requests: 256,
+      maximum_primary_rate_limit_requests: 256,
+      primary_rate_limit_requests: 256,
+      remaining_tail_required: 0,
+      remaining_tail_reserve: 1,
+      disposition: 'total_exhausted',
+    });
+  });
+
+  it('fails closed immediately at the observed tail-plus-reserve boundary', async () => {
+    const profile = {
+      ...TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+      remainingTailRequired: 3,
+      remainingTailReserve: 5,
+      measurementOnly: false,
+    };
+    const budget = () =>
+      ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+        buildDiscriminator: 'r4-w2',
+        identity: trustedProofIdentity(),
+        profile,
+      });
+    const observeRemaining = async (value: ArtifactRestRequestBudget, remaining: number) => {
+      await value.runAuthenticatedApiCall(
+        { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+        async () => ({ status: 200, headers: { 'x-ratelimit-remaining': String(remaining) } }),
+      );
+    };
+
+    const atBoundary = budget();
+    await observeRemaining(atBoundary, 8);
+    expect(atBoundary.receipt()).toMatchObject({ disposition: 'primary_exhausted' });
+    await expect(runGet(atBoundary)).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+
+    const allocation = budget();
+    await observeRemaining(allocation, 9);
+    expect(() => allocation.requireObservedPrimaryAllocation(1)).toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+
+    const mutation = budget();
+    await observeRemaining(mutation, 9);
+    expect(() =>
+      mutation.reserveMutation({
+        authenticatedRequests: 1,
+        primaryRequests: 1,
+        secondaryPoints: 1,
+      }),
+    ).toThrow('trusted_proof_artifact_rest_budget_primary_exhausted');
+
+    const dispatch = budget();
+    await observeRemaining(dispatch, 9);
+    await expect(runGet(dispatch)).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+    expect(dispatch.receipt()).toMatchObject({
+      measurement_only: false,
+      remaining_tail_required: 3,
+      remaining_tail_reserve: 5,
+    });
+
+    const boundaryPlusOne = budget();
+    await observeRemaining(boundaryPlusOne, 10);
+    expect(() => boundaryPlusOne.requireObservedPrimaryAllocation(1)).not.toThrow();
+    await expect(runGet(boundaryPlusOne)).resolves.toMatchObject({ status: 200 });
   });
 
   it.each([
@@ -92,9 +183,40 @@ describe('trusted proof artifact REST budget', () => {
     expect(() =>
       ArtifactRestRequestBudget.forVerifiedPreparedPayload({
         buildDiscriminator: 'r4-w2',
-        limits,
+        profile: {
+          ...TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+          limits,
+        },
       }),
     ).toThrow('artifact_rest_request_budget_limits_invalid');
+  });
+
+  it('rejects a protected caller limit override instead of reporting a mismatched profile', () => {
+    expect(() =>
+      ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+        buildDiscriminator: 'r4-w2',
+        identity: trustedProofIdentity(),
+        limits: { maximumTotalAuthenticatedApiRequests: 2, maximumPrimaryRateLimitRequests: 2 },
+        profile: TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+      }),
+    ).toThrow('artifact_rest_request_budget_profile_invalid');
+  });
+
+  it.each([
+    {
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile: undefined,
+    },
+    {
+      buildDiscriminator: 'r4-h1',
+      identity: undefined,
+      profile: TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+    },
+  ])('admits a budget profile only for the verified protected route', (input) => {
+    expect(() => ArtifactRestRequestBudget.forVerifiedPreparedPayload(input)).toThrow(
+      'artifact_rest_request_budget_profile_invalid',
+    );
   });
 
   it.each([
@@ -106,6 +228,7 @@ describe('trusted proof artifact REST budget', () => {
       ArtifactRestRequestBudget.forVerifiedPreparedPayload({
         buildDiscriminator: 'r4-w2',
         identity: identity as ReturnType<typeof trustedProofIdentity>,
+        profile: TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
       }),
     ).toThrow('artifact_rest_request_budget_identity_invalid');
   });
@@ -166,6 +289,8 @@ describe('trusted proof artifact REST budget', () => {
       run_attempt: '1',
       cap_profile: 'apr-r4-artifact-rest-request-budget-v2',
       measurement_only: true,
+      remaining_tail_required: 0,
+      remaining_tail_reserve: 1,
     });
   });
 
@@ -438,7 +563,8 @@ describe('trusted proof artifact REST budget', () => {
 
     expect(getArtifact).toHaveBeenCalledTimes(2);
     expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
-      request: { headers: { 'if-none-match': '"artifact-v1"' } },
+      headers: { 'if-none-match': '"artifact-v1"' },
+      request: { signal: expect.anything() },
     });
     expect(budget.receipt()).toMatchObject({
       total_authenticated_api_requests: 2,
@@ -450,9 +576,70 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
+  it('sends conditional headers on the real Octokit wire and reuses 304 data', async () => {
+    const requests: Array<{ readonly url: string; readonly headers: HeadersInit | undefined }> = [];
+    const counts = new Map<string, number>();
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      const count = counts.get(url) ?? 0;
+      counts.set(url, count + 1);
+      requests.push({ url, headers: init?.headers });
+      if (count > 0) return new Response(null, { status: 304 });
+      const data = url.includes('/actions/artifacts/')
+        ? artifact()
+        : url.includes('/actions/artifacts')
+          ? { total_count: 0, artifacts: [] }
+          : { id: 900, run_attempt: 1 };
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { 'content-type': 'application/json', etag: '"fixture-v1"' },
+      });
+    };
+    const octokit = getOctokit('synthetic-token', {
+      baseUrl: 'https://api.fixture.invalid',
+      request: { fetch },
+    });
+    const budget = trustedProofBudget({ total: 8, primary: 8 });
+    const client = createArtifactActionsRestClient(octokit, budget);
+
+    await client.listArtifactsForRepo(listInput(), signal());
+    await client.listArtifactsForRepo(listInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+    await client.getWorkflowRunAttempt(
+      { owner: 'owner', repo: 'repo', run_id: 900, attempt_number: 1 },
+      signal(),
+    );
+    await client.getWorkflowRunAttempt(
+      { owner: 'owner', repo: 'repo', run_id: 900, attempt_number: 1 },
+      signal(),
+    );
+
+    expect(requests).toHaveLength(6);
+    expect(requests.slice(1).filter((_, index) => index % 2 === 0)).toEqual([
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'if-none-match': '"fixture-v1"' }),
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'if-none-match': '"fixture-v1"' }),
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'if-none-match': '"fixture-v1"' }),
+      }),
+    ]);
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 6,
+      primary_rate_limit_requests: 3,
+      conditional_not_modified_requests: 3,
+    });
+  });
+
   it('does not dispatch a possibly charged conditional GET after the primary cap is reserved', async () => {
     const getArtifact = vi.fn(
-      async (_input: { readonly request?: { readonly headers?: unknown } }) => ({
+      async (_input: {
+        readonly headers?: unknown;
+        readonly request?: { readonly headers?: unknown };
+      }) => ({
         status: 200,
         headers: { etag: '"artifact-v1"' },
         data: artifact(),
@@ -507,12 +694,13 @@ describe('trusted proof artifact REST budget', () => {
     await client.getArtifact(artifactInput(), signal());
 
     expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
-      request: { headers: { 'if-none-match': '"artifact-v1"' } },
+      headers: { 'if-none-match': '"artifact-v1"' },
+      request: { signal: expect.anything() },
     });
     expect(getArtifact.mock.calls[2]?.[0]).toMatchObject({
       request: { signal: expect.anything() },
     });
-    expect(getArtifact.mock.calls[2]?.[0].request.headers).toBeUndefined();
+    expect(getArtifact.mock.calls[2]?.[0].headers).toBeUndefined();
   });
 
   it('clears repository conditional representations before a delete mutation', async () => {
@@ -542,7 +730,7 @@ describe('trusted proof artifact REST budget', () => {
     expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
       request: { signal: expect.anything() },
     });
-    expect(getArtifact.mock.calls[1]?.[0]?.request?.headers).toBeUndefined();
+    expect(getArtifact.mock.calls[1]?.[0]?.headers).toBeUndefined();
   });
 
   it('marks deletion at the immediate pre-wire boundary', async () => {
@@ -599,7 +787,10 @@ describe('trusted proof artifact REST budget', () => {
     vi.stubGlobal('structuredClone', clone);
     const oversized = { payload: 'x'.repeat(256 * 1024) };
     const getArtifact = vi.fn(
-      async (_input: { readonly request?: { readonly headers?: unknown } }) => ({
+      async (_input: {
+        readonly headers?: unknown;
+        readonly request?: { readonly headers?: unknown };
+      }) => ({
         status: 200,
         headers: { etag: '"oversized"' },
         data: oversized,
@@ -614,7 +805,7 @@ describe('trusted proof artifact REST budget', () => {
     await client.getArtifact(artifactInput(), signal());
 
     expect(getArtifact).toHaveBeenCalledTimes(2);
-    expect(getArtifact.mock.calls[1]?.[0]?.request?.headers).toBeUndefined();
+    expect(getArtifact.mock.calls[1]?.[0]?.headers).toBeUndefined();
     expect(clone).not.toHaveBeenCalled();
   });
 
@@ -622,6 +813,7 @@ describe('trusted proof artifact REST budget', () => {
     const getArtifact = vi.fn(
       async (input: {
         readonly artifact_id: number;
+        readonly headers?: unknown;
         readonly request?: { readonly headers?: unknown };
       }) => ({
         status: 200,
@@ -640,7 +832,7 @@ describe('trusted proof artifact REST budget', () => {
     await client.getArtifact({ owner: 'owner', repo: 'repo', artifact_id: 1 }, signal());
 
     expect(getArtifact).toHaveBeenCalledTimes(3);
-    expect(getArtifact.mock.calls[2]?.[0]?.request?.headers).toBeUndefined();
+    expect(getArtifact.mock.calls[2]?.[0]?.headers).toBeUndefined();
   });
 
   it('makes a returned secondary rate limit sticky before later authenticated dispatches', async () => {
@@ -862,7 +1054,7 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('allows ordinary successful zero remaining but blocks the next charged dispatch', async () => {
+  it('makes an ordinary successful zero remaining response immediately sticky', async () => {
     const getArtifact = vi.fn(async () => ({
       status: 200,
       headers: {
@@ -880,7 +1072,7 @@ describe('trusted proof artifact REST budget', () => {
     );
 
     await client.getArtifact(artifactInput(), signal());
-    expect(budget.receipt().disposition).toBe('active');
+    expect(budget.receipt().disposition).toBe('primary_exhausted');
     await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
       'trusted_proof_artifact_rest_budget_primary_exhausted',
     );
@@ -1135,7 +1327,7 @@ describe('trusted proof artifact REST budget', () => {
       .fn()
       .mockResolvedValueOnce({
         status: 200,
-        headers: { etag: '"artifact-v1"', 'x-ratelimit-remaining': '1' },
+        headers: { etag: '"artifact-v1"', 'x-ratelimit-remaining': '3' },
         data: artifact(),
       })
       .mockRejectedValueOnce(
@@ -1221,6 +1413,8 @@ describe('trusted proof artifact REST budget', () => {
       run_attempt: null,
       cap_profile: null,
       measurement_only: null,
+      remaining_tail_required: null,
+      remaining_tail_reserve: null,
     });
   });
 });
@@ -1265,13 +1459,23 @@ function trustedProofBudget(
 ): ArtifactRestRequestBudget {
   return ArtifactRestRequestBudget.forVerifiedPreparedPayload({
     buildDiscriminator: 'r4-w2',
+    secondaryRateLimit,
+    identity: trustedProofIdentity(),
+    profile: trustedProofProfile(limits),
+  });
+}
+
+function trustedProofProfile(limits: {
+  readonly total: number;
+  readonly primary: number;
+}): ArtifactRestRequestBudgetProfile {
+  return {
+    ...TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
     limits: {
       maximumTotalAuthenticatedApiRequests: limits.total,
       maximumPrimaryRateLimitRequests: limits.primary,
     },
-    secondaryRateLimit,
-    identity: trustedProofIdentity(),
-  });
+  };
 }
 
 function nonProofBudget(

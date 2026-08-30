@@ -88,6 +88,8 @@ public sealed class TrustedProofControlTests
         Assert.Equal(0, exit);
         Assert.All(handler.Requests, request =>
             Assert.Equal(HttpMethod.Get, request.Method));
+        Assert.All(handler.Requests, request =>
+            Assert.Equal("trusted_control_rest", request.Domain));
         Assert.Contains(handler.Requests, request =>
             request.Path.Contains(
                 "/collaborators/maintainer/permission",
@@ -115,6 +117,25 @@ public sealed class TrustedProofControlTests
             request.Path.EndsWith("/pulls/147", StringComparison.Ordinal)));
         Assert.DoesNotContain(handler.Requests, request =>
             request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task FixturePullRequestPreflightIsTaggedAsControlOnly()
+    {
+        var budget = new TrustedProofControlRequestBudget(maximumRequests: 1);
+        var handler = new DomainRecordingHandler();
+
+        var result = await TrustedProofControlTransport.ReadFixturePullRequestAsync(
+            Coordinates.Repository,
+            Coordinates.PullRequestNumber,
+            "github-token-canary",
+            handler,
+            budget,
+            CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(1, budget.Consumed);
+        Assert.Equal("trusted_control_rest", handler.Domain);
     }
 
     [Fact]
@@ -508,7 +529,7 @@ public sealed class TrustedProofControlTests
                 pullRequestBaseShas ?? [Coordinates.WorkflowSha]);
         }
 
-        internal List<(HttpMethod Method, string Path)> Requests { get; } = [];
+        internal List<(HttpMethod Method, string Path, string? Domain)> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -516,7 +537,10 @@ public sealed class TrustedProofControlTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             var path = request.RequestUri!.PathAndQuery;
-            Requests.Add((request.Method, path));
+            request.Options.TryGetValue(
+                TrustedProofOperationRequestAccounting.WitnessDomainOption,
+                out string? domain);
+            Requests.Add((request.Method, path, domain));
             if (request.Method == HttpMethod.Get &&
                 path.EndsWith("/pulls/147", StringComparison.Ordinal))
             {
@@ -647,6 +671,23 @@ public sealed class TrustedProofControlTests
                 value["role_name"] = "write";
                 value["user"] = new JsonObject { ["login"] = "maintainer" };
             }
+        }
+    }
+
+    private sealed class DomainRecordingHandler : HttpMessageHandler
+    {
+        internal string? Domain { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            request.Options.TryGetValue(
+                TrustedProofOperationRequestAccounting.WitnessDomainOption,
+                out string? domain);
+            Domain = domain;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }
 

@@ -48,7 +48,7 @@ export function createArtifactActionsRestClient(
         async (etag) =>
           await octokit.rest.actions.listArtifactsForRepo({
             ...input,
-            request: requestOptions(signal, etag),
+            ...conditionalRequestOptions(signal, etag),
           }),
       );
     },
@@ -63,7 +63,7 @@ export function createArtifactActionsRestClient(
           async (etag) =>
             await octokit.rest.actions.getArtifact({
               ...input,
-              request: requestOptions(signal, etag),
+              ...conditionalRequestOptions(signal, etag),
             }),
         );
       } catch (error) {
@@ -137,7 +137,7 @@ export function createArtifactActionsRestClient(
         async (etag) =>
           await octokit.rest.actions.getWorkflowRunAttempt({
             ...input,
-            request: requestOptions(signal, etag),
+            ...conditionalRequestOptions(signal, etag),
           }),
       );
     },
@@ -297,8 +297,11 @@ class ConditionalGetCacheError extends Error {
   }
 }
 
-function requestOptions(signal: AbortSignal, etag: string | undefined) {
-  return etag === undefined ? { signal } : { signal, headers: { 'if-none-match': etag } };
+function conditionalRequestOptions(signal: AbortSignal, etag: string | undefined) {
+  return {
+    request: { signal },
+    ...(etag === undefined ? {} : { headers: { 'if-none-match': etag } }),
+  };
 }
 
 function validEtag(value: string | undefined): value is string {

@@ -773,6 +773,8 @@ internal static class FrameworkSupervisor
                 process.Id, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         var platformQuiet = await WaitForPlatformQuietAsync(platform,
             TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        var canonicalRequestEvents = !spec.TrustedProofPayload ||
+            MaterializeScenarioRequestEvents(scenario);
         var expected = spec.CrashAfterGate is not null
             ? crashGateReached && process.ExitCode != 0
             : spec.ExpectedStatus == "wrapper_failure"
@@ -874,6 +876,7 @@ internal static class FrameworkSupervisor
         var passed = exited && expected && barrierAfterPassed && noLeak &&
             closedEnvironment && reorderedHistoryRejected && outputUnchanged &&
             groupQuiet && platformQuiet && continuation &&
+            canonicalRequestEvents &&
             successfulContinuation && sixTools && signalGateReached &&
             hostInitializationObserved &&
             noProviderSatisfied && providerCountSatisfied &&
@@ -900,6 +903,7 @@ internal static class FrameworkSupervisor
                     ("output_unchanged", outputUnchanged),
                     ("process_group_quiet", groupQuiet),
                     ("platform_quiet", platformQuiet),
+                    ("canonical_request_events", canonicalRequestEvents),
                     ("continuation_observed", continuation),
                     ("successful_continuation", successfulContinuation),
                     ("tool_sequence_satisfied", sixTools),
@@ -4354,10 +4358,170 @@ internal static class FrameworkSupervisor
                     cleanup.Sum(value => value.Primary)))));
     }
 
-    // Only normalized, secret-free fixture observations are admitted here.
-    // The platform records the timestamp at listener dispatch, before route
-    // handling, so the half-open rolling-window calculation cannot be
-    // satisfied by delaying response serialization.
+    // The final per-scenario witness is materialized only after every process
+    // is quiet. Platform data owns Node/data-plane observations; the verifier
+    // traces own Host/control observations.  Joining both sources here avoids
+    // treating a forwarding listener as an authoritative duplicate of a
+    // producer's request path.
+    private static bool MaterializeScenarioRequestEvents(string scenario)
+    {
+        var eventsPath = Path.Join(scenario, "trusted-proof-request-events.tsv");
+        if (!TryReadPlatformWitness(eventsPath, out var platform) ||
+            !TryReadVerifierWitness(Path.Join(scenario,
+                    "verifier-github-requests.tsv"), "verifier_github",
+                new HashSet<string>([
+                    "host_head_source_rest", "host_other_github_rest",
+                    "trusted_control_rest",
+                ], StringComparer.Ordinal),
+                out var github) ||
+            !TryReadVerifierWitness(Path.Join(scenario,
+                    "verifier-control-requests.tsv"), "verifier_control",
+                new HashSet<string>(["trusted_control_rest"],
+                    StringComparer.Ordinal), out var control))
+        {
+            return false;
+        }
+
+        if (platform.Any(value => value.Domain is not (
+                "node_artifact_rest" or "actions_results_service" or
+                "anonymous_transfers")))
+        {
+            // Host and control are direct verifier-owned transports in this
+            // fixture. Seeing either in the platform stream is topology drift,
+            // not a duplicate that may be discarded silently.
+            return false;
+        }
+
+        var merged = platform.Concat(github).Concat(control)
+            .OrderBy(value => value.Timestamp)
+            .ThenBy(value => value.SourcePriority)
+            .ThenBy(value => value.Domain, StringComparer.Ordinal)
+            .ThenBy(value => value.Route, StringComparer.Ordinal)
+            .ThenBy(value => value.Method, StringComparer.Ordinal)
+            .ThenBy(value => value.Points)
+            .ThenBy(value => value.Response, StringComparer.Ordinal)
+            .ThenBy(value => value.LocalSequence)
+            .ToArray();
+        if (merged.Length == 0) return false;
+
+        File.WriteAllLines(eventsPath, merged.Select(value => value.ToTsv()));
+        var domains = new[]
+        {
+            "node_artifact_rest", "host_head_source_rest",
+            "host_other_github_rest", "trusted_control_rest",
+            "actions_results_service", "anonymous_transfers",
+        };
+        File.WriteAllLines(Path.Join(scenario, "trusted-proof-request-domains.tsv"),
+            domains.Select(domain => domain + "\t" + merged.Count(value =>
+                value.Domain == domain).ToString(CultureInfo.InvariantCulture)));
+        return true;
+    }
+
+    internal static bool MaterializeScenarioRequestEventsForTest(string scenario) =>
+        MaterializeScenarioRequestEvents(scenario);
+
+    private static bool TryReadPlatformWitness(
+        string path,
+        out IReadOnlyList<ScenarioWitnessEvent> events)
+    {
+        events = [];
+        if (!File.Exists(path)) return false;
+        var parsed = new List<ScenarioWitnessEvent>();
+        var localSequence = 0;
+        foreach (var line in File.ReadLines(path))
+        {
+            localSequence++;
+            if (line.Split('\t') is not [var domain, var route, var method,
+                    var points, var timestamp, var response] ||
+                !TryParseWitnessFields(domain, route, method, points, timestamp,
+                    response, out var eventFields))
+            {
+                return false;
+            }
+            parsed.Add(new ScenarioWitnessEvent("platform", 0, localSequence,
+                eventFields.Domain, eventFields.Route, eventFields.Method,
+                eventFields.Points, eventFields.Timestamp,
+                eventFields.Response));
+        }
+        events = parsed;
+        return true;
+    }
+
+    private static bool TryReadVerifierWitness(
+        string path,
+        string expectedSource,
+        IReadOnlySet<string> expectedDomains,
+        out IReadOnlyList<ScenarioWitnessEvent> events)
+    {
+        events = [];
+        if (!File.Exists(path)) return false;
+        var parsed = new List<ScenarioWitnessEvent>();
+        var sequences = new HashSet<int>();
+        foreach (var line in File.ReadLines(path))
+        {
+            if (line.Split('\t') is not [var source, var sequence, var domain,
+                    var route, var method, var points, var timestamp,
+                    var response] ||
+                !StringComparer.Ordinal.Equals(source, expectedSource) ||
+                !int.TryParse(sequence, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var localSequence) ||
+                localSequence < 1 || !sequences.Add(localSequence) ||
+                !expectedDomains.Contains(domain) ||
+                !TryParseWitnessFields(domain, route, method, points, timestamp,
+                    response, out var eventFields))
+            {
+                return false;
+            }
+            parsed.Add(new ScenarioWitnessEvent(source,
+                expectedSource == "verifier_github" ? 1 : 2, localSequence,
+                eventFields.Domain, eventFields.Route, eventFields.Method,
+                eventFields.Points, eventFields.Timestamp,
+                eventFields.Response));
+        }
+        events = parsed;
+        return parsed.Count > 0;
+    }
+
+    private static bool TryParseWitnessFields(
+        string domain,
+        string route,
+        string method,
+        string points,
+        string timestamp,
+        string response,
+        out (string Domain, string Route, string Method, int Points,
+            long Timestamp, string Response) fields)
+    {
+        fields = default;
+        var validDomain = domain is "node_artifact_rest" or
+            "host_head_source_rest" or "host_other_github_rest" or
+            "trusted_control_rest" or "actions_results_service" or
+            "anonymous_transfers";
+        var validResponse = response is "success" or "not_modified" or
+            "permission_denied" or "primary_rate_limited" or
+            "secondary_rate_limited" or "combined_rate_limited" or
+            "invalid_rate_headers" or "other_failure";
+        if (!validDomain || !validResponse || !IsExactEventRoute(domain, route) ||
+            !int.TryParse(points, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var parsedPoints) ||
+            !long.TryParse(timestamp, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var parsedTimestamp) ||
+            parsedTimestamp < 0 ||
+            parsedPoints != (method is "GET" or "HEAD" or "OPTIONS" ? 1 : 5) ||
+            method is not ("GET" or "HEAD" or "OPTIONS" or "POST" or "PUT" or
+                "PATCH" or "DELETE"))
+        {
+            return false;
+        }
+        fields = (domain, route, method, parsedPoints, parsedTimestamp, response);
+        return true;
+    }
+
+    // Only canonical, secret-free merged observations are admitted here. The
+    // source timestamp is recorded before dispatch. Equal timestamps are a
+    // concurrent bucket: source priority and canonical public fields make its
+    // rendered order stable; local sequence only disambiguates identical
+    // observations without retaining payloads.
     private static OperationRequestEventMeasurement ReadOperationRequestEvents(
         string root,
         IReadOnlyList<string> names)
@@ -4377,26 +4541,6 @@ internal static class FrameworkSupervisor
         {
             return OperationRequestEventMeasurement.Invalid;
         }
-        var acceptedDomains = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "node_artifact_rest",
-            "host_head_source_rest",
-            "host_other_github_rest",
-            "trusted_control_rest",
-            "actions_results_service",
-            "anonymous_transfers",
-        };
-        var acceptedResponses = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "success",
-            "not_modified",
-            "permission_denied",
-            "primary_rate_limited",
-            "secondary_rate_limited",
-            "combined_rate_limited",
-            "invalid_rate_headers",
-            "other_failure",
-        };
         var groups = new List<List<OperationRequestEvent>>();
         var globalOrdinal = 0;
         for (var scenarioIndex = 0; scenarioIndex < paths.Length; scenarioIndex++)
@@ -4405,25 +4549,18 @@ internal static class FrameworkSupervisor
             var operation = new List<OperationRequestEvent>();
             foreach (var line in File.ReadLines(path))
             {
-                if (line.Split('\t') is not [var domain, var route, var method, var points,
-                        var timestamp, var response] ||
-                    !acceptedDomains.Contains(domain) ||
-                    !IsExactEventRoute(domain, route) ||
-                    !acceptedResponses.Contains(response) ||
-                    !int.TryParse(points, NumberStyles.None,
-                        CultureInfo.InvariantCulture, out var secondaryPoints) ||
-                    !long.TryParse(timestamp, NumberStyles.None,
-                        CultureInfo.InvariantCulture, out var monotonicTimestamp) ||
-                    monotonicTimestamp < 0 ||
-                    secondaryPoints != (method is "GET" or "HEAD" or "OPTIONS"
-                        ? 1 : 5))
+                if (line.Split('\t') is not [var domain, var route, var method,
+                        var points, var timestamp, var response] ||
+                    !TryParseWitnessFields(domain, route, method, points,
+                        timestamp, response, out var eventFields))
                 {
                     return OperationRequestEventMeasurement.Invalid;
                 }
 
                 operation.Add(new(names[scenarioIndex], scenarioIndex + 1,
-                    checked(++globalOrdinal), domain, route, method,
-                    secondaryPoints, monotonicTimestamp, response));
+                    checked(++globalOrdinal), eventFields.Domain,
+                    eventFields.Route, eventFields.Method, eventFields.Points,
+                    eventFields.Timestamp, eventFields.Response));
             }
             groups.Add(operation);
         }
@@ -4473,21 +4610,38 @@ internal static class FrameworkSupervisor
         };
         var tails = domains.ToDictionary(domain => domain, _ => 0,
             StringComparer.Ordinal);
-        // The three runs share one fixed aggregate witness order:
-        // bootstrap -> continuation -> stale.  Ordinal is append order from
-        // SyntheticOfficialPlatform, not a wall-clock sort key.  A remaining
-        // observation in bootstrap must therefore retain the primary work of
-        // the following continuation and stale witnesses in its suffix.
-        var ordered = scenarioEvents.SelectMany(scenario => scenario)
-            .OrderBy(value => value.Ordinal)
+        // The three runs retain their fixed aggregate order:
+        // bootstrap -> continuation -> stale. Within one scenario, equal
+        // timestamps are a concurrent dispatch bucket, not an accidental
+        // source/append ordering. A response in that bucket must retain every
+        // other primary request in the same bucket as well as all later
+        // buckets and all later scenarios. This makes the frozen tail stable
+        // when independent platform, Host, and control producers interleave.
+        var scenarios = scenarioEvents.Select(scenario => scenario.ToArray())
             .ToArray();
-        for (var index = 0; index < ordered.Length; index++)
+        var primaryInLaterScenarios = scenarios.Sum(scenario =>
+            scenario.Count(IsPrimaryCharged));
+        foreach (var scenario in scenarios)
         {
-            var current = ordered[index];
-            if (!tails.ContainsKey(current.Domain)) continue;
-            var futurePrimary = ordered.Skip(index + 1).Count(IsPrimaryCharged);
-            tails[current.Domain] = Math.Max(tails[current.Domain],
-                futurePrimary);
+            var primaryInScenario = scenario.Count(IsPrimaryCharged);
+            primaryInLaterScenarios -= primaryInScenario;
+            var primaryInLaterBuckets = primaryInScenario;
+            foreach (var bucket in scenario.GroupBy(value => value.MonotonicTimestamp)
+                .OrderBy(group => group.Key))
+            {
+                var primaryInBucket = bucket.Count(IsPrimaryCharged);
+                primaryInLaterBuckets -= primaryInBucket;
+                foreach (var current in bucket)
+                {
+                    if (!tails.ContainsKey(current.Domain)) continue;
+                    var concurrentPrimary = primaryInBucket -
+                        (IsPrimaryCharged(current) ? 1 : 0);
+                    var futurePrimary = primaryInLaterScenarios +
+                        primaryInLaterBuckets + concurrentPrimary;
+                    tails[current.Domain] = Math.Max(tails[current.Domain],
+                        futurePrimary);
+                }
+            }
         }
 
         return tails;
@@ -4584,24 +4738,25 @@ internal static class FrameworkSupervisor
         {
             if (line.Split('\t') is not [var domain, var route, var method, var points,
                     var timestamp, var response] || !mutable.TryGetValue(domain,
-                    out var stat) || !int.TryParse(points, out var parsedPoints) ||
-                !long.TryParse(timestamp, out _) || parsedPoints !=
-                    (method is "GET" or "HEAD" or "OPTIONS" ? 1 : 5) ||
-                response is not ("success" or "not_modified" or "permission_denied") ||
-                !IsExactEventRoute(domain, route))
+                    out var stat) || !TryParseWitnessFields(domain, route, method,
+                    points, timestamp, response, out var eventFields))
             {
                 return false;
             }
             stat.Raw++;
-            stat.Points += parsedPoints;
-            if (method is not ("GET" or "HEAD" or "OPTIONS")) stat.Mutations++;
-            if (route == "actions_results_signed_upload") stat.SignedUploads++;
-            if (route == "actions_results_signed_download") stat.SignedDownloads++;
-            if (response == "not_modified") stat.NotModified++;
+            stat.Points += eventFields.Points;
+            if (eventFields.Method is not ("GET" or "HEAD" or "OPTIONS"))
+                stat.Mutations++;
+            if (eventFields.Route == "actions_results_signed_upload")
+                stat.SignedUploads++;
+            if (eventFields.Route == "actions_results_signed_download")
+                stat.SignedDownloads++;
+            if (eventFields.Response == "not_modified") stat.NotModified++;
             else
             {
                 stat.Primary++;
-                if (response == "permission_denied") stat.PermissionDenied++;
+                if (eventFields.Response == "permission_denied")
+                    stat.PermissionDenied++;
             }
         }
         for (var index = 0; index < domains.Length; index++)
@@ -4804,11 +4959,11 @@ internal static class FrameworkSupervisor
         receipt.Kind == "apr-r4-trusted-proof-artifact-rest-budget-v2" &&
         ArtifactRestReceiptIdentityIsExact(receipt, scenario) &&
         receipt.ProtectedRoute &&
-        receipt.MaximumTotalAuthenticatedApiRequests == 32 &&
+        receipt.MaximumTotalAuthenticatedApiRequests == 256 &&
         receipt.TotalAuthenticatedApiRequests >= 0 &&
         receipt.TotalAuthenticatedApiRequests <=
             receipt.MaximumTotalAuthenticatedApiRequests &&
-        receipt.MaximumPrimaryRateLimitRequests == 32 &&
+        receipt.MaximumPrimaryRateLimitRequests == 256 &&
         receipt.PrimaryRateLimitRequests >= 0 &&
         receipt.PrimaryRateLimitRequests <=
             receipt.MaximumPrimaryRateLimitRequests &&
@@ -4829,6 +4984,11 @@ internal static class FrameworkSupervisor
             receipt.MaximumPrimaryRateLimitRequests -
                 receipt.PrimaryRateLimitRequests &&
         receipt.Disposition == "active" &&
+        receipt.CapProfile == "apr-r4-artifact-rest-request-budget-v2" &&
+        receipt.MeasurementOnly &&
+        receipt.RemainingTailRequired == 0 &&
+        receipt.RemainingTailReserve ==
+            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
         artifactRestRequests == receipt.TotalAuthenticatedApiRequests &&
         artifactRestNotModified == receipt.ConditionalNotModifiedRequests &&
         artifactRestPrimary == receipt.PrimaryRateLimitRequests &&
@@ -4999,7 +5159,8 @@ internal static class FrameworkSupervisor
                     "repository", "repository_id", "workflow_sha",
                     "action_source_sha", "payload_sha256",
                     "build_discriminator", "run_id", "run_attempt",
-                    "cap_profile", "measurement_only"))
+                    "cap_profile", "measurement_only",
+                    "remaining_tail_required", "remaining_tail_reserve"))
             {
                 return null;
             }
@@ -5032,7 +5193,9 @@ internal static class FrameworkSupervisor
                 receipt.GetProperty("run_id").GetString() ?? string.Empty,
                 receipt.GetProperty("run_attempt").GetString() ?? string.Empty,
                 receipt.GetProperty("cap_profile").GetString() ?? string.Empty,
-                receipt.GetProperty("measurement_only").GetBoolean());
+                receipt.GetProperty("measurement_only").GetBoolean(),
+                receipt.GetProperty("remaining_tail_required").GetInt32(),
+                receipt.GetProperty("remaining_tail_reserve").GetInt32());
         }
         catch (Exception error) when (error is JsonException or
             InvalidOperationException or KeyNotFoundException or FormatException)
@@ -5384,7 +5547,9 @@ internal static class FrameworkSupervisor
         string RunId,
         string RunAttempt,
         string CapProfile,
-        bool MeasurementOnly);
+        bool MeasurementOnly,
+        int RemainingTailRequired,
+        int RemainingTailReserve);
 
     private sealed record FrameworkControlRequestBudgetReceipt(
         int Consumed,
@@ -5431,6 +5596,22 @@ internal static class FrameworkSupervisor
         int SecondaryPoints,
         long MonotonicTimestamp,
         string ResponseClass);
+
+    private sealed record ScenarioWitnessEvent(
+        string Source,
+        int SourcePriority,
+        int LocalSequence,
+        string Domain,
+        string Route,
+        string Method,
+        int Points,
+        long Timestamp,
+        string Response)
+    {
+        internal string ToTsv() => Domain + "\t" + Route + "\t" + Method +
+            "\t" + Points.ToString(CultureInfo.InvariantCulture) + "\t" +
+            Timestamp.ToString(CultureInfo.InvariantCulture) + "\t" + Response;
+    }
 
     private sealed record OperationRequestEventMeasurement(
         bool ShapeValid,
