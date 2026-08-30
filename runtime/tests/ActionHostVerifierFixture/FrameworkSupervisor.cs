@@ -22,7 +22,7 @@ internal static class FrameworkSupervisor
     private const int ProductionShapedReviewedHeadRequests = 180;
     private const int ProductionShapedHistoricalBaseObjectRequests = 10;
 
-    private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(5);
 
     internal static async Task<int> RunAsync(string[] args)
     {
@@ -4968,7 +4968,7 @@ internal static class FrameworkSupervisor
         receipt.Kind == "apr-r4-trusted-proof-artifact-rest-budget-v2" &&
         ArtifactRestReceiptIdentityIsExact(receipt, scenario) &&
         receipt.ProtectedRoute &&
-        receipt.MaximumTotalAuthenticatedApiRequests == 1280 &&
+        receipt.MaximumTotalAuthenticatedApiRequests == 2304 &&
         receipt.TotalAuthenticatedApiRequests >= 0 &&
         receipt.TotalAuthenticatedApiRequests <=
             receipt.MaximumTotalAuthenticatedApiRequests &&

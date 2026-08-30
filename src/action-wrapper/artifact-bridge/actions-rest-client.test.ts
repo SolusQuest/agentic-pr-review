@@ -75,13 +75,13 @@ describe('bounded artifact archive acquisition', () => {
 });
 
 describe('trusted proof artifact REST budget', () => {
-  it('uses the r4-w2 measurement profile with explicit 1280 raw and 256 primary caps', () => {
+  it('uses the r4-w2 measurement profile with explicit 2304 raw and 256 primary caps', () => {
     expect(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS).toEqual({
       maximumTotalAuthenticatedApiRequests: 256,
       maximumPrimaryRateLimitRequests: 256,
     });
     expect(trustedProofBudget().receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 1280,
+      maximum_total_authenticated_api_requests: 2304,
       maximum_primary_rate_limit_requests: 256,
       measurement_only: true,
       remaining_tail_required: 0,
@@ -89,7 +89,7 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('allows 1280 measured raw requests and rejects the 1281st before wire dispatch', async () => {
+  it('allows 2304 measured raw requests and rejects the 2305th before wire dispatch', async () => {
     let now = 0;
     const budget = trustedProofBudget(undefined, {
       now: () => now,
@@ -97,7 +97,7 @@ describe('trusted proof artifact REST budget', () => {
         now += milliseconds;
       },
     });
-    for (let index = 0; index < 1280; index += 1) {
+    for (let index = 0; index < 2304; index += 1) {
       await runNotModified(budget);
     }
 
@@ -105,11 +105,11 @@ describe('trusted proof artifact REST budget', () => {
       'trusted_proof_artifact_rest_budget_total_exhausted',
     );
     expect(budget.receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 1280,
-      total_authenticated_api_requests: 1280,
+      maximum_total_authenticated_api_requests: 2304,
+      total_authenticated_api_requests: 2304,
       maximum_primary_rate_limit_requests: 256,
       primary_rate_limit_requests: 0,
-      conditional_not_modified_requests: 1280,
+      conditional_not_modified_requests: 2304,
       remaining_tail_required: 0,
       remaining_tail_reserve: 1,
       disposition: 'total_exhausted',
@@ -132,7 +132,7 @@ describe('trusted proof artifact REST budget', () => {
       'trusted_proof_artifact_rest_budget_primary_exhausted',
     );
     expect(budget.receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 1280,
+      maximum_total_authenticated_api_requests: 2304,
       total_authenticated_api_requests: 256,
       maximum_primary_rate_limit_requests: 256,
       primary_rate_limit_requests: 256,

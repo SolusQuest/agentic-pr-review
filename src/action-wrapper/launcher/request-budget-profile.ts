@@ -17,10 +17,11 @@ export const TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: Art
   Object.freeze({
     capProfile: 'apr-r4-artifact-rest-request-budget-v2',
     limits: Object.freeze({
-      // The 768-request rehearsal ended during post-write reconciliation.
-      // 1,280 is measurement-only headroom over the fixture's 1,056 bounded
-      // state operations; the final profile freezes the completed wire count.
-      maximumTotalAuthenticatedApiRequests: 1_280,
+      // Bootstrap completed at 1,096 raw requests, while continuation's
+      // frozen 2,042 state operations were still reconciling at 1,280 raw.
+      // This measurement-only window covers those bounded operations plus 262
+      // authenticated verification slots; final freezes the completed count.
+      maximumTotalAuthenticatedApiRequests: 2_304,
       maximumPrimaryRateLimitRequests: 256,
     }),
     remainingTailRequired: 0,

@@ -101474,10 +101474,11 @@ var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
 var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
   capProfile: "apr-r4-artifact-rest-request-budget-v2",
   limits: Object.freeze({
-    // The 768-request rehearsal ended during post-write reconciliation.
-    // 1,280 is measurement-only headroom over the fixture's 1,056 bounded
-    // state operations; the final profile freezes the completed wire count.
-    maximumTotalAuthenticatedApiRequests: 1280,
+    // Bootstrap completed at 1,096 raw requests, while continuation's
+    // frozen 2,042 state operations were still reconciling at 1,280 raw.
+    // This measurement-only window covers those bounded operations plus 262
+    // authenticated verification slots; final freezes the completed count.
+    maximumTotalAuthenticatedApiRequests: 2304,
     maximumPrimaryRateLimitRequests: 256
   }),
   remainingTailRequired: 0,
@@ -102100,4 +102101,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: d159335e32f97dd5ebaac70e42233df91561d705f1f5008cba92d089b848de36
+// Action source inventory sha256: 88f125c7e7c487703aef5fb977ff4ff584615cf5da382e37007ee1ca29082202
