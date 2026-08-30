@@ -17,6 +17,8 @@ internal sealed record TrustedProofControlCoordinates(
     long RunId,
     int RunAttempt)
 {
+    internal const string FrozenRepository = "SolusQuest/agentic-pr-review";
+
     internal static bool TryReadEnvironment(
         Func<string, string?> read,
         out TrustedProofControlCoordinates? coordinates,
@@ -31,7 +33,7 @@ internal sealed record TrustedProofControlCoordinates(
         var actionSourceSha = read("ACTION_SOURCE_SHA");
         var payloadSha256 = read("PAYLOAD_SHA256");
         if (string.IsNullOrWhiteSpace(token) ||
-            repository != "SolusQuest/agentic-pr-review" ||
+            repository != FrozenRepository ||
             !long.TryParse(read("REPOSITORY_ID"), out var repositoryId) ||
             repositoryId <= 0 ||
             !long.TryParse(read("PR_NUMBER"), out var pullRequestNumber) ||
@@ -159,7 +161,7 @@ internal sealed record TrustedProofControlMarker(
             if (marker is null ||
                 marker.Contract != ContractKind ||
                 !Kinds.Contains(marker.Kind, StringComparer.Ordinal) ||
-                marker.Repository != "SolusQuest/agentic-pr-review" ||
+                marker.Repository != TrustedProofControlCoordinates.FrozenRepository ||
                 marker.RepositoryId <= 0 ||
                 marker.PullRequestNumber <= 0 ||
                 marker.RunId <= 0 ||

@@ -1,5 +1,13 @@
+using System.Formats.Tar;
+using System.Buffers.Binary;
+using System.IO.Compression;
+using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using Xunit;
@@ -8,6 +16,36 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
 public sealed class TrustedProofVerifierFixtureTests
 {
+    [Fact]
+    public void RequestBudgetTailsUseTheLargestFutureChargedSuffixPerDomain()
+    {
+        var bootstrap = new[]
+        {
+            Event("dispatch-bootstrap", 1, 1, "node_artifact_rest", "success"),
+            Event("dispatch-bootstrap", 1, 2, "host_head_source_rest", "not_modified"),
+            Event("dispatch-bootstrap", 1, 3, "trusted_control_rest", "permission_denied"),
+            Event("dispatch-bootstrap", 1, 4, "host_other_github_rest", "success"),
+        };
+        var continuation = new[]
+        {
+            Event("dispatch-continuation", 2, 5, "node_artifact_rest", "success"),
+            Event("dispatch-continuation", 2, 6, "host_head_source_rest", "success"),
+        };
+        var stale = new[]
+        {
+            Event("stale-head", 3, 7, "host_other_github_rest", "success"),
+        };
+
+        var tails = FrameworkSupervisor.DomainFuturePrimaryTails(
+            [bootstrap, continuation, stale]);
+
+        Assert.Equal(5, tails["node_artifact_rest"]);
+        Assert.Equal(5, tails["host_head_source_rest"]);
+        Assert.Equal(4, tails["trusted_control_rest"]);
+        Assert.Equal(3, tails["host_other_github_rest"]);
+        Assert.Equal(4, tails.Count);
+    }
+
     [Fact]
     public async Task ProofControlBarrierCompletesAcrossFreshProofScenarios()
     {
@@ -38,6 +76,68 @@ public sealed class TrustedProofVerifierFixtureTests
                 continuation,
                 901,
                 "cleanup"));
+
+            var stale = Path.Join(root, "stale-head");
+            await PrepareProofScenarioAsync(stale, "stale", 902);
+            Assert.Equal(
+                TrustedProofStaleWindowCoordinator.StaleOperationId,
+                FrameworkCanaries.StaleProofOperationId);
+            Assert.Equal(1, await RunControlAsync(
+                stale,
+                902,
+                "hold",
+                FrameworkCanaries.ProofOperationId));
+            Assert.Equal(0, await RunControlAsync(
+                stale,
+                902,
+                "hold",
+                FrameworkCanaries.StaleProofOperationId));
+
+            Assert.Equal(
+                TrustedProofControlCoordinates.FrozenRepository,
+                FrameworkCanaries.ProofControlRepository);
+            var staleCoordinates = new TrustedProofControlCoordinates(
+                TrustedProofControlCoordinates.FrozenRepository,
+                FrameworkGitHubHandler.RepositoryId,
+                FrameworkGitHubHandler.PullRequestNumber,
+                FrameworkGitHubHandler.HeadSha,
+                FrameworkCanaries.StaleProofOperationId,
+                FrameworkGitHubHandler.WorkflowSha,
+                FrameworkGitHubHandler.ActionSha,
+                new string('f', 64),
+                902,
+                1);
+            using var control = TrustedProofControlTransport.Create(
+                staleCoordinates,
+                FrameworkCanaries.GitHubToken,
+                new FrameworkGitHubHandler(stale, new string('f', 64)));
+            var beforeStaleSignal = await control.ListAsync(
+                CancellationToken.None);
+            Assert.NotNull(beforeStaleSignal);
+            Assert.Equal(2, beforeStaleSignal.Count);
+            var staleReady = TrustedProofControlMarker.CreateBody(
+                "stale-ready",
+                staleCoordinates,
+                predecessorCommentId: null);
+            var creation = await control.CreateAsync(
+                staleReady, CancellationToken.None);
+            Assert.Equal(TrustedProofMutationOutcome.Committed, creation.Outcome);
+            var controlComments = await control.ListAsync(CancellationToken.None);
+            Assert.NotNull(controlComments);
+            Assert.Equal(4, controlComments.Count);
+            var kinds = new List<string>();
+            Assert.All(controlComments, comment =>
+            {
+                Assert.True(TrustedProofControlMarker.TryParse(
+                    comment.Body, out var marker));
+                Assert.Equal(
+                    TrustedProofControlCoordinates.FrozenRepository,
+                    marker!.Repository);
+                kinds.Add(marker.Kind);
+            });
+            Assert.Equal(
+                ["ready", "release", "stale-ready", "stale-release"],
+                kinds.Order(StringComparer.Ordinal));
         }
         finally
         {
@@ -265,6 +365,182 @@ public sealed class TrustedProofVerifierFixtureTests
         }
     }
 
+    [Fact]
+    public async Task ExactHeadArchiveUsesAnonymousCodeloadAnd178TreeTopology()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-r4-e2p-archive-topology-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var handler = new FrameworkGitHubHandler(root,
+                new string('f', 64));
+            using var api = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer", FrameworkCanaries.GitHubToken);
+            using var redirect = await api.GetAsync("repos/" +
+                FrameworkCanaries.Repository + "/tarball/" +
+                FrameworkGitHubHandler.HeadSha);
+            Assert.Equal(System.Net.HttpStatusCode.Found, redirect.StatusCode);
+            using var codeload = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://codeload.github.com/"),
+            };
+            using var archiveResponse = await codeload.GetAsync(
+                redirect.Headers.Location);
+            archiveResponse.EnsureSuccessStatusCode();
+            using var archive = new GZipStream(
+                new MemoryStream(await archiveResponse.Content.ReadAsByteArrayAsync()),
+                CompressionMode.Decompress);
+            using var reader = new TarReader(archive);
+            var entries = new Dictionary<string, TarEntry>(StringComparer.Ordinal);
+            TarEntry? entry;
+            while ((entry = reader.GetNextEntry()) is not null) entries.Add(
+                entry.Name, entry);
+            var bundle = entries["agentic-pr-review-fixture/.github/actions/" +
+                "agentic-pr-review/dist/index.js"];
+            Assert.Equal((UnixFileMode)0x1b4, bundle.Mode);
+            Assert.Equal(FrameworkGitHubHandler.ProductionShapedLargeBlobByteCount,
+                bundle.Length);
+            Assert.Equal("0", await File.ReadAllTextAsync(Path.Join(root,
+                "head-blob-api-count")));
+
+            using var commitResponse = await api.GetAsync("repos/" +
+                FrameworkCanaries.Repository + "/git/commits/" +
+                FrameworkGitHubHandler.HeadSha);
+            using var commit = JsonDocument.Parse(
+                await commitResponse.Content.ReadAsStringAsync());
+            var pending = new Stack<string>([
+                commit.RootElement.GetProperty("tree").GetProperty("sha")
+                    .GetString()!,
+            ]);
+            var visited = 0;
+            while (pending.TryPop(out var treeSha))
+            {
+                visited++;
+                foreach (var treeEntry in await GetTreeAsync(api, treeSha))
+                {
+                    if (treeEntry.GetProperty("type").GetString() == "tree")
+                    {
+                        pending.Push(treeEntry.GetProperty("sha").GetString()!);
+                    }
+                }
+            }
+
+            Assert.Equal(FrameworkGitHubHandler.ProductionShapedHeadTreeObjectCount,
+                visited);
+            Assert.Equal("1", await File.ReadAllTextAsync(Path.Join(root,
+                "head-commit-api-count")));
+            Assert.Equal(FrameworkGitHubHandler.ProductionShapedHeadTreeObjectCount
+                    .ToString(),
+                await File.ReadAllTextAsync(Path.Join(root,
+                    "head-tree-api-count")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StaleHostFailureCancelsCoordinatorBeforeAwaitingRelease()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-r4-e2p-stale-coordinator-cancel-" +
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "mode"), "stale");
+            await File.WriteAllTextAsync(Path.Join(root,
+                "trusted-proof-payload"), "1");
+            var eventPath = Path.Join(root, "event.json");
+            var eventBytes = Encoding.UTF8.GetBytes("{}");
+            await File.WriteAllBytesAsync(eventPath, eventBytes);
+            var launch = StaleCancelledLaunch(eventPath, eventBytes);
+            var input = FramedLaunch(launch);
+            await using var output = new MemoryStream();
+            var run = TrustedProofPayloadHost.RunCoreAsync(
+                input,
+                output,
+                _ => Task.FromResult(new TrustedProofPayloadRuntimePorts(
+                    () => new FrameworkGitHubHandler(root,
+                        launch.PayloadSha256),
+                    github => new FrameworkStateDependencies(root, github))),
+                CancellationToken.None);
+
+            Assert.Equal(1, await run.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Equal("1", await File.ReadAllTextAsync(Path.Join(root,
+                "pull-request-revalidation-count")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SyntheticOfficialPlatformConditionalArtifactAndAttemptGetsAreFreeOfPrimaryCharge()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-conditional-rest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var platform = SyntheticOfficialPlatform.Start(root);
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri(platform.BaseUrl + "/"),
+            };
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer", FrameworkCanaries.GitHubToken);
+            var artifactPath = "repos/" + FrameworkCanaries.Repository +
+                "/actions/artifacts?name=missing&per_page=100&page=1";
+
+            using var initial = await client.GetAsync(artifactPath);
+            initial.EnsureSuccessStatusCode();
+            var artifactEtag = initial.Headers.ETag;
+            Assert.NotNull(artifactEtag);
+            var artifactTag = artifactEtag.Tag;
+            using var conditional = new HttpRequestMessage(
+                HttpMethod.Get, artifactPath);
+            conditional.Headers.TryAddWithoutValidation("If-None-Match", artifactTag);
+            using var notModified = await client.SendAsync(conditional);
+            Assert.Equal(HttpStatusCode.NotModified, notModified.StatusCode);
+            Assert.Equal(artifactTag, notModified.Headers.ETag?.Tag);
+
+            const string attemptPath = "repos/" + FrameworkCanaries.Repository +
+                "/actions/runs/900/attempts/1";
+            using var attempt = await client.GetAsync(attemptPath);
+            attempt.EnsureSuccessStatusCode();
+            var attemptEtag = attempt.Headers.ETag;
+            Assert.NotNull(attemptEtag);
+            var attemptTag = attemptEtag.Tag;
+            using var conditionalAttempt = new HttpRequestMessage(
+                HttpMethod.Get, attemptPath);
+            conditionalAttempt.Headers.TryAddWithoutValidation("If-None-Match", attemptTag);
+            using var notModifiedAttempt = await client.SendAsync(conditionalAttempt);
+            Assert.Equal(HttpStatusCode.NotModified, notModifiedAttempt.StatusCode);
+
+            Assert.Equal("4", await File.ReadAllTextAsync(
+                Path.Join(root, "official-rest-count")));
+            Assert.Equal("2", await File.ReadAllTextAsync(
+                Path.Join(root, "official-rest-not-modified-count")));
+            Assert.Equal("2", await File.ReadAllTextAsync(
+                Path.Join(root, "official-rest-primary-count")));
+            Assert.Equal("4", await File.ReadAllTextAsync(
+                Path.Join(root, "official-rest-secondary-points")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static async Task PrepareProofScenarioAsync(
         string scenario,
         string mode,
@@ -279,10 +555,80 @@ public sealed class TrustedProofVerifierFixtureTests
         await File.WriteAllTextAsync(Path.Join(scenario, "run-attempt"), "1");
     }
 
+    private static ActionHostLaunchContract StaleCancelledLaunch(
+        string eventPath,
+        byte[] eventBytes)
+    {
+        Assert.True(ActionHostGitHubToken.TryCreate(
+            FrameworkCanaries.GitHubToken, out var githubToken));
+        Assert.True(ActionHostProviderApiKey.TryCreate(
+            "provider-canary", out var providerKey));
+        Assert.True(ActionHostStateKey.TryCreate(
+            Convert.ToBase64String(new byte[32]), out var stateKey));
+        Assert.True(ActionHostInputs.TryCreate(
+            githubToken,
+            providerKey,
+            stateKey,
+            previousStateKey: null,
+            configPath: null,
+            FrameworkGitHubHandler.PullRequestNumber,
+            ActionHostStateMode.Auto,
+            out var inputs));
+        Assert.True(ActionHostLaunchContract.TryCreate(
+            inputs,
+            eventPath,
+            Convert.ToHexString(SHA256.HashData(eventBytes)).ToLowerInvariant(),
+            FrameworkCanaries.Repository,
+            FrameworkGitHubHandler.RepositoryId,
+            runId: 900,
+            runAttempt: 1,
+            workflowPath: ".github/workflows/r4-trusted-proof.yml",
+            workflowRef: FrameworkCanaries.Repository +
+                "/.github/workflows/r4-trusted-proof.yml@refs/heads/main",
+            workflowSha: FrameworkGitHubHandler.WorkflowSha,
+            actionSourceSha: FrameworkGitHubHandler.ActionSha,
+            payloadSha256: new string('f', 64),
+            buildDiscriminator: TrustedProofPayloadHost.PayloadBuildDiscriminator,
+            cancellation: ActionHostCancellationState.Requested,
+            artifactBridgeEndpoint: Path.Join(Path.GetDirectoryName(eventPath)!,
+                "bridge.sock"),
+            out var launch));
+        return launch!;
+    }
+
+    private static MemoryStream FramedLaunch(ActionHostLaunchContract launch)
+    {
+        Assert.True(ActionHostJsonCodec.TryWriteLaunch(launch, out var document));
+        var stream = new MemoryStream();
+        Span<byte> length = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(length, checked((uint)document.Length));
+        stream.Write(length);
+        stream.Write(document);
+        stream.Position = 0;
+        return stream;
+    }
+
+    private static FrameworkSupervisor.OperationRequestEvent Event(
+        string scenario,
+        int scenarioOrdinal,
+        int ordinal,
+        string domain,
+        string responseClass) => new(
+        scenario,
+        scenarioOrdinal,
+        ordinal,
+        domain,
+        "github_rest",
+        "GET",
+        1,
+        ordinal,
+        responseClass);
+
     private static Task<int> RunControlAsync(
         string scenario,
         long runId,
-        string command)
+        string command,
+        string? operationId = null)
     {
         var payloadSha256 = new string('f', 64);
         var coordinates = new TrustedProofControlCoordinates(
@@ -290,7 +636,7 @@ public sealed class TrustedProofVerifierFixtureTests
             FrameworkGitHubHandler.RepositoryId,
             FrameworkGitHubHandler.PullRequestNumber,
             FrameworkGitHubHandler.HeadSha,
-            new string('1', 64),
+            operationId ?? FrameworkCanaries.ProofOperationId,
             FrameworkGitHubHandler.WorkflowSha,
             FrameworkGitHubHandler.ActionSha,
             payloadSha256,

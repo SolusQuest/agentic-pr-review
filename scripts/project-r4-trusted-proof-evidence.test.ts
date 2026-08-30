@@ -1598,8 +1598,22 @@ describe('R4 E3 executable evidence contract', () => {
     expect(execution.provider_mode).toMatchObject({
       provider: 'deepseek',
       model: 'deepseek-v4-flash',
-      adapter: '968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502',
+      adapter: 'deepseek-v1',
+      transport: 'in-process-http-message-handler',
+      network: false,
+      deterministic_provider_contract_sha256:
+        '3da2dd332c21097cb30ece8cc80830b75dfd02fd146f159555899194eaf52d8c',
     });
+  });
+
+  test('rejects a live-provider transport or network-capable E4 declaration', () => {
+    const liveTransport = copy(host);
+    liveTransport.authorizations.execution.provider_mode.transport = 'production-https-json';
+    expect(() => validateHostEvidence(liveTransport)).toThrow(/execution-provider-mode-values/u);
+
+    const networkCapable = copy(host);
+    networkCapable.authorizations.execution.provider_mode.network = true;
+    expect(() => validateHostEvidence(networkCapable)).toThrow(/execution-provider-mode-values/u);
   });
 
   test('reopens every captured source, archive, and encrypted object at final assembly', () => {
@@ -2131,7 +2145,10 @@ describe('R4 E3 executable evidence contract', () => {
       observed_cleanup: [],
       resources: {
         authorization_variable: 'R4_TRUSTED_PROOF_AUTHORIZATION',
-        secret_names: ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+        secret_names: [
+          'AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY',
+          'AGENTIC_PR_REVIEW_STATE_KEY',
+        ],
         environment: 'r4-trusted-proof',
         fixture_refs: host.cleanup.resources.fixture_refs,
         fixture_pr_numbers: host.cleanup.resources.fixture_pr_numbers,

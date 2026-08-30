@@ -9,6 +9,7 @@
     <SelfContained Condition="'$(PublishAot)' != 'true'">false</SelfContained>
     <JsonSerializerIsReflectionEnabledByDefault Condition="'$(PublishAot)' != 'true'">true</JsonSerializerIsReflectionEnabledByDefault>
     <AssemblyName>AgenticPrReview.Runtime.ActionHostVerifierFixture</AssemblyName>
+    <DefineConstants>$(DefineConstants);ACTION_HOST_VERIFIER_FIXTURE</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(PublishAot)' == 'true'">
     <SelfContained>true</SelfContained>
@@ -19,6 +20,10 @@
   <ItemGroup Condition="'$(PublishAot)' != 'true'">
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
                       AdditionalProperties="ActionHostVerifierFrameworkReference=true" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\ActionHostTrustedProofPayload\TrustedProofOperationRequestAccounting.cs"
+             Link="TrustedProofOperationRequestAccounting.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(PublishAot)' == 'true'">
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"

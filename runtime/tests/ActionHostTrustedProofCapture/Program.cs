@@ -40,6 +40,10 @@ internal static class Program
         {
             return PhaseFragmentMaterializer.Run(args);
         }
+        if (EnrollmentObservationMaterializer.IsCommand(args))
+        {
+            return EnrollmentObservationMaterializer.Run(args);
+        }
         RestrictedEvidenceRoot? root = null;
         CredentialAdmissionMaterialization? admission = null;
         var completed = false;

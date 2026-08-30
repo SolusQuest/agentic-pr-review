@@ -148,13 +148,12 @@ run_production_smoke() {
     set -e
     [[ "$status" -eq 1 && ! -s "$stdout" ]] || return 1
     if [[ "$mode" == missing-github ]]; then
-      [[ "$(cat "$stderr")" == \
-        'APR_R4_E2P_UNHANDLED InvalidOperationException' ]] || return 1
+      [[ "$(cat "$stderr")" == $'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":0,"authenticated_rest_limit":216,"anonymous_codeload_requests":0,"anonymous_codeload_limit":1,"rejected_requests":0}\nAPR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":0,"limit":64,"rate_limited":false}\nAPR_R4_E2P_UNHANDLED InvalidOperationException' &&
+          "$(wc -c < "$stderr")" -le 512 ]] || return 1
     else
-      [[ ! -s "$stderr" ]] || return 1
+      [[ ! -s "$stderr" && "$(wc -c < "$stderr")" -le 128 ]] || return 1
     fi
-    [[ "$(wc -c < "$stdout")" -le 128 &&
-        "$(wc -c < "$stderr")" -le 128 ]] || return 1
+    [[ "$(wc -c < "$stdout")" -le 128 ]] || return 1
     if grep -Eq '(^|[[:space:]])(socket|socketpair|connect|accept|accept4|bind|listen|sendto|sendmsg|recvfrom|recvmsg|getsockname|getpeername|setsockopt|getsockopt)\(' "$trace"; then
       return 1
     fi
@@ -308,18 +307,25 @@ execute_proof() {
     "$normalized_evidence" <<'NODE'
 import fs from 'node:fs';
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const expectedCases = ['dispatch-bootstrap', 'dispatch-continuation', 'stale-head'];
+const expectedCases = [
+  'dispatch-bootstrap',
+  'dispatch-continuation',
+  'stale-head',
+  'stale-unauthorized-follow-on',
+];
 const expectedFields = [
   'passed',
   'verifier_executable_sha256',
   'compiled_payload_proof_kind',
   'compiled_payload_source_commit',
   'compiled_payload_source_tree',
+  'trusted_proof_request_budget_satisfied',
   'cases',
 ];
 if (input === null || Array.isArray(input) || typeof input !== 'object' ||
     JSON.stringify(Object.keys(input)) !== JSON.stringify(expectedFields) ||
-    input.passed !== true || !Array.isArray(input.cases) ||
+    input.passed !== true || input.trusted_proof_request_budget_satisfied !== true ||
+    !Array.isArray(input.cases) ||
     input.cases.length !== expectedCases.length ||
     !/^[0-9a-f]{64}$/.test(input.verifier_executable_sha256 ?? '') ||
     input.compiled_payload_proof_kind !==
@@ -329,8 +335,11 @@ if (input === null || Array.isArray(input) || typeof input !== 'object' ||
   throw new Error('The trusted-proof evidence envelope is invalid.');
 }
 const cases = input.cases.map((item, index) => {
-  if (item?.Name !== expectedCases[index] || item.Passed !== true ||
-      !Number.isSafeInteger(item.HostPid) || item.HostPid <= 0) {
+  const expectedName = expectedCases[index];
+  const expectedHostPid = expectedName === 'stale-unauthorized-follow-on' ? 0 : null;
+  if (item?.Name !== expectedName || item.Passed !== true ||
+      !Number.isSafeInteger(item.HostPid) ||
+      (expectedHostPid === null ? item.HostPid <= 0 : item.HostPid !== expectedHostPid)) {
     throw new Error('The trusted-proof case evidence is invalid.');
   }
   const { HostPid: _hostPid, ...stable } = item;
@@ -342,6 +351,7 @@ fs.writeFileSync(process.argv[3], JSON.stringify({
   compiled_payload_proof_kind: input.compiled_payload_proof_kind,
   compiled_payload_source_commit: input.compiled_payload_source_commit,
   compiled_payload_source_tree: input.compiled_payload_source_tree,
+  trusted_proof_request_budget_satisfied: input.trusted_proof_request_budget_satisfied,
   cases,
 }) + '\n');
 NODE

@@ -413,10 +413,20 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
+            var rateLimit = ActionHostGitHubRateLimitClassifier.Classify(response);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return ActionHostGitHubResult<T>.Failed(
-                    ClassifyStatus(response.StatusCode));
+                    ClassifyStatus(response.StatusCode, rateLimit));
+            }
+            if (rateLimit != ActionHostGitHubRateLimitClassification.None)
+            {
+                return ActionHostGitHubResult<T>.Failed(
+                    rateLimit is ActionHostGitHubRateLimitClassification.Primary or
+                        ActionHostGitHubRateLimitClassification.Secondary or
+                        ActionHostGitHubRateLimitClassification.Combined
+                        ? ActionHostGitHubFailure.RateLimited
+                        : ActionHostGitHubFailure.InvalidResponse);
             }
 
             if (!HasJsonContentType(response.Content.Headers.ContentType))
@@ -590,12 +600,19 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
     }
 
     private static ActionHostGitHubFailure ClassifyStatus(
-        HttpStatusCode status) => status switch
+        HttpStatusCode status,
+        ActionHostGitHubRateLimitClassification rateLimit) =>
+        rateLimit is ActionHostGitHubRateLimitClassification.Primary or
+            ActionHostGitHubRateLimitClassification.Secondary or
+            ActionHostGitHubRateLimitClassification.Combined
+            ? ActionHostGitHubFailure.RateLimited
+            : rateLimit == ActionHostGitHubRateLimitClassification.Invalid
+            ? ActionHostGitHubFailure.InvalidResponse
+            : status switch
     {
         HttpStatusCode.Unauthorized => ActionHostGitHubFailure.Unauthorized,
         HttpStatusCode.Forbidden => ActionHostGitHubFailure.Forbidden,
         HttpStatusCode.NotFound => ActionHostGitHubFailure.NotFound,
-        (HttpStatusCode)429 => ActionHostGitHubFailure.RateLimited,
         >= HttpStatusCode.InternalServerError =>
             ActionHostGitHubFailure.UpstreamFailure,
         _ => ActionHostGitHubFailure.UpstreamFailure,

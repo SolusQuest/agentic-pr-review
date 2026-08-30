@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createArtifactActionsRestClient } from './actions-rest-client.js';
+import {
+  ArtifactRestRequestBudget,
+  type ArtifactRestSecondaryRateLimitOptions,
+  TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS,
+} from './artifact-rest-request-budget.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -17,7 +22,7 @@ describe('bounded artifact archive acquisition', () => {
         }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const client = createArtifactActionsRestClient(octokitWithRedirect());
+    const client = createArtifactActionsRestClient(octokitWithRedirect(), nonProofBudget());
 
     const result = await client.downloadArtifactArchive(
       {
@@ -49,7 +54,7 @@ describe('bounded artifact archive acquisition', () => {
       'fetch',
       vi.fn(async () => new Response(stream, { status: 200 })),
     );
-    const client = createArtifactActionsRestClient(octokitWithRedirect());
+    const client = createArtifactActionsRestClient(octokitWithRedirect(), nonProofBudget());
 
     await expect(
       client.downloadArtifactArchive(
@@ -66,6 +71,1160 @@ describe('bounded artifact archive acquisition', () => {
   });
 });
 
+describe('trusted proof artifact REST budget', () => {
+  it('freezes the r4-w2 raw and primary production caps at 32 during measurement', () => {
+    expect(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS).toEqual({
+      maximumTotalAuthenticatedApiRequests: 32,
+      maximumPrimaryRateLimitRequests: 32,
+    });
+    expect(trustedProofBudget().receipt()).toMatchObject({
+      maximum_total_authenticated_api_requests: 32,
+      maximum_primary_rate_limit_requests: 32,
+      measurement_only: true,
+    });
+  });
+
+  it.each([
+    { maximumTotalAuthenticatedApiRequests: 0, maximumPrimaryRateLimitRequests: 1 },
+    { maximumTotalAuthenticatedApiRequests: 1, maximumPrimaryRateLimitRequests: 0 },
+    { maximumTotalAuthenticatedApiRequests: 1.5, maximumPrimaryRateLimitRequests: 1 },
+  ])('rejects an invalid measurement limit configuration', (limits) => {
+    expect(() =>
+      ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+        buildDiscriminator: 'r4-w2',
+        limits,
+      }),
+    ).toThrow('artifact_rest_request_budget_limits_invalid');
+  });
+
+  it.each([
+    {},
+    { ...trustedProofIdentity(), payloadSha256: 'C'.repeat(64) },
+    { ...trustedProofIdentity(), runAttempt: '0' },
+  ])('requires exact verified identity for the protected receipt', (identity) => {
+    expect(() =>
+      ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+        buildDiscriminator: 'r4-w2',
+        identity: identity as ReturnType<typeof trustedProofIdentity>,
+      }),
+    ).toThrow('artifact_rest_request_budget_identity_invalid');
+  });
+
+  it.each([
+    { maximumEntries: 0, maximumBytes: 1 },
+    { maximumEntries: 1, maximumBytes: 0 },
+    { maximumEntries: 1.5, maximumBytes: 1 },
+  ])('rejects an invalid conditional cache limit configuration', (cacheLimits) => {
+    expect(() =>
+      createArtifactActionsRestClient(
+        octokitWithArtifactMethods({}),
+        nonProofBudget(),
+        cacheLimits,
+      ),
+    ).toThrow('conditional_get_cache_limits_invalid');
+  });
+
+  it('fails closed at the raw authenticated request cap before dispatch', async () => {
+    const listArtifactsForRepo = vi.fn(async () => ({
+      status: 200,
+      data: { artifacts: [] },
+    }));
+    const budget = trustedProofBudget({ total: 2, primary: 2 });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ listArtifactsForRepo }),
+      budget,
+    );
+
+    for (let index = 0; index < 2; index += 1) {
+      await client.listArtifactsForRepo(listInput(), signal());
+    }
+    await expect(client.listArtifactsForRepo(listInput(), signal())).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_total_exhausted',
+    );
+
+    expect(listArtifactsForRepo).toHaveBeenCalledTimes(2);
+    expect(budget.receipt()).toEqual({
+      kind: 'apr-r4-trusted-proof-artifact-rest-budget-v2',
+      protected_route: true,
+      maximum_total_authenticated_api_requests: 2,
+      total_authenticated_api_requests: 2,
+      maximum_primary_rate_limit_requests: 2,
+      primary_rate_limit_requests: 2,
+      conditional_not_modified_requests: 0,
+      secondary_limit_points: 2,
+      permission_denied: 0,
+      remaining_total_authenticated_api_requests: 0,
+      remaining_primary_rate_limit_requests: 0,
+      disposition: 'total_exhausted',
+      repository: 'owner/repo',
+      repository_id: '1',
+      workflow_sha: 'a'.repeat(40),
+      action_source_sha: 'b'.repeat(40),
+      payload_sha256: 'c'.repeat(64),
+      build_discriminator: 'r4-w2',
+      run_id: '2',
+      run_attempt: '1',
+      cap_profile: 'apr-r4-artifact-rest-request-budget-v2',
+      measurement_only: true,
+    });
+  });
+
+  it('serializes concurrent protected dispatches FIFO through the shared executor budget', async () => {
+    const observed: number[] = [];
+    let active = 0;
+    let maximumActive = 0;
+    const getArtifact = vi.fn(async (input: { readonly artifact_id: number }) => {
+      observed.push(input.artifact_id);
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return { status: 200, data: artifact() };
+    });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      trustedProofBudget({ total: 8, primary: 8 }),
+    );
+
+    await Promise.all(
+      [3, 1, 2].map(async (artifact_id) => {
+        await client.getArtifact({ owner: 'owner', repo: 'repo', artifact_id }, signal());
+      }),
+    );
+
+    expect(observed).toEqual([3, 1, 2]);
+    expect(maximumActive).toBe(1);
+  });
+
+  it('enforces rolling secondary points and mutative spacing with an injectable clock', async () => {
+    let now = 0;
+    const waits: number[] = [];
+    const rateLimit: ArtifactRestSecondaryRateLimitOptions = {
+      now: () => now,
+      sleep: async (milliseconds) => {
+        waits.push(milliseconds);
+        now += milliseconds;
+      },
+      maximumPointsPerRollingMinute: 5,
+      minimumMutativeSpacingMs: 1_000,
+    };
+    const budget = trustedProofBudget({ total: 16, primary: 16 }, rateLimit);
+
+    await runGet(budget);
+    await runGet(budget);
+    await runGet(budget);
+    await runGet(budget);
+    await runGet(budget);
+    await runGet(budget);
+
+    expect(waits).toEqual([100, 100, 100, 100, 59_600]);
+    expect(budget.receipt().secondary_limit_points).toBe(6);
+
+    const mutationBudget = trustedProofBudget(
+      { total: 4, primary: 4 },
+      {
+        now: () => now,
+        sleep: async (milliseconds) => {
+          waits.push(milliseconds);
+          now += milliseconds;
+        },
+        maximumPointsPerRollingMinute: 20,
+        minimumMutativeSpacingMs: 1_000,
+      },
+    );
+    await mutationBudget.runAuthenticatedApiCall(
+      { signal: signal(), secondaryLimitPoints: 5, mutative: true },
+      async () => ({ status: 204 }),
+    );
+    await mutationBudget.runAuthenticatedApiCall(
+      { signal: signal(), secondaryLimitPoints: 5, mutative: true },
+      async () => ({ status: 204 }),
+    );
+
+    expect(waits).toEqual([100, 100, 100, 100, 59_600, 1_000]);
+    expect(mutationBudget.receipt().secondary_limit_points).toBe(10);
+  });
+
+  it('waits for rolling secondary capacity before dispatching a fully reserved mutation', async () => {
+    let now = 0;
+    const waits: number[] = [];
+    const budget = trustedProofBudget(
+      { total: 1_024, primary: 1_024 },
+      {
+        now: () => now,
+        sleep: async (milliseconds) => {
+          waits.push(milliseconds);
+          now += milliseconds;
+        },
+        maximumPointsPerRollingMinute: 600,
+      },
+    );
+    for (let index = 0; index < 599; index += 1) {
+      await runGet(budget);
+    }
+    const reservation = budget.reserveMutation({
+      authenticatedRequests: 3,
+      primaryRequests: 3,
+      secondaryPoints: 8,
+    });
+    let wireDispatches = 0;
+
+    await budget.runReservedMutationDataPlaneCall(
+      {
+        signal: signal(),
+        secondaryLimitPoints: 5,
+        mutative: true,
+        latestAttemptStartAt: 120_000,
+      },
+      async (markDispatched) => {
+        markDispatched();
+        wireDispatches += 1;
+        return { status: 201 };
+      },
+    );
+    reservation.release();
+
+    expect(wireDispatches).toBe(1);
+    expect(waits.at(-1)).toBe(500);
+    expect(budget.receipt().disposition).toBe('active');
+  });
+
+  it('rejects a mutation before its wire dispatch when pacing misses the command deadline', async () => {
+    let now = 0;
+    const budget = trustedProofBudget(
+      { total: 1_024, primary: 1_024 },
+      {
+        now: () => now,
+        sleep: async (milliseconds) => {
+          now += milliseconds;
+        },
+        maximumPointsPerRollingMinute: 600,
+      },
+    );
+    for (let index = 0; index < 599; index += 1) {
+      await runGet(budget);
+    }
+    const reservation = budget.reserveMutation({
+      authenticatedRequests: 3,
+      primaryRequests: 3,
+      secondaryPoints: 8,
+    });
+    let wireDispatches = 0;
+
+    await expect(
+      budget.runReservedMutationDataPlaneCall(
+        {
+          signal: signal(),
+          secondaryLimitPoints: 5,
+          mutative: true,
+          latestAttemptStartAt: now + 100,
+        },
+        async (markDispatched) => {
+          markDispatched();
+          wireDispatches += 1;
+          return { status: 201 };
+        },
+      ),
+    ).rejects.toThrow('artifact_rest_attempt_deadline_exceeded');
+    reservation.release();
+
+    expect(wireDispatches).toBe(0);
+    expect(budget.receipt().disposition).toBe('active');
+  });
+
+  it('removes a cancelled FIFO waiter without recording a REST dispatch', async () => {
+    let now = 0;
+    const rateLimit: ArtifactRestSecondaryRateLimitOptions = {
+      now: () => now,
+      sleep: async (milliseconds, requestSignal) => {
+        await new Promise<void>((_resolve, reject) => {
+          requestSignal.addEventListener(
+            'abort',
+            () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' })),
+            { once: true },
+          );
+        });
+        now += milliseconds;
+      },
+      maximumPointsPerRollingMinute: 1,
+    };
+    const budget = trustedProofBudget({ total: 4, primary: 4 }, rateLimit);
+    await runGet(budget);
+    const controller = new AbortController();
+    const pending = budget.runAuthenticatedApiCall(
+      { signal: controller.signal, secondaryLimitPoints: 1, mutative: false },
+      async () => ({ status: 200 }),
+    );
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 1,
+      secondary_limit_points: 1,
+      disposition: 'active',
+    });
+  });
+
+  it('shares one ledger across commands and excludes the anonymous signed download', async () => {
+    const bytes = Buffer.from('zip');
+    const fetchMock = vi.fn(async () => new Response(bytes, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const methods = {
+      listArtifactsForRepo: vi.fn(async () => ({ status: 200, data: { artifacts: [] } })),
+      getArtifact: vi.fn(async () => ({ status: 200, data: artifact() })),
+      downloadArtifact: vi.fn(async () => ({
+        status: 302,
+        headers: { location: 'https://blob.invalid/archive?sig=opaque' },
+      })),
+      getWorkflowRunAttempt: vi.fn(async () => ({ status: 200, data: {} })),
+      deleteArtifact: vi.fn(async () => ({ status: 204, data: undefined })),
+    };
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(octokitWithArtifactMethods(methods), budget);
+
+    await client.listArtifactsForRepo(listInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+    await client.downloadArtifactArchive({ ...artifactInput(), maximum_bytes: 16 }, signal());
+    await client.getWorkflowRunAttempt(
+      { owner: 'owner', repo: 'repo', run_id: 9, attempt_number: 1 },
+      signal(),
+    );
+    await client.deleteArtifact(artifactInput(), signal());
+
+    expect(methods.downloadArtifact).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://blob.invalid/archive?sig=opaque',
+      expect.not.objectContaining({ headers: expect.anything() }),
+    );
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 5,
+      primary_rate_limit_requests: 5,
+      conditional_not_modified_requests: 0,
+      remaining_total_authenticated_api_requests:
+        TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumTotalAuthenticatedApiRequests - 5,
+      disposition: 'active',
+    });
+  });
+
+  it('makes a real conditional GET, reuses only a 304 representation, and accounts it separately', async () => {
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"artifact-v1"' },
+        data: artifact(),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('not modified'), {
+          status: 304,
+          response: { status: 304, headers: {} },
+        }),
+      );
+    const budget = trustedProofBudget({ total: 3, primary: 2 });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await expect(client.getArtifact(artifactInput(), signal())).resolves.toMatchObject({
+      status: 200,
+      data: artifact(),
+    });
+    await expect(client.getArtifact(artifactInput(), signal())).resolves.toMatchObject({
+      status: 200,
+      data: artifact(),
+    });
+
+    expect(getArtifact).toHaveBeenCalledTimes(2);
+    expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
+      request: { headers: { 'if-none-match': '"artifact-v1"' } },
+    });
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 2,
+      primary_rate_limit_requests: 1,
+      conditional_not_modified_requests: 1,
+      remaining_total_authenticated_api_requests: 1,
+      remaining_primary_rate_limit_requests: 1,
+      disposition: 'active',
+    });
+  });
+
+  it('does not dispatch a possibly charged conditional GET after the primary cap is reserved', async () => {
+    const getArtifact = vi.fn(
+      async (_input: { readonly request?: { readonly headers?: unknown } }) => ({
+        status: 200,
+        headers: { etag: '"artifact-v1"' },
+        data: artifact(),
+      }),
+    );
+    const budget = trustedProofBudget({ total: 3, primary: 1 });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+
+    expect(getArtifact).toHaveBeenCalledOnce();
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 1,
+      primary_rate_limit_requests: 1,
+      conditional_not_modified_requests: 0,
+      disposition: 'primary_exhausted',
+    });
+  });
+
+  it('invalidates a cached GET after a remote 404 and does not reuse it on a later observation', async () => {
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"artifact-v1"' },
+        data: artifact(),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('not found'), {
+          status: 404,
+          response: { status: 404, headers: {} },
+        }),
+      )
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"artifact-v2"' },
+        data: artifact(),
+      });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      trustedProofBudget({ total: 4, primary: 4 }),
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow('not found');
+    await client.getArtifact(artifactInput(), signal());
+
+    expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
+      request: { headers: { 'if-none-match': '"artifact-v1"' } },
+    });
+    expect(getArtifact.mock.calls[2]?.[0]).toMatchObject({
+      request: { signal: expect.anything() },
+    });
+    expect(getArtifact.mock.calls[2]?.[0].request.headers).toBeUndefined();
+  });
+
+  it('clears repository conditional representations before a delete mutation', async () => {
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"artifact-v1"' },
+        data: artifact(),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"artifact-v2"' },
+        data: artifact(),
+      });
+    const deleteArtifact = vi.fn(async () => ({ status: 204, data: undefined }));
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact, deleteArtifact }),
+      trustedProofBudget({ total: 4, primary: 4 }),
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await client.deleteArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+
+    expect(deleteArtifact).toHaveBeenCalledOnce();
+    expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
+      request: { signal: expect.anything() },
+    });
+    expect(getArtifact.mock.calls[1]?.[0]?.request?.headers).toBeUndefined();
+  });
+
+  it('marks deletion at the immediate pre-wire boundary', async () => {
+    const events: string[] = [];
+    const deleteArtifact = vi.fn(async () => {
+      events.push('octokit');
+      return { status: 204, data: undefined };
+    });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ deleteArtifact }),
+      trustedProofBudget({ total: 4, primary: 4 }),
+    );
+
+    await client.deleteArtifact(artifactInput(), signal(), undefined, () => {
+      events.push('marker');
+    });
+
+    expect(events).toEqual(['marker', 'octokit']);
+    expect(deleteArtifact).toHaveBeenCalledOnce();
+  });
+
+  it('does not mark or call deletion when FIFO pacing misses its command deadline', async () => {
+    let now = 0;
+    const deleteArtifact = vi.fn(async () => ({ status: 204, data: undefined }));
+    const budget = trustedProofBudget(
+      { total: 16, primary: 16 },
+      {
+        now: () => now,
+        sleep: async (milliseconds) => {
+          now += milliseconds;
+        },
+        maximumPointsPerRollingMinute: 5,
+      },
+    );
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ deleteArtifact }),
+      budget,
+    );
+    let markers = 0;
+
+    await runGet(budget);
+    await expect(
+      client.deleteArtifact(artifactInput(), signal(), now + 100, () => {
+        markers += 1;
+      }),
+    ).rejects.toThrow('artifact_rest_attempt_deadline_exceeded');
+
+    expect(markers).toBe(0);
+    expect(deleteArtifact).not.toHaveBeenCalled();
+  });
+
+  it('does not clone or retain an over-bound conditional representation', async () => {
+    const clone = vi.fn((value) => value);
+    vi.stubGlobal('structuredClone', clone);
+    const oversized = { payload: 'x'.repeat(256 * 1024) };
+    const getArtifact = vi.fn(
+      async (_input: { readonly request?: { readonly headers?: unknown } }) => ({
+        status: 200,
+        headers: { etag: '"oversized"' },
+        data: oversized,
+      }),
+    );
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      nonProofBudget(),
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+
+    expect(getArtifact).toHaveBeenCalledTimes(2);
+    expect(getArtifact.mock.calls[1]?.[0]?.request?.headers).toBeUndefined();
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it('evicts conditional representations to its aggregate byte bound', async () => {
+    const getArtifact = vi.fn(
+      async (input: {
+        readonly artifact_id: number;
+        readonly request?: { readonly headers?: unknown };
+      }) => ({
+        status: 200,
+        headers: { etag: '"artifact-' + input.artifact_id + '"' },
+        data: { id: input.artifact_id, value: 'x'.repeat(24) },
+      }),
+    );
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      nonProofBudget(),
+      { maximumEntries: 4, maximumBytes: 48 },
+    );
+
+    await client.getArtifact({ owner: 'owner', repo: 'repo', artifact_id: 1 }, signal());
+    await client.getArtifact({ owner: 'owner', repo: 'repo', artifact_id: 2 }, signal());
+    await client.getArtifact({ owner: 'owner', repo: 'repo', artifact_id: 1 }, signal());
+
+    expect(getArtifact).toHaveBeenCalledTimes(3);
+    expect(getArtifact.mock.calls[2]?.[0]?.request?.headers).toBeUndefined();
+  });
+
+  it('makes a returned secondary rate limit sticky before later authenticated dispatches', async () => {
+    const getArtifact = vi.fn(async () => ({
+      status: 403,
+      headers: { 'retry-after': '60', 'x-ratelimit-remaining': '999' },
+      data: artifact(),
+    }));
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_rate_limited',
+    );
+
+    expect(getArtifact).toHaveBeenCalledOnce();
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 1,
+      primary_rate_limit_requests: 1,
+      disposition: 'rate_limited',
+    });
+  });
+
+  it('accounts an ordinary authorization 403 without poisoning the protected route', async () => {
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 403, headers: {}, data: artifact() })
+      .mockResolvedValueOnce({ status: 200, headers: { etag: '"ok"' }, data: artifact() });
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+
+    expect(getArtifact).toHaveBeenCalledTimes(2);
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 2,
+      primary_rate_limit_requests: 2,
+      permission_denied: 1,
+      disposition: 'active',
+    });
+  });
+
+  it.each([
+    [
+      '403 primary exhaustion',
+      403,
+      { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1893456000' },
+      artifact(),
+      'primary_exhausted',
+    ],
+    [
+      '429 primary exhaustion',
+      429,
+      { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1893456000' },
+      artifact(),
+      'primary_exhausted',
+    ],
+    ['403 secondary Retry-After', 403, { 'retry-after': '60' }, artifact(), 'rate_limited'],
+    [
+      '429 secondary message',
+      429,
+      {},
+      { message: 'You have exceeded a secondary rate limit. Please wait.' },
+      'rate_limited',
+    ],
+    [
+      '403 combined primary and secondary exhaustion',
+      403,
+      {
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': '1893456000',
+        'retry-after': '60',
+      },
+      artifact(),
+      'primary_and_secondary_rate_limited',
+    ],
+    [
+      '429 combined primary and secondary exhaustion',
+      429,
+      {
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': '1893456000',
+        'retry-after': '60',
+      },
+      { message: 'secondary rate limit' },
+      'primary_and_secondary_rate_limited',
+    ],
+  ] as const)(
+    '%s yields a sticky truthful taxonomy',
+    async (_label, status, headers, data, disposition) => {
+      const getArtifact = vi.fn(async () => ({ status, headers, data }));
+      const budget = trustedProofBudget();
+      const client = createArtifactActionsRestClient(
+        octokitWithArtifactMethods({ getArtifact }),
+        budget,
+      );
+
+      await client.getArtifact(artifactInput(), signal());
+      await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+        `trusted_proof_artifact_rest_budget_${disposition}`,
+      );
+
+      expect(getArtifact).toHaveBeenCalledOnce();
+      expect(budget.receipt()).toMatchObject({
+        total_authenticated_api_requests: 1,
+        primary_rate_limit_requests: 1,
+        disposition,
+      });
+    },
+  );
+
+  it('rejects a compound mutation reservation one raw unit before any dispatch', () => {
+    const budget = trustedProofBudget({ total: 2, primary: 2 });
+
+    expect(() =>
+      budget.reserveMutation({
+        authenticatedRequests: 3,
+        primaryRequests: 3,
+        secondaryPoints: 7,
+      }),
+    ).toThrow('trusted_proof_artifact_rest_budget_total_exhausted');
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 0,
+      primary_rate_limit_requests: 0,
+      secondary_limit_points: 0,
+      disposition: 'total_exhausted',
+    });
+  });
+
+  it('fails closed for a 429 that supplies neither primary nor secondary evidence', async () => {
+    const getArtifact = vi.fn(async () => {
+      throw Object.assign(new Error('rate limited'), {
+        status: 429,
+        response: { status: 429, headers: {} },
+      });
+    });
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'artifact_rest_rate_limit_headers_invalid',
+    );
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'artifact_rest_rate_limit_headers_invalid',
+    );
+
+    expect(getArtifact).toHaveBeenCalledOnce();
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 1,
+      primary_rate_limit_requests: 1,
+      disposition: 'invalid_rate_limit_headers',
+    });
+  });
+
+  it('makes a thrown secondary rate-limit response sticky with primary capacity remaining', async () => {
+    const getArtifact = vi.fn(async () => {
+      throw Object.assign(new Error('secondary rate limited'), {
+        status: 403,
+        response: {
+          status: 403,
+          headers: { 'retry-after': '60', 'x-ratelimit-remaining': '999' },
+        },
+      });
+    });
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'secondary rate limited',
+    );
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_rate_limited',
+    );
+
+    expect(getArtifact).toHaveBeenCalledOnce();
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 1,
+      primary_rate_limit_requests: 1,
+      disposition: 'rate_limited',
+    });
+  });
+
+  it('accounts a plain 403 when only an Octokit error message mentions a secondary limit', async () => {
+    const getArtifact = vi.fn(async () => {
+      throw Object.assign(new Error('You have exceeded a secondary rate limit.'), {
+        status: 403,
+        response: { status: 403, headers: {} },
+      });
+    });
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'You have exceeded a secondary rate limit.',
+    );
+
+    expect(budget.receipt()).toMatchObject({
+      disposition: 'active',
+      total_authenticated_api_requests: 1,
+      primary_rate_limit_requests: 1,
+      permission_denied: 1,
+    });
+  });
+
+  it('allows ordinary successful zero remaining but blocks the next charged dispatch', async () => {
+    const getArtifact = vi.fn(async () => ({
+      status: 200,
+      headers: {
+        etag: '"artifact"',
+        'x-ratelimit-limit': '5000',
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': '1893456000',
+      },
+      data: artifact(),
+    }));
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    expect(budget.receipt().disposition).toBe('active');
+    await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+
+    expect(getArtifact).toHaveBeenCalledOnce();
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 1,
+      primary_rate_limit_requests: 1,
+      disposition: 'primary_exhausted',
+    });
+  });
+
+  it('keeps normal 200 and 304 primary headers non-sticky', async () => {
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {
+          etag: '"artifact"',
+          'x-ratelimit-limit': '5000',
+          'x-ratelimit-remaining': '4999',
+          'x-ratelimit-reset': '1893456000',
+        },
+        data: artifact(),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('not modified'), {
+          status: 304,
+          response: {
+            status: 304,
+            headers: {
+              'x-ratelimit-limit': '5000',
+              'x-ratelimit-remaining': '4999',
+              'x-ratelimit-reset': '1893456000',
+            },
+          },
+        }),
+      );
+    const budget = trustedProofBudget({ total: 3, primary: 3 });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 2,
+      primary_rate_limit_requests: 1,
+      conditional_not_modified_requests: 1,
+      disposition: 'active',
+    });
+  });
+
+  it('never derives a secondary signal from a 200 or 304 JSON body', async () => {
+    const budget = trustedProofBudget();
+    for (const status of [200, 304]) {
+      await budget.runAuthenticatedApiCall(
+        { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+        async () => ({
+          status,
+          headers: {},
+          data: { message: 'You have exceeded a secondary rate limit.' },
+        }),
+      );
+    }
+
+    expect(budget.receipt()).toMatchObject({
+      disposition: 'active',
+      total_authenticated_api_requests: 2,
+      primary_rate_limit_requests: 1,
+      conditional_not_modified_requests: 1,
+    });
+  });
+
+  it.each([
+    ['', 'invalid'],
+    ['secondary rate\u0000limit', 'invalid'],
+    ['secondary rate limit', 'secondary'],
+    ['secondary rate limited', 'secondary'],
+    ['secondary rate limits', 'secondary'],
+    [`secondary rate limit ${'x'.repeat(491)}`, 'secondary'],
+    [`secondary rate limit ${'x'.repeat(492)}`, 'invalid'],
+    ['ésecondary rate limit', 'secondary'],
+    ['secondary rate limité', 'secondary'],
+    ['xsecondary rate limit', 'permission'],
+    ['secondary rate limitx', 'permission'],
+  ] as const)(
+    'uses the exact bounded secondary-message predicate for %j',
+    async (message, outcome) => {
+      const budget = trustedProofBudget();
+      const observe = () =>
+        budget.runAuthenticatedApiCall(
+          { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+          async () => ({ status: 403, headers: {}, data: { message } }),
+        );
+
+      if (outcome === 'invalid') {
+        await expect(observe()).rejects.toThrow('artifact_rest_rate_limit_headers_invalid');
+        return;
+      }
+      await observe();
+      expect(budget.receipt().disposition).toBe(
+        outcome === 'secondary' ? 'rate_limited' : 'active',
+      );
+      expect(budget.receipt().permission_denied).toBe(outcome === 'permission' ? 1 : 0);
+    },
+  );
+
+  it.each(['not-json', null, ['secondary rate limit'], { message: { nested: true } }])(
+    'fails closed for a non-object or malformed GitHub error payload',
+    async (data) => {
+      const budget = trustedProofBudget();
+
+      await expect(
+        budget.runAuthenticatedApiCall(
+          { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+          async () => ({ status: 403, headers: {}, data }),
+        ),
+      ).rejects.toThrow('artifact_rest_rate_limit_headers_invalid');
+    },
+  );
+
+  it.each([
+    [-1, 'invalid'],
+    [0, 'invalid'],
+    [1, 'primary_exhausted'],
+  ] as const)(
+    'validates reset epochs against its injected clock at now%+d',
+    async (delta, outcome) => {
+      const now = 1_900_000_000;
+      const budget = trustedProofBudget(undefined, { epochSeconds: () => now });
+      const observe = () =>
+        budget.runAuthenticatedApiCall(
+          { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+          async () => ({
+            status: 403,
+            headers: {
+              'x-ratelimit-remaining': '0',
+              'x-ratelimit-reset': String(now + delta),
+            },
+            data: artifact(),
+          }),
+        );
+
+      if (outcome === 'invalid') {
+        await expect(observe()).rejects.toThrow('artifact_rest_rate_limit_headers_invalid');
+        return;
+      }
+      await observe();
+      expect(budget.receipt().disposition).toBe(outcome);
+    },
+  );
+
+  it.each([
+    { headers: { 'x-ratelimit-remaining': 'not-a-number' } },
+    { headers: { 'x-ratelimit-remaining': '3', 'x-ratelimit-limit': '2' } },
+    { headers: { 'x-ratelimit-reset': 'not-an-epoch' } },
+    { headers: { 'x-ratelimit-reset': '1', 'x-ratelimit-remaining': '1' } },
+    { headers: { 'x-ratelimit-reset': '1893456000' } },
+    { headers: { 'x-ratelimit-reset': '4102444801' } },
+    { headers: { 'x-ratelimit-reset': ['1893456000', '1893456001'] } },
+    {
+      headers: {
+        'x-ratelimit-remaining': '1',
+        'X-RateLimit-Remaining': '1',
+      },
+    },
+    { headers: { 'retry-after': 'later' } },
+    { headers: { 'retry-after': '1' } },
+    { status: 403, headers: { 'retry-after': '1', 'x-ratelimit-remaining': '0' } },
+    { status: 429, headers: {} },
+    { status: 429, headers: {}, data: { message: 'ordinary failure' } },
+    { status: 429, headers: {}, data: { message: 'x'.repeat(513) } },
+  ])(
+    'rejects malformed or contradictory rate-limit headers and poisons later dispatches',
+    async ({ headers, status = 200, data = artifact() }) => {
+      const getArtifact = vi
+        .fn()
+        .mockResolvedValueOnce({ status, headers, data })
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: artifact() });
+      const budget = trustedProofBudget();
+      const client = createArtifactActionsRestClient(
+        octokitWithArtifactMethods({ getArtifact }),
+        budget,
+      );
+
+      await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+        'artifact_rest_rate_limit_headers_invalid',
+      );
+      await expect(client.getArtifact(artifactInput(), signal())).rejects.toThrow(
+        'artifact_rest_rate_limit_headers_invalid',
+      );
+
+      expect(getArtifact).toHaveBeenCalledOnce();
+      expect(budget.receipt()).toMatchObject({
+        total_authenticated_api_requests: 1,
+        primary_rate_limit_requests: 1,
+        disposition: 'invalid_rate_limit_headers',
+      });
+    },
+  );
+
+  it('rejects a compound mutation reservation against a verified zero remaining allocation', async () => {
+    const getArtifact = vi.fn(async () => ({
+      status: 200,
+      headers: {
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': '1893456000',
+      },
+      data: artifact(),
+    }));
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    expect(() =>
+      budget.reserveMutation({ authenticatedRequests: 3, primaryRequests: 3, secondaryPoints: 8 }),
+    ).toThrow('trusted_proof_artifact_rest_budget_primary_exhausted');
+    expect(getArtifact).toHaveBeenCalledOnce();
+  });
+
+  it('reserves the compound primary tail plus the final-profile reserve before mutation wire work', async () => {
+    const getArtifact = vi.fn(async () => ({
+      status: 200,
+      headers: { 'x-ratelimit-remaining': '3' },
+      data: artifact(),
+    }));
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+    let mutationWireDispatches = 0;
+
+    await client.getArtifact(artifactInput(), signal());
+    expect(() => {
+      budget.reserveMutation({ authenticatedRequests: 3, primaryRequests: 3, secondaryPoints: 8 });
+      mutationWireDispatches += 1;
+    }).toThrow('trusted_proof_artifact_rest_budget_primary_exhausted');
+
+    expect(mutationWireDispatches).toBe(0);
+    expect(getArtifact).toHaveBeenCalledOnce();
+  });
+
+  it('restores a provisional known allocation after a headerless 304', async () => {
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"artifact-v1"', 'x-ratelimit-remaining': '1' },
+        data: artifact(),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('not modified'), {
+          status: 304,
+          response: { status: 304, headers: {} },
+        }),
+      )
+      .mockResolvedValueOnce({ status: 200, headers: { etag: '"artifact-v2"' }, data: artifact() });
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+
+    expect(getArtifact).toHaveBeenCalledTimes(3);
+    expect(budget.receipt()).toMatchObject({
+      primary_rate_limit_requests: 2,
+      conditional_not_modified_requests: 1,
+      disposition: 'active',
+    });
+  });
+
+  it('requires the known remaining allocation to cover a command tail as one unit', async () => {
+    const getArtifact = vi.fn(async () => ({
+      status: 200,
+      headers: { 'x-ratelimit-remaining': '2' },
+      data: artifact(),
+    }));
+    const budget = trustedProofBudget();
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      budget,
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    expect(() => budget.requireObservedPrimaryAllocation(3)).toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+    expect(getArtifact).toHaveBeenCalledOnce();
+  });
+
+  it('leaves an authenticated non-proof route unaffected', async () => {
+    const listArtifactsForRepo = vi.fn(async () => ({
+      status: 200,
+      data: { artifacts: [] },
+    }));
+    const budget = nonProofBudget({ total: 2, primary: 2 });
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ listArtifactsForRepo }),
+      budget,
+    );
+
+    for (let index = 0; index <= 2; index += 1) {
+      await client.listArtifactsForRepo(listInput(), signal());
+    }
+
+    expect(listArtifactsForRepo).toHaveBeenCalledTimes(3);
+    expect(budget.receipt()).toEqual({
+      kind: 'apr-r4-trusted-proof-artifact-rest-budget-v2',
+      protected_route: false,
+      maximum_total_authenticated_api_requests: null,
+      total_authenticated_api_requests: 0,
+      maximum_primary_rate_limit_requests: null,
+      primary_rate_limit_requests: 0,
+      conditional_not_modified_requests: 0,
+      secondary_limit_points: 0,
+      permission_denied: 0,
+      remaining_total_authenticated_api_requests: null,
+      remaining_primary_rate_limit_requests: null,
+      disposition: 'active',
+      repository: null,
+      repository_id: null,
+      workflow_sha: null,
+      action_source_sha: null,
+      payload_sha256: null,
+      build_discriminator: null,
+      run_id: null,
+      run_attempt: null,
+      cap_profile: null,
+      measurement_only: null,
+    });
+  });
+});
+
 function octokitWithRedirect() {
   return {
     rest: {
@@ -77,4 +1236,91 @@ function octokitWithRedirect() {
       },
     },
   } as never;
+}
+
+function octokitWithArtifactMethods(methods: Record<string, unknown>) {
+  return {
+    rest: {
+      actions: {
+        listArtifactsForRepo: vi.fn(async () => ({
+          status: 200,
+          data: { artifacts: [] },
+        })),
+        getArtifact: vi.fn(async () => ({ status: 200, data: artifact() })),
+        downloadArtifact: vi.fn(async () => ({ status: 302, headers: {} })),
+        getWorkflowRunAttempt: vi.fn(async () => ({ status: 200, data: {} })),
+        deleteArtifact: vi.fn(async () => ({ status: 204, data: undefined })),
+        ...methods,
+      },
+    },
+  } as never;
+}
+
+function trustedProofBudget(
+  limits = {
+    total: TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumTotalAuthenticatedApiRequests,
+    primary: TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumPrimaryRateLimitRequests,
+  },
+  secondaryRateLimit?: ArtifactRestSecondaryRateLimitOptions,
+): ArtifactRestRequestBudget {
+  return ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+    buildDiscriminator: 'r4-w2',
+    limits: {
+      maximumTotalAuthenticatedApiRequests: limits.total,
+      maximumPrimaryRateLimitRequests: limits.primary,
+    },
+    secondaryRateLimit,
+    identity: trustedProofIdentity(),
+  });
+}
+
+function nonProofBudget(
+  limits = {
+    total: TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumTotalAuthenticatedApiRequests,
+    primary: TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumPrimaryRateLimitRequests,
+  },
+): ArtifactRestRequestBudget {
+  return ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+    buildDiscriminator: 'r4-h1',
+    limits: {
+      maximumTotalAuthenticatedApiRequests: limits.total,
+      maximumPrimaryRateLimitRequests: limits.primary,
+    },
+  });
+}
+
+function listInput() {
+  return { owner: 'owner', repo: 'repo', name: 'artifact', per_page: 100, page: 1 };
+}
+
+function artifactInput() {
+  return { owner: 'owner', repo: 'repo', artifact_id: 1 };
+}
+
+function artifact() {
+  return { id: 1, name: 'artifact', expired: false };
+}
+
+function signal(): AbortSignal {
+  return new AbortController().signal;
+}
+
+function trustedProofIdentity() {
+  return {
+    repository: 'owner/repo',
+    repositoryId: '1',
+    workflowSha: 'a'.repeat(40),
+    actionSourceSha: 'b'.repeat(40),
+    payloadSha256: 'c'.repeat(64),
+    buildDiscriminator: 'r4-w2',
+    runId: '2',
+    runAttempt: '1',
+  };
+}
+
+async function runGet(budget: ArtifactRestRequestBudget) {
+  return await budget.runAuthenticatedApiCall(
+    { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+    async () => ({ status: 200 }),
+  );
 }

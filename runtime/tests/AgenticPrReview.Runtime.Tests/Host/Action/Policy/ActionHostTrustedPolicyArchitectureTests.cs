@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
@@ -10,6 +11,15 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.Policy;
 
 public sealed class ActionHostTrustedPolicyArchitectureTests
 {
+    private static readonly IReadOnlyDictionary<ushort, OpCode> OpCodesByValue =
+        typeof(OpCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(static field => field.FieldType == typeof(OpCode))
+            .Select(static field => (OpCode)field.GetValue(null)!)
+            .ToDictionary(
+                static opCode => unchecked((ushort)opCode.Value),
+                static opCode => opCode);
+
     [Fact]
     public void PolicySurfaceIsInternalImmutableAndPrivatelyMinted()
     {
@@ -54,7 +64,8 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
                 BindingFlags.Instance |
                 BindingFlags.Static |
                 BindingFlags.Public |
-                BindingFlags.NonPublic))
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly))
             .Where(method => Calls(method, export.MetadataToken))
             .Select(method => method.DeclaringType)
             .Distinct()
@@ -94,11 +105,17 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
         {
             "GetBlobObjectAsync",
             "GetCommitObjectAsync",
+            "GetHeadArchiveAsync",
             "GetTreeObjectAsync",
         }, typeof(IActionHostGitObjectTransport)
             .GetMethods()
             .Select(method => method.Name)
             .Order(StringComparer.Ordinal));
+        var archive = Assert.Single(typeof(IActionHostGitObjectTransport)
+            .GetMethods(), method => method.Name == "GetHeadArchiveAsync");
+        Assert.Equal(
+            typeof(Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>),
+            archive.ReturnType);
         Assert.Equal(new[]
         {
             "CopyBlobObjectAsync",
@@ -176,15 +193,58 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
             return false;
         }
 
-        var token = BitConverter.GetBytes(metadataToken);
-        for (var index = 0; index <= body.Length - token.Length; index++)
+        var offset = 0;
+        while (offset < body.Length)
         {
-            if (body.AsSpan(index, token.Length).SequenceEqual(token))
+            var opCode = ReadOpCode(body, ref offset);
+            var operandOffset = offset;
+            var operandSize = OperandSize(opCode.OperandType, body, offset);
+            if ((opCode == OpCodes.Call || opCode == OpCodes.Callvirt) &&
+                BitConverter.ToInt32(body, operandOffset) == metadataToken)
             {
                 return true;
             }
+
+            offset += operandSize;
         }
 
         return false;
     }
+
+    private static OpCode ReadOpCode(byte[] il, ref int offset)
+    {
+        var first = il[offset++];
+        var value = first == 0xfe
+            ? (ushort)(0xfe00 | il[offset++])
+            : first;
+        return OpCodesByValue.TryGetValue(value, out var opCode)
+            ? opCode
+            : throw new Xunit.Sdk.XunitException("Unknown IL opcode.");
+    }
+
+    private static int OperandSize(
+        OperandType operandType,
+        byte[] il,
+        int offset) => operandType switch
+        {
+            OperandType.InlineNone => 0,
+            OperandType.ShortInlineBrTarget or
+                OperandType.ShortInlineI or
+                OperandType.ShortInlineVar => 1,
+            OperandType.InlineVar => 2,
+            OperandType.InlineBrTarget or
+                OperandType.InlineField or
+                OperandType.InlineI or
+                OperandType.InlineMethod or
+                OperandType.InlineSig or
+                OperandType.InlineString or
+                OperandType.InlineTok or
+                OperandType.InlineType or
+                OperandType.ShortInlineR => 4,
+            OperandType.InlineI8 or OperandType.InlineR => 8,
+            OperandType.InlineSwitch =>
+                4 + checked(BitConverter.ToInt32(il, offset) * 4),
+            _ => throw new Xunit.Sdk.XunitException(
+                $"Unsupported IL operand type {operandType}."),
+        };
 }

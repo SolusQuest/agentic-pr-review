@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   authorizationDigest,
   authorizationDigestV2,
+  authorizationManifestV2,
   extractPreflight,
   runExtractedPreflight,
 } from './check-r4-e2p-preflight.mjs';
@@ -47,6 +48,7 @@ const environment = {
   EVENT_HEAD_REPOSITORY: values.repository,
   EVENT_HEAD_REPOSITORY_ID: values.repositoryId,
   INPUT_PR_NUMBER: '',
+  INPUT_OPERATION_ID: '',
   REPOSITORY: values.repository,
   REPOSITORY_ID: values.repositoryId,
   WORKFLOW_SHA: values.workflowSha,
@@ -113,6 +115,7 @@ describe('R4 E2P exact inline preflight', () => {
       EVENT_PR_NUMBER: '',
       EVENT_HEAD_SHA: '',
       INPUT_PR_NUMBER: '147',
+      INPUT_OPERATION_ID: operationId,
     };
 
     const result = await runExtractedPreflight({
@@ -262,13 +265,15 @@ describe('R4 E2P v2 exact inline preflight', () => {
   const v2Source = extractPreflight(fs.readFileSync(v2TemplatePath));
   const v2Values = {
     ...values,
-    payloadSourceSha: '1'.repeat(40),
+    actionSourceSha: values.workflowSha,
+    payloadSourceSha: values.workflowSha,
   };
   const v2Environment = {
     ...environment,
-    PAYLOAD_SOURCE_SHA: v2Values.payloadSourceSha,
-    R4_TRUSTED_PROOF_AUTHORIZATION: authorizationDigestV2(v2Values),
+    R4_TRUSTED_PROOF_AUTHORIZATION: authorizationManifestV2(v2Values),
   };
+  const v2Authorization = (overrides: Partial<typeof v2Values> = {}) =>
+    authorizationManifestV2({ ...v2Values, ...overrides });
   const v2Pull = (overrides: Record<string, unknown> = {}) => ({
     number: 147,
     state: 'open',
@@ -299,6 +304,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
               EVENT_PR_NUMBER: '',
               EVENT_HEAD_SHA: '',
               INPUT_PR_NUMBER: '147',
+              INPUT_OPERATION_ID: operationId,
             }
           : v2Environment;
 
@@ -309,7 +315,9 @@ describe('R4 E2P v2 exact inline preflight', () => {
       });
 
       expect(result.stderr).toBe('');
-      expect(result.stdout).toContain('authorized=true\n');
+      expect(result.stdout).toBe(
+        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(v2Values)}\nexpected-payload-sha256=${v2Values.payloadSha256}\n`,
+      );
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(fetchImpl.mock.calls[0][1]).toMatchObject({
         method: 'GET',
@@ -341,11 +349,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     ['wrong branch', {}, { head: { ...v2Pull().head, ref: 'renamed' } }],
     ['draft', {}, { draft: true }],
     ['closed', {}, { state: 'closed' }],
-    ['wrong payload source', { PAYLOAD_SOURCE_SHA: '2'.repeat(40) }, {}],
-    ['missing payload source', { PAYLOAD_SOURCE_SHA: '' }, {}],
     ['wrong workflow sha', { WORKFLOW_SHA: '2'.repeat(40) }, {}],
-    ['wrong action source', { ACTION_SOURCE_SHA: '2'.repeat(40) }, {}],
-    ['wrong payload digest', { PAYLOAD_SHA256: '2'.repeat(64) }, {}],
     ['wrong repository', { REPOSITORY: 'fork/repo' }, {}],
     ['wrong repository id', { REPOSITORY_ID: '43' }, {}],
   ])('rejects v2 fact drift: %s', async (_name, environmentOverrides, pullOverrides) => {
@@ -356,10 +360,28 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
 
     expect(result.stdout).toBe(
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\n',
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\n',
     );
     expect(result.stdout).not.toContain('authorized=true');
     expect(result.stderr).toMatch(/^APR_R4_E2P_PREFLIGHT_REJECTED /u);
+  });
+
+  it('rejects a workflow-dispatch operation id that is not the authorized fixture-ref suffix', async () => {
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: {
+        ...v2Environment,
+        EVENT_NAME: 'workflow_dispatch',
+        EVENT_PR_NUMBER: '',
+        EVENT_HEAD_SHA: '',
+        INPUT_PR_NUMBER: '147',
+        INPUT_OPERATION_ID: '2'.repeat(64),
+      },
+      fetchImpl: vi.fn(async () => response(v2Pull())),
+    });
+
+    expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
+    expect(result.stderr).toContain('workflow-dispatch-operation-id');
   });
 
   it.each([
@@ -388,6 +410,30 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
     expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
     expect(result.stderr).toContain('github-response-duplicate-key');
+  });
+
+  it.each([
+    ['old fixed action source', v2Authorization({ actionSourceSha: 'b'.repeat(40) })],
+    ['different payload source', v2Authorization({ payloadSourceSha: 'c'.repeat(40) })],
+    ['noncanonical whitespace', ` ${v2Authorization()}`],
+    ['extra manifest member', v2Authorization().replace(/\}$/u, ',"extra":"x"}')],
+    [
+      'duplicate manifest member',
+      v2Authorization().replace(
+        '"payload_sha256":',
+        '"payload_sha256":"' + '0'.repeat(64) + '","payload_sha256":',
+      ),
+    ],
+  ])('rejects v2 authorization manifest: %s', async (_name, authorization) => {
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: { ...v2Environment, R4_TRUSTED_PROOF_AUTHORIZATION: authorization },
+      fetchImpl: vi.fn(async () => response(v2Pull())),
+    });
+
+    expect(result.stdout).toBe(
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\n',
+    );
   });
 
   it('fails closed on v2 transport or timeout failures', async () => {

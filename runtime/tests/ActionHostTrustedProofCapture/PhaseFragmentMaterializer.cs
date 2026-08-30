@@ -166,7 +166,7 @@ public static partial class PhaseFragmentMaterializer
         }
     }
 
-    private static PhaseAuthorization ReadAuthorization(
+    internal static PhaseAuthorization ReadAuthorization(
         RestrictedEvidenceRoot root,
         string relativePath,
         string expectedSha256,
@@ -253,7 +253,7 @@ public static partial class PhaseFragmentMaterializer
             "terminal-stale", "post-cleanup-normal", "post-cleanup-stale",
         };
         var stale = phase.Contains("stale", StringComparison.Ordinal);
-        if (!allowed.Contains(phase, StringComparer.Ordinal) ||
+        if ((!allowed.Contains(phase, StringComparer.Ordinal) && !EnrollmentPhase(phase)) ||
             operationId != operationIds[stale ? 1 : 0] ||
             !ValidSourcePhase(options["--source-id"], phase) ||
             !options["--route"].StartsWith($"/repos/{repository}/", StringComparison.Ordinal) ||
@@ -271,6 +271,14 @@ public static partial class PhaseFragmentMaterializer
 
     private static bool ValidSourcePhase(string sourceId, string phase)
     {
+        if (EnrollmentPhase(phase))
+        {
+            var match = Regex.Match(sourceId,
+                "^enrollment-(normal-inert-preflight|stale-inert-preflight|normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-(run|jobs|pending|approvals|discovery|pull)-run-[1-9][0-9]*$");
+            return match.Success && phase == $"enrollment-{match.Groups[1].Value}-" +
+                (match.Groups[2].Value == "run" ? "terminal" :
+                    match.Groups[2].Value == "approvals" ? "approval" : match.Groups[2].Value);
+        }
         if (phase.StartsWith("baseline-", StringComparison.Ordinal))
         {
             var scope = phase["baseline-".Length..];
@@ -440,6 +448,16 @@ public static partial class PhaseFragmentMaterializer
             ValidateDeploymentApproval(pages, authorization);
             return;
         }
+        if (sourceId.Contains("-discovery-run-", StringComparison.Ordinal))
+        {
+            ValidateEnrollmentDiscovery(options, pages, authorization);
+            return;
+        }
+        if (sourceId.Contains("-pull-run-", StringComparison.Ordinal))
+        {
+            ValidateEnrollmentPull(options, pages, authorization);
+            return;
+        }
         if (sourceId.StartsWith("proof-control-", StringComparison.Ordinal) &&
             sourceId.Contains("-comment-", StringComparison.Ordinal))
         {
@@ -457,7 +475,12 @@ public static partial class PhaseFragmentMaterializer
             ValidateConcurrency(options, pages, authorization);
             return;
         }
-        if (sourceId.StartsWith("run-terminal-", StringComparison.Ordinal))
+        if (sourceId.StartsWith("run-terminal-", StringComparison.Ordinal) ||
+            (sourceId.StartsWith("enrollment-", StringComparison.Ordinal) &&
+                sourceId.Contains("-run-", StringComparison.Ordinal) &&
+                !sourceId.Contains("-jobs-", StringComparison.Ordinal) &&
+                !sourceId.Contains("-pending-", StringComparison.Ordinal) &&
+                !sourceId.Contains("-approvals-", StringComparison.Ordinal)))
         {
             ValidateTerminalRun(options, pages);
             return;
@@ -784,7 +807,8 @@ public static partial class PhaseFragmentMaterializer
     {
         using var document = JsonDocument.Parse(pages.Bodies.Single());
         var run = document.RootElement;
-        var source = Regex.Match(options["--source-id"], "^run-terminal-([1-9][0-9]*)$");
+        var source = Regex.Match(options["--source-id"],
+            "^(?:run-terminal-|enrollment-(?:normal-inert-preflight|stale-inert-preflight|normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-run-)([1-9][0-9]*)$");
         if (!source.Success || run.GetProperty("id").GetRawText() != source.Groups[1].Value ||
             run.GetProperty("status").GetString() != "completed" ||
             string.IsNullOrWhiteSpace(run.GetProperty("conclusion").GetString()) ||
@@ -797,6 +821,65 @@ public static partial class PhaseFragmentMaterializer
                 eventName.GetString() is not ("workflow_run" or "workflow_dispatch")) ||
             (run.TryGetProperty("head_sha", out var headSha) &&
                 !Hex40(headSha.GetString() ?? string.Empty)))
+        {
+            throw new InvalidDataException("phase_materializer_semantics_invalid");
+        }
+    }
+
+    private static void ValidateEnrollmentDiscovery(
+        IReadOnlyDictionary<string, string> options,
+        CapturePageSet pages,
+        PhaseAuthorization authorization)
+    {
+        var match = Regex.Match(options["--source-id"],
+            "^enrollment-(normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-discovery-run-([1-9][0-9]*)$");
+        var endpoint = $"/repos/{authorization.Repository}/actions/workflows/r4-trusted-proof.yml/runs";
+        if (!match.Success || options["--route"] != endpoint + "?per_page=100")
+        {
+            throw new InvalidDataException("phase_materializer_semantics_invalid");
+        }
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var body in pages.Bodies)
+        {
+            using var document = JsonDocument.Parse(body);
+            var runs = document.RootElement.GetProperty("workflow_runs");
+            if (runs.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidDataException("phase_materializer_semantics_invalid");
+            }
+            foreach (var run in runs.EnumerateArray())
+            {
+                var id = run.GetProperty("id").GetRawText();
+                if (!PositiveDecimal(id) || !seen.Add(id) || !PositiveDecimal(run.GetProperty("run_attempt").GetRawText()) ||
+                    run.GetProperty("event").GetString() is not ("workflow_run" or "workflow_dispatch") ||
+                    run.GetProperty("status").GetString() is null ||
+                    run.GetProperty("head_repository").GetProperty("full_name").GetString() != authorization.Repository ||
+                    run.GetProperty("path").GetString() != ".github/workflows/r4-trusted-proof.yml" ||
+                    !DateTimeOffset.TryParse(run.GetProperty("created_at").GetString(), out _))
+                {
+                    throw new InvalidDataException("phase_materializer_semantics_invalid");
+                }
+            }
+        }
+    }
+
+    private static void ValidateEnrollmentPull(
+        IReadOnlyDictionary<string, string> options,
+        CapturePageSet pages,
+        PhaseAuthorization authorization)
+    {
+        var match = Regex.Match(options["--source-id"],
+            "^enrollment-(normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-pull-run-([1-9][0-9]*)$");
+        if (!match.Success || pages.Bodies.Length != 1)
+        {
+            throw new InvalidDataException("phase_materializer_semantics_invalid");
+        }
+        using var document = JsonDocument.Parse(pages.Bodies[0]);
+        var value = document.RootElement;
+        if (!PositiveDecimal(value.GetProperty("number").GetRawText()) ||
+            !Hex40(value.GetProperty("head").GetProperty("sha").GetString() ?? string.Empty) ||
+            value.GetProperty("base").GetProperty("ref").GetString() != "main" ||
+            options["--route"] != $"/repos/{authorization.Repository}/pulls/{value.GetProperty("number").GetRawText()}")
         {
             throw new InvalidDataException("phase_materializer_semantics_invalid");
         }
@@ -844,7 +927,7 @@ public static partial class PhaseFragmentMaterializer
         string? runId = null;
         var source = Regex.Match(
             options["--source-id"],
-            "^transition-(?:bootstrap|continuation|stale|stale-follow-on)-jobs-run-([1-9][0-9]*)$");
+            "^(?:transition-(?:bootstrap|continuation|stale|stale-follow-on)-jobs|enrollment-(?:normal-inert-preflight|stale-inert-preflight|normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-jobs)-run-([1-9][0-9]*)$");
         if (!source.Success)
         {
             throw new InvalidDataException("phase_materializer_semantics_invalid");
@@ -875,8 +958,12 @@ public static partial class PhaseFragmentMaterializer
                 }
             }
         }
-        var rejectedFollowOn = options["--phase"] == "stale-follow-on-jobs";
-        var selected = options["--phase"].StartsWith("continuation-", StringComparison.Ordinal)
+        var inert = options["--phase"] is "enrollment-normal-inert-preflight-jobs" or
+            "enrollment-stale-inert-preflight-jobs";
+        var rejectedFollowOn = options["--phase"] == "stale-follow-on-jobs" ||
+            options["--phase"] == "enrollment-stale-follow-on-jobs" || inert;
+        var selected = options["--phase"].StartsWith("continuation-", StringComparison.Ordinal) ||
+            options["--phase"] == "enrollment-normal-continuation-jobs"
             ? "workflow-dispatch-review"
             : "workflow-run-review";
         var other = selected == "workflow-run-review"
@@ -950,6 +1037,9 @@ public static partial class PhaseFragmentMaterializer
 
     private static bool Hex40(string value) => value.Length == 40 &&
         value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool EnrollmentPhase(string phase) => Regex.IsMatch(phase,
+        "^enrollment-(normal-inert-preflight|stale-inert-preflight|normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-(terminal|jobs|pending|approval|discovery|pull)$");
 
     [GeneratedRegex(@"/actions/runs/([1-9][0-9]*)(?:/|$)", RegexOptions.CultureInvariant)]
     private static partial Regex RunRoute();

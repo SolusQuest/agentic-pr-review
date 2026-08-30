@@ -41,10 +41,20 @@ export async function startArtifactBridgeRuntime(input: {
     fail('wrapper_bridge_invalid');
   }
   let executorPromise: Promise<ArtifactBridgeExecutor> | undefined;
+  let executorAccepting = true;
   const lazyExecutor: ArtifactBridgeExecutor = {
     execute: async (command, signal) => {
+      if (!executorAccepting) throw new Error('artifact_bridge_executor_stopped');
       executorPromise ??= input.executorFactory(stagingRoot);
       return await (await executorPromise).execute(command, signal);
+    },
+    dispose: async () => {
+      if (!executorPromise) return;
+      await (await executorPromise).dispose?.();
+    },
+    stopAndDrain: async () => {
+      if (!executorPromise) return;
+      await (await executorPromise).stopAndDrain?.();
     },
   };
   const server = createArtifactBridgeServer({
@@ -74,12 +84,22 @@ export async function startArtifactBridgeRuntime(input: {
     stopAndDrain: async () => {
       if (stopped) return;
       stopped = true;
-      await stopAndDrain(server, sockets);
+      executorAccepting = false;
+      // Close listener admission and executor command admission together.
+      // Existing connections may finish framing while the socket drain runs,
+      // but their executor calls now fail before any lifecycle work starts.
+      const socketDrain = stopAndDrain(server, sockets);
+      const executorDrain = lazyExecutor.stopAndDrain?.();
+      await Promise.all([socketDrain, executorDrain]);
     },
     cleanup: async () => {
       if (cleaned) return;
       cleaned = true;
-      await rm(tempRoot, { recursive: true, force: true });
+      try {
+        await lazyExecutor.dispose?.();
+      } finally {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
     },
   };
 }

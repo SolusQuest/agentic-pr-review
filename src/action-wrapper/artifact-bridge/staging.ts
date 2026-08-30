@@ -4,7 +4,10 @@ import path from 'node:path';
 
 import { relativePath } from './contracts.js';
 import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
-import type { ArtifactBridgeOperationBudget } from './operation-budget.js';
+import {
+  ArtifactBridgeDeadlineError,
+  type ArtifactBridgeOperationBudget,
+} from './operation-budget.js';
 
 export class ArtifactBridgeStagingError extends Error {
   constructor() {
@@ -40,6 +43,7 @@ export class ArtifactBridgeStaging {
     await this.assertRoot();
     const resolved = await this.resolveExistingFile(relative);
     const handle = await openStagedFile(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    let bytes: Buffer | undefined;
     try {
       const before = await handle.stat();
       if (
@@ -52,7 +56,7 @@ export class ArtifactBridgeStaging {
       }
       await this.assertOpenedPath(resolved, before);
       budget?.throwIfExpired();
-      const bytes = await handle.readFile(budget ? { signal: budget.signal } : undefined);
+      bytes = await handle.readFile(budget ? { signal: budget.signal } : undefined);
       budget?.throwIfExpired();
       const after = await handle.stat();
       await this.assertOpenedPath(resolved, after);
@@ -66,6 +70,11 @@ export class ArtifactBridgeStaging {
       }
       return bytes;
     } catch (error) {
+      // The caller takes ownership only after a stable, fully validated return.
+      // A deadline or validation failure after readFile must not leave the
+      // encrypted source bytes resident in this frame.
+      bytes?.fill(0);
+      if (error instanceof ArtifactBridgeDeadlineError) throw error;
       if (budget?.signal.aborted) budget.throwIfExpired();
       if (error instanceof ArtifactBridgeStagingError) throw error;
       throw new ArtifactBridgeStagingError();

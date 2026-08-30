@@ -5,8 +5,8 @@ import process from 'node:process';
 import Ajv from 'ajv';
 import { parseDocument } from 'yaml';
 import { extractPreflight } from './check-r4-e2p-preflight.mjs';
-import { verifyReceipt } from './check-r4-e2p-receipt.mjs';
-import { verifyReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
+import { verifySealedReceipt } from './check-r4-e2p-receipt.mjs';
+import { verifySealedReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
 import { generateCleanupPlan, projectTrustedProofEvidence } from './r4-trusted-proof-contract.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
@@ -25,8 +25,12 @@ const actionSourceSha = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
 const payloadSourceSha = 'edc594c29a8a6b5fdacfab48643bf221277af200';
 const payloadSourceTree = '8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089';
 const payloadSha256 = 'b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e';
-const templateSha256 = '46ff02fc0e107bdff5d4d4fbe185d8a4f97b8cb8059b99485a285c8d11a45768';
-const renderedWorkflowSha256 = '1dcf42e6c3890614d13ef1a0e6f98ca35e0029c2c78e85d4afdd4f32e29aebd9';
+const templateSha256 = 'efa1c282c6339e6b51fd4774ca5e650e5e3bcc07aae6cd76464cddc155956c8a';
+const renderedWorkflowSha256 = 'efa1c282c6339e6b51fd4774ca5e650e5e3bcc07aae6cd76464cddc155956c8a';
+const sealedReceiptTemplateSha256 =
+  '46ff02fc0e107bdff5d4d4fbe185d8a4f97b8cb8059b99485a285c8d11a45768';
+const sealedRenderedWorkflowSha256 =
+  '1dcf42e6c3890614d13ef1a0e6f98ca35e0029c2c78e85d4afdd4f32e29aebd9';
 const receiptLineSha256 = '346cf753a0657ba4e25c5271df21afb1a95d2574c3ca8eb2a1f2e772ec776242';
 const receiptJsonSha256 = '3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1';
 const normalCanarySha256 = 'bc58613e9f389b973f1e44de64021a7acc748fafd857b7fa99466493670db446';
@@ -60,15 +64,15 @@ const fixtureDigests = new Map([
   ],
   [
     'authorizations/cleanup.json',
-    '541f8015e85dc88e9d8e0b58a0aff80687313f2df54cd03540e7d8289c0d82bd',
+    'c628fc31deb048475f65973899aa53c71adf4084a70660bce05894b3141f135a',
   ],
   [
     'authorizations/execution.json',
-    '07bb9b554a95407c9f8793afce85731168702c0f21a212550b14df569ac08f42',
+    '339af52dac9b4f37368551981b6b9e6e9398fe0cb1ecd0b0bc47ca9c6ad3d4e7',
   ],
   ['authorizations/setup.json', 'a7cb429e66a51ebc6006929c16b07216efc15620bd0b9b509b599c668db5ac3f'],
   ['cleanup-contract.json', '6322a614c3118aac9e0684b00b371e1440a5046a8a0fef19df1132759bfea969'],
-  ['cleanup-plan.json', '011c681b6b5105c46440d80dd67017a71ea13f01003fc499997b31f4d50b107e'],
+  ['cleanup-plan.json', '4b480139c00d1c4a496ec3ddf0c5802533fbbd43032cb7e3d919c5d777bd8863'],
   [
     'expected-success-role-contract.json',
     '8d601c863d184f8f8cf3cdae5e1b447eb9fa7aea25fd94d00390a3ac786a92ba',
@@ -88,7 +92,7 @@ const fixtureDigests = new Map([
   ],
   [
     'schemas/host-restricted-evidence.schema.json',
-    '7d0ca7869f1886a290735376501c936808b3ee0bdf6292ba96b5bb9802f0b804',
+    '5d675eac84d152921bb3ec14bb0b4115ecf9d678995f969ff078d39bde150320',
   ],
   [
     'schemas/public-safe-evidence.schema.json',
@@ -101,7 +105,7 @@ const fixtureDigests = new Map([
   ['source-map.json', 'f99fba6f95199833597957d1e7b79b47d6754bae3cbc37f2b0b45b4d72ed734e'],
   [
     'templates/host-restricted-evidence.json',
-    'c6a6f57841384d1bbe52b5228cc7464262d30a2c0fdd5a5789a72d7be58607a6',
+    'af35ff511cdb23c4026a855621bd39c5675ec8cf092b7315ec1dc57896495d4f',
   ],
   [
     'templates/public-safe-evidence.json',
@@ -450,24 +454,91 @@ const reviewedWriteActionRoutes = new Map([
   [
     'r4-trusted-proof.yml\0workflow-run-review',
     [
-      'checkout-control-root\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
-      'checkout-payload-source\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
       'setup-node\0actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
       'setup-dotnet\0actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
-      'review\0SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+      'review\0./control-root/.github/actions/agentic-pr-review',
     ],
   ],
   [
     'r4-trusted-proof.yml\0workflow-dispatch-review',
     [
-      'checkout-control-root\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
-      'checkout-payload-source\0actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
       'setup-node\0actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
       'setup-dotnet\0actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
-      'review\0SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+      'review\0./control-root/.github/actions/agentic-pr-review',
     ],
   ],
 ]);
+
+function exactSourceAcquisitionRun() {
+  return `set -euo pipefail
+unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
+acquire_exact_public_commit() {
+  local destination="$1"
+  local expected_sha="$2"
+  if [ -e "$destination" ]; then
+    echo "APR_R4_E2P_SOURCE_PATH_NOT_FRESH $destination" >&2
+    exit 1
+  fi
+  git init --quiet "$destination"
+  git -C "$destination" remote add origin https://github.com/SolusQuest/agentic-pr-review.git
+  if git -C "$destination" config --local --get-regexp '^(credential\\.helper|http\\..*\\.extraheader)$'; then
+    echo "APR_R4_E2P_SOURCE_CREDENTIAL_CONFIGURATION" >&2
+    exit 1
+  fi
+  git -C "$destination" fetch --depth=1 --no-tags origin "$expected_sha"
+  if [ "$(git -C "$destination" rev-parse FETCH_HEAD)" != "$expected_sha" ]; then
+    echo "APR_R4_E2P_SOURCE_FETCH_IDENTITY" >&2
+    exit 1
+  fi
+  git -C "$destination" checkout --quiet --detach "$expected_sha"
+  if [ "$(git -C "$destination" rev-parse HEAD)" != "$expected_sha" ]; then
+    echo "APR_R4_E2P_SOURCE_CHECKOUT_IDENTITY" >&2
+    exit 1
+  fi
+}
+acquire_exact_public_commit "$GITHUB_WORKSPACE/control-root" "$CONTROL_ROOT_SHA"
+acquire_exact_public_commit "$GITHUB_WORKSPACE/payload-source" "$PAYLOAD_SOURCE_SHA"
+`;
+}
+
+function validateExactSourceAcquisition(workflowSource, workflow) {
+  if (workflowSource.includes('actions/checkout')) fail('source-acquisition-checkout');
+  if (workflow.jobs === null || Array.isArray(workflow.jobs) || typeof workflow.jobs !== 'object') {
+    fail('source-acquisition-jobs');
+  }
+  for (const jobId of ['workflow-run-review', 'workflow-dispatch-review']) {
+    const job = workflow.jobs[jobId];
+    if (
+      job === null ||
+      Array.isArray(job) ||
+      typeof job !== 'object' ||
+      !Array.isArray(job.steps)
+    ) {
+      fail('source-acquisition-job');
+    }
+    const step = job.steps[0];
+    if (
+      step === null ||
+      Array.isArray(step) ||
+      typeof step !== 'object' ||
+      JSON.stringify(Object.keys(step)) !== JSON.stringify(['id', 'env', 'run']) ||
+      step.id !== 'acquire-exact-sources' ||
+      JSON.stringify(step.env) !==
+        JSON.stringify({
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_ASKPASS: '/bin/false',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          CONTROL_ROOT_SHA: '${{ github.workflow_sha }}',
+          PAYLOAD_SOURCE_SHA: '${{ github.workflow_sha }}',
+        }) ||
+      step.run !== exactSourceAcquisitionRun()
+    ) {
+      fail('source-acquisition-contract');
+    }
+  }
+}
 
 const proofMutationPermissions = new Set(['actions', 'contents', 'issues', 'pull-requests']);
 const reviewedWritePermissionIdentity = JSON.stringify([
@@ -687,8 +758,8 @@ function validateRepositorySecretRoutes(workflowsRoot) {
   const proofAnchors = [
     'R4_TRUSTED_PROOF_AUTHORIZATION',
     'environment: r4-trusted-proof',
-    'prepare-r4-trusted-proof-payload.sh',
-    'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+    'prepare-r4-trusted-proof-payload-current.sh',
+    'uses: ./control-root/.github/actions/agentic-pr-review',
     'AGENTIC_PR_REVIEW_PREPARED_',
     'AGENTIC_PR_REVIEW_ACTION_SOURCE_SHA',
     'AGENTIC_PR_REVIEW_PAYLOAD_BUILD_DISCRIMINATOR',
@@ -710,7 +781,10 @@ function validateRepositorySecretRoutes(workflowsRoot) {
   const expected = [
     `r3-live-proof.yml\0\${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}`,
     ...Array.from({ length: 4 }, () => `r4-trusted-proof.yml\0\${{ secrets.GITHUB_TOKEN }}`),
-    ...Array.from({ length: 2 }, () => `r4-trusted-proof.yml\0\${{ secrets.DEEPSEEK_API_KEY }}`),
+    ...Array.from(
+      { length: 2 },
+      () => `r4-trusted-proof.yml\0\${{ secrets.AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY }}`,
+    ),
     ...Array.from(
       { length: 2 },
       () => `r4-trusted-proof.yml\0\${{ secrets.AGENTIC_PR_REVIEW_STATE_KEY }}`,
@@ -744,17 +818,13 @@ export function checkR4TrustedProof(options = {}) {
     templateBytes.includes(0x0d) ||
     workflowBytes.includes(0x0d) ||
     sha256(templateBytes) !== templateSha256 ||
-    count(templateBytes.toString('utf8'), '__ACTION_SOURCE_SHA__') !== 5 ||
-    count(templateBytes.toString('utf8'), '__PAYLOAD_SOURCE_SHA__') !== 5 ||
-    count(templateBytes.toString('utf8'), '__PAYLOAD_SHA256__') !== 3
+    count(templateBytes.toString('utf8'), '__ACTION_SOURCE_SHA__') !== 0 ||
+    count(templateBytes.toString('utf8'), '__PAYLOAD_SOURCE_SHA__') !== 0 ||
+    count(templateBytes.toString('utf8'), '__PAYLOAD_SHA256__') !== 0
   ) {
     fail('template-identity');
   }
-  const rendered = templateBytes
-    .toString('utf8')
-    .replaceAll('__ACTION_SOURCE_SHA__', actionSourceSha)
-    .replaceAll('__PAYLOAD_SOURCE_SHA__', payloadSourceSha)
-    .replaceAll('__PAYLOAD_SHA256__', payloadSha256);
+  const rendered = templateBytes.toString('utf8');
   if (
     workflowBytes.toString('utf8') !== rendered ||
     sha256(workflowBytes) !== renderedWorkflowSha256 ||
@@ -762,7 +832,8 @@ export function checkR4TrustedProof(options = {}) {
   ) {
     fail('rendered-workflow');
   }
-  parseWorkflow(workflowPath);
+  const parsedWorkflow = parseWorkflow(workflowPath);
+  validateExactSourceAcquisition(parsedWorkflow.source, parsedWorkflow.value);
   const documents = validateFixtureContracts(fixtureRoot);
   const capturePlanSource = fs.readFileSync(
     path.join(root, 'runtime', 'tests', 'ActionHostTrustedProofCapture', 'CapturePlan.cs'),
@@ -895,9 +966,9 @@ export function checkR4TrustedProof(options = {}) {
     'v1',
     'trusted-proof-payload-receipt.json',
   );
-  verifyReceipt({ receiptPath: historicalReceiptPath, sourceRoot: root });
+  verifySealedReceipt({ receiptPath: historicalReceiptPath, sourceRoot: root });
   const receiptPath = path.join(fixtureRoot, 'trusted-proof-payload-receipt-v2.json');
-  const receipt = verifyReceiptV2({ receiptPath, sourceRoot: root });
+  const receipt = verifySealedReceiptV2({ receiptPath, sourceRoot: root });
   const receiptBytes = documents.get('trusted-proof-payload-receipt-v2.json').bytes;
   if (
     sha256(receiptBytes) !== receiptJsonSha256 ||
@@ -909,7 +980,7 @@ export function checkR4TrustedProof(options = {}) {
     receipt.compiled_payload_source_tree !== payloadSourceTree ||
     receipt.action_source_sha !== actionSourceSha ||
     receipt.payload_sha256 !== payloadSha256 ||
-    receipt.workflow_topology_sha256 !== templateSha256 ||
+    receipt.workflow_topology_sha256 !== sealedReceiptTemplateSha256 ||
     receipt.result !== 'passed'
   ) {
     fail('receipt-identity');
@@ -947,8 +1018,8 @@ export function checkR4TrustedProof(options = {}) {
     provenance.materialization_job_id !== '97797924152' ||
     provenance.receipt_line_sha256 !== receiptLineSha256 ||
     provenance.receipt_json_sha256 !== receiptJsonSha256 ||
-    provenance.workflow_template_sha256 !== templateSha256 ||
-    provenance.rendered_workflow_sha256 !== renderedWorkflowSha256 ||
+    provenance.workflow_template_sha256 !== sealedReceiptTemplateSha256 ||
+    provenance.rendered_workflow_sha256 !== sealedRenderedWorkflowSha256 ||
     provenance.action_source_sha !== actionSourceSha ||
     provenance.payload_sha256 !== payloadSha256 ||
     provenance.result !== 'passed'
@@ -964,10 +1035,12 @@ export function checkR4TrustedProof(options = {}) {
   const stagedInline = extractPreflight(stagedTemplate);
   if (
     stagedTemplate.includes(0x0d) ||
-    count(stagedSource, '__ACTION_SOURCE_SHA__') !== 5 ||
-    count(stagedSource, '__PAYLOAD_SOURCE_SHA__') !== 5 ||
-    count(stagedSource, '__PAYLOAD_SHA256__') !== 3 ||
+    stagedSource.includes('__ACTION_SOURCE_SHA__') ||
+    stagedSource.includes('__PAYLOAD_SOURCE_SHA__') ||
+    stagedSource.includes('__PAYLOAD_SHA256__') ||
     !stagedInline.includes("'apr-r4-e2p-authorization-manifest-v2'") ||
+    !stagedInline.includes('authorizationText !== manifest') ||
+    !stagedInline.includes('authorization-source-identity') ||
     !stagedInline.includes('pull.merged_at !== null') ||
     !stagedInline.includes("pull.base?.ref !== 'main'") ||
     !stagedInline.includes('pull.base?.sha !== workflowSha')
@@ -992,6 +1065,7 @@ export function checkR4TrustedProof(options = {}) {
       'payload_source_identity',
       'workflow_run',
       'authorization_variable',
+      'authorization_value',
       'authorization_manifest_kind',
       'authorization_manifest_order',
       'outputs',
@@ -1004,7 +1078,8 @@ export function checkR4TrustedProof(options = {}) {
     stagedPreflight.redirect !== 'error' ||
     stagedPreflight.base_ref !== 'main' ||
     stagedPreflight.base_sha !== 'exact-workflow-sha' ||
-    stagedPreflight.payload_source_identity !== 'exact-compiled-payload-source-commit' ||
+    stagedPreflight.payload_source_identity !== 'exact-workflow-action-payload-source-commit' ||
+    stagedPreflight.authorization_value !== 'strict-canonical-manifest-json' ||
     stagedPreflight.authorization_manifest_kind !== 'apr-r4-e2p-authorization-manifest-v2'
   ) {
     fail('staged-v2-preflight-contract');
@@ -1014,24 +1089,27 @@ export function checkR4TrustedProof(options = {}) {
     16_384,
   ).value;
   const stagedPreparationScript = readBounded(
-    path.join(root, ...stagedPreparationScriptRelative.split('/')),
+    path.join(root, 'runtime', 'scripts', 'prepare-r4-trusted-proof-payload-current.sh'),
   ).toString('utf8');
   if (
-    stagedPreparation.kind !== 'apr-r4-e2p-preparation-contract-v2' ||
+    stagedPreparation.kind !== 'apr-r4-e2p-current-preparation-contract-v1' ||
     JSON.stringify(stagedPreparation.outputs) !==
       JSON.stringify([
         'prepared_root',
         'prepared_executable',
         'prepared_payload_sha256',
         'action_source_sha',
+        'payload_source_sha',
+        'payload_source_tree',
         'payload_build_discriminator',
       ]) ||
-    stagedPreparation.action_source_sha !== actionSourceSha ||
     stagedPreparation.payload_build_discriminator !== 'r4-w2' ||
-    count(stagedPreparationScript, 'payload_source_sha=') !== 0 ||
-    !stagedPreparationScript.includes('-p:PayloadSourceCommit=$source_commit') ||
+    !stagedPreparationScript.includes('--expected-payload-sha256') ||
+    !stagedPreparationScript.includes('expected_source_sha') ||
+    !stagedPreparationScript.includes('-p:PayloadSourceCommit=$expected_source_sha') ||
     !stagedPreparationScript.includes('-p:PayloadSourceTree=$source_tree') ||
-    !stagedPreparationScript.includes('"$(wc -l < "$output_lines")" -eq 5')
+    stagedPreparationScript.includes('trusted-proof-payload-receipt-v2.json') ||
+    !stagedPreparationScript.includes('"$(wc -l < "$output_lines")" -eq 7')
   ) {
     fail('staged-v2-preparation-contract');
   }

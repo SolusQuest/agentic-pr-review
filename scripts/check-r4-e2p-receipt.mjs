@@ -44,7 +44,7 @@ function lowerHex(value, length) {
   return typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`, 'u').test(value);
 }
 
-export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
+export function verifySealedReceipt({ receiptPath, sourceRoot }) {
   const contractPath = path.join(
     sourceRoot,
     'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/receipt-contract.json',
@@ -95,6 +95,12 @@ export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
   ) {
     fail('shared-managed-identity');
   }
+  if (receipt.receipt_contract_sha256 !== sha256(contractBytes)) fail('contract-digest');
+  return receipt;
+}
+
+export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
+  const receipt = verifySealedReceipt({ receiptPath, sourceRoot });
   const fixedFiles = new Map([
     ['action_metadata_sha256', '.github/actions/agentic-pr-review/action.yml'],
     ['wrapper_bundle_sha256', '.github/actions/agentic-pr-review/dist/index.js'],
@@ -139,7 +145,6 @@ export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
       fail(`digest-${field}`);
     }
   }
-  if (receipt.receipt_contract_sha256 !== sha256(contractBytes)) fail('contract-digest');
   if (payloadPath && receipt.payload_sha256 !== sha256(read(payloadPath, 256 * 1024 * 1024))) {
     fail('payload-digest');
   }

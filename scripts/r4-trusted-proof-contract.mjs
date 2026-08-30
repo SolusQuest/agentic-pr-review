@@ -133,9 +133,15 @@ function sourceTimestamp(value, code) {
 
 function expectedCaptureSourcePhase(sourceId, operationId, operationIds) {
   const family = sourceId.replace(/:page:[1-9][0-9]*$/u, '');
-  let match = /^authorization-(setup|execution)-(?:comment|permission)-(normal|stale)-/u.exec(
-    family,
-  );
+  let match =
+    /^enrollment-(normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-(run|jobs|discovery|pull|pending|approvals)-run-[1-9][0-9]*$/u.exec(
+      family,
+    );
+  if (match) {
+    const kind = match[2] === 'run' ? 'terminal' : match[2] === 'approvals' ? 'approval' : match[2];
+    return `enrollment-${match[1]}-${kind}`;
+  }
+  match = /^authorization-(setup|execution)-(?:comment|permission)-(normal|stale)-/u.exec(family);
   if (match) return `baseline-${match[2]}`;
   match = /^(baseline-(?:normal|stale))-/u.exec(family);
   if (match) return match[1];
@@ -889,65 +895,72 @@ function deriveAuthorizationReadback(phase, response, permission, captureBodySha
   };
 }
 
-function deriveAuthorizations(captureManifest, capturedSourceBodies, retainedDocuments) {
-  const authorizations = {};
-  const read = (source) => {
-    const retained = capturedSourceBodies.get(source.source_id);
-    if (
-      retained === undefined ||
-      typeof retained.text !== 'string' ||
-      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
-      String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size
-    ) {
-      invalid('authorization-capture-binding');
-    }
-    try {
-      return JSON.parse(retained.text);
-    } catch {
-      invalid('authorization-capture-json');
-    }
-  };
-  for (const phase of ['setup', 'execution']) {
-    const derivedByScope = [];
-    for (const scope of ['normal', 'stale']) {
-      const comments = captureManifest.sources.filter((source) =>
-        new RegExp(`^authorization-${phase}-comment-${scope}-[1-9][0-9]*:page:1$`, 'u').test(
-          source.source_id,
-        ),
-      );
-      const permissions = captureManifest.sources.filter((source) =>
-        new RegExp(`^authorization-${phase}-permission-${scope}-[A-Za-z0-9-]+:page:1$`, 'u').test(
-          source.source_id,
-        ),
-      );
-      if (comments.length !== 1 || permissions.length !== 1) {
-        invalid(`authorization-${phase}-${scope}-source-cardinality`);
-      }
-      const comment = comments[0];
-      const permission = permissions[0];
-      derivedByScope.push({
-        response: read(comment),
-        permission: read(permission),
-        authorization: deriveAuthorizationReadback(
-          phase,
-          read(comment),
-          read(permission),
-          comment.body_sha256,
-          {
-            request_started: comment.request_started_unix_milliseconds,
-            response_received: comment.response_received_unix_milliseconds,
-          },
-        ),
-      });
-    }
-    if (
-      canonicalJson(derivedByScope[0].response) !== canonicalJson(derivedByScope[1].response) ||
-      canonicalJson(derivedByScope[0].permission) !== canonicalJson(derivedByScope[1].permission)
-    ) {
-      invalid(`authorization-${phase}-paired-baseline-drift`);
-    }
-    authorizations[phase] = derivedByScope[0].authorization;
+function readCapturedAuthorizationSource(source, capturedSourceBodies) {
+  const retained = capturedSourceBodies.get(source.source_id);
+  if (
+    retained === undefined ||
+    typeof retained.text !== 'string' ||
+    sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
+    String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size
+  ) {
+    invalid('authorization-capture-binding');
   }
+  try {
+    return JSON.parse(retained.text);
+  } catch {
+    invalid('authorization-capture-json');
+  }
+}
+
+function derivePairedAuthorization(phase, captureManifest, capturedSourceBodies) {
+  const derivedByScope = [];
+  for (const scope of ['normal', 'stale']) {
+    const comments = captureManifest.sources.filter((source) =>
+      new RegExp(`^authorization-${phase}-comment-${scope}-[1-9][0-9]*:page:1$`, 'u').test(
+        source.source_id,
+      ),
+    );
+    const permissions = captureManifest.sources.filter((source) =>
+      new RegExp(`^authorization-${phase}-permission-${scope}-[A-Za-z0-9-]+:page:1$`, 'u').test(
+        source.source_id,
+      ),
+    );
+    if (comments.length !== 1 || permissions.length !== 1) {
+      invalid(`authorization-${phase}-${scope}-source-cardinality`);
+    }
+    const comment = comments[0];
+    const permission = permissions[0];
+    const response = readCapturedAuthorizationSource(comment, capturedSourceBodies);
+    const permissionResponse = readCapturedAuthorizationSource(permission, capturedSourceBodies);
+    derivedByScope.push({
+      response,
+      permission: permissionResponse,
+      authorization: deriveAuthorizationReadback(
+        phase,
+        response,
+        permissionResponse,
+        comment.body_sha256,
+        {
+          request_started: comment.request_started_unix_milliseconds,
+          response_received: comment.response_received_unix_milliseconds,
+        },
+      ),
+    });
+  }
+  if (
+    canonicalJson(derivedByScope[0].response) !== canonicalJson(derivedByScope[1].response) ||
+    canonicalJson(derivedByScope[0].permission) !== canonicalJson(derivedByScope[1].permission)
+  ) {
+    invalid(`authorization-${phase}-paired-baseline-drift`);
+  }
+  return derivedByScope[0].authorization;
+}
+
+function deriveAuthorizations(captureManifest, capturedSourceBodies, retainedDocuments) {
+  const authorizations = {
+    setup: derivePairedAuthorization('setup', captureManifest, capturedSourceBodies),
+    execution: derivePairedAuthorization('execution', captureManifest, capturedSourceBodies),
+  };
   const cleanup = retainedDocuments.get('cleanup-authorization-readback');
   exactKeys(
     cleanup,
@@ -1596,59 +1609,63 @@ function validateAuthorizationSource(value, phase) {
   }
 }
 
-function validateAuthorization(value, identities) {
-  exactKeys(value, ['setup', 'execution', 'cleanup'], 'authorization-shape');
-  exactKeys(
-    value.setup,
-    ['kind', 'phase', 'source', 'coordinates', 'capabilities', 'branches'],
-    'setup-authorization-shape',
-  );
-  validateAuthorizationSource(value.setup.source, 'setup');
-  exactKeys(
-    value.setup.coordinates,
-    ['repository', 'workflow_sha', 'action_source_sha', 'payload_source_sha', 'payload_sha256'],
-    'setup-authorization-coordinate-shape',
-  );
-  if (
-    value.setup.kind !== 'apr-r4-e3-setup-authorization-v1' ||
-    value.setup.phase !== 'setup' ||
-    !Array.isArray(value.setup.branches) ||
-    value.setup.branches.length !== 2 ||
-    value.setup.branches.some((branch) => {
-      exactKeys(
-        branch,
-        ['ref', 'head_sha', 'parent_sha', 'tree_sha'],
-        'setup-authorization-branch-shape',
-      );
-      return (
-        !hex40.test(branch.head_sha) ||
-        !hex40.test(branch.parent_sha) ||
-        !hex40.test(branch.tree_sha) ||
-        !fixtureRef.test(branch.ref)
-      );
-    }) ||
-    JSON.stringify(value.setup.coordinates) !==
-      JSON.stringify({
-        repository: identities.repository,
-        workflow_sha: identities.workflow_sha,
-        action_source_sha: identities.action_source_sha,
-        payload_source_sha: identities.payload_source_sha,
-        payload_sha256: identities.payload_sha256,
-      })
-  ) {
-    invalid('setup-authorization-values');
+function validateAuthorization(value, identities, { executionOnly = false } = {}) {
+  if (executionOnly) {
+    value = { setup: { coordinates: value.coordinates }, execution: value };
+  } else {
+    exactKeys(value, ['setup', 'execution', 'cleanup'], 'authorization-shape');
+    exactKeys(
+      value.setup,
+      ['kind', 'phase', 'source', 'coordinates', 'capabilities', 'branches'],
+      'setup-authorization-shape',
+    );
+    validateAuthorizationSource(value.setup.source, 'setup');
+    exactKeys(
+      value.setup.coordinates,
+      ['repository', 'workflow_sha', 'action_source_sha', 'payload_source_sha', 'payload_sha256'],
+      'setup-authorization-coordinate-shape',
+    );
+    if (
+      value.setup.kind !== 'apr-r4-e3-setup-authorization-v1' ||
+      value.setup.phase !== 'setup' ||
+      !Array.isArray(value.setup.branches) ||
+      value.setup.branches.length !== 2 ||
+      value.setup.branches.some((branch) => {
+        exactKeys(
+          branch,
+          ['ref', 'head_sha', 'parent_sha', 'tree_sha'],
+          'setup-authorization-branch-shape',
+        );
+        return (
+          !hex40.test(branch.head_sha) ||
+          !hex40.test(branch.parent_sha) ||
+          !hex40.test(branch.tree_sha) ||
+          !fixtureRef.test(branch.ref)
+        );
+      }) ||
+      JSON.stringify(value.setup.coordinates) !==
+        JSON.stringify({
+          repository: identities.repository,
+          workflow_sha: identities.workflow_sha,
+          action_source_sha: identities.action_source_sha,
+          payload_source_sha: identities.payload_source_sha,
+          payload_sha256: identities.payload_sha256,
+        })
+    ) {
+      invalid('setup-authorization-values');
+    }
+    exactArray(
+      value.setup.capabilities,
+      [
+        'configure-environment-baseline',
+        'push-two-precomputed-heads',
+        'open-two-frozen-fixture-prs',
+        'observe-secret-free-ci-and-inert-preflight',
+        'bounded-setup-rollback',
+      ],
+      'setup-authorization-capabilities',
+    );
   }
-  exactArray(
-    value.setup.capabilities,
-    [
-      'configure-environment-baseline',
-      'push-two-precomputed-heads',
-      'open-two-frozen-fixture-prs',
-      'observe-secret-free-ci-and-inert-preflight',
-      'bounded-setup-rollback',
-    ],
-    'setup-authorization-capabilities',
-  );
 
   exactKeys(
     value.execution,
@@ -1865,8 +1882,12 @@ function validateAuthorization(value, identities) {
     'execution-active-secret-profile-shape',
   );
   const allowedEnvironmentProfiles = [
-    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
-    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY', 'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY'],
+    ['AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+    [
+      'AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY',
+      'AGENTIC_PR_REVIEW_STATE_KEY',
+      'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
+    ],
   ];
   const allowedCredentialProfiles = [
     ['github-token', 'current-state-key'],
@@ -2003,18 +2024,24 @@ function validateAuthorization(value, identities) {
   }
   exactKeys(
     value.execution.provider_mode,
-    ['provider', 'model', 'adapter', 'endpoint', 'transport', 'canary_contract_sha256'],
+    [
+      'provider',
+      'model',
+      'adapter',
+      'transport',
+      'network',
+      'deterministic_provider_contract_sha256',
+    ],
     'execution-provider-mode-shape',
   );
   if (
     value.execution.provider_mode.provider !== 'deepseek' ||
     value.execution.provider_mode.model !== 'deepseek-v4-flash' ||
-    value.execution.provider_mode.adapter !==
-      '968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502' ||
-    value.execution.provider_mode.endpoint !== 'https://api.deepseek.com/chat/completions' ||
-    value.execution.provider_mode.transport !== 'production-https-json' ||
-    value.execution.provider_mode.canary_contract_sha256 !==
-      value.execution.protected_scan_input.sha256
+    value.execution.provider_mode.adapter !== 'deepseek-v1' ||
+    value.execution.provider_mode.transport !== 'in-process-http-message-handler' ||
+    value.execution.provider_mode.network !== false ||
+    value.execution.provider_mode.deterministic_provider_contract_sha256 !==
+      '3da2dd332c21097cb30ece8cc80830b75dfd02fd146f159555899194eaf52d8c'
   ) {
     invalid('execution-provider-mode-values');
   }
@@ -2043,20 +2070,172 @@ function validateAuthorization(value, identities) {
     invalid('execution-protected-scan-input-values');
   }
 
-  exactKeys(
-    value.cleanup,
-    ['kind', 'phase', 'source', 'coordinates', 'plan_sha256'],
-    'cleanup-authorization-shape',
-  );
-  validateAuthorizationSource(value.cleanup.source, 'cleanup');
-  if (
-    value.cleanup.kind !== 'apr-r4-e3-cleanup-authorization-v1' ||
-    value.cleanup.phase !== 'cleanup' ||
-    !hex64.test(value.cleanup.plan_sha256) ||
-    JSON.stringify(value.cleanup.coordinates) !== JSON.stringify(value.setup.coordinates)
-  ) {
-    invalid('cleanup-authorization-values');
+  if (!executionOnly) {
+    exactKeys(
+      value.cleanup,
+      ['kind', 'phase', 'source', 'coordinates', 'plan_sha256'],
+      'cleanup-authorization-shape',
+    );
+    validateAuthorizationSource(value.cleanup.source, 'cleanup');
+    if (
+      value.cleanup.kind !== 'apr-r4-e3-cleanup-authorization-v1' ||
+      value.cleanup.phase !== 'cleanup' ||
+      !hex64.test(value.cleanup.plan_sha256) ||
+      JSON.stringify(value.cleanup.coordinates) !== JSON.stringify(value.setup.coordinates)
+    ) {
+      invalid('cleanup-authorization-values');
+    }
   }
+}
+
+const enrollmentAuthoritySourceKeys = Object.freeze([
+  'source_id',
+  'operation_id',
+  'phase',
+  'route',
+  'page',
+  'status',
+  'body_path',
+  'body_sha256',
+  'body_size',
+  'body_file_identity',
+  'safe_headers_sha256',
+  'request_started_unix_milliseconds',
+  'response_received_unix_milliseconds',
+  'next_route',
+]);
+
+/**
+ * Validate the host-restricted paired GitHub readback that grants post-merge enrollment.
+ * This is deliberately narrower than final proof assembly: it reuses the E3 authorization
+ * grammar and capture-source contract without creating a second evidence collector.
+ */
+export function validateEnrollmentExecutionAuthorityPackage(value) {
+  exactKeys(
+    value,
+    ['kind', 'identities', 'sources', 'captured_source_bodies', 'execution_authorization'],
+    'enrollment-authority-package-shape',
+  );
+  exactKeys(
+    value.identities,
+    ['repository', 'workflow_sha', 'action_source_sha', 'payload_source_sha', 'payload_sha256'],
+    'enrollment-authority-identity-shape',
+  );
+  if (
+    value.kind !== 'apr-r4-e2p-enrollment-execution-authority-v1' ||
+    value.identities.repository !== 'SolusQuest/agentic-pr-review' ||
+    !hex40.test(value.identities.workflow_sha) ||
+    !hex40.test(value.identities.action_source_sha) ||
+    !hex40.test(value.identities.payload_source_sha) ||
+    !hex64.test(value.identities.payload_sha256) ||
+    !Array.isArray(value.sources) ||
+    value.sources.length !== 4 ||
+    !Array.isArray(value.captured_source_bodies) ||
+    value.captured_source_bodies.length !== 4
+  ) {
+    invalid('enrollment-authority-package-values');
+  }
+  const sourceIds = new Set();
+  for (const source of value.sources) {
+    exactKeys(source, enrollmentAuthoritySourceKeys, 'enrollment-authority-source-shape');
+    const match =
+      /^authorization-execution-(comment|permission)-(normal|stale)-([A-Za-z0-9-]+):page:1$/u.exec(
+        source.source_id,
+      );
+    if (
+      !match ||
+      sourceIds.has(source.source_id) ||
+      !hex64.test(source.operation_id) ||
+      source.phase !== `baseline-${match[2]}` ||
+      source.page !== 1 ||
+      source.status !== 200 ||
+      typeof source.body_path !== 'string' ||
+      !/^source-[0-9]{4}\.json$/u.test(source.body_path) ||
+      !hex64.test(source.body_sha256) ||
+      !decimal.test(source.body_size) ||
+      !hex64.test(source.body_file_identity) ||
+      !hex64.test(source.safe_headers_sha256) ||
+      !Number.isSafeInteger(source.request_started_unix_milliseconds) ||
+      !Number.isSafeInteger(source.response_received_unix_milliseconds) ||
+      source.request_started_unix_milliseconds < 0 ||
+      source.response_received_unix_milliseconds < source.request_started_unix_milliseconds ||
+      source.next_route !== null ||
+      (match[1] === 'comment'
+        ? !/^\/repos\/SolusQuest\/agentic-pr-review\/issues\/comments\/[1-9][0-9]*$/u.test(
+            source.route,
+          )
+        : !/^\/repos\/SolusQuest\/agentic-pr-review\/collaborators\/[A-Za-z0-9-]+\/permission$/u.test(
+            source.route,
+          ))
+    ) {
+      invalid('enrollment-authority-source-values');
+    }
+    sourceIds.add(source.source_id);
+  }
+  const capturedSourceBodies = new Map();
+  for (const body of value.captured_source_bodies) {
+    exactKeys(body, ['source_id', 'text'], 'enrollment-authority-body-shape');
+    if (
+      !sourceIds.has(body.source_id) ||
+      capturedSourceBodies.has(body.source_id) ||
+      typeof body.text !== 'string'
+    ) {
+      invalid('enrollment-authority-body-values');
+    }
+    capturedSourceBodies.set(body.source_id, { text: body.text });
+  }
+  if (capturedSourceBodies.size !== sourceIds.size) {
+    invalid('enrollment-authority-body-cardinality');
+  }
+  const derived = derivePairedAuthorization(
+    'execution',
+    { sources: value.sources },
+    capturedSourceBodies,
+  );
+  exactKeys(
+    derived,
+    ['kind', 'phase', 'source', 'enrollment_record_sha256', 'execution'],
+    'enrollment-authority-readback-shape',
+  );
+  if (
+    derived.kind !== 'apr-r4-e2p-enrollment-execution-authorization-v1' ||
+    derived.phase !== 'execution' ||
+    !hex64.test(derived.enrollment_record_sha256) ||
+    derived.execution === null ||
+    Array.isArray(derived.execution) ||
+    typeof derived.execution !== 'object'
+  ) {
+    invalid('enrollment-authority-readback-values');
+  }
+  const executionAuthorization = {
+    kind: 'apr-r4-e3-execution-authorization-v1',
+    phase: 'execution',
+    source: derived.source,
+    ...derived.execution,
+  };
+  if (canonicalJson(executionAuthorization) !== canonicalJson(value.execution_authorization)) {
+    invalid('enrollment-authority-derived-readback');
+  }
+  validateAuthorization(executionAuthorization, value.identities, { executionOnly: true });
+  const captureIdentity = executionAuthorization.correction_gate.authority_identities[0];
+  if (captureIdentity.component !== 'capture') invalid('enrollment-authority-capture-identity');
+  const phaseMaterializerIdentity =
+    executionAuthorization.correction_gate.authority_identities.find(
+      (identity) => identity.component === 'phase-fragment-materializer',
+    );
+  if (phaseMaterializerIdentity === undefined) {
+    invalid('enrollment-authority-phase-materializer-identity');
+  }
+  return Object.freeze({
+    kind: 'apr-r4-e2p-enrollment-authority-binding-v1',
+    execution_authorization_sha256: sha256(canonicalJson(executionAuthorization)),
+    enrollment_record_sha256: derived.enrollment_record_sha256,
+    capture_source_set_sha256: sha256(canonicalJson(value.sources)),
+    capture_source_sha256: captureIdentity.source_sha256,
+    capture_build_sha256: captureIdentity.build_sha256,
+    phase_materializer_source_sha256: phaseMaterializerIdentity.source_sha256,
+    phase_materializer_build_sha256: phaseMaterializerIdentity.build_sha256,
+  });
 }
 
 function validateApproval(approval, phase) {
@@ -2486,8 +2665,12 @@ export function generateCleanupPlan(input) {
     'cleanup-plan-resource-shape',
   );
   const allowedSecretProfiles = [
-    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
-    ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY', 'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY'],
+    ['AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+    [
+      'AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY',
+      'AGENTIC_PR_REVIEW_STATE_KEY',
+      'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
+    ],
   ];
   const selectedSecretProfile = allowedSecretProfiles.find(
     (profile) => canonicalJson(profile) === canonicalJson(input.resources.secret_names),

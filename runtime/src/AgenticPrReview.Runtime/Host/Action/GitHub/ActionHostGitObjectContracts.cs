@@ -2,6 +2,8 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 
 namespace AgenticPrReview.Runtime.ActionHost.GitHub;
 
+using AgenticPrReview.Runtime.ActionHost.Snapshot;
+
 internal enum ActionHostGitObjectFailure
 {
     None = 0,
@@ -89,6 +91,57 @@ internal sealed record ActionHostGitBlobObject(
     string Sha,
     byte[] Bytes);
 
+// The GitHub adapter owns the archive wire format.  Snapshot receives only a
+// forward-only sequence of narrow entry views; it never gets a whole archive
+// buffer or a gzip/tar parser authority.
+internal enum ActionHostGitArchiveEntryType
+{
+    Directory,
+    RegularFile,
+    SymbolicLink,
+    Unsupported,
+}
+
+internal sealed record ActionHostGitArchiveEntry(
+    string Name,
+    ActionHostGitArchiveEntryType EntryType,
+    int Mode,
+    long Length,
+    string? LinkName,
+    Stream? DataStream);
+
+internal abstract class ActionHostGitArchiveReader : IDisposable
+{
+    internal abstract int CapturedResponseBytes { get; }
+
+    internal abstract Task<ActionHostGitArchiveEntry?> GetNextEntryAsync(
+        CancellationToken cancellationToken);
+
+    public abstract void Dispose();
+}
+
+// Archive wire parsing stays at the GitHub edge, but Snapshot needs the
+// bounded-size cause to distinguish an admitted-size exhaustion from a
+// malformed identity payload.  Do not use this for path or Git identity
+// decisions; those remain Snapshot authority.
+internal enum ActionHostGitArchiveReadFailure
+{
+    CompressedLimitExceeded,
+    DecodedLimitExceeded,
+}
+
+internal sealed class ActionHostGitArchiveReadException : IOException
+{
+    internal ActionHostGitArchiveReadException(
+        ActionHostGitArchiveReadFailure failure)
+        : base("The codeload archive exceeds its configured byte limit.")
+    {
+        Failure = failure;
+    }
+
+    internal ActionHostGitArchiveReadFailure Failure { get; }
+}
+
 internal sealed class ActionHostGitBlobReadBudget
 {
     private ActionHostGitBlobReadBudget(
@@ -96,9 +149,20 @@ internal sealed class ActionHostGitBlobReadBudget
         int maximumEncodedCharacters,
         int maximumDecodedBytes)
     {
+        if (maximumResponseBytes <= MaximumBlobJsonEnvelopeBytes ||
+            maximumEncodedCharacters < 0 ||
+            maximumDecodedBytes < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumResponseBytes));
+        }
+
         MaximumResponseBytes = maximumResponseBytes;
         MaximumEncodedCharacters = maximumEncodedCharacters;
         MaximumDecodedBytes = maximumDecodedBytes;
+        MaximumWhitespaceCharacters = checked(
+            (maximumResponseBytes - MaximumBlobJsonEnvelopeBytes -
+                maximumEncodedCharacters) /
+            MaximumJsonEscapedWhitespaceBytes);
     }
 
     internal int MaximumResponseBytes { get; }
@@ -107,14 +171,33 @@ internal sealed class ActionHostGitBlobReadBudget
 
     internal int MaximumDecodedBytes { get; }
 
+    // The codec accepts only CRLF or LF between complete Base64 quanta. JSON
+    // may represent each admitted control character as a six-byte \u00XX
+    // escape, so reserve that worst-case wire cost plus a closed object
+    // envelope. This makes an accepted maximum-size wrapped blob fit under
+    // MaximumResponseBytes rather than relying on ReadBoundedAsync to reject
+    // a presentation the codec would otherwise admit.
+    internal int MaximumWhitespaceCharacters { get; }
+
+    private const int MaximumBlobJsonEnvelopeBytes = 1_024;
+    private const int MaximumJsonEscapedWhitespaceBytes = 6;
+
     internal static ActionHostGitBlobReadBudget TrustedConfig { get; } =
         new(64 * 1024, 32 * 1024, 16 * 1024);
 
-    internal static ActionHostGitBlobReadBudget TrustedInstructions
-        { get; } = new(256 * 1024, 128 * 1024, 64 * 1024);
+    internal static ActionHostGitBlobReadBudget TrustedInstructions { get; } =
+        new(256 * 1024, 128 * 1024, 64 * 1024);
+
+    private const int MaximumSupportedDecodedBytes =
+        checked((int)ReviewedContentLimits.HeadBlobBytes);
+    private const int MaximumSupportedEncodedCharacters =
+        4 * ((MaximumSupportedDecodedBytes + 2) / 3);
 
     internal static ActionHostGitBlobReadBudget MaximumSupported { get; } =
-        new(2 * 1024 * 1024, 1536 * 1024, 1024 * 1024);
+        new(
+            checked((int)ReviewedContentLimits.GitObjectResponseBytes),
+            MaximumSupportedEncodedCharacters,
+            MaximumSupportedDecodedBytes);
 }
 
 internal interface IActionHostGitObjectTransportFactory
@@ -143,4 +226,60 @@ internal interface IActionHostGitObjectTransport : IDisposable
             string blobSha,
             ActionHostGitBlobReadBudget budget,
             CancellationToken cancellationToken);
+
+    Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+        GetHeadArchiveAsync(
+            string repositoryName,
+            string headSha,
+            CancellationToken cancellationToken);
+}
+
+internal sealed class ActionHostBoundedReadStream : Stream
+{
+    private readonly Stream _inner;
+    private readonly int _maximumBytes;
+    private int _capturedBytes;
+    private bool _exceeded;
+
+    internal ActionHostBoundedReadStream(Stream inner, int maximumBytes)
+    {
+        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _maximumBytes = maximumBytes > 0 ? maximumBytes :
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+    }
+
+    internal int CapturedBytes => _capturedBytes;
+    internal bool Exceeded => _exceeded;
+    public override bool CanRead => _inner.CanRead;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() => throw new NotSupportedException();
+    public override int Read(byte[] buffer, int offset, int count) =>
+        Count(_inner.Read(buffer, offset, count));
+    public override async ValueTask<int> ReadAsync(
+        Memory<byte> buffer,
+        CancellationToken cancellationToken = default) =>
+        Count(await _inner.ReadAsync(buffer, cancellationToken));
+    private int Count(int read)
+    {
+        if (read > 0 && _capturedBytes > _maximumBytes - read)
+        {
+            _capturedBytes = checked(_maximumBytes + 1);
+            _exceeded = true;
+            throw new InvalidDataException("The archive response exceeds its byte limit.");
+        }
+
+        _capturedBytes += read;
+        return read;
+    }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _inner.Dispose();
+        base.Dispose(disposing);
+    }
 }

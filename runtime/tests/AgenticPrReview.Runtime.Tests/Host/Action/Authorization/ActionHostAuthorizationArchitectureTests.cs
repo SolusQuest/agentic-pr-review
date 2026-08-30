@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
@@ -12,6 +13,15 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 
 public sealed class ActionHostAuthorizationArchitectureTests
 {
+    private static readonly IReadOnlyDictionary<ushort, OpCode> OpCodesByValue =
+        typeof(OpCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(static field => field.FieldType == typeof(OpCode))
+            .Select(static field => (OpCode)field.GetValue(null)!)
+            .ToDictionary(
+                static opCode => unchecked((ushort)opCode.Value),
+                static opCode => opCode);
+
     [Fact]
     public void H2ProductionSurfaceRemainsInternalAndClosed()
     {
@@ -116,7 +126,8 @@ public sealed class ActionHostAuthorizationArchitectureTests
                 BindingFlags.Instance |
                 BindingFlags.Static |
                 BindingFlags.Public |
-                BindingFlags.NonPublic))
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly))
             .Where(method => Calls(method, export.MetadataToken))
             .Select(method => method.DeclaringType)
             .Distinct()
@@ -204,15 +215,58 @@ public sealed class ActionHostAuthorizationArchitectureTests
             return false;
         }
 
-        for (var index = 0; index <= bytes.Length - 5; index++)
+        var offset = 0;
+        while (offset < bytes.Length)
         {
-            if (bytes[index] is 0x28 or 0x6f &&
-                BitConverter.ToInt32(bytes, index + 1) == metadataToken)
+            var opCode = ReadOpCode(bytes, ref offset);
+            var operandOffset = offset;
+            var operandSize = OperandSize(opCode.OperandType, bytes, offset);
+            if ((opCode == OpCodes.Call || opCode == OpCodes.Callvirt) &&
+                BitConverter.ToInt32(bytes, operandOffset) == metadataToken)
             {
                 return true;
             }
+
+            offset += operandSize;
         }
 
         return false;
     }
+
+    private static OpCode ReadOpCode(byte[] il, ref int offset)
+    {
+        var first = il[offset++];
+        var value = first == 0xfe
+            ? (ushort)(0xfe00 | il[offset++])
+            : first;
+        return OpCodesByValue.TryGetValue(value, out var opCode)
+            ? opCode
+            : throw new Xunit.Sdk.XunitException("Unknown IL opcode.");
+    }
+
+    private static int OperandSize(
+        OperandType operandType,
+        byte[] il,
+        int offset) => operandType switch
+        {
+            OperandType.InlineNone => 0,
+            OperandType.ShortInlineBrTarget or
+                OperandType.ShortInlineI or
+                OperandType.ShortInlineVar => 1,
+            OperandType.InlineVar => 2,
+            OperandType.InlineBrTarget or
+                OperandType.InlineField or
+                OperandType.InlineI or
+                OperandType.InlineMethod or
+                OperandType.InlineSig or
+                OperandType.InlineString or
+                OperandType.InlineTok or
+                OperandType.InlineType or
+                OperandType.ShortInlineR => 4,
+            OperandType.InlineI8 or OperandType.InlineR => 8,
+            OperandType.InlineSwitch =>
+                4 + checked(BitConverter.ToInt32(il, offset) * 4),
+            _ => throw new Xunit.Sdk.XunitException(
+                $"Unsupported IL operand type {operandType}."),
+        };
 }

@@ -296,4 +296,13 @@ export const residualReferenceRules = [
     'legacy vocabulary occurs only in negative deletion checks and the closed W6 historical-test manifest',
     'W13 may replace this assertion only after preserving the same W6 absence proof and mapped replacement evidence',
   ),
+  narrowConformance(
+    'RR-041',
+    /legacy\.tar\.gz/u,
+    /^runtime\/(?:src\/AgenticPrReview\.Runtime\/Host\/Action\/GitHub\/ActionHostGitObjectTransport|tests\/ActionHostVerifierFixture\/FrameworkGitHubHandler|tests\/AgenticPrReview\.Runtime\.Tests\/Host\/Action\/(?:GitHub\/ActionHostGitObjectTransport|Snapshot\/GitObjects\/GitObjectTransport)Tests)\.cs$/u,
+    'R4 Git-object transport and production-shaped verifier conformance',
+    'permanent production-shaped codeload redirect conformance',
+    'the Codeload endpoint segment is the exact GitHub tarball transport shape in the production reader and its bounded verifier fixtures, not a supported legacy runtime route',
+    'an accepted Git-object transport change must preserve equivalent bounded Codeload redirect and archive-download evidence',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];

@@ -1,0 +1,28 @@
+{
+  "schema": "apr.r4.trusted-proof.github-request-budget.v1",
+  "head_source_shape": "production_shaped_synthetic",
+  "maximum_authenticated_rest_requests": 216,
+  "head_source_authenticated_rest_requests": 180,
+  "head_source_formula": "commit:1 + trees:178 + tarball:1",
+  "head_source_scope": "synthetic tree-request and archive transport shape only",
+  "includes_resolve_initial_pr_get": true,
+  "control_max_requests_per_phase": 64,
+  "artifact_bridge_max_requests": 32,
+  "external_control_max_requests_per_phase": 64,
+  "operation_request_formula": "3 * (216 + 32) + 3 * 64 = 936",
+  "operation_request_reserve": 64,
+  "cases": [
+    {
+      "name": "dispatch-bootstrap",
+      "authenticated_rest_requests": 209
+    },
+    {
+      "name": "dispatch-continuation",
+      "authenticated_rest_requests": 213
+    },
+    {
+      "name": "stale-head",
+      "authenticated_rest_requests": 199
+    }
+  ]
+}

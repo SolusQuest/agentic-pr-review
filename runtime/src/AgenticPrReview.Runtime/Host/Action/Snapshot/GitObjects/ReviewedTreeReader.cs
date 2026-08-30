@@ -312,10 +312,17 @@ internal sealed class ReviewedTreeReader
                     break;
 
                 case EntryShapeKind.Symlink:
-                    if (entry.Size is < 0)
+                    if (entry.Size is not { } symlinkSize || symlinkSize < 0)
                     {
                         return CoreResult.Failed(
                             ReviewedTreeFailure.InvalidGraph);
+                    }
+
+                    if (symlinkSize > ReviewedContentLimits.HeadBlobBytes ||
+                        !meter.TryAddLogicalHeadBlobBytes(symlinkSize))
+                    {
+                        return CoreResult.Failed(
+                            ReviewedTreeFailure.UnsupportedSize);
                     }
 
                     var symlinkLeaf = TryAddLeaf(path, leaves, meter);
@@ -330,7 +337,7 @@ internal sealed class ReviewedTreeReader
                             meter,
                             entry.Sha,
                             ObjectKind.Blob,
-                            entry.Size,
+                            symlinkSize,
                             countTowardLimit: true);
                     if (symlinkClaim != AdmissionResult.Success)
                     {
@@ -343,7 +350,7 @@ internal sealed class ReviewedTreeReader
                         entry.Mode,
                         ReviewedTreeEntryKind.Symlink,
                         entry.Sha,
-                        null));
+                        symlinkSize));
                     break;
 
                 case EntryShapeKind.Submodule:
@@ -381,32 +388,25 @@ internal sealed class ReviewedTreeReader
             }
         }
 
-        var stagedBySha = new Dictionary<string, ReviewedStagedBlob>(
-            StringComparer.Ordinal);
-        foreach (var regular in drafts
-                     .Where(static item =>
-                         item.Kind == ReviewedTreeEntryKind.Regular)
-                     .GroupBy(static item => item.Sha, StringComparer.Ordinal)
-                     .Select(static group => group.First())
-                     .OrderBy(static item => item.Sha, StringComparer.Ordinal))
+        var archiveEntries = drafts
+            .Where(static item => item.Kind is ReviewedTreeEntryKind.Regular or
+                ReviewedTreeEntryKind.Symlink)
+            .Select(static item => new ReviewedHeadArchiveEntry(
+                item.Path, item.Mode, item.Sha, item.Size!.Value))
+            .OrderBy(static item => item.Path, StringComparer.Ordinal)
+            .ToArray();
+        IReadOnlyDictionary<string, ReviewedStagedBlob> stagedBySha =
+            new Dictionary<string, ReviewedStagedBlob>(StringComparer.Ordinal);
+        if (archiveEntries.Length > 0)
         {
-            if (!budget.TryContinue(cancellationToken))
+            var archiveResult = await transport.StageHeadRegularBlobsAsync(
+                archiveEntries, staging, cancellationToken);
+            if (archiveResult.Value is null)
             {
-                return CoreResult.Failed(
-                    ReviewedTreeFailure.UnsupportedSize);
+                return CoreResult.Failed(MapFailure(archiveResult.Failure));
             }
 
-            var blobResult = await transport.StageBlobAsync(
-                regular.Sha,
-                regular.Size!.Value,
-                staging,
-                cancellationToken);
-            if (blobResult.Value is null)
-            {
-                return CoreResult.Failed(MapFailure(blobResult.Failure));
-            }
-
-            stagedBySha.Add(regular.Sha, blobResult.Value);
+            stagedBySha = archiveResult.Value.StagedBySha;
         }
 
         if (!budget.TryContinue(cancellationToken))
@@ -430,7 +430,9 @@ internal sealed class ReviewedTreeReader
                 draft.Mode,
                 draft.Kind,
                 draft.Sha,
-                draft.Size,
+                draft.Kind == ReviewedTreeEntryKind.Regular
+                    ? draft.Size
+                    : null,
                 draft.Kind == ReviewedTreeEntryKind.Regular
                     ? stagedBySha[draft.Sha]
                     : null));

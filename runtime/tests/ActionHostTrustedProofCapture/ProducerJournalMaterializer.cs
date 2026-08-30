@@ -123,13 +123,17 @@ internal static class ProducerJournalMaterializer
         var prior = journal.Entries.LastOrDefault(item => item.AuthorityId == target.AuthorityId);
         var attempt = prior is null ? 1 : checked(prior.Attempt + 1);
         var observed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var intent = target.TargetKind == "trigger"
+            ? ProducerOutcomeJournal.CreateEnrollmentMutationIntent(target, observed)
+            : null;
         journal.AppendCreateNew(
             target.AuthorityId,
             attempt,
             "before-dispatch",
             observed,
             observed,
-            []);
+            [],
+            mutationIntent: intent);
         Console.Out.WriteLine("APR_R4_E3_PRODUCER_BEGUN");
         return 0;
     }
@@ -148,7 +152,8 @@ internal static class ProducerJournalMaterializer
             "outcome-unknown",
             prior.Observation.RequestStartedUnixMilliseconds,
             observed,
-            []);
+            [],
+            mutationIntent: prior.MutationIntent);
         Console.Out.WriteLine("APR_R4_E3_PRODUCER_OUTCOME_UNKNOWN");
         return 2;
     }
@@ -268,13 +273,17 @@ internal static class ProducerJournalMaterializer
         var prior = journal.Entries.LastOrDefault(item => item.AuthorityId == producer.Target.AuthorityId);
         var attempt = prior is null ? 1 : checked(prior.Attempt + 1);
         var before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var intent = producer.Target.TargetKind == "trigger"
+            ? ProducerOutcomeJournal.CreateEnrollmentMutationIntent(producer.Target, before)
+            : null;
         journal.AppendCreateNew(
             producer.Target.AuthorityId,
             attempt,
             "before-dispatch",
             before,
             before,
-            []);
+            [],
+            mutationIntent: intent);
         try
         {
             using var timeout = new CancellationTokenSource(EvidenceLimits.LogicalOperationTimeout);
@@ -306,7 +315,8 @@ internal static class ProducerJournalMaterializer
                         response.Capture.RequestStartedUnixMilliseconds,
                         response.Capture.ResponseReceivedUnixMilliseconds,
                         sourceIds,
-                        committedRunId);
+                        committedRunId,
+                        intent);
                 }
                 finally
                 {
@@ -330,7 +340,8 @@ internal static class ProducerJournalMaterializer
                 "outcome-unknown",
                 before,
                 observed,
-                []);
+                [],
+                mutationIntent: intent);
             Console.Error.WriteLine("APR_R4_E3_PRODUCER_OUTCOME_UNKNOWN");
             return 2;
         }
@@ -370,6 +381,22 @@ internal static class ProducerJournalMaterializer
                 throw new InvalidDataException("producer_materializer_precondition_invalid");
             }
         }
+        if (target.Role == "stale-follow-on")
+        {
+            // The earlier stale-jobs fragment is only evidence that the readback phase ran.  It
+            // cannot authorize the one ref mutation by itself: bind that write to the durable
+            // stale-protected enrollment receipt, then revalidate the receipt's pinned inputs.
+            var phaseAuthorization = PhaseFragmentMaterializer.ReadAuthorization(
+                root,
+                options["--execution-authorization"],
+                options["--execution-authorization-sha256"],
+                options["--destination-identity"]);
+            EnrollmentObservationMaterializer.ValidatePinnedCheckpointForStaleAdvance(
+                root,
+                phaseAuthorization,
+                journal,
+                options);
+        }
     }
 
     private static int Reconcile(
@@ -386,11 +413,6 @@ internal static class ProducerJournalMaterializer
         {
             throw new InvalidDataException("producer_reconciliation_invalid");
         }
-        if (producer.Target.ExpectedEvent == "workflow_dispatch")
-        {
-            Console.Error.WriteLine("APR_R4_E3_PRODUCER_OUTCOME_STILL_UNKNOWN");
-            return 2;
-        }
         var phase = $"reconcile-{journal.Entries.Count + 1:D4}";
         var sources = CaptureDiscovery(
             root,
@@ -398,12 +420,12 @@ internal static class ProducerJournalMaterializer
             options["--journal-directory"],
             phase,
             client);
-        if (!DiscoveryContainsCandidate(
+        var recoveredRunId = FindDiscoveryCandidate(
                 root,
                 sources,
-                journal.Authority.Repository,
                 producer.Target,
-                unknown.Observation.RequestStartedUnixMilliseconds))
+                unknown.MutationIntent ?? throw new InvalidDataException("producer_reconciliation_invalid"));
+        if (recoveredRunId is null)
         {
             Console.Error.WriteLine("APR_R4_E3_PRODUCER_OUTCOME_STILL_UNKNOWN");
             return 2;
@@ -414,7 +436,9 @@ internal static class ProducerJournalMaterializer
             "reconciled-committed",
             sources[0].RequestStartedUnixMilliseconds,
             sources[^1].ResponseReceivedUnixMilliseconds,
-            sources.Select(item => item.BodySha256).ToArray());
+            sources.Select(item => item.BodySha256).ToArray(),
+            recoveredRunId,
+            unknown.MutationIntent);
         Console.Out.WriteLine("APR_R4_E3_PRODUCER_RECONCILED");
         return 0;
     }
@@ -463,14 +487,13 @@ internal static class ProducerJournalMaterializer
         }
     }
 
-    private static bool DiscoveryContainsCandidate(
+    private static string? FindDiscoveryCandidate(
         RestrictedEvidenceRoot root,
         IReadOnlyList<ProducerDiscoverySource> sources,
-        string repository,
         ProducerTargetAuthority target,
-        long notBefore)
+        ProducerMutationIntent intent)
     {
-        var matches = 0;
+        var candidates = new List<ProducerEnrollmentDiscoveryRun>();
         foreach (var source in sources)
         {
             using var lease = root.AcquirePinnedFile(source.BodyPath, EvidenceLimits.MaximumDocumentBytes);
@@ -493,27 +516,31 @@ internal static class ProducerJournalMaterializer
                 var runRepository = run.GetProperty("head_repository").GetProperty("full_name")
                     .GetString() ?? string.Empty;
                 var workflowPath = run.GetProperty("path").GetString() ?? string.Empty;
-                if (created.ToUnixTimeMilliseconds() + 999 >= notBefore &&
-                    runRepository == repository &&
-                    workflowPath == ".github/workflows/r4-trusted-proof.yml" &&
-                    run.GetProperty("event").GetString() == target.ExpectedEvent &&
-                    (target.ExpectedHeadSha.Length == 0 ||
-                        run.GetProperty("head_sha").GetString() == target.ExpectedHeadSha) &&
-                    (target.ExpectedHeadBranch.Length == 0 ||
-                        run.GetProperty("head_branch").GetString() == target.ExpectedHeadBranch) &&
-                    (target.ExpectedEvent == "workflow_dispatch"
-                        ? pullRequests.Length == 0
-                        : target.ExpectedPullRequestNumber.Length == 0
-                            ? pullRequests.Length == 0
-                            : pullRequests.Contains(
-                                target.ExpectedPullRequestNumber,
-                                StringComparer.Ordinal)))
-                {
-                    matches++;
-                }
+                var displayTitle = run.TryGetProperty("display_title", out var displayTitleElement)
+                    ? displayTitleElement.GetString() ?? string.Empty
+                    : string.Empty;
+                var candidate = new ProducerEnrollmentDiscoveryRun(
+                    run.GetProperty("id").GetRawText(),
+                    run.GetProperty("run_attempt").GetRawText(),
+                    run.GetProperty("event").GetString() ?? string.Empty,
+                    run.GetProperty("status").GetString() ?? string.Empty,
+                    run.GetProperty("conclusion").ValueKind == JsonValueKind.Null
+                        ? null : run.GetProperty("conclusion").GetString(),
+                    run.GetProperty("head_sha").GetString() ?? string.Empty,
+                    run.GetProperty("head_branch").GetString() ?? string.Empty,
+                    pullRequests,
+                    runRepository,
+                    workflowPath,
+                    created.ToUnixTimeMilliseconds(),
+                    displayTitle);
+                candidates.Add(candidate);
             }
         }
-        return matches == 1;
+        // A recovery read is itself evidence.  Use its first request time as the upper end of
+        // the immutable candidate window: this admits a run created after a concurrent role
+        // begins, but never one first seen only after this recovery probe started.
+        return ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            candidates, target, intent, sources[0].RequestStartedUnixMilliseconds);
     }
 
     private static CredentialFileRepresentations ReadAuthorizedToken(
@@ -632,7 +659,7 @@ internal static class ProducerJournalMaterializer
                     scope is not ("normal" or "stale") ||
                     expectedEvent is not ("workflow_run" or "workflow_dispatch") ||
                     !PositiveDecimal(prNumber) || !reference.StartsWith("refs/heads/", StringComparison.Ordinal) ||
-                    authorizedHeadSha.Length != 40)
+                    !Hex40(authorizedHeadSha))
                 {
                     throw new InvalidDataException("producer_materializer_authorization_invalid");
                 }
@@ -655,8 +682,12 @@ internal static class ProducerJournalMaterializer
                     expectedEvent,
                     descriptorSha256,
                     workflowSha,
-                    producer == "dispatch-proof-workflow" ? RequiredText(source, "value") : "main",
-                    string.Empty,
+                    "main",
+                    prNumber,
+                    role == "stale-follow-on" ? RequiredHex40(source, "value") : authorizedHeadSha,
+                    reference["refs/heads/".Length..],
+                    repository,
+                    workflowSha,
                     RequiredPreconditionPhases: [preconditionPhase],
                     RequiredPreconditionSourcePrefixes: [preconditionPrefix]);
                 return producer switch
@@ -671,7 +702,7 @@ internal static class ProducerJournalMaterializer
                         target,
                         HttpMethod.Post,
                         $"/repos/{repository}/actions/workflows/r4-trusted-proof.yml/dispatches",
-                        BuildDispatchRequestBody(RequiredText(source, "value"), prNumber),
+                        BuildDispatchRequestBody(RequiredText(source, "value"), prNumber, operationId),
                         HttpStatusCode.OK),
                     "advance-stale-ref" => new ProducerCommand(
                         target,
@@ -692,6 +723,12 @@ internal static class ProducerJournalMaterializer
             }
         }).ToArray();
         var mutationTargets = BuildMutationTargets(execution, operationIds);
+        // This is the only live producer authority shape: a malformed, missing, reordered, or
+        // extra enrollment trigger is rejected before a journal can be created.
+        ProducerOutcomeJournal.ValidateEnrollmentTargets(
+            repository,
+            operationIds,
+            commands.Select(item => item.Target).ToArray());
         return new ProducerAuthorization(
             repository,
             operationIds,
@@ -925,13 +962,19 @@ internal static class ProducerJournalMaterializer
     private static bool Sha256(string value) => value.Length == 64 &&
         value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
+    private static bool Hex40(string value) => value.Length == 40 &&
+        value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     private static bool PositiveDecimal(string value) => value.Length > 0 && value != "0" &&
         value.All(character => character is >= '0' and <= '9') &&
         (value.Length == 1 || value[0] != '0');
 
-    internal static byte[] BuildDispatchRequestBody(string reference, string pullRequestNumber)
+    internal static byte[] BuildDispatchRequestBody(
+        string reference,
+        string pullRequestNumber,
+        string operationId)
     {
-        if (string.IsNullOrWhiteSpace(reference) || !PositiveDecimal(pullRequestNumber))
+        if (reference != "main" || !PositiveDecimal(pullRequestNumber) || !Sha256(operationId))
         {
             throw new InvalidDataException("producer_dispatch_request_invalid");
         }
@@ -941,6 +984,7 @@ internal static class ProducerJournalMaterializer
             ["inputs"] = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["pr-number"] = pullRequestNumber,
+                ["operation-id"] = operationId,
             },
         });
     }

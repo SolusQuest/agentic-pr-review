@@ -515,6 +515,12 @@ internal static class FrameworkSupervisor
                 ("twirp", ReadInt(root, "official-twirp-count")),
                 ("blob", ReadInt(root, "official-blob-count")),
                 ("rest", ReadInt(root, "official-rest-count")),
+                ("rest_not_modified", ReadInt(root,
+                    "official-rest-not-modified-count")),
+                ("rest_primary", ReadInt(root,
+                    "official-rest-primary-count")),
+                ("rest_secondary_points", ReadInt(root,
+                    "official-rest-secondary-points")),
                 ("finalize", ReadInt(root, "official-finalize-count")),
                 ("signed_download", ReadInt(root,
                     "official-signed-download-count")),
@@ -546,6 +552,16 @@ internal static class FrameworkSupervisor
     {
         var scenario = Path.Join(root, spec.Name);
         Directory.CreateDirectory(scenario);
+        var officialRestBefore = ReadInt(root, "official-rest-count");
+        var officialRestNotModifiedBefore = ReadInt(root,
+            "official-rest-not-modified-count");
+        var officialRestPrimaryBefore = ReadInt(root,
+            "official-rest-primary-count");
+        var officialRestSecondaryPointsBefore = ReadInt(root,
+            "official-rest-secondary-points");
+        var signedUploadBefore = ReadInt(root, "official-blob-count");
+        var signedDownloadBefore = ReadInt(root,
+            "official-signed-download-count");
         platform.BeginScenario(spec.Mode, scenario, Sha256(payload));
         await File.WriteAllTextAsync(Path.Join(scenario, "mode"), spec.Mode)
             .ConfigureAwait(false);
@@ -560,6 +576,10 @@ internal static class FrameworkSupervisor
             .ConfigureAwait(false);
         await File.WriteAllTextAsync(Path.Join(scenario, "run-attempt"), "1")
             .ConfigureAwait(false);
+        // The receipt is bound to the exact executable bytes that this
+        // scenario launches, not merely to a source identity.
+        await File.WriteAllTextAsync(Path.Join(scenario, "payload-sha256"),
+            Sha256(payload) + "\n").ConfigureAwait(false);
         if (spec.ExpectContinuation)
         {
             await File.WriteAllTextAsync(
@@ -684,6 +704,10 @@ internal static class FrameworkSupervisor
         await File.WriteAllTextAsync(
             Path.Join(scenario, "wrapper-stderr.redacted.txt"),
             RedactCanaries(stderr)).ConfigureAwait(false);
+        if (spec.TrustedProofPayload)
+        {
+            CaptureTrustedProofRequestBudgetReceipts(scenario, stderr);
+        }
         var summary = File.Exists(summaryPath)
             ? await File.ReadAllTextAsync(summaryPath).ConfigureAwait(false)
             : "";
@@ -781,6 +805,10 @@ internal static class FrameworkSupervisor
             stickyMutations == spec.ExpectedStickyMutations;
         var scenarioEvidenceSatisfied = spec.RequiredScenarioEvidence is null ||
             File.Exists(Path.Join(scenario, spec.RequiredScenarioEvidence));
+        var archiveTransportSatisfied = spec.RequiredScenarioEvidence ==
+            "head-archive-served"
+            ? HeadArchiveTransportEvidenceIsExact(scenario)
+            : true;
         var stateOperationSatisfied = spec.RequiredStateOperation is null ||
             File.Exists(Path.Join(scenario, "state-operations.tsv")) &&
             File.ReadAllText(Path.Join(scenario, "state-operations.tsv"))
@@ -789,6 +817,30 @@ internal static class FrameworkSupervisor
             File.Exists(Path.Join(root, spec.RequiredGlobalEvidence));
         var noUnexpectedGitHubRequest = !File.Exists(
             Path.Join(scenario, "unexpected-github-request"));
+        var artifactRestRequests = ReadInt(root, "official-rest-count") -
+            officialRestBefore;
+        var artifactRestNotModified = ReadInt(root,
+            "official-rest-not-modified-count") -
+            officialRestNotModifiedBefore;
+        var artifactRestPrimary = ReadInt(root,
+            "official-rest-primary-count") -
+            officialRestPrimaryBefore;
+        var artifactRestSecondaryPoints = ReadInt(root,
+            "official-rest-secondary-points") -
+            officialRestSecondaryPointsBefore;
+        var anonymousSignedDownloads = ReadInt(root,
+            "official-signed-download-count") - signedDownloadBefore;
+        var anonymousSignedUploads = ReadInt(root, "official-blob-count") -
+            signedUploadBefore;
+        var trustedProofRequestBudgetSatisfied = !spec.TrustedProofPayload ||
+            TrustedProofRequestBudgetReceiptsAreExact(
+                scenario,
+                artifactRestRequests,
+                artifactRestNotModified,
+                artifactRestPrimary,
+                artifactRestSecondaryPoints,
+                anonymousSignedDownloads);
+        var artifactRestBudgetSatisfied = trustedProofRequestBudgetSatisfied;
         var passed = exited && expected && barrierAfterPassed && noLeak &&
             closedEnvironment && reorderedHistoryRejected && outputUnchanged &&
             groupQuiet && platformQuiet && continuation &&
@@ -796,6 +848,8 @@ internal static class FrameworkSupervisor
             hostInitializationObserved &&
             noProviderSatisfied && providerCountSatisfied &&
             stickyCountSatisfied && scenarioEvidenceSatisfied &&
+            archiveTransportSatisfied && trustedProofRequestBudgetSatisfied &&
+            artifactRestBudgetSatisfied &&
             stateOperationSatisfied && globalEvidenceSatisfied &&
             noUnexpectedGitHubRequest;
         if (!passed)
@@ -826,6 +880,11 @@ internal static class FrameworkSupervisor
                     ("provider_count_satisfied", providerCountSatisfied),
                     ("sticky_count_satisfied", stickyCountSatisfied),
                     ("scenario_evidence_satisfied", scenarioEvidenceSatisfied),
+                    ("archive_transport_satisfied", archiveTransportSatisfied),
+                    ("trusted_proof_request_budget_satisfied",
+                        trustedProofRequestBudgetSatisfied),
+                    ("artifact_rest_budget_satisfied",
+                        artifactRestBudgetSatisfied),
                     ("state_operation_satisfied", stateOperationSatisfied),
                     ("global_evidence_satisfied", globalEvidenceSatisfied),
                     ("no_unexpected_github_request",
@@ -843,6 +902,12 @@ internal static class FrameworkSupervisor
             providerRequests,
             ReadInt(scenario, "provider-sequence"),
             ReadInt(scenario, "github-request-count"),
+            artifactRestRequests,
+            artifactRestNotModified,
+            artifactRestPrimary,
+            artifactRestSecondaryPoints,
+            anonymousSignedUploads,
+            anonymousSignedDownloads,
             File.Exists(Path.Join(scenario, "state-operations.tsv"))
                 ? File.ReadLines(Path.Join(scenario, "state-operations.tsv"))
                     .Count()
@@ -889,10 +954,14 @@ internal static class FrameworkSupervisor
             FrameworkGitHubHandler.PullRequestNumber.ToString(
                 CultureInfo.InvariantCulture);
         info.Environment["FIXTURE_HEAD_SHA"] = FrameworkGitHubHandler.HeadSha;
-        info.Environment["OPERATION_ID"] = new string('1', 64);
+        info.Environment["OPERATION_ID"] = spec.Mode == "stale"
+            ? FrameworkCanaries.StaleProofOperationId
+            : FrameworkCanaries.ProofOperationId;
         info.Environment["WORKFLOW_SHA"] = FrameworkGitHubHandler.WorkflowSha;
         info.Environment["ACTION_SOURCE_SHA"] = FrameworkGitHubHandler.ActionSha;
         info.Environment["PAYLOAD_SHA256"] = Sha256(payload);
+        info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
+            "measurement";
         info.Environment["RUN_ID"] = RunId(spec).ToString(
             CultureInfo.InvariantCulture);
         info.Environment["RUN_ATTEMPT"] = "1";
@@ -920,6 +989,7 @@ internal static class FrameworkSupervisor
         await File.WriteAllTextAsync(
             Path.Join(scenario, "barrier-" + mode + ".stderr"),
             stderr).ConfigureAwait(false);
+        CaptureExternalControlRequestBudgetReceipt(scenario, mode, stderr);
         return process.ExitCode == 0 &&
             !stdout.Contains(FrameworkCanaries.GitHubToken,
                 StringComparison.Ordinal) &&
@@ -935,6 +1005,12 @@ internal static class FrameworkSupervisor
         spec.ExpectedStatus,
         null,
         1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
         0,
         0,
         0,
@@ -968,6 +1044,7 @@ internal static class FrameworkSupervisor
                 WorkflowRun: true,
                 ExpectedStickyMutations: 1,
                 TrustedProofPayload: true,
+                RequiredScenarioEvidence: "head-archive-served",
                 BarrierBefore: "hold"),
                 root, repository, payload, bundle, node, platform)
                 .ConfigureAwait(false),
@@ -979,6 +1056,7 @@ internal static class FrameworkSupervisor
                 ExpectedStickyMutations: 1,
                 RequireSuccessfulContinuation: true,
                 TrustedProofPayload: true,
+                RequiredScenarioEvidence: "head-archive-served",
                 BarrierBefore: "verify-completed",
                 BarrierAfter: "cleanup"),
                 root, repository, payload, bundle, node, platform)
@@ -989,10 +1067,18 @@ internal static class FrameworkSupervisor
             "stale-head",
             "stale",
             "stale_head",
-            TrustedProofPayload: true),
+            ExpectedStickyMutations: 0,
+            TrustedProofPayload: true,
+            RequiredScenarioEvidence: "head-archive-served",
+            BarrierBefore: "hold"),
             root, repository, payload, bundle, node, platform)
             .ConfigureAwait(false));
-        var compiledIdentities = cases
+        cases.Add(await RecordStaleUnauthorizedFollowOnAsync(root, repository,
+            node)
+            .ConfigureAwait(false));
+        var payloadCases = cases.Where(result =>
+            result.Name != "stale-unauthorized-follow-on").ToArray();
+        var compiledIdentities = payloadCases
             .Select(result => ReadCompiledPayloadIdentity(root, result.Name))
             .ToArray();
         var compiledIdentity = compiledIdentities.FirstOrDefault();
@@ -1008,14 +1094,17 @@ internal static class FrameworkSupervisor
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceTree,
                 sourceExpectation.SourceTree);
+        var requestBudgetValid = await VerifyTrustedProofRequestBudgetAsync(
+            root, repository, cases).ConfigureAwait(false);
         var passed = cases.All(result => result.Passed) &&
-            compiledIdentityValid;
+            compiledIdentityValid && requestBudgetValid;
         var evidence = FrameworkJson.Object(
             ("passed", passed),
             ("verifier_executable_sha256", Sha256(payload)),
             ("compiled_payload_proof_kind", compiledIdentity?.ProofKind),
             ("compiled_payload_source_commit", compiledIdentity?.SourceCommit),
             ("compiled_payload_source_tree", compiledIdentity?.SourceTree),
+            ("trusted_proof_request_budget_satisfied", requestBudgetValid),
             ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
         await File.WriteAllTextAsync(
             Path.Join(root, "trusted-proof-payload-evidence.json"),
@@ -1023,6 +1112,601 @@ internal static class FrameworkSupervisor
             .ConfigureAwait(false);
         return passed ? 0 : 1;
     }
+
+    // This records the denied preflight boundary without launching a payload.
+    // It is intentionally not RunCaseAsync: an unauthorized follow-on must
+    // prove that no protected job, token, provider, state, snapshot, or
+    // publisher route can begin before the workflow preflight rejects it.
+    private static async Task<CaseResult>
+        RecordStaleUnauthorizedFollowOnAsync(
+            string root,
+            string repository,
+            string node)
+    {
+        const string name = "stale-unauthorized-follow-on";
+        var scenario = Path.Join(root, name);
+        Directory.CreateDirectory(scenario);
+        var preflight = await RunUnauthorizedNoLaunchProbeAsync(repository, node)
+            .ConfigureAwait(false);
+        var receiptNames = new[]
+        {
+            "trusted-proof-github-request-budget.json",
+            "trusted-proof-artifact-rest-request-budget.json",
+            "trusted-proof-embedded-control-request-budget.json",
+        };
+        var counters = new[]
+        {
+            "github-request-count",
+            "provider-request-count",
+            "publisher-api-count",
+            "head-commit-api-count",
+            "head-tree-api-count",
+            "head-archive-api-count",
+            "head-blob-api-count",
+            "policy-api-count",
+            "authorization-api-count",
+        };
+        var csharpPayloadReceiptPresent = File.Exists(Path.Join(scenario,
+            receiptNames[0]));
+        var nodeArtifactReceiptPresent = File.Exists(Path.Join(scenario,
+            receiptNames[1]));
+        var embeddedControlReceiptPresent = File.Exists(Path.Join(scenario,
+            receiptNames[2]));
+        var externalControlReceiptPresent = Directory.EnumerateFiles(scenario,
+                "trusted-proof-external-control-*-request-budget.json")
+            .Any();
+        var githubProtectedRequests = ReadInt(scenario, "github-request-count");
+        var providerRequests = ReadInt(scenario, "provider-request-count");
+        var publisherRequests = ReadInt(scenario, "publisher-api-count");
+        var stateOperations = File.Exists(Path.Join(scenario,
+            "state-operations.tsv"))
+            ? File.ReadLines(Path.Join(scenario, "state-operations.tsv")).Count()
+            : 0;
+        var passed = preflight.Passed && !csharpPayloadReceiptPresent &&
+            !nodeArtifactReceiptPresent && !embeddedControlReceiptPresent &&
+            !externalControlReceiptPresent &&
+            counters.All(counter => ReadInt(scenario, counter) == 0) &&
+            stateOperations == 0 &&
+            !File.Exists(Path.Join(scenario, "host-pid"));
+        var evidence = FrameworkJson.Object(
+            ("preflight_admitted", false),
+            ("public_preflight_requests", preflight.PublicPreflightRequests),
+            ("preflight_authorization_header_present",
+                preflight.AuthorizationHeaderPresent),
+            ("workflow_run_review_eligible", preflight.WorkflowRunEligible),
+            ("workflow_dispatch_review_eligible",
+                preflight.WorkflowDispatchEligible),
+            ("payload_started", false),
+            ("payload_start_attempts", preflight.PayloadStarts),
+            ("wrapper_start_attempts", preflight.WrapperStarts),
+            ("provider_start_attempts", preflight.ProviderStarts),
+            ("state_start_attempts", preflight.StateStarts),
+            ("publisher_start_attempts", preflight.PublisherStarts),
+            ("csharp_payload_receipt_attempts", preflight.CSharpReceiptStarts),
+            ("node_artifact_receipt_attempts", preflight.NodeReceiptStarts),
+            ("embedded_control_receipt_attempts",
+                preflight.EmbeddedControlReceiptStarts),
+            ("external_control_receipt_attempts",
+                preflight.ExternalControlReceiptStarts),
+            ("csharp_payload_receipt_present", csharpPayloadReceiptPresent),
+            ("node_artifact_bridge_receipt_present", nodeArtifactReceiptPresent),
+            ("embedded_control_receipt_present", embeddedControlReceiptPresent),
+            ("external_control_receipt_present", externalControlReceiptPresent),
+            ("github_protected_requests", githubProtectedRequests),
+            ("provider_requests", providerRequests),
+            ("state_operations", stateOperations),
+            ("publisher_requests", publisherRequests));
+        await File.WriteAllTextAsync(Path.Join(scenario,
+            "preflight-denial-evidence.json"),
+            FrameworkJson.SerializeIndented(evidence) + "\n")
+            .ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Join(scenario, "case-result.txt"),
+            passed ? "pass\n" : "fail\n").ConfigureAwait(false);
+        return new CaseResult(
+            name,
+            "preflight_rejected",
+            "preflight_rejected",
+            passed ? 0 : 1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            passed);
+    }
+
+    private static async Task<UnauthorizedNoLaunchProbe>
+        RunUnauthorizedNoLaunchProbeAsync(string repository, string node)
+    {
+        var script = Path.Join(repository, "scripts",
+            "probe-r4-e2p-unauthorized-no-launch.mjs");
+        var workflow = Path.Join(repository, ".github", "workflows",
+            "r4-trusted-proof.yml");
+        if (!File.Exists(script) || !File.Exists(workflow))
+        {
+            return UnauthorizedNoLaunchProbe.Failed;
+        }
+
+        try
+        {
+            var info = new ProcessStartInfo(node)
+            {
+                WorkingDirectory = repository,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            info.ArgumentList.Add(script);
+            info.ArgumentList.Add(workflow);
+            using var process = new Process { StartInfo = info };
+            if (!process.Start()) return UnauthorizedNoLaunchProbe.Failed;
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            if (!await WaitForExitAsync(process, TimeSpan.FromSeconds(30))
+                    .ConfigureAwait(false))
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().ConfigureAwait(false);
+                return UnauthorizedNoLaunchProbe.Failed;
+            }
+
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            _ = await stderrTask.ConfigureAwait(false);
+            if (process.ExitCode != 0) return UnauthorizedNoLaunchProbe.Failed;
+            using var document = JsonDocument.Parse(stdout);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !StringComparer.Ordinal.Equals(root.GetProperty("schema")
+                    .GetString(), "apr.r4.e2p.unauthorized-no-launch.v1") ||
+                root.GetProperty("preflight_admitted").GetBoolean() ||
+                root.GetProperty("public_preflight_requests").GetInt32() != 1 ||
+                root.GetProperty("preflight_authorization_header_present")
+                    .GetBoolean() ||
+                root.GetProperty("workflow_run_review_eligible").GetBoolean() ||
+                root.GetProperty("workflow_dispatch_review_eligible").GetBoolean())
+            {
+                return UnauthorizedNoLaunchProbe.Failed;
+            }
+
+            var starts = root.GetProperty("starts");
+            var expectedStarts = new[]
+            {
+                "payload",
+                "wrapper",
+                "provider",
+                "state",
+                "publisher",
+                "csharp_payload_receipt",
+                "node_artifact_receipt",
+                "embedded_control_receipt",
+                "external_control_receipt",
+            };
+            if (starts.ValueKind != JsonValueKind.Object ||
+                starts.EnumerateObject().Select(property => property.Name)
+                    .Order(StringComparer.Ordinal)
+                    .SequenceEqual(expectedStarts.Order(StringComparer.Ordinal)) is false ||
+                expectedStarts.Any(property => starts.GetProperty(property)
+                    .GetInt32() != 0))
+            {
+                return UnauthorizedNoLaunchProbe.Failed;
+            }
+
+            return new UnauthorizedNoLaunchProbe(true, 1, false, false, false,
+                0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        catch (Exception exception) when (exception is IOException or
+            InvalidOperationException or JsonException or
+            System.ComponentModel.Win32Exception)
+        {
+            return UnauthorizedNoLaunchProbe.Failed;
+        }
+    }
+
+    private static async Task<bool> VerifyTrustedProofRequestBudgetAsync(
+        string root,
+        string repository,
+        IReadOnlyList<CaseResult> cases)
+    {
+        var golden = Path.Join(repository, "runtime", "tests", "fixtures",
+            "action-host", "framework",
+            "trusted-proof-request-budget.json.golden");
+        if (!File.Exists(golden))
+        {
+            return false;
+        }
+
+        var names = new[]
+        {
+            "dispatch-bootstrap",
+            "dispatch-continuation",
+            "stale-head",
+        };
+        var selected = names.Select(name => cases.SingleOrDefault(result =>
+            result.Name == name)).ToArray();
+        if (selected.Any(result => result is null))
+        {
+            return false;
+        }
+
+        var payloadReceipts = selected.Select(result =>
+            TryReadTrustedProofRequestBudgetReceipt(Path.Join(root,
+                result!.Name))).ToArray();
+        var artifactReceipts = selected.Select(result =>
+            TryReadArtifactRestRequestBudgetReceipt(Path.Join(root,
+                result!.Name))).ToArray();
+        var embeddedControlReceipts = selected.Select(result =>
+            TryReadEmbeddedControlRequestBudgetReceipt(Path.Join(root,
+                result!.Name))).ToArray();
+        var allExternalControlReceipts = selected.Select(result =>
+            ReadExternalControlRequestBudgetReceipts(Path.Join(root,
+                result!.Name))).ToArray();
+        var protectedExternalControlReceipts = allExternalControlReceipts
+            .Select(receipts => receipts.Where(receipt =>
+                receipt.Phase != "cleanup").ToArray()).ToArray();
+        var postOperationCleanupReceipts = allExternalControlReceipts
+            .Select(receipts => receipts.Where(receipt =>
+                receipt.Phase == "cleanup").ToArray()).ToArray();
+        if (payloadReceipts.Any(receipt => receipt is null) ||
+            artifactReceipts.Any(receipt => receipt is null) ||
+            embeddedControlReceipts.Any(receipt => receipt is null))
+        {
+            return false;
+        }
+
+        const int payloadMaximum = 216;
+        const int controlMaximum = 64;
+        const int repositoryPrimaryMaximum = 1_000;
+        const int minimumPrimaryReserve = 64;
+        const int secondaryPointMaximumPerMinute = 600;
+        const int minimumMutativeSpacingMilliseconds = 1_000;
+        var artifactMaximumTotals = artifactReceipts.Select(receipt =>
+                receipt!.MaximumTotalAuthenticatedApiRequests)
+            .Distinct().ToArray();
+        var artifactMaximumPrimaries = artifactReceipts.Select(receipt =>
+                receipt!.MaximumPrimaryRateLimitRequests)
+            .Distinct().ToArray();
+        if (artifactMaximumTotals.Length != 1 ||
+            artifactMaximumPrimaries.Length != 1)
+        {
+            return false;
+        }
+        var roleTotals = ObservedRoleTotals(payloadReceipts,
+            artifactReceipts, embeddedControlReceipts,
+            protectedExternalControlReceipts, postOperationCleanupReceipts);
+        var operationPrimaryRequests = roleTotals.Values.Sum();
+        var operationPrimaryReserve = repositoryPrimaryMaximum -
+            operationPrimaryRequests;
+        var finalAllocationValid = SatisfiesFrozenRoleAllocation(
+            roleTotals, FrozenOperationPrimaryRoleCaps,
+            minimumPrimaryReserve);
+        var operationEvents = ReadOperationRequestEvents(root, names);
+        var domainTails = operationEvents.DomainTails;
+        var finalRemainingTailValid = SatisfiesFrozenRemainingTailGuard(
+            domainTails);
+        var perScenarioControlPrimary = Enumerable.Range(0, selected.Length)
+            .Select(index => checked(embeddedControlReceipts[index]!.Primary +
+                protectedExternalControlReceipts[index].Sum(receipt => receipt.Primary) +
+                postOperationCleanupReceipts[index].Sum(receipt => receipt.Primary)))
+            .ToArray();
+        var perScenarioControlWithinCap = perScenarioControlPrimary.All(value =>
+            value <= controlMaximum);
+        var roleTotalsWithinBudget = roleTotals.Values.All(value => value >= 0 &&
+            value + minimumPrimaryReserve <= repositoryPrimaryMaximum) &&
+            operationPrimaryRequests + minimumPrimaryReserve <=
+                repositoryPrimaryMaximum;
+        // A tail is the largest future charged suffix after one observation in
+        // its own scenario.  It is deliberately not a sum: each runtime
+        // observation needs only the remaining suffix for that one execution.
+        var domainTailsWithinBudget = domainTails.Values.All(value => value >= 0 &&
+            value + minimumPrimaryReserve < repositoryPrimaryMaximum);
+        var protectedEventJoins = selected.Select((result, index) =>
+            ProtectedEventJoinIsExact(Path.Join(root, result!.Name), result,
+                payloadReceipts[index]!, artifactReceipts[index]!,
+                embeddedControlReceipts[index]!,
+                protectedExternalControlReceipts[index],
+                postOperationCleanupReceipts[index]))
+            .ToArray();
+        var measurementOnly = payloadReceipts.Any(receipt =>
+                receipt!.MeasurementOnly) ||
+            embeddedControlReceipts.Any(receipt => receipt!.MeasurementOnly) ||
+            artifactReceipts.Any(receipt => receipt!.MeasurementOnly) ||
+            protectedExternalControlReceipts.SelectMany(receipts => receipts)
+                .Any(receipt => receipt.MeasurementOnly) ||
+            postOperationCleanupReceipts.SelectMany(receipts => receipts)
+                .Any(receipt => receipt.MeasurementOnly);
+        var actualCases = FrameworkJson.Array(selected.Select((result, index) =>
+        {
+            var externalControls = FrameworkJson.Array(
+                protectedExternalControlReceipts[index].Select(receipt =>
+                    FrameworkJson.Object(
+                        ("phase", receipt.Phase),
+                        ("requests", receipt.Consumed))));
+            var postOperationCleanup = FrameworkJson.Array(
+                postOperationCleanupReceipts[index].Select(receipt =>
+                    FrameworkJson.Object(
+                        ("requests", receipt.Consumed))));
+            return FrameworkJson.Object(
+                ("name", result!.Name),
+                ("csharp_payload", FrameworkJson.Object(
+                    ("authenticated_rest_requests",
+                        payloadReceipts[index]!.AuthenticatedRestRequests),
+                    ("anonymous_codeload_requests",
+                        payloadReceipts[index]!.AnonymousCodeloadRequests),
+                    ("rejected_requests",
+                        payloadReceipts[index]!.RejectedRequests))),
+                ("node_artifact_bridge", FrameworkJson.Object(
+                    ("total_authenticated_rest_requests",
+                        artifactReceipts[index]!.TotalAuthenticatedApiRequests),
+                    ("conditional_not_modified_requests",
+                        artifactReceipts[index]!
+                            .ConditionalNotModifiedRequests),
+                    ("primary_rate_limit_requests",
+                        artifactReceipts[index]!.PrimaryRateLimitRequests),
+                    ("secondary_limit_points",
+                        artifactReceipts[index]!.SecondaryLimitPoints),
+                    ("permission_denied",
+                        artifactReceipts[index]!.PermissionDenied),
+                    ("anonymous_signed_downloads",
+                        result.AnonymousSignedDownloads))),
+                ("embedded_control", FrameworkJson.Object(
+                    ("requests", embeddedControlReceipts[index]!.Consumed),
+                    ("primary", embeddedControlReceipts[index]!.Primary))),
+                ("external_control", externalControls),
+                ("post_operation_cleanup", postOperationCleanup),
+                ("roles", RoleEvidence(
+                    payloadReceipts[index]!, artifactReceipts[index]!,
+                    embeddedControlReceipts[index]!,
+                    protectedExternalControlReceipts[index],
+                    postOperationCleanupReceipts[index])),
+                ("control_primary_total", perScenarioControlPrimary[index]),
+                ("control_primary_within_64", perScenarioControlPrimary[index] <=
+                    controlMaximum),
+                ("receipt_event_join", protectedEventJoins[index]));
+        }));
+        var receiptEventJoins = FrameworkJson.Array(selected.Select((result, index) =>
+            ReceiptEventJoinEvidence(Path.Join(root, result!.Name), result,
+                payloadReceipts[index]!, artifactReceipts[index]!,
+                embeddedControlReceipts[index]!,
+                protectedExternalControlReceipts[index],
+                postOperationCleanupReceipts[index], protectedEventJoins[index])));
+        var roleTotalEvidence = FrameworkJson.Object(
+            ("node_artifact_rest", roleTotals["node_artifact_rest"]),
+            ("host_head_source_rest", roleTotals["host_head_source_rest"]),
+            ("host_other_github_rest", roleTotals["host_other_github_rest"]),
+            ("embedded_control", roleTotals["embedded_control"]),
+            ("external_control", roleTotals["external_control"]),
+            ("cleanup_control", roleTotals["cleanup_control"]));
+        var domainTailEvidence = FrameworkJson.Object(
+            ("node_artifact_rest", domainTails["node_artifact_rest"]),
+            ("host_head_source_rest", domainTails["host_head_source_rest"]),
+            ("host_other_github_rest", domainTails["host_other_github_rest"]),
+            ("trusted_control_rest", domainTails["trusted_control_rest"]));
+        var actual = FrameworkJson.Object(
+            ("schema", "apr.r4.trusted-proof.github-request-budget.v3"),
+            ("head_source_shape", "production_shaped_synthetic"),
+            ("head_source_authenticated_rest_requests", 180),
+            ("head_source_formula", "commit:1 + trees:178 + tarball:1"),
+            ("head_source_scope",
+                "synthetic tree-request and archive transport shape only"),
+            ("includes_resolve_initial_pr_get", true),
+            ("payload_maximum_authenticated_rest_requests", payloadMaximum),
+            ("control_max_requests_per_phase", controlMaximum),
+            ("artifact_bridge_maximum_total_authenticated_rest_requests",
+                artifactMaximumTotals[0]),
+            ("artifact_bridge_maximum_primary_rate_limit_requests",
+                artifactMaximumPrimaries[0]),
+            ("artifact_bridge_secondary_point_maximum_per_minute",
+                secondaryPointMaximumPerMinute),
+            ("artifact_bridge_minimum_mutative_spacing_milliseconds",
+                minimumMutativeSpacingMilliseconds),
+            ("external_control_max_requests_per_phase", controlMaximum),
+            ("repository_primary_rate_limit_maximum",
+                repositoryPrimaryMaximum),
+            ("operation_primary_rate_limit_formula",
+                "payload + artifact + embedded control + external control + cleanup"),
+            ("operation_primary_rate_limit_requests",
+                operationPrimaryRequests),
+            ("operation_primary_rate_limit_reserve", operationPrimaryReserve),
+            ("minimum_required_operation_primary_rate_limit_reserve",
+                minimumPrimaryReserve),
+            ("final_role_allocation_frozen", finalAllocationValid),
+            ("remaining_tail_guard_frozen", finalRemainingTailValid),
+            ("fixed_scenario_order", FrameworkJson.Array(names)),
+            ("suite_role_totals", roleTotalEvidence),
+            ("domain_tails", domainTailEvidence),
+            ("primary_budget", FrameworkJson.Object(
+                ("total", operationPrimaryRequests),
+                ("reserve", minimumPrimaryReserve),
+                ("slack", repositoryPrimaryMaximum - operationPrimaryRequests -
+                    minimumPrimaryReserve),
+                ("role_totals_within_budget", roleTotalsWithinBudget),
+                ("domain_tails_within_budget", domainTailsWithinBudget))),
+            ("event_sequence", FrameworkJson.Object(
+                ("digest", operationEvents.SequenceDigest),
+                ("ordinal_policy",
+                    "one-based append order in fixed scenario aggregate"),
+                ("scenario_ordinals", FrameworkJson.Array(names.Select((name, index) =>
+                    (object?)FrameworkJson.Object(("name", name),
+                        ("ordinal", index + 1))))),
+                ("event_count", operationEvents.Events.Count),
+                ("first_ordinal", operationEvents.Events.Count == 0 ? 0 : 1),
+                ("last_ordinal", operationEvents.Events.Count),
+                ("primary_charged_events", operationEvents.Events.Count(
+                    IsPrimaryCharged)))),
+            ("operation_wide_measurement", FrameworkJson.Object(
+                ("measurement_only", measurementOnly),
+                ("event_shape_valid", operationEvents.ShapeValid),
+                ("node_secondary_points_within_600", operationEvents.NodeWindowValid),
+                ("all_authenticated_secondary_points_below_900",
+                    operationEvents.AllWindowValid),
+                ("authenticated_mutations_spaced", operationEvents.MutationSpacingValid),
+                ("node_artifact_raw_events", operationEvents.NodeArtifactRaw),
+                ("host_head_source_raw_events", operationEvents.HostHeadRaw),
+                ("host_other_raw_events", operationEvents.HostOtherRaw),
+                ("trusted_control_raw_events", operationEvents.ControlRaw),
+                ("actions_results_events", operationEvents.ResultsRaw),
+                ("anonymous_transfer_events", operationEvents.AnonymousRaw))),
+            ("protected_event_receipt_joins", FrameworkJson.Array(
+                protectedEventJoins.Select(value => (object?)value))),
+            ("receipt_event_joins", receiptEventJoins),
+            ("cases", actualCases));
+        var actualBytes = Encoding.UTF8.GetBytes(
+            FrameworkJson.SerializeIndented(actual) + "\n");
+        await File.WriteAllBytesAsync(Path.Join(root,
+            "trusted-proof-request-budget-evidence.json"), actualBytes)
+            .ConfigureAwait(false);
+        return payloadReceipts.All(receipt =>
+                PayloadRequestBudgetReceiptIsExact(receipt!, payloadMaximum)) &&
+            selected.Select((result, index) =>
+                ArtifactRestRequestBudgetReceiptIsExact(
+                    artifactReceipts[index]!,
+                    Path.Join(root, selected[index]!.Name),
+                    result!.ArtifactRestRequests,
+                    result.ArtifactRestNotModified,
+                    result.ArtifactRestPrimary,
+                    result.ArtifactRestSecondaryPoints,
+                    result.AnonymousSignedDownloads)).All(value => value) &&
+            embeddedControlReceipts.All(receipt => receipt is not null &&
+                ControlRequestBudgetReceiptIsExact(receipt)) &&
+            protectedExternalControlReceipts.Select((receipts, index) =>
+                receipts.Length == 1 && receipts[0].Phase ==
+                    RequiredProtectedExternalControlPhase(selected[index]!.Name))
+                .All(value => value) &&
+            protectedExternalControlReceipts.All(receipts =>
+                receipts.All(ControlExternalReceiptIsExact)) &&
+            postOperationCleanupReceipts.Select((receipts, index) =>
+                selected[index]!.Name == "dispatch-continuation"
+                    ? receipts.Length == 1
+                    : receipts.Length == 0).All(value => value) &&
+            postOperationCleanupReceipts.All(receipts =>
+                receipts.All(ControlExternalReceiptIsExact)) &&
+            operationEvents.ShapeValid &&
+            operationEvents.NodeWindowValid &&
+            operationEvents.AllWindowValid &&
+            operationEvents.MutationSpacingValid &&
+            protectedEventJoins.All(value => value) &&
+            perScenarioControlWithinCap &&
+            roleTotalsWithinBudget &&
+            domainTailsWithinBudget &&
+            !measurementOnly &&
+            finalAllocationValid &&
+            finalRemainingTailValid &&
+            operationPrimaryReserve >= minimumPrimaryReserve &&
+            JsonEquivalent(actualBytes, await File.ReadAllBytesAsync(golden)
+                .ConfigureAwait(false));
+    }
+
+    private static string RequiredProtectedExternalControlPhase(string name) =>
+        name switch
+        {
+            "dispatch-bootstrap" => "hold",
+            "dispatch-continuation" => "verify-completed",
+            "stale-head" => "hold",
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        };
+
+    private static bool ControlExternalReceiptIsExact(
+        FrameworkExternalControlRequestBudgetReceipt receipt) =>
+        receipt.Consumed >= 0 && receipt.Consumed <= receipt.Limit &&
+        receipt.Limit == 64 && receipt.Primary >= 0 &&
+        receipt.NotModified >= 0 && receipt.Primary + receipt.NotModified ==
+            receipt.Consumed && receipt.SecondaryPoints >= receipt.Consumed &&
+        receipt.MutationCount >= 0 && receipt.MutationCount <= receipt.Consumed &&
+        receipt.PermissionDenied == 0 &&
+        receipt.PrimaryRateLimited == 0 &&
+        receipt.SecondaryRateLimited == 0 &&
+        receipt.CombinedRateLimited == 0 &&
+        !receipt.InvalidRemainingHeader && RemainingTailProfileIsExact(receipt) &&
+        !receipt.RateLimited;
+
+    private static bool RemainingTailProfileIsExact(
+        FrameworkExternalControlRequestBudgetReceipt receipt) => receipt.MeasurementOnly
+        ? receipt.RemainingTailReserve ==
+            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
+            receipt.RemainingTailRequired == 0
+        : FrozenTailReceiptIsExact(TrustedProofRequestDomain.TrustedControlRest,
+            receipt.RemainingTailRequired, receipt.RemainingTailReserve);
+
+    // Empty until the first complete AOT measurement is reviewed.  Keeping the
+    // final map unpopulated is fail-closed: no measurement profile can become
+    // a live verdict merely because its wide local guard happened to pass.
+    private static readonly IReadOnlyDictionary<string, int>
+        FrozenOperationPrimaryRoleCaps = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+
+    private static IReadOnlyDictionary<string, int> ObservedRoleTotals(
+        FrameworkRequestBudgetReceipt?[] host,
+        FrameworkArtifactRestRequestBudgetReceipt?[] artifact,
+        FrameworkControlRequestBudgetReceipt?[] embedded,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt>[] external,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt>[] cleanup) =>
+        new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["node_artifact_rest"] = artifact.Sum(value => value!.PrimaryRateLimitRequests),
+            ["host_head_source_rest"] = host.Sum(value => value!.HostHeadSourcePrimary),
+            ["host_other_github_rest"] = host.Sum(value => value!.HostOtherGitHubPrimary),
+            ["embedded_control"] = embedded.Sum(value => value!.Primary),
+            ["external_control"] = external.Sum(values => values.Sum(value => value.Primary)),
+            ["cleanup_control"] = cleanup.Sum(values => values.Sum(value => value.Primary)),
+        };
+
+    private static bool SatisfiesFrozenRoleAllocation(
+        IReadOnlyDictionary<string, int> observed,
+        IReadOnlyDictionary<string, int> frozen,
+        int reserve)
+    {
+        var roles = new[]
+        {
+            "node_artifact_rest", "host_head_source_rest", "host_other_github_rest",
+            "embedded_control", "external_control", "cleanup_control",
+        };
+        return observed.Count == roles.Length && frozen.Count == roles.Length &&
+            roles.All(observed.ContainsKey) && roles.All(frozen.ContainsKey) &&
+            roles.All(role => observed[role] >= 0 && frozen[role] == observed[role]) &&
+            frozen.Values.Sum() + reserve <=
+                TrustedProofOperationRequestAccounting.OperationPrimaryBudget;
+    }
+
+    private static bool SatisfiesFrozenRemainingTailGuard(
+        IReadOnlyDictionary<string, int> observed)
+    {
+        var domains = new[]
+        {
+            "node_artifact_rest", "host_head_source_rest", "host_other_github_rest",
+            "trusted_control_rest",
+        };
+        return TrustedProofRequestBudgetProfile.TryGetFrozenTailProfile(
+                out var frozen, out var reserve) &&
+            observed.Count == domains.Length && domains.All(observed.ContainsKey) &&
+            domains.All(domain => observed[domain] >= 0 &&
+                frozen[DomainForTailName(domain)] == observed[domain]) &&
+            domains.All(domain => frozen[DomainForTailName(domain)] + reserve <
+                TrustedProofOperationRequestAccounting.OperationPrimaryBudget);
+    }
+
+    private static TrustedProofRequestDomain DomainForTailName(string domain) =>
+        domain switch
+        {
+            "node_artifact_rest" => TrustedProofRequestDomain.NodeArtifactRest,
+            "host_head_source_rest" => TrustedProofRequestDomain.HostHeadSourceRest,
+            "host_other_github_rest" => TrustedProofRequestDomain.HostOtherGitHubRest,
+            "trusted_control_rest" => TrustedProofRequestDomain.TrustedControlRest,
+            _ => throw new ArgumentOutOfRangeException(nameof(domain)),
+        };
 
     private static CompiledPayloadSourceExpectation?
         ReadCompiledPayloadSourceExpectation(
@@ -1127,6 +1811,8 @@ internal static class FrameworkSupervisor
         info.Environment["ACTIONS_RESULTS_URL"] = platform.BaseUrl;
         info.Environment["ACTIONS_RUNTIME_TOKEN"] = RuntimeToken;
         info.Environment["ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY"] = "1";
+        info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
+            "measurement";
         info.Environment["INPUT_GITHUB-TOKEN"] = FrameworkCanaries.GitHubToken;
         info.Environment["INPUT_PROVIDER-API-KEY"] = spec.MissingProvider
             ? ""
@@ -3422,6 +4108,13 @@ internal static class FrameworkSupervisor
             ("ProviderRequests", result.ProviderRequests),
             ("ToolSequence", result.ToolSequence),
             ("GitHubRequests", result.GitHubRequests),
+            ("ArtifactRestRequests", result.ArtifactRestRequests),
+            ("ArtifactRestNotModified", result.ArtifactRestNotModified),
+            ("ArtifactRestPrimary", result.ArtifactRestPrimary),
+            ("ArtifactRestSecondaryPoints",
+                result.ArtifactRestSecondaryPoints),
+            ("AnonymousSignedUploads", result.AnonymousSignedUploads),
+            ("AnonymousSignedDownloads", result.AnonymousSignedDownloads),
             ("StateOperations", result.StateOperations),
             ("StickyMutations", result.StickyMutations),
             ("InlineMutations", result.InlineMutations),
@@ -3441,6 +4134,829 @@ internal static class FrameworkSupervisor
             ? value
             : 0;
     }
+
+    private static long ReadLong(string root, string name)
+    {
+        var path = Path.Join(root, name);
+        return File.Exists(path) && long.TryParse(File.ReadAllText(path),
+            NumberStyles.None, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : 0;
+    }
+
+    private static JsonObject RoleEvidence(
+        FrameworkRequestBudgetReceipt host,
+        FrameworkArtifactRestRequestBudgetReceipt artifact,
+        FrameworkControlRequestBudgetReceipt embedded,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt> external,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt> cleanup) =>
+        FrameworkJson.Object(
+            ("node_artifact_rest", artifact.PrimaryRateLimitRequests),
+            ("host_head_source_rest", host.HostHeadSourcePrimary),
+            ("host_other_github_rest", host.HostOtherGitHubPrimary),
+            ("embedded_control", embedded.Primary),
+            ("external_control", external.Sum(value => value.Primary)),
+            ("cleanup_control", cleanup.Sum(value => value.Primary)));
+
+    private static JsonObject ReceiptEventJoinEvidence(
+        string scenario,
+        CaseResult result,
+        FrameworkRequestBudgetReceipt host,
+        FrameworkArtifactRestRequestBudgetReceipt artifact,
+        FrameworkControlRequestBudgetReceipt embedded,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt> external,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt> cleanup,
+        bool joined)
+    {
+        var eventsRead = TryReadScenarioEvents(scenario, out var events);
+        var eventRoles = eventsRead
+            ? FrameworkJson.Object(
+                ("node_artifact_rest", events["node_artifact_rest"].Primary),
+                ("host_head_source_rest", events["host_head_source_rest"].Primary),
+                ("host_other_github_rest", events["host_other_github_rest"].Primary),
+                ("trusted_control_rest", events["trusted_control_rest"].Primary))
+            : FrameworkJson.Object(
+                ("node_artifact_rest", -1),
+                ("host_head_source_rest", -1),
+                ("host_other_github_rest", -1),
+                ("trusted_control_rest", -1));
+        return FrameworkJson.Object(
+            ("case", result.Name),
+            ("joined", joined),
+            ("event_roles", eventRoles),
+            ("receipt_roles", FrameworkJson.Object(
+                ("node_artifact_rest", artifact.PrimaryRateLimitRequests),
+                ("host_head_source_rest", host.HostHeadSourcePrimary),
+                ("host_other_github_rest", host.HostOtherGitHubPrimary),
+                ("trusted_control_rest", embedded.Primary +
+                    external.Sum(value => value.Primary) +
+                    cleanup.Sum(value => value.Primary)))));
+    }
+
+    // Only normalized, secret-free fixture observations are admitted here.
+    // The platform records the timestamp at listener dispatch, before route
+    // handling, so the half-open rolling-window calculation cannot be
+    // satisfied by delaying response serialization.
+    private static OperationRequestEventMeasurement ReadOperationRequestEvents(
+        string root,
+        IReadOnlyList<string> names)
+    {
+        var fixedNames = new[]
+        {
+            "dispatch-bootstrap", "dispatch-continuation", "stale-head",
+        };
+        if (!names.SequenceEqual(fixedNames, StringComparer.Ordinal))
+        {
+            return OperationRequestEventMeasurement.Invalid;
+        }
+        var paths = names.Select(name => Path.Join(root, name,
+                "trusted-proof-request-events.tsv"))
+            .ToArray();
+        if (paths.Length != names.Count || paths.Any(path => !File.Exists(path)))
+        {
+            return OperationRequestEventMeasurement.Invalid;
+        }
+        var acceptedDomains = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "node_artifact_rest",
+            "host_head_source_rest",
+            "host_other_github_rest",
+            "trusted_control_rest",
+            "actions_results_service",
+            "anonymous_transfers",
+        };
+        var acceptedResponses = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "success",
+            "not_modified",
+            "permission_denied",
+            "primary_rate_limited",
+            "secondary_rate_limited",
+            "combined_rate_limited",
+            "invalid_rate_headers",
+            "other_failure",
+        };
+        var groups = new List<List<OperationRequestEvent>>();
+        var globalOrdinal = 0;
+        for (var scenarioIndex = 0; scenarioIndex < paths.Length; scenarioIndex++)
+        {
+            var path = paths[scenarioIndex];
+            var operation = new List<OperationRequestEvent>();
+            foreach (var line in File.ReadLines(path))
+            {
+                if (line.Split('\t') is not [var domain, var route, var method, var points,
+                        var timestamp, var response] ||
+                    !acceptedDomains.Contains(domain) ||
+                    !IsExactEventRoute(domain, route) ||
+                    !acceptedResponses.Contains(response) ||
+                    !int.TryParse(points, NumberStyles.None,
+                        CultureInfo.InvariantCulture, out var secondaryPoints) ||
+                    !long.TryParse(timestamp, NumberStyles.None,
+                        CultureInfo.InvariantCulture, out var monotonicTimestamp) ||
+                    monotonicTimestamp < 0 ||
+                    secondaryPoints != (method is "GET" or "HEAD" or "OPTIONS"
+                        ? 1 : 5))
+                {
+                    return OperationRequestEventMeasurement.Invalid;
+                }
+
+                operation.Add(new(names[scenarioIndex], scenarioIndex + 1,
+                    checked(++globalOrdinal), domain, route, method,
+                    secondaryPoints, monotonicTimestamp, response));
+            }
+            groups.Add(operation);
+        }
+
+        var events = groups.SelectMany(group => group).ToArray();
+        var authenticated = events.Where(value => value.Domain is
+            "node_artifact_rest" or "host_head_source_rest" or
+            "host_other_github_rest" or "trusted_control_rest")
+            .OrderBy(value => value.MonotonicTimestamp).ToArray();
+        var node = authenticated.Where(value =>
+            value.Domain == "node_artifact_rest").ToArray();
+        var nodeWindowValid = groups.All(group => RollingWindowWithin(group
+                .Where(value => value.Domain == "node_artifact_rest")
+                .OrderBy(value => value.MonotonicTimestamp).ToArray(), 600,
+                inclusive: true));
+        var allWindowValid = groups.All(group => RollingWindowWithin(group
+                .Where(value => value.Domain is "node_artifact_rest" or
+                    "host_head_source_rest" or "host_other_github_rest" or
+                    "trusted_control_rest")
+                .OrderBy(value => value.MonotonicTimestamp).ToArray(), 900,
+                inclusive: false));
+        var mutationSpacingValid = groups.All(group => MutationSpacingValid(group));
+        var domainTails = DomainFuturePrimaryTails(groups);
+        var sequence = string.Concat(events.Select(value =>
+            value.Scenario + "\t" + value.ScenarioOrdinal.ToString(
+                CultureInfo.InvariantCulture) + "\t" + value.Ordinal.ToString(
+                CultureInfo.InvariantCulture) + "\t" + value.Domain + "\t" +
+            value.Route + "\t" + value.Method + "\t" + value.SecondaryPoints.ToString(
+                CultureInfo.InvariantCulture) + "\t" + value.ResponseClass + "\n"));
+        return new(true, nodeWindowValid, allWindowValid, mutationSpacingValid,
+            node.Length,
+            events.Count(value => value.Domain == "host_head_source_rest"),
+            events.Count(value => value.Domain == "host_other_github_rest"),
+            events.Count(value => value.Domain == "trusted_control_rest"),
+            events.Count(value => value.Domain == "actions_results_service"),
+            events.Count(value => value.Domain == "anonymous_transfers"),
+            events, domainTails, Sha256Text(sequence));
+    }
+
+    internal static IReadOnlyDictionary<string, int> DomainFuturePrimaryTails(
+        IEnumerable<IEnumerable<OperationRequestEvent>> scenarioEvents)
+    {
+        var domains = new[]
+        {
+            "node_artifact_rest", "host_head_source_rest",
+            "host_other_github_rest", "trusted_control_rest",
+        };
+        var tails = domains.ToDictionary(domain => domain, _ => 0,
+            StringComparer.Ordinal);
+        // The three runs share one fixed aggregate witness order:
+        // bootstrap -> continuation -> stale.  Ordinal is append order from
+        // SyntheticOfficialPlatform, not a wall-clock sort key.  A remaining
+        // observation in bootstrap must therefore retain the primary work of
+        // the following continuation and stale witnesses in its suffix.
+        var ordered = scenarioEvents.SelectMany(scenario => scenario)
+            .OrderBy(value => value.Ordinal)
+            .ToArray();
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var current = ordered[index];
+            if (!tails.ContainsKey(current.Domain)) continue;
+            var futurePrimary = ordered.Skip(index + 1).Count(IsPrimaryCharged);
+            tails[current.Domain] = Math.Max(tails[current.Domain],
+                futurePrimary);
+        }
+
+        return tails;
+    }
+
+    private static bool IsPrimaryCharged(OperationRequestEvent value) =>
+        (value.Domain is "node_artifact_rest" or "host_head_source_rest" or
+            "host_other_github_rest" or "trusted_control_rest") &&
+        value.ResponseClass != "not_modified";
+
+    private static bool ProtectedEventJoinIsExact(
+        string scenario,
+        CaseResult result,
+        FrameworkRequestBudgetReceipt host,
+        FrameworkArtifactRestRequestBudgetReceipt artifact,
+        FrameworkControlRequestBudgetReceipt embedded,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt> external,
+        IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt> cleanup)
+    {
+        if (!TryReadScenarioEvents(scenario, out var events)) return false;
+        var node = events["node_artifact_rest"];
+        var head = events["host_head_source_rest"];
+        var other = events["host_other_github_rest"];
+        var control = events["trusted_control_rest"];
+        var results = events["actions_results_service"];
+        var anonymous = events["anonymous_transfers"];
+        var controlRaw = embedded.Consumed + external.Sum(value => value.Consumed) +
+            cleanup.Sum(value => value.Consumed);
+        var controlPrimary = embedded.Primary + external.Sum(value => value.Primary) +
+            cleanup.Sum(value => value.Primary);
+        var controlPoints = embedded.SecondaryPoints +
+            external.Sum(value => value.SecondaryPoints) +
+            cleanup.Sum(value => value.SecondaryPoints);
+        var controlMutations = embedded.MutationCount +
+            external.Sum(value => value.MutationCount) +
+            cleanup.Sum(value => value.MutationCount);
+        return head.Raw == 180 &&
+            ReadInt(scenario, "head-commit-api-count") == 1 &&
+            ReadInt(scenario, "head-tree-api-count") == 178 &&
+            ReadInt(scenario, "head-archive-api-count") == 1 &&
+            ReadInt(scenario, "base-api-count") == 0 &&
+            head.Raw == host.HostHeadSourceRaw &&
+            head.Primary == host.HostHeadSourcePrimary &&
+            head.NotModified == host.HostHeadSourceNotModified &&
+            head.Points == host.HostHeadSourceSecondaryPoints &&
+            other.Raw == host.HostOtherGitHubRaw &&
+            other.Primary == host.HostOtherGitHubPrimary &&
+            other.NotModified == host.HostOtherGitHubNotModified &&
+            other.Points == host.HostOtherGitHubSecondaryPoints &&
+            node.Raw == artifact.TotalAuthenticatedApiRequests &&
+            node.Raw == result.ArtifactRestRequests &&
+            node.NotModified == artifact.ConditionalNotModifiedRequests &&
+            node.Primary == artifact.PrimaryRateLimitRequests &&
+            node.Primary == result.ArtifactRestPrimary &&
+            node.Points == artifact.SecondaryLimitPoints &&
+            node.Points == result.ArtifactRestSecondaryPoints &&
+            node.PermissionDenied == artifact.PermissionDenied &&
+            control.Raw == controlRaw && control.Primary == controlPrimary &&
+            control.Points == controlPoints && control.Mutations == controlMutations &&
+            anonymous.SignedDownloads == result.AnonymousSignedDownloads &&
+            anonymous.SignedUploads == result.AnonymousSignedUploads &&
+            anonymous.Raw == anonymous.SignedUploads + anonymous.SignedDownloads &&
+            host.AnonymousCodeloadRequests == ReadInt(scenario,
+                "head-archive-anonymous-codeload-count") &&
+            host.AnonymousCodeloadRequests == 1 &&
+            result.AnonymousSignedDownloads >= 0 &&
+            results.Raw > 0;
+    }
+
+    private static bool TryReadScenarioEvents(
+        string scenario,
+        out IReadOnlyDictionary<string, ScenarioRequestEventStats> values)
+    {
+        values = new Dictionary<string, ScenarioRequestEventStats>();
+        var domainsPath = Path.Join(scenario, "trusted-proof-request-domains.tsv");
+        var eventsPath = Path.Join(scenario, "trusted-proof-request-events.tsv");
+        if (!File.Exists(domainsPath) || !File.Exists(eventsPath)) return false;
+        var domains = new[]
+        {
+            "node_artifact_rest", "host_head_source_rest", "host_other_github_rest",
+            "trusted_control_rest", "actions_results_service", "anonymous_transfers",
+        };
+        var declared = File.ReadLines(domainsPath).Select(line => line.Split('\t'))
+            .ToArray();
+        if (declared.Length != domains.Length || declared.Any(fields => fields.Length != 2) ||
+            !declared.Select(fields => fields[0]).SequenceEqual(domains) ||
+            declared.Select(fields => fields[0]).Distinct(StringComparer.Ordinal).Count() != domains.Length)
+        {
+            return false;
+        }
+        var mutable = domains.ToDictionary(domain => domain,
+            _ => new MutableScenarioRequestEventStats(), StringComparer.Ordinal);
+        foreach (var line in File.ReadLines(eventsPath))
+        {
+            if (line.Split('\t') is not [var domain, var route, var method, var points,
+                    var timestamp, var response] || !mutable.TryGetValue(domain,
+                    out var stat) || !int.TryParse(points, out var parsedPoints) ||
+                !long.TryParse(timestamp, out _) || parsedPoints !=
+                    (method is "GET" or "HEAD" or "OPTIONS" ? 1 : 5) ||
+                response is not ("success" or "not_modified" or "permission_denied") ||
+                !IsExactEventRoute(domain, route))
+            {
+                return false;
+            }
+            stat.Raw++;
+            stat.Points += parsedPoints;
+            if (method is not ("GET" or "HEAD" or "OPTIONS")) stat.Mutations++;
+            if (route == "actions_results_signed_upload") stat.SignedUploads++;
+            if (route == "actions_results_signed_download") stat.SignedDownloads++;
+            if (response == "not_modified") stat.NotModified++;
+            else
+            {
+                stat.Primary++;
+                if (response == "permission_denied") stat.PermissionDenied++;
+            }
+        }
+        for (var index = 0; index < domains.Length; index++)
+        {
+            if (!int.TryParse(declared[index][1], NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var declaredRaw) ||
+                declaredRaw != mutable[domains[index]].Raw)
+            {
+                return false;
+            }
+        }
+        values = mutable.ToDictionary(pair => pair.Key,
+            pair => new ScenarioRequestEventStats(pair.Value.Raw,
+                pair.Value.NotModified, pair.Value.Primary, pair.Value.Points,
+                pair.Value.PermissionDenied, pair.Value.Mutations, pair.Value.SignedUploads,
+                pair.Value.SignedDownloads),
+            StringComparer.Ordinal);
+        return true;
+    }
+
+    private static bool IsExactEventRoute(string domain, string route) =>
+        domain == "actions_results_service"
+            ? route == "actions_results_twirp"
+            : domain == "anonymous_transfers"
+                ? route is "actions_results_signed_upload" or
+                    "actions_results_signed_download"
+                : route == "github_rest";
+
+    private static bool RollingWindowWithin(
+        IReadOnlyList<OperationRequestEvent> events,
+        int maximum,
+        bool inclusive)
+    {
+        for (var index = 0; index < events.Count; index++)
+        {
+            var end = checked(events[index].MonotonicTimestamp +
+                Stopwatch.Frequency * 60L);
+            var points = events.Where(value => value.MonotonicTimestamp >=
+                    events[index].MonotonicTimestamp &&
+                value.MonotonicTimestamp < end).Sum(value => value.SecondaryPoints);
+            if (inclusive ? points > maximum : points >= maximum) return false;
+        }
+
+        return true;
+    }
+
+    private static bool MutationSpacingValid(
+        IEnumerable<OperationRequestEvent> events)
+    {
+        var mutations = events.Where(value => value.Domain is
+                "node_artifact_rest" or "host_head_source_rest" or
+                "host_other_github_rest" or "trusted_control_rest")
+            .Where(value => value.Method is not "GET" and not "HEAD" and
+                not "OPTIONS")
+            .OrderBy(value => value.MonotonicTimestamp)
+            .ToArray();
+        return mutations.Zip(mutations.Skip(1), (first, second) =>
+                second.MonotonicTimestamp - first.MonotonicTimestamp)
+            .All(delta => delta >= Stopwatch.Frequency);
+    }
+
+    private static bool HeadArchiveTransportEvidenceIsExact(string scenario)
+    {
+        var path = Path.Join(scenario, "head-archive-served");
+        if (!File.Exists(path) || File.ReadAllLines(path) is not [var line] ||
+            line.Split('\t') is not [var decodedLargeBlobBytes,
+                var compressedArchiveBytes, var decodedArchiveFileBytes,
+                var prefix] ||
+            !int.TryParse(decodedLargeBlobBytes, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var decodedLargeBlob) ||
+            !int.TryParse(compressedArchiveBytes, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var compressedArchive) ||
+            !int.TryParse(decodedArchiveFileBytes, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var decodedArchive))
+        {
+            return false;
+        }
+
+        return decodedLargeBlob == FrameworkGitHubHandler
+                .ProductionShapedLargeBlobByteCount &&
+            compressedArchive > 0 &&
+            decodedArchive == decodedLargeBlob +
+                Encoding.UTF8.GetByteCount(FrameworkCanaries.ToolData + "\n") &&
+            compressedArchive < decodedArchive &&
+            prefix == "agentic-pr-review-fixture/" &&
+            ReadInt(scenario, "head-archive-api-count") == 1 &&
+            ReadInt(scenario, "head-archive-anonymous-codeload-count") == 1 &&
+            ReadInt(scenario,
+                "head-archive-credential-not-forwarded-count") == 1 &&
+            ReadInt(scenario, "head-blob-api-count") == 0;
+    }
+
+    private static void CaptureTrustedProofRequestBudgetReceipts(
+        string scenario,
+        string stderr)
+    {
+        CapturePrefixedReceipt(scenario, stderr,
+            "APR_R4_E2P_GITHUB_REQUEST_BUDGET ",
+            "trusted-proof-github-request-budget.json");
+        CapturePrefixedReceipt(scenario, stderr,
+            "APR_R4_E2P_ARTIFACT_REST_BUDGET ",
+            "trusted-proof-artifact-rest-request-budget.json");
+        CapturePrefixedReceipt(scenario, stderr,
+            "APR_R4_E2P_CONTROL_REQUEST_BUDGET ",
+            "trusted-proof-embedded-control-request-budget.json");
+    }
+
+    private static void CaptureExternalControlRequestBudgetReceipt(
+        string scenario,
+        string phase,
+        string stderr) =>
+        CapturePrefixedReceipt(scenario, stderr,
+            "APR_R4_E2P_CONTROL_REQUEST_BUDGET ",
+            "trusted-proof-external-control-" + phase +
+                "-request-budget.json");
+
+    private static void CapturePrefixedReceipt(
+        string scenario,
+        string stderr,
+        string prefix,
+        string name)
+    {
+        var matches = stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.StartsWith(prefix, StringComparison.Ordinal))
+            .ToArray();
+        if (matches.Length == 1)
+        {
+            File.WriteAllText(Path.Join(scenario, name),
+                matches[0][prefix.Length..] + "\n");
+        }
+    }
+
+    private static bool TrustedProofRequestBudgetReceiptsAreExact(
+        string scenario,
+        int artifactRestRequests,
+        int artifactRestNotModified,
+        int artifactRestPrimary,
+        int artifactRestSecondaryPoints,
+        int anonymousSignedDownloads) =>
+        TryReadTrustedProofRequestBudgetReceipt(scenario) is { } payload &&
+        PayloadRequestBudgetReceiptIsExact(payload,
+            payload.AuthenticatedRestLimit) &&
+        TryReadArtifactRestRequestBudgetReceipt(scenario) is { } artifact &&
+        ArtifactRestRequestBudgetReceiptIsExact(
+            artifact,
+            scenario,
+            artifactRestRequests,
+            artifactRestNotModified,
+            artifactRestPrimary,
+            artifactRestSecondaryPoints,
+            anonymousSignedDownloads) &&
+        TryReadEmbeddedControlRequestBudgetReceipt(scenario) is { } control &&
+        ControlRequestBudgetReceiptIsExact(control);
+
+    private static bool PayloadRequestBudgetReceiptIsExact(
+        FrameworkRequestBudgetReceipt receipt,
+        int maximum) =>
+        receipt.AuthenticatedRestRequests <= maximum &&
+        receipt.AuthenticatedRestLimit == maximum &&
+        receipt.HostHeadSourceRaw >= 0 && receipt.HostOtherGitHubRaw >= 0 &&
+        receipt.HostHeadSourceRaw + receipt.HostOtherGitHubRaw ==
+            receipt.AuthenticatedRestRequests &&
+        receipt.HostHeadSourcePrimary >= 0 &&
+        receipt.HostHeadSourceNotModified >= 0 &&
+        receipt.HostHeadSourcePrimary + receipt.HostHeadSourceNotModified ==
+            receipt.HostHeadSourceRaw &&
+        receipt.HostOtherGitHubPrimary >= 0 &&
+        receipt.HostOtherGitHubNotModified >= 0 &&
+        receipt.HostOtherGitHubPrimary + receipt.HostOtherGitHubNotModified ==
+            receipt.HostOtherGitHubRaw &&
+        receipt.HostHeadSourcePermission == 0 &&
+        receipt.HostHeadSourcePrimaryRateLimited == 0 &&
+        receipt.HostHeadSourceSecondaryRateLimited == 0 &&
+        receipt.HostHeadSourceCombinedRateLimited == 0 &&
+        receipt.HostHeadSourceInvalidRateHeaders == 0 &&
+        receipt.HostHeadSourceSecondaryPoints >= receipt.HostHeadSourceRaw &&
+        receipt.HostOtherGitHubPermission == 0 &&
+        receipt.HostOtherGitHubPrimaryRateLimited == 0 &&
+        receipt.HostOtherGitHubSecondaryRateLimited == 0 &&
+        receipt.HostOtherGitHubCombinedRateLimited == 0 &&
+        receipt.HostOtherGitHubInvalidRateHeaders == 0 &&
+        receipt.HostOtherGitHubSecondaryPoints >= receipt.HostOtherGitHubRaw &&
+        !receipt.InvalidRemainingHeader &&
+        !receipt.TerminalRateLimited &&
+        !receipt.LowRemainingGuard &&
+        RemainingTailProfileIsExact(receipt) &&
+        receipt.AnonymousCodeloadRequests == 1 &&
+        receipt.AnonymousCodeloadLimit == 1 &&
+        receipt.RejectedRequests == 0;
+
+    private static bool ArtifactRestRequestBudgetReceiptIsExact(
+        FrameworkArtifactRestRequestBudgetReceipt receipt,
+        string scenario,
+        int artifactRestRequests,
+        int artifactRestNotModified,
+        int artifactRestPrimary,
+        int artifactRestSecondaryPoints,
+        int anonymousSignedDownloads) =>
+        receipt.Kind == "apr-r4-trusted-proof-artifact-rest-budget-v2" &&
+        ArtifactRestReceiptIdentityIsExact(receipt, scenario) &&
+        receipt.ProtectedRoute &&
+        receipt.MaximumTotalAuthenticatedApiRequests == 32 &&
+        receipt.TotalAuthenticatedApiRequests >= 0 &&
+        receipt.TotalAuthenticatedApiRequests <=
+            receipt.MaximumTotalAuthenticatedApiRequests &&
+        receipt.MaximumPrimaryRateLimitRequests == 32 &&
+        receipt.PrimaryRateLimitRequests >= 0 &&
+        receipt.PrimaryRateLimitRequests <=
+            receipt.MaximumPrimaryRateLimitRequests &&
+        receipt.ConditionalNotModifiedRequests >= 0 &&
+        receipt.ConditionalNotModifiedRequests <=
+            receipt.TotalAuthenticatedApiRequests &&
+        receipt.PrimaryRateLimitRequests ==
+            receipt.TotalAuthenticatedApiRequests -
+                receipt.ConditionalNotModifiedRequests &&
+        receipt.SecondaryLimitPoints >=
+            receipt.TotalAuthenticatedApiRequests &&
+        receipt.PermissionDenied >= 0 &&
+        receipt.PermissionDenied <= receipt.PrimaryRateLimitRequests &&
+        receipt.RemainingTotalAuthenticatedApiRequests ==
+            receipt.MaximumTotalAuthenticatedApiRequests -
+                receipt.TotalAuthenticatedApiRequests &&
+        receipt.RemainingPrimaryRateLimitRequests ==
+            receipt.MaximumPrimaryRateLimitRequests -
+                receipt.PrimaryRateLimitRequests &&
+        receipt.Disposition == "active" &&
+        artifactRestRequests == receipt.TotalAuthenticatedApiRequests &&
+        artifactRestNotModified == receipt.ConditionalNotModifiedRequests &&
+        artifactRestPrimary == receipt.PrimaryRateLimitRequests &&
+        artifactRestSecondaryPoints == receipt.SecondaryLimitPoints &&
+        anonymousSignedDownloads >= 0;
+
+    private static bool ArtifactRestReceiptIdentityIsExact(
+        FrameworkArtifactRestRequestBudgetReceipt receipt,
+        string scenario) =>
+        StringComparer.Ordinal.Equals(receipt.Repository,
+            FrameworkCanaries.Repository) &&
+        StringComparer.Ordinal.Equals(receipt.RepositoryId,
+            FrameworkGitHubHandler.RepositoryId.ToString(
+                CultureInfo.InvariantCulture)) &&
+        StringComparer.Ordinal.Equals(receipt.WorkflowSha,
+            FrameworkGitHubHandler.WorkflowSha) &&
+        StringComparer.Ordinal.Equals(receipt.ActionSourceSha,
+            FrameworkGitHubHandler.ActionSha) &&
+        StringComparer.Ordinal.Equals(receipt.PayloadSha256,
+            ReadOptionalText(scenario, "payload-sha256").Trim()) &&
+        StringComparer.Ordinal.Equals(receipt.BuildDiscriminator,
+            FrameworkCanaries.BuildDiscriminator) &&
+        StringComparer.Ordinal.Equals(receipt.RunId,
+            ReadLong(scenario, "run-id").ToString(CultureInfo.InvariantCulture)) &&
+        StringComparer.Ordinal.Equals(receipt.RunAttempt,
+            ReadInt(scenario, "run-attempt").ToString(CultureInfo.InvariantCulture)) &&
+        StringComparer.Ordinal.Equals(receipt.CapProfile,
+            "apr-r4-artifact-rest-request-budget-v2");
+
+    private static bool ControlRequestBudgetReceiptIsExact(
+        FrameworkControlRequestBudgetReceipt receipt) =>
+        receipt.Consumed >= 0 && receipt.Consumed <= receipt.Limit &&
+        receipt.Limit == 64 &&
+        receipt.Primary >= 0 && receipt.NotModified >= 0 &&
+        receipt.Primary + receipt.NotModified == receipt.Consumed &&
+        receipt.SecondaryPoints >= receipt.Consumed &&
+        receipt.MutationCount >= 0 && receipt.MutationCount <= receipt.Consumed &&
+        receipt.PermissionDenied == 0 &&
+        receipt.PrimaryRateLimited == 0 &&
+        receipt.SecondaryRateLimited == 0 &&
+        receipt.CombinedRateLimited == 0 &&
+        !receipt.InvalidRemainingHeader &&
+        RemainingTailProfileIsExact(receipt) &&
+        !receipt.RateLimited;
+
+    private static bool RemainingTailProfileIsExact(
+        FrameworkRequestBudgetReceipt receipt) => receipt.MeasurementOnly
+        ? receipt.RemainingTailReserve ==
+            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
+            receipt.HostHeadSourceRemainingTailRequired == 0 &&
+            receipt.HostOtherGitHubRemainingTailRequired == 0
+        : FrozenTailReceiptIsExact(TrustedProofRequestDomain.HostHeadSourceRest,
+                receipt.HostHeadSourceRemainingTailRequired,
+                receipt.RemainingTailReserve) &&
+            FrozenTailReceiptIsExact(TrustedProofRequestDomain.HostOtherGitHubRest,
+                receipt.HostOtherGitHubRemainingTailRequired,
+                receipt.RemainingTailReserve);
+
+    private static bool RemainingTailProfileIsExact(
+        FrameworkControlRequestBudgetReceipt receipt) => receipt.MeasurementOnly
+        ? receipt.RemainingTailReserve ==
+            TrustedProofOperationRequestAccounting.OperationPrimaryReserve &&
+            receipt.RemainingTailRequired == 0
+        : FrozenTailReceiptIsExact(TrustedProofRequestDomain.TrustedControlRest,
+            receipt.RemainingTailRequired, receipt.RemainingTailReserve);
+
+    private static bool FrozenTailReceiptIsExact(
+        TrustedProofRequestDomain domain,
+        int requiredTail,
+        int reserve) => TrustedProofRequestBudgetProfile.TryGetFrozenTailProfile(
+            out var frozen, out var frozenReserve) && reserve == frozenReserve &&
+        frozen[domain] == requiredTail;
+
+    private static FrameworkRequestBudgetReceipt?
+        TryReadTrustedProofRequestBudgetReceipt(string scenario)
+    {
+        var path = Path.Join(scenario,
+            "trusted-proof-github-request-budget.json");
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var receipt = document.RootElement;
+            if (!HasExactProperties(receipt,
+                    "authenticated_rest_requests", "authenticated_rest_limit",
+                    "anonymous_codeload_requests", "anonymous_codeload_limit",
+                    "rejected_requests", "measurement_only",
+                    "invalid_remaining_header", "terminal_rate_limited",
+                    "low_remaining_guard", "remaining_tail_reserve", "host_head_source_rest",
+                    "host_other_github_rest") ||
+                !HasExactProperties(receipt.GetProperty("host_head_source_rest"),
+                    "raw", "primary", "not_modified", "secondary_points", "permission",
+                    "primary_rate_limited", "secondary_rate_limited",
+                    "combined_rate_limited", "invalid_rate_headers",
+                    "remaining_tail_required") ||
+                !HasExactProperties(receipt.GetProperty("host_other_github_rest"),
+                    "raw", "primary", "not_modified", "secondary_points", "permission",
+                    "primary_rate_limited", "secondary_rate_limited",
+                    "combined_rate_limited", "invalid_rate_headers",
+                    "remaining_tail_required"))
+            {
+                return null;
+            }
+            return new FrameworkRequestBudgetReceipt(
+                receipt.GetProperty("authenticated_rest_requests").GetInt32(),
+                receipt.GetProperty("authenticated_rest_limit").GetInt32(),
+                receipt.GetProperty("anonymous_codeload_requests").GetInt32(),
+                receipt.GetProperty("anonymous_codeload_limit").GetInt32(),
+                receipt.GetProperty("rejected_requests").GetInt32(),
+                receipt.GetProperty("measurement_only").GetBoolean(),
+                receipt.GetProperty("invalid_remaining_header").GetBoolean(),
+                receipt.GetProperty("terminal_rate_limited").GetBoolean(),
+                receipt.GetProperty("low_remaining_guard").GetBoolean(),
+                receipt.GetProperty("remaining_tail_reserve").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("raw").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("primary").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("not_modified").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("secondary_points").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("permission").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("primary_rate_limited").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("secondary_rate_limited").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("combined_rate_limited").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("invalid_rate_headers").GetInt32(),
+                receipt.GetProperty("host_head_source_rest").GetProperty("remaining_tail_required").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("raw").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("primary").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("not_modified").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("secondary_points").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("permission").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("primary_rate_limited").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("secondary_rate_limited").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("combined_rate_limited").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("invalid_rate_headers").GetInt32(),
+                receipt.GetProperty("host_other_github_rest").GetProperty("remaining_tail_required").GetInt32());
+        }
+        catch (Exception error) when (error is JsonException or
+            InvalidOperationException or KeyNotFoundException or FormatException)
+        {
+            return null;
+        }
+    }
+
+    private static FrameworkArtifactRestRequestBudgetReceipt?
+        TryReadArtifactRestRequestBudgetReceipt(string scenario) =>
+        TryReadArtifactRestRequestBudgetReceiptFromPath(Path.Join(scenario,
+            "trusted-proof-artifact-rest-request-budget.json"));
+
+    private static FrameworkArtifactRestRequestBudgetReceipt?
+        TryReadArtifactRestRequestBudgetReceiptFromPath(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var receipt = document.RootElement;
+            if (!HasExactProperties(receipt,
+                    "kind", "protected_route",
+                    "maximum_total_authenticated_api_requests",
+                    "total_authenticated_api_requests",
+                    "maximum_primary_rate_limit_requests",
+                    "primary_rate_limit_requests",
+                    "conditional_not_modified_requests",
+                    "secondary_limit_points", "permission_denied",
+                    "remaining_total_authenticated_api_requests",
+                    "remaining_primary_rate_limit_requests", "disposition",
+                    "repository", "repository_id", "workflow_sha",
+                    "action_source_sha", "payload_sha256",
+                    "build_discriminator", "run_id", "run_attempt",
+                    "cap_profile", "measurement_only"))
+            {
+                return null;
+            }
+            return new FrameworkArtifactRestRequestBudgetReceipt(
+                receipt.GetProperty("kind").GetString() ?? string.Empty,
+                receipt.GetProperty("protected_route").GetBoolean(),
+                receipt.GetProperty(
+                    "maximum_total_authenticated_api_requests")
+                    .GetInt32(),
+                receipt.GetProperty("total_authenticated_api_requests")
+                    .GetInt32(),
+                receipt.GetProperty("maximum_primary_rate_limit_requests")
+                    .GetInt32(),
+                receipt.GetProperty("primary_rate_limit_requests").GetInt32(),
+                receipt.GetProperty("conditional_not_modified_requests")
+                    .GetInt32(),
+                receipt.GetProperty("secondary_limit_points").GetInt32(),
+                receipt.GetProperty("permission_denied").GetInt32(),
+                receipt.GetProperty(
+                    "remaining_total_authenticated_api_requests").GetInt32(),
+                receipt.GetProperty(
+                    "remaining_primary_rate_limit_requests").GetInt32(),
+                receipt.GetProperty("disposition").GetString() ?? string.Empty,
+                receipt.GetProperty("repository").GetString() ?? string.Empty,
+                receipt.GetProperty("repository_id").GetString() ?? string.Empty,
+                receipt.GetProperty("workflow_sha").GetString() ?? string.Empty,
+                receipt.GetProperty("action_source_sha").GetString() ?? string.Empty,
+                receipt.GetProperty("payload_sha256").GetString() ?? string.Empty,
+                receipt.GetProperty("build_discriminator").GetString() ?? string.Empty,
+                receipt.GetProperty("run_id").GetString() ?? string.Empty,
+                receipt.GetProperty("run_attempt").GetString() ?? string.Empty,
+                receipt.GetProperty("cap_profile").GetString() ?? string.Empty,
+                receipt.GetProperty("measurement_only").GetBoolean());
+        }
+        catch (Exception error) when (error is JsonException or
+            InvalidOperationException or KeyNotFoundException or FormatException)
+        {
+            return null;
+        }
+    }
+
+    private static FrameworkControlRequestBudgetReceipt?
+        TryReadEmbeddedControlRequestBudgetReceipt(string scenario) =>
+        TryReadControlRequestBudgetReceipt(Path.Join(scenario,
+            "trusted-proof-embedded-control-request-budget.json"));
+
+    private static IReadOnlyList<FrameworkExternalControlRequestBudgetReceipt>
+        ReadExternalControlRequestBudgetReceipts(string scenario) =>
+        Directory.EnumerateFiles(scenario,
+                "trusted-proof-external-control-*-request-budget.json")
+            .Order(StringComparer.Ordinal)
+            .Select(path => TryReadControlRequestBudgetReceipt(path) is { } receipt
+                ? new FrameworkExternalControlRequestBudgetReceipt(
+                    Path.GetFileName(path)["trusted-proof-external-control-".Length..
+                        ^"-request-budget.json".Length],
+                    receipt.Consumed,
+                    receipt.Limit,
+                    receipt.RateLimited,
+                    receipt.MeasurementOnly,
+                    receipt.Primary,
+                    receipt.NotModified,
+                    receipt.SecondaryPoints,
+                    receipt.MutationCount,
+                    receipt.RemainingTailRequired,
+                    receipt.RemainingTailReserve,
+                    receipt.PermissionDenied,
+                    receipt.PrimaryRateLimited,
+                    receipt.SecondaryRateLimited,
+                    receipt.CombinedRateLimited,
+                    receipt.InvalidRemainingHeader)
+                : null)
+            .Where(receipt => receipt is not null)
+            .Cast<FrameworkExternalControlRequestBudgetReceipt>()
+            .ToArray();
+
+    private static FrameworkControlRequestBudgetReceipt?
+        TryReadControlRequestBudgetReceipt(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var receipt = document.RootElement;
+            if (!HasExactProperties(receipt,
+                    "consumed", "limit", "primary", "not_modified",
+                    "secondary_points", "mutation_count", "remaining_tail_required",
+                    "remaining_tail_reserve", "permission_denied",
+                    "primary_rate_limited", "secondary_rate_limited",
+                    "combined_rate_limited", "invalid_remaining_header",
+                    "measurement_only", "rate_limited"))
+            {
+                return null;
+            }
+            return new FrameworkControlRequestBudgetReceipt(
+                receipt.GetProperty("consumed").GetInt32(),
+                receipt.GetProperty("limit").GetInt32(),
+                receipt.GetProperty("rate_limited").GetBoolean(),
+                receipt.GetProperty("primary").GetInt32(),
+                receipt.GetProperty("not_modified").GetInt32(),
+                receipt.GetProperty("secondary_points").GetInt32(),
+                receipt.GetProperty("mutation_count").GetInt32(),
+                receipt.GetProperty("remaining_tail_required").GetInt32(),
+                receipt.GetProperty("remaining_tail_reserve").GetInt32(),
+                receipt.GetProperty("permission_denied").GetInt32(),
+                receipt.GetProperty("primary_rate_limited").GetInt32(),
+                receipt.GetProperty("secondary_rate_limited").GetInt32(),
+                receipt.GetProperty("combined_rate_limited").GetInt32(),
+                receipt.GetProperty("invalid_remaining_header").GetBoolean(),
+                receipt.GetProperty("measurement_only").GetBoolean());
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool HasExactProperties(JsonElement value,
+        params string[] properties) => value.ValueKind == JsonValueKind.Object &&
+        value.EnumerateObject().Select(property => property.Name)
+            .SequenceEqual(properties, StringComparer.Ordinal);
 
     private static string SourceInventoryDigest(string repository)
     {
@@ -3623,6 +5139,12 @@ internal static class FrameworkSupervisor
         int ProviderRequests,
         int ToolSequence,
         int GitHubRequests,
+        int ArtifactRestRequests,
+        int ArtifactRestNotModified,
+        int ArtifactRestPrimary,
+        int ArtifactRestSecondaryPoints,
+        int AnonymousSignedUploads,
+        int AnonymousSignedDownloads,
         int StateOperations,
         int StickyMutations,
         int InlineMutations,
@@ -3642,6 +5164,176 @@ internal static class FrameworkSupervisor
     private sealed record CompiledPayloadSourceExpectation(
         string SourceCommit,
         string SourceTree);
+
+    private sealed record FrameworkRequestBudgetReceipt(
+        int AuthenticatedRestRequests,
+        int AuthenticatedRestLimit,
+        int AnonymousCodeloadRequests,
+        int AnonymousCodeloadLimit,
+        int RejectedRequests,
+        bool MeasurementOnly,
+        bool InvalidRemainingHeader,
+        bool TerminalRateLimited,
+        bool LowRemainingGuard,
+        int RemainingTailReserve,
+        int HostHeadSourceRaw,
+        int HostHeadSourcePrimary,
+        int HostHeadSourceNotModified,
+        int HostHeadSourceSecondaryPoints,
+        int HostHeadSourcePermission,
+        int HostHeadSourcePrimaryRateLimited,
+        int HostHeadSourceSecondaryRateLimited,
+        int HostHeadSourceCombinedRateLimited,
+        int HostHeadSourceInvalidRateHeaders,
+        int HostHeadSourceRemainingTailRequired,
+        int HostOtherGitHubRaw,
+        int HostOtherGitHubPrimary,
+        int HostOtherGitHubNotModified,
+        int HostOtherGitHubSecondaryPoints,
+        int HostOtherGitHubPermission,
+        int HostOtherGitHubPrimaryRateLimited,
+        int HostOtherGitHubSecondaryRateLimited,
+        int HostOtherGitHubCombinedRateLimited,
+        int HostOtherGitHubInvalidRateHeaders,
+        int HostOtherGitHubRemainingTailRequired);
+
+    private sealed record FrameworkArtifactRestRequestBudgetReceipt(
+        string Kind,
+        bool ProtectedRoute,
+        int MaximumTotalAuthenticatedApiRequests,
+        int TotalAuthenticatedApiRequests,
+        int MaximumPrimaryRateLimitRequests,
+        int PrimaryRateLimitRequests,
+        int ConditionalNotModifiedRequests,
+        int SecondaryLimitPoints,
+        int PermissionDenied,
+        int RemainingTotalAuthenticatedApiRequests,
+        int RemainingPrimaryRateLimitRequests,
+        string Disposition,
+        string Repository,
+        string RepositoryId,
+        string WorkflowSha,
+        string ActionSourceSha,
+        string PayloadSha256,
+        string BuildDiscriminator,
+        string RunId,
+        string RunAttempt,
+        string CapProfile,
+        bool MeasurementOnly);
+
+    private sealed record FrameworkControlRequestBudgetReceipt(
+        int Consumed,
+        int Limit,
+        bool RateLimited,
+        int Primary,
+        int NotModified,
+        int SecondaryPoints,
+        int MutationCount,
+        int RemainingTailRequired,
+        int RemainingTailReserve,
+        int PermissionDenied,
+        int PrimaryRateLimited,
+        int SecondaryRateLimited,
+        int CombinedRateLimited,
+        bool InvalidRemainingHeader,
+        bool MeasurementOnly);
+
+    private sealed record FrameworkExternalControlRequestBudgetReceipt(
+        string Phase,
+        int Consumed,
+        int Limit,
+        bool RateLimited,
+        bool MeasurementOnly,
+        int Primary,
+        int NotModified,
+        int SecondaryPoints,
+        int MutationCount,
+        int RemainingTailRequired,
+        int RemainingTailReserve,
+        int PermissionDenied,
+        int PrimaryRateLimited,
+        int SecondaryRateLimited,
+        int CombinedRateLimited,
+        bool InvalidRemainingHeader);
+
+    internal sealed record OperationRequestEvent(
+        string Scenario,
+        int ScenarioOrdinal,
+        int Ordinal,
+        string Domain,
+        string Route,
+        string Method,
+        int SecondaryPoints,
+        long MonotonicTimestamp,
+        string ResponseClass);
+
+    private sealed record OperationRequestEventMeasurement(
+        bool ShapeValid,
+        bool NodeWindowValid,
+        bool AllWindowValid,
+        bool MutationSpacingValid,
+        int NodeArtifactRaw,
+        int HostHeadRaw,
+        int HostOtherRaw,
+        int ControlRaw,
+        int ResultsRaw,
+        int AnonymousRaw,
+        IReadOnlyList<OperationRequestEvent> Events,
+        IReadOnlyDictionary<string, int> DomainTails,
+        string SequenceDigest)
+    {
+        internal static readonly OperationRequestEventMeasurement Invalid = new(
+            false, false, false, false, 0, 0, 0, 0, 0, 0,
+            [], new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["node_artifact_rest"] = 0,
+                ["host_head_source_rest"] = 0,
+                ["host_other_github_rest"] = 0,
+                ["trusted_control_rest"] = 0,
+            }, "");
+    }
+
+    private sealed record ScenarioRequestEventStats(
+        int Raw,
+        int NotModified,
+        int Primary,
+        int Points,
+        int PermissionDenied,
+        int Mutations,
+        int SignedUploads,
+        int SignedDownloads);
+
+    private sealed class MutableScenarioRequestEventStats
+    {
+        internal int Raw { get; set; }
+        internal int NotModified { get; set; }
+        internal int Primary { get; set; }
+        internal int Points { get; set; }
+        internal int PermissionDenied { get; set; }
+        internal int Mutations { get; set; }
+        internal int SignedUploads { get; set; }
+        internal int SignedDownloads { get; set; }
+    }
+
+    private sealed record UnauthorizedNoLaunchProbe(
+        bool Passed,
+        int PublicPreflightRequests,
+        bool AuthorizationHeaderPresent,
+        bool WorkflowRunEligible,
+        bool WorkflowDispatchEligible,
+        int PayloadStarts,
+        int WrapperStarts,
+        int ProviderStarts,
+        int StateStarts,
+        int PublisherStarts,
+        int CSharpReceiptStarts,
+        int NodeReceiptStarts,
+        int EmbeddedControlReceiptStarts,
+        int ExternalControlReceiptStarts)
+    {
+        internal static readonly UnauthorizedNoLaunchProbe Failed = new(
+            false, 0, false, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
 
     private sealed record CanaryRoute(
         IReadOnlySet<string> AllowedSinks,

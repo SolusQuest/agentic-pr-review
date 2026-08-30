@@ -65,15 +65,21 @@ internal sealed class BoundedGitHubValidationEvidence
     internal BoundedGitHubValidationEvidence(int statusCode,
         bool reviewIdentityReturned, string message,
         string? documentationUrl,
-        IReadOnlyList<BoundedGitHubErrorItemEvidence> errors) =>
-        (StatusCode, ReviewIdentityReturned, Message, DocumentationUrl, Errors) =
-        (statusCode, reviewIdentityReturned, message, documentationUrl, errors);
+        IReadOnlyList<BoundedGitHubErrorItemEvidence> errors,
+        string? rateLimitClassification = null)
+    {
+        (StatusCode, ReviewIdentityReturned, Message, DocumentationUrl, Errors,
+            RateLimitClassification) =
+            (statusCode, reviewIdentityReturned, message, documentationUrl,
+                errors, rateLimitClassification);
+    }
 
     internal int StatusCode { get; }
     internal bool ReviewIdentityReturned { get; }
     internal string Message { get; }
     internal string? DocumentationUrl { get; }
     internal IReadOnlyList<BoundedGitHubErrorItemEvidence> Errors { get; }
+    internal string? RateLimitClassification { get; }
 }
 
 internal sealed class BoundedGitHubHttpResult<T> where T : class

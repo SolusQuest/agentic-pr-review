@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
 import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
@@ -63,6 +63,56 @@ describe('artifact bridge staging root', () => {
     await expect(staging.readSource('csharp/op/source.bin')).rejects.toBeInstanceOf(
       ArtifactBridgeStagingError,
     );
+  });
+
+  it('zeroes a source buffer when post-read validation rejects it', async () => {
+    const root = await temporaryRoot();
+    const parent = path.join(root, 'csharp', 'op');
+    const encrypted = Buffer.from('post-read-validation-ciphertext');
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(parent, 'source.bin'), encrypted);
+    const staging = await ArtifactBridgeStaging.create(root);
+    const internal = staging as unknown as {
+      assertOpenedPath: (...arguments_: readonly unknown[]) => Promise<void>;
+    };
+    let assertions = 0;
+    vi.spyOn(internal, 'assertOpenedPath').mockImplementation(async () => {
+      assertions += 1;
+      if (assertions === 2) throw new Error('synthetic post-read validation failure');
+    });
+    const fill = vi.spyOn(Buffer.prototype, 'fill');
+
+    await expect(staging.readSource('csharp/op/source.bin')).rejects.toBeInstanceOf(
+      ArtifactBridgeStagingError,
+    );
+
+    expectZeroedBuffer(fill, encrypted.length);
+  });
+
+  it('zeroes a source buffer when the post-read deadline expires', async () => {
+    const root = await temporaryRoot();
+    const parent = path.join(root, 'csharp', 'op');
+    const encrypted = Buffer.from('post-read-deadline-ciphertext');
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(parent, 'source.bin'), encrypted);
+    const staging = await ArtifactBridgeStaging.create(root);
+    let clockReads = 0;
+    const budget = new ArtifactBridgeOperationBudget(
+      new AbortController().signal,
+      () => {
+        clockReads += 1;
+        return clockReads >= 3 ? 120_000 : 0;
+      },
+      0,
+    );
+    const fill = vi.spyOn(Buffer.prototype, 'fill');
+
+    await expect(staging.readSource('csharp/op/source.bin', budget)).rejects.toBeInstanceOf(
+      ArtifactBridgeDeadlineError,
+    );
+
+    expectZeroedBuffer(fill, encrypted.length);
+    budget.dispose();
   });
 
   it('rejects a symlinked parent where the platform permits links', async () => {
@@ -153,4 +203,15 @@ async function temporaryRoot(): Promise<string> {
 
 function testBudget(): ArtifactBridgeOperationBudget {
   return new ArtifactBridgeOperationBudget(new AbortController().signal, () => 0, 0);
+}
+
+function expectZeroedBuffer(fill: ReturnType<typeof vi.spyOn>, length: number): void {
+  expect(
+    fill.mock.contexts.some(
+      (context, index) =>
+        fill.mock.calls[index]?.[0] === 0 &&
+        Buffer.isBuffer(context) &&
+        context.equals(Buffer.alloc(length)),
+    ),
+  ).toBe(true);
 }

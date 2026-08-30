@@ -1,5 +1,5 @@
 import { deflateRawSync } from 'node:zlib';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   ArtifactTransportEnvelopeError,
@@ -136,6 +136,79 @@ describe('private artifact transport envelope', () => {
     await expect(
       readArtifactArchive(archive, digestBytes(archive), testBudget()),
     ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
+  });
+
+  it('zeroes newly decoded encrypted bytes when post-allocation validation fails', async () => {
+    const encrypted = Buffer.from('must-not-survive-invalid-envelope');
+    const valid = encodeArtifactTransportEnvelope(
+      '7001',
+      '2',
+      encrypted,
+      digestBytes(encrypted),
+      testBudget(),
+    );
+    const malformed = Buffer.from(
+      valid
+        .toString('utf8')
+        .replace(digestBytes(encrypted), '0'.repeat(digestBytes(encrypted).length)),
+      'utf8',
+    );
+    const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: malformed }]);
+    const fill = vi.spyOn(Buffer.prototype, 'fill');
+
+    await expect(
+      readArtifactArchive(archive, digestBytes(archive), testBudget()),
+    ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
+
+    expect(
+      fill.mock.contexts.some(
+        (context, index) =>
+          fill.mock.calls[index]?.[0] === 0 &&
+          Buffer.isBuffer(context) &&
+          context.equals(Buffer.alloc(encrypted.length)),
+      ),
+    ).toBe(true);
+  });
+
+  it('zeroes an encoded envelope when its post-allocation deadline check fails', () => {
+    const encrypted = Buffer.from('must-not-survive-encoded-deadline');
+    const expected = encodeArtifactTransportEnvelope(
+      '7001',
+      '2',
+      encrypted,
+      digestBytes(encrypted),
+      testBudget(),
+    );
+    let clockReads = 0;
+    const expiredAfterEncoding = new ArtifactBridgeOperationBudget(
+      new AbortController().signal,
+      () => {
+        clockReads += 1;
+        return clockReads >= 2 ? 120_000 : 0;
+      },
+      0,
+    );
+    const fill = vi.spyOn(Buffer.prototype, 'fill');
+
+    expect(() =>
+      encodeArtifactTransportEnvelope(
+        '7001',
+        '2',
+        encrypted,
+        digestBytes(encrypted),
+        expiredAfterEncoding,
+      ),
+    ).toThrow(ArtifactBridgeDeadlineError);
+
+    expect(
+      fill.mock.contexts.some(
+        (context, index) =>
+          fill.mock.calls[index]?.[0] === 0 &&
+          Buffer.isBuffer(context) &&
+          context.equals(Buffer.alloc(expected.length)),
+      ),
+    ).toBe(true);
+    expiredAfterEncoding.dispose();
   });
 
   it('observes the shared operation deadline before archive processing', async () => {

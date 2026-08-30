@@ -432,6 +432,75 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     }
 
     [Fact]
+    public void ProducerJournalFixesTheFourRoleTriggerOrderAndAllowsOnlyTerminalRecovery()
+    {
+        var root = CreateRestrictedRoot();
+        var operations = new[] { new string('6', 64), new string('8', 64) };
+        var roles = new[]
+        {
+            "normal-bootstrap", "normal-continuation", "stale-protected", "stale-follow-on",
+        };
+        var workflow = new string('d', 40);
+        var targets = roles.Select((role, index) => new ProducerTargetAuthority(
+            new string((char)('a' + index), 64),
+            operations[index < 2 ? 0 : 1], role, index < 2 ? "normal" : "stale",
+            "synthetic-producer", index == 1 ? "workflow_dispatch" : "workflow_run",
+            new string((char)('1' + index), 64), workflow, "main", index < 2 ? "1001" : "1002",
+            new string((char)('5' + index), 40), "r4-trusted-proof/" + operations[index < 2 ? 0 : 1],
+            "SolusQuest/agentic-pr-review", workflow)).ToArray();
+        var journal = ProducerOutcomeJournal.CreateNew(
+            root, "fixed-order-producer-journal", new string('4', 64), new string('5', 64),
+            new string('6', 64), "SolusQuest/agentic-pr-review", operations, targets, 0);
+        ProducerOutcomeJournal.ValidateEnrollmentTargets(
+            "SolusQuest/agentic-pr-review", operations, targets);
+        Assert.Throws<InvalidDataException>(() => ProducerOutcomeJournal.ValidateEnrollmentTargets(
+            "SolusQuest/agentic-pr-review", operations, targets.Take(3).ToArray()));
+        Assert.Throws<InvalidDataException>(() => ProducerOutcomeJournal.ValidateEnrollmentTargets(
+            "SolusQuest/agentic-pr-review", operations,
+            [targets[1], targets[0], targets[2], targets[3]]));
+        Assert.Throws<InvalidDataException>(() => ProducerOutcomeJournal.ValidateEnrollmentTargets(
+            "SolusQuest/agentic-pr-review", operations,
+            [.. targets, targets[0] with { AuthorityId = new string('f', 64) }]));
+
+        // A stale-only earlier fragment cannot move the stale ref ahead of the two normal roles.
+        Assert.Throws<InvalidDataException>(() => journal.AppendCreateNew(
+            targets[2].AuthorityId, 1, "before-dispatch", 0, 1, []));
+        journal.AppendCreateNew(targets[0].AuthorityId, 1, "before-dispatch", 2, 3, []);
+        // The continuation write is not permitted until bootstrap's producer commit is durable.
+        // This still precedes either workflow run's terminal observation.
+        Assert.Throws<InvalidDataException>(() => journal.AppendCreateNew(
+            targets[1].AuthorityId, 1, "before-dispatch", 4, 5, []));
+        journal.AppendCreateNew(targets[0].AuthorityId, 1, "committed", 6, 7, [new string('a', 64)]);
+        journal.AppendCreateNew(targets[1].AuthorityId, 1, "before-dispatch", 8, 9, []);
+
+        // A stale role cannot jump over the normal pair while either producer is unfinished.
+        Assert.Throws<InvalidDataException>(() => journal.AppendCreateNew(
+            targets[2].AuthorityId, 1, "before-dispatch", 10, 11, []));
+        journal.AppendCreateNew(targets[1].AuthorityId, 1, "outcome-unknown", 12, 13, []);
+        Assert.Throws<InvalidDataException>(() => journal.AppendCreateNew(
+            targets[2].AuthorityId, 1, "before-dispatch", 14, 15, []));
+        journal.AppendCreateNew(targets[1].AuthorityId, 1, "reconciled-not-committed", 16, 17,
+            [new string('b', 64)]);
+        journal.AppendCreateNew(targets[1].AuthorityId, 2, "before-dispatch", 18, 19, []);
+        journal.AppendCreateNew(targets[1].AuthorityId, 2, "committed", 20, 21,
+            [new string('c', 64)], "9002");
+        journal.AppendCreateNew(targets[2].AuthorityId, 1, "before-dispatch", 22, 23, []);
+        journal.AppendCreateNew(targets[2].AuthorityId, 1, "committed", 24, 25, [new string('d', 64)]);
+        journal.AppendCreateNew(targets[3].AuthorityId, 1, "before-dispatch", 26, 27, []);
+        journal.AppendCreateNew(targets[3].AuthorityId, 1, "outcome-unknown", 28, 29, []);
+
+        // Crash recovery must reconcile the same target before any retry; it cannot start a
+        // duplicate stale-follow-on write or go back to an earlier operation.
+        Assert.Throws<InvalidDataException>(() => journal.AppendCreateNew(
+            targets[3].AuthorityId, 2, "before-dispatch", 30, 31, []));
+        Assert.Throws<InvalidDataException>(() => journal.AppendCreateNew(
+            targets[0].AuthorityId, 2, "before-dispatch", 30, 31, []));
+        journal.AppendCreateNew(targets[3].AuthorityId, 1, "reconciled-not-committed", 32, 33,
+            [new string('e', 64)]);
+        journal.AppendCreateNew(targets[3].AuthorityId, 2, "before-dispatch", 34, 35, []);
+    }
+
+    [Fact]
     public void CorrectionAndCleanupAuthorizationRejectEditedCommentsReadOnlyAuthorsAndOtherWorktrees()
     {
         var repository = FindRepositoryRoot();
@@ -638,6 +707,83 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.Equal(roleCount, seal.Document.DerivedRoles.Length);
         Assert.All(seal.Document.DerivedRoles, role =>
             Assert.Equal(["producer-discovery-final:page:1"], role.ProducerSourceIds));
+    }
+
+    [Fact]
+    public void ProducerSealRetainsFailedAndCancelledOwnedRunsWithoutInventingSuccessfulRoles()
+    {
+        var root = CreateRestrictedRoot();
+        var operations = new[] { new string('6', 64), new string('8', 64) };
+        var targets = new[]
+        {
+            new ProducerTargetAuthority(
+                new string('a', 64),
+                operations[0],
+                "normal-bootstrap",
+                "normal",
+                "synthetic-producer",
+                "workflow_run",
+                new string('1', 64)),
+            new ProducerTargetAuthority(
+                new string('b', 64),
+                operations[0],
+                "normal-continuation",
+                "normal",
+                "synthetic-producer",
+                "workflow_dispatch",
+                new string('2', 64)),
+        };
+        var journal = ProducerOutcomeJournal.CreateNew(
+            root,
+            "failed-cancelled-producer-journal",
+            new string('4', 64),
+            new string('5', 64),
+            new string('6', 64),
+            "SolusQuest/agentic-pr-review",
+            operations,
+            targets,
+            0);
+        for (var index = 0; index < targets.Length; index++)
+        {
+            var before = index * 2_000L;
+            journal.AppendCreateNew(
+                targets[index].AuthorityId,
+                1,
+                "before-dispatch",
+                before,
+                before + 1,
+                []);
+            journal.AppendCreateNew(
+                targets[index].AuthorityId,
+                1,
+                "committed",
+                before + 2,
+                before + 3,
+                [new string((char)('a' + index), 64)],
+                index == 1 ? "9002" : null);
+        }
+        var runs = new[]
+        {
+            (RunId: "9001", RunAttempt: "1", Event: "workflow_run", CreatedUnixMilliseconds: 1_000L),
+            (RunId: "9002", RunAttempt: "1", Event: "workflow_dispatch", CreatedUnixMilliseconds: 3_000L),
+        };
+        var outcomes = new Dictionary<string, (string Status, string? Conclusion)>(StringComparer.Ordinal)
+        {
+            ["9001"] = ("completed", "failure"),
+            ["9002"] = ("completed", "cancelled"),
+        };
+
+        var seal = journal.SealCreateNew(CreateProducerDiscovery(
+            root,
+            "failed-cancelled-producer-journal",
+            runs,
+            outcomes));
+
+        Assert.Equal(["9001", "9002"], seal.Document.ObservedRuns.Select(run => run.RunId));
+        Assert.All(seal.Document.ObservedRuns,
+            run => Assert.Equal("operation-owned", run.Ownership));
+        Assert.Empty(seal.Document.DerivedRoles);
+        Assert.Equal("recovery-only", seal.Document.Disposition);
     }
 
     [Fact]
@@ -3045,6 +3191,12 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             authorization,
             terminal.Replace("completed", "in_progress", StringComparison.Ordinal)));
 
+        options["--phase"] = "enrollment-normal-inert-preflight-terminal";
+        options["--source-id"] = "enrollment-normal-inert-preflight-run-9001";
+        ValidatePhase(options, authorization, terminal);
+        options["--source-id"] = "enrollment-normal-inert-preflight-run-9002";
+        Assert.Throws<InvalidDataException>(() => ValidatePhase(options, authorization, terminal));
+
         options["--source-id"] = "artifacts-run-9001";
         options["--route"] = "/repos/SolusQuest/agentic-pr-review/actions/runs/9001/artifacts";
         ValidatePhase(options, authorization,
@@ -3053,6 +3205,363 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
             options,
             authorization,
             "{\"total_count\":2,\"artifacts\":[{\"id\":7001,\"workflow_run\":{\"id\":9001}}]}"));
+    }
+
+    [Fact]
+    public void EnrollmentInertPreflightJobsAreExplicitAndCannotCreateProtectedJobs()
+    {
+        var operationId = new string('6', 64);
+        var authorization = new PhaseFragmentMaterializer.PhaseAuthorization(
+            "SolusQuest/agentic-pr-review", [operationId, new string('8', 64)],
+            new string('1', 64), new string('2', 64), "20766359842", "r4-trusted-proof",
+            ["16307884"], false, false, ["R4_PROVIDER_TOKEN"],
+            "R4_TRUSTED_PROOF_AUTHORIZATION", [new string('a', 64), new string('b', 64)]);
+        var options = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["--operation-id"] = operationId,
+            ["--phase"] = "enrollment-normal-inert-preflight-jobs",
+            ["--source-id"] = "enrollment-normal-inert-preflight-jobs-run-9001",
+            ["--route"] = "/repos/SolusQuest/agentic-pr-review/actions/runs/9001/attempts/1/jobs",
+        };
+        var inert = "{\"total_count\":3,\"jobs\":[" +
+            "{\"id\":1,\"run_id\":9001,\"run_attempt\":1,\"name\":\"authorization-preflight\",\"status\":\"completed\",\"conclusion\":\"success\"}," +
+            "{\"id\":2,\"run_id\":9001,\"run_attempt\":1,\"name\":\"workflow-run-review\",\"status\":\"completed\",\"conclusion\":\"skipped\"}," +
+            "{\"id\":3,\"run_id\":9001,\"run_attempt\":1,\"name\":\"workflow-dispatch-review\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]}";
+        ValidatePhase(options, authorization, inert);
+        Assert.Throws<InvalidDataException>(() => ValidatePhase(options, authorization,
+            inert.Replace("\"name\":\"workflow-run-review\",\"status\":\"completed\",\"conclusion\":\"skipped\"",
+                "\"name\":\"workflow-run-review\",\"status\":\"completed\",\"conclusion\":\"success\"", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void EnrollmentObservationBindsEveryProducerRoleToItsActualDiscoveryHead()
+    {
+        var normalOperation = new string('6', 64);
+        var staleOperation = new string('8', 64);
+        var mergedWorkflowHead = new string('a', 40);
+        var fixtureHead = new string('b', 40);
+        var targets = new[]
+        {
+            new ProducerTargetAuthority(new string('1', 64), normalOperation, "normal-continuation",
+                "normal", "dispatch-proof-workflow", "workflow_dispatch", new string('2', 64),
+                mergedWorkflowHead, "main", "1001", fixtureHead,
+                "r4-trusted-proof/" + new string('6', 64), "SolusQuest/agentic-pr-review", mergedWorkflowHead),
+            new ProducerTargetAuthority(new string('3', 64), staleOperation, "stale-follow-on",
+                "stale", "advance-stale-ref", "workflow_run", new string('4', 64),
+                mergedWorkflowHead, "main", "1002", fixtureHead,
+                "r4-trusted-proof/" + new string('8', 64), "SolusQuest/agentic-pr-review", mergedWorkflowHead),
+        };
+
+        EnrollmentObservationMaterializer.ValidateProducerTarget(
+            targets, "normal-continuation", normalOperation, "workflow_dispatch", mergedWorkflowHead);
+        EnrollmentObservationMaterializer.ValidateProducerTarget(
+            targets, "stale-follow-on", staleOperation, "workflow_run", mergedWorkflowHead);
+        Assert.Throws<InvalidDataException>(() => EnrollmentObservationMaterializer.ValidateProducerTarget(
+            targets, "normal-continuation", normalOperation, "workflow_dispatch", fixtureHead));
+    }
+
+    [Fact]
+    public void EnrollmentTerminalPullRequestBindingIsExactForWorkflowRunAndExplicitlyEmptyForDispatch()
+    {
+        static JsonElement Parse(string text)
+        {
+            using var document = JsonDocument.Parse(text);
+            return document.RootElement.Clone();
+        }
+
+        Assert.True(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{\"pull_requests\":[{\"number\":1001}]}"), "workflow_run", "1001"));
+        Assert.False(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{\"pull_requests\":[]}"), "workflow_run", "1001"));
+        Assert.False(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{\"pull_requests\":[{\"number\":1002}]}"), "workflow_run", "1001"));
+        Assert.False(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{\"pull_requests\":[{\"number\":1001},{\"number\":1001}]}"), "workflow_run", "1001"));
+        Assert.False(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{}"), "workflow_run", "1001"));
+
+        Assert.True(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{\"pull_requests\":[]}"), "workflow_dispatch", "1001"));
+        Assert.False(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{\"pull_requests\":[{\"number\":1001}]}"), "workflow_dispatch", "1001"));
+        Assert.False(EnrollmentObservationMaterializer.HasExactTerminalPullRequestBinding(
+            Parse("{}"), "workflow_dispatch", "1001"));
+    }
+
+    [Fact]
+    public void EnrollmentProducerBindingRejectsRunReuseAmbiguityAndIncompleteCausality()
+    {
+        var root = CreateRestrictedRoot();
+        var operation = new string('6', 64);
+        var workflow = new string('a', 40);
+        var fixture = new string('b', 40);
+        var target = new ProducerTargetAuthority(new string('1', 64), operation,
+            "normal-bootstrap", "normal", "rerun-upstream-ci", "workflow_run",
+            new string('2', 64), workflow, "main", "1001", fixture,
+            "r4-trusted-proof/" + operation, "SolusQuest/agentic-pr-review", workflow);
+        var journal = ProducerOutcomeJournal.CreateNew(root, "enrollment-binding-journal",
+            new string('3', 64), new string('4', 64), new string('5', 64),
+            "SolusQuest/agentic-pr-review", [operation, new string('8', 64)], [target], 0);
+        journal.AppendCreateNew(target.AuthorityId, 1, "before-dispatch", 100, 101, []);
+        journal.AppendCreateNew(target.AuthorityId, 1, "committed", 102, 103, [new string('9', 64)]);
+        var checkpoint = journal.CurrentCheckpoint();
+        ProducerEnrollmentDiscoveryRun Run(string id, string attempt = "1", string pr = "1001", string head = "") =>
+            new(id, attempt, "workflow_run", "completed", "success", head.Length == 0 ? workflow : head,
+                "main", [pr], "SolusQuest/agentic-pr-review", ".github/workflows/r4-trusted-proof.yml", 150,
+                "apr-r4-e2p-r4-trusted-proof/" + operation);
+        journal.ValidateEnrollmentRoleRunBinding("normal-bootstrap", operation, "9001", "workflow_run", 200,
+            checkpoint.Document, checkpoint.Sha256, [Run("9001")]);
+
+        // Same M is insufficient: selected id must be the sole target-window candidate.
+        Assert.Throws<InvalidDataException>(() => journal.ValidateEnrollmentRoleRunBinding(
+            "normal-bootstrap", operation, "9002", "workflow_run", 200, checkpoint.Document,
+            checkpoint.Sha256, [Run("9001"), Run("9002")]));
+        Assert.Throws<InvalidDataException>(() => journal.ValidateEnrollmentRoleRunBinding(
+            "normal-bootstrap", operation, "9001", "workflow_run", 200, checkpoint.Document,
+            checkpoint.Sha256, [Run("9001", "2")]));
+        Assert.Throws<InvalidDataException>(() => journal.ValidateEnrollmentRoleRunBinding(
+            "normal-bootstrap", operation, "9001", "workflow_run", 200, checkpoint.Document,
+            checkpoint.Sha256, [Run("9001", pr: "1002")]));
+        Assert.Throws<InvalidDataException>(() => journal.ValidateEnrollmentRoleRunBinding(
+            "normal-bootstrap", operation, "9001", "workflow_run", 200, checkpoint.Document,
+            checkpoint.Sha256, [Run("9001", head: new string('c', 40))]));
+        Assert.Throws<InvalidDataException>(() => journal.ValidateEnrollmentRoleRunBinding(
+            "normal-bootstrap", operation, "9001", "workflow_run", 102, checkpoint.Document,
+            checkpoint.Sha256, [Run("9001")]));
+
+        // GitHub workflow_dispatch listings may legitimately omit pull_requests. Its run id
+        // comes from the producer response; the exact PR remains bound by the separate pull readback.
+        var dispatchTarget = target with
+        {
+            AuthorityId = new string('7', 64), Role = "normal-continuation",
+            Producer = "dispatch-proof-workflow", ExpectedEvent = "workflow_dispatch",
+        };
+        var dispatchRoot = CreateRestrictedRoot();
+        var dispatch = ProducerOutcomeJournal.CreateNew(dispatchRoot, "dispatch-empty-pulls-binding",
+            new string('3', 64), new string('4', 64), new string('5', 64),
+            "SolusQuest/agentic-pr-review", [operation, new string('8', 64)], [dispatchTarget], 0);
+        dispatch.AppendCreateNew(dispatchTarget.AuthorityId, 1, "before-dispatch", 100, 101, []);
+        dispatch.AppendCreateNew(dispatchTarget.AuthorityId, 1, "committed", 102, 103, [new string('9', 64)], "9002");
+        var dispatchCheckpoint = dispatch.CurrentCheckpoint();
+        var dispatchRun = new ProducerEnrollmentDiscoveryRun("9002", "1", "workflow_dispatch", "completed", "success",
+            workflow, "main", [], "SolusQuest/agentic-pr-review",
+            ".github/workflows/r4-trusted-proof.yml", 150, "apr-r4-e2p-" + operation);
+        dispatch.ValidateEnrollmentRoleRunBinding("normal-continuation", operation, "9002", "workflow_dispatch", 200,
+            dispatchCheckpoint.Document, dispatchCheckpoint.Sha256, [dispatchRun]);
+
+        var uncommittedRoot = CreateRestrictedRoot();
+        var uncommitted = ProducerOutcomeJournal.CreateNew(uncommittedRoot, "uncommitted-enrollment-binding",
+            new string('3', 64), new string('4', 64), new string('5', 64),
+            "SolusQuest/agentic-pr-review", [operation, new string('8', 64)], [target], 0);
+        uncommitted.AppendCreateNew(target.AuthorityId, 1, "before-dispatch", 100, 101, []);
+        var incomplete = uncommitted.CurrentCheckpoint();
+        Assert.Throws<InvalidDataException>(() => uncommitted.ValidateEnrollmentRoleRunBinding(
+            "normal-bootstrap", operation, "9001", "workflow_run", 200, incomplete.Document,
+            incomplete.Sha256, [Run("9001")]));
+    }
+
+    [Fact]
+    public void EnrollmentUncertainMutationRecoveryRequiresOneExactFixtureCandidate()
+    {
+        var operation = new string('6', 64);
+        var workflow = new string('a', 40);
+        var fixture = new string('b', 40);
+        var target = new ProducerTargetAuthority(
+            new string('1', 64), operation, "normal-bootstrap", "normal", "rerun-upstream-ci",
+            "workflow_run", new string('2', 64), workflow, "main", "1001", fixture,
+            "r4-trusted-proof/" + operation, "SolusQuest/agentic-pr-review", workflow);
+        var intent = ProducerOutcomeJournal.CreateEnrollmentMutationIntent(target, 100);
+        ProducerEnrollmentDiscoveryRun Run(
+            string id,
+            long created = 500,
+            string runAttempt = "1",
+            string @event = "workflow_run",
+            string? head = null,
+            string? reference = null,
+            string? displayTitle = null) => new(
+                id, runAttempt, @event, "queued", null, head ?? workflow,
+                reference ?? "main", ["1001"],
+                "SolusQuest/agentic-pr-review", ".github/workflows/r4-trusted-proof.yml", created,
+                displayTitle ?? (@event == "workflow_dispatch"
+                    ? "apr-r4-e2p-" + operation
+                    : "apr-r4-e2p-r4-trusted-proof/" + operation));
+
+        // The concurrent continuation producer can begin at 200; the bootstrap run is still
+        // attributable when it appears at 500 because identity is fixture-bound, not bounded by
+        // the next producer's start time.
+        Assert.Equal("9001", ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001")], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun([], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001"), Run("9002")], target, intent, 600));
+
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001", head: new string('c', 40))], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001", reference: "r4-trusted-proof/" + new string('8', 64))], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001", displayTitle: "apr-r4-e2p-r4-trusted-proof/" + new string('8', 64))], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001", @event: "workflow_dispatch")], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001", runAttempt: "2")], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001", created: 7_000)], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001", created: -1_000)], target, intent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [Run("9001")], target with { OperationId = new string('8', 64) }, intent, 600));
+
+        var dispatchTarget = target with
+        {
+            AuthorityId = new string('7', 64),
+            Role = "normal-continuation",
+            Producer = "dispatch-proof-workflow",
+            ExpectedEvent = "workflow_dispatch",
+        };
+        var dispatchIntent = ProducerOutcomeJournal.CreateEnrollmentMutationIntent(dispatchTarget, 100);
+        var dispatchRun = new ProducerEnrollmentDiscoveryRun("9010", "1", "workflow_dispatch", "queued", null,
+            workflow, "main", [], "SolusQuest/agentic-pr-review",
+            ".github/workflows/r4-trusted-proof.yml", 500, "apr-r4-e2p-" + operation);
+        Assert.Equal("9010", ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [dispatchRun], dispatchTarget, dispatchIntent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [dispatchRun, dispatchRun with { RunId = "9011" }], dispatchTarget, dispatchIntent, 600));
+        Assert.Null(ProducerOutcomeJournal.SelectEnrollmentRecoveryRun(
+            [dispatchRun with { DisplayTitle = "apr-r4-e2p-" + new string('8', 64) }],
+            dispatchTarget, dispatchIntent, 600));
+
+        var root = CreateRestrictedRoot();
+        var journal = ProducerOutcomeJournal.CreateNew(root, "uncertain-dispatch-recovery",
+            new string('3', 64), new string('4', 64), new string('5', 64),
+            "SolusQuest/agentic-pr-review", [operation, new string('8', 64)], [target], 0);
+        journal.AppendCreateNew(target.AuthorityId, 1, "before-dispatch", 100, 101, []);
+        journal.AppendCreateNew(target.AuthorityId, 1, "outcome-unknown", 100, 102, []);
+        journal.AppendCreateNew(target.AuthorityId, 1, "reconciled-committed", 400, 401,
+            [new string('d', 64)], "9001");
+        var checkpoint = journal.CurrentCheckpoint();
+        var terminal = Run("9001") with { Status = "completed", Conclusion = "success" };
+        journal.ValidateEnrollmentRoleRunBinding("normal-bootstrap", operation, "9001", "workflow_run", 600,
+            checkpoint.Document, checkpoint.Sha256, [terminal]);
+        Assert.Throws<InvalidDataException>(() => journal.ValidateEnrollmentRoleRunBinding(
+            "normal-bootstrap", operation, "9002", "workflow_run", 600,
+            checkpoint.Document, checkpoint.Sha256, [terminal with { RunId = "9002" }]));
+    }
+
+    [Fact]
+    public void StaleAdvanceRequiresAndReopensItsPinnedProtectedReceiptAcrossRecovery()
+    {
+        var root = CreateRestrictedRoot();
+        var operation = new string('8', 64);
+        var other = new string('6', 64);
+        var workflow = new string('a', 40);
+        var fixture = new string('d', 40);
+        var targets = new[]
+        {
+            new ProducerTargetAuthority(new string('a', 64), other, "normal-bootstrap", "normal",
+                "rerun-upstream-ci", "workflow_run", new string('2', 64)),
+            new ProducerTargetAuthority(new string('b', 64), other, "normal-continuation", "normal",
+                "dispatch-proof-workflow", "workflow_dispatch", new string('3', 64)),
+            new ProducerTargetAuthority(new string('1', 64), operation, "stale-protected", "stale",
+                "rerun-upstream-ci", "workflow_run", new string('4', 64), workflow, "main", "1002", fixture,
+                "r4-trusted-proof/" + operation, "SolusQuest/agentic-pr-review", workflow),
+            new ProducerTargetAuthority(new string('c', 64), operation, "stale-follow-on", "stale",
+                "advance-stale-ref", "workflow_run", new string('5', 64), workflow, "main", "1002", fixture,
+                "r4-trusted-proof/" + operation, "SolusQuest/agentic-pr-review", workflow),
+        };
+        var journal = ProducerOutcomeJournal.CreateNew(root, "enrollment-materialize-journal", new string('3', 64),
+            new string('4', 64), new string('5', 64), "SolusQuest/agentic-pr-review", [other, operation], targets, 0);
+        journal.AppendCreateNew(targets[0].AuthorityId, 1, "before-dispatch", 10, 11, []);
+        journal.AppendCreateNew(targets[0].AuthorityId, 1, "committed", 12, 13, [new string('7', 64)]);
+        journal.AppendCreateNew(targets[1].AuthorityId, 1, "before-dispatch", 20, 21, []);
+        journal.AppendCreateNew(targets[1].AuthorityId, 1, "committed", 22, 23, [new string('8', 64)], "8999");
+        journal.AppendCreateNew(targets[2].AuthorityId, 1, "before-dispatch", 100, 101, []);
+        journal.AppendCreateNew(targets[2].AuthorityId, 1, "committed", 102, 103, [new string('9', 64)]);
+        var checkpoint = journal.CurrentCheckpoint();
+        const string package = "enrollment-materialize-package";
+        root.CreateExclusiveDirectory(package);
+        var authorization = new PhaseFragmentMaterializer.PhaseAuthorization(
+            "SolusQuest/agentic-pr-review", [other, operation], new string('4', 64), new string('5', 64),
+            "20766359842", "r4-trusted-proof", ["16307884"], false, false, [],
+            "R4_TRUSTED_PROOF_AUTHORIZATION", [new string('b', 64), new string('c', 64)]);
+        string? predecessor = null;
+        var sequence = 0;
+        void Append(string id, string phase, string route, string body, long started)
+        {
+            var bytes = Encoding.UTF8.GetBytes(body);
+            try
+            {
+                var bodyPath = $"source-{sequence + 1:D4}.json";
+                var identity = root.WritePinnedFileCreateNew($"{package}/{bodyPath}", bytes);
+                var reference = PhaseFragmentJournal.AppendCreateNew(root, package, [other, operation],
+                    new string('3', 64), new string('4', 64), new string('5', 64), checkpoint,
+                    ++sequence, predecessor, new CaptureManifestSource($"{id}:page:1", operation, phase, route, 1, 200,
+                        bodyPath, CanonicalEvidence.Sha256(bytes), bytes.Length.ToString(), identity, new string('e', 64),
+                        started, started + 1, null));
+                predecessor = reference.Sha256;
+            }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
+        }
+        const string rootRoute = "/repos/SolusQuest/agentic-pr-review";
+        Append("enrollment-stale-protected-run-9001", "enrollment-stale-protected-terminal",
+            rootRoute + "/actions/runs/9001",
+            $"{{\"id\":9001,\"run_attempt\":1,\"event\":\"workflow_run\",\"path\":\".github/workflows/r4-trusted-proof.yml\",\"status\":\"completed\",\"conclusion\":\"success\",\"head_sha\":\"{workflow}\",\"head_branch\":\"main\",\"display_title\":\"apr-r4-e2p-r4-trusted-proof/{operation}\",\"head_repository\":{{\"full_name\":\"SolusQuest/agentic-pr-review\"}},\"pull_requests\":[{{\"number\":1002}}]}}", 200);
+        Append("enrollment-stale-protected-jobs-run-9001", "enrollment-stale-protected-jobs",
+            rootRoute + "/actions/runs/9001/attempts/1/jobs",
+            "{\"total_count\":3,\"jobs\":[{\"id\":1,\"run_id\":9001,\"run_attempt\":1,\"name\":\"authorization-preflight\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"id\":2,\"run_id\":9001,\"run_attempt\":1,\"name\":\"workflow-run-review\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"id\":3,\"run_id\":9001,\"run_attempt\":1,\"name\":\"workflow-dispatch-review\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]}", 210);
+        Append("enrollment-stale-protected-discovery-run-9001", "enrollment-stale-protected-discovery",
+            rootRoute + "/actions/workflows/r4-trusted-proof.yml/runs?per_page=100",
+            $"{{\"total_count\":1,\"workflow_runs\":[{{\"id\":9001,\"run_attempt\":1,\"event\":\"workflow_run\",\"status\":\"completed\",\"conclusion\":\"success\",\"head_sha\":\"{workflow}\",\"head_branch\":\"main\",\"display_title\":\"apr-r4-e2p-r4-trusted-proof/{operation}\",\"pull_requests\":[{{\"number\":1002}}],\"head_repository\":{{\"full_name\":\"SolusQuest/agentic-pr-review\"}},\"path\":\".github/workflows/r4-trusted-proof.yml\",\"created_at\":\"1970-01-01T00:00:00.150Z\"}}]}}", 220);
+        Append("enrollment-stale-protected-pull-run-9001", "enrollment-stale-protected-pull", rootRoute + "/pulls/1002",
+            $"{{\"number\":1002,\"state\":\"open\",\"draft\":false,\"head\":{{\"sha\":\"{fixture}\",\"ref\":\"r4-trusted-proof/{operation}\",\"repo\":{{\"full_name\":\"SolusQuest/agentic-pr-review\"}}}},\"base\":{{\"sha\":\"{workflow}\",\"ref\":\"main\",\"repo\":{{\"full_name\":\"SolusQuest/agentic-pr-review\"}}}}}}", 230);
+        Append("enrollment-stale-protected-pending-run-9001", "enrollment-stale-protected-pending",
+            rootRoute + "/actions/runs/9001/pending_deployments",
+            "[{\"environment\":{\"id\":20766359842,\"name\":\"r4-trusted-proof\"},\"reviewers\":[{\"reviewer\":{\"id\":16307884}}]}]", 240);
+        Append("enrollment-stale-protected-approvals-run-9001", "enrollment-stale-protected-approval",
+            rootRoute + "/actions/runs/9001/approvals",
+            "[{\"state\":\"approved\",\"user\":{\"id\":16307884},\"environments\":[{\"id\":20766359842,\"name\":\"r4-trusted-proof\"}]}]", 250);
+        var options = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["--role"] = "stale-protected", ["--operation-id"] = operation, ["--run-id"] = "9001",
+            ["--expected-event"] = "workflow_run", ["--expected-run-head"] = workflow,
+            ["--package-name"] = package, ["--execution-authorization-sha256"] = new string('3', 64),
+        };
+
+        // No package-local receipt exists yet, so stale ref advancement cannot use a bare
+        // stale-jobs fragment or a caller supplied run id as its authority.
+        Assert.Throws<InvalidDataException>(() =>
+            EnrollmentObservationMaterializer.ValidatePinnedCheckpointForStaleAdvance(
+                root, authorization, journal, options));
+        var receipt = EnrollmentObservationMaterializer.Materialize(root, authorization, journal,
+            options);
+        Assert.Equal("9001", receipt.RunId);
+        Assert.Equal(6, receipt.Sources.Length);
+        EnrollmentObservationMaterializer.MaterializeCheckpointCreateOrVerify(
+            root, authorization, journal, options, receipt);
+        EnrollmentObservationMaterializer.ValidatePinnedCheckpointForStaleAdvance(
+            root, authorization, journal, options);
+
+        // This models the unique C# advance writer committing the ref and the later Node-driven
+        // readback invoking the same C# observation command.  Reopening the old protected
+        // checkpoint remains valid, but it cannot authorize a second stale advance.
+        journal.AppendCreateNew(targets[3].AuthorityId, 1, "before-dispatch", 260, 261, []);
+        journal.AppendCreateNew(targets[3].AuthorityId, 1, "committed", 262, 263, [new string('f', 64)]);
+        var recovered = EnrollmentObservationMaterializer.Materialize(root, authorization, journal, options);
+        EnrollmentObservationMaterializer.MaterializeCheckpointCreateOrVerify(
+            root, authorization, journal, options, recovered);
+        Assert.Throws<InvalidDataException>(() =>
+            EnrollmentObservationMaterializer.ValidatePinnedCheckpointForStaleAdvance(
+                root, authorization, journal, options));
+        var writer = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+        EnrollmentObservationMaterializer.WriteCanonicalReceipt(writer, receipt);
+        var expectedBytes = CanonicalEvidence.Encode(receipt, EvidenceJson.Options);
+        try
+        {
+            Assert.Equal(Encoding.UTF8.GetString(expectedBytes), writer.ToString());
+            Assert.EndsWith("\n", writer.ToString(), StringComparison.Ordinal);
+            Assert.False(writer.ToString().EndsWith("\n\n", StringComparison.Ordinal));
+        }
+        finally { CryptographicOperations.ZeroMemory(expectedBytes); }
     }
 
     [Fact]
@@ -3562,7 +4071,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     public async Task DispatchRequestMatchesThePinnedApiVersionSchema()
     {
         Assert.Equal("2026-03-10", TrustedProofCaptureClient.ApiVersion);
-        var body = ProducerJournalMaterializer.BuildDispatchRequestBody("main", "181");
+        var operationId = new string('6', 64);
+        var body = ProducerJournalMaterializer.BuildDispatchRequestBody("main", "181", operationId);
         var responseBody = Encoding.UTF8.GetBytes(
             "{\"workflow_run_id\":9002," +
             "\"run_url\":\"https://api.github.com/repos/SolusQuest/agentic-pr-review/actions/runs/9002\"," +
@@ -3584,9 +4094,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 root.EnumerateObject().Select(item => item.Name).ToArray());
             Assert.Equal("main", root.GetProperty("ref").GetString());
             var inputs = root.GetProperty("inputs");
-            Assert.Equal(new[] { "pr-number" },
+            Assert.Equal(new[] { "pr-number", "operation-id" },
                 inputs.EnumerateObject().Select(item => item.Name).ToArray());
             Assert.Equal("181", inputs.GetProperty("pr-number").GetString());
+            Assert.Equal(operationId, inputs.GetProperty("operation-id").GetString());
             Assert.False(root.TryGetProperty("return_run_details", out _));
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -4169,20 +4680,29 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     private static ProducerDiscoverySource[] CreateProducerDiscovery(
         RestrictedEvidenceRoot root,
         string journalDirectory,
-        IReadOnlyList<(string RunId, string RunAttempt, string Event, long CreatedUnixMilliseconds)> runs)
+        IReadOnlyList<(string RunId, string RunAttempt, string Event, long CreatedUnixMilliseconds)> runs,
+        IReadOnlyDictionary<string, (string Status, string? Conclusion)>? outcomes = null)
     {
         var body = JsonSerializer.SerializeToUtf8Bytes(new
         {
             total_count = runs.Count,
-            workflow_runs = runs.Select(run => new
+            workflow_runs = runs.Select(run =>
             {
-                id = ulong.Parse(run.RunId, System.Globalization.CultureInfo.InvariantCulture),
-                run_attempt = uint.Parse(run.RunAttempt, System.Globalization.CultureInfo.InvariantCulture),
-                @event = run.Event,
-                path = ".github/workflows/r4-trusted-proof.yml",
-                head_repository = new { full_name = "SolusQuest/agentic-pr-review" },
-                created_at = DateTimeOffset.FromUnixTimeMilliseconds(run.CreatedUnixMilliseconds)
-                    .ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                var outcome = outcomes is not null && outcomes.TryGetValue(run.RunId, out var configured)
+                    ? configured
+                    : (Status: "completed", Conclusion: (string?)"success");
+                return new
+                {
+                    id = ulong.Parse(run.RunId, System.Globalization.CultureInfo.InvariantCulture),
+                    run_attempt = uint.Parse(run.RunAttempt, System.Globalization.CultureInfo.InvariantCulture),
+                    @event = run.Event,
+                    status = outcome.Status,
+                    conclusion = outcome.Conclusion,
+                    path = ".github/workflows/r4-trusted-proof.yml",
+                    head_repository = new { full_name = "SolusQuest/agentic-pr-review" },
+                    created_at = DateTimeOffset.FromUnixTimeMilliseconds(run.CreatedUnixMilliseconds)
+                        .ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                };
             }).ToArray(),
         });
         try
@@ -4229,6 +4749,8 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
                 id = ulong.Parse(run.RunId, System.Globalization.CultureInfo.InvariantCulture),
                 run_attempt = 1,
                 @event = "workflow_run",
+                status = "completed",
+                conclusion = "success",
                 path = workflowPath,
                 head_repository = new { full_name = repository },
                 head_sha = run.HeadSha,

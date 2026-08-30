@@ -68,6 +68,24 @@ internal sealed record ReviewedGitTreeFact(
     string Sha,
     IReadOnlyList<ReviewedGitTreeEntryFact> Entries);
 
+internal sealed record ReviewedHeadArchiveEntry(
+    string Path,
+    string Mode,
+    string Sha,
+    long Size);
+
+internal sealed class ReviewedHeadArchiveBatch
+{
+    internal ReviewedHeadArchiveBatch(
+        IReadOnlyDictionary<string, ReviewedStagedBlob> stagedBySha)
+    {
+        StagedBySha = stagedBySha ?? throw new ArgumentNullException(
+            nameof(stagedBySha));
+    }
+
+    internal IReadOnlyDictionary<string, ReviewedStagedBlob> StagedBySha { get; }
+}
+
 internal interface IReviewedGitObjectTransportFactory
 {
     IReviewedGitObjectTransport Create(
@@ -90,6 +108,12 @@ internal interface IReviewedGitObjectTransport : IDisposable
         long declaredSize,
         ReviewedBlobStagingLease staging,
         CancellationToken cancellationToken);
+
+    Task<ReviewedGitObjectResult<ReviewedHeadArchiveBatch>>
+        StageHeadRegularBlobsAsync(
+            IReadOnlyList<ReviewedHeadArchiveEntry> entries,
+            ReviewedBlobStagingLease staging,
+            CancellationToken cancellationToken);
 }
 
 internal static class ReviewedGitObjectValidation

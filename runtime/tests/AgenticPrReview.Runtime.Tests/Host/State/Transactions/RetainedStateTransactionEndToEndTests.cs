@@ -4815,15 +4815,22 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Tree transport was called.");
 
-        public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
-            GetBlobObjectAsync(
+    public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
+        GetBlobObjectAsync(
                 string repositoryName,
                 string blobSha,
                 ActionHostGitBlobReadBudget budget,
-                CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Blob transport was called.");
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Blob transport was called.");
 
-        public void Dispose() { }
+    public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+        GetHeadArchiveAsync(
+            string repositoryName,
+            string headSha,
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Archive transport was called.");
+
+    public void Dispose() { }
     }
 
     private sealed class NoCallTransport : IActionHostGitObjectTransport
@@ -4842,15 +4849,22 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Bootstrap must not read Git.");
 
-        public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
-            GetBlobObjectAsync(
+    public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
+        GetBlobObjectAsync(
                 string repositoryName,
                 string blobSha,
                 ActionHostGitBlobReadBudget budget,
-                CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Bootstrap must not read Git.");
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Bootstrap must not read Git.");
 
-        public void Dispose() { }
+    public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+        GetHeadArchiveAsync(
+            string repositoryName,
+            string headSha,
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Bootstrap must not read archive.");
+
+    public void Dispose() { }
     }
 
     private sealed class OneResponseChatClient(

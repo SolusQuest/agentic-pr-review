@@ -1496,7 +1496,84 @@ public sealed class ActionHostCompositionTests
                     ActionHostGitBlobObject>.Success(value, value.Bytes.Length));
             }
 
+            public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+                GetHeadArchiveAsync(
+                    string repositoryName,
+                    string headSha,
+                    CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!owner.withInlineFile || headSha != owner.pullRequest.HeadSha)
+                {
+                    return Task.FromResult(ActionHostGitObjectResult<
+                        ActionHostGitArchiveReader>.Failed(
+                            ActionHostGitObjectFailure.NotFound));
+                }
+
+                return Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostGitArchiveReader>.Success(
+                    new CompositionArchiveReader(
+                        "agentic-pr-review-fixture/file.txt", FileBytes),
+                    FileBytes.Length));
+            }
+
             public void Dispose() { }
+        }
+
+        private sealed class CompositionArchiveReader(
+            string name,
+            byte[] bytes) : ActionHostGitArchiveReader
+        {
+            private readonly MemoryStream stream = new(bytes, writable: false);
+            private int returned;
+            private bool disposed;
+
+            internal override int CapturedResponseBytes => bytes.Length;
+
+            internal override Task<ActionHostGitArchiveEntry?> GetNextEntryAsync(
+                CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (disposed)
+                {
+                    throw new ObjectDisposedException(nameof(CompositionArchiveReader));
+                }
+
+                if (returned == 2)
+                {
+                    return Task.FromResult<ActionHostGitArchiveEntry?>(null);
+                }
+
+                if (returned++ == 0)
+                {
+                    return Task.FromResult<ActionHostGitArchiveEntry?>(new(
+                        name[..(name.LastIndexOf('/') + 1)],
+                        ActionHostGitArchiveEntryType.Directory,
+                        0,
+                        0,
+                        null,
+                        null));
+                }
+
+                return Task.FromResult<ActionHostGitArchiveEntry?>(new(
+                    name,
+                    ActionHostGitArchiveEntryType.RegularFile,
+                    0x1b4,
+                    bytes.Length,
+                    null,
+                    stream));
+            }
+
+            public override void Dispose()
+            {
+                if (disposed)
+                {
+                    return;
+                }
+
+                disposed = true;
+                stream.Dispose();
+            }
         }
 
         private sealed class SnapshotTransport(

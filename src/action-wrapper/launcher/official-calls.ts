@@ -9,6 +9,11 @@ export class OfficialCallTracker {
       get: (target, property) => {
         const value = Reflect.get(target, property, target) as unknown;
         if (typeof value !== 'function') return value;
+        // These two methods only wipe process-local state. They deliberately
+        // remain available during cleanup after the external-call gate seals.
+        if (property === 'invalidateRepository' || property === 'dispose') {
+          return (...args: unknown[]): unknown => Reflect.apply(value, target, args);
+        }
         return (...args: unknown[]): unknown => {
           if (this.sealed) throw new Error('wrapper_official_calls_sealed');
           const result = Reflect.apply(value, target, args) as unknown;

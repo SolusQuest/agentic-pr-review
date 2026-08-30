@@ -12,14 +12,31 @@ internal static class ReviewedContentLimits
     internal const int GitObjectRequests = 4_096;
     internal const int ChangedFilesPerPage = 100;
     internal const int ChangedFiles = 200;
-    internal const long HeadBlobBytes = 1024L * 1024;
+    internal const long HeadBlobBytes = 8L * 1024 * 1024;
     internal const long AggregateHeadBlobBytes = 256L * 1024 * 1024;
     internal const long BaseBlobBytes = 1024L * 1024;
     internal const long AggregateBaseBlobBytes = 64L * 1024 * 1024;
     internal const long MaterializedRootBytes = 256L * 1024 * 1024;
     internal const int StreamBufferBytes = 64 * 1024;
-    internal const long GitObjectResponseBytes = 2L * 1024 * 1024;
+    internal const long GitObjectResponseBytes = 16L * 1024 * 1024;
     internal const long AggregateResponseBytes = 512L * 1024 * 1024;
+    // This is an independent archive transport admission cap, not a derived
+    // tree-graph maximum.  ReviewedTreeReader legitimately reuses cached tree
+    // objects beneath multiple logical prefixes, so unique object count does
+    // not bound archive directory path instances.  A codeload archive beyond
+    // this cap fails closed before path/staging work.
+    internal const int HeadArchiveMembers = 24_000;
+    private const int TarRecordBytes = 512;
+    // In addition to an admitted member's logical bytes, allow its tar
+    // header/padding and one bounded PAX path record.  PathBytes is the
+    // existing accepted path maximum.  This is an independent transport
+    // ceiling and does not enlarge any logical or response budget.
+    private const int HeadArchiveMemberOverheadBytes =
+        (4 * TarRecordBytes) + PathBytes;
+    internal const long HeadArchiveDecodedBytes =
+        AggregateHeadBlobBytes +
+        ((long)HeadArchiveMembers * HeadArchiveMemberOverheadBytes) +
+        (2 * TarRecordBytes);
     internal static readonly TimeSpan AcquisitionAndMaterializationTimeout =
         TimeSpan.FromSeconds(300);
 

@@ -16,6 +16,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArtifactBridgeExecutor } from './artifact-bridge/index.js';
 import {
+  ArtifactRestRequestBudget,
+  TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX,
+} from './artifact-bridge/artifact-rest-request-budget.js';
+import {
   createProductionArtifactExecutor,
   readProductionRuntimeFacts,
   runPrivateActionWrapperWithSeams,
@@ -24,11 +28,19 @@ import { parseLaunchDocument, type ActionRuntimeFacts } from './launcher/contrac
 import { HostProcessTerminationUnconfirmedError } from './launcher/host-process.js';
 import { OfficialCallTracker } from './launcher/official-calls.js';
 import type { PreparedPayloadProof } from './launcher/prepared-payload.js';
+import {
+  R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE,
+  readTrustedProofRequestBudgetProfile,
+} from './launcher/request-budget-profile.js';
 import type { ActionPresentationToolkit } from './presentation/toolkit.js';
 
 const roots: string[] = [];
 const fullWorkflowRef =
   'SolusQuest/agentic-pr-review/.github/workflows/r4-trusted-proof.yml@refs/heads/main';
+const githubBudgetReceipt =
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"remaining_tail_required":0}}\n';
+const controlBudgetReceipt =
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -72,6 +84,10 @@ describe('W1 production composition', () => {
         runId: '1',
         runAttempt: '1',
         stagingRoot,
+        verifiedPreparedPayload: { buildDiscriminator: 'r4-h1' },
+        artifactRestRequestBudget: ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+          buildDiscriminator: 'r4-h1',
+        }),
       },
       tracker,
     );
@@ -121,7 +137,11 @@ describe('W1 production composition', () => {
         const launch = parseLaunchDocument(request.launchBytes);
         expect(launch.workflow_ref).toBe(fullWorkflowRef);
         expect(launch.inputs.github_token).toBe('github-canary');
-        return { completionBytes: validCompletion(), exitCode: 0 };
+        return {
+          completionBytes: validCompletion(),
+          exitCode: 0,
+          trustedProofBudgetReceiptLines: [],
+        };
       },
       fatalExit: () => events.push('fatal'),
     });
@@ -133,6 +153,262 @@ describe('W1 production composition', () => {
     expect(admittedHandle?.fd).toBe(-1);
     expect(presentation.summaries[0]).not.toContain('github-canary');
   });
+
+  it('emits only exact protected budget receipts after drain and quiescence', async () => {
+    vi.stubEnv('AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE', 'measurement');
+    const fixture = await wrapperFixture('r4-w2');
+    const presentation = recordingToolkit({ 'github-token': 'github-canary' });
+    const events = presentation.events;
+    const receipts: string[] = [];
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async (input) => {
+        await input.executorFactory('/tmp/apr-w2/artifact-staging');
+        return {
+          endpoint: '/tmp/apr-w2/bridge.sock',
+          stagingRoot: '/tmp/apr-w2/artifact-staging',
+          tempRoot: '/tmp/apr-w2',
+          stopAndDrain: async () => {
+            events.push('bridge:drain');
+          },
+          cleanup: async () => {
+            events.push('bridge:cleanup');
+          },
+        };
+      },
+      createArtifactExecutor: async () => ({
+        execute: async () => ({ status: 'ok' }) as never,
+      }),
+      hostProcessRunner: async (request) => {
+        expect(request.requestBudgetProfile).toBe('measurement');
+        return {
+          completionBytes: validCompletion('r4-w2'),
+          exitCode: 0,
+          trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+        };
+      },
+      trustedProofBudgetReceiptSink: (frame) => {
+        receipts.push(frame);
+        events.push('budget:frame');
+      },
+      fatalExit: () => events.push('fatal'),
+    });
+
+    expect(exit).toBe(0);
+    expect(receipts).toHaveLength(1);
+    const lines = receipts[0]!.trimEnd().split('\n');
+    expect(lines.slice(0, 2)).toEqual([
+      githubBudgetReceipt.trimEnd(),
+      controlBudgetReceipt.trimEnd(),
+    ]);
+    expect(lines[2]).toContain(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX);
+    expect(JSON.parse(lines[2]!.split(' ', 2)[1]!)).toMatchObject({
+      repository: fixture.facts.repositoryName,
+      repository_id: fixture.facts.repositoryId,
+      workflow_sha: fixture.facts.workflowSha,
+      action_source_sha: fixture.proof.actionSourceSha,
+      payload_sha256: fixture.proof.payloadSha256,
+      build_discriminator: 'r4-w2',
+      run_id: fixture.facts.runId,
+      run_attempt: fixture.facts.runAttempt,
+      cap_profile: 'apr-r4-artifact-rest-request-budget-v2',
+      measurement_only: true,
+    });
+    expect(events.indexOf('bridge:drain')).toBeLessThan(events.indexOf('budget:frame'));
+    expect(events.indexOf('budget:frame')).toBeLessThan(events.indexOf('bridge:cleanup'));
+  });
+
+  it('cleans the bridge and fails closed when the protected receipt sink throws', async () => {
+    vi.stubEnv('AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE', 'measurement');
+    const fixture = await wrapperFixture('r4-w2');
+    const presentation = recordingToolkit({});
+    const events = presentation.events;
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async (input) => {
+        await input.executorFactory('/tmp/apr-w2/artifact-staging');
+        return {
+          endpoint: '/tmp/apr-w2/bridge.sock',
+          stagingRoot: '/tmp/apr-w2/artifact-staging',
+          tempRoot: '/tmp/apr-w2',
+          stopAndDrain: async () => {
+            events.push('bridge:drain');
+          },
+          cleanup: async () => {
+            events.push('bridge:cleanup');
+          },
+        };
+      },
+      createArtifactExecutor: async () => ({
+        execute: async () => ({ status: 'ok' }) as never,
+      }),
+      hostProcessRunner: async () => ({
+        completionBytes: validCompletion('r4-w2'),
+        exitCode: 0,
+        trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+      }),
+      trustedProofBudgetReceiptSink: () => {
+        events.push('artifact-budget:receipt-failed');
+        throw new Error('receipt-sink-failure');
+      },
+      fatalExit: () => events.push('fatal'),
+    });
+
+    expect(exit).toBe(1);
+    expect(events.indexOf('bridge:drain')).toBeLessThan(
+      events.indexOf('artifact-budget:receipt-failed'),
+    );
+    expect(events.indexOf('artifact-budget:receipt-failed')).toBeLessThan(
+      events.indexOf('bridge:cleanup'),
+    );
+    expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+  });
+
+  it('keeps the protected receipt after a business failure once bridge work has quiesced', async () => {
+    vi.stubEnv('AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE', 'measurement');
+    const fixture = await wrapperFixture('r4-w2');
+    const presentation = recordingToolkit({});
+    const events = presentation.events;
+    const receipts: string[] = [];
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async (input) => {
+        await input.executorFactory('/tmp/apr-w2/artifact-staging');
+        return {
+          endpoint: '/tmp/apr-w2/bridge.sock',
+          stagingRoot: '/tmp/apr-w2/artifact-staging',
+          tempRoot: '/tmp/apr-w2',
+          stopAndDrain: async () => {
+            events.push('bridge:drain');
+          },
+          cleanup: async () => {
+            events.push('bridge:cleanup');
+            throw new Error('cleanup-failure');
+          },
+        };
+      },
+      createArtifactExecutor: async () => ({
+        execute: async () => ({ status: 'ok' }) as never,
+      }),
+      hostProcessRunner: async () => ({
+        completionBytes: Buffer.from('{"malformed":true}'),
+        exitCode: 0,
+        trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+      }),
+      trustedProofBudgetReceiptSink: (line) => {
+        receipts.push(line);
+        events.push('artifact-budget:receipt');
+      },
+      fatalExit: () => events.push('fatal'),
+    });
+
+    expect(exit).toBe(1);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]?.startsWith('APR_R4_E2P_GITHUB_REQUEST_BUDGET ')).toBe(true);
+    expect(receipts[0]).toContain(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX);
+    expect(events.indexOf('bridge:drain')).toBeLessThan(events.indexOf('artifact-budget:receipt'));
+    expect(events.indexOf('artifact-budget:receipt')).toBeLessThan(
+      events.indexOf('bridge:cleanup'),
+    );
+    expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+  });
+
+  it('does not enable the protected receipt from ordinary action inputs', async () => {
+    const fixture = await wrapperFixture('r4-h1');
+    const presentation = recordingToolkit({
+      'github-token': 'r4-w2',
+      'provider-api-key': 'r4-w2',
+    });
+    const receipts: string[] = [];
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async (input) => {
+        await input.executorFactory('/tmp/apr-h1/artifact-staging');
+        return await fakeBridge(input);
+      },
+      createArtifactExecutor: async () => ({
+        execute: async () => ({ status: 'ok' }) as never,
+      }),
+      hostProcessRunner: async () => ({
+        completionBytes: validCompletion('r4-h1'),
+        exitCode: 0,
+        trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+      }),
+      trustedProofBudgetReceiptSink: (line) => receipts.push(line),
+      fatalExit: () => undefined,
+    });
+
+    expect(exit).toBe(0);
+    expect(receipts).toEqual([]);
+  });
+
+  it.each([
+    ['missing', undefined, 'wrapper_request_budget_profile_invalid'],
+    ['invalid', 'wide-open', 'wrapper_request_budget_profile_invalid'],
+    ['final before allocations freeze', 'final', 'wrapper_request_budget_profile_unfrozen'],
+  ])(
+    'fails closed before bridge or Host for a protected %s request-budget profile',
+    async (_caseName, profile, expectedCode) => {
+      vi.stubEnv('AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE', profile);
+      const fixture = await wrapperFixture('r4-w2');
+      const presentation = recordingToolkit({});
+      let bridgeStarted = false;
+      let hostStarted = false;
+
+      const exit = await runPrivateActionWrapperWithSeams({
+        toolkit: presentation.toolkit,
+        preparedPayload: fixture.proof,
+        platform: 'linux',
+        signal: new AbortController().signal,
+        runtimeFacts: () => fixture.facts,
+        bridgeRuntime: async (input) => {
+          bridgeStarted = true;
+          return await fakeBridge(input);
+        },
+        createArtifactExecutor: async () => {
+          throw new Error('must remain lazy');
+        },
+        hostProcessRunner: async () => {
+          hostStarted = true;
+          return {
+            completionBytes: validCompletion('r4-w2'),
+            exitCode: 0,
+            trustedProofBudgetReceiptLines: [],
+          };
+        },
+        fatalExit: () => undefined,
+      });
+
+      expect(exit).toBe(1);
+      expect(bridgeStarted).toBe(false);
+      expect(hostStarted).toBe(false);
+      expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+      expect(() =>
+        readTrustedProofRequestBudgetProfile(
+          'r4-w2',
+          profile === undefined
+            ? {}
+            : { [R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]: profile },
+        ),
+      ).toThrow(expectedCode);
+    },
+  );
 
   it('fails closed on malformed Host output without forwarding canaries', async () => {
     const fixture = await wrapperFixture();
@@ -150,6 +426,7 @@ describe('W1 production composition', () => {
       hostProcessRunner: async () => ({
         completionBytes: Buffer.from('{"private":"provider-canary"}'),
         exitCode: 0,
+        trustedProofBudgetReceiptLines: [],
       }),
       fatalExit: () => undefined,
     });
@@ -178,7 +455,11 @@ describe('W1 production composition', () => {
       },
       hostProcessRunner: async () => {
         hostStarted = true;
-        return { completionBytes: validCompletion(), exitCode: 0 };
+        return {
+          completionBytes: validCompletion(),
+          exitCode: 0,
+          trustedProofBudgetReceiptLines: [],
+        };
       },
       fatalExit: () => undefined,
     });
@@ -210,7 +491,11 @@ describe('W1 production composition', () => {
         void client.call();
         return { execute: async () => Promise.reject(new Error('unused')) };
       },
-      hostProcessRunner: async () => ({ completionBytes: validCompletion(), exitCode: 0 }),
+      hostProcessRunner: async () => ({
+        completionBytes: validCompletion(),
+        exitCode: 0,
+        trustedProofBudgetReceiptLines: [],
+      }),
       fatalExit: () => {
         fatal += 1;
       },
@@ -222,7 +507,7 @@ describe('W1 production composition', () => {
     expect(presentation.errors).toEqual([]);
   });
 
-  it('fatally exits without bridge cleanup or presentation when Host close is unconfirmed', async () => {
+  it('fatally exits after one bridge cleanup attempt and without presentation when Host close is unconfirmed', async () => {
     const fixture = await wrapperFixture();
     const presentation = recordingToolkit({ 'github-token': 'termination-canary' });
     let fatal = 0;
@@ -257,8 +542,8 @@ describe('W1 production composition', () => {
     });
     expect(exit).toBe(1);
     expect(fatal).toBe(1);
-    expect(drained).toBe(0);
-    expect(cleaned).toBe(0);
+    expect(drained).toBe(1);
+    expect(cleaned).toBe(1);
     expect(presentation.summaries).toEqual([]);
     expect(presentation.errors).toEqual([]);
     expect(presentation.events).toContain('mask:termination-canary');
@@ -332,7 +617,7 @@ async function fakeBridge(_input: {
   };
 }
 
-async function wrapperFixture(): Promise<{
+async function wrapperFixture(buildDiscriminator = 'r4-h1'): Promise<{
   readonly proof: PreparedPayloadProof;
   readonly facts: ActionRuntimeFacts;
 }> {
@@ -350,8 +635,8 @@ async function wrapperFixture(): Promise<{
       executableRelativePath: 'host',
       actionSourceSha: 'a'.repeat(40),
       payloadSha256: createHash('sha256').update(bytes).digest('hex'),
-      buildDiscriminator: 'r4-h1',
-      wrapperBuildDiscriminator: 'r4-h1',
+      buildDiscriminator,
+      wrapperBuildDiscriminator: buildDiscriminator,
     },
     facts: {
       eventJsonPath: event,
@@ -383,10 +668,10 @@ function recordingToolkit(values: Record<string, string>) {
   return { toolkit, events, summaries, errors };
 }
 
-function validCompletion(): Buffer {
+function validCompletion(buildDiscriminator = 'r4-h1'): Buffer {
   return Buffer.from(
     JSON.stringify({
-      build_discriminator: 'r4-h1',
+      build_discriminator: buildDiscriminator,
       status: 'reviewed',
       exit_class: 'success',
       process_exit_code: 0,

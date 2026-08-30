@@ -20,14 +20,20 @@ import {
   closedChildEnvironment,
   encodeFrame,
   HOST_CANCELLATION_RECONCILIATION_GRACE_MS,
+  HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
   HostProcessTerminationUnconfirmedError,
   readSingleFrame,
+  readTrustedProofBudgetReceiptLines,
   runHostProcess,
 } from './host-process.js';
 import { verifyPreparedPayload } from './prepared-payload.js';
 
 const roots: string[] = [];
 const handles: FileHandle[] = [];
+const githubBudgetReceipt =
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"remaining_tail_required":0}}\n';
+const controlBudgetReceipt =
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
 
 afterEach(async () => {
   await Promise.all(handles.splice(0).map(async (handle) => await handle.close()));
@@ -56,21 +62,117 @@ describe('W1 private Host framing', () => {
     await expect(readSingleFrame(stream, 32)).rejects.toThrow('wrapper_frame_invalid');
   });
 
-  it('constructs a closed temp-only child environment', () => {
+  it('constructs a closed temp-only child environment without ambient leakage', () => {
+    process.env.R4_AMBIENT_SECRET_CANARY = 'must-not-cross';
     expect(closedChildEnvironment('/tmp/apr-private')).toEqual({
       TMPDIR: '/tmp/apr-private',
       NO_COLOR: '1',
       DOTNET_NOLOGO: '1',
       DOTNET_CLI_TELEMETRY_OPTOUT: '1',
     });
+    expect(closedChildEnvironment('/tmp/apr-private')).not.toHaveProperty(
+      'R4_AMBIENT_SECRET_CANARY',
+    );
+    delete process.env.R4_AMBIENT_SECRET_CANARY;
+  });
+
+  it('forwards only the verified measurement profile to a protected child', () => {
+    expect(closedChildEnvironment('/tmp/apr-private', 'measurement')).toEqual({
+      TMPDIR: '/tmp/apr-private',
+      NO_COLOR: '1',
+      DOTNET_NOLOGO: '1',
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+      AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: 'measurement',
+    });
   });
 
   it('keeps the production cancellation grace beyond the complete S2 operation bound', () => {
     expect(HOST_CANCELLATION_RECONCILIATION_GRACE_MS).toBeGreaterThan(120_000);
   });
+
+  it('admits only canonical proof-budget records from otherwise private Host stderr', async () => {
+    const stream = new PassThrough();
+    const reading = readTrustedProofBudgetReceiptLines(stream);
+    stream.end(
+      `private-provider-canary\n${controlBudgetReceipt}${githubBudgetReceipt}private-tail\n`,
+    );
+
+    await expect(reading).resolves.toEqual([githubBudgetReceipt, controlBudgetReceipt]);
+  });
+
+  it.each([
+    githubBudgetReceipt,
+    githubBudgetReceipt + githubBudgetReceipt + controlBudgetReceipt,
+    githubBudgetReceipt.replace(
+      '"authenticated_rest_limit":216',
+      '"authenticated_rest_limit":217',
+    ) + controlBudgetReceipt,
+    githubBudgetReceipt.replace(
+      '"invalid_remaining_header":false',
+      '"invalid_remaining_header":true',
+    ) + controlBudgetReceipt,
+    githubBudgetReceipt.replace('"secondary_points":180', '"secondary_points":179') +
+      controlBudgetReceipt,
+    githubBudgetReceipt.replace('"terminal_rate_limited":false', '"terminal_rate_limited":true') +
+      controlBudgetReceipt,
+    githubBudgetReceipt.replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":0') +
+      controlBudgetReceipt,
+    githubBudgetReceipt.replace('"raw":180', '"raw":179') + controlBudgetReceipt,
+    githubBudgetReceipt +
+      controlBudgetReceipt.replace('"measurement_only":true', '"measurement_only":false'),
+    githubBudgetReceipt +
+      controlBudgetReceipt.replace('"secondary_points":13', '"secondary_points":12'),
+    githubBudgetReceipt +
+      controlBudgetReceipt.replace('"remaining_tail_required":0', '"remaining_tail_required":1'),
+    'APR_R4_E2P_GITHUB_REQUEST_BUDGET {malformed}\n' + controlBudgetReceipt,
+    'x'.repeat(HOST_STDERR_CAPTURE_MAXIMUM_BYTES + 1) + githubBudgetReceipt + controlBudgetReceipt,
+  ])(
+    'suppresses incomplete, duplicate, malformed, or oversized Host stderr receipts',
+    async (body) => {
+      const stream = new PassThrough();
+      const reading = readTrustedProofBudgetReceiptLines(stream);
+      stream.end(body);
+      await expect(reading).resolves.toEqual([]);
+    },
+  );
 });
 
 describe.runIf(process.platform === 'linux')('W1 real private Host process', () => {
+  it('forwards the protected measurement profile and no other ambient environment', async () => {
+    const root = await fixtureRoot();
+    const script = await executable(
+      root,
+      `
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const expectedEnv = ['AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE','DOTNET_CLI_TELEMETRY_OPTOUT','DOTNET_NOLOGO','NO_COLOR','TMPDIR'];
+if (JSON.stringify(Object.keys(process.env).sort()) !== JSON.stringify(expectedEnv)) process.exit(9);
+if (process.env.AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE !== 'measurement') process.exit(10);
+const body = Buffer.from('{"protected":true}');
+const output = Buffer.alloc(4 + body.length);
+output.writeUInt32BE(body.length, 0);
+body.copy(output, 4);
+process.stdout.write(output);
+`,
+    );
+    process.env.R4_AMBIENT_SECRET_CANARY = 'must-not-cross';
+    try {
+      const result = await runHostProcess({
+        executableHandle: await opened(script),
+        launchBytes: Buffer.from('{}'),
+        tempRoot: root,
+        signal: new AbortController().signal,
+        requestBudgetProfile: 'measurement',
+      });
+      expect(result).toMatchObject({
+        exitCode: 0,
+        completionBytes: Buffer.from('{"protected":true}'),
+      });
+    } finally {
+      delete process.env.R4_AMBIENT_SECRET_CANARY;
+    }
+  });
+
   it('launches one verified executable with no args, closed environment, and exact exit', async () => {
     const root = await fixtureRoot();
     const script = await executable(
@@ -224,7 +326,11 @@ setInterval(() => {}, 1000);
       signal: new AbortController().signal,
     });
 
-    expect(result).toEqual({ completionBytes: launchBytes, exitCode: 0 });
+    expect(result).toEqual({
+      completionBytes: launchBytes,
+      exitCode: 0,
+      trustedProofBudgetReceiptLines: [],
+    });
   });
 });
 

@@ -56,4 +56,23 @@ describe('W1 official SDK quiescence', () => {
     await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
     expect(() => client.read()).toThrow('wrapper_official_calls_sealed');
   });
+
+  it('allows only local cache cleanup after sealing', async () => {
+    const tracker = new OfficialCallTracker();
+    let invalidated = 0;
+    const client = tracker.wrap({
+      async read() {
+        return 'remote';
+      },
+      invalidateRepository() {
+        invalidated += 1;
+      },
+    });
+
+    await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
+    client.invalidateRepository();
+
+    expect(invalidated).toBe(1);
+    expect(() => client.read()).toThrow('wrapper_official_calls_sealed');
+  });
 });

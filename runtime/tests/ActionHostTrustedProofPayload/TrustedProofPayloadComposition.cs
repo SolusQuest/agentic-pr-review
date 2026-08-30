@@ -11,27 +11,39 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 internal static class TrustedProofPayloadComposition
 {
     internal static ActionHostCompositionDependencies CreateProductionLike(
+        TrustedProofGitHubRequestBudget githubBudget,
+        TrustedProofPayloadRuntimePorts ports,
         ITrustedProofStaleSignal? staleSignal = null)
     {
-        var github = new ActionHostGitHubAuthorizationTransportFactory();
-        var publisher = new BoundedGitHubPublisherTransportFactory();
+        ArgumentNullException.ThrowIfNull(githubBudget);
+        ArgumentNullException.ThrowIfNull(ports);
+        var github = new ActionHostGitHubAuthorizationTransportFactory(
+            githubBudget.CreateHandler);
+        var publisher = new BoundedGitHubPublisherTransportFactory(
+            githubBudget.CreateHandler);
         var provider = new ActionHostDeepSeekProviderRunnerFactory(
-            credential => DeepSeekTransport.CreateForTesting(
-                credential,
-                new TrustedProofDeterministicDeepSeekHandler(
-                    credential.Value,
-                    staleSignal),
-                TimeSpan.FromSeconds(30)));
+            credential =>
+            {
+                HttpMessageHandler deterministic =
+                    new TrustedProofDeterministicDeepSeekHandler(
+                        credential.Value,
+                        staleSignal);
+                return DeepSeekTransport.CreateForTesting(
+                    credential,
+                    ports.WrapProviderHandler(deterministic),
+                    TimeSpan.FromSeconds(30));
+            });
         return new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,
             github,
             github,
-            new AcceptedStateProductionDependencies(github),
+            ports.CreateStateDependencies(github),
             publisher,
             provider,
-            TimeProvider.System,
-            inlineHook: new PostAcceptanceInlinePublisherHook(publisher),
+            ports.TimeProvider,
+            ports.StagingParentFactory,
+            new PostAcceptanceInlinePublisherHook(publisher),
             workflowAdmission: TrustedProofV2WorkflowAdmission.Instance);
     }
 }

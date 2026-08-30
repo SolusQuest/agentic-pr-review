@@ -6,6 +6,23 @@ public sealed record ProducerOutcomeObservation(
     long RequestStartedUnixMilliseconds,
     long ResponseReceivedUnixMilliseconds);
 
+/// <summary>
+/// The durable identity of one enrollment producer mutation.  A transport failure after a
+/// mutation is sent is never permission to send it again: recovery may only discover one run
+/// with this exact, pre-recorded identity.
+/// </summary>
+public sealed record ProducerMutationIntent(
+    string Role,
+    string OperationId,
+    string ExpectedEvent,
+    string ExpectedFixtureHeadSha,
+    string ExpectedFixtureHeadRef,
+    string ExpectedFixtureRepository,
+    string ExpectedPullRequestNumber,
+    string RunAttempt,
+    long CreatedNotBeforeUnixMilliseconds,
+    string ExpectedDisplayTitle);
+
 public sealed record ProducerTargetAuthority(
     string AuthorityId,
     string OperationId,
@@ -17,6 +34,10 @@ public sealed record ProducerTargetAuthority(
     string ExpectedHeadSha = "",
     string ExpectedHeadBranch = "",
     string ExpectedPullRequestNumber = "",
+    string ExpectedFixtureHeadSha = "",
+    string ExpectedFixtureHeadRef = "",
+    string ExpectedFixtureRepository = "",
+    string ExpectedFixtureBaseSha = "",
     string TargetKind = "trigger",
     string RequiredReadbackPhase = "",
     string RequiredSourcePrefix = "",
@@ -48,7 +69,8 @@ public sealed record ProducerOutcomeEntry(
     ProducerOutcomeObservation Observation,
     string[] ReconciliationSourceIds,
     string? CommittedRunId,
-    bool Finalized);
+    bool Finalized,
+    ProducerMutationIntent? MutationIntent = null);
 
 public sealed record ProducerJournalExpectedRole(
     string Role,
@@ -92,6 +114,21 @@ public sealed record ProducerJournalCheckpoint(
     ProducerJournalCheckpointDocument Document,
     string Sha256);
 
+/// <summary>Authenticated run-list facts extracted from an enrollment phase fragment.</summary>
+public sealed record ProducerEnrollmentDiscoveryRun(
+    string RunId,
+    string RunAttempt,
+    string Event,
+    string Status,
+    string? Conclusion,
+    string WorkflowHeadSha,
+    string WorkflowHeadBranch,
+    string[] PullRequestNumbers,
+    string Repository,
+    string WorkflowPath,
+    long CreatedUnixMilliseconds,
+    string DisplayTitle = "");
+
 public sealed record ProducerOutcomeJournalSealDocument(
     string Kind,
     string DestinationIdentitySha256,
@@ -118,6 +155,27 @@ public sealed class ProducerOutcomeJournal
     public const string SealKind = "apr-r4-e3-producer-outcome-journal-seal-v1";
     public const string CheckpointKind = "apr-r4-e3-producer-outcome-journal-checkpoint-v1";
     public const string AuthorityName = "authority.json";
+    private static readonly HashSet<string> WorkflowRunStatuses = new(StringComparer.Ordinal)
+    {
+        "completed",
+        "in_progress",
+        "pending",
+        "queued",
+        "requested",
+        "waiting",
+    };
+    private static readonly HashSet<string> WorkflowRunConclusions = new(StringComparer.Ordinal)
+    {
+        "action_required",
+        "cancelled",
+        "failure",
+        "neutral",
+        "skipped",
+        "stale",
+        "startup_failure",
+        "success",
+        "timed_out",
+    };
     public const string SealName = "seal.json";
     private static readonly string[] Outcomes =
     [
@@ -259,15 +317,97 @@ public sealed class ProducerOutcomeJournal
     public IReadOnlyList<ProducerOutcomeEntry> Entries => entries;
     public ProducerAuthorityDocument Authority => authority;
 
-    public ProducerJournalCheckpoint CurrentCheckpoint()
+    /// <summary>
+    /// Binds an enrollment-selected run to the producer action which made it possible.
+    /// This deliberately consumes only already authenticated journal and fragment facts; it
+    /// never treats a caller supplied run id as authority.
+    /// </summary>
+    public void ValidateEnrollmentRoleRunBinding(
+        string role,
+        string operationId,
+        string selectedRunId,
+        string expectedEvent,
+        long discoveryRequestStartedUnixMilliseconds,
+        ProducerJournalCheckpointDocument discoveryCheckpoint,
+        string discoveryCheckpointSha256,
+        IReadOnlyList<ProducerEnrollmentDiscoveryRun> discoveryRuns)
     {
+        var target = authority.Targets.SingleOrDefault(item => item.TargetKind == "trigger" &&
+            item.Role == role && item.OperationId == operationId && item.ExpectedEvent == expectedEvent);
+        if (target is null || !PositiveDecimal(selectedRunId) || !ValidEnrollmentTarget(target, authority.Repository))
+        {
+            throw new InvalidDataException("producer_enrollment_binding_invalid");
+        }
+        ValidateCheckpoint(discoveryCheckpoint, discoveryCheckpointSha256);
+        var terminal = entries.LastOrDefault(item => item.AuthorityId == target.AuthorityId);
+        if (terminal is null || terminal.Outcome is not ("committed" or "reconciled-committed") ||
+            discoveryCheckpoint.EntryCount < terminal.Sequence ||
+            discoveryRequestStartedUnixMilliseconds < terminal.Observation.ResponseReceivedUnixMilliseconds)
+        {
+            throw new InvalidDataException("producer_enrollment_binding_invalid");
+        }
+        var before = entries.LastOrDefault(item => item.AuthorityId == target.AuthorityId &&
+            item.Outcome == "before-dispatch");
+        if (before is null)
+        {
+            throw new InvalidDataException("producer_enrollment_binding_invalid");
+        }
+        if (terminal.Attempt != before.Attempt)
+        {
+            throw new InvalidDataException("producer_enrollment_binding_invalid");
+        }
+        var intent = terminal.MutationIntent ??
+            throw new InvalidDataException("producer_enrollment_binding_invalid");
+        var candidates = discoveryRuns.Where(run =>
+            MatchesEnrollmentMutationIntent(run, target, intent) &&
+            run.Status == "completed" && run.Conclusion == "success" &&
+            InMutationDiscoveryWindow(run.CreatedUnixMilliseconds, intent,
+                discoveryRequestStartedUnixMilliseconds))
+            .ToArray();
+        if (candidates.Length != 1 || candidates[0].RunId != selectedRunId ||
+            (terminal.CommittedRunId is not null && terminal.CommittedRunId != selectedRunId))
+        {
+            throw new InvalidDataException("producer_enrollment_binding_invalid");
+        }
+    }
+
+    public void ValidateEnrollmentFragmentCheckpoint(
+        string role,
+        string operationId,
+        ProducerJournalCheckpointDocument checkpoint,
+        string checkpointSha256)
+    {
+        var target = authority.Targets.SingleOrDefault(item => item.TargetKind == "trigger" &&
+            item.Role == role && item.OperationId == operationId);
+        var terminal = target is null ? null : entries.LastOrDefault(item => item.AuthorityId == target.AuthorityId);
+        ValidateCheckpoint(checkpoint, checkpointSha256);
+        if (terminal is null || terminal.Outcome is not ("committed" or "reconciled-committed") ||
+            checkpoint.EntryCount < terminal.Sequence)
+        {
+            throw new InvalidDataException("producer_enrollment_binding_invalid");
+        }
+    }
+
+    public ProducerJournalCheckpoint CurrentCheckpoint() => CheckpointAt(digests.Count);
+
+    /// <summary>
+    /// Returns the immutable prefix checkpoint ending at a particular journal entry.  Consumers
+    /// use this when a later, independent producer action must not invalidate a receipt for an
+    /// already authenticated role.
+    /// </summary>
+    public ProducerJournalCheckpoint CheckpointAt(int entryCount)
+    {
+        if (entryCount < 0 || entryCount > digests.Count)
+        {
+            throw new InvalidDataException("producer_journal_checkpoint_invalid");
+        }
         var document = new ProducerJournalCheckpointDocument(
             CheckpointKind,
             root.DestinationIdentitySha256,
             authority.ExecutionAuthorizationSha256,
             authoritySha256,
-            digests.Count,
-            digests.Count == 0 ? authoritySha256 : digests[^1],
+            entryCount,
+            entryCount == 0 ? authoritySha256 : digests[entryCount - 1],
             Finalized: true);
         var bytes = CanonicalEvidence.Encode(document, EvidenceJson.Options);
         try
@@ -313,7 +453,8 @@ public sealed class ProducerOutcomeJournal
         long requestStartedUnixMilliseconds,
         long responseReceivedUnixMilliseconds,
         string[] reconciliationSourceIds,
-        string? committedRunId = null)
+        string? committedRunId = null,
+        ProducerMutationIntent? mutationIntent = null)
     {
         if (EvidenceFileHandle.PathEntryExists(
                 RestrictedEvidenceRoot.ResolveChildPath(
@@ -324,6 +465,17 @@ public sealed class ProducerOutcomeJournal
         }
         var target = authority.Targets.SingleOrDefault(item => item.AuthorityId == authorityId) ??
             throw new InvalidDataException("producer_journal_invalid");
+        // The journal, not a retrying caller, owns the durable intent.  Explicit callers must
+        // agree with this value; the small compatibility path below lets existing in-process
+        // journal tests exercise the same persisted invariant without hand-building it.
+        var prior = entries.LastOrDefault(item => item.AuthorityId == authorityId);
+        var effectiveIntent = mutationIntent;
+        if (target.TargetKind == "trigger" && ValidEnrollmentTarget(target, authority.Repository))
+        {
+            effectiveIntent ??= outcome == "before-dispatch"
+                ? CreateEnrollmentMutationIntent(target, requestStartedUnixMilliseconds)
+                : prior?.MutationIntent;
+        }
         var entry = new ProducerOutcomeEntry(
             EntryKind,
             root.DestinationIdentitySha256,
@@ -339,7 +491,8 @@ public sealed class ProducerOutcomeJournal
                 responseReceivedUnixMilliseconds),
             reconciliationSourceIds,
             committedRunId,
-            Finalized: true);
+            Finalized: true,
+            effectiveIntent);
         var proposedEntries = entries.Append(entry).ToArray();
         var bytes = CanonicalEvidence.Encode(entry, EvidenceJson.Options);
         var digest = CanonicalEvidence.Sha256(bytes);
@@ -482,25 +635,24 @@ public sealed class ProducerOutcomeJournal
         var mapped = new List<(ProducerTargetAuthority Target, DiscoveredRun Run)>();
         foreach (var run in discovered)
         {
-            var window = windows.SingleOrDefault(candidate =>
-                committed.GetValueOrDefault(candidate.Target.AuthorityId)?.CommittedRunId == run.RunId);
-            if (window is null)
+            var candidates = windows.Where(candidate =>
+                candidate.Start is not null &&
+                run.CreatedUnixMilliseconds + 999 >= candidate.Start.Value &&
+                (candidate.Target.ExpectedEvent != "workflow_dispatch" ||
+                    committed.GetValueOrDefault(candidate.Target.AuthorityId)?.CommittedRunId is not null) &&
+                (committed.GetValueOrDefault(candidate.Target.AuthorityId)?.CommittedRunId is null ||
+                    committed[candidate.Target.AuthorityId].CommittedRunId == run.RunId) &&
+                (ValidEnrollmentTarget(candidate.Target, authority.Repository) ||
+                    candidate.End is null || run.CreatedUnixMilliseconds < candidate.End.Value) &&
+                RunMatchesTarget(run, candidate.Target)).ToArray();
+            // Enrollment roles are separated by their immutable fixture head/ref, rather than a
+            // later role's mutation start.  In particular, a bootstrap workflow may appear only
+            // after continuation has already been dispatched; a next-before cut-off would
+            // silently lose that valid run.  Multiple exact candidates remain fail-closed.
+            if (candidates.Length == 1)
             {
-                window = windows.LastOrDefault(candidate =>
-                    candidate.Target.ExpectedEvent != "workflow_dispatch" &&
-                    candidate.Start is not null &&
-                    run.CreatedUnixMilliseconds + 999 >= candidate.Start.Value);
+                mapped.Add((candidates[0].Target, run));
             }
-            if (window is null)
-            {
-                if (run.CreatedUnixMilliseconds + 999 < authority.CreatedUnixMilliseconds) continue;
-                window = windows.FirstOrDefault(candidate =>
-                    candidate.Target.ExpectedEvent != "workflow_dispatch");
-                if (window is null) continue;
-            }
-            if (window.End is not null && run.CreatedUnixMilliseconds >= window.End.Value) continue;
-            if (!RunMatchesTarget(run, window.Target)) continue;
-            mapped.Add((window.Target, run));
         }
         var candidateCounts = mapped
             .GroupBy(item => item.Target.AuthorityId, StringComparer.Ordinal)
@@ -523,7 +675,9 @@ public sealed class ProducerOutcomeJournal
                     item.Target.AuthorityId == window.Target.AuthorityId &&
                     item.Run.Event == window.Target.ExpectedEvent).ToArray();
                 return committed.ContainsKey(window.Target.AuthorityId) && candidates.Length == 1 &&
-                    candidates[0].Run.RunAttempt == "1"
+                    candidates[0].Run.RunAttempt == "1" &&
+                    candidates[0].Run.Status == "completed" &&
+                    candidates[0].Run.Conclusion == "success"
                     ? new ProducerJournalExpectedRole(
                         window.Target.Role,
                         window.Target.OperationId,
@@ -616,6 +770,11 @@ public sealed class ProducerOutcomeJournal
                     var runId = run.GetProperty("id").GetRawText();
                     var runAttempt = run.GetProperty("run_attempt").GetRawText();
                     var runEvent = run.GetProperty("event").GetString() ?? string.Empty;
+                    var status = run.GetProperty("status").GetString() ?? string.Empty;
+                    var conclusion = run.GetProperty("conclusion").ValueKind ==
+                        System.Text.Json.JsonValueKind.Null
+                            ? null
+                            : run.GetProperty("conclusion").GetString();
                     var headSha = run.TryGetProperty("head_sha", out var headShaElement)
                         ? headShaElement.GetString() ?? string.Empty
                         : string.Empty;
@@ -630,9 +789,16 @@ public sealed class ProducerOutcomeJournal
                     var repository = run.GetProperty("head_repository").GetProperty("full_name")
                         .GetString() ?? string.Empty;
                     var workflowPath = run.GetProperty("path").GetString() ?? string.Empty;
+                    var displayTitle = run.TryGetProperty("display_title", out var displayTitleElement)
+                        ? displayTitleElement.GetString() ?? string.Empty
+                        : string.Empty;
                     var createdText = run.GetProperty("created_at").GetString() ?? string.Empty;
                     if (!PositiveDecimal(runId) || !PositiveDecimal(runAttempt) ||
                         runEvent is not ("workflow_run" or "workflow_dispatch") ||
+                        !WorkflowRunStatuses.Contains(status) ||
+                        (status == "completed"
+                            ? conclusion is null || !WorkflowRunConclusions.Contains(conclusion)
+                            : conclusion is not null) ||
                         repository != authority.Repository ||
                         workflowPath != ".github/workflows/r4-trusted-proof.yml" ||
                         !DateTimeOffset.TryParse(
@@ -653,7 +819,10 @@ public sealed class ProducerOutcomeJournal
                         pullRequestNumbers,
                         repository,
                         workflowPath,
-                        created.ToUnixTimeMilliseconds()));
+                        status,
+                        conclusion,
+                        created.ToUnixTimeMilliseconds(),
+                        displayTitle));
                 }
             }
             catch (Exception exception) when (exception is System.Text.Json.JsonException or
@@ -704,6 +873,9 @@ public sealed class ProducerOutcomeJournal
                     : item.ExpectedEvent.Length != 0 ||
                         string.IsNullOrWhiteSpace(item.RequiredReadbackPhase) ||
                         string.IsNullOrWhiteSpace(item.RequiredSourcePrefix)) ||
+                (item.ExpectedFixtureHeadSha.Length != 0 && !Hex40(item.ExpectedFixtureHeadSha)) ||
+                ((item.ExpectedFixtureHeadRef.Length != 0 || item.ExpectedFixtureRepository.Length != 0 ||
+                    item.ExpectedFixtureBaseSha.Length != 0) && !ValidEnrollmentTarget(item, value.Repository)) ||
                 ((item.RequiredPreconditionPhases is null) !=
                     (item.RequiredPreconditionSourcePrefixes is null)) ||
                 item.RequiredPreconditionPhases is { } phases &&
@@ -735,6 +907,7 @@ public sealed class ProducerOutcomeJournal
             throw new InvalidDataException("producer_journal_invalid");
         }
         var byTarget = new Dictionary<string, ProducerOutcomeEntry>(StringComparer.Ordinal);
+        var fourRoleTargets = FourRoleTriggerTargets(authority);
         for (var index = 0; index < entries.Count; index++)
         {
             var entry = entries[index];
@@ -755,13 +928,190 @@ public sealed class ProducerOutcomeJournal
                 entry.ReconciliationSourceIds.Any(item => !Sha256(item)) ||
                 (target.ExpectedEvent == "workflow_dispatch" && entry.Outcome == "committed"
                     ? !PositiveDecimal(entry.CommittedRunId ?? string.Empty)
-                    : entry.CommittedRunId is not null) ||
+                    : entry.CommittedRunId is not null &&
+                        !(target.TargetKind == "trigger" &&
+                            ValidEnrollmentTarget(target, authority.Repository) &&
+                            entry.Outcome == "reconciled-committed" &&
+                            PositiveDecimal(entry.CommittedRunId))) ||
                 !ValidTransition(prior, entry))
             {
                 throw new InvalidDataException("producer_journal_invalid");
             }
+            if (target.TargetKind == "trigger" && ValidEnrollmentTarget(target, authority.Repository))
+            {
+                // Each production enrollment transition retains the same pre-mutation intent.
+                // This makes recovery auditable and prevents a later caller from widening the
+                // candidate set or retrying an uncertain live write.
+                if (entry.MutationIntent is null ||
+                    !ValidMutationIntent(entry.MutationIntent, target) ||
+                    (entry.Outcome == "before-dispatch"
+                        ? entry.MutationIntent.CreatedNotBeforeUnixMilliseconds !=
+                            entry.Observation.RequestStartedUnixMilliseconds
+                        : prior?.MutationIntent is null ||
+                            entry.MutationIntent != prior.MutationIntent) ||
+                    (entry.Outcome == "committed" && target.ExpectedEvent == "workflow_dispatch" &&
+                        !PositiveDecimal(entry.CommittedRunId ?? string.Empty)) ||
+                    (entry.Outcome == "committed" && target.ExpectedEvent == "workflow_run" &&
+                        entry.CommittedRunId is not null) ||
+                    (entry.Outcome == "reconciled-committed" &&
+                        !PositiveDecimal(entry.CommittedRunId ?? string.Empty)) ||
+                    (entry.Outcome is not ("committed" or "reconciled-committed") &&
+                        entry.CommittedRunId is not null))
+                {
+                    throw new InvalidDataException("producer_journal_invalid");
+                }
+            }
+            else if (entry.MutationIntent is not null)
+            {
+                throw new InvalidDataException("producer_journal_invalid");
+            }
+            if (fourRoleTargets is not null && target.TargetKind == "trigger")
+            {
+                var targetIndex = Array.FindIndex(fourRoleTargets, item =>
+                    item.AuthorityId == target.AuthorityId);
+                var bootstrap = byTarget.GetValueOrDefault(fourRoleTargets[0].AuthorityId);
+                var continuation = byTarget.GetValueOrDefault(fourRoleTargets[1].AuthorityId);
+                var staleProtected = byTarget.GetValueOrDefault(fourRoleTargets[2].AuthorityId);
+                Func<ProducerOutcomeEntry?, bool> committed = static entry => entry is not null &&
+                    entry.Outcome is "committed" or "reconciled-committed";
+                // Continuation waits for bootstrap's authenticated producer commit, not the
+                // workflow-run terminal receipt; the workflow runs themselves still provide the
+                // shared-concurrency serialization proof. Stale work cannot begin until
+                // both normal producers are committed; the ref advance then follows the
+                // independently authenticated stale-protected receipt in the materializer.
+                if (targetIndex < 0 ||
+                    (targetIndex == 1 && !committed(bootstrap)) ||
+                    (targetIndex == 2 && (!committed(bootstrap) || !committed(continuation))) ||
+                    (targetIndex == 3 && !committed(staleProtected)))
+                {
+                    throw new InvalidDataException("producer_journal_order_invalid");
+                }
+            }
             byTarget[entry.AuthorityId] = entry;
         }
+    }
+
+    private static ProducerTargetAuthority[]? FourRoleTriggerTargets(ProducerAuthorityDocument authority)
+    {
+        var targets = authority.Targets.Where(item => item.TargetKind == "trigger").ToArray();
+        var roles = new[]
+        {
+            "normal-bootstrap", "normal-continuation", "stale-protected", "stale-follow-on",
+        };
+        return targets.Length == roles.Length && targets.Select(item => item.Role)
+                .SequenceEqual(roles, StringComparer.Ordinal)
+            ? targets
+            : null;
+    }
+
+    /// <summary>
+    /// Validates the fixed production enrollment target topology.  Generic journal consumers may
+    /// model a single producer for unit tests; the live authorization reader calls this boundary
+    /// before it creates the journal authority.
+    /// </summary>
+    public static void ValidateEnrollmentTargets(
+        string repository,
+        IReadOnlyList<string> operationIds,
+        IReadOnlyList<ProducerTargetAuthority> targets)
+    {
+        var roles = new[]
+        {
+            "normal-bootstrap", "normal-continuation", "stale-protected", "stale-follow-on",
+        };
+        var triggers = targets.Where(item => item.TargetKind == "trigger").ToArray();
+        var enrollment = triggers.Where(item => roles.Contains(item.Role, StringComparer.Ordinal)).ToArray();
+        if (enrollment.Length == 0 || triggers.Length != roles.Length ||
+            !triggers.Select(item => item.Role).SequenceEqual(roles, StringComparer.Ordinal) ||
+            !triggers.All(item => ValidEnrollmentTarget(item, repository)) ||
+            triggers[0].OperationId != operationIds[0] ||
+            triggers[1].OperationId != operationIds[0] ||
+            triggers[2].OperationId != operationIds[1] ||
+            triggers[3].OperationId != operationIds[1] ||
+            triggers[0].Scope != "normal" || triggers[1].Scope != "normal" ||
+            triggers[2].Scope != "stale" || triggers[3].Scope != "stale" ||
+            triggers[0].ExpectedEvent != "workflow_run" ||
+            triggers[1].ExpectedEvent != "workflow_dispatch" ||
+            triggers[2].ExpectedEvent != "workflow_run" ||
+            triggers[3].ExpectedEvent != "workflow_run")
+        {
+            throw new InvalidDataException("producer_enrollment_authority_invalid");
+        }
+    }
+
+    /// <summary>
+    /// Captures the immutable match key before a live enrollment mutation starts.  This is kept
+    /// with every terminal transition so an interrupted mutation can be reconciled without a
+    /// second dispatch or rerun.
+    /// </summary>
+    public static ProducerMutationIntent CreateEnrollmentMutationIntent(
+        ProducerTargetAuthority target,
+        long createdNotBeforeUnixMilliseconds)
+    {
+        if (!ValidEnrollmentTarget(target, target.ExpectedFixtureRepository) ||
+            createdNotBeforeUnixMilliseconds < 0)
+        {
+            throw new InvalidDataException("producer_mutation_intent_invalid");
+        }
+        return new ProducerMutationIntent(
+            target.Role,
+            target.OperationId,
+            target.ExpectedEvent,
+            target.ExpectedFixtureHeadSha,
+            target.ExpectedFixtureHeadRef,
+            target.ExpectedFixtureRepository,
+            target.ExpectedPullRequestNumber,
+            "1",
+            createdNotBeforeUnixMilliseconds,
+            EnrollmentDisplayTitle(target));
+    }
+
+    public static bool MatchesEnrollmentMutationIntent(
+        ProducerEnrollmentDiscoveryRun run,
+        ProducerTargetAuthority target,
+        ProducerMutationIntent intent) =>
+        intent.Role == target.Role &&
+        intent.OperationId == target.OperationId &&
+        intent.ExpectedEvent == target.ExpectedEvent &&
+        intent.ExpectedFixtureHeadSha == target.ExpectedFixtureHeadSha &&
+        intent.ExpectedFixtureHeadRef == target.ExpectedFixtureHeadRef &&
+        intent.ExpectedFixtureRepository == target.ExpectedFixtureRepository &&
+        intent.ExpectedPullRequestNumber == target.ExpectedPullRequestNumber &&
+        intent.RunAttempt == "1" &&
+        intent.ExpectedDisplayTitle == EnrollmentDisplayTitle(target) &&
+        run.Event == intent.ExpectedEvent && run.RunAttempt == intent.RunAttempt &&
+        run.Repository == intent.ExpectedFixtureRepository &&
+        run.WorkflowPath == ".github/workflows/r4-trusted-proof.yml" &&
+        // The workflow itself always runs from main. The fixture is deliberately a separate
+        // binding: it is carried in the exact run title rather than confused with GitHub's
+        // workflow transport head fields.
+        run.WorkflowHeadSha == target.ExpectedHeadSha &&
+        run.WorkflowHeadBranch == target.ExpectedHeadBranch &&
+        run.DisplayTitle == intent.ExpectedDisplayTitle &&
+        (intent.ExpectedEvent == "workflow_dispatch"
+            ? run.PullRequestNumbers.Length == 0
+            : run.PullRequestNumbers.Contains(intent.ExpectedPullRequestNumber, StringComparer.Ordinal));
+
+    public static bool InMutationDiscoveryWindow(
+        long runCreatedUnixMilliseconds,
+        ProducerMutationIntent intent,
+        long discoveryRequestStartedUnixMilliseconds) =>
+        runCreatedUnixMilliseconds + 999 >= intent.CreatedNotBeforeUnixMilliseconds &&
+        runCreatedUnixMilliseconds <= discoveryRequestStartedUnixMilliseconds;
+
+    public static string? SelectEnrollmentRecoveryRun(
+        IEnumerable<ProducerEnrollmentDiscoveryRun> candidates,
+        ProducerTargetAuthority target,
+        ProducerMutationIntent intent,
+        long discoveryRequestStartedUnixMilliseconds)
+    {
+        var matches = candidates.Where(run =>
+                PositiveDecimal(run.RunId) &&
+                MatchesEnrollmentMutationIntent(run, target, intent) &&
+                InMutationDiscoveryWindow(run.CreatedUnixMilliseconds, intent,
+                    discoveryRequestStartedUnixMilliseconds))
+            .Select(run => run.RunId)
+            .ToArray();
+        return matches.Length == 1 ? matches[0] : null;
     }
 
     private static bool ValidTransition(ProducerOutcomeEntry? prior, ProducerOutcomeEntry current)
@@ -837,15 +1187,60 @@ public sealed class ProducerOutcomeJournal
         value.Length > 0 && value.All(character => character is >= '0' and <= '9') &&
         (value.Length == 1 || value[0] != '0') && value != "0";
 
-    private static bool RunMatchesTarget(DiscoveredRun run, ProducerTargetAuthority target) =>
-        run.Event == target.ExpectedEvent &&
-        run.Repository.Length > 0 &&
-        run.WorkflowPath == ".github/workflows/r4-trusted-proof.yml" &&
-        (target.ExpectedHeadSha.Length == 0 || run.HeadSha == target.ExpectedHeadSha) &&
-        (target.ExpectedHeadBranch.Length == 0 || run.HeadBranch == target.ExpectedHeadBranch) &&
-        (target.ExpectedEvent == "workflow_dispatch" || target.ExpectedPullRequestNumber.Length == 0
-            ? run.PullRequestNumbers.Length == 0
-            : run.PullRequestNumbers.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal));
+    private static bool Hex40(string value) => value.Length == 40 &&
+        value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool ValidEnrollmentTarget(ProducerTargetAuthority target, string repository) =>
+        Hex40(target.ExpectedHeadSha) && target.ExpectedHeadBranch == "main" &&
+        PositiveDecimal(target.ExpectedPullRequestNumber) && Hex40(target.ExpectedFixtureHeadSha) &&
+        target.ExpectedFixtureHeadRef.StartsWith("r4-trusted-proof/", StringComparison.Ordinal) &&
+        target.ExpectedFixtureHeadRef.Length == "r4-trusted-proof/".Length + 64 &&
+        Sha256(target.ExpectedFixtureHeadRef["r4-trusted-proof/".Length..]) &&
+        target.ExpectedFixtureRepository == repository && Hex40(target.ExpectedFixtureBaseSha) &&
+        target.ExpectedFixtureBaseSha == target.ExpectedHeadSha;
+
+    private static bool ValidMutationIntent(
+        ProducerMutationIntent intent,
+        ProducerTargetAuthority target) =>
+        intent.Role == target.Role && intent.OperationId == target.OperationId &&
+        intent.ExpectedEvent == target.ExpectedEvent &&
+        intent.ExpectedFixtureHeadSha == target.ExpectedFixtureHeadSha &&
+        intent.ExpectedFixtureHeadRef == target.ExpectedFixtureHeadRef &&
+        intent.ExpectedFixtureRepository == target.ExpectedFixtureRepository &&
+        intent.ExpectedPullRequestNumber == target.ExpectedPullRequestNumber &&
+        intent.RunAttempt == "1" &&
+        intent.ExpectedDisplayTitle == EnrollmentDisplayTitle(target) &&
+        intent.CreatedNotBeforeUnixMilliseconds >= 0;
+
+    private static string EnrollmentDisplayTitle(ProducerTargetAuthority target) =>
+        target.ExpectedEvent == "workflow_dispatch"
+            ? $"apr-r4-e2p-{target.OperationId}"
+            : $"apr-r4-e2p-{target.ExpectedFixtureHeadRef}";
+
+    private bool RunMatchesTarget(DiscoveredRun run, ProducerTargetAuthority target)
+    {
+        if (ValidEnrollmentTarget(target, authority.Repository))
+        {
+            return run.Event == target.ExpectedEvent && run.RunAttempt == "1" &&
+                run.Repository == target.ExpectedFixtureRepository &&
+                run.WorkflowPath == ".github/workflows/r4-trusted-proof.yml" &&
+                run.HeadSha == target.ExpectedHeadSha &&
+                run.HeadBranch == target.ExpectedHeadBranch &&
+                run.DisplayTitle == EnrollmentDisplayTitle(target) &&
+                (target.ExpectedEvent == "workflow_dispatch"
+                    ? run.PullRequestNumbers.Length == 0
+                    : run.PullRequestNumbers.Contains(
+                        target.ExpectedPullRequestNumber, StringComparer.Ordinal));
+        }
+        return run.Event == target.ExpectedEvent &&
+            run.Repository.Length > 0 &&
+            run.WorkflowPath == ".github/workflows/r4-trusted-proof.yml" &&
+            (target.ExpectedHeadSha.Length == 0 || run.HeadSha == target.ExpectedHeadSha) &&
+            (target.ExpectedHeadBranch.Length == 0 || run.HeadBranch == target.ExpectedHeadBranch) &&
+            (target.ExpectedEvent == "workflow_dispatch" || target.ExpectedPullRequestNumber.Length == 0
+                ? run.PullRequestNumbers.Length == 0
+                : run.PullRequestNumbers.Contains(target.ExpectedPullRequestNumber, StringComparer.Ordinal));
+    }
 
     private sealed record DiscoveredRun(
         string RunId,
@@ -856,5 +1251,8 @@ public sealed class ProducerOutcomeJournal
         string[] PullRequestNumbers,
         string Repository,
         string WorkflowPath,
-        long CreatedUnixMilliseconds);
+        string Status,
+        string? Conclusion,
+        long CreatedUnixMilliseconds,
+        string DisplayTitle = "");
 }

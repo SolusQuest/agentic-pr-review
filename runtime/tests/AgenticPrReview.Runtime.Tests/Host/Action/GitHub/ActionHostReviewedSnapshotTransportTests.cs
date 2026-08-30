@@ -279,6 +279,13 @@ public sealed class ActionHostReviewedSnapshotTransportTests
                 CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Blob transport was called.");
 
+        public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+            GetHeadArchiveAsync(
+                string repositoryName,
+                string headSha,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Archive transport was called.");
+
         public void Dispose()
         {
         }
