@@ -75,13 +75,13 @@ describe('bounded artifact archive acquisition', () => {
 });
 
 describe('trusted proof artifact REST budget', () => {
-  it('uses the r4-w2 measurement profile with explicit 256 raw and primary caps', () => {
+  it('uses the r4-w2 measurement profile with explicit 512 raw and 256 primary caps', () => {
     expect(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS).toEqual({
       maximumTotalAuthenticatedApiRequests: 256,
       maximumPrimaryRateLimitRequests: 256,
     });
     expect(trustedProofBudget().receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 256,
+      maximum_total_authenticated_api_requests: 512,
       maximum_primary_rate_limit_requests: 256,
       measurement_only: true,
       remaining_tail_required: 0,
@@ -89,7 +89,34 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('allows 256 measured authenticated requests and rejects the 257th before wire dispatch', async () => {
+  it('allows 512 measured raw requests and rejects the 513th before wire dispatch', async () => {
+    let now = 0;
+    const budget = trustedProofBudget(undefined, {
+      now: () => now,
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+    });
+    for (let index = 0; index < 512; index += 1) {
+      await runNotModified(budget);
+    }
+
+    await expect(runNotModified(budget)).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_total_exhausted',
+    );
+    expect(budget.receipt()).toMatchObject({
+      maximum_total_authenticated_api_requests: 512,
+      total_authenticated_api_requests: 512,
+      maximum_primary_rate_limit_requests: 256,
+      primary_rate_limit_requests: 0,
+      conditional_not_modified_requests: 512,
+      remaining_tail_required: 0,
+      remaining_tail_reserve: 1,
+      disposition: 'total_exhausted',
+    });
+  });
+
+  it('allows 256 primary charges and rejects the 257th before the raw cap', async () => {
     let now = 0;
     const budget = trustedProofBudget(undefined, {
       now: () => now,
@@ -102,16 +129,16 @@ describe('trusted proof artifact REST budget', () => {
     }
 
     await expect(runGet(budget)).rejects.toThrow(
-      'trusted_proof_artifact_rest_budget_total_exhausted',
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
     );
     expect(budget.receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 256,
+      maximum_total_authenticated_api_requests: 512,
       total_authenticated_api_requests: 256,
       maximum_primary_rate_limit_requests: 256,
       primary_rate_limit_requests: 256,
       remaining_tail_required: 0,
       remaining_tail_reserve: 1,
-      disposition: 'total_exhausted',
+      disposition: 'primary_exhausted',
     });
   });
 
@@ -527,7 +554,8 @@ describe('trusted proof artifact REST budget', () => {
       primary_rate_limit_requests: 5,
       conditional_not_modified_requests: 0,
       remaining_total_authenticated_api_requests:
-        TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumTotalAuthenticatedApiRequests - 5,
+        TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE.limits
+          .maximumTotalAuthenticatedApiRequests - 5,
       disposition: 'active',
     });
   });
@@ -1452,8 +1480,12 @@ function octokitWithArtifactMethods(methods: Record<string, unknown>) {
 
 function trustedProofBudget(
   limits = {
-    total: TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumTotalAuthenticatedApiRequests,
-    primary: TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS.maximumPrimaryRateLimitRequests,
+    total:
+      TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE.limits
+        .maximumTotalAuthenticatedApiRequests,
+    primary:
+      TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE.limits
+        .maximumPrimaryRateLimitRequests,
   },
   secondaryRateLimit?: ArtifactRestSecondaryRateLimitOptions,
 ): ArtifactRestRequestBudget {
@@ -1526,5 +1558,12 @@ async function runGet(budget: ArtifactRestRequestBudget) {
   return await budget.runAuthenticatedApiCall(
     { signal: signal(), secondaryLimitPoints: 1, mutative: false },
     async () => ({ status: 200 }),
+  );
+}
+
+async function runNotModified(budget: ArtifactRestRequestBudget) {
+  return await budget.runAuthenticatedApiCall(
+    { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+    async () => ({ status: 304 }),
   );
 }

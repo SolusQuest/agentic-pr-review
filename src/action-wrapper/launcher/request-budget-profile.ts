@@ -17,7 +17,7 @@ export const TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: Art
   Object.freeze({
     capProfile: 'apr-r4-artifact-rest-request-budget-v2',
     limits: Object.freeze({
-      maximumTotalAuthenticatedApiRequests: 256,
+      maximumTotalAuthenticatedApiRequests: 512,
       maximumPrimaryRateLimitRequests: 256,
     }),
     remainingTailRequired: 0,

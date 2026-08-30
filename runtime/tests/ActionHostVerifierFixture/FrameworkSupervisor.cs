@@ -19,6 +19,8 @@ internal static class FrameworkSupervisor
         "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0." +
         "eyJzY3AiOiJBY3Rpb25zLlJlc3VsdHM6YXByMTc4LXByb29mLXJ1bi1iYWNrZW5kLWlkOmFw" +
         "cjE3OC1wcm9vZi1qb2ItYmFja2VuZC1pZCJ9.";
+    private const int ProductionShapedReviewedHeadRequests = 180;
+    private const int ProductionShapedHistoricalBaseObjectRequests = 10;
 
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(3);
 
@@ -1610,7 +1612,8 @@ internal static class FrameworkSupervisor
                 ("node_secondary_points_within_600", operationEvents.NodeWindowValid),
                 ("all_authenticated_secondary_points_below_900",
                     operationEvents.AllWindowValid),
-                ("authenticated_mutations_spaced", operationEvents.MutationSpacingValid),
+                ("node_artifact_rest_mutations_spaced",
+                    operationEvents.NodeArtifactMutationSpacingValid),
                 ("node_artifact_raw_events", operationEvents.NodeArtifactRaw),
                 ("host_head_source_raw_events", operationEvents.HostHeadRaw),
                 ("host_other_raw_events", operationEvents.HostOtherRaw),
@@ -1654,7 +1657,7 @@ internal static class FrameworkSupervisor
             operationEvents.ShapeValid &&
             operationEvents.NodeWindowValid &&
             operationEvents.AllWindowValid &&
-            operationEvents.MutationSpacingValid &&
+            operationEvents.NodeArtifactMutationSpacingValid &&
             protectedEventJoins.All(value => value) &&
             perScenarioControlWithinCap &&
             roleTotalsWithinBudget &&
@@ -4348,6 +4351,10 @@ internal static class FrameworkSupervisor
         return FrameworkJson.Object(
             ("case", result.Name),
             ("joined", joined),
+            ("reviewed_head_expected_raw",
+                ProductionShapedReviewedHeadRequests),
+            ("historical_base_object_raw", ReadInt(scenario,
+                "base-api-count")),
             ("event_roles", eventRoles),
             ("receipt_roles", FrameworkJson.Object(
                 ("node_artifact_rest", artifact.PrimaryRateLimitRequests),
@@ -4582,7 +4589,8 @@ internal static class FrameworkSupervisor
                     "trusted_control_rest")
                 .OrderBy(value => value.MonotonicTimestamp).ToArray(), 900,
                 inclusive: false));
-        var mutationSpacingValid = groups.All(group => MutationSpacingValid(group));
+        var nodeArtifactMutationSpacingValid = groups.All(group =>
+            NodeArtifactMutationSpacingValid(group));
         var domainTails = DomainFuturePrimaryTails(groups);
         var sequence = string.Concat(events.Select(value =>
             value.Scenario + "\t" + value.ScenarioOrdinal.ToString(
@@ -4590,7 +4598,8 @@ internal static class FrameworkSupervisor
                 CultureInfo.InvariantCulture) + "\t" + value.Domain + "\t" +
             value.Route + "\t" + value.Method + "\t" + value.SecondaryPoints.ToString(
                 CultureInfo.InvariantCulture) + "\t" + value.ResponseClass + "\n"));
-        return new(true, nodeWindowValid, allWindowValid, mutationSpacingValid,
+        return new(true, nodeWindowValid, allWindowValid,
+            nodeArtifactMutationSpacingValid,
             node.Length,
             events.Count(value => value.Domain == "host_head_source_rest"),
             events.Count(value => value.Domain == "host_other_github_rest"),
@@ -4678,11 +4687,12 @@ internal static class FrameworkSupervisor
         var controlMutations = embedded.MutationCount +
             external.Sum(value => value.MutationCount) +
             cleanup.Sum(value => value.MutationCount);
-        return head.Raw == 180 &&
+        return head.Raw == ProductionShapedReviewedHeadRequests &&
             ReadInt(scenario, "head-commit-api-count") == 1 &&
             ReadInt(scenario, "head-tree-api-count") == 178 &&
             ReadInt(scenario, "head-archive-api-count") == 1 &&
-            ReadInt(scenario, "base-api-count") == 0 &&
+            ReadInt(scenario, "base-api-count") ==
+                ProductionShapedHistoricalBaseObjectRequests &&
             head.Raw == host.HostHeadSourceRaw &&
             head.Primary == host.HostHeadSourcePrimary &&
             head.NotModified == host.HostHeadSourceNotModified &&
@@ -4803,12 +4813,11 @@ internal static class FrameworkSupervisor
         return true;
     }
 
-    private static bool MutationSpacingValid(
+    internal static bool NodeArtifactMutationSpacingValid(
         IEnumerable<OperationRequestEvent> events)
     {
-        var mutations = events.Where(value => value.Domain is
-                "node_artifact_rest" or "host_head_source_rest" or
-                "host_other_github_rest" or "trusted_control_rest")
+        var mutations = events.Where(value =>
+                value.Domain == "node_artifact_rest")
             .Where(value => value.Method is not "GET" and not "HEAD" and
                 not "OPTIONS")
             .OrderBy(value => value.MonotonicTimestamp)
@@ -4959,7 +4968,7 @@ internal static class FrameworkSupervisor
         receipt.Kind == "apr-r4-trusted-proof-artifact-rest-budget-v2" &&
         ArtifactRestReceiptIdentityIsExact(receipt, scenario) &&
         receipt.ProtectedRoute &&
-        receipt.MaximumTotalAuthenticatedApiRequests == 256 &&
+        receipt.MaximumTotalAuthenticatedApiRequests == 512 &&
         receipt.TotalAuthenticatedApiRequests >= 0 &&
         receipt.TotalAuthenticatedApiRequests <=
             receipt.MaximumTotalAuthenticatedApiRequests &&
@@ -5617,7 +5626,7 @@ internal static class FrameworkSupervisor
         bool ShapeValid,
         bool NodeWindowValid,
         bool AllWindowValid,
-        bool MutationSpacingValid,
+        bool NodeArtifactMutationSpacingValid,
         int NodeArtifactRaw,
         int HostHeadRaw,
         int HostOtherRaw,

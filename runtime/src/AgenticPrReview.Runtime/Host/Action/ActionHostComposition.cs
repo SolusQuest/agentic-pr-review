@@ -428,7 +428,8 @@ internal sealed class ActionHostCompositionDependencies
         TimeProvider timeProvider,
         Func<string>? stagingParentFactory = null,
         IActionHostPostAcceptanceInlineHook? inlineHook = null,
-        IActionHostTrustedWorkflowAdmission? workflowAdmission = null)
+        IActionHostTrustedWorkflowAdmission? workflowAdmission = null,
+        IActionHostGitObjectTransportFactory? reviewedHeadSourceFactory = null)
     {
         EventReader = eventReader ??
             throw new ArgumentNullException(nameof(eventReader));
@@ -436,6 +437,8 @@ internal sealed class ActionHostCompositionDependencies
             throw new ArgumentNullException(nameof(authorizationFactory));
         GitObjectFactory = gitObjectFactory ??
             throw new ArgumentNullException(nameof(gitObjectFactory));
+        ReviewedHeadSourceFactory = reviewedHeadSourceFactory ??
+            GitObjectFactory;
         SnapshotFactory = snapshotFactory ??
             throw new ArgumentNullException(nameof(snapshotFactory));
         StateDependencies = stateDependencies ??
@@ -456,6 +459,14 @@ internal sealed class ActionHostCompositionDependencies
     internal IActionHostGitHubAuthorizationTransportFactory
         AuthorizationFactory { get; }
     internal IActionHostGitObjectTransportFactory GitObjectFactory { get; }
+    // The reviewed-tree traversal is the one capability that acquires the
+    // frozen head graph.  Production shares the ordinary factory, while a
+    // controlled proof can inject a separately accounted capability without
+    // inferring meaning from a GitHub URI.
+    internal IActionHostGitObjectTransportFactory ReviewedHeadSourceFactory
+    {
+        get;
+    }
     internal IActionHostReviewedSnapshotTransportFactory SnapshotFactory
     {
         get;
@@ -623,7 +634,7 @@ internal sealed class ActionHostComposition
             Directory.CreateDirectory(stagingParent);
             var treeResult = await new ReviewedTreeReader(
                     new ReviewedGitObjectTransportFactory(
-                        dependencies.GitObjectFactory),
+                        dependencies.ReviewedHeadSourceFactory),
                     dependencies.TimeProvider)
                 .MaterializeAsync(
                     invocation,

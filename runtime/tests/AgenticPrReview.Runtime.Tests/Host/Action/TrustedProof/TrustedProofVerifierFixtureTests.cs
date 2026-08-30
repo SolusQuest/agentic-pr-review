@@ -1,5 +1,6 @@
 using System.Formats.Tar;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
@@ -244,6 +245,38 @@ public sealed class TrustedProofVerifierFixtureTests
         Assert.Equal(3, expected["host_head_source_rest"]);
         Assert.Equal(3, expected["trusted_control_rest"]);
         Assert.Equal(0, expected["host_other_github_rest"]);
+    }
+
+    [Fact]
+    public void ArtifactMutationSpacingDoesNotImposeCrossProcessControlPacing()
+    {
+        var tooCloseNode = new[]
+        {
+            Event("dispatch-continuation", 2, 1, "node_artifact_rest", "success",
+                timestamp: 10, method: "DELETE"),
+            Event("dispatch-continuation", 2, 2, "node_artifact_rest", "success",
+                timestamp: 10 + Stopwatch.Frequency - 1, method: "DELETE"),
+        };
+        var spacedNode = new[]
+        {
+            tooCloseNode[0],
+            Event("dispatch-continuation", 2, 2, "node_artifact_rest", "success",
+                timestamp: 10 + Stopwatch.Frequency, method: "DELETE"),
+        };
+        var closeIndependentControl = new[]
+        {
+            Event("dispatch-continuation", 2, 1, "trusted_control_rest", "success",
+                timestamp: 10, method: "DELETE"),
+            Event("dispatch-continuation", 2, 2, "trusted_control_rest", "success",
+                timestamp: 11, method: "DELETE"),
+        };
+
+        Assert.False(FrameworkSupervisor.NodeArtifactMutationSpacingValid(
+            tooCloseNode));
+        Assert.True(FrameworkSupervisor.NodeArtifactMutationSpacingValid(
+            spacedNode));
+        Assert.True(FrameworkSupervisor.NodeArtifactMutationSpacingValid(
+            closeIndependentControl));
     }
 
     [Fact]
@@ -1063,14 +1096,15 @@ public sealed class TrustedProofVerifierFixtureTests
         int ordinal,
         string domain,
         string responseClass,
-        long? timestamp = null) => new(
+        long? timestamp = null,
+        string method = "GET") => new(
         scenario,
         scenarioOrdinal,
         ordinal,
         domain,
         "github_rest",
-        "GET",
-        1,
+        method,
+        method is "GET" or "HEAD" or "OPTIONS" ? 1 : 5,
         timestamp ?? ordinal,
         responseClass);
 

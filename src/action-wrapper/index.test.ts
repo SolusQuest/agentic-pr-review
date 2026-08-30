@@ -203,7 +203,7 @@ describe('W1 production composition', () => {
     expect(exit).toBe(0);
     expect(receipts).toHaveLength(1);
     expect(artifactBudgetReceipt).toMatchObject({
-      maximum_total_authenticated_api_requests: 256,
+      maximum_total_authenticated_api_requests: 512,
       maximum_primary_rate_limit_requests: 256,
       remaining_tail_required: 0,
       remaining_tail_reserve: 1,

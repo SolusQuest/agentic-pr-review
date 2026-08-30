@@ -23,8 +23,9 @@ public sealed class ActionHostReviewedSnapshotTransportTests
 
         using var transport = factory.CreateReviewedSnapshotTransport(token!);
 
-        // One handler serves reviewed PR/files and the other serves the nested
-        // object reader when no explicit reviewed-head factory was supplied.
+        // The reviewed snapshot always uses the supplied ordinary handler for
+        // both PR/files and its nested base-object reader.  Frozen reviewed
+        // head acquisition is a separate composition capability.
         Assert.Equal(2, handlerCalls);
     }
 

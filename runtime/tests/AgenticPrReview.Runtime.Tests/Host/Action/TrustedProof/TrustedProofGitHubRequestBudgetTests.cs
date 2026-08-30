@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using Xunit;
 
@@ -179,6 +181,66 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 "host_other_github_rest", "host_other_github_rest",
                 "host_other_github_rest",
             ],
+            witnessedDomains);
+    }
+
+    [Fact]
+    public async Task ReviewedHeadSourceCapabilityCoversTheWholeFrozenHeadGraph()
+    {
+        var witnessedDomains = new List<string?>();
+        var budget = new TrustedProofGitHubRequestBudget(
+            maximumAuthenticatedRestRequests: 200,
+            maximumAnonymousCodeloadRequests: 1,
+            innerFactory: () => new DomainRecordingHandler(witnessedDomains));
+        var ordinary = new ActionHostGitHubAuthorizationTransportFactory(
+            budget.CreateOtherGitHubHandler);
+        var reviewedHead = new ActionHostGitHubAuthorizationTransportFactory(
+            budget.CreateHeadSourceHandler);
+        Assert.True(ActionHostGitHubToken.TryCreate("token-canary", out var token));
+        const string sha = "0123456789abcdef0123456789abcdef01234567";
+
+        using (var transport = reviewedHead.CreateExactObjectTransport(token!))
+        {
+            _ = await transport.GetCommitObjectAsync("o/r", sha,
+                CancellationToken.None);
+            for (var index = 0; index < 178; index++)
+            {
+                _ = await transport.GetTreeObjectAsync("o/r", sha,
+                    CancellationToken.None);
+            }
+
+            _ = await transport.GetHeadArchiveAsync("o/r", sha,
+                CancellationToken.None);
+        }
+
+        // Exact-object routes alone do not define the proof domain: policy and
+        // the base-diff snapshot reader use the ordinary capability.
+        using (var policy = ordinary.CreateExactObjectTransport(token!))
+        {
+            _ = await policy.GetTreeObjectAsync("o/r", sha,
+                CancellationToken.None);
+        }
+
+        using (var snapshot = ordinary.CreateReviewedSnapshotTransport(token!))
+        {
+            _ = await snapshot.GetCurrentPullRequestAsync("o/r", 1,
+                CancellationToken.None);
+            _ = await snapshot.GetCommitObjectAsync("o/r", sha,
+                CancellationToken.None);
+        }
+
+        Assert.Equal(183, budget.Snapshot().AuthenticatedRestRequests);
+        using var output = new StringWriter();
+        budget.WriteReceipt(output);
+        using var receipt = JsonDocument.Parse(output.ToString()[
+            "APR_R4_E2P_GITHUB_REQUEST_BUDGET ".Length..].Trim());
+        Assert.Equal(180, receipt.RootElement
+            .GetProperty("host_head_source_rest").GetProperty("raw").GetInt32());
+        Assert.Equal(3, receipt.RootElement
+            .GetProperty("host_other_github_rest").GetProperty("raw").GetInt32());
+        Assert.Equal(
+            Enumerable.Repeat("host_head_source_rest", 180)
+                .Concat(Enumerable.Repeat("host_other_github_rest", 3)),
             witnessedDomains);
     }
 

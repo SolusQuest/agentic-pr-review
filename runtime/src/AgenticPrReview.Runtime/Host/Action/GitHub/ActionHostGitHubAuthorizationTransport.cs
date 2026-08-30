@@ -14,7 +14,6 @@ internal sealed class ActionHostGitHubAuthorizationTransportFactory :
     IActionHostReviewedSnapshotTransportFactory
 {
     private readonly Func<HttpMessageHandler>? handlerFactory;
-    private readonly Func<HttpMessageHandler>? reviewedSnapshotObjectHandlerFactory;
 
     internal ActionHostGitHubAuthorizationTransportFactory()
     {
@@ -22,24 +21,9 @@ internal sealed class ActionHostGitHubAuthorizationTransportFactory :
 
     internal ActionHostGitHubAuthorizationTransportFactory(
         Func<HttpMessageHandler> handlerFactory)
-        : this(
-            handlerFactory,
-            reviewedSnapshotObjectHandlerFactory: null)
-    {
-    }
-
-    // The production factory uses one transport for every GitHub route.  The
-    // trusted-proof fixture supplies a separately labelled handler only for
-    // the reviewed-head object reader, so its request receipt is semantic
-    // rather than an inference from a SHA-shaped URI.
-    internal ActionHostGitHubAuthorizationTransportFactory(
-        Func<HttpMessageHandler> handlerFactory,
-        Func<HttpMessageHandler>? reviewedSnapshotObjectHandlerFactory)
     {
         this.handlerFactory = handlerFactory ??
             throw new ArgumentNullException(nameof(handlerFactory));
-        this.reviewedSnapshotObjectHandlerFactory =
-            reviewedSnapshotObjectHandlerFactory;
     }
 
     public IActionHostGitHubAuthorizationTransport Create(
@@ -78,9 +62,7 @@ internal sealed class ActionHostGitHubAuthorizationTransportFactory :
 
         var objects = ActionHostGitObjectTransport.CreateForTesting(
             exported,
-            reviewedSnapshotObjectHandlerFactory is null
-                ? handlerFactory()
-                : reviewedSnapshotObjectHandlerFactory());
+            handlerFactory());
         try
         {
             return ActionHostReviewedSnapshotTransport.CreateForTesting(

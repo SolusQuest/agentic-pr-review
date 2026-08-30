@@ -18,7 +18,12 @@ internal static class TrustedProofPayloadComposition
         ArgumentNullException.ThrowIfNull(githubBudget);
         ArgumentNullException.ThrowIfNull(ports);
         var github = new ActionHostGitHubAuthorizationTransportFactory(
-            githubBudget.CreateOtherGitHubHandler,
+            githubBudget.CreateOtherGitHubHandler);
+        // This capability is passed only to ReviewedTreeReader.  It labels
+        // the authenticated commit/tree/tarball acquisition of the frozen
+        // reviewed head; policy, base-diff, revalidation, and snapshot outer
+        // routes remain on the ordinary GitHub capability above.
+        var reviewedHeadSource = new ActionHostGitHubAuthorizationTransportFactory(
             githubBudget.CreateHeadSourceHandler);
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubBudget.CreateHandler);
@@ -45,6 +50,7 @@ internal static class TrustedProofPayloadComposition
             ports.TimeProvider,
             ports.StagingParentFactory,
             new PostAcceptanceInlinePublisherHook(publisher),
-            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance);
+            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance,
+            reviewedHeadSourceFactory: reviewedHeadSource);
     }
 }

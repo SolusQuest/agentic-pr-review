@@ -101461,7 +101461,7 @@ var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
 var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
   capProfile: "apr-r4-artifact-rest-request-budget-v2",
   limits: Object.freeze({
-    maximumTotalAuthenticatedApiRequests: 256,
+    maximumTotalAuthenticatedApiRequests: 512,
     maximumPrimaryRateLimitRequests: 256
   }),
   remainingTailRequired: 0,
@@ -102084,4 +102084,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 76dbace2c2f2ad50b88bbdd51bcd51f058e7cdac32718e41e3babc93beb12073
+// Action source inventory sha256: 93793036444f93d95ce70a4be5020e9ec6d3fe5d8d95765fa38539a222ece162
