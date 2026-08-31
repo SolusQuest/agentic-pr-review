@@ -56,14 +56,38 @@ import fs from 'node:fs';
 const [expectedPath, actualPath] = process.argv.slice(2);
 const expected = JSON.parse(fs.readFileSync(expectedPath, 'utf8'));
 const actual = JSON.parse(fs.readFileSync(actualPath, 'utf8'));
-const keys = [...new Set([...Object.keys(expected), ...Object.keys(actual)])]
-  .filter((key) => JSON.stringify(expected[key]) !== JSON.stringify(actual[key]))
-  .sort();
-const details = keys.map((key) =>
-  typeof expected[key] !== 'object' && typeof actual[key] !== 'object'
-    ? `${key}:${JSON.stringify(expected[key])}->${JSON.stringify(actual[key])}`
-    : key,
-);
+const maximumDetails = 256;
+const details = [];
+const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const encode = (value) => {
+  if (value === undefined) return '<missing>';
+  const encoded = JSON.stringify(value);
+  return encoded.length <= 160 ? encoded : `${encoded.slice(0, 157)}...`;
+};
+const visit = (left, right, location) => {
+  if (same(left, right) || details.length >= maximumDetails) return;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) {
+      details.push(`${location}.length:${left.length}->${right.length}`);
+    }
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+      visit(left[index], right[index], `${location}[${index}]`);
+    }
+    return;
+  }
+  if (
+    left !== null && right !== null &&
+    typeof left === 'object' && typeof right === 'object' &&
+    !Array.isArray(left) && !Array.isArray(right)
+  ) {
+    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+    for (const key of keys) visit(left[key], right[key], location ? `${location}.${key}` : key);
+    return;
+  }
+  details.push(`${location}:${encode(left)}->${encode(right)}`);
+};
+visit(expected, actual, '');
+if (!same(expected, actual) && details.length === maximumDetails) details.push('<truncated>');
 process.stderr.write(`APR_ACTION_HOST_FRAMEWORK_EVIDENCE_MISMATCH ${details.join(',')}\n`);
 NODE
     fi
