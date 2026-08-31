@@ -24,8 +24,10 @@ internal static class TrustedProofVerifierControl
         }
 
         var scenarioRoot = Directory.GetCurrentDirectory();
+        var primaryBucket = FrameworkPrimaryRateLimitBucket.OpenForScenario(
+            scenarioRoot);
         var requestBudget = new TrustedProofControlRequestBudget(
-            remainingTailGuard: requestBudgetProfile.RemainingTailGuard);
+            remainingTailGuard: requestBudgetProfile.ControlRemainingTailGuard(args));
         try
         {
             return await TrustedProofControlService.RunAsync(
@@ -39,7 +41,9 @@ internal static class TrustedProofVerifierControl
                             "control",
                             new FrameworkGitHubHandler(
                                 scenarioRoot,
-                                coordinates.PayloadSha256)),
+                                coordinates.PayloadSha256,
+                                observePrimaryRemaining:
+                                    primaryBucket.ObserveAsync)),
                         requestBudget),
                     CancellationToken.None)
                 .ConfigureAwait(false);

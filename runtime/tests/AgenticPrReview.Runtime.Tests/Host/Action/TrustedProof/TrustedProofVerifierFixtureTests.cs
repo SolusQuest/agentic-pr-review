@@ -18,6 +18,40 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
 public sealed class TrustedProofVerifierFixtureTests
 {
+    [Fact]
+    public async Task SyntheticPrimaryBucketIsSharedAcrossScenarioInstances()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-shared-primary-" + Guid.NewGuid().ToString("N"));
+        var evidence = Path.Join(root, "evidence");
+        var firstScenario = Path.Join(evidence, "first");
+        var secondScenario = Path.Join(evidence, "second");
+        Directory.CreateDirectory(firstScenario);
+        Directory.CreateDirectory(secondScenario);
+        try
+        {
+            using var owner = FrameworkPrimaryRateLimitBucket.Initialize(
+                evidence, 64);
+            var first = FrameworkPrimaryRateLimitBucket.OpenForScenario(
+                firstScenario);
+            var second = FrameworkPrimaryRateLimitBucket.OpenForScenario(
+                secondScenario);
+            var observations = await Task.WhenAll(Enumerable.Range(0, 32)
+                .Select(index => (index % 2 == 0 ? first : second)
+                    .ObserveAsync(charged: true, CancellationToken.None)
+                    .AsTask()));
+
+            Assert.Equal(Enumerable.Range(32, 32), observations.Order());
+            Assert.Equal(32, owner.ReadRemaining());
+            Assert.Equal(32, await first.ObserveAsync(charged: false,
+                CancellationToken.None));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("dispatch-bootstrap", 1)]
     [InlineData("dispatch-continuation", 2)]

@@ -1377,7 +1377,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             launch, StringComparison.Ordinal);
         Assert.Contains("if (spec.TrustedProofPayload)\n        {\n" +
             "            info.Environment[\"AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE\"] =\n" +
-            "                \"final\";\n        }",
+            "                RequestBudgetProfile(spec);\n        }",
             launch, StringComparison.Ordinal);
     }
 

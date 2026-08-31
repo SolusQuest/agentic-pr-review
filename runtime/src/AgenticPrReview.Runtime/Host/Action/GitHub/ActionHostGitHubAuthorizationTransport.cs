@@ -415,7 +415,8 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
-            var rateLimit = ActionHostGitHubRateLimitClassifier.Classify(response);
+            var rateLimit = await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return ActionHostGitHubResult<T>.Failed(

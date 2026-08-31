@@ -997,7 +997,7 @@ internal static class FrameworkSupervisor
         info.Environment["ACTION_SOURCE_SHA"] = LaunchActionSourceSha(spec);
         info.Environment["PAYLOAD_SHA256"] = Sha256(payload);
         info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
-            "final";
+            RequestBudgetProfile(spec);
         info.Environment["RUN_ID"] = RunId(spec).ToString(
             CultureInfo.InvariantCulture);
         info.Environment["RUN_ATTEMPT"] = "1";
@@ -1148,11 +1148,15 @@ internal static class FrameworkSupervisor
                 requiredSourceExpectation.SourceTree);
         var requestBudgetValid = await VerifyTrustedProofRequestBudgetAsync(
             root, repository, cases).ConfigureAwait(false);
+        var sharedPrimaryRemaining = platform.PrimaryRemaining;
+        var sharedPrimaryBucketValid = sharedPrimaryRemaining ==
+            SyntheticOfficialPlatform.FrozenFinalPrimaryRemaining;
         var authorityExact = payloadCases.All(result =>
             TrustedProofAuthorityIsExact(root, result.Name,
                 requiredSourceExpectation.SourceCommit));
         var passed = cases.All(result => result.Passed) &&
-            compiledIdentityValid && requestBudgetValid && authorityExact;
+            compiledIdentityValid && requestBudgetValid && authorityExact &&
+            sharedPrimaryBucketValid;
         var evidence = FrameworkJson.Object(
             ("passed", passed),
             ("verifier_executable_sha256", Sha256(payload)),
@@ -1164,6 +1168,10 @@ internal static class FrameworkSupervisor
             ("fixture_base_sha", requiredSourceExpectation.SourceCommit),
             ("trusted_authority_exact", authorityExact),
             ("trusted_proof_request_budget_satisfied", requestBudgetValid),
+            ("shared_primary_bucket_start",
+                SyntheticOfficialPlatform.SyntheticPrimaryLimit),
+            ("shared_primary_bucket_end", sharedPrimaryRemaining),
+            ("shared_primary_bucket_exact", sharedPrimaryBucketValid),
             ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
         await File.WriteAllTextAsync(
             Path.Join(root, "trusted-proof-payload-evidence.json"),
@@ -1629,8 +1637,9 @@ internal static class FrameworkSupervisor
         await File.WriteAllBytesAsync(Path.Join(root,
             "trusted-proof-request-budget-evidence.json"), actualBytes)
             .ConfigureAwait(false);
-        return payloadReceipts.All(receipt =>
-                PayloadRequestBudgetReceiptIsExact(receipt!, payloadMaximum)) &&
+        return payloadReceipts.Select((receipt, index) =>
+                PayloadRequestBudgetReceiptIsExact(receipt!, payloadMaximum,
+                    selected[index]!.Name)).All(value => value) &&
             selected.Select((result, index) =>
                 ArtifactRestRequestBudgetReceiptIsExact(
                     artifactReceipts[index]!,
@@ -1640,20 +1649,23 @@ internal static class FrameworkSupervisor
                     result.ArtifactRestPrimary,
                     result.ArtifactRestSecondaryPoints,
                     result.AnonymousSignedDownloads)).All(value => value) &&
-            embeddedControlReceipts.All(receipt => receipt is not null &&
-                ControlRequestBudgetReceiptIsExact(receipt)) &&
+            embeddedControlReceipts.Select((receipt, index) => receipt is not null &&
+                ControlRequestBudgetReceiptIsExact(receipt,
+                    selected[index]!.Name)).All(value => value) &&
             protectedExternalControlReceipts.Select((receipts, index) =>
                 receipts.Length == 1 && receipts[0].Phase ==
                     RequiredProtectedExternalControlPhase(selected[index]!.Name))
                 .All(value => value) &&
-            protectedExternalControlReceipts.All(receipts =>
-                receipts.All(ControlExternalReceiptIsExact)) &&
+            protectedExternalControlReceipts.Select((receipts, index) =>
+                receipts.All(receipt => ControlExternalReceiptIsExact(receipt,
+                    selected[index]!.Name))).All(value => value) &&
             postOperationCleanupReceipts.Select((receipts, index) =>
                 selected[index]!.Name == "dispatch-continuation"
                     ? receipts.Length == 1
                     : receipts.Length == 0).All(value => value) &&
-            postOperationCleanupReceipts.All(receipts =>
-                receipts.All(ControlExternalReceiptIsExact)) &&
+            postOperationCleanupReceipts.Select((receipts, index) =>
+                receipts.All(receipt => ControlExternalReceiptIsExact(receipt,
+                    selected[index]!.Name))).All(value => value) &&
             operationEvents.ShapeValid &&
             operationEvents.NodeWindowValid &&
             operationEvents.AllWindowValid &&
@@ -1680,7 +1692,8 @@ internal static class FrameworkSupervisor
         };
 
     private static bool ControlExternalReceiptIsExact(
-        FrameworkExternalControlRequestBudgetReceipt receipt) =>
+        FrameworkExternalControlRequestBudgetReceipt receipt,
+        string scenarioName) =>
         receipt.Consumed >= 0 && receipt.Consumed <= receipt.Limit &&
         receipt.Limit == 64 && receipt.Primary >= 0 &&
         receipt.NotModified >= 0 && receipt.Primary + receipt.NotModified ==
@@ -1690,15 +1703,20 @@ internal static class FrameworkSupervisor
         receipt.PrimaryRateLimited == 0 &&
         receipt.SecondaryRateLimited == 0 &&
         receipt.CombinedRateLimited == 0 &&
-        !receipt.InvalidRemainingHeader && RemainingTailProfileIsExact(receipt) &&
+        !receipt.InvalidRemainingHeader && RemainingTailProfileIsExact(receipt,
+            scenarioName) &&
         !receipt.RateLimited;
 
     private static bool RemainingTailProfileIsExact(
-        FrameworkExternalControlRequestBudgetReceipt receipt) => receipt.MeasurementOnly
+        FrameworkExternalControlRequestBudgetReceipt receipt,
+        string scenarioName) => receipt.MeasurementOnly
         ? receipt.RemainingTailReserve ==
             TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.RemainingTailRequired == 0
-        : FrozenTailReceiptIsExact(TrustedProofRequestDomain.TrustedControlRest,
+        : FrozenTailReceiptIsExact(scenarioName,
+            receipt.Phase == "cleanup" ? TrustedProofRequestBudgetLane.CleanupControl :
+                TrustedProofRequestBudgetLane.ExternalControl,
+            TrustedProofRequestDomain.TrustedControlRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve);
 
     // These exact role totals are frozen from two byte-identical clean AOT
@@ -1759,6 +1777,7 @@ internal static class FrameworkSupervisor
             "trusted_control_rest",
         };
         return TrustedProofRequestBudgetProfile.TryGetFrozenTailProfile(
+                "final-bootstrap", TrustedProofRequestBudgetLane.ExternalControl,
                 out var frozen, out var reserve) &&
             observed.Count == domains.Length && domains.All(observed.ContainsKey) &&
             domains.All(domain => observed[domain] >= 0 &&
@@ -1994,7 +2013,7 @@ internal static class FrameworkSupervisor
         if (spec.TrustedProofPayload)
         {
             info.Environment["AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"] =
-                "final";
+                RequestBudgetProfile(spec);
         }
         info.Environment["INPUT_GITHUB-TOKEN"] = FrameworkCanaries.GitHubToken;
         info.Environment["INPUT_PROVIDER-API-KEY"] = spec.MissingProvider
@@ -2052,6 +2071,15 @@ internal static class FrameworkSupervisor
         "cancel-escalation" => 928,
         "host-crash" => 929,
         _ => throw new InvalidOperationException(),
+    };
+
+    private static string RequestBudgetProfile(CaseSpec spec) => spec.Name switch
+    {
+        "dispatch-bootstrap" => "final-bootstrap",
+        "dispatch-continuation" => "final-continuation",
+        "stale-head" => "final-stale",
+        _ => throw new InvalidOperationException(
+            "trusted_proof_request_budget_phase_unfrozen"),
     };
 
     private static string Event(CaseSpec spec)
@@ -4938,7 +4966,7 @@ internal static class FrameworkSupervisor
         int anonymousSignedDownloads) =>
         TryReadTrustedProofRequestBudgetReceipt(scenario) is { } payload &&
         PayloadRequestBudgetReceiptIsExact(payload,
-            payload.AuthenticatedRestLimit) &&
+            payload.AuthenticatedRestLimit, Path.GetFileName(scenario)) &&
         TryReadArtifactRestRequestBudgetReceipt(scenario) is { } artifact &&
         ArtifactRestRequestBudgetReceiptIsExact(
             artifact,
@@ -4949,11 +4977,12 @@ internal static class FrameworkSupervisor
             artifactRestSecondaryPoints,
             anonymousSignedDownloads) &&
         TryReadEmbeddedControlRequestBudgetReceipt(scenario) is { } control &&
-        ControlRequestBudgetReceiptIsExact(control);
+        ControlRequestBudgetReceiptIsExact(control, Path.GetFileName(scenario));
 
     private static bool PayloadRequestBudgetReceiptIsExact(
         FrameworkRequestBudgetReceipt receipt,
-        int maximum) =>
+        int maximum,
+        string scenarioName) =>
         receipt.AuthenticatedRestRequests <= maximum &&
         receipt.AuthenticatedRestLimit == maximum &&
         receipt.HostHeadSourceRaw >= 0 && receipt.HostOtherGitHubRaw >= 0 &&
@@ -4982,7 +5011,7 @@ internal static class FrameworkSupervisor
         !receipt.InvalidRemainingHeader &&
         !receipt.TerminalRateLimited &&
         !receipt.LowRemainingGuard &&
-        RemainingTailProfileIsExact(receipt) &&
+        RemainingTailProfileIsExact(receipt, scenarioName) &&
         receipt.AnonymousCodeloadRequests == 1 &&
         receipt.AnonymousCodeloadLimit == 1 &&
         receipt.RejectedRequests == 0;
@@ -5025,7 +5054,9 @@ internal static class FrameworkSupervisor
         receipt.Disposition == "active" &&
         receipt.CapProfile == "apr-r4-artifact-rest-request-budget-v2" &&
         !receipt.MeasurementOnly &&
-        FrozenTailReceiptIsExact(TrustedProofRequestDomain.NodeArtifactRest,
+        FrozenTailReceiptIsExact(Path.GetFileName(scenario),
+            TrustedProofRequestBudgetLane.Host,
+            TrustedProofRequestDomain.NodeArtifactRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve) &&
         artifactRestRequests == receipt.TotalAuthenticatedApiRequests &&
         artifactRestNotModified == receipt.ConditionalNotModifiedRequests &&
@@ -5059,7 +5090,8 @@ internal static class FrameworkSupervisor
             "apr-r4-artifact-rest-request-budget-v2");
 
     private static bool ControlRequestBudgetReceiptIsExact(
-        FrameworkControlRequestBudgetReceipt receipt) =>
+        FrameworkControlRequestBudgetReceipt receipt,
+        string scenarioName) =>
         receipt.Consumed >= 0 && receipt.Consumed <= receipt.Limit &&
         receipt.Limit == 64 &&
         receipt.Primary >= 0 && receipt.NotModified >= 0 &&
@@ -5071,36 +5103,57 @@ internal static class FrameworkSupervisor
         receipt.SecondaryRateLimited == 0 &&
         receipt.CombinedRateLimited == 0 &&
         !receipt.InvalidRemainingHeader &&
-        RemainingTailProfileIsExact(receipt) &&
+        RemainingTailProfileIsExact(receipt, scenarioName) &&
         !receipt.RateLimited;
 
     private static bool RemainingTailProfileIsExact(
-        FrameworkRequestBudgetReceipt receipt) => receipt.MeasurementOnly
+        FrameworkRequestBudgetReceipt receipt,
+        string scenarioName) => receipt.MeasurementOnly
         ? receipt.RemainingTailReserve ==
             TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.HostHeadSourceRemainingTailRequired == 0 &&
             receipt.HostOtherGitHubRemainingTailRequired == 0
-        : FrozenTailReceiptIsExact(TrustedProofRequestDomain.HostHeadSourceRest,
+        : FrozenTailReceiptIsExact(scenarioName,
+                TrustedProofRequestBudgetLane.Host,
+                TrustedProofRequestDomain.HostHeadSourceRest,
                 receipt.HostHeadSourceRemainingTailRequired,
                 receipt.RemainingTailReserve) &&
-            FrozenTailReceiptIsExact(TrustedProofRequestDomain.HostOtherGitHubRest,
+            FrozenTailReceiptIsExact(scenarioName,
+                TrustedProofRequestBudgetLane.Host,
+                TrustedProofRequestDomain.HostOtherGitHubRest,
                 receipt.HostOtherGitHubRemainingTailRequired,
                 receipt.RemainingTailReserve);
 
     private static bool RemainingTailProfileIsExact(
-        FrameworkControlRequestBudgetReceipt receipt) => receipt.MeasurementOnly
+        FrameworkControlRequestBudgetReceipt receipt,
+        string scenarioName) => receipt.MeasurementOnly
         ? receipt.RemainingTailReserve ==
             TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.RemainingTailRequired == 0
-        : FrozenTailReceiptIsExact(TrustedProofRequestDomain.TrustedControlRest,
+        : FrozenTailReceiptIsExact(scenarioName,
+            TrustedProofRequestBudgetLane.Host,
+            TrustedProofRequestDomain.TrustedControlRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve);
 
     private static bool FrozenTailReceiptIsExact(
+        string scenarioName,
+        TrustedProofRequestBudgetLane lane,
         TrustedProofRequestDomain domain,
         int requiredTail,
         int reserve) => TrustedProofRequestBudgetProfile.TryGetFrozenTailProfile(
+            RequestBudgetProfileForScenario(scenarioName), lane,
             out var frozen, out var frozenReserve) && reserve == frozenReserve &&
         frozen[domain] == requiredTail;
+
+    private static string RequestBudgetProfileForScenario(string scenarioName) =>
+        scenarioName switch
+        {
+            "dispatch-bootstrap" => "final-bootstrap",
+            "dispatch-continuation" => "final-continuation",
+            "stale-head" => "final-stale",
+            _ => throw new InvalidOperationException(
+                "trusted_proof_request_budget_phase_unfrozen"),
+        };
 
     private static FrameworkRequestBudgetReceipt?
         TryReadTrustedProofRequestBudgetReceipt(string scenario)

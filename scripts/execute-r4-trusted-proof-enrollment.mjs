@@ -16,6 +16,7 @@ const manifestKeys = Object.freeze([
   'repository_id',
   'repository',
   'pr_number',
+  'proof_scope',
   'fixture_head_sha',
   'operation_id',
   'workflow_sha',
@@ -136,6 +137,7 @@ export function canonicalAuthorizationManifest(value) {
     !/^[1-9][0-9]*$/u.test(value.repository_id) ||
     value.repository !== ENROLLMENT_CONTRACT.repository ||
     !/^(?:225|226)$/u.test(value.pr_number) ||
+    value.proof_scope !== (value.pr_number === '225' ? 'normal' : 'stale') ||
     !hex40.test(value.fixture_head_sha) ||
     !hex64.test(value.operation_id) ||
     value.operation_id !== frozen.operationId ||
@@ -276,6 +278,7 @@ function buildEnrollmentPlan({ coordinates, objects }) {
       repository_id: repositoryId,
       repository: ENROLLMENT_CONTRACT.repository,
       pr_number: fixture.prNumber,
+      proof_scope: scope,
       fixture_head_sha: head,
       operation_id: fixture.operationId,
       workflow_sha: workflowSha,
@@ -574,7 +577,10 @@ function notFound(error) {
   return error?.status === 404 || error?.notFound === true;
 }
 function uncertain(error) {
-  return error?.uncertain === true;
+  return (
+    error?.uncertain === true ||
+    (Number.isSafeInteger(error?.status) && error.status >= 500 && error.status <= 599)
+  );
 }
 function objectTarget(object) {
   return `object:${object.kind}:${object.sha}`;
@@ -642,6 +648,7 @@ function ghError(result) {
   const error = new Error('gh api request failed');
   if (status !== null) {
     error.status = status;
+    if (status >= 500 && status <= 599) error.uncertain = true;
     return error;
   }
   const code = String(result.error?.code ?? '');
@@ -697,6 +704,7 @@ export function createGhTransport({ repository, runGh = spawnSync }) {
     if (parsed.status < 200 || parsed.status >= 300) {
       const error = new Error('gh api request failed');
       error.status = parsed.status;
+      if (parsed.status >= 500 && parsed.status <= 599) error.uncertain = true;
       throw error;
     }
     let response = {};
@@ -1411,6 +1419,16 @@ function validateActionEvents(events, complete) {
   ) {
     return;
   }
+  if (
+    completion.outcome === 'uncertain-reconciled' &&
+    starts.length >= 1 &&
+    terminal.outcome === 'pre-mutation-reconcile' &&
+    results.length === starts.length &&
+    results.every((entry) => entry.outcome === 'uncertain-mutation') &&
+    exactCompletion(terminal, 'uncertain-reconciled')
+  ) {
+    return;
+  }
   fail('journal-mutation-shape');
 }
 function validatePhaseMarker(entry, kind) {
@@ -1739,6 +1757,9 @@ async function runMutationAction({
       outcome: 'pre-mutation-reconcile',
     });
     if (current === expected) {
+      const reconciledUncertain = entries.some(
+        (entry) => entry.kind === 'wire-result' && entry.outcome === 'uncertain-mutation',
+      );
       appendActionComplete({
         directory,
         record,
@@ -1748,7 +1769,7 @@ async function runMutationAction({
         method,
         expected,
         observed: current,
-        outcome: 'reconciled-expected',
+        outcome: reconciledUncertain ? 'uncertain-reconciled' : 'reconciled-expected',
       });
       return;
     }

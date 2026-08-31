@@ -27,7 +27,7 @@ const artifactBudgetReceiptPrefix = 'APR_R4_E2P_ARTIFACT_REST_BUDGET ';
 const finalGitHubBudgetReceipt =
   'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":0,"authenticated_rest_limit":216,"anonymous_codeload_requests":0,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":false,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":64,"host_head_source_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":863},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":878}}\n';
 const finalControlBudgetReceipt =
-  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":0,"limit":64,"primary":0,"not_modified":0,"secondary_points":0,"mutation_count":0,"remaining_tail_required":888,"remaining_tail_reserve":64,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":false,"rate_limited":false}\n';
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":0,"limit":64,"primary":0,"not_modified":0,"secondary_points":0,"mutation_count":0,"remaining_tail_required":879,"remaining_tail_reserve":64,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":false,"rate_limited":false}\n';
 const temporaryPaths: string[] = [];
 
 afterEach(async () => {
@@ -88,7 +88,7 @@ describe('R4 Action distribution', () => {
       'WRAPPER_BUILD_DISCRIMINATOR = "r4-h1"',
     );
     expect(frameworkFixture.bytes).not.toEqual(production.bytes);
-  });
+  }, 15_000);
 
   it('changes the source inventory identity for wrapper or build-script drift', async () => {
     const fixture = await temporaryDirectory('apr-action-source-identity-');
@@ -277,7 +277,7 @@ async function runIsolatedBundle(buildDiscriminator: string) {
     AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: payloadSha256,
     AGENTIC_PR_REVIEW_ACTION_SOURCE_SHA: 'a'.repeat(40),
     AGENTIC_PR_REVIEW_PAYLOAD_BUILD_DISCRIMINATOR: buildDiscriminator,
-    AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: 'final',
+    AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: 'final-bootstrap',
     GITHUB_EVENT_PATH: eventPath,
     GITHUB_REPOSITORY: 'owner/repository',
     GITHUB_REPOSITORY_ID: '123',

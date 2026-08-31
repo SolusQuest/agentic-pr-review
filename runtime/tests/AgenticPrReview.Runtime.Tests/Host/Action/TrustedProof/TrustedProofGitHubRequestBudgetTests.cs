@@ -260,7 +260,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         if (remaining is not null) response.Headers.TryAddWithoutValidation("x-ratelimit-remaining", remaining);
 
         Assert.Equal(Enum.Parse<TrustedProofRateClassification>(expected),
-            TrustedProofOperationRequestAccounting.RateClassify(response));
+            RateClassify(response));
     }
 
     [Fact]
@@ -270,12 +270,12 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         primary.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         primary.Headers.TryAddWithoutValidation("x-ratelimit-reset", "1900000000");
         Assert.Equal(TrustedProofRateClassification.Primary,
-            TrustedProofOperationRequestAccounting.RateClassify(primary));
+            RateClassify(primary));
 
         using var secondary = new HttpResponseMessage(HttpStatusCode.Forbidden);
         secondary.Headers.TryAddWithoutValidation("retry-after", "1");
         Assert.Equal(TrustedProofRateClassification.Secondary,
-            TrustedProofOperationRequestAccounting.RateClassify(secondary));
+            RateClassify(secondary));
 
         using var bodyOnlySecondary = new HttpResponseMessage(HttpStatusCode.Forbidden)
         {
@@ -283,7 +283,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             Content = JsonError("You have exceeded a secondary rate limit."),
         };
         Assert.Equal(TrustedProofRateClassification.Secondary,
-            TrustedProofOperationRequestAccounting.RateClassify(bodyOnlySecondary));
+            RateClassify(bodyOnlySecondary));
 
         using var bodyOnlySecondary429 = new HttpResponseMessage(
             HttpStatusCode.TooManyRequests)
@@ -291,7 +291,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             Content = JsonError("You have exceeded a secondary rate limit."),
         };
         Assert.Equal(TrustedProofRateClassification.Secondary,
-            TrustedProofOperationRequestAccounting.RateClassify(bodyOnlySecondary429));
+            RateClassify(bodyOnlySecondary429));
 
         using var reasonPhraseOnly = new HttpResponseMessage(HttpStatusCode.Forbidden)
         {
@@ -299,14 +299,14 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             Content = new ByteArrayContent([]),
         };
         Assert.Equal(TrustedProofRateClassification.Permission,
-            TrustedProofOperationRequestAccounting.RateClassify(reasonPhraseOnly));
+            RateClassify(reasonPhraseOnly));
 
         using var combined = new HttpResponseMessage(HttpStatusCode.Forbidden);
         combined.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         combined.Headers.TryAddWithoutValidation("x-ratelimit-reset", "1900000000");
         combined.Headers.TryAddWithoutValidation("retry-after", "1");
         Assert.Equal(TrustedProofRateClassification.Combined,
-            TrustedProofOperationRequestAccounting.RateClassify(combined));
+            RateClassify(combined));
 
         using var bodyCombined = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
         {
@@ -315,91 +315,91 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         bodyCombined.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         bodyCombined.Headers.TryAddWithoutValidation("x-ratelimit-reset", "1900000000");
         Assert.Equal(TrustedProofRateClassification.Combined,
-            TrustedProofOperationRequestAccounting.RateClassify(bodyCombined));
+            RateClassify(bodyCombined));
 
         using var ordinarySuccess = new HttpResponseMessage(HttpStatusCode.OK);
         ordinarySuccess.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         ordinarySuccess.Headers.TryAddWithoutValidation("x-ratelimit-reset", "1900000000");
         Assert.Equal(TrustedProofRateClassification.None,
-            TrustedProofOperationRequestAccounting.RateClassify(ordinarySuccess));
+            RateClassify(ordinarySuccess));
 
         using var successBodySecondary = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = JsonError("You have exceeded a secondary rate limit."),
         };
         Assert.Equal(TrustedProofRateClassification.None,
-            TrustedProofOperationRequestAccounting.RateClassify(successBodySecondary));
+            RateClassify(successBodySecondary));
 
         using var ordinaryNotModified = new HttpResponseMessage(HttpStatusCode.NotModified);
         ordinaryNotModified.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         ordinaryNotModified.Headers.TryAddWithoutValidation("x-ratelimit-reset", "1900000000");
         Assert.Equal(TrustedProofResponseClass.NotModified,
-            TrustedProofOperationRequestAccounting.ResponseClassify(ordinaryNotModified));
+            ResponseClassify(ordinaryNotModified));
 
         using var notModifiedBodySecondary = new HttpResponseMessage(HttpStatusCode.NotModified)
         {
             Content = JsonError("You have exceeded a secondary rate limit."),
         };
         Assert.Equal(TrustedProofResponseClass.NotModified,
-            TrustedProofOperationRequestAccounting.ResponseClassify(notModifiedBodySecondary));
+            ResponseClassify(notModifiedBodySecondary));
 
         using var malformed = new HttpResponseMessage(HttpStatusCode.OK);
         malformed.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "not-a-number");
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(malformed));
+            RateClassify(malformed));
 
         using var unrelatedRetryAfter = new HttpResponseMessage(HttpStatusCode.OK);
         unrelatedRetryAfter.Headers.TryAddWithoutValidation("retry-after", "1");
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(unrelatedRetryAfter));
+            RateClassify(unrelatedRetryAfter));
 
         using var malformedRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
         malformedRetryAfter.Headers.TryAddWithoutValidation("retry-after", "not-a-delay");
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(malformedRetryAfter));
+            RateClassify(malformedRetryAfter));
 
         using var duplicateReset = new HttpResponseMessage(HttpStatusCode.Forbidden);
         duplicateReset.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         duplicateReset.Headers.TryAddWithoutValidation("x-ratelimit-reset",
             new[] { "1900000000", "1900000001" });
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(duplicateReset));
+            RateClassify(duplicateReset));
 
         using var overflowReset = new HttpResponseMessage(HttpStatusCode.Forbidden);
         overflowReset.Headers.TryAddWithoutValidation("x-ratelimit-reset",
             "999999999999999999999999999999999");
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(overflowReset));
+            RateClassify(overflowReset));
 
         using var pastReset = new HttpResponseMessage(HttpStatusCode.Forbidden);
         pastReset.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         pastReset.Headers.TryAddWithoutValidation("x-ratelimit-reset", "1");
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(pastReset));
+            RateClassify(pastReset));
 
         using var resetWithoutRemaining = new HttpResponseMessage(HttpStatusCode.OK);
         resetWithoutRemaining.Headers.TryAddWithoutValidation(
             "x-ratelimit-reset", "1900000000");
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(
+            RateClassify(
                 resetWithoutRemaining));
 
         using var malformed304 = new HttpResponseMessage(HttpStatusCode.NotModified);
         malformed304.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "broken");
         Assert.Equal(TrustedProofResponseClass.InvalidRateHeaders,
-            TrustedProofOperationRequestAccounting.ResponseClassify(malformed304));
+            ResponseClassify(malformed304));
 
         using var contradictory304 = new HttpResponseMessage(HttpStatusCode.NotModified);
         contradictory304.Headers.TryAddWithoutValidation("retry-after", "1");
         Assert.Equal(TrustedProofResponseClass.InvalidRateHeaders,
-            TrustedProofOperationRequestAccounting.ResponseClassify(contradictory304));
+            ResponseClassify(contradictory304));
 
         using var oversizedMessage = new HttpResponseMessage(HttpStatusCode.Forbidden)
         {
             Content = JsonError(new string('x', 513)),
         };
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(oversizedMessage));
+            RateClassify(oversizedMessage));
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         contradictoryLimit.Headers.TryAddWithoutValidation("x-ratelimit-limit", "2");
         contradictoryLimit.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "3");
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(contradictoryLimit));
+            RateClassify(contradictoryLimit));
 
         foreach (var (message, expected) in new[]
         {
@@ -433,24 +433,74 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 Content = JsonError(message),
             };
             Assert.Equal(expected,
-                TrustedProofOperationRequestAccounting.RateClassify(response));
+                RateClassify(response));
         }
     }
 
     [Fact]
-    public async Task UnknownLengthOversizedRateLimitBodyIsNotConsumedOrTruncated()
+    public async Task UnknownLengthOversizedRateLimitBodyIsReadOnlyToTheBoundAndRejected()
     {
         var body = Encoding.UTF8.GetBytes("{\"message\":\"" +
             new string('x', 4 * 1024) + "\"}");
+        var stream = new NonSeekableCountingReadStream(body);
+        using var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StreamContent(stream),
+        };
+
+        Assert.Null(response.Content.Headers.ContentLength);
+        Assert.Equal(ActionHostGitHubRateLimitClassification.Invalid,
+            await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, CancellationToken.None));
+        Assert.Equal(ActionHostGitHubRateLimitClassifier.MaximumErrorBodyBytes + 1,
+            stream.BytesRead);
+    }
+
+    [Fact]
+    public async Task UnknownLengthBoundedRateLimitBodyIsClassifiedAndPreserved()
+    {
+        var body = Encoding.UTF8.GetBytes(
+            "{\"message\":\"You have exceeded a secondary rate limit.\"}");
         using var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
         {
             Content = new UnknownLengthContent(body),
         };
 
-        Assert.Null(response.Content.Headers.ContentLength);
-        Assert.Equal(TrustedProofRateClassification.Permission,
-            TrustedProofOperationRequestAccounting.RateClassify(response));
+        Assert.Equal(ActionHostGitHubRateLimitClassification.Secondary,
+            await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, CancellationToken.None));
         Assert.Equal(body, await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [Fact]
+    public async Task DeclaredLengthTruncationIsRejectedWithoutReplacingContent()
+    {
+        var body = Encoding.UTF8.GetBytes("{\"message\":\"short\"}");
+        using var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new DeclaredLengthContent(body, body.Length + 1),
+        };
+
+        var original = response.Content;
+        Assert.Equal(ActionHostGitHubRateLimitClassification.Invalid,
+            await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, CancellationToken.None));
+        Assert.Same(original, response.Content);
+    }
+
+    [Fact]
+    public async Task RateLimitBodyReadHonorsOperationCancellation()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StreamContent(new CancellationAwareBlockingStream()),
+        };
+        using var cancellation = new CancellationTokenSource(
+            TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellation.Token));
     }
 
     [Theory]
@@ -466,7 +516,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         };
 
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(response));
+            RateClassify(response));
     }
 
     [Theory]
@@ -484,7 +534,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         response.Content.Headers.ContentType = new("application/json");
 
         Assert.Equal(TrustedProofRateClassification.InvalidRemaining,
-            TrustedProofOperationRequestAccounting.RateClassify(response));
+            RateClassify(response));
         Assert.Equal(original, await response.Content.ReadAsByteArrayAsync());
     }
 
@@ -504,7 +554,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             response.Headers.TryAddWithoutValidation("x-ratelimit-reset",
                 (now + delta).ToString(System.Globalization.CultureInfo.InvariantCulture));
             Assert.Equal(expected,
-                TrustedProofOperationRequestAccounting.RateClassify(response, now));
+                RateClassify(response, now));
         }
 
         var control = new TrustedProofControlRequestBudget(
@@ -512,7 +562,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         using var atBoundary = new HttpResponseMessage(HttpStatusCode.Forbidden);
         atBoundary.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
         atBoundary.Headers.TryAddWithoutValidation("x-ratelimit-reset", now.ToString());
-        control.Observe(atBoundary, HttpMethod.Get);
+        Observe(control, atBoundary, HttpMethod.Get);
         using var receipt = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
         control.WriteReceipt(receipt);
         using var document = JsonDocument.Parse(receipt.ToString()[
@@ -574,7 +624,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
     {
         var permission = new TrustedProofControlRequestBudget(2);
         using var denied = new HttpResponseMessage(HttpStatusCode.Forbidden);
-        permission.Observe(denied, HttpMethod.Get);
+        Observe(permission, denied, HttpMethod.Get);
         Assert.False(permission.IsRateLimited);
         Assert.True(permission.TryClaim(out var permissionLease));
         permissionLease!.Ledger.AbortBeforeWire(permissionLease);
@@ -582,20 +632,20 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         var malformed = new TrustedProofControlRequestBudget(2);
         using var response = new HttpResponseMessage(HttpStatusCode.OK);
         response.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "not-a-number");
-        malformed.Observe(response, HttpMethod.Get);
+        Observe(malformed, response, HttpMethod.Get);
         Assert.True(malformed.IsRateLimited);
         Assert.False(malformed.TryClaim(out _));
 
         var lowRemaining = new TrustedProofControlRequestBudget(2);
         using var success = new HttpResponseMessage(HttpStatusCode.OK);
         success.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "1");
-        lowRemaining.Observe(success, HttpMethod.Get);
+        Observe(lowRemaining, success, HttpMethod.Get);
         Assert.False(lowRemaining.TryClaim(out _));
 
         var oneRequestAbove = new TrustedProofControlRequestBudget(2);
         using var sufficient = new HttpResponseMessage(HttpStatusCode.OK);
         sufficient.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "2");
-        oneRequestAbove.Observe(sufficient, HttpMethod.Get);
+        Observe(oneRequestAbove, sufficient, HttpMethod.Get);
         Assert.True(oneRequestAbove.TryClaim(out var sufficientLease));
         sufficientLease!.Ledger.AbortBeforeWire(sufficientLease);
     }
@@ -655,6 +705,83 @@ public sealed class TrustedProofGitHubRequestBudgetTests
     }
 
     [Fact]
+    public async Task FrozenTailAdvancesAcrossADecreasingPrimaryBucket()
+    {
+        var sent = 0;
+        var remaining = 5;
+        var guard = Guard(reserve: 1, otherTail: 3);
+        var budget = new TrustedProofGitHubRequestBudget(4, 1,
+            () => new ResponseHandler(() => RemainingResponse(
+                Interlocked.Decrement(ref remaining).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture))),
+            guard);
+        using var client = new HttpClient(budget.CreateOtherGitHubHandler());
+
+        for (var index = 0; index < 4; index++)
+        {
+            using var response = await client.SendAsync(
+                ApiRequest($"/repos/o/r/issues/{index + 1}"));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            sent++;
+        }
+
+        Assert.Equal(4, sent);
+        Assert.False(budget.IsRateLimited);
+        Assert.Equal(0, budget.Snapshot().RejectedRequests);
+    }
+
+    [Fact]
+    public async Task NotModifiedDoesNotAdvanceTheProtectedPrimaryTail()
+    {
+        var sent = 0;
+        var guard = Guard(reserve: 1, otherTail: 2);
+        var budget = new TrustedProofGitHubRequestBudget(4, 1,
+            () => new ResponseHandler(() => Interlocked.Increment(ref sent) switch
+            {
+                1 => RemainingResponse("3"),
+                2 => RemainingResponse("3", HttpStatusCode.NotModified),
+                3 => RemainingResponse("2"),
+                _ => RemainingResponse("1"),
+            }), guard);
+        using var client = new HttpClient(budget.CreateOtherGitHubHandler());
+
+        using var first = await client.SendAsync(ApiRequest("/repos/o/r"));
+        using var notModified = await client.SendAsync(ApiRequest("/repos/o/r/issues/1"));
+        using var third = await client.SendAsync(ApiRequest("/repos/o/r/issues/2"));
+        using var fourth = await client.SendAsync(ApiRequest("/repos/o/r/issues/3"));
+        using var rejected = await client.SendAsync(ApiRequest("/repos/o/r/issues/4"));
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.NotModified, notModified.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, third.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, fourth.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.Equal(4, sent);
+    }
+
+    [Fact]
+    public async Task LowRemainingClosesOnlyFutureDispatchAndPreservesCurrentSuccess()
+    {
+        var sent = 0;
+        var guard = Guard(reserve: 1, otherTail: 3);
+        var budget = new TrustedProofGitHubRequestBudget(2, 1,
+            () => new ResponseHandler(() =>
+            {
+                Interlocked.Increment(ref sent);
+                return RemainingResponse("3");
+            }), guard);
+        using var client = new HttpClient(budget.CreateOtherGitHubHandler());
+
+        using var current = await client.SendAsync(ApiRequest("/repos/o/r"));
+        using var next = await client.SendAsync(ApiRequest("/repos/o/r/issues/1"));
+
+        Assert.Equal(HttpStatusCode.OK, current.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, next.StatusCode);
+        Assert.Equal(1, sent);
+        Assert.True(budget.IsRateLimited);
+    }
+
+    [Fact]
     public void RemainingGuardAllowsExactTailAndReserveButRejectsOneRequestBelow()
     {
         var tails = new Dictionary<TrustedProofRequestDomain, int>
@@ -693,7 +820,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.True(control.TryClaim(out var controlLease));
         using var controlResponse = RemainingResponse("1");
-        control.Observe(controlResponse, HttpMethod.Get, controlLease);
+        Observe(control, controlResponse, HttpMethod.Get, controlLease);
 
         using var rejected = await client.SendAsync(ApiRequest("/repos/o/r/issues/1"));
         Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
@@ -724,7 +851,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         Assert.Equal(HttpStatusCode.OK, other.StatusCode);
         Assert.True(control.TryClaim(out var controlLease));
         using var controlResponse = RemainingResponse("1");
-        control.Observe(controlResponse, HttpMethod.Get, controlLease);
+        Observe(control, controlResponse, HttpMethod.Get, controlLease);
 
         using var rejected = await headClient.SendAsync(ApiRequest(
             "/repos/o/r/git/trees/" + new string('a', 40)));
@@ -922,9 +1049,15 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 TrustedProofRequestDomain.HostOtherGitHubRest, guard);
         }
 
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var third));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var fourth));
         Assert.False(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
             guard, out _));
         Assert.True(ledger.IsClosed);
+        ledger.AbortBeforeWire(third!);
+        ledger.AbortBeforeWire(fourth!);
     }
 
     [Fact]
@@ -947,10 +1080,16 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 TrustedProofRequestDomain.HostOtherGitHubRest, guard);
         }
 
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var third));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var fourth));
         Assert.False(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
             guard, out _));
         Assert.Equal(TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining,
             ledger.CloseReason);
+        ledger.AbortBeforeWire(third!);
+        ledger.AbortBeforeWire(fourth!);
     }
 
     [Fact]
@@ -1056,7 +1195,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             out var measurement));
         Assert.True(measurement!.MeasurementOnly);
         Assert.Equal(TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve,
-            measurement.RemainingTailGuard.Reserve);
+            measurement.HostRemainingTailGuard.Reserve);
         Assert.All(new[]
         {
             TrustedProofRequestDomain.NodeArtifactRest,
@@ -1064,22 +1203,24 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             TrustedProofRequestDomain.HostOtherGitHubRest,
             TrustedProofRequestDomain.TrustedControlRest,
         }, domain => Assert.Equal(0,
-            measurement.RemainingTailGuard.RequiredTail(domain)));
+            measurement.HostRemainingTailGuard.RequiredTail(domain)));
 
         Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
             name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
-                ? "final" : null,
+                ? "final-bootstrap" : null,
             out var final));
         Assert.False(final!.MeasurementOnly);
         Assert.Equal(TrustedProofOperationRequestAccounting.OperationPrimaryReserve,
-            final.RemainingTailGuard.Reserve);
-        Assert.Equal(679, final.RemainingTailGuard.RequiredTail(
+            final.HostRemainingTailGuard.Reserve);
+        Assert.Equal(679, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.NodeArtifactRest));
-        Assert.Equal(863, final.RemainingTailGuard.RequiredTail(
+        Assert.Equal(863, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.HostHeadSourceRest));
-        Assert.Equal(878, final.RemainingTailGuard.RequiredTail(
+        Assert.Equal(878, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.HostOtherGitHubRest));
-        Assert.Equal(888, final.RemainingTailGuard.RequiredTail(
+        Assert.Equal(879, final.HostRemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.TrustedControlRest));
+        Assert.Equal(888, final.ExternalControlRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.TrustedControlRest));
 
         Assert.False(TrustedProofRequestBudgetProfile.TrySelectProduction(
@@ -1093,6 +1234,164 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         Assert.Null(invalid);
     }
 
+    [Theory]
+    [InlineData("final-bootstrap", 679, 863, 878, 879, 888, 888)]
+    [InlineData("final-continuation", 393, 577, 591, 592, 597, 242)]
+    [InlineData("final-stale", 26, 210, 224, 225, 234, 234)]
+    public void FrozenProfilesBindEveryStageAndProcessLane(
+        string requested,
+        int node,
+        int head,
+        int other,
+        int embeddedControl,
+        int externalControl,
+        int cleanupControl)
+    {
+        Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
+            name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
+                ? requested : null,
+            out var profile));
+        Assert.Equal(node, profile!.HostRemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.NodeArtifactRest));
+        Assert.Equal(head, profile.HostRemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.HostHeadSourceRest));
+        Assert.Equal(other, profile.HostRemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.HostOtherGitHubRest));
+        Assert.Equal(embeddedControl, profile.HostRemainingTailGuard.RequiredTail(
+            TrustedProofRequestDomain.TrustedControlRest));
+        Assert.Equal(externalControl,
+            profile.ExternalControlRemainingTailGuard.RequiredTail(
+                TrustedProofRequestDomain.TrustedControlRest));
+        Assert.Equal(cleanupControl,
+            profile.CleanupControlRemainingTailGuard.RequiredTail(
+                TrustedProofRequestDomain.TrustedControlRest));
+    }
+
+    [Theory]
+    [InlineData("661", false)]
+    [InlineData("660", true)]
+    public void ContinuationExternalFirstResponsePreservesTheExactLowStartBoundary(
+        string remaining,
+        bool closes)
+    {
+        Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
+            name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
+                ? "final-continuation" : null,
+            out var profile));
+        var guard = profile!.ExternalControlRemainingTailGuard;
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.TrustedControlRest,
+            guard, out var lease));
+        using var response = RemainingResponse(remaining);
+
+        ledger.Observe(lease, response, TrustedProofResponseClass.Success,
+            TrustedProofRequestDomain.TrustedControlRest, guard);
+
+        Assert.Equal(closes, ledger.IsClosed);
+        if (!closes)
+        {
+            Assert.True(ledger.TryLease(
+                TrustedProofRequestDomain.TrustedControlRest, guard,
+                out var next));
+            ledger.AbortBeforeWire(next!);
+        }
+    }
+
+    [Fact]
+    public void Lower304HeaderAdvancesSharedProgressAndLateHigherCannotLiftIt()
+    {
+        var guard = Guard(reserve: 2, otherTail: 9);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var first));
+        using (var initial = RemainingResponse("20"))
+        {
+            ledger.Observe(first, initial, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var notModifiedLease));
+        using (var notModified = RemainingResponse("8"))
+        {
+            notModified.StatusCode = HttpStatusCode.NotModified;
+            ledger.Observe(notModifiedLease, notModified,
+                TrustedProofResponseClass.NotModified,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var lateHigherLease));
+        using (var lateHigher = RemainingResponse("19"))
+        {
+            ledger.Observe(lateHigherLease, lateHigher,
+                TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+
+        Assert.False(ledger.IsClosed);
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var next));
+        ledger.AbortBeforeWire(next!);
+    }
+
+    [Fact]
+    public void SharedHeaderProgressDoesNotDoubleConsumeAPendingLocalLease()
+    {
+        var guard = Guard(reserve: 1, otherTail: 9);
+        var ledger = new TrustedProofPrimaryRemainingLedger();
+        using (var anchor = RemainingResponse("11"))
+        {
+            ledger.Observe(null, anchor, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var first));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var second));
+        using (var lower = RemainingResponse("8"))
+        {
+            ledger.Observe(second, lower, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+        using (var lateHigher = RemainingResponse("9"))
+        {
+            ledger.Observe(first, lateHigher, TrustedProofResponseClass.Success,
+                TrustedProofRequestDomain.HostOtherGitHubRest, guard);
+        }
+
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var firstExactBoundary));
+        Assert.True(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out var secondExactBoundary));
+        Assert.False(ledger.TryLease(TrustedProofRequestDomain.HostOtherGitHubRest,
+            guard, out _));
+        Assert.Equal(TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining,
+            ledger.CloseReason);
+        ledger.AbortBeforeWire(firstExactBoundary!);
+        ledger.AbortBeforeWire(secondExactBoundary!);
+    }
+
+    private static TrustedProofRateClassification RateClassify(
+        HttpResponseMessage response,
+        long? currentUnixSeconds = null) =>
+        TrustedProofOperationRequestAccounting.RateClassifyAsync(
+            response, CancellationToken.None, currentUnixSeconds).AsTask()
+            .GetAwaiter().GetResult();
+
+    private static void Observe(
+        TrustedProofControlRequestBudget budget,
+        HttpResponseMessage response,
+        HttpMethod method,
+        TrustedProofPrimaryRemainingLease? lease = null) =>
+        budget.ObserveAsync(response, method, CancellationToken.None, lease)
+            .GetAwaiter().GetResult();
+
+    private static TrustedProofResponseClass ResponseClassify(
+        HttpResponseMessage response,
+        long? currentUnixSeconds = null) =>
+        TrustedProofOperationRequestAccounting.ResponseClassifyAsync(
+            response, CancellationToken.None, currentUnixSeconds).AsTask()
+            .GetAwaiter().GetResult();
+
     private static TrustedProofRemainingTailGuard Guard(
         int reserve = 0,
         int otherTail = 0) => new(
@@ -1104,9 +1403,11 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             [TrustedProofRequestDomain.TrustedControlRest] = 0,
         }, reserve, measurementOnly: false);
 
-    private static HttpResponseMessage RemainingResponse(string remaining)
+    private static HttpResponseMessage RemainingResponse(
+        string remaining,
+        HttpStatusCode status = HttpStatusCode.OK)
     {
-        var response = new HttpResponseMessage(HttpStatusCode.OK);
+        var response = new HttpResponseMessage(status);
         response.Headers.TryAddWithoutValidation("x-ratelimit-remaining", remaining);
         return response;
     }
@@ -1166,6 +1467,102 @@ public sealed class TrustedProofGitHubRequestBudgetTests
 
         protected override Task SerializeToStreamAsync(Stream stream,
             TransportContext? context) => stream.WriteAsync(body).AsTask();
+    }
+
+    private sealed class DeclaredLengthContent(byte[] body, long declaredLength) : HttpContent
+    {
+        protected override bool TryComputeLength(out long length)
+        {
+            length = declaredLength;
+            return true;
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream,
+            TransportContext? context) => stream.WriteAsync(body).AsTask();
+    }
+
+    private sealed class CancellationAwareBlockingStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken) =>
+            WaitForCancellationAsync(cancellationToken);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            new(WaitForCancellationAsync(cancellationToken));
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        private static async Task<int> WaitForCancellationAsync(
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+    }
+
+    private sealed class NonSeekableCountingReadStream(byte[] body) : Stream
+    {
+        private int position;
+
+        internal int BytesRead { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadCore(buffer.AsSpan(offset, count));
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(ReadCore(buffer.AsSpan(offset, count)));
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(ReadCore(buffer.Span));
+        }
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        private int ReadCore(Span<byte> destination)
+        {
+            var count = Math.Min(destination.Length, body.Length - position);
+            if (count == 0) return 0;
+            body.AsSpan(position, count).CopyTo(destination);
+            position += count;
+            BytesRead += count;
+            return count;
+        }
     }
 
     private sealed class ResponseHandler(Func<HttpResponseMessage> create) : HttpMessageHandler

@@ -76,6 +76,7 @@ function unauthorizedEnvironment() {
     repository_id: repositoryId,
     repository,
     pr_number: prNumber,
+    proof_scope: 'normal',
     fixture_head_sha: fixtureHeadSha,
     operation_id: '2'.repeat(64),
     workflow_sha: workflowSha,
@@ -175,7 +176,7 @@ export async function probeUnauthorizedNoLaunch(workflowPath) {
     fetches !== 1 ||
     authorizationHeaderPresent ||
     preflight.stdout !==
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\n' ||
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n' ||
     !preflight.stderr.startsWith('APR_R4_E2P_PREFLIGHT_REJECTED authorization-mismatch\n') ||
     workflowRunEligible ||
     workflowDispatchEligible ||

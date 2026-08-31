@@ -238,7 +238,7 @@ if (control.consumed !== 0 ||
     control.not_modified !== 0 ||
     control.secondary_points !== 0 ||
     control.mutation_count !== 0 ||
-    control.remaining_tail_required !== 888 ||
+    control.remaining_tail_required !== 879 ||
     control.remaining_tail_reserve !== 64 ||
     control.permission_denied !== 0 ||
     control.primary_rate_limited !== 0 ||
@@ -264,7 +264,7 @@ run_production_smoke() {
     trace="$temporary_root/smoke-$mode.network"
     write_smoke_frame "$mode" "$frame"
     set +e
-    AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final \
+    AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap \
       strace -qq -f -e trace=network -o "$trace" \
       "$payload" < "$frame" > "$stdout" 2> "$stderr"
     status=$?
@@ -396,7 +396,7 @@ execute_proof() {
     --proof-output "$architecture" \
     --verifier-output "$verifier_architecture"
   if printf '\000\000\000\001x' |
-      env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final \
+      env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap \
         "$payload" >/dev/null 2>&1; then
     echo APR_R4_E2P_AOT_MALFORMED_FRAME_ACCEPTED >&2
     return 1
@@ -453,6 +453,9 @@ const expectedFields = [
   'fixture_base_sha',
   'trusted_authority_exact',
   'trusted_proof_request_budget_satisfied',
+  'shared_primary_bucket_start',
+  'shared_primary_bucket_end',
+  'shared_primary_bucket_exact',
   'cases',
 ];
 if (input === null || Array.isArray(input) || typeof input !== 'object' ||
@@ -470,6 +473,11 @@ if (input === null || Array.isArray(input) || typeof input !== 'object' ||
     input.launch_action_source_sha !== expectedSourceCommit ||
     input.fixture_base_sha !== expectedSourceCommit) {
   throw new Error('The trusted-proof evidence envelope is invalid.');
+}
+if (input.shared_primary_bucket_start !== 1000 ||
+    input.shared_primary_bucket_end !== 111 ||
+    input.shared_primary_bucket_exact !== true) {
+  throw new Error('The shared primary bucket evidence is invalid.');
 }
 const cases = input.cases.map((item, index) => {
   const expectedName = expectedCases[index];
@@ -493,6 +501,9 @@ fs.writeFileSync(outputPath, JSON.stringify({
   fixture_base_sha: input.fixture_base_sha,
   trusted_authority_exact: input.trusted_authority_exact,
   trusted_proof_request_budget_satisfied: input.trusted_proof_request_budget_satisfied,
+  shared_primary_bucket_start: input.shared_primary_bucket_start,
+  shared_primary_bucket_end: input.shared_primary_bucket_end,
+  shared_primary_bucket_exact: input.shared_primary_bucket_exact,
   cases,
 }) + '\n');
 NODE

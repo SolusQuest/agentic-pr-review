@@ -97606,11 +97606,12 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
     invalidateArtifactMutation: (input) => {
       cache.deleteArtifactMutation(input);
     },
+    invalidateArtifactListRepresentation: (input) => cache.delete(listCacheKey(input)),
+    invalidateArtifactRepresentation: (input) => cache.delete(artifactCacheKey(input)),
+    invalidateWorkflowRunAttemptRepresentation: (input) => cache.delete(attemptCacheKey(input)),
     dispose: () => cache.dispose(),
     listArtifactsForRepo: async (input, signal, latestAttemptStartAt) => {
-      const key = ["list", input.owner, input.repo, input.name, input.per_page, input.page].join(
-        "\0"
-      );
+      const key = listCacheKey(input);
       return await cache.conditionalGet(
         key,
         budget,
@@ -97623,7 +97624,7 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
       );
     },
     getArtifact: async (input, signal, latestAttemptStartAt) => {
-      const key = ["artifact", input.owner, input.repo, input.artifact_id].join("\0");
+      const key = artifactCacheKey(input);
       try {
         return await cache.conditionalGet(
           key,
@@ -97691,9 +97692,7 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
       return { status: 200, data: Buffer.concat(chunks, total) };
     },
     getWorkflowRunAttempt: async (input, signal, latestAttemptStartAt) => {
-      const key = ["attempt", input.owner, input.repo, input.run_id, input.attempt_number].join(
-        "\0"
-      );
+      const key = attemptCacheKey(input);
       return await cache.conditionalGet(
         key,
         budget,
@@ -97826,7 +97825,16 @@ function conditionalRequestOptions(signal, etag) {
   };
 }
 function validEtag(value) {
-  return value !== void 0 && value.length > 0 && value.length <= 512 && /^[\x21-\x7e]+$/.test(value);
+  return value !== void 0 && value.length <= 512 && /^(?:W\/)?"[\x21\x23-\x7e\x80-\xff]*"$/u.test(value);
+}
+function listCacheKey(input) {
+  return ["list", input.owner, input.repo, input.name, input.per_page, input.page].join("\0");
+}
+function artifactCacheKey(input) {
+  return ["artifact", input.owner, input.repo, input.artifact_id].join("\0");
+}
+function attemptCacheKey(input) {
+  return ["attempt", input.owner, input.repo, input.run_id, input.attempt_number].join("\0");
 }
 function clone(value) {
   return structuredClone(value);
@@ -97857,8 +97865,8 @@ function header(headers, name) {
     return getter(name) ?? void 0;
   }
   const record = headers;
-  const value = record[name] ?? record[name.toLowerCase()];
-  return Array.isArray(value) ? value[0] : value;
+  const values = Object.entries(record).filter(([key]) => key.toLowerCase() === name.toLowerCase()).flatMap(([, value]) => Array.isArray(value) ? value : value === void 0 ? [] : [value]);
+  return values.length === 1 ? values[0] : void 0;
 }
 var ArtifactArchiveDownloadError = class extends Error {
   constructor() {
@@ -98006,6 +98014,16 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
    * dispatch.
    */
   observedPrimaryRemaining;
+  /** Charged primary requests still expected before the frozen route ends. */
+  futurePrimaryRequests;
+  /**
+   * The first verified remaining header anchors this process lane. Later
+   * decreases include charges made by sibling Host/control processes, so they
+   * advance the same frozen suffix without treating a low starting bucket as
+   * proof progress.
+   */
+  primaryProgressAnchorRemaining;
+  primaryProgressAnchorFutureRequests;
   disposition = "active";
   sealedReceiptLine;
   secondaryRateLimiter;
@@ -98075,7 +98093,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < input.primaryRequests + this.requiredTailAndReserve()) {
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < Math.max(input.primaryRequests, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve()) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98108,7 +98126,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       throw new ArtifactRestRateLimitHeadersError();
     }
     if (this.disposition !== "active") throw new ArtifactRestRequestBudgetError(this.disposition);
-    const requiredWithFinalProfileTail = required2 + this.requiredTailAndReserve();
+    const requiredWithFinalProfileTail = Math.max(required2, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve();
     if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < requiredWithFinalProfileTail) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -98207,19 +98225,20 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
     if (!reservation.protectedRoute || !reservation.primaryReserved) return;
     this.primaryReservations -= 1;
     if (status === 304) {
-      const suppliedRemaining = this.observeRateLimitHeaders(
-        status,
-        headers,
-        message
-      ).suppliedRemaining;
-      if (!suppliedRemaining && this.observedPrimaryRemaining !== void 0) {
+      if (this.observedPrimaryRemaining !== void 0) {
         this.observedPrimaryRemaining += 1;
       }
+      const rateLimit2 = this.observeRateLimitHeaders(status, headers, message);
+      this.observeSharedPrimaryProgress(rateLimit2.remaining);
+      this.closeOnInsufficientFuture(rateLimit2.disposition);
       this.conditionalNotModifiedRequests += 1;
       return;
     }
     this.primaryRateLimitRequests += 1;
     const rateLimit = this.observeRateLimitHeaders(status, headers, message);
+    this.advanceFuturePrimaryRequests();
+    this.observeSharedPrimaryProgress(rateLimit.remaining);
+    this.closeOnInsufficientFuture(rateLimit.disposition);
     if (rateLimit.permissionDenied) this.permissionDenied += 1;
     if (this.disposition === "active" && rateLimit.disposition !== void 0) {
       this.disposition = rateLimit.disposition;
@@ -98244,7 +98263,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       this.disposition = "total_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < 1 + this.requiredTailAndReserve()) {
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < this.requiredFuturePrimaryRequests() + this.remainingTailReserve()) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -98267,7 +98286,10 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
     this.primaryReservations += 1;
     this.secondaryLimitPoints += dispatch.secondaryLimitPoints;
     if (this.observedPrimaryRemaining !== void 0) this.observedPrimaryRemaining -= 1;
-    return { protectedRoute: true, primaryReserved: true };
+    return {
+      protectedRoute: true,
+      primaryReserved: true
+    };
   }
   /**
    * GitHub's rate-limit headers are untrusted transport input.  A malformed
@@ -98278,7 +98300,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
    */
   observeRateLimitHeaders(status, headers, message) {
     if (status === void 0) {
-      return { suppliedRemaining: false, permissionDenied: false };
+      return { permissionDenied: false };
     }
     const remaining = parseRateLimitInteger(header2(headers, "x-ratelimit-remaining"), 0);
     const limit = parseRateLimitInteger(header2(headers, "x-ratelimit-limit"), 1);
@@ -98300,13 +98322,10 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
     }
     const disposition = primary && secondary ? "primary_and_secondary_rate_limited" : primary ? "primary_exhausted" : secondary ? "rate_limited" : void 0;
     if (remaining.value !== void 0) {
-      this.observedPrimaryRemaining = remaining.value;
-      if (remaining.value < this.requiredTailAndReserve() && disposition === void 0) {
-        this.disposition = "primary_exhausted";
-      }
+      this.observedPrimaryRemaining = this.observedPrimaryRemaining === void 0 ? remaining.value : Math.min(this.observedPrimaryRemaining, remaining.value);
     }
     return {
-      suppliedRemaining: remaining.value !== void 0,
+      remaining: remaining.value,
       permissionDenied: status === 403 && !primary && !secondary,
       disposition
     };
@@ -98320,8 +98339,37 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
     this.reservedMutationSecondaryPoints -= reservation.remainingSecondaryPoints;
     this.activeMutationReservation = void 0;
   }
-  requiredTailAndReserve() {
-    return (this.profile?.remainingTailRequired ?? 0) + (this.profile?.remainingTailReserve ?? 0);
+  requiredFuturePrimaryRequests() {
+    const frozen = 1 + (this.profile?.remainingTailRequired ?? 0);
+    const remaining = this.futurePrimaryRequests === void 0 ? frozen : Math.min(frozen, this.futurePrimaryRequests);
+    return Math.max(1, remaining);
+  }
+  remainingTailReserve() {
+    return this.profile?.remainingTailReserve ?? 0;
+  }
+  advanceFuturePrimaryRequests() {
+    const before = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
+    this.futurePrimaryRequests = Math.max(0, before - 1);
+  }
+  observeSharedPrimaryProgress(remaining) {
+    if (remaining === void 0) return;
+    const future = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
+    if (this.primaryProgressAnchorRemaining === void 0 || this.primaryProgressAnchorFutureRequests === void 0) {
+      this.primaryProgressAnchorRemaining = remaining;
+      this.primaryProgressAnchorFutureRequests = future;
+      return;
+    }
+    const globallyCharged = Math.max(0, this.primaryProgressAnchorRemaining - remaining);
+    this.futurePrimaryRequests = Math.min(
+      future,
+      Math.max(0, this.primaryProgressAnchorFutureRequests - globallyCharged)
+    );
+  }
+  closeOnInsufficientFuture(rateDisposition) {
+    const future = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
+    if (this.disposition === "active" && rateDisposition === void 0 && this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < future + this.remainingTailReserve()) {
+      this.disposition = "primary_exhausted";
+    }
   }
 };
 function header2(headers, name) {
@@ -99900,7 +99948,8 @@ var BridgeOperationFailure = class extends Error {
 var OfficialArtifactOperations = class {
   constructor(context5) {
     this.context = context5;
-    this.now = context5.now ?? (() => performance.now());
+    this.monotonicNow = context5.monotonicNow ?? (() => performance.now());
+    this.utcNow = context5.utcNow ?? (() => Date.now());
     this.artifactClient = context5.artifactClient ?? new DefaultArtifactClient();
     this.cacheLedger = context5.cacheLedger ?? new ArtifactCacheLedger();
     this.verifiedRecords = new VerifiedArtifactRecordCache(this.cacheLedger);
@@ -99909,14 +99958,19 @@ var OfficialArtifactOperations = class {
     }
   }
   context;
-  now;
+  monotonicNow;
+  utcNow;
   artifactClient;
   cacheLedger;
   verifiedRecords;
   coordinator = new ArtifactLifecycleCoordinator();
   async execute(command, signal) {
     return await this.coordinator.run(signal, async () => {
-      const budget = new ArtifactBridgeOperationBudget(signal, this.now, this.now());
+      const budget = new ArtifactBridgeOperationBudget(
+        signal,
+        this.monotonicNow,
+        this.monotonicNow()
+      );
       try {
         const requiredPrimaryAllocation = mandatoryPrimaryAllocation(command);
         if (requiredPrimaryAllocation !== void 0) {
@@ -99960,15 +100014,16 @@ var OfficialArtifactOperations = class {
     const seen = /* @__PURE__ */ new Set();
     const objects = [];
     for (let page = 1; page <= ARTIFACT_BRIDGE_LIMITS.maximumPages; page += 1) {
+      const pageInput = {
+        owner: this.context.owner,
+        repo: this.context.repository,
+        name: command.name,
+        per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
+        page
+      };
       const response = await this.callOfficial(
         (requestSignal) => this.context.actions.listArtifactsForRepo(
-          {
-            owner: this.context.owner,
-            repo: this.context.repository,
-            name: command.name,
-            per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
-            page
-          },
+          pageInput,
           requestSignal,
           budget.latestHttpAttemptStartAt()
         ),
@@ -99976,25 +100031,29 @@ var OfficialArtifactOperations = class {
       );
       budget.throwIfExpired();
       if (response.status !== 200 || !responseFits(response.data)) {
-        throw new BridgeOperationFailure("incomplete");
+        this.rejectArtifactList(command.name, page, "incomplete");
       }
       if (!Array.isArray(response.data.artifacts) || response.data.artifacts.length > ARTIFACT_BRIDGE_LIMITS.recordsPerPage) {
-        throw new BridgeOperationFailure("incomplete");
+        this.rejectArtifactList(command.name, page, "incomplete");
       }
       const total = response.data.total_count;
       if (!Number.isSafeInteger(total) || total < 0 || total > ARTIFACT_BRIDGE_LIMITS.maximumRecords || total > maximum || expectedTotal !== void 0 && total !== expectedTotal) {
-        throw new BridgeOperationFailure("incomplete");
+        this.rejectArtifactList(command.name, page, "incomplete");
       }
       expectedTotal = total;
       for (const artifact of response.data.artifacts) {
         const id = platformId(artifact.id);
         if (artifact.name !== command.name || !id || seen.has(id)) {
-          throw new BridgeOperationFailure(id && seen.has(id) ? "duplicate" : "incomplete");
+          this.rejectArtifactList(
+            command.name,
+            page,
+            id && seen.has(id) ? "duplicate" : "incomplete"
+          );
         }
         seen.add(id);
         objects.push({ name: command.name, object_id: id });
         if (objects.length > total || objects.length > maximum) {
-          throw new BridgeOperationFailure("incomplete");
+          this.rejectArtifactList(command.name, page, "incomplete");
         }
       }
       if (objects.length === total) {
@@ -100009,10 +100068,10 @@ var OfficialArtifactOperations = class {
         };
       }
       if (response.data.artifacts.length !== ARTIFACT_BRIDGE_LIMITS.recordsPerPage) {
-        throw new BridgeOperationFailure("incomplete");
+        this.rejectArtifactList(command.name, page, "incomplete");
       }
     }
-    throw new BridgeOperationFailure("incomplete");
+    return this.rejectArtifactList(command.name, ARTIFACT_BRIDGE_LIMITS.maximumPages, "incomplete");
   }
   async metadata(command, budget) {
     const platform2 = await this.loadPlatformArtifact(command.name, command.object_id, budget);
@@ -100033,7 +100092,12 @@ var OfficialArtifactOperations = class {
     this.assertNotExpired(platform2);
     const record = await this.readRecord(platform2, budget);
     try {
-      assertMetadata(command.expected, record.metadata);
+      try {
+        assertMetadata(command.expected, record.metadata);
+      } catch (error3) {
+        this.invalidatePlatformRepresentation(platform2.name, platform2.id);
+        throw error3;
+      }
       if (record.bytes.length > Number(command.maximum_bytes)) {
         throw new BridgeOperationFailure("digest_mismatch");
       }
@@ -100077,7 +100141,7 @@ var OfficialArtifactOperations = class {
       const minimumExpiry = Number(command.minimum_expires_at_unix_seconds);
       const retentionDays = Math.max(
         1,
-        Math.ceil((minimumExpiry * 1e3 - this.now()) / 864e5)
+        Math.ceil((minimumExpiry * 1e3 - this.utcNow()) / 864e5)
       );
       reservation = this.reserveMutation(3, 8);
       const upload = async (markDispatched) => await this.callOfficial(
@@ -100128,6 +100192,7 @@ var OfficialArtifactOperations = class {
       try {
         metadata2 = record.metadata;
         if (record.metadata.encrypted_object_digest !== command.encrypted_object_digest || Number(record.metadata.expires_at_unix_seconds) < minimumExpiry) {
+          this.invalidatePlatformRepresentation(platform2.name, platform2.id);
           throw new BridgeOperationFailure("conflict", "committed", record.metadata);
         }
         return {
@@ -100183,7 +100248,12 @@ var OfficialArtifactOperations = class {
     this.assertExpectedPlatform(command.expected, platform2);
     const record = await this.readRecord(platform2, budget);
     try {
-      assertMetadata(command.expected, record.metadata);
+      try {
+        assertMetadata(command.expected, record.metadata);
+      } catch (error3) {
+        this.invalidatePlatformRepresentation(platform2.name, platform2.id);
+        throw error3;
+      }
       return successWithMetadata(command, record.metadata);
     } finally {
       record.bytes.fill(0);
@@ -100291,6 +100361,7 @@ var OfficialArtifactOperations = class {
       throw new BridgeOperationFailure("not_found");
     }
     if (response.status !== 200 || !responseFits(response.data)) {
+      this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("invalid");
     }
     const artifact = response.data;
@@ -100299,6 +100370,7 @@ var OfficialArtifactOperations = class {
     const archiveDigest = parseRestArtifactDigest(artifact.digest);
     const expiry = parseExpiry(artifact.expires_at);
     if (id !== objectId || artifact.name !== expectedName || !runId || !archiveDigest || !expiry || typeof artifact.expired !== "boolean" || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 1 || artifact.size_in_bytes > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
+      this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("invalid");
     }
     return {
@@ -100358,6 +100430,11 @@ var OfficialArtifactOperations = class {
       this.verifiedRecords.store(platform2, record);
       const output = this.verifiedRecords.copy(record);
       return output;
+    } catch (error3) {
+      if (error3 instanceof BridgeOperationFailure || error3 instanceof ArtifactTransportEnvelopeError) {
+        this.invalidatePlatformRepresentation(platform2.name, platform2.id);
+      }
+      throw error3;
     } finally {
       envelope?.encryptedBytes.fill(0);
       archive.fill(0);
@@ -100379,16 +100456,24 @@ var OfficialArtifactOperations = class {
     );
     budget.throwIfExpired();
     if (response.status !== 200 || platformId(response.data.id) !== runId || platformId(response.data.run_attempt ?? void 0) !== runAttempt) {
+      this.context.actions.invalidateWorkflowRunAttemptRepresentation?.({
+        owner: this.context.owner,
+        repo: this.context.repository,
+        run_id: Number(runId),
+        attempt_number: Number(runAttempt)
+      });
       throw new BridgeOperationFailure("conflict");
     }
   }
   assertExpectedPlatform(expected, platform2) {
     if (expected.name !== platform2.name || expected.object_id !== platform2.id || expected.producing_run_id !== platform2.producingRunId || expected.archive_digest !== platform2.archiveDigest || expected.expires_at_unix_seconds !== platform2.expiresAtUnixSeconds) {
+      this.invalidatePlatformRepresentation(platform2.name, platform2.id);
       throw new BridgeOperationFailure("conflict");
     }
   }
   assertNotExpired(platform2) {
-    if (platform2.expired || Number(platform2.expiresAtUnixSeconds) <= Math.floor(this.now() / 1e3)) {
+    if (platform2.expired || Number(platform2.expiresAtUnixSeconds) <= Math.floor(this.utcNow() / 1e3)) {
+      this.invalidatePlatformRepresentation(platform2.name, platform2.id);
       throw new BridgeOperationFailure("expired");
     }
   }
@@ -100399,7 +100484,7 @@ var OfficialArtifactOperations = class {
       budget.remainingMs(),
       budget.signal,
       latestAttemptStartAt,
-      this.now,
+      this.monotonicNow,
       beforeDispatch
     );
   }
@@ -100411,6 +100496,26 @@ var OfficialArtifactOperations = class {
       primaryRequests: authenticatedRequests,
       secondaryPoints
     });
+  }
+  rejectArtifactList(name, throughPage, failure) {
+    for (let page = 1; page <= throughPage; page += 1) {
+      this.context.actions.invalidateArtifactListRepresentation?.({
+        owner: this.context.owner,
+        repo: this.context.repository,
+        name,
+        per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
+        page
+      });
+    }
+    throw new BridgeOperationFailure(failure);
+  }
+  invalidatePlatformRepresentation(name, objectId) {
+    this.context.actions.invalidateArtifactRepresentation?.({
+      owner: this.context.owner,
+      repo: this.context.repository,
+      artifact_id: Number(objectId)
+    });
+    this.verifiedRecords.deleteByNameAndId(name, objectId);
   }
   failureResult(command, error3) {
     let failure = "io";
@@ -101049,16 +101154,21 @@ var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.free
   remainingTailReserve: 1,
   measurementOnly: true
 });
-var TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
-  capProfile: "apr-r4-artifact-rest-request-budget-v2",
-  limits: Object.freeze({
-    maximumTotalAuthenticatedApiRequests: 2130,
-    maximumPrimaryRateLimitRequests: 136
-  }),
-  remainingTailRequired: 679,
-  remainingTailReserve: 64,
-  measurementOnly: false
-});
+function finalArtifactProfile(remainingTailRequired) {
+  return Object.freeze({
+    capProfile: "apr-r4-artifact-rest-request-budget-v2",
+    limits: Object.freeze({
+      maximumTotalAuthenticatedApiRequests: 2130,
+      maximumPrimaryRateLimitRequests: 136
+    }),
+    remainingTailRequired,
+    remainingTailReserve: 64,
+    measurementOnly: false
+  });
+}
+var TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile(679);
+var TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile(393);
+var TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile(26);
 var TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE = Object.freeze({
   measurementOnly: true,
   remainingTailReserve: 1,
@@ -101066,27 +101176,42 @@ var TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE = Object.freeze({
   hostOtherGitHubRestTail: 0,
   trustedControlRestTail: 0
 });
-var TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE = Object.freeze({
+var finalHostReceiptProfile = (hostHeadSourceRestTail, hostOtherGitHubRestTail, trustedControlRestTail) => Object.freeze({
   measurementOnly: false,
   remainingTailReserve: 64,
-  hostHeadSourceRestTail: 863,
-  hostOtherGitHubRestTail: 878,
-  trustedControlRestTail: 888
+  hostHeadSourceRestTail,
+  hostOtherGitHubRestTail,
+  trustedControlRestTail
 });
+var TRUSTED_PROOF_FINAL_BOOTSTRAP_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(863, 878, 879);
+var TRUSTED_PROOF_FINAL_CONTINUATION_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(
+  577,
+  591,
+  592
+);
+var TRUSTED_PROOF_FINAL_STALE_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(210, 224, 225);
 function artifactRestRequestBudgetProfile(profile) {
   switch (profile) {
     case "measurement":
       return TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
-    case "final":
-      return TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case "final-bootstrap":
+      return TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case "final-continuation":
+      return TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case "final-stale":
+      return TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
   }
 }
 function trustedProofHostReceiptProfile(profile) {
   switch (profile) {
     case "measurement":
       return TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE;
-    case "final":
-      return TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE;
+    case "final-bootstrap":
+      return TRUSTED_PROOF_FINAL_BOOTSTRAP_HOST_RECEIPT_PROFILE;
+    case "final-continuation":
+      return TRUSTED_PROOF_FINAL_CONTINUATION_HOST_RECEIPT_PROFILE;
+    case "final-stale":
+      return TRUSTED_PROOF_FINAL_STALE_HOST_RECEIPT_PROFILE;
   }
 }
 function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment = process.env) {
@@ -101096,8 +101221,12 @@ function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment =
   switch (environment[R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]) {
     case "measurement":
       return "measurement";
-    case "final":
-      return "final";
+    case "final-bootstrap":
+      return "final-bootstrap";
+    case "final-continuation":
+      return "final-continuation";
+    case "final-stale":
+      return "final-stale";
     default:
       return fail("wrapper_request_budget_profile_invalid");
   }
@@ -102141,4 +102270,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 3e150522a5a2f3a53c0154f959e2227c637573d3a1eb718dc03714d254139e10
+// Action source inventory sha256: 88d9693bf1ed73b5d5e01d76cf05a8b3d4645c91aa3e98da870f9ec43a7f1c9c

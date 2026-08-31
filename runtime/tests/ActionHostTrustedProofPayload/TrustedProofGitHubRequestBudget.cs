@@ -230,11 +230,12 @@ internal sealed class TrustedProofGitHubRequestBudget
         UseProxy = false,
     };
 
-    private void Observe(
+    private async Task ObserveAsync(
         TrustedProofRequestDomain domain,
         HttpRequestMessage request,
         HttpResponseMessage response,
-        TrustedProofPrimaryRemainingLease lease)
+        TrustedProofPrimaryRemainingLease lease,
+        CancellationToken cancellationToken)
     {
         var head = domain == TrustedProofRequestDomain.HostHeadSourceRest;
         if (head) Interlocked.Increment(ref _headSourceRaw);
@@ -254,8 +255,9 @@ internal sealed class TrustedProofGitHubRequestBudget
         else Interlocked.Add(ref _otherGitHubSecondaryPoints,
             IsRead(request.Method) ? 1 : 5);
 
-        var responseClass = TrustedProofOperationRequestAccounting.ResponseClassify(
-            response, _epochSeconds());
+        var responseClass = await TrustedProofOperationRequestAccounting
+            .ResponseClassifyAsync(response, cancellationToken, _epochSeconds())
+            .ConfigureAwait(false);
         switch (responseClass)
         {
             case TrustedProofResponseClass.PermissionDenied:
@@ -348,8 +350,19 @@ internal sealed class TrustedProofGitHubRequestBudget
                     budget._remainingLedger.CloseOutcomeUnknown(lease!);
                     throw;
                 }
-                budget.Observe(domain, request, response, lease!);
-                if (!budget.IsRateLimited)
+                try
+                {
+                    await budget.ObserveAsync(domain, request, response, lease!,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    budget._remainingLedger.CloseOutcomeUnknown(lease!);
+                    response.Dispose();
+                    throw;
+                }
+                if (!budget.IsRateLimited || budget._remainingLedger.CloseReason ==
+                        TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining)
                 {
                     return response;
                 }

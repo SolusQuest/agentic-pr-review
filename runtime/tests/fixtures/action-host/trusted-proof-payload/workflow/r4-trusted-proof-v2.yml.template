@@ -31,6 +31,7 @@ jobs:
       operation-id: ${{ steps.authorization.outputs.operation-id }}
       authorization-manifest-digest: ${{ steps.authorization.outputs.authorization-manifest-digest }}
       expected-payload-sha256: ${{ steps.authorization.outputs.expected-payload-sha256 }}
+      request-budget-profile: ${{ steps.authorization.outputs.request-budget-profile }}
     steps:
       - id: authorization
         env:
@@ -119,6 +120,7 @@ jobs:
               'repository_id',
               'repository',
               'pr_number',
+              'proof_scope',
               'fixture_head_sha',
               'operation_id',
               'workflow_sha',
@@ -135,6 +137,7 @@ jobs:
               authorization.repository_id !== repositoryId ||
               authorization.repository !== repository ||
               !positiveInteger.test(String(authorization.pr_number ?? '')) ||
+              !/^(?:normal|stale)$/u.test(authorization.proof_scope ?? '') ||
               !lowerHex40.test(authorization.fixture_head_sha ?? '') ||
               !lowerHex64.test(authorization.operation_id ?? '') ||
               !lowerHex40.test(authorization.workflow_sha ?? '') ||
@@ -188,6 +191,14 @@ jobs:
                 : 'INPUT_PR_NUMBER',
               positiveInteger,
             );
+            const requestBudgetProfile =
+              eventName === 'workflow_run'
+                ? authorization.proof_scope === 'normal'
+                  ? 'final-bootstrap'
+                  : 'final-stale'
+                : authorization.proof_scope === 'normal'
+                  ? 'final-continuation'
+                  : fail('workflow-dispatch-proof-scope');
             const response = await fetch(
               `https://api.github.com/repos/${repository}/pulls/${prNumber}`,
               {
@@ -249,6 +260,7 @@ jobs:
               repository_id: authorization.repository_id,
               repository: authorization.repository,
               pr_number: authorization.pr_number,
+              proof_scope: authorization.proof_scope,
               fixture_head_sha: authorization.fixture_head_sha,
               operation_id: authorization.operation_id,
               workflow_sha: authorization.workflow_sha,
@@ -275,7 +287,7 @@ jobs:
             ).join('');
             if (!lowerHex64.test(digest)) fail('authorization-digest');
             process.stdout.write(
-              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\nexpected-payload-sha256=${payloadSha256}\n`,
+              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\nexpected-payload-sha256=${payloadSha256}\nrequest-budget-profile=${requestBudgetProfile}\n`,
             );
           })().catch((error) => {
             const code =
@@ -284,7 +296,7 @@ jobs:
                 : 'preflight-failed';
             process.stderr.write(`APR_R4_E2P_PREFLIGHT_REJECTED ${code}\n`);
             process.stdout.write(
-              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\n',
+              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n',
             );
           });
           APR_R4_E2P_PREFLIGHT
@@ -357,7 +369,7 @@ jobs:
           bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-hold
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -383,7 +395,7 @@ jobs:
           pr-number: ''
           state-mode: auto
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           AGENTIC_PR_REVIEW_PREPARED_ROOT: ${{ steps.prepare.outputs.prepared_root }}
           AGENTIC_PR_REVIEW_PREPARED_EXECUTABLE: ${{ steps.prepare.outputs.prepared_executable }}
           AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}
@@ -458,7 +470,7 @@ jobs:
           bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-verify-completed
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -484,7 +496,7 @@ jobs:
           pr-number: ${{ inputs.pr-number }}
           state-mode: auto
         env:
-          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           AGENTIC_PR_REVIEW_PREPARED_ROOT: ${{ steps.prepare.outputs.prepared_root }}
           AGENTIC_PR_REVIEW_PREPARED_EXECUTABLE: ${{ steps.prepare.outputs.prepared_executable }}
           AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}

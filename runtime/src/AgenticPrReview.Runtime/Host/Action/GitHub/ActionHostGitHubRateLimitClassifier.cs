@@ -26,8 +26,9 @@ internal static class ActionHostGitHubRateLimitClassifier
     private const int MaximumHeaderValue = 1_000_000;
     private const long MaximumResetEpoch = 4_102_444_800;
 
-    internal static ActionHostGitHubRateLimitClassification Classify(
+    internal static async ValueTask<ActionHostGitHubRateLimitClassification> ClassifyAsync(
         HttpResponseMessage response,
+        CancellationToken cancellationToken,
         long? currentUnixSeconds = null)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -39,25 +40,25 @@ internal static class ActionHostGitHubRateLimitClassifier
                 currentUnixSeconds);
         }
         var content = response.Content;
-        if (content.Headers.ContentLength is not { } length)
-        {
-            // Never consume an unbounded one-shot error stream merely to look
-            // for an optional secondary message.
-            return Classify(response.StatusCode, response.Headers, null,
-                currentUnixSeconds);
-        }
-        if (length < 0 || length > MaximumErrorBodyBytes)
+        var declaredLength = content.Headers.ContentLength;
+        if (declaredLength is < 0 or > MaximumErrorBodyBytes)
         {
             return ActionHostGitHubRateLimitClassification.Invalid;
         }
         try
         {
-            using var input = content.ReadAsStream(CancellationToken.None);
+            await using var input = await content.ReadAsStreamAsync(cancellationToken)
+                .ConfigureAwait(false);
             using var output = new MemoryStream();
             var buffer = new byte[1024];
             while (true)
             {
-                var read = input.Read(buffer, 0, buffer.Length);
+                var remainingBound = checked(MaximumErrorBodyBytes + 1 -
+                    (int)output.Length);
+                var read = await input.ReadAsync(
+                    buffer.AsMemory(0, Math.Min(buffer.Length, remainingBound)),
+                    cancellationToken)
+                    .ConfigureAwait(false);
                 if (read == 0) break;
                 if (output.Length + read > MaximumErrorBodyBytes)
                 {
@@ -67,6 +68,11 @@ internal static class ActionHostGitHubRateLimitClassifier
                 output.Write(buffer, 0, read);
             }
             var body = output.ToArray();
+            if (declaredLength is { } expectedLength &&
+                body.LongLength != expectedLength)
+            {
+                return ActionHostGitHubRateLimitClassification.Invalid;
+            }
             var replacement = new ByteArrayContent(body);
             foreach (var header in content.Headers)
             {

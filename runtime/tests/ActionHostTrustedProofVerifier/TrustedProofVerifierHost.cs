@@ -82,6 +82,8 @@ internal static class TrustedProofVerifierHost
                 TrustedProofPayloadBuildIdentity.SourceTree) + "\n")
             .ConfigureAwait(false);
 
+        var primaryBucket = FrameworkPrimaryRateLimitBucket.OpenForScenario(
+            scenarioRoot);
         Func<HttpMessageHandler> createGitHubInnerHandler = () =>
             new VerifierRecordingHandler(
             scenarioRoot,
@@ -89,7 +91,8 @@ internal static class TrustedProofVerifierHost
             new FrameworkGitHubHandler(
                 scenarioRoot,
                 launch.PayloadSha256,
-                TrustedProofV2WorkflowAdmission.Render));
+                TrustedProofV2WorkflowAdmission.Render,
+                primaryBucket.ObserveAsync));
         return new TrustedProofPayloadRuntimePorts(
             createGitHubInnerHandler,
             github => new FrameworkStateDependencies(scenarioRoot, github),
@@ -204,7 +207,8 @@ internal static class TrustedProofVerifierHost
         return names.SequenceEqual(ExpectedEnvironment, StringComparer.Ordinal) &&
             Environment.GetEnvironmentVariable(
                 "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE") is
-                    "measurement" or "final" &&
+                    "measurement" or "final-bootstrap" or
+                    "final-continuation" or "final-stale" &&
             Environment.GetEnvironmentVariable("NO_COLOR") == "1" &&
             Environment.GetEnvironmentVariable("DOTNET_NOLOGO") == "1" &&
             Environment.GetEnvironmentVariable(

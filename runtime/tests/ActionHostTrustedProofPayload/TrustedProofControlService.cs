@@ -24,7 +24,7 @@ internal static class TrustedProofControlService
         }
 
         var requestBudget = new TrustedProofControlRequestBudget(
-            remainingTailGuard: requestBudgetProfile.RemainingTailGuard);
+            remainingTailGuard: requestBudgetProfile.ControlRemainingTailGuard(args));
         try
         {
             return await RunAsync(

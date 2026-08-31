@@ -35,11 +35,12 @@ export function createArtifactActionsRestClient(
     invalidateArtifactMutation: (input) => {
       cache.deleteArtifactMutation(input);
     },
+    invalidateArtifactListRepresentation: (input) => cache.delete(listCacheKey(input)),
+    invalidateArtifactRepresentation: (input) => cache.delete(artifactCacheKey(input)),
+    invalidateWorkflowRunAttemptRepresentation: (input) => cache.delete(attemptCacheKey(input)),
     dispose: () => cache.dispose(),
     listArtifactsForRepo: async (input, signal, latestAttemptStartAt) => {
-      const key = ['list', input.owner, input.repo, input.name, input.per_page, input.page].join(
-        '\u0000',
-      );
+      const key = listCacheKey(input);
       return await cache.conditionalGet(
         key,
         budget,
@@ -53,7 +54,7 @@ export function createArtifactActionsRestClient(
       );
     },
     getArtifact: async (input, signal, latestAttemptStartAt) => {
-      const key = ['artifact', input.owner, input.repo, input.artifact_id].join('\u0000');
+      const key = artifactCacheKey(input);
       try {
         return await cache.conditionalGet(
           key,
@@ -126,9 +127,7 @@ export function createArtifactActionsRestClient(
       return { status: 200, data: Buffer.concat(chunks, total) };
     },
     getWorkflowRunAttempt: async (input, signal, latestAttemptStartAt) => {
-      const key = ['attempt', input.owner, input.repo, input.run_id, input.attempt_number].join(
-        '\u0000',
-      );
+      const key = attemptCacheKey(input);
       return await cache.conditionalGet(
         key,
         budget,
@@ -314,8 +313,37 @@ function conditionalRequestOptions(signal: AbortSignal, etag: string | undefined
 
 function validEtag(value: string | undefined): value is string {
   return (
-    value !== undefined && value.length > 0 && value.length <= 512 && /^[\x21-\x7e]+$/.test(value)
+    value !== undefined &&
+    value.length <= 512 &&
+    /^(?:W\/)?"[\x21\x23-\x7e\x80-\xff]*"$/u.test(value)
   );
+}
+
+function listCacheKey(input: {
+  readonly owner: string;
+  readonly repo: string;
+  readonly name: string;
+  readonly per_page: number;
+  readonly page: number;
+}): string {
+  return ['list', input.owner, input.repo, input.name, input.per_page, input.page].join('\u0000');
+}
+
+function artifactCacheKey(input: {
+  readonly owner: string;
+  readonly repo: string;
+  readonly artifact_id: number;
+}): string {
+  return ['artifact', input.owner, input.repo, input.artifact_id].join('\u0000');
+}
+
+function attemptCacheKey(input: {
+  readonly owner: string;
+  readonly repo: string;
+  readonly run_id: number;
+  readonly attempt_number: number;
+}): string {
+  return ['attempt', input.owner, input.repo, input.run_id, input.attempt_number].join('\u0000');
 }
 
 function clone<T>(value: T): T {
@@ -354,8 +382,10 @@ function header(headers: HeadersLike | undefined, name: string): string | undefi
     return (getter as (headerName: string) => string | null | undefined)(name) ?? undefined;
   }
   const record = headers as Readonly<Record<string, string | string[] | undefined>>;
-  const value = record[name] ?? record[name.toLowerCase()];
-  return Array.isArray(value) ? value[0] : value;
+  const values = Object.entries(record)
+    .filter(([key]) => key.toLowerCase() === name.toLowerCase())
+    .flatMap(([, value]) => (Array.isArray(value) ? value : value === undefined ? [] : [value]));
+  return values.length === 1 ? values[0] : undefined;
 }
 
 class ArtifactArchiveDownloadError extends Error {

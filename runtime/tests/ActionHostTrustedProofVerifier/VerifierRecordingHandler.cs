@@ -45,8 +45,9 @@ internal sealed class VerifierRecordingHandler(
             .ConfigureAwait(false);
         if (recordTrustedRequest)
         {
-            RecordTrustedProofRequest(request, response, dispatchTimestamp,
-                trustedSequence);
+            await RecordTrustedProofRequestAsync(request, response,
+                dispatchTimestamp, trustedSequence, cancellationToken)
+                .ConfigureAwait(false);
         }
         lock (Gate)
         {
@@ -67,11 +68,12 @@ internal sealed class VerifierRecordingHandler(
 
     // Persist only canonical, secret-free facts.  URI queries, headers,
     // bodies, and credentials are intentionally outside the witness format.
-    private void RecordTrustedProofRequest(
+    private async Task RecordTrustedProofRequestAsync(
         HttpRequestMessage request,
         HttpResponseMessage response,
         long dispatchTimestamp,
-        int localSequence)
+        int localSequence,
+        CancellationToken cancellationToken)
     {
         if (request.RequestUri is not { } uri)
         {
@@ -96,9 +98,11 @@ internal sealed class VerifierRecordingHandler(
             throw new InvalidOperationException("unexpected verifier request method");
         }
         var points = method is "GET" or "HEAD" or "OPTIONS" ? 1 : 5;
+        var classified = await TrustedProofOperationRequestAccounting
+            .ResponseClassifyAsync(response, cancellationToken)
+            .ConfigureAwait(false);
         var responseClass = TrustedProofOperationRequestAccounting
-            .WitnessResponseClass(TrustedProofOperationRequestAccounting
-                .ResponseClassify(response));
+            .WitnessResponseClass(classified);
         lock (Gate)
         {
             File.AppendAllText(

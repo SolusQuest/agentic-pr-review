@@ -297,6 +297,18 @@ public sealed class TrustedProofArchitectureTests
             "input.trusted_proof_request_budget_satisfied !== true",
             source,
             StringComparison.Ordinal);
+        Assert.Contains("'shared_primary_bucket_start',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'shared_primary_bucket_end',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'shared_primary_bucket_exact',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.shared_primary_bucket_start !== 1000", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.shared_primary_bucket_end !== 111", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.shared_primary_bucket_exact !== true", source,
+            StringComparison.Ordinal);
         Assert.Contains("'stale-unauthorized-follow-on',", source,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -305,7 +317,7 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("item.HostPid !== expectedHostPid", source,
             StringComparison.Ordinal);
-        Assert.Contains("AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: final",
+        Assert.Contains("request-budget-profile: ${{ steps.authorization.outputs.request-budget-profile }}",
             File.ReadAllText(Path.Join(FindRepositoryRoot(), ".github",
                 "workflows", "r4-trusted-proof.yml")), StringComparison.Ordinal);
         Assert.Contains("'launch_workflow_sha',", source,
@@ -323,10 +335,10 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("input.trusted_authority_exact !== true", source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final",
+            "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap",
             source, StringComparison.Ordinal);
         Assert.Contains(
-            "env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final",
+            "env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap",
             source, StringComparison.Ordinal);
         Assert.Contains("validate_missing_github_stderr", source,
             StringComparison.Ordinal);
@@ -336,7 +348,7 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains(
             "github.host_other_github_rest.remaining_tail_required !== 878",
             source, StringComparison.Ordinal);
-        Assert.Contains("control.remaining_tail_required !== 888", source,
+        Assert.Contains("control.remaining_tail_required !== 879", source,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "\"rejected_requests\":0}\\nAPR_R4_E2P_CONTROL_REQUEST_BUDGET",
@@ -473,6 +485,8 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("ActionHostTrustedProofPayload.csproj", project,
             StringComparison.Ordinal);
         Assert.Contains("FrameworkGitHubHandler.cs", project,
+            StringComparison.Ordinal);
+        Assert.Contains("FrameworkPrimaryRateLimitBucket.cs", project,
             StringComparison.Ordinal);
         Assert.Contains("FrameworkStateDependencies.cs", project,
             StringComparison.Ordinal);

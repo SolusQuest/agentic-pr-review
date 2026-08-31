@@ -73,9 +73,10 @@ internal sealed class TrustedProofControlRequestBudget
     // A malformed remaining header is not a benign observability gap: accepting
     // another authenticated request would make the proof's rate accounting
     // unverifiable, so it closes this control budget just like a real limit.
-    internal void Observe(
+    internal async Task ObserveAsync(
         HttpResponseMessage response,
         HttpMethod method,
+        CancellationToken cancellationToken,
         TrustedProofPrimaryRemainingLease? lease = null)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -93,8 +94,9 @@ internal sealed class TrustedProofControlRequestBudget
             Interlocked.Increment(ref primary);
         }
 
-        var responseClass = TrustedProofOperationRequestAccounting.ResponseClassify(
-            response, epochSeconds());
+        var responseClass = await TrustedProofOperationRequestAccounting
+            .ResponseClassifyAsync(response, cancellationToken, epochSeconds())
+            .ConfigureAwait(false);
         switch (responseClass)
         {
             case TrustedProofResponseClass.PermissionDenied:
@@ -268,8 +270,21 @@ internal sealed class TrustedProofControlTransport : IDisposable
         }
         using (response)
         {
-            requestBudget.Observe(response, HttpMethod.Get, lease);
-            if (requestBudget.IsRateLimited) return null;
+            try
+            {
+                await requestBudget.ObserveAsync(response, HttpMethod.Get,
+                    cancellationToken, lease).ConfigureAwait(false);
+            }
+            catch
+            {
+                lease!.Ledger.CloseOutcomeUnknown(lease);
+                throw;
+            }
+            if (requestBudget.IsRateLimited && lease!.Ledger.CloseReason !=
+                    TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining)
+            {
+                return null;
+            }
 
             return response.IsSuccessStatusCode
                 ? await ReadBoundedBytesAsync(response, 64 * 1024, cancellationToken)
@@ -374,7 +389,9 @@ internal sealed class TrustedProofControlTransport : IDisposable
             if (!response.IsSuccessStatusCode)
             {
                 return new(
-                    IsRateLimited(response, requestBudget.CurrentUnixSeconds)
+                    await IsRateLimitedAsync(response,
+                        requestBudget.CurrentUnixSeconds, cancellationToken)
+                        .ConfigureAwait(false)
                         ? TrustedProofMutationOutcome.RateLimited
                         : IsKnownNotSent(response.StatusCode)
                         ? TrustedProofMutationOutcome.KnownNotSent
@@ -496,7 +513,9 @@ internal sealed class TrustedProofControlTransport : IDisposable
                 return TrustedProofMutationOutcome.MissingIdempotent;
             }
 
-            return IsRateLimited(response, requestBudget.CurrentUnixSeconds)
+            return await IsRateLimitedAsync(response,
+                requestBudget.CurrentUnixSeconds, cancellationToken)
+                .ConfigureAwait(false)
                 ? TrustedProofMutationOutcome.RateLimited
                 : IsKnownNotSent(response.StatusCode)
                 ? TrustedProofMutationOutcome.KnownNotSent
@@ -582,8 +601,19 @@ internal sealed class TrustedProofControlTransport : IDisposable
             lease!.Ledger.CloseOutcomeUnknown(lease);
             throw;
         }
-        requestBudget.Observe(response, method, lease);
-        if (requestBudget.IsRateLimited)
+        try
+        {
+            await requestBudget.ObserveAsync(response, method, cancellationToken, lease)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            lease!.Ledger.CloseOutcomeUnknown(lease);
+            response.Dispose();
+            throw;
+        }
+        if (requestBudget.IsRateLimited && lease!.Ledger.CloseReason !=
+                TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining)
         {
             response.Dispose();
             return null;
@@ -682,9 +712,12 @@ internal sealed class TrustedProofControlTransport : IDisposable
         }
     }
 
-    private static bool IsRateLimited(HttpResponseMessage response,
-        long currentUnixSeconds) =>
-        TrustedProofOperationRequestAccounting.RateClassify(response, currentUnixSeconds) is
+    private static async ValueTask<bool> IsRateLimitedAsync(
+        HttpResponseMessage response,
+        long currentUnixSeconds,
+        CancellationToken cancellationToken) =>
+        await TrustedProofOperationRequestAccounting.RateClassifyAsync(
+            response, cancellationToken, currentUnixSeconds).ConfigureAwait(false) is
             TrustedProofRateClassification.Primary or
             TrustedProofRateClassification.Secondary or
             TrustedProofRateClassification.Combined or

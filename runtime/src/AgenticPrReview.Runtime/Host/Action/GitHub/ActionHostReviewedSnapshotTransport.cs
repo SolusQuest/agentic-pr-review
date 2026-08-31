@@ -219,7 +219,8 @@ internal sealed class ActionHostReviewedSnapshotTransport :
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
-            var rateLimit = ActionHostGitHubRateLimitClassifier.Classify(response);
+            var rateLimit = await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return ActionHostGitObjectResult<ActionHostStreamedBlobObject>
@@ -344,7 +345,8 @@ internal sealed class ActionHostReviewedSnapshotTransport :
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
-            var rateLimit = ActionHostGitHubRateLimitClassifier.Classify(response);
+            var rateLimit = await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return DocumentResult<T>.Failed(

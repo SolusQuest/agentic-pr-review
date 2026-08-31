@@ -686,7 +686,7 @@ describe('upload mutation phase matrix', () => {
         artifactClient,
         actions,
         staging,
-        now: () => elapsed,
+        monotonicNow: () => elapsed,
       });
 
       const result = await operations.execute(
@@ -876,6 +876,119 @@ describe('precise conditional-representation invalidation', () => {
     expect(result).toMatchObject({ failure: 'none', mutation_state: 'committed' });
     expect(getCalls).toBe(2);
   });
+
+  it('evicts every list page participating in a rejected aggregate', async () => {
+    const invalidations: Array<Record<string, unknown>> = [];
+    let page = 0;
+    const operations = await createOperations({
+      invalidateArtifactListRepresentation: (input) => invalidations.push(input),
+      listArtifactsForRepo: async () => {
+        page += 1;
+        return {
+          status: 200,
+          data: {
+            total_count: page === 1 ? 101 : 102,
+            artifacts: Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
+              id: (page - 1) * 100 + index + 1,
+              name: 'opaque-state',
+              size_in_bytes: 1,
+              expired: false,
+              expires_at: '2030-01-01T00:00:00Z',
+            })),
+          },
+        };
+      },
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'list_exact',
+        correlation_id: 'semantic-list-invalidation',
+        name: 'opaque-state',
+        maximum_objects: '256',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'incomplete', complete: false });
+    expect(invalidations).toEqual([
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', per_page: 100, page: 1 },
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', per_page: 100, page: 2 },
+    ]);
+  });
+
+  it('evicts a rejected artifact descriptor and its verified-record identity', async () => {
+    const invalidations: Array<Record<string, unknown>> = [];
+    const expected = metadataFixture();
+    const operations = await createOperations({
+      invalidateArtifactRepresentation: (input) => invalidations.push(input),
+      getArtifact: async () => ({
+        status: 200,
+        data: { ...platformRecord(expected), name: 'wrong-name' },
+      }),
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'metadata',
+        correlation_id: 'semantic-artifact-invalidation',
+        name: expected.name,
+        object_id: expected.object_id,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'invalid' });
+    expect(invalidations).toEqual([{ owner: 'owner', repo: 'repository', artifact_id: 42 }]);
+  });
+
+  it('evicts rejected run-attempt and related artifact representations', async () => {
+    const encrypted = Buffer.from('semantic-attempt-ciphertext');
+    const envelope = encodeArtifactTransportEnvelope(
+      '7001',
+      '2',
+      encrypted,
+      digestBytes(encrypted),
+      testBudget(),
+    );
+    const archive = createTestZip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+    const expected = {
+      ...metadataFixture(),
+      archive_digest: digestBytes(archive),
+      encrypted_object_digest: digestBytes(encrypted),
+      size: String(encrypted.length),
+    };
+    const artifactInvalidations: Array<Record<string, unknown>> = [];
+    const attemptInvalidations: Array<Record<string, unknown>> = [];
+    const operations = await createOperations({
+      invalidateArtifactRepresentation: (input) => artifactInvalidations.push(input),
+      invalidateWorkflowRunAttemptRepresentation: (input) => attemptInvalidations.push(input),
+      getArtifact: async () => ({
+        status: 200,
+        data: { ...platformRecord(expected), size_in_bytes: archive.length },
+      }),
+      downloadArtifactArchive: async () => ({ status: 200, data: archive }),
+      getWorkflowRunAttempt: async () => ({ status: 200, data: { id: 7001, run_attempt: 9 } }),
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'metadata',
+        correlation_id: 'semantic-attempt-invalidation',
+        name: expected.name,
+        object_id: expected.object_id,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'conflict' });
+    expect(attemptInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', run_id: 7001, attempt_number: 2 },
+    ]);
+    expect(artifactInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', artifact_id: 42 },
+    ]);
+  });
 });
 
 describe('delete dispatch marker', () => {
@@ -905,6 +1018,39 @@ describe('delete dispatch marker', () => {
 });
 
 describe('official artifact lifecycle', () => {
+  it('uses UTC time for expiry while the monotonic clock remains deadline-only', async () => {
+    const expected = metadataFixture();
+    const invalidations: Array<Record<string, unknown>> = [];
+    let downloadCalls = 0;
+    const operations = await createOperations(
+      {
+        invalidateArtifactRepresentation: (input) => invalidations.push(input),
+        getArtifact: async () => ({ status: 200, data: platformRecord(expected) }),
+        downloadArtifactArchive: async () => {
+          downloadCalls += 1;
+          return { status: 200, data: Buffer.from('unexpected') };
+        },
+      },
+      () => 0,
+      () => Date.parse('2031-01-01T00:00:00Z'),
+    );
+
+    const result = await operations.execute(
+      {
+        operation: 'download',
+        correlation_id: 'utc-expiry',
+        expected,
+        destination_relative_path: 'destination/object.bin',
+        maximum_bytes: '1024',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'expired' });
+    expect(downloadCalls).toBe(0);
+    expect(invalidations).toEqual([{ owner: 'owner', repo: 'repository', artifact_id: 42 }]);
+  });
+
   it('uploads, verifies, downloads, reads back, and authorizes exact deletion', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'apr-lifecycle-test-'));
     roots.push(root);
@@ -940,7 +1086,7 @@ describe('official artifact lifecycle', () => {
     await writeFile(path.join(destinationDirectory, 'object.bin'), Buffer.alloc(0));
 
     const now = Date.parse('2029-01-01T00:00:00Z');
-    const minimumExpiry = Math.floor(now / 1000) + 3600;
+    const minimumExpiry = Math.floor(now / 1000) + 86_401;
     const expiresAt = minimumExpiry + 86400;
     let nextId = 42;
     let stored:
@@ -968,7 +1114,7 @@ describe('official artifact lifecycle', () => {
         expect(operationRoot).toBe(sourceDirectory);
         expect(files).toHaveLength(1);
         expect(options?.compressionLevel).toBe(0);
-        expect(options?.retentionDays).toBe(1);
+        expect(options?.retentionDays).toBe(2);
         const archive = createTestZip([
           {
             name: ARTIFACT_ENVELOPE_ENTRY,
@@ -1053,7 +1199,8 @@ describe('official artifact lifecycle', () => {
       artifactClient,
       actions,
       staging,
-      now: () => now,
+      monotonicNow: () => 0,
+      utcNow: () => now,
     });
     const signal = new AbortController().signal;
     const uploadCommand = {
@@ -1196,6 +1343,7 @@ describe('official artifact lifecycle', () => {
 async function createOperations(
   overrides: Partial<ArtifactActionsRestClient>,
   now?: () => number,
+  utcNow?: () => number,
 ): Promise<OfficialArtifactOperations> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'apr-official-test-'));
   roots.push(root);
@@ -1226,7 +1374,8 @@ async function createOperations(
     artifactClient,
     actions,
     staging,
-    now,
+    monotonicNow: now,
+    utcNow,
   });
 }
 

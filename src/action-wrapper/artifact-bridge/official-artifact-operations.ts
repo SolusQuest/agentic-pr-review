@@ -57,6 +57,27 @@ export interface ArtifactActionsRestClient {
     readonly name: string;
     readonly artifact_id?: number;
   }): void;
+  /** Evicts one semantically rejected repository-artifact list page. */
+  invalidateArtifactListRepresentation?(input: {
+    readonly owner: string;
+    readonly repo: string;
+    readonly name: string;
+    readonly per_page: number;
+    readonly page: number;
+  }): void;
+  /** Evicts one semantically rejected artifact descriptor. */
+  invalidateArtifactRepresentation?(input: {
+    readonly owner: string;
+    readonly repo: string;
+    readonly artifact_id: number;
+  }): void;
+  /** Evicts one semantically rejected workflow-run attempt descriptor. */
+  invalidateWorkflowRunAttemptRepresentation?(input: {
+    readonly owner: string;
+    readonly repo: string;
+    readonly run_id: number;
+    readonly attempt_number: number;
+  }): void;
   dispose?(): void | Promise<void>;
 
   listArtifactsForRepo(
@@ -132,7 +153,10 @@ export interface OfficialArtifactOperationsContext {
   readonly artifactClient?: ArtifactClient;
   readonly actions: ArtifactActionsRestClient;
   readonly staging: ArtifactBridgeStaging;
-  readonly now?: () => number;
+  /** Monotonic milliseconds used only for operation deadlines and pacing. */
+  readonly monotonicNow?: () => number;
+  /** Unix wall-clock milliseconds used only for expiry and retention. */
+  readonly utcNow?: () => number;
   /** Shared by the REST representation and verified-record caches. */
   readonly cacheLedger?: ArtifactCacheLedger;
   /** Present only for the verified trusted-proof route. */
@@ -171,14 +195,16 @@ class BridgeOperationFailure extends Error {
 }
 
 export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
-  private readonly now: () => number;
+  private readonly monotonicNow: () => number;
+  private readonly utcNow: () => number;
   private readonly artifactClient: ArtifactClient;
   private readonly cacheLedger: ArtifactCacheLedger;
   private readonly verifiedRecords: VerifiedArtifactRecordCache;
   private readonly coordinator = new ArtifactLifecycleCoordinator();
 
   constructor(private readonly context: OfficialArtifactOperationsContext) {
-    this.now = context.now ?? (() => performance.now());
+    this.monotonicNow = context.monotonicNow ?? (() => performance.now());
+    this.utcNow = context.utcNow ?? (() => Date.now());
     this.artifactClient = context.artifactClient ?? new DefaultArtifactClient();
     this.cacheLedger = context.cacheLedger ?? new ArtifactCacheLedger();
     this.verifiedRecords = new VerifiedArtifactRecordCache(this.cacheLedger);
@@ -197,7 +223,11 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     signal: AbortSignal,
   ): Promise<ArtifactBridgeResult> {
     return await this.coordinator.run(signal, async () => {
-      const budget = new ArtifactBridgeOperationBudget(signal, this.now, this.now());
+      const budget = new ArtifactBridgeOperationBudget(
+        signal,
+        this.monotonicNow,
+        this.monotonicNow(),
+      );
       try {
         const requiredPrimaryAllocation = mandatoryPrimaryAllocation(command);
         if (requiredPrimaryAllocation !== undefined) {
@@ -247,16 +277,17 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     const seen = new Set<string>();
     const objects: ArtifactReferenceWire[] = [];
     for (let page = 1; page <= ARTIFACT_BRIDGE_LIMITS.maximumPages; page += 1) {
+      const pageInput = {
+        owner: this.context.owner,
+        repo: this.context.repository,
+        name: command.name,
+        per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
+        page,
+      } as const;
       const response = await this.callOfficial(
         (requestSignal) =>
           this.context.actions.listArtifactsForRepo(
-            {
-              owner: this.context.owner,
-              repo: this.context.repository,
-              name: command.name,
-              per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
-              page,
-            },
+            pageInput,
             requestSignal,
             budget.latestHttpAttemptStartAt(),
           ),
@@ -264,13 +295,13 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       );
       budget.throwIfExpired();
       if (response.status !== 200 || !responseFits(response.data)) {
-        throw new BridgeOperationFailure('incomplete');
+        this.rejectArtifactList(command.name, page, 'incomplete');
       }
       if (
         !Array.isArray(response.data.artifacts) ||
         response.data.artifacts.length > ARTIFACT_BRIDGE_LIMITS.recordsPerPage
       ) {
-        throw new BridgeOperationFailure('incomplete');
+        this.rejectArtifactList(command.name, page, 'incomplete');
       }
       const total = response.data.total_count;
       if (
@@ -280,18 +311,22 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         total > maximum ||
         (expectedTotal !== undefined && total !== expectedTotal)
       ) {
-        throw new BridgeOperationFailure('incomplete');
+        this.rejectArtifactList(command.name, page, 'incomplete');
       }
       expectedTotal = total;
       for (const artifact of response.data.artifacts) {
         const id = platformId(artifact.id);
         if (artifact.name !== command.name || !id || seen.has(id)) {
-          throw new BridgeOperationFailure(id && seen.has(id) ? 'duplicate' : 'incomplete');
+          this.rejectArtifactList(
+            command.name,
+            page,
+            id && seen.has(id) ? 'duplicate' : 'incomplete',
+          );
         }
         seen.add(id);
         objects.push({ name: command.name, object_id: id });
         if (objects.length > total || objects.length > maximum) {
-          throw new BridgeOperationFailure('incomplete');
+          this.rejectArtifactList(command.name, page, 'incomplete');
         }
       }
       if (objects.length === total) {
@@ -306,10 +341,10 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         };
       }
       if (response.data.artifacts.length !== ARTIFACT_BRIDGE_LIMITS.recordsPerPage) {
-        throw new BridgeOperationFailure('incomplete');
+        this.rejectArtifactList(command.name, page, 'incomplete');
       }
     }
-    throw new BridgeOperationFailure('incomplete');
+    return this.rejectArtifactList(command.name, ARTIFACT_BRIDGE_LIMITS.maximumPages, 'incomplete');
   }
 
   private async metadata(
@@ -338,7 +373,12 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     this.assertNotExpired(platform);
     const record = await this.readRecord(platform, budget);
     try {
-      assertMetadata(command.expected, record.metadata);
+      try {
+        assertMetadata(command.expected, record.metadata);
+      } catch (error) {
+        this.invalidatePlatformRepresentation(platform.name, platform.id);
+        throw error;
+      }
       if (record.bytes.length > Number(command.maximum_bytes)) {
         throw new BridgeOperationFailure('digest_mismatch');
       }
@@ -389,7 +429,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       const minimumExpiry = Number(command.minimum_expires_at_unix_seconds);
       const retentionDays = Math.max(
         1,
-        Math.ceil((minimumExpiry * 1000 - this.now()) / 86_400_000),
+        Math.ceil((minimumExpiry * 1000 - this.utcNow()) / 86_400_000),
       );
       // The upload data-plane call is followed by get/archive/attempt
       // verification.  Reserve those three authenticated REST observations
@@ -456,6 +496,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
           record.metadata.encrypted_object_digest !== command.encrypted_object_digest ||
           Number(record.metadata.expires_at_unix_seconds) < minimumExpiry
         ) {
+          this.invalidatePlatformRepresentation(platform.name, platform.id);
           throw new BridgeOperationFailure('conflict', 'committed', record.metadata);
         }
         return {
@@ -528,7 +569,12 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     this.assertExpectedPlatform(command.expected, platform);
     const record = await this.readRecord(platform, budget);
     try {
-      assertMetadata(command.expected, record.metadata);
+      try {
+        assertMetadata(command.expected, record.metadata);
+      } catch (error) {
+        this.invalidatePlatformRepresentation(platform.name, platform.id);
+        throw error;
+      }
       return successWithMetadata(command, record.metadata);
     } finally {
       record.bytes.fill(0);
@@ -660,6 +706,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       throw new BridgeOperationFailure('not_found');
     }
     if (response.status !== 200 || !responseFits(response.data)) {
+      this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure('invalid');
     }
     const artifact = response.data;
@@ -678,6 +725,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       artifact.size_in_bytes < 1 ||
       artifact.size_in_bytes > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes
     ) {
+      this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure('invalid');
     }
     return {
@@ -750,6 +798,14 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       this.verifiedRecords.store(platform, record);
       const output = this.verifiedRecords.copy(record);
       return output;
+    } catch (error) {
+      if (
+        error instanceof BridgeOperationFailure ||
+        error instanceof ArtifactTransportEnvelopeError
+      ) {
+        this.invalidatePlatformRepresentation(platform.name, platform.id);
+      }
+      throw error;
     } finally {
       // The cache and returned record each take defensive copies.  This source
       // envelope remains owned here even when verification, caching, or copying
@@ -784,6 +840,12 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       platformId(response.data.id) !== runId ||
       platformId(response.data.run_attempt ?? undefined) !== runAttempt
     ) {
+      this.context.actions.invalidateWorkflowRunAttemptRepresentation?.({
+        owner: this.context.owner,
+        repo: this.context.repository,
+        run_id: Number(runId),
+        attempt_number: Number(runAttempt),
+      });
       throw new BridgeOperationFailure('conflict');
     }
   }
@@ -796,6 +858,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       expected.archive_digest !== platform.archiveDigest ||
       expected.expires_at_unix_seconds !== platform.expiresAtUnixSeconds
     ) {
+      this.invalidatePlatformRepresentation(platform.name, platform.id);
       throw new BridgeOperationFailure('conflict');
     }
   }
@@ -803,8 +866,9 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
   private assertNotExpired(platform: PlatformArtifact): void {
     if (
       platform.expired ||
-      Number(platform.expiresAtUnixSeconds) <= Math.floor(this.now() / 1000)
+      Number(platform.expiresAtUnixSeconds) <= Math.floor(this.utcNow() / 1000)
     ) {
+      this.invalidatePlatformRepresentation(platform.name, platform.id);
       throw new BridgeOperationFailure('expired');
     }
   }
@@ -820,7 +884,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       budget.remainingMs(),
       budget.signal,
       latestAttemptStartAt,
-      this.now,
+      this.monotonicNow,
       beforeDispatch,
     );
   }
@@ -838,6 +902,32 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       primaryRequests: authenticatedRequests,
       secondaryPoints,
     });
+  }
+
+  private rejectArtifactList(
+    name: string,
+    throughPage: number,
+    failure: Extract<ArtifactBridgeFailure, 'duplicate' | 'incomplete'>,
+  ): never {
+    for (let page = 1; page <= throughPage; page += 1) {
+      this.context.actions.invalidateArtifactListRepresentation?.({
+        owner: this.context.owner,
+        repo: this.context.repository,
+        name,
+        per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
+        page,
+      });
+    }
+    throw new BridgeOperationFailure(failure);
+  }
+
+  private invalidatePlatformRepresentation(name: string, objectId: string): void {
+    this.context.actions.invalidateArtifactRepresentation?.({
+      owner: this.context.owner,
+      repo: this.context.repository,
+      artifact_id: Number(objectId),
+    });
+    this.verifiedRecords.deleteByNameAndId(name, objectId);
   }
 
   private failureResult(command: ArtifactBridgeCommand, error: unknown): ArtifactBridgeResult {

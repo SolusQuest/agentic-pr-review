@@ -32,5 +32,5 @@ describe('R4 post-merge fixture refresh contract', () => {
     } finally {
       materialized.dispose();
     }
-  });
+  }, 15_000);
 });

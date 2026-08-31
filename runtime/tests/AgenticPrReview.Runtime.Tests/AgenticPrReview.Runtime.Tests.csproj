@@ -19,6 +19,9 @@
     <ProjectReference Include="..\ActionHostVerifierFixture\AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj" />
     <ProjectReference Include="..\ActionHostTrustedProofPayload\AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj"
                       AdditionalProperties="PayloadSourceCommit=1111111111111111111111111111111111111111;PayloadSourceTree=2222222222222222222222222222222222222222" />
+    <ProjectReference Include="..\ActionHostTrustedProofVerifier\AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.csproj"
+                      ReferenceOutputAssembly="false"
+                      AdditionalProperties="PayloadSourceCommit=1111111111111111111111111111111111111111;PayloadSourceTree=2222222222222222222222222222222222222222" />
     <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
     <ProjectReference Include="..\ActionHostTrustedProofCapture\AgenticPrReview.Runtime.ActionHostTrustedProofCapture.csproj" />
     <ProjectReference Include="..\ActionHostTrustedProofEvidenceAssembler\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceAssembler.csproj" />

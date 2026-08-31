@@ -284,6 +284,8 @@ type FakeOptions = {
   uncertainMode?: 'before' | 'after' | 'drift';
   definitiveTarget?: string;
   definitiveStatus?: number;
+  definitiveMode?: 'before' | 'after';
+  readFailureAfterMutationTarget?: string;
 };
 
 function fakeTransport(value: ReturnType<typeof record>, options: FakeOptions = {}) {
@@ -303,6 +305,7 @@ function fakeTransport(value: ReturnType<typeof record>, options: FakeOptions = 
   state.set(`ref:${value.fixtures.normal.ref}`, value.fixtures.normal.old_head);
   state.set(`ref:${value.fixtures.stale.ref}`, value.fixtures.stale.old_head);
   let uncertainty = options.uncertainTarget;
+  let readFailureAfterMutation = options.readFailureAfterMutationTarget;
 
   const apply = (method: string, target: string, body: any) => {
     if (target.startsWith('object:')) state.set(target, target.split(':').at(-1)!);
@@ -324,11 +327,19 @@ function fakeTransport(value: ReturnType<typeof record>, options: FakeOptions = 
     state,
     async read(target: string) {
       calls.push({ kind: 'read', target });
+      if (
+        readFailureAfterMutation === target &&
+        calls.some((call) => call.kind === 'mutate' && call.target === target)
+      ) {
+        readFailureAfterMutation = undefined;
+        throw new Error('synthetic post-mutation read failure');
+      }
       return state.get(target) ?? null;
     },
     async mutate(method: string, target: string, body: any) {
       calls.push({ kind: 'mutate', method, target, body });
       if (options.definitiveTarget === target) {
+        if (options.definitiveMode === 'after') apply(method, target, body);
         const error: any = new Error('definitive');
         error.status = options.definitiveStatus ?? 403;
         throw error;
@@ -424,11 +435,13 @@ describe('R4 post-merge enrollment executor', () => {
     expect(value.fixtures.stale.pr_number).toBe('226');
     expect(value.objects.initial_tree.body.base_tree).toBe(value.coordinates.workflow_tree_sha);
     const normal = JSON.parse(value.fixtures.normal.manifest);
+    const stale = JSON.parse(value.fixtures.stale.manifest);
     expect(Object.keys(normal)).toEqual([
       'kind',
       'repository_id',
       'repository',
       'pr_number',
+      'proof_scope',
       'fixture_head_sha',
       'operation_id',
       'workflow_sha',
@@ -436,7 +449,10 @@ describe('R4 post-merge enrollment executor', () => {
       'payload_source_sha',
       'payload_sha256',
     ]);
+    expect(normal.proof_scope).toBe('normal');
+    expect(stale.proof_scope).toBe('stale');
     expect(value.fixtures.normal.manifest).toBe(canonicalAuthorizationManifest(normal));
+    expect(value.fixtures.stale.manifest).toBe(canonicalAuthorizationManifest(stale));
     expect(value.fixtures.normal.manifest).not.toBe(value.fixtures.stale.manifest);
 
     const changed = structuredClone(value);
@@ -495,7 +511,7 @@ describe('R4 post-merge enrollment executor', () => {
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   test('treats the producer-owned advanced stale ref as an exact readback and never patches it', async () => {
     const value = record();
@@ -570,7 +586,110 @@ describe('R4 post-merge enrollment executor', () => {
     } finally {
       fs.rmSync(definitiveDirectory, { recursive: true, force: true });
     }
-  });
+
+    const appliedServerFailureTransport = fakeTransport(value, {
+      definitiveTarget: target,
+      definitiveStatus: 503,
+      definitiveMode: 'after',
+      readFailureAfterMutationTarget: target,
+    });
+    const appliedServerFailureDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'apr-enrollment-server-failure-applied-'),
+    );
+    try {
+      await runThrough(
+        value,
+        appliedServerFailureTransport,
+        appliedServerFailureDirectory,
+        'prepare',
+      );
+      await expect(
+        executeDurableEnrollmentPhase({
+          directory: appliedServerFailureDirectory,
+          record: value,
+          phase: 'refresh',
+          transport: appliedServerFailureTransport,
+          observations: observations(value),
+          observationMaterializer: fakeObservationMaterializer(value),
+        }),
+      ).rejects.toThrow(/read/u);
+      expect(
+        appliedServerFailureTransport.calls.filter(
+          (call) => call.kind === 'mutate' && call.target === target,
+        ),
+      ).toHaveLength(1);
+      await expect(
+        executeDurableEnrollmentPhase({
+          directory: appliedServerFailureDirectory,
+          record: value,
+          phase: 'refresh',
+          transport: appliedServerFailureTransport,
+          observations: observations(value),
+          observationMaterializer: fakeObservationMaterializer(value),
+        }),
+      ).resolves.toMatchObject({ phase: 'refresh', kind: 'phase-complete' });
+      expect(
+        appliedServerFailureTransport.calls.filter(
+          (call) => call.kind === 'mutate' && call.target === target,
+        ),
+      ).toHaveLength(1);
+    } finally {
+      fs.rmSync(appliedServerFailureDirectory, { recursive: true, force: true });
+    }
+
+    const serverFailureTransport = fakeTransport(value, {
+      definitiveTarget: target,
+      definitiveStatus: 503,
+    });
+    const serverFailureDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'apr-enrollment-server-failure-'),
+    );
+    try {
+      await runThrough(value, serverFailureTransport, serverFailureDirectory, 'prepare');
+      await expect(
+        executeDurableEnrollmentPhase({
+          directory: serverFailureDirectory,
+          record: value,
+          phase: 'refresh',
+          transport: serverFailureTransport,
+          observations: observations(value),
+          observationMaterializer: fakeObservationMaterializer(value),
+        }),
+      ).rejects.toThrow(/mutation-readback/u);
+      expect(
+        serverFailureTransport.calls.filter(
+          (call) => call.kind === 'mutate' && call.target === target,
+        ),
+      ).toHaveLength(2);
+      expect(
+        readEnrollmentJournal({ directory: serverFailureDirectory, record: value }).filter(
+          (entry: any) => entry.outcome === 'uncertain-mutation',
+        ),
+      ).toHaveLength(2);
+      await expect(
+        executeDurableEnrollmentPhase({
+          directory: serverFailureDirectory,
+          record: value,
+          phase: 'refresh',
+          transport: serverFailureTransport,
+          observations: observations(value),
+          observationMaterializer: fakeObservationMaterializer(value),
+        }),
+      ).rejects.toThrow(/mutation-retry/u);
+      expect(
+        serverFailureTransport.calls.filter(
+          (call) => call.kind === 'mutate' && call.target === target,
+        ),
+      ).toHaveLength(2);
+      expect(
+        serverFailureTransport.calls.some(
+          (call) => call.kind === 'mutate' && call.target.startsWith('variable:'),
+        ),
+      ).toBe(false);
+    } finally {
+      fs.rmSync(serverFailureDirectory, { recursive: true, force: true });
+    }
+  }, 15_000);
 
   test('binds the merged commit to its exact tree before any mutation', async () => {
     const value = record();
@@ -1295,6 +1414,18 @@ describe('R4 post-merge enrollment executor', () => {
       expect(error.status).toBe(403);
       expect(error.uncertain).toBeUndefined();
     }
+
+    const serverFailure = createGhTransport({
+      repository: ENROLLMENT_CONTRACT.repository,
+      runGh: () => ({
+        status: 1,
+        stdout: 'HTTP/2 503 Service Unavailable\ncontent-type: application/json\n\n{}',
+        stderr: '',
+      }),
+    });
+    await expect(
+      serverFailure.mutate('PATCH', `ref:${ENROLLMENT_CONTRACT.normal.operationId}`, {}),
+    ).rejects.toMatchObject({ status: 503, uncertain: true });
 
     const timeout = createGhTransport({
       repository: ENROLLMENT_CONTRACT.repository,

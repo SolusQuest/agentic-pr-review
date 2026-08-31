@@ -265,6 +265,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
   const v2Source = extractPreflight(fs.readFileSync(v2TemplatePath));
   const v2Values = {
     ...values,
+    proofScope: 'normal',
     actionSourceSha: values.workflowSha,
     payloadSourceSha: values.workflowSha,
   };
@@ -316,7 +317,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
 
       expect(result.stderr).toBe('');
       expect(result.stdout).toBe(
-        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(v2Values)}\nexpected-payload-sha256=${v2Values.payloadSha256}\n`,
+        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(v2Values)}\nexpected-payload-sha256=${v2Values.payloadSha256}\nrequest-budget-profile=${route === 'workflow_run' ? 'final-bootstrap' : 'final-continuation'}\n`,
       );
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(fetchImpl.mock.calls[0][1]).toMatchObject({
@@ -328,6 +329,45 @@ describe('R4 E2P v2 exact inline preflight', () => {
       );
     },
   );
+
+  it('selects the stale suffix only from an authenticated stale workflow-run manifest', async () => {
+    const staleValues = { ...v2Values, proofScope: 'stale' };
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: {
+        ...v2Environment,
+        R4_TRUSTED_PROOF_AUTHORIZATION: authorizationManifestV2(staleValues),
+      },
+      fetchImpl: vi.fn(async () => response(v2Pull())),
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('request-budget-profile=final-stale\n');
+    expect(result.stdout).toContain(
+      `authorization-manifest-digest=${authorizationDigestV2(staleValues)}\n`,
+    );
+  });
+
+  it('rejects a stale manifest on the continuation workflow-dispatch route before readback', async () => {
+    const fetchImpl = vi.fn(async () => response(v2Pull()));
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: {
+        ...v2Environment,
+        EVENT_NAME: 'workflow_dispatch',
+        EVENT_PR_NUMBER: '',
+        EVENT_HEAD_SHA: '',
+        INPUT_PR_NUMBER: '147',
+        INPUT_OPERATION_ID: operationId,
+        R4_TRUSTED_PROOF_AUTHORIZATION: v2Authorization({ proofScope: 'stale' }),
+      },
+      fetchImpl,
+    });
+
+    expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
+    expect(result.stderr).toContain('workflow-dispatch-proof-scope');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['merged pull request', {}, { merged_at: '2026-08-24T00:00:00Z' }],
@@ -360,7 +400,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
 
     expect(result.stdout).toBe(
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\n',
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n',
     );
     expect(result.stdout).not.toContain('authorized=true');
     expect(result.stderr).toMatch(/^APR_R4_E2P_PREFLIGHT_REJECTED /u);
@@ -413,6 +453,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
   });
 
   it.each([
+    ['invalid proof scope', v2Authorization({ proofScope: 'other' })],
     ['old fixed action source', v2Authorization({ actionSourceSha: 'b'.repeat(40) })],
     ['different payload source', v2Authorization({ payloadSourceSha: 'c'.repeat(40) })],
     ['noncanonical whitespace', ` ${v2Authorization()}`],
@@ -432,7 +473,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
 
     expect(result.stdout).toBe(
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\n',
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n',
     );
   });
 

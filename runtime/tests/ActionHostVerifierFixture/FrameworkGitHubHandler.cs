@@ -15,7 +15,8 @@ using AgenticPrReview.Runtime.ActionHost.Authorization;
 internal sealed class FrameworkGitHubHandler(
     string scenarioRoot,
     string payloadSha256,
-    Func<string, string, string>? workflowRenderer = null) :
+    Func<string, string, string>? workflowRenderer = null,
+    Func<bool, CancellationToken, ValueTask<int>>? observePrimaryRemaining = null) :
     HttpMessageHandler
 {
     internal const long RepositoryId = 42;
@@ -64,6 +65,29 @@ internal sealed class FrameworkGitHubHandler(
         workflowRenderer is not null;
 
     protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        var response = await SendCoreAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+        if (observePrimaryRemaining is not null &&
+            request.RequestUri?.Host.Equals("api.github.com",
+                StringComparison.OrdinalIgnoreCase) == true &&
+            request.Headers.Authorization?.Parameter == FrameworkCanaries.GitHubToken)
+        {
+            var remaining = await observePrimaryRemaining(
+                response.StatusCode != HttpStatusCode.NotModified,
+                cancellationToken).ConfigureAwait(false);
+            response.Headers.TryAddWithoutValidation("x-ratelimit-limit", "1000");
+            response.Headers.TryAddWithoutValidation("x-ratelimit-remaining",
+                remaining.ToString(CultureInfo.InvariantCulture));
+            response.Headers.TryAddWithoutValidation("x-ratelimit-reset",
+                "4102444800");
+        }
+        return response;
+    }
+
+    private async Task<HttpResponseMessage> SendCoreAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {

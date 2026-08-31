@@ -40,7 +40,7 @@ const finalGitHubBudgetReceipt = githubBudgetReceipt
   .replace('"remaining_tail_required":0', '"remaining_tail_required":863')
   .replace('"remaining_tail_required":0', '"remaining_tail_required":878');
 const finalControlBudgetReceipt = controlBudgetReceipt
-  .replace('"remaining_tail_required":0', '"remaining_tail_required":888')
+  .replace('"remaining_tail_required":0', '"remaining_tail_required":879')
   .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":64')
   .replace('"measurement_only":true', '"measurement_only":false');
 
@@ -93,9 +93,9 @@ describe('W1 private Host framing', () => {
       DOTNET_CLI_TELEMETRY_OPTOUT: '1',
       AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: 'measurement',
     });
-    expect(closedChildEnvironment('/tmp/apr-private', 'final')).toHaveProperty(
+    expect(closedChildEnvironment('/tmp/apr-private', 'final-bootstrap')).toHaveProperty(
       'AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE',
-      'final',
+      'final-bootstrap',
     );
   });
 
@@ -123,7 +123,7 @@ describe('W1 private Host framing', () => {
 
   it('admits a final receipt only under the verified final profile', async () => {
     const stream = new PassThrough();
-    const reading = readTrustedProofBudgetReceiptLines(stream, 'final');
+    const reading = readTrustedProofBudgetReceiptLines(stream, 'final-bootstrap');
     stream.end(`${finalControlBudgetReceipt}${finalGitHubBudgetReceipt}`);
     await expect(reading).resolves.toEqual([finalGitHubBudgetReceipt, finalControlBudgetReceipt]);
   });
@@ -148,14 +148,14 @@ describe('W1 private Host framing', () => {
     ) + finalControlBudgetReceipt,
     finalGitHubBudgetReceipt +
       finalControlBudgetReceipt.replace(
-        '"remaining_tail_required":888',
+        '"remaining_tail_required":879',
         '"remaining_tail_required":887',
       ),
     finalGitHubBudgetReceipt +
       finalControlBudgetReceipt.replace('"measurement_only":false', '"measurement_only":true'),
   ])('rejects mismatched final cap, tail, reserve, or measurement receipts', async (body) => {
     const stream = new PassThrough();
-    const reading = readTrustedProofBudgetReceiptLines(stream, 'final');
+    const reading = readTrustedProofBudgetReceiptLines(stream, 'final-bootstrap');
     stream.end(body);
     await expect(reading).resolves.toEqual([]);
   });

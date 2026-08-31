@@ -160,7 +160,7 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('permits equality only when the following dispatch leaves the exact tail and reserve', async () => {
+  it('advances a frozen suffix after charged responses and preserves the exact reserve', async () => {
     const profile = {
       ...TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
       remainingTailRequired: 3,
@@ -183,7 +183,12 @@ describe('trusted proof artifact REST budget', () => {
     const atBoundary = budget();
     await observeRemaining(atBoundary, 8);
     expect(atBoundary.receipt()).toMatchObject({ disposition: 'active' });
-    await expect(runGet(atBoundary)).rejects.toThrow(
+    await expect(runGet(atBoundary)).resolves.toMatchObject({ status: 200 });
+
+    const belowBoundary = budget();
+    await observeRemaining(belowBoundary, 7);
+    expect(belowBoundary.receipt()).toMatchObject({ disposition: 'primary_exhausted' });
+    await expect(runGet(belowBoundary)).rejects.toThrow(
       'trusted_proof_artifact_rest_budget_primary_exhausted',
     );
 
@@ -217,9 +222,7 @@ describe('trusted proof artifact REST budget', () => {
     });
     await observeRemaining(frozenFinal, 743);
     expect(frozenFinal.receipt()).toMatchObject({ disposition: 'active' });
-    await expect(runGet(frozenFinal)).rejects.toThrow(
-      'trusted_proof_artifact_rest_budget_primary_exhausted',
-    );
+    await expect(runGet(frozenFinal)).resolves.toMatchObject({ status: 200 });
 
     const frozenFinalEquality = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
       buildDiscriminator: 'r4-w2',
@@ -228,6 +231,69 @@ describe('trusted proof artifact REST budget', () => {
     });
     await observeRemaining(frozenFinalEquality, 744);
     await expect(runGet(frozenFinalEquality)).resolves.toMatchObject({ status: 200 });
+  });
+
+  it('does not advance the protected primary suffix on a 304', async () => {
+    const profile = {
+      ...TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+      remainingTailRequired: 2,
+      remainingTailReserve: 1,
+      measurementOnly: false,
+    };
+    const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile,
+    });
+    await budget.runAuthenticatedApiCall(
+      { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+      async () => ({ status: 200, headers: { 'x-ratelimit-remaining': '3' } }),
+    );
+    await budget.runAuthenticatedApiCall(
+      { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+      async () => ({ status: 304, headers: { 'x-ratelimit-remaining': '3' } }),
+    );
+
+    await expect(runGet(budget)).resolves.toMatchObject({ status: 200 });
+    await expect(runGet(budget)).resolves.toMatchObject({ status: 200 });
+    await expect(runGet(budget)).rejects.toThrow(
+      'trusted_proof_artifact_rest_budget_primary_exhausted',
+    );
+    expect(budget.receipt()).toMatchObject({
+      primary_rate_limit_requests: 3,
+      conditional_not_modified_requests: 1,
+    });
+  });
+
+  it('uses a lower 304 header as shared-token progress and never lets a later higher header lift it', async () => {
+    const profile = {
+      ...TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+      remainingTailRequired: 9,
+      remainingTailReserve: 2,
+      measurementOnly: false,
+    };
+    const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile,
+    });
+    const dispatch = { signal: signal(), secondaryLimitPoints: 1, mutative: false } as const;
+
+    await budget.runAuthenticatedApiCall(dispatch, async () => ({
+      status: 200,
+      headers: { 'x-ratelimit-remaining': '20' },
+    }));
+    await budget.runAuthenticatedApiCall(dispatch, async () => ({
+      status: 304,
+      headers: { 'x-ratelimit-remaining': '8' },
+    }));
+    await budget.runAuthenticatedApiCall(dispatch, async () => ({
+      status: 200,
+      headers: { 'x-ratelimit-remaining': '19' },
+    }));
+
+    expect(budget.receipt()).toMatchObject({ disposition: 'active' });
+    await expect(runGet(budget)).resolves.toMatchObject({ status: 200 });
   });
 
   it.each([
@@ -632,6 +698,52 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
+  it.each([
+    ['wildcard', '*'],
+    ['unquoted token', 'artifact-v1'],
+    ['entity-tag list', '"artifact-v1", "artifact-v2"'],
+    ['lowercase weak prefix', 'w/"artifact-v1"'],
+    ['unterminated tag', '"artifact-v1'],
+    ['duplicate field values', ['"artifact-v1"', '"artifact-v2"']],
+  ])('never replays a malformed %s ETag as If-None-Match', async (_description, etag) => {
+    const getArtifact = vi.fn(async (_request: { headers?: Record<string, string> }) => ({
+      status: 200,
+      headers: { etag },
+      data: artifact(),
+    }));
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ getArtifact }),
+      nonProofBudget(),
+    );
+
+    await client.getArtifact(artifactInput(), signal());
+    await client.getArtifact(artifactInput(), signal());
+
+    expect(getArtifact).toHaveBeenCalledTimes(2);
+    expect(getArtifact.mock.calls[1]?.[0].headers).toBeUndefined();
+  });
+
+  it.each(['W/"artifact-v1"', '"artifact,opaque"', '""'])(
+    'replays one exact RFC entity-tag validator: %s',
+    async (etag) => {
+      const getArtifact = vi
+        .fn()
+        .mockResolvedValueOnce({ status: 200, headers: { etag }, data: artifact() })
+        .mockResolvedValueOnce({ status: 304, data: artifact() });
+      const client = createArtifactActionsRestClient(
+        octokitWithArtifactMethods({ getArtifact }),
+        nonProofBudget(),
+      );
+
+      await client.getArtifact(artifactInput(), signal());
+      await client.getArtifact(artifactInput(), signal());
+
+      expect(getArtifact.mock.calls[1]?.[0]).toMatchObject({
+        headers: { 'if-none-match': etag },
+      });
+    },
+  );
+
   it('sends conditional headers on the real Octokit wire and reuses 304 data', async () => {
     const requests: Array<{ readonly url: string; readonly headers: HeadersInit | undefined }> = [];
     const counts = new Map<string, number>();
@@ -854,6 +966,45 @@ describe('trusted proof artifact REST budget', () => {
     expect(listArtifactsForRepo.mock.calls[5]?.[0]).toMatchObject({
       headers: { 'if-none-match': '"other-page"' },
     });
+  });
+
+  it('evicts each semantically rejected representation by its exact cache identity', async () => {
+    const listArtifactsForRepo = vi.fn(async (_request: { headers?: Record<string, string> }) => ({
+      status: 200,
+      headers: { etag: '"list"' },
+      data: { total_count: 0, artifacts: [] },
+    }));
+    const getArtifact = vi.fn(async (_request: { headers?: Record<string, string> }) => ({
+      status: 200,
+      headers: { etag: '"artifact"' },
+      data: artifact(),
+    }));
+    const getWorkflowRunAttempt = vi.fn(async (_request: { headers?: Record<string, string> }) => ({
+      status: 200,
+      headers: { etag: '"attempt"' },
+      data: { id: 9, run_attempt: 1 },
+    }));
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ listArtifactsForRepo, getArtifact, getWorkflowRunAttempt }),
+      nonProofBudget(),
+    );
+    const list = listInput();
+    const descriptor = artifactInput();
+    const attempt = { owner: 'owner', repo: 'repo', run_id: 9, attempt_number: 1 };
+
+    await client.listArtifactsForRepo(list, signal());
+    await client.getArtifact(descriptor, signal());
+    await client.getWorkflowRunAttempt(attempt, signal());
+    client.invalidateArtifactListRepresentation?.(list);
+    client.invalidateArtifactRepresentation?.(descriptor);
+    client.invalidateWorkflowRunAttemptRepresentation?.(attempt);
+    await client.listArtifactsForRepo(list, signal());
+    await client.getArtifact(descriptor, signal());
+    await client.getWorkflowRunAttempt(attempt, signal());
+
+    expect(listArtifactsForRepo.mock.calls[1]?.[0].headers).toBeUndefined();
+    expect(getArtifact.mock.calls[1]?.[0].headers).toBeUndefined();
+    expect(getWorkflowRunAttempt.mock.calls[1]?.[0].headers).toBeUndefined();
   });
 
   it('does not make deleteArtifact itself decide which named list pages are stale', async () => {

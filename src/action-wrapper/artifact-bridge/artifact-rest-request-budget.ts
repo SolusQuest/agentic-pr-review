@@ -160,6 +160,16 @@ export class ArtifactRestRequestBudget {
    * dispatch.
    */
   private observedPrimaryRemaining: number | undefined;
+  /** Charged primary requests still expected before the frozen route ends. */
+  private futurePrimaryRequests: number | undefined;
+  /**
+   * The first verified remaining header anchors this process lane. Later
+   * decreases include charges made by sibling Host/control processes, so they
+   * advance the same frozen suffix without treating a low starting bucket as
+   * proof progress.
+   */
+  private primaryProgressAnchorRemaining: number | undefined;
+  private primaryProgressAnchorFutureRequests: number | undefined;
   private disposition: ArtifactRestRequestBudgetDisposition = 'active';
   private sealedReceiptLine: string | undefined;
   private readonly secondaryRateLimiter: ArtifactRestSecondaryRateLimiter | undefined;
@@ -284,7 +294,9 @@ export class ArtifactRestRequestBudget {
     }
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining < input.primaryRequests + this.requiredTailAndReserve()
+      this.observedPrimaryRemaining <
+        Math.max(input.primaryRequests, this.requiredFuturePrimaryRequests()) +
+          this.remainingTailReserve()
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -319,7 +331,8 @@ export class ArtifactRestRequestBudget {
       throw new ArtifactRestRateLimitHeadersError();
     }
     if (this.disposition !== 'active') throw new ArtifactRestRequestBudgetError(this.disposition);
-    const requiredWithFinalProfileTail = required + this.requiredTailAndReserve();
+    const requiredWithFinalProfileTail =
+      Math.max(required, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve();
     if (
       this.observedPrimaryRemaining !== undefined &&
       this.observedPrimaryRemaining < requiredWithFinalProfileTail
@@ -446,19 +459,20 @@ export class ArtifactRestRequestBudget {
     if (!reservation.protectedRoute || !reservation.primaryReserved) return;
     this.primaryReservations -= 1;
     if (status === 304) {
-      const suppliedRemaining = this.observeRateLimitHeaders(
-        status,
-        headers,
-        message,
-      ).suppliedRemaining;
-      if (!suppliedRemaining && this.observedPrimaryRemaining !== undefined) {
+      if (this.observedPrimaryRemaining !== undefined) {
         this.observedPrimaryRemaining += 1;
       }
+      const rateLimit = this.observeRateLimitHeaders(status, headers, message);
+      this.observeSharedPrimaryProgress(rateLimit.remaining);
+      this.closeOnInsufficientFuture(rateLimit.disposition);
       this.conditionalNotModifiedRequests += 1;
       return;
     }
     this.primaryRateLimitRequests += 1;
     const rateLimit = this.observeRateLimitHeaders(status, headers, message);
+    this.advanceFuturePrimaryRequests();
+    this.observeSharedPrimaryProgress(rateLimit.remaining);
+    this.closeOnInsufficientFuture(rateLimit.disposition);
     if (rateLimit.permissionDenied) this.permissionDenied += 1;
     if (this.disposition === 'active' && rateLimit.disposition !== undefined) {
       this.disposition = rateLimit.disposition;
@@ -489,7 +503,8 @@ export class ArtifactRestRequestBudget {
     }
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining < 1 + this.requiredTailAndReserve()
+      this.observedPrimaryRemaining <
+        this.requiredFuturePrimaryRequests() + this.remainingTailReserve()
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
@@ -519,7 +534,10 @@ export class ArtifactRestRequestBudget {
     this.primaryReservations += 1;
     this.secondaryLimitPoints += dispatch.secondaryLimitPoints;
     if (this.observedPrimaryRemaining !== undefined) this.observedPrimaryRemaining -= 1;
-    return { protectedRoute: true, primaryReserved: true };
+    return {
+      protectedRoute: true,
+      primaryReserved: true,
+    };
   }
 
   /**
@@ -535,7 +553,7 @@ export class ArtifactRestRequestBudget {
     message: unknown,
   ): RateLimitObservation {
     if (status === undefined) {
-      return { suppliedRemaining: false, permissionDenied: false };
+      return { permissionDenied: false };
     }
     const remaining = parseRateLimitInteger(header(headers, 'x-ratelimit-remaining'), 0);
     const limit = parseRateLimitInteger(header(headers, 'x-ratelimit-limit'), 1);
@@ -583,13 +601,13 @@ export class ArtifactRestRequestBudget {
             ? 'rate_limited'
             : undefined;
     if (remaining.value !== undefined) {
-      this.observedPrimaryRemaining = remaining.value;
-      if (remaining.value < this.requiredTailAndReserve() && disposition === undefined) {
-        this.disposition = 'primary_exhausted';
-      }
+      this.observedPrimaryRemaining =
+        this.observedPrimaryRemaining === undefined
+          ? remaining.value
+          : Math.min(this.observedPrimaryRemaining, remaining.value);
     }
     return {
-      suppliedRemaining: remaining.value !== undefined,
+      remaining: remaining.value,
       permissionDenied: status === 403 && !primary && !secondary,
       disposition,
     };
@@ -605,8 +623,54 @@ export class ArtifactRestRequestBudget {
     this.activeMutationReservation = undefined;
   }
 
-  private requiredTailAndReserve(): number {
-    return (this.profile?.remainingTailRequired ?? 0) + (this.profile?.remainingTailReserve ?? 0);
+  private requiredFuturePrimaryRequests(): number {
+    const frozen = 1 + (this.profile?.remainingTailRequired ?? 0);
+    const remaining =
+      this.futurePrimaryRequests === undefined
+        ? frozen
+        : Math.min(frozen, this.futurePrimaryRequests);
+    // Even after the frozen route is complete, an unexpected extra dispatch
+    // must retain the reserve for the request it is about to put on wire.
+    return Math.max(1, remaining);
+  }
+
+  private remainingTailReserve(): number {
+    return this.profile?.remainingTailReserve ?? 0;
+  }
+
+  private advanceFuturePrimaryRequests(): void {
+    const before = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
+    this.futurePrimaryRequests = Math.max(0, before - 1);
+  }
+
+  private observeSharedPrimaryProgress(remaining: number | undefined): void {
+    if (remaining === undefined) return;
+    const future = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
+    if (
+      this.primaryProgressAnchorRemaining === undefined ||
+      this.primaryProgressAnchorFutureRequests === undefined
+    ) {
+      this.primaryProgressAnchorRemaining = remaining;
+      this.primaryProgressAnchorFutureRequests = future;
+      return;
+    }
+    const globallyCharged = Math.max(0, this.primaryProgressAnchorRemaining - remaining);
+    this.futurePrimaryRequests = Math.min(
+      future,
+      Math.max(0, this.primaryProgressAnchorFutureRequests - globallyCharged),
+    );
+  }
+
+  private closeOnInsufficientFuture(rateDisposition: RateLimitObservation['disposition']): void {
+    const future = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
+    if (
+      this.disposition === 'active' &&
+      rateDisposition === undefined &&
+      this.observedPrimaryRemaining !== undefined &&
+      this.observedPrimaryRemaining < future + this.remainingTailReserve()
+    ) {
+      this.disposition = 'primary_exhausted';
+    }
   }
 }
 
@@ -624,7 +688,7 @@ interface ResponseLike {
 }
 
 interface RateLimitObservation {
-  readonly suppliedRemaining: boolean;
+  readonly remaining?: number;
   readonly permissionDenied: boolean;
   readonly disposition?: Extract<
     ArtifactRestRequestBudgetDisposition,

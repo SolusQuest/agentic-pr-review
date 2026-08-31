@@ -11,7 +11,11 @@ const TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = 'r4-w2';
  * envelope. Both variants are closed: callers cannot supply a wider or
  * partially specified allocation.
  */
-export type TrustedProofRequestBudgetProfile = 'measurement' | 'final';
+export type TrustedProofRequestBudgetProfile =
+  | 'measurement'
+  | 'final-bootstrap'
+  | 'final-continuation'
+  | 'final-stale';
 
 export const TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: ArtifactRestRequestBudgetProfile =
   Object.freeze({
@@ -29,18 +33,30 @@ export const TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: Art
     measurementOnly: true,
   });
 
-/** The reviewed two-run allocation, including the Node domain's shared-token tail. */
-export const TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE: ArtifactRestRequestBudgetProfile =
-  Object.freeze({
+function finalArtifactProfile(remainingTailRequired: number): ArtifactRestRequestBudgetProfile {
+  return Object.freeze({
     capProfile: 'apr-r4-artifact-rest-request-budget-v2',
     limits: Object.freeze({
       maximumTotalAuthenticatedApiRequests: 2_130,
       maximumPrimaryRateLimitRequests: 136,
     }),
-    remainingTailRequired: 679,
+    remainingTailRequired,
     remainingTailReserve: 64,
     measurementOnly: false,
   });
+}
+
+/** Frozen Node-lane suffixes at the first charged response in each protected role. */
+export const TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE =
+  finalArtifactProfile(679);
+export const TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE =
+  finalArtifactProfile(393);
+export const TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE =
+  finalArtifactProfile(26);
+
+/** Backward source alias for focused bootstrap-boundary tests. */
+export const TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE =
+  TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
 
 export interface TrustedProofHostReceiptProfile {
   readonly measurementOnly: boolean;
@@ -59,13 +75,26 @@ const TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE: TrustedProofHostReceiptPro
     trustedControlRestTail: 0,
   });
 
-const TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE: TrustedProofHostReceiptProfile = Object.freeze({
-  measurementOnly: false,
-  remainingTailReserve: 64,
-  hostHeadSourceRestTail: 863,
-  hostOtherGitHubRestTail: 878,
-  trustedControlRestTail: 888,
-});
+const finalHostReceiptProfile = (
+  hostHeadSourceRestTail: number,
+  hostOtherGitHubRestTail: number,
+  trustedControlRestTail: number,
+): TrustedProofHostReceiptProfile =>
+  Object.freeze({
+    measurementOnly: false,
+    remainingTailReserve: 64,
+    hostHeadSourceRestTail,
+    hostOtherGitHubRestTail,
+    trustedControlRestTail,
+  });
+
+const TRUSTED_PROOF_FINAL_BOOTSTRAP_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(863, 878, 879);
+const TRUSTED_PROOF_FINAL_CONTINUATION_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(
+  577,
+  591,
+  592,
+);
+const TRUSTED_PROOF_FINAL_STALE_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(210, 224, 225);
 
 /**
  * This remains the single selection boundary between the verified payload and
@@ -77,8 +106,12 @@ export function artifactRestRequestBudgetProfile(
   switch (profile) {
     case 'measurement':
       return TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
-    case 'final':
-      return TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case 'final-bootstrap':
+      return TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case 'final-continuation':
+      return TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
+    case 'final-stale':
+      return TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
   }
 }
 
@@ -92,8 +125,12 @@ export function trustedProofHostReceiptProfile(
   switch (profile) {
     case 'measurement':
       return TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE;
-    case 'final':
-      return TRUSTED_PROOF_FINAL_HOST_RECEIPT_PROFILE;
+    case 'final-bootstrap':
+      return TRUSTED_PROOF_FINAL_BOOTSTRAP_HOST_RECEIPT_PROFILE;
+    case 'final-continuation':
+      return TRUSTED_PROOF_FINAL_CONTINUATION_HOST_RECEIPT_PROFILE;
+    case 'final-stale':
+      return TRUSTED_PROOF_FINAL_STALE_HOST_RECEIPT_PROFILE;
   }
 }
 
@@ -108,8 +145,12 @@ export function readTrustedProofRequestBudgetProfile(
   switch (environment[R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]) {
     case 'measurement':
       return 'measurement';
-    case 'final':
-      return 'final';
+    case 'final-bootstrap':
+      return 'final-bootstrap';
+    case 'final-continuation':
+      return 'final-continuation';
+    case 'final-stale':
+      return 'final-stale';
     default:
       return fail('wrapper_request_budget_profile_invalid');
   }

@@ -78,10 +78,12 @@ internal static class TrustedProofOperationRequestAccounting
             _ => throw new ArgumentOutOfRangeException(nameof(domain)),
         };
 
-    internal static TrustedProofRateClassification RateClassify(
+    internal static async ValueTask<TrustedProofRateClassification> RateClassifyAsync(
         HttpResponseMessage response,
+        CancellationToken cancellationToken,
         long? currentUnixSeconds = null) =>
-        ActionHostGitHubRateLimitClassifier.Classify(response, currentUnixSeconds) switch
+        (await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+            response, cancellationToken, currentUnixSeconds).ConfigureAwait(false)) switch
         {
             ActionHostGitHubRateLimitClassification.Permission =>
                 TrustedProofRateClassification.Permission,
@@ -118,9 +120,12 @@ internal static class TrustedProofOperationRequestAccounting
         return TryReadRemaining(response, out remaining, out var present) && present;
     }
 
-    internal static TrustedProofResponseClass ResponseClassify(
+    internal static async ValueTask<TrustedProofResponseClass> ResponseClassifyAsync(
         HttpResponseMessage response,
-        long? currentUnixSeconds = null) => RateClassify(response, currentUnixSeconds) switch
+        CancellationToken cancellationToken,
+        long? currentUnixSeconds = null) =>
+        (await RateClassifyAsync(response, cancellationToken, currentUnixSeconds)
+            .ConfigureAwait(false)) switch
         {
             TrustedProofRateClassification.Permission => TrustedProofResponseClass.PermissionDenied,
             TrustedProofRateClassification.Primary => TrustedProofResponseClass.PrimaryRateLimited,
@@ -226,6 +231,13 @@ internal sealed class TrustedProofPrimaryRemainingLedger
 {
     private readonly object _gate = new();
     private int? _remaining;
+    // Local completions and shared-header progress are independent estimates.
+    // Keeping them separate prevents a lower header that already includes a
+    // pending local request from consuming that request again on settlement.
+    private int? _localFuturePrimaryRequests;
+    private int? _sharedFuturePrimaryRequests;
+    private int? _primaryProgressAnchorRemaining;
+    private int? _primaryProgressAnchorFutureRequests;
     private readonly HashSet<TrustedProofPrimaryRemainingLease> _unbackedLeases = [];
     private int _pendingUnobservedPrimaryCharges;
     private TrustedProofPrimaryRemainingLedgerCloseReason _closeReason;
@@ -261,14 +273,13 @@ internal sealed class TrustedProofPrimaryRemainingLedger
                 return false;
             }
 
-            var requiredAfter = tailGuard.MinimumRemainingAfter(domain);
+            var futureBefore = CurrentFuturePrimaryRequests(domain, tailGuard);
+            var localFutureBefore = CurrentLocalFuturePrimaryRequests(domain,
+                tailGuard);
+            var requiredBefore = checked(futureBefore + tailGuard.Reserve);
             if (_remaining is { } remaining)
             {
-                // The response equality is accepted: it leaves exactly the
-                // protected future tail plus reserve.  The next wire needs
-                // one additional request, so this exact pre-wire boundary is
-                // remaining < 1 + tail + reserve.
-                if (remaining < checked(1 + requiredAfter))
+                if (remaining < requiredBefore)
                 {
                     _closeReason =
                         TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining;
@@ -278,12 +289,14 @@ internal sealed class TrustedProofPrimaryRemainingLedger
 
                 _remaining = remaining - 1;
                 lease = new TrustedProofPrimaryRemainingLease(this,
-                    domain, tailGuard, preDebited: true);
+                    domain, tailGuard, Math.Max(0, localFutureBefore - 1),
+                    preDebited: true);
                 return true;
             }
 
             lease = new TrustedProofPrimaryRemainingLease(this,
-                domain, tailGuard, preDebited: false);
+                domain, tailGuard, Math.Max(0, localFutureBefore - 1),
+                preDebited: false);
             _unbackedLeases.Add(lease);
             return true;
         }
@@ -304,6 +317,9 @@ internal sealed class TrustedProofPrimaryRemainingLedger
         lock (_gate)
         {
             var unbacked = lease is { PreDebited: false };
+            var localFutureAfterResponse = lease?.LocalFutureAfterResponse ??
+                Math.Max(0, CurrentLocalFuturePrimaryRequests(domain,
+                    tailGuard) - 1);
             if (unbacked) _unbackedLeases.Remove(lease!);
 
             if (responseClass is TrustedProofResponseClass.InvalidRateHeaders or
@@ -328,6 +344,14 @@ internal sealed class TrustedProofPrimaryRemainingLedger
             if (refund304 && _remaining is { } refundCurrent)
             {
                 _remaining = checked(refundCurrent + 1);
+            }
+
+            if (response.StatusCode != HttpStatusCode.NotModified)
+            {
+                _localFuturePrimaryRequests =
+                    _localFuturePrimaryRequests is { } currentFuture
+                        ? Math.Max(0, currentFuture - 1)
+                        : localFutureAfterResponse;
             }
 
             var hasObservedRemaining =
@@ -367,9 +391,12 @@ internal sealed class TrustedProofPrimaryRemainingLedger
                     ? Math.Min(current, conservative)
                     : conservative;
                 _pendingUnobservedPrimaryCharges = 0;
+                ObserveSharedPrimaryProgress(observed, domain, tailGuard);
             }
-            if (_remaining is { } remaining && remaining <
-                tailGuard.MinimumRemainingAfter(domain))
+            var future = CurrentFuturePrimaryRequests(domain, tailGuard,
+                protectUnexpectedDispatch: false);
+            if (_remaining is { } remaining && remaining < checked(
+                    future + tailGuard.Reserve))
             {
                 _closeReason =
                     TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining;
@@ -421,6 +448,52 @@ internal sealed class TrustedProofPrimaryRemainingLedger
         lock (_gate) _closeReason = TrustedProofPrimaryRemainingLedgerCloseReason.Terminal;
     }
 
+    private int CurrentFuturePrimaryRequests(
+        TrustedProofRequestDomain domain,
+        TrustedProofRemainingTailGuard tailGuard,
+        bool protectUnexpectedDispatch = true)
+    {
+        var local = CurrentLocalFuturePrimaryRequests(domain, tailGuard);
+        var future = _sharedFuturePrimaryRequests is { } shared
+            ? Math.Min(local, shared)
+            : local;
+        return protectUnexpectedDispatch ? Math.Max(1, future) : future;
+    }
+
+    private int CurrentLocalFuturePrimaryRequests(
+        TrustedProofRequestDomain domain,
+        TrustedProofRemainingTailGuard tailGuard)
+    {
+        var frozen = checked(1 + tailGuard.RequiredTail(domain));
+        return _localFuturePrimaryRequests is { } local
+            ? Math.Min(frozen, local)
+            : frozen;
+    }
+
+    private void ObserveSharedPrimaryProgress(
+        int observed,
+        TrustedProofRequestDomain domain,
+        TrustedProofRemainingTailGuard tailGuard)
+    {
+        var future = CurrentFuturePrimaryRequests(domain, tailGuard,
+            protectUnexpectedDispatch: false);
+        if (_primaryProgressAnchorRemaining is null ||
+            _primaryProgressAnchorFutureRequests is null)
+        {
+            _primaryProgressAnchorRemaining = observed;
+            _primaryProgressAnchorFutureRequests = future;
+            return;
+        }
+
+        var globallyCharged = Math.Max(0,
+            _primaryProgressAnchorRemaining.Value - observed);
+        var sharedFuture = Math.Max(0,
+            _primaryProgressAnchorFutureRequests.Value - globallyCharged);
+        _sharedFuturePrimaryRequests = _sharedFuturePrimaryRequests is { } current
+            ? Math.Min(current, sharedFuture)
+            : sharedFuture;
+    }
+
     private void ValidateLease(
         TrustedProofPrimaryRemainingLease? lease,
         TrustedProofRequestDomain domain,
@@ -450,50 +523,64 @@ internal sealed class TrustedProofPrimaryRemainingLease
         TrustedProofPrimaryRemainingLedger ledger,
         TrustedProofRequestDomain domain,
         TrustedProofRemainingTailGuard tailGuard,
+        int localFutureAfterResponse,
         bool preDebited)
     {
         Ledger = ledger;
         Domain = domain;
         TailGuard = tailGuard;
+        LocalFutureAfterResponse = localFutureAfterResponse;
         PreDebited = preDebited;
     }
 
     internal TrustedProofPrimaryRemainingLedger Ledger { get; }
     internal TrustedProofRequestDomain Domain { get; }
     internal TrustedProofRemainingTailGuard TailGuard { get; }
+    internal int LocalFutureAfterResponse { get; }
     internal bool PreDebited { get; }
     internal bool CoveredByObservedHeader { get; private set; }
     internal void MarkCoveredByObservedHeader() => CoveredByObservedHeader = true;
     internal bool TrySettle() => Interlocked.Exchange(ref _settled, 1) == 0;
 }
 
+internal enum TrustedProofRequestBudgetLane
+{
+    Host,
+    ExternalControl,
+    CleanupControl,
+}
+
 internal sealed class TrustedProofRequestBudgetProfile(
-    TrustedProofRemainingTailGuard remainingTailGuard)
+    TrustedProofRemainingTailGuard hostRemainingTailGuard,
+    TrustedProofRemainingTailGuard externalControlRemainingTailGuard,
+    TrustedProofRemainingTailGuard cleanupControlRemainingTailGuard)
 {
     private const string ProfileEnvironment =
         "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
 
-    // Frozen from two byte-identical synthetic AOT runs. Each domain value is
-    // the largest charged-primary suffix still required after an observation in
-    // that domain; the shared reserve is held separately.
-    private static readonly IReadOnlyDictionary<TrustedProofRequestDomain, int>
-        FrozenTailByDomain = new Dictionary<TrustedProofRequestDomain, int>
-        {
-            [TrustedProofRequestDomain.NodeArtifactRest] = 679,
-            [TrustedProofRequestDomain.HostHeadSourceRest] = 863,
-            [TrustedProofRequestDomain.HostOtherGitHubRest] = 878,
-            [TrustedProofRequestDomain.TrustedControlRest] = 888,
-        };
     private const int FrozenReserve =
         TrustedProofOperationRequestAccounting.OperationPrimaryReserve;
 
     internal static readonly TrustedProofRequestBudgetProfile Measurement = new(
+        TrustedProofRemainingTailGuard.Measurement,
+        TrustedProofRemainingTailGuard.Measurement,
         TrustedProofRemainingTailGuard.Measurement);
 
-    internal TrustedProofRemainingTailGuard RemainingTailGuard { get; } =
-        remainingTailGuard;
+    internal TrustedProofRemainingTailGuard HostRemainingTailGuard { get; } =
+        hostRemainingTailGuard;
 
-    internal bool MeasurementOnly => RemainingTailGuard.MeasurementOnly;
+    internal TrustedProofRemainingTailGuard ExternalControlRemainingTailGuard { get; } =
+        externalControlRemainingTailGuard;
+
+    internal TrustedProofRemainingTailGuard CleanupControlRemainingTailGuard { get; } =
+        cleanupControlRemainingTailGuard;
+
+    internal bool MeasurementOnly => HostRemainingTailGuard.MeasurementOnly;
+
+    internal TrustedProofRemainingTailGuard ControlRemainingTailGuard(string[] args) =>
+        args is ["cleanup"]
+            ? CleanupControlRemainingTailGuard
+            : ExternalControlRemainingTailGuard;
 
     internal static bool TrySelectProduction(
         Func<string, string?> getEnvironment,
@@ -507,24 +594,61 @@ internal sealed class TrustedProofRequestBudgetProfile(
             return true;
         }
 
-        if (!StringComparer.Ordinal.Equals(requested, "final") ||
-            !TryGetFrozenTailProfile(out var frozenTailByDomain, out var reserve))
+        if (requested is not ("final-bootstrap" or "final-continuation" or
+            "final-stale") || !TryGetFrozenTailProfile(requested,
+                TrustedProofRequestBudgetLane.Host, out var host, out var reserve) ||
+            !TryGetFrozenTailProfile(requested,
+                TrustedProofRequestBudgetLane.ExternalControl, out var external,
+                out var externalReserve) ||
+            !TryGetFrozenTailProfile(requested,
+                TrustedProofRequestBudgetLane.CleanupControl, out var cleanup,
+                out var cleanupReserve) || reserve != externalReserve ||
+            reserve != cleanupReserve)
         {
             profile = null;
             return false;
         }
 
         profile = new TrustedProofRequestBudgetProfile(
-            new TrustedProofRemainingTailGuard(frozenTailByDomain, reserve,
-                measurementOnly: false));
+            new TrustedProofRemainingTailGuard(host, reserve, measurementOnly: false),
+            new TrustedProofRemainingTailGuard(external, reserve, measurementOnly: false),
+            new TrustedProofRemainingTailGuard(cleanup, reserve, measurementOnly: false));
         return true;
     }
 
     internal static bool TryGetFrozenTailProfile(
+        string requested,
+        TrustedProofRequestBudgetLane lane,
         out IReadOnlyDictionary<TrustedProofRequestDomain, int> tailByDomain,
         out int reserve)
     {
-        tailByDomain = FrozenTailByDomain;
+        var values = (requested, lane) switch
+        {
+            ("final-bootstrap", TrustedProofRequestBudgetLane.Host) =>
+                (Node: 679, Head: 863, Other: 878, Control: 879),
+            ("final-bootstrap", TrustedProofRequestBudgetLane.ExternalControl or
+                TrustedProofRequestBudgetLane.CleanupControl) =>
+                (Node: 679, Head: 863, Other: 878, Control: 888),
+            ("final-continuation", TrustedProofRequestBudgetLane.Host) =>
+                (Node: 393, Head: 577, Other: 591, Control: 592),
+            ("final-continuation", TrustedProofRequestBudgetLane.ExternalControl) =>
+                (Node: 393, Head: 577, Other: 591, Control: 597),
+            ("final-continuation", TrustedProofRequestBudgetLane.CleanupControl) =>
+                (Node: 393, Head: 577, Other: 591, Control: 242),
+            ("final-stale", TrustedProofRequestBudgetLane.Host) =>
+                (Node: 26, Head: 210, Other: 224, Control: 225),
+            ("final-stale", TrustedProofRequestBudgetLane.ExternalControl or
+                TrustedProofRequestBudgetLane.CleanupControl) =>
+                (Node: 26, Head: 210, Other: 224, Control: 234),
+            _ => (Node: -1, Head: -1, Other: -1, Control: -1),
+        };
+        tailByDomain = new Dictionary<TrustedProofRequestDomain, int>
+        {
+            [TrustedProofRequestDomain.NodeArtifactRest] = values.Node,
+            [TrustedProofRequestDomain.HostHeadSourceRest] = values.Head,
+            [TrustedProofRequestDomain.HostOtherGitHubRest] = values.Other,
+            [TrustedProofRequestDomain.TrustedControlRest] = values.Control,
+        };
         reserve = FrozenReserve;
         return reserve >= 0 && tailByDomain.Count == 4 &&
             new[]

@@ -193,7 +193,8 @@ internal sealed class ActionHostGitObjectTransport :
             using var redirect = await _client.SendAsync(source,
                 HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var redirectRateLimit =
-                ActionHostGitHubRateLimitClassifier.Classify(redirect);
+                await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                    redirect, cancellationToken).ConfigureAwait(false);
             if (redirectRateLimit != ActionHostGitHubRateLimitClassification.None)
             {
                 return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
@@ -221,7 +222,8 @@ internal sealed class ActionHostGitObjectTransport :
             var response = await _client.SendAsync(request,
                 HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var responseRateLimit =
-                ActionHostGitHubRateLimitClassifier.Classify(response);
+                await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                    response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 var failure = ClassifyStatus(response, responseRateLimit);
@@ -327,7 +329,8 @@ internal sealed class ActionHostGitObjectTransport :
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
-            var rateLimit = ActionHostGitHubRateLimitClassifier.Classify(response);
+            var rateLimit = await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return DocumentResult<T>.Failed(

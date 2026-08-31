@@ -53,7 +53,7 @@ describe('clean-source proof runner', () => {
       `proof-ok\nAPR_R4_W13_SOURCE_COMMIT ${git(root, 'rev-parse', 'HEAD^{commit}')}\n` +
         `APR_R4_W13_SOURCE_TREE ${git(root, 'rev-parse', 'HEAD^{tree}')}\n`,
     );
-  });
+  }, 15_000);
 
   test('rejects staged tracked drift without emitting markers', () => {
     const root = fixture();

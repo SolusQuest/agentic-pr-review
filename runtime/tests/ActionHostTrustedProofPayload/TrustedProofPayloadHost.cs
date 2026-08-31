@@ -70,10 +70,10 @@ internal static class TrustedProofPayloadHost
             TrustedProofGitHubRequestBudget.MaximumAuthenticatedRestRequests,
             TrustedProofGitHubRequestBudget.MaximumAnonymousCodeloadRequests,
             ports.CreateGitHubInnerHandler,
-            requestBudgetProfile.RemainingTailGuard,
+            requestBudgetProfile.HostRemainingTailGuard,
             remainingLedger: primaryRemainingLedger);
         var controlBudget = new TrustedProofControlRequestBudget(
-            remainingTailGuard: requestBudgetProfile.RemainingTailGuard,
+            remainingTailGuard: requestBudgetProfile.HostRemainingTailGuard,
             remainingLedger: primaryRemainingLedger);
         TrustedProofStaleWindowCoordinator? coordinator = null;
         Task<bool>? coordinatorTask = null;

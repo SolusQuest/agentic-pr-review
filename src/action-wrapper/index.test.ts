@@ -422,13 +422,13 @@ describe('W1 production composition', () => {
   it('selects the frozen final profile only from the verified protected environment', () => {
     expect(
       readTrustedProofRequestBudgetProfile('r4-h1', {
-        [R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]: 'final',
+        [R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]: 'final-bootstrap',
       }),
     ).toBeUndefined();
     const profile = readTrustedProofRequestBudgetProfile('r4-w2', {
-      [R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]: 'final',
+      [R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]: 'final-bootstrap',
     });
-    expect(profile).toBe('final');
+    expect(profile).toBe('final-bootstrap');
     expect(artifactRestRequestBudgetProfile(profile!)).toMatchObject({
       limits: {
         maximumTotalAuthenticatedApiRequests: 2_130,

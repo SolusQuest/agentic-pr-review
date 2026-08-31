@@ -22,6 +22,7 @@
     <Compile Include="..\ActionHostVerifierFixture\FrameworkCanaryCapture.cs" Link="Synthetic\FrameworkCanaryCapture.cs" />
     <Compile Include="..\ActionHostVerifierFixture\FrameworkGitHubHandler.cs" Link="Synthetic\FrameworkGitHubHandler.cs" />
     <Compile Include="..\ActionHostVerifierFixture\FrameworkJson.cs" Link="Synthetic\FrameworkJson.cs" />
+    <Compile Include="..\ActionHostVerifierFixture\FrameworkPrimaryRateLimitBucket.cs" Link="Synthetic\FrameworkPrimaryRateLimitBucket.cs" />
     <Compile Include="..\ActionHostVerifierFixture\FrameworkStateDependencies.cs" Link="Synthetic\FrameworkStateDependencies.cs" />
   </ItemGroup>
 </Project>

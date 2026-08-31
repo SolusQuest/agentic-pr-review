@@ -13,6 +13,8 @@ namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
 internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 {
+    internal const int SyntheticPrimaryLimit = 1000;
+    internal const int FrozenFinalPrimaryRemaining = 111;
     private sealed class Artifact(
         long id,
         string name,
@@ -45,6 +47,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private readonly List<Task> handlers = [];
     private readonly object gate = new();
     private readonly string evidenceRoot;
+    private readonly FrameworkPrimaryRateLimitBucket primaryBucket;
     private readonly Func<string, string, string>? workflowRenderer;
     private readonly Func<long> epochSeconds;
     private Task? pump;
@@ -78,9 +81,13 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         ]);
         BaseUrl = $"http://127.0.0.1:{port}";
         listener.Prefixes.Add(BaseUrl + "/");
+        primaryBucket = FrameworkPrimaryRateLimitBucket.Initialize(
+            evidenceRoot, SyntheticPrimaryLimit);
     }
 
     internal string BaseUrl { get; }
+
+    internal int PrimaryRemaining => primaryBucket.ReadRemaining();
 
     internal int InFlight => Volatile.Read(ref inFlight);
 
@@ -178,6 +185,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
         listener.Close();
         shutdown.Dispose();
+        primaryBucket.Dispose();
     }
 
     private async Task PumpAsync()
@@ -530,7 +538,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
                 if (mode == "artifact-pagination-late")
                 {
-                    await WriteJsonAsync(context.Response,
+                    await WriteGitHubJsonAsync(context.Response,
                         HttpStatusCode.InternalServerError, "{}")
                         .ConfigureAwait(false);
                     return null;
@@ -563,11 +571,13 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     CultureInfo.InvariantCulture, out var archiveId) ||
                 !TryArtifact(archiveId, out _))
             {
-                await WriteJsonAsync(context.Response, HttpStatusCode.NotFound,
+                await WriteGitHubJsonAsync(context.Response, HttpStatusCode.NotFound,
                     "{}").ConfigureAwait(false);
                 return null;
             }
 
+            await StampGitHubPrimaryResponseAsync(context.Response, charged: true,
+                shutdown.Token).ConfigureAwait(false);
             context.Response.StatusCode = (int)HttpStatusCode.Redirect;
             context.Response.RedirectLocation = BaseUrl + "/blob/download/" +
                 archiveId.ToString(CultureInfo.InvariantCulture) + "?sig=" +
@@ -623,11 +633,13 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                         Path.Join(evidenceRoot,
                             "delete-outcome-unknown-committed"),
                         id.ToString(CultureInfo.InvariantCulture));
-                    await WriteJsonAsync(context.Response,
+                    await WriteGitHubJsonAsync(context.Response,
                         HttpStatusCode.InternalServerError, "{}")
                         .ConfigureAwait(false);
                     return null;
                 }
+                await StampGitHubPrimaryResponseAsync(context.Response, charged: true,
+                    shutdown.Token).ConfigureAwait(false);
                 context.Response.StatusCode = (int)HttpStatusCode.NoContent;
                 context.Response.Close();
                 return null;
@@ -645,7 +657,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 return null;
             }
 
-            await WriteJsonAsync(context.Response, HttpStatusCode.NotFound,
+            await WriteGitHubJsonAsync(context.Response, HttpStatusCode.NotFound,
                 "{\"message\":\"Not Found\"}").ConfigureAwait(false);
             return null;
         }
@@ -662,7 +674,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             return null;
         }
 
-        await WriteJsonAsync(context.Response, HttpStatusCode.NotFound, "{}")
+        await WriteGitHubJsonAsync(context.Response, HttpStatusCode.NotFound, "{}")
             .ConfigureAwait(false);
         return null;
     }
@@ -680,7 +692,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         using var handler = new FrameworkGitHubHandler(
             scenarioRoot,
             payloadSha256,
-            workflowRenderer);
+            workflowRenderer,
+            primaryBucket.ObserveAsync);
         using var invoker = new HttpMessageInvoker(handler);
         using var request = new HttpRequestMessage(
             new HttpMethod(context.Request.HttpMethod),
@@ -719,8 +732,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             request,
             shutdown.Token).ConfigureAwait(false);
         var responseClass = TrustedProofOperationRequestAccounting.WitnessResponseClass(
-            TrustedProofOperationRequestAccounting.ResponseClassify(
-                response, epochSeconds()));
+            await TrustedProofOperationRequestAccounting.ResponseClassifyAsync(
+                response, shutdown.Token, epochSeconds()).ConfigureAwait(false));
         context.Response.StatusCode = (int)response.StatusCode;
         foreach (var name in new[] { "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after" })
         {
@@ -950,6 +963,17 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         response.Close();
     }
 
+    private async Task WriteGitHubJsonAsync(
+        HttpListenerResponse response,
+        HttpStatusCode status,
+        string body)
+    {
+        await StampGitHubPrimaryResponseAsync(response,
+            charged: status != HttpStatusCode.NotModified, shutdown.Token)
+            .ConfigureAwait(false);
+        await WriteJsonAsync(response, status, body).ConfigureAwait(false);
+    }
+
     private async Task WriteEtaggedJsonAsync(
         HttpListenerContext context,
         HttpStatusCode status,
@@ -958,8 +982,11 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         var etag = "\"" + Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(body))).ToLowerInvariant() + "\"";
         context.Response.Headers[HttpResponseHeader.ETag] = etag;
-        if (MatchesIfNoneMatch(context.Request.Headers["If-None-Match"],
-                etag))
+        var notModified = MatchesIfNoneMatch(
+            context.Request.Headers["If-None-Match"], etag);
+        await StampGitHubPrimaryResponseAsync(context.Response,
+            charged: !notModified, shutdown.Token).ConfigureAwait(false);
+        if (notModified)
         {
             context.Response.StatusCode = (int)HttpStatusCode.NotModified;
             context.Response.Close();
@@ -967,6 +994,20 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         }
 
         await WriteJsonAsync(context.Response, status, body).ConfigureAwait(false);
+    }
+
+    private async ValueTask StampGitHubPrimaryResponseAsync(
+        HttpListenerResponse response,
+        bool charged,
+        CancellationToken cancellationToken)
+    {
+        var remaining = await primaryBucket.ObserveAsync(charged,
+            cancellationToken).ConfigureAwait(false);
+        response.Headers["x-ratelimit-limit"] =
+            SyntheticPrimaryLimit.ToString(CultureInfo.InvariantCulture);
+        response.Headers["x-ratelimit-remaining"] =
+            remaining.ToString(CultureInfo.InvariantCulture);
+        response.Headers["x-ratelimit-reset"] = "4102444800";
     }
 
     private static bool MatchesIfNoneMatch(string? header, string etag)
