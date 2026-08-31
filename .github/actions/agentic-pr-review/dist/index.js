@@ -101630,7 +101630,7 @@ var OfficialCallTracker = class {
       get: (target, property) => {
         const value = Reflect.get(target, property, target);
         if (typeof value !== "function") return value;
-        if (property === "invalidateArtifactMutation" || property === "dispose") {
+        if (isLocalCacheMethod(property)) {
           return (...args) => Reflect.apply(value, target, args);
         }
         return (...args) => {
@@ -101667,6 +101667,16 @@ var OfficialCallTracker = class {
     return promise;
   }
 };
+var localCacheMethods = /* @__PURE__ */ new Set([
+  "invalidateArtifactMutation",
+  "invalidateArtifactListRepresentation",
+  "invalidateArtifactRepresentation",
+  "invalidateWorkflowRunAttemptRepresentation",
+  "dispose"
+]);
+function isLocalCacheMethod(property) {
+  return localCacheMethods.has(property);
+}
 function isPromiseLike(value) {
   return value !== null && (typeof value === "object" || typeof value === "function") && typeof value.then === "function";
 }
@@ -102280,4 +102290,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 6cfc12dd793d72e30ccb52b9abd1df514682172d58a7e8302f1c8f67b2c05fc4
+// Action source inventory sha256: a0eb3df6160d6b56a3e15b6e9fe30d395adcb4e0a21d570a0f345b70921b2cfd

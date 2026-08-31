@@ -17,6 +17,7 @@ import {
   ArtifactRestRequestBudget,
 } from './artifact-rest-request-budget.js';
 import { createTestZip } from './zip-test-helper.js';
+import { OfficialCallTracker } from '../launcher/official-calls.js';
 
 const roots: string[] = [];
 
@@ -1098,6 +1099,51 @@ describe('precise conditional-representation invalidation', () => {
     expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(3);
   });
 
+  it('preserves a committed delete when the tracked production REST client observes 404', async () => {
+    const target = integratedArtifactFixture({
+      id: 42,
+      name: 'target-state',
+      runId: 7001,
+      runAttempt: 2,
+      expiresAtUnixSeconds: 1_893_456_000,
+    });
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"target-v1"' },
+        data: target.platform,
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('production-shaped post-delete 404'), {
+          status: 404,
+          response: { status: 404, headers: {} },
+        }),
+      );
+    const deleteArtifact = vi.fn(async () => ({ status: 204, data: undefined }));
+    const tracker = new OfficialCallTracker();
+    const operations = await createIntegratedOperations(
+      { getArtifact, deleteArtifact },
+      () => Date.parse('2029-01-01T00:00:00Z'),
+      tracker,
+    );
+
+    const result = await operations.execute(
+      {
+        operation: 'delete_exact',
+        correlation_id: 'tracked-production-delete-404',
+        expected: target.metadata,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'none', mutation_state: 'committed' });
+    expect(getArtifact).toHaveBeenCalledTimes(2);
+    expect(getArtifact.mock.calls[1]?.[0].headers).toBeUndefined();
+    expect(deleteArtifact).toHaveBeenCalledTimes(1);
+    await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
+  });
+
   it('revokes both cache families when UTC expiry follows an authenticated 304', async () => {
     const expiry = Date.parse('2030-01-01T00:00:00Z');
     let utcNow = expiry - 1_000;
@@ -1617,6 +1663,7 @@ function integratedArtifactFixture(input: {
 async function createIntegratedOperations(
   methods: Record<string, unknown>,
   utcNow: () => number,
+  tracker?: OfficialCallTracker,
 ): Promise<OfficialArtifactOperations> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'apr-integrated-cache-test-'));
   roots.push(root);
@@ -1631,7 +1678,7 @@ async function createIntegratedOperations(
       maximumPrimaryRateLimitRequests: 32,
     },
   });
-  const actions = createArtifactActionsRestClient(
+  const untrackedActions = createArtifactActionsRestClient(
     {
       rest: {
         actions: {
@@ -1648,6 +1695,7 @@ async function createIntegratedOperations(
     undefined,
     ledger,
   );
+  const actions = tracker?.wrap(untrackedActions) ?? untrackedActions;
   const artifactClient: ArtifactClient = {
     uploadArtifact: unsupported,
     downloadArtifact: unsupported,

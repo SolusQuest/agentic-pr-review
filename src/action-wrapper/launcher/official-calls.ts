@@ -9,9 +9,11 @@ export class OfficialCallTracker {
       get: (target, property) => {
         const value = Reflect.get(target, property, target) as unknown;
         if (typeof value !== 'function') return value;
-        // These two methods only wipe process-local state. They deliberately
-        // remain available during cleanup after the external-call gate seals.
-        if (property === 'invalidateArtifactMutation' || property === 'dispose') {
+        // These methods only wipe process-local cache state. They deliberately
+        // remain available during cleanup after the external-call gate seals,
+        // and their synchronous void return must not be mistaken for an
+        // untracked official SDK call.
+        if (isLocalCacheMethod(property)) {
           return (...args: unknown[]): unknown => Reflect.apply(value, target, args);
         }
         return (...args: unknown[]): unknown => {
@@ -54,6 +56,18 @@ export class OfficialCallTracker {
     void marker.then(() => this.active.delete(marker));
     return promise;
   }
+}
+
+const localCacheMethods = new Set<PropertyKey>([
+  'invalidateArtifactMutation',
+  'invalidateArtifactListRepresentation',
+  'invalidateArtifactRepresentation',
+  'invalidateWorkflowRunAttemptRepresentation',
+  'dispose',
+]);
+
+function isLocalCacheMethod(property: PropertyKey): boolean {
+  return localCacheMethods.has(property);
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
