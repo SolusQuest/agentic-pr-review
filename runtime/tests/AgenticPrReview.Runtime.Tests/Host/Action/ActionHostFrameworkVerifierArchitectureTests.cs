@@ -4,13 +4,16 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
+using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Canonical;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
@@ -24,6 +27,50 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action;
 
 public sealed class ActionHostFrameworkVerifierArchitectureTests
 {
+    [Fact]
+    public async Task StateEvidenceRecorderSerializesConcurrentOperationPairs()
+    {
+        var root = Path.Join(Path.GetTempPath(), "apr-state-evidence-" +
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var recorder = new FrameworkStateEvidenceRecorder(root);
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, 256),
+                async (index, _) =>
+                {
+                    await Task.Yield();
+                    var operation = "operation-" + index.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture);
+                    recorder.Record(
+                        operation,
+                        OpaqueStoreFailure.None,
+                        index,
+                        "name",
+                        "identity",
+                        "digest",
+                        "None",
+                        "Committed",
+                        "result");
+                });
+
+            var operations = File.ReadAllLines(
+                Path.Join(root, "state-operations.tsv"));
+            var identities = File.ReadAllLines(
+                Path.Join(root, "state-operation-identities.tsv"));
+            Assert.Equal(256, operations.Length);
+            Assert.Equal(256, identities.Length);
+            Assert.Equal(
+                operations.Select(value => value.Split('\t')[0]),
+                identities.Select(value => value.Split('\t')[0]));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void ProductionCompositionWiresTheRealPostAcceptanceInlineHook()
     {
@@ -134,6 +181,36 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_R4_W13_SOURCE_TREE", runner,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FrameworkGoldenIncludesEveryOfficialBridgeAccountingField()
+    {
+        var root = FindRepositoryRoot();
+        var supervisor = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkSupervisor.cs"));
+        const string bridgeStart =
+            "(\"official_bridge\", FrameworkJson.Object(";
+        const string nextField = "(\"exact_child_environment\"";
+        var start = supervisor.IndexOf(bridgeStart, StringComparison.Ordinal);
+        var end = supervisor.IndexOf(nextField,
+            start + bridgeStart.Length, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var emittedFields = Regex.Matches(
+                supervisor[(start + bridgeStart.Length)..end],
+                "\\(\"([a-z_]+)\"")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+
+        using var golden = JsonDocument.Parse(File.ReadAllBytes(Path.Join(root,
+            "runtime", "tests", "fixtures", "action-host", "framework",
+            "expected-evidence.json.golden")));
+        var bridge = golden.RootElement.GetProperty("official_bridge");
+        Assert.Equal(emittedFields,
+            bridge.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(bridge.GetProperty("rest").GetInt32(),
+            bridge.GetProperty("rest_not_modified").GetInt32() +
+            bridge.GetProperty("rest_primary").GetInt32());
     }
 
     [Fact]
@@ -1200,7 +1277,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     }
 
     [Fact]
-    public void NativeAotProofIsReflectionFreeIdentityBoundAndRunsTwice()
+    public void NativeAotGenericProofIsReflectionFreeAndHistoricalE2ContractRemainsFrozen()
     {
         var root = FindRepositoryRoot();
         var verifier = File.ReadAllText(Path.Join(root,
@@ -1237,13 +1314,22 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("--execution-kind native-aot", verifier,
             StringComparison.Ordinal);
-        Assert.Contains("<VerifyReferenceAotCompatibility>true",
-            fixtureProject, StringComparison.Ordinal);
+        Assert.Contains("writeFrameworkFixtureActionBundle", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("--bundle \"$framework_bundle\"", verifier,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("compose-r4-e2-receipt.mjs", verifier,
+            StringComparison.Ordinal);
         Assert.Equal(2, Count(workflow,
             "bash runtime/scripts/verify-action-host.sh aot"));
-        Assert.Equal(2, Count(workflow, "set -o pipefail"));
-        Assert.Contains("cmp \"$RUNNER_TEMP/r4-e2-aot-first.receipt\"",
+        Assert.DoesNotContain("r4-e2-aot-", workflow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("R4 Native AOT receipts are byte-identical",
             workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("grep '^APR_R4_E2_RECEIPT '", workflow,
+            StringComparison.Ordinal);
+        Assert.Contains("<VerifyReferenceAotCompatibility>true",
+            fixtureProject, StringComparison.Ordinal);
         Assert.Contains("reflection_json_enabled !== false", composer,
             StringComparison.Ordinal);
         Assert.Contains("dynamic_code_supported !== false", composer,
@@ -1264,6 +1350,35 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Equal("17bbdc8e1cb6591112a7c871ffba9108ecf3680f",
             contract.RootElement.GetProperty("migration_base_tree")
                 .GetString());
+    }
+
+    [Fact]
+    public void GenericFrameworkAndTrustedPayloadLaunchUseSeparateWrapperAuthorities()
+    {
+        var root = FindRepositoryRoot();
+        var supervisor = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkSupervisor.cs"));
+        var canaries = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkCanaries.cs"));
+
+        Assert.Contains("FrameworkFixtureBuildDiscriminator = \"r4-h1\"",
+            canaries, StringComparison.Ordinal);
+        Assert.Contains("TrustedProofBuildDiscriminator = \"r4-w2\"",
+            canaries, StringComparison.Ordinal);
+        var startWrapper = supervisor.IndexOf("private static Process StartWrapper(",
+            StringComparison.Ordinal);
+        var startWrapperEnd = supervisor.IndexOf("\n    private static ",
+            startWrapper + 1, StringComparison.Ordinal);
+        Assert.True(startWrapper >= 0 && startWrapperEnd > startWrapper);
+        var launch = supervisor[startWrapper..startWrapperEnd];
+        Assert.Contains("spec.TrustedProofPayload\n" +
+            "                ? FrameworkCanaries.TrustedProofBuildDiscriminator\n" +
+            "                : FrameworkCanaries.FrameworkFixtureBuildDiscriminator",
+            launch, StringComparison.Ordinal);
+        Assert.Contains("if (spec.TrustedProofPayload)\n        {\n" +
+            "            info.Environment[\"AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE\"] =\n" +
+            "                RequestBudgetProfile(spec);\n        }",
+            launch, StringComparison.Ordinal);
     }
 
     private static int Count(string value, string searched)

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using Xunit;
@@ -9,6 +10,25 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.GitHub;
 
 public sealed class ActionHostReviewedSnapshotTransportTests
 {
+    [Fact]
+    public void OneArgumentFactoryFallsBackToItsHandlerForReviewedObjects()
+    {
+        var handlerCalls = 0;
+        var factory = new ActionHostGitHubAuthorizationTransportFactory(() =>
+        {
+            handlerCalls++;
+            return new FailIfSentHandler();
+        });
+        Assert.True(ActionHostGitHubToken.TryCreate("token-canary", out var token));
+
+        using var transport = factory.CreateReviewedSnapshotTransport(token!);
+
+        // The reviewed snapshot always uses the supplied ordinary handler for
+        // both PR/files and its nested base-object reader.  Frozen reviewed
+        // head acquisition is a separate composition capability.
+        Assert.Equal(2, handlerCalls);
+    }
+
     [Fact]
     public async Task PullRequestFilesUseBoundedPaginationAndGeneratedDto()
     {
@@ -279,9 +299,24 @@ public sealed class ActionHostReviewedSnapshotTransportTests
                 CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Blob transport was called.");
 
+        public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+            GetHeadArchiveAsync(
+                string repositoryName,
+                string headSha,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Archive transport was called.");
+
         public void Dispose()
         {
         }
+    }
+
+    private sealed class FailIfSentHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No request was expected.");
     }
 
     private sealed class MeasuringStream : Stream

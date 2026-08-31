@@ -21,7 +21,7 @@ public sealed class ReviewedTreeSnapshotTests
     }
 
     [Fact]
-    public void ProductionLimitsMatchTheFrozenH4AndRetainedAgentContract()
+    public void ProductionLimitsMatchTheBoundedReviewedContentContract()
     {
         Assert.Equal(20_000, ReviewedContentLimits.TrackedPaths);
         Assert.Equal(8L * 1024 * 1024,
@@ -31,12 +31,17 @@ public sealed class ReviewedTreeSnapshotTests
         Assert.Equal(4_000,
             ReviewedContentLimits.UniqueTreeAndBlobObjects);
         Assert.Equal(4_096, ReviewedContentLimits.GitObjectRequests);
-        Assert.Equal(1024L * 1024, ReviewedContentLimits.HeadBlobBytes);
+        Assert.Equal(8L * 1024 * 1024,
+            ReviewedContentLimits.HeadBlobBytes);
         Assert.Equal(256L * 1024 * 1024,
             ReviewedContentLimits.AggregateHeadBlobBytes);
-        Assert.Equal(2L * 1024 * 1024,
+        Assert.Equal(16L * 1024 * 1024,
             ReviewedContentLimits.GitObjectResponseBytes);
         Assert.Equal(512L * 1024 * 1024,
+            ReviewedContentLimits.AggregateResponseBytes);
+        Assert.Equal(24_000, ReviewedContentLimits.HeadArchiveMembers);
+        Assert.InRange(ReviewedContentLimits.HeadArchiveDecodedBytes,
+            ReviewedContentLimits.AggregateHeadBlobBytes,
             ReviewedContentLimits.AggregateResponseBytes);
         Assert.Equal(TimeSpan.FromSeconds(300),
             ReviewedContentLimits.AcquisitionAndMaterializationTimeout);

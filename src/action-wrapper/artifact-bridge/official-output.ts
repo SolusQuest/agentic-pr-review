@@ -29,15 +29,23 @@ export async function runContainedOfficialCall<T>(
   call: (signal: AbortSignal) => Promise<T>,
   remainingLogicalMs: number,
   outerSignal: AbortSignal,
+  latestAttemptStartAt?: number,
+  now: () => number = () => performance.now(),
+  beforeDispatch?: () => void,
 ): Promise<T> {
-  const queuedAt = Date.now();
+  // Command accounting uses the monotonic process clock. Wall-clock changes
+  // must neither extend an operation nor make a queued HTTP attempt appear to
+  // have expired before it was admitted.
+  const queuedAt = now();
   let release!: () => void;
   const preceding = containmentTail;
   containmentTail = new Promise<void>((resolve) => {
     release = resolve;
   });
 
-  const acquired = await waitForTurn(preceding, Math.max(1, remainingLogicalMs), outerSignal);
+  const startWindowMs =
+    latestAttemptStartAt === undefined ? remainingLogicalMs : latestAttemptStartAt - queuedAt;
+  const acquired = await waitForTurn(preceding, Math.max(1, startWindowMs), outerSignal);
   if (!acquired) {
     void preceding.then(release);
     throw new OfficialCallTimeoutError(Promise.resolve());
@@ -46,8 +54,12 @@ export async function runContainedOfficialCall<T>(
     release();
     throw new OfficialCallTimeoutError(Promise.resolve());
   }
-  const logicalRemaining = remainingLogicalMs - (Date.now() - queuedAt);
-  if (logicalRemaining <= 0) {
+  const startedAt = now();
+  const logicalRemaining = remainingLogicalMs - (startedAt - queuedAt);
+  if (
+    logicalRemaining <= 0 ||
+    (latestAttemptStartAt !== undefined && startedAt > latestAttemptStartAt)
+  ) {
     release();
     throw new OfficialCallTimeoutError(Promise.resolve());
   }
@@ -68,6 +80,7 @@ export async function runContainedOfficialCall<T>(
     const requestTimer = setTimeout(abortRequest, timeoutMs);
     requestTimer.unref();
     try {
+      beforeDispatch?.();
       return { ok: true, value: await call(requestController.signal) };
     } catch (error) {
       return { ok: false, error };

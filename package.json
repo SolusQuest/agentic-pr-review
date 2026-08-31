@@ -10,6 +10,7 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "r3:live:policy": "node scripts/check-r3-live-proof.mjs",
+    "r4:trusted-proof:fixture-admission": "node scripts/check-r4-trusted-proof-fixture-admission.mjs",
     "runtime:verify": "bash runtime/scripts/verify-runtime.sh all",
     "runtime:integration": "node scripts/run-runtime-integration.mjs",
     "typecheck": "tsc --noEmit",

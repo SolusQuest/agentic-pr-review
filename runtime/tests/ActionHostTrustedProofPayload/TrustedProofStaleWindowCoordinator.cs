@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 
@@ -24,20 +22,15 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
 
     internal TrustedProofStaleSignal Signal { get; }
 
-    internal static TrustedProofStaleWindowCoordinator CreateForVerifier(
-        TrustedProofControlCoordinates coordinates,
-        TrustedProofControlTransport transport)
-    {
-        ArgumentNullException.ThrowIfNull(coordinates);
-        ArgumentNullException.ThrowIfNull(transport);
-        return new(coordinates, transport);
-    }
-
     internal static async Task<TrustedProofStaleWindowCoordinator?> ResolveAsync(
         ActionHostLaunchContract launch,
+        Func<HttpMessageHandler> handlerFactory,
+        TrustedProofControlRequestBudget requestBudget,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(launch);
+        ArgumentNullException.ThrowIfNull(handlerFactory);
+        ArgumentNullException.ThrowIfNull(requestBudget);
         if (launch.Inputs.GitHubToken is null)
         {
             throw new InvalidOperationException("The GitHub token is missing.");
@@ -51,41 +44,14 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
         }
 
         var token = launch.Inputs.GitHubToken.ExportForPrivateLaunch();
-        using var handler = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            AutomaticDecompression = DecompressionMethods.None,
-            Credentials = null,
-            PreAuthenticate = false,
-            UseCookies = false,
-            UseProxy = false,
-            ConnectTimeout = TimeSpan.FromSeconds(10),
-        };
-        using var client = new HttpClient(handler, disposeHandler: false)
-        {
-            BaseAddress = new Uri("https://api.github.com/"),
-            Timeout = TimeSpan.FromSeconds(30),
-        };
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", token);
-        client.DefaultRequestHeaders.Accept.Add(
-            new MediaTypeWithQualityHeaderValue(
-                "application/vnd.github+json"));
-        client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-        client.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "agentic-pr-review-r4-e2p");
-        using var response = await client.GetAsync(
-            $"repos/{launch.RepositoryName}/pulls/{pullRequestNumber}",
-            cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("The fixture PR is unavailable.");
-        }
-
-        var responseBytes = await ReadBoundedAsync(
-            response,
-            64 * 1024,
-            cancellationToken).ConfigureAwait(false) ??
+        var responseBytes = await TrustedProofControlTransport
+            .ReadFixturePullRequestAsync(
+                launch.RepositoryName,
+                pullRequestNumber,
+                token,
+                handlerFactory(),
+                requestBudget,
+                cancellationToken).ConfigureAwait(false) ??
             throw new InvalidOperationException("The fixture PR is oversized.");
         using var document = JsonDocument.Parse(
             responseBytes,
@@ -131,7 +97,7 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
         }
 
         var coordinates = new TrustedProofControlCoordinates(
-            launch.RepositoryName,
+            TrustedProofControlCoordinates.FrozenRepository,
             launch.RepositoryId,
             pullRequestNumber,
             headSha,
@@ -143,12 +109,18 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
             launch.RunAttempt);
         return new(
             coordinates,
-            TrustedProofControlTransport.Create(coordinates, token));
+            TrustedProofControlTransport.Create(
+                coordinates,
+                token,
+                handler: handlerFactory(),
+                requestBudget: requestBudget));
     }
 
     internal async Task<bool> CoordinateAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
+        delayAsync ??= Task.Delay;
         var succeeded = false;
         try
         {
@@ -232,6 +204,7 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken,
                 deadline.Token);
+            var pollDelay = TimeSpan.FromSeconds(2);
             while (!linked.IsCancellationRequested)
             {
                 comments = await transport.ListAsync(linked.Token)
@@ -280,8 +253,14 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
                     return succeeded;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(2), linked.Token)
+                if (transport.HasTerminalFailure)
+                {
+                    return false;
+                }
+
+                await delayAsync(pollDelay, linked.Token)
                     .ConfigureAwait(false);
+                pollDelay = TrustedProofControlService.NextPollDelay(pollDelay);
             }
 
             return false;
@@ -368,36 +347,4 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
             : 0;
     }
 
-    private static async Task<byte[]?> ReadBoundedAsync(
-        HttpResponseMessage response,
-        int maximumBytes,
-        CancellationToken cancellationToken)
-    {
-        var contentLength = response.Content.Headers.ContentLength;
-        if (contentLength.HasValue && contentLength.Value > maximumBytes)
-        {
-            return null;
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(
-            cancellationToken).ConfigureAwait(false);
-        using var output = new MemoryStream();
-        var buffer = new byte[8192];
-        while (true)
-        {
-            var read = await stream.ReadAsync(buffer, cancellationToken)
-                .ConfigureAwait(false);
-            if (read == 0)
-            {
-                return output.Length == 0 ? null : output.ToArray();
-            }
-
-            if (output.Length + read > maximumBytes)
-            {
-                return null;
-            }
-
-            output.Write(buffer, 0, read);
-        }
-    }
 }

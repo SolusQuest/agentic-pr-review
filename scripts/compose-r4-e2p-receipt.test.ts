@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { verifyReceipt } from './check-r4-e2p-receipt.mjs';
+import { verifyReceipt, verifySealedReceipt } from './check-r4-e2p-receipt.mjs';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -108,7 +108,7 @@ describe('R4 E2P supplemental receipt', () => {
     expect(sha256(Buffer.concat([Buffer.from('APR_R4_E2P_RECEIPT '), authoritativeBytes]))).toBe(
       '3fa55211baa43da955a2eb083b2188a1fde193e6684cb129ec99f5f35374ad49',
     );
-    const authoritative = verifyReceipt({
+    const authoritative = verifySealedReceipt({
       receiptPath: authoritativePath,
       sourceRoot: process.cwd(),
     });
@@ -116,9 +116,37 @@ describe('R4 E2P supplemental receipt', () => {
     expect(authoritative.payload_sha256).toBe(
       '97af2b7b0160e333862e74e5e421b2e802f3962d1bb6405c909301971a0130fc',
     );
-    expect(verifyReceipt({ receiptPath, payloadPath, sourceRoot: process.cwd() }).result).toBe(
-      'passed',
+    expect(authoritative.wrapper_bundle_sha256).not.toBe(
+      sha256(
+        fs.readFileSync(
+          path.join(process.cwd(), '.github/actions/agentic-pr-review/dist/index.js'),
+        ),
+      ),
     );
+    const sourceRootContract = JSON.parse(
+      fs.readFileSync(path.join(fixtureRoot, 'source-root-contract.json'), 'utf8'),
+    );
+    expect(sourceRootContract).toEqual({
+      kind: 'apr-r4-e2p-two-root-consumer-v1',
+      control_root: 'control-root',
+      payload_source_root: 'payload-source',
+      receipt_relative_path:
+        'runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt.json',
+      authoritative_repository_path_absent: true,
+    });
+    const retainedBytes = fs.readFileSync(receiptPath);
+    expect(retainedBytes.at(-1)).toBe(0x0a);
+    expect(retainedBytes.includes(0x0d)).toBe(false);
+    expect(sha256(retainedBytes)).toBe(
+      '24c0f7114d3f50776ed4cdec7a64aba3b885f1f36d79609c10a3931639613ff4',
+    );
+    expect(sha256(Buffer.concat([Buffer.from('APR_R4_E2P_RECEIPT '), retainedBytes]))).toBe(
+      '324126202298e6a81ce5fc8d3ef32d4c06fce58108ef76f4163508c9d0322358',
+    );
+    const retained = verifySealedReceipt({ receiptPath, sourceRoot: process.cwd() });
+    expect(retainedBytes).not.toEqual(authoritativeBytes);
+    expect(retained.payload_sha256).toBe(sha256(fs.readFileSync(payloadPath)));
+    expect(retained.result).toBe('passed');
   });
 
   it('composes and verifies one canonical offline receipt', () => {

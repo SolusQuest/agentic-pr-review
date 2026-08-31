@@ -49,6 +49,7 @@ export function authorizationManifestV2(values) {
     repository_id: values.repositoryId,
     repository: values.repository,
     pr_number: values.prNumber,
+    proof_scope: values.proofScope,
     fixture_head_sha: values.fixtureHeadSha,
     operation_id: values.operationId,
     workflow_sha: values.workflowSha,

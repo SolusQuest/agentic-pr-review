@@ -34,6 +34,20 @@ export class ArtifactBridgeOperationBudget {
     return this.controller.signal;
   }
 
+  /**
+   * A command may occupy the bridge for 120 seconds, but every individual
+   * HTTP attempt is capped at 30 seconds. A rate-limited FIFO ticket must be
+   * able to start by this monotonic instant or it is rejected before dispatch.
+   */
+  latestHttpAttemptStartAt(): number {
+    this.throwIfExpired();
+    return (
+      this.startedAt +
+      ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs -
+      ARTIFACT_BRIDGE_LIMITS.requestTimeoutMs
+    );
+  }
+
   remainingMs(): number {
     this.throwIfExpired();
     return ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs - (this.now() - this.startedAt);

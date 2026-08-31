@@ -60,6 +60,23 @@ internal static class ReviewedSnapshotTestAccess
             shared);
     }
 
+    internal static ReviewedGitObjectTransport Transport(
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        ReviewedContentBudget budget,
+        IActionHostGitObjectTransport shared)
+    {
+        if (!ReviewedGitObjectTransport.TryAuthorizedSource(
+                invocation,
+                out var repositoryName,
+                out var headSha))
+        {
+            throw new InvalidOperationException(
+                "The test invocation is not an authorized source.");
+        }
+
+        return CreateTransport(repositoryName, headSha, budget, shared);
+    }
+
     internal static ReviewedBlobStagingLease Staging(
         string parent,
         ReviewedContentBudget budget)

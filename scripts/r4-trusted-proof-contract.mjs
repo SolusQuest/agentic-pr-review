@@ -77,6 +77,18 @@ function invalid(code) {
   throw new Error(`APR_R4_E3_EVIDENCE_INVALID ${code}`);
 }
 
+function proofControlPhase(host, comment) {
+  return comment.operation_id === host.identities.operation_ids[0] ? 'bootstrap' : 'stale';
+}
+
+function proofControlCommentSourceId(host, comment) {
+  return `proof-control-${proofControlPhase(host, comment)}-comment-${comment.comment_id}:page:1`;
+}
+
+function proofControlPermissionSourceId(host, comment) {
+  return `proof-control-${proofControlPhase(host, comment)}-permission-${comment.comment_id}-maintainer:page:1`;
+}
+
 export function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -119,6 +131,40 @@ function sourceTimestamp(value, code) {
   }
 }
 
+function expectedCaptureSourcePhase(sourceId, operationId, operationIds) {
+  const family = sourceId.replace(/:page:[1-9][0-9]*$/u, '');
+  let match =
+    /^enrollment-(normal-bootstrap|normal-continuation|stale-protected|stale-follow-on)-(run|jobs|discovery|pull|pending|approvals)-run-[1-9][0-9]*$/u.exec(
+      family,
+    );
+  if (match) {
+    const kind = match[2] === 'run' ? 'terminal' : match[2] === 'approvals' ? 'approval' : match[2];
+    return `enrollment-${match[1]}-${kind}`;
+  }
+  match = /^authorization-(setup|execution)-(?:comment|permission)-(normal|stale)-/u.exec(family);
+  if (match) return `baseline-${match[2]}`;
+  match = /^(baseline-(?:normal|stale))-/u.exec(family);
+  if (match) return match[1];
+  match = /^readiness-(bootstrap|continuation|stale)-/u.exec(family);
+  if (match) return `${match[1]}-readiness`;
+  match =
+    /^transition-(bootstrap|continuation|stale|stale-follow-on)-(pending|approvals|jobs)-/u.exec(
+      family,
+    );
+  if (match) return `${match[1]}-${match[2] === 'approvals' ? 'approval' : match[2]}`;
+  match = /^proof-control-comments-(normal|stale)-pr-/u.exec(family);
+  if (match) return `terminal-${match[1]}`;
+  match = /^proof-control-(bootstrap|stale)-(?:comment|permission)-/u.exec(family);
+  if (match) return `${match[1]}-approval`;
+  match = /^concurrency-(normal|stale)-run-/u.exec(family);
+  if (match) return match[1] === 'normal' ? 'bootstrap-concurrency' : 'stale-concurrency';
+  if (family === 'producer-discovery-final') return 'producer-discovery';
+  if (/^(?:artifacts-run|run-terminal)-[1-9][0-9]*$/u.test(family)) {
+    return operationId === operationIds[1] ? 'terminal-stale' : 'terminal-normal';
+  }
+  return null;
+}
+
 function validateSourceMap(value) {
   exactKeys(value, ['kind', 'api_version', 'entries'], 'source-map-shape');
   if (
@@ -141,33 +187,33 @@ function validateSourceMap(value) {
       '/authorizations',
       'durable-maintainer-authorization',
       'authorization-readbacks',
-      'issue-comment-readback',
+      'paired-baseline-comments-permissions-and-post-plan-cleanup-readback',
       'none',
-      'authorizations/*.json',
+      'paired setup/execution baseline phase fragments and checked post-plan cleanup authorization readback',
     ],
     [
       '/environment',
-      'github-rest-and-ui-attestation',
-      'environment-protection',
-      'environment-and-ui',
-      'none',
-      'environment protection plus UI attestation',
+      'github-rest',
+      'environment-readiness',
+      'environment-branch-policies-environment-secrets',
+      'complete-cursor',
+      'environment, deployment branch policies, and environment secret inventory',
     ],
     [
       '/approval_transitions',
       'github-rest',
       'deployment-transitions',
-      'pending-approvals-jobs',
-      'none',
-      'three exact run transitions',
+      'pending-deployments-approvals-and-attempt-jobs',
+      'complete-cursor',
+      'three exact admitted pending and approval transitions with complete attempt-one jobs plus one rejected follow-on job topology',
     ],
     [
       '/concurrency',
       'github-rest',
       'concurrency-groups',
-      'run-concurrency-group',
-      'complete-cursor',
-      'normal and stale ahead_of_run',
+      'active-repository-concurrency-group',
+      'none',
+      'normal and stale active group_members and ahead_of_run',
     ],
     [
       '/proof_control',
@@ -352,7 +398,6 @@ function validateSourceEvidenceBindings(
   captureManifest,
   captureManifestSha256,
   oracleResultSha256,
-  uiAttestationSha256,
   retainedDocuments,
   host,
 ) {
@@ -369,17 +414,23 @@ function validateSourceEvidenceBindings(
     if (value === undefined) invalid('source-evidence-retained-missing');
     return { source_id: sourceId, sha256: sha256(canonicalJson(value)) };
   };
-  const authorizationReferences = ['cleanup', 'execution', 'setup']
+  const authorizationReferences = ['execution', 'setup']
     .flatMap((phase) => {
       const source = host.authorizations[phase].source;
-      const comment = captureReference(
-        `authorization-${phase}-comment-${source.comment_id}:page:1`,
-      );
-      if (comment.sha256 !== source.capture_body_sha256) {
-        invalid('source-evidence-authorization-digest');
-      }
-      return [comment, captureReference(`authorization-${phase}-permission-maintainer:page:1`)];
+      return ['normal', 'stale'].flatMap((scope) => {
+        const comment = captureReference(
+          `authorization-${phase}-comment-${scope}-${source.comment_id}:page:1`,
+        );
+        if (scope === 'normal' && comment.sha256 !== source.capture_body_sha256) {
+          invalid('source-evidence-authorization-digest');
+        }
+        return [
+          comment,
+          captureReference(`authorization-${phase}-permission-${scope}-maintainer:page:1`),
+        ];
+      });
     })
+    .concat(retainedReference('cleanup-authorization-readback'))
     .sort((a, b) => a.source_id.localeCompare(b.source_id));
   const approvalReferences = Object.entries(host.approval_transitions)
     .flatMap(([phase, transition]) => [
@@ -387,21 +438,36 @@ function validateSourceEvidenceBindings(
       captureReference(`transition-${phase}-pending-run-${transition.run_id}:page:1`),
       captureReference(`transition-${phase}-jobs-run-${transition.run_id}:page:1`),
     ])
+    .concat(
+      captureManifest.sources
+        .filter((source) =>
+          /^transition-stale-follow-on-jobs-run-[1-9][0-9]*:page:[1-9][0-9]*$/u.test(
+            source.source_id,
+          ),
+        )
+        .map((source) => captureReference(source.source_id)),
+    )
     .sort((a, b) => a.source_id.localeCompare(b.source_id));
   const proofReferences = Object.values(host.proof_control)
     .flatMap((family) => family.comments)
     .flatMap((comment) => {
-      const reference = captureReference(`proof-control-comment-${comment.comment_id}:page:1`);
+      const reference = captureReference(proofControlCommentSourceId(host, comment));
       if (reference.sha256 !== comment.capture_body_sha256) {
         invalid('source-evidence-proof-control-digest');
       }
       return comment.kind === 'release' || comment.kind === 'stale-release'
-        ? [
-            reference,
-            captureReference(`proof-control-permission-${comment.comment_id}-maintainer:page:1`),
-          ]
+        ? [reference, captureReference(proofControlPermissionSourceId(host, comment))]
         : [reference];
     })
+    .concat(
+      captureManifest.sources
+        .filter((source) =>
+          /^proof-control-comments-(normal|stale)-pr-[1-9][0-9]*:page:[1-9][0-9]*$/u.test(
+            source.source_id,
+          ),
+        )
+        .map((source) => captureReference(source.source_id)),
+    )
     .sort((a, b) => a.source_id.localeCompare(b.source_id));
   const receiptReference = {
     source_id: 'trusted-proof-payload-receipt-v2',
@@ -412,11 +478,13 @@ function validateSourceEvidenceBindings(
       '/identities',
       [
         captureReference(
-          `authorization-execution-comment-${host.authorizations.execution.source.comment_id}:page:1`,
+          `authorization-execution-comment-normal-${host.authorizations.execution.source.comment_id}:page:1`,
         ),
         { source_id: 'capture-manifest', sha256: captureManifestSha256 },
+        retainedReference('correction-gate-receipt'),
         retainedReference('oracle-build-receipt'),
         { source_id: 'oracle-result', sha256: oracleResultSha256 },
+        retainedReference('producer-journal-seal'),
         receiptReference,
       ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
     ],
@@ -424,11 +492,9 @@ function validateSourceEvidenceBindings(
     [
       '/environment',
       [
-        captureReference('environment-protection:page:1'),
-        {
-          source_id: 'environment-ui-attestation',
-          sha256: uiAttestationSha256,
-        },
+        captureReference('readiness-stale-environment-branch-policies:page:1'),
+        captureReference('readiness-stale-environment-protection:page:1'),
+        captureReference('readiness-stale-environment-secret-inventory:page:1'),
       ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
     ],
     ['/approval_transitions', approvalReferences],
@@ -456,11 +522,13 @@ function validateSourceEvidenceBindings(
       '/canaries/live',
       [
         { source_id: 'capture-manifest', sha256: captureManifestSha256 },
+        retainedReference('credential-admission-receipt'),
+        retainedReference('credential-disposition-receipt'),
         { source_id: 'oracle-result', sha256: oracleResultSha256 },
         ...Object.values(host.proof_control)
           .flatMap((family) => family.comments)
           .filter((comment) => comment.kind === 'ready' || comment.kind === 'stale-ready')
-          .map((comment) => captureReference(`proof-control-comment-${comment.comment_id}:page:1`)),
+          .map((comment) => captureReference(proofControlCommentSourceId(host, comment))),
       ].sort((a, b) => a.source_id.localeCompare(b.source_id)),
     ],
     ['/canaries/cross_sink', [receiptReference]],
@@ -497,43 +565,41 @@ function validateEnvironmentDerivation(
   host,
   captureManifest,
   capturedSourceBodies,
-  uiAttestation,
-  uiAttestationSha256,
   authorizations,
 ) {
-  const source = captureManifest.sources.find(
-    (candidate) => candidate.source_id === 'environment-protection:page:1',
-  );
-  const retained = capturedSourceBodies.get('environment-protection:page:1');
-  if (
-    source === undefined ||
-    retained === undefined ||
-    typeof retained.text !== 'string' ||
-    sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
-    String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size ||
-    sha256(canonicalJson(uiAttestation)) !== uiAttestationSha256
-  ) {
-    invalid('environment-source-binding');
-  }
-  let response;
-  try {
-    response = JSON.parse(retained.text);
-  } catch {
-    invalid('environment-source-json');
-  }
-  exactKeys(
-    response,
-    ['id', 'name', 'protection_rules', 'deployment_branch_policy'],
-    'environment-response-shape',
-  );
+  const read = (sourceId) => {
+    const source = captureManifest.sources.find((candidate) => candidate.source_id === sourceId);
+    const retained = capturedSourceBodies.get(sourceId);
+    if (
+      source === undefined ||
+      retained === undefined ||
+      typeof retained.text !== 'string' ||
+      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
+      String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size
+    ) {
+      invalid('environment-source-binding');
+    }
+    try {
+      return { value: JSON.parse(retained.text), source };
+    } catch {
+      invalid('environment-source-json');
+    }
+  };
+  const environment = read('readiness-stale-environment-protection:page:1');
+  const branches = read('readiness-stale-environment-branch-policies:page:1');
+  const secrets = read('readiness-stale-environment-secret-inventory:page:1');
+  const response = environment.value;
   const reviewersRule = response.protection_rules?.find(
     (rule) => rule?.type === 'required_reviewers',
   );
   const branchPolicy = response.deployment_branch_policy;
   if (
     response.name !== 'r4-trusted-proof' ||
+    String(response.id) !== authorizations.execution.environment_baseline.environment_id ||
+    response.can_admins_bypass !== false ||
     !Array.isArray(response.protection_rules) ||
     reviewersRule === undefined ||
+    reviewersRule.prevent_self_review !== false ||
     !Array.isArray(reviewersRule.reviewers) ||
     branchPolicy === null ||
     typeof branchPolicy !== 'object' ||
@@ -542,62 +608,67 @@ function validateEnvironmentDerivation(
   ) {
     invalid('environment-response-values');
   }
-  exactKeys(
-    uiAttestation,
-    [
-      'repository',
-      'environment',
-      'source_kind',
-      'observation',
-      'capture_sha256',
-      'maintainer_id',
-      'prevent_self_review',
-      'administrator_bypass',
-    ],
-    'environment-ui-source-shape',
-  );
-  interval(uiAttestation.observation, 'environment-ui-source-observation');
+  exactKeys(branches.value, ['total_count', 'branch_policies'], 'environment-branches-shape');
+  exactKeys(secrets.value, ['total_count', 'secrets'], 'environment-secrets-shape');
+  if (
+    !Number.isSafeInteger(branches.value.total_count) ||
+    branches.value.total_count !== branches.value.branch_policies?.length ||
+    branches.value.total_count !== 1 ||
+    String(branches.value.branch_policies[0]?.id) !== '58463845' ||
+    branches.value.branch_policies[0]?.name !== 'main' ||
+    branches.value.branch_policies[0]?.type !== 'branch' ||
+    !Number.isSafeInteger(secrets.value.total_count) ||
+    secrets.value.total_count !== secrets.value.secrets?.length
+  ) {
+    invalid('environment-inventory-values');
+  }
+  const unorderedSecretNames = secrets.value.secrets.map((secret) => secret?.name);
+  const selectedSecretSet = authorizations.execution.active_secret_profile.environment_secret_names;
+  if (
+    selectedSecretSet.length !== unorderedSecretNames.length ||
+    !selectedSecretSet.every((name) => unorderedSecretNames.includes(name)) ||
+    new Set(unorderedSecretNames).size !== unorderedSecretNames.length
+  ) {
+    invalid('environment-secret-profile');
+  }
+  const secretNames = selectedSecretSet;
   const derived = {
     name: response.name,
-    prevent_self_review: uiAttestation.prevent_self_review,
-    protection_snapshot: {
-      source_id: 'environment-protection',
+    readiness_snapshot: {
+      source_ids: {
+        environment: 'readiness-stale-environment-protection',
+        branch_policies: 'readiness-stale-environment-branch-policies',
+        environment_secrets: 'readiness-stale-environment-secret-inventory',
+      },
       environment_id: String(response.id),
-      deployment_branch_policy: 'main-only',
+      can_admins_bypass: response.can_admins_bypass,
+      deployment_branch_policy: branchPolicy,
       required_reviewer_ids: reviewersRule.reviewers.map((reviewer) =>
         String(reviewer?.reviewer?.id),
       ),
-      required_approvals: reviewersRule.required_approvals,
-      secret_names: [],
+      prevent_self_review: reviewersRule.prevent_self_review,
+      branch_policies: branches.value.branch_policies.map((policy) => ({
+        id: String(policy.id),
+        name: policy.name,
+        type: policy.type,
+      })),
+      secret_names: secretNames,
       token_permissions: { actions: 'write', contents: 'read', pull_requests: 'write' },
-      readback_sha256: source.body_sha256,
+      readback_sha256: sha256(
+        canonicalJson({
+          environment: environment.source.body_sha256,
+          branch_policies: branches.source.body_sha256,
+          environment_secrets: secrets.source.body_sha256,
+        }),
+      ),
       observation: {
-        request_started: source.request_started_unix_milliseconds,
-        response_received: source.response_received_unix_milliseconds,
+        request_started: environment.source.request_started_unix_milliseconds,
+        response_received: secrets.source.response_received_unix_milliseconds,
       },
     },
-    ui_attestation: {
-      repository: uiAttestation.repository,
-      environment: uiAttestation.environment,
-      source_kind: uiAttestation.source_kind,
-      observation: uiAttestation.observation,
-      capture_sha256: uiAttestation.capture_sha256,
-      maintainer_id: uiAttestation.maintainer_id,
-      administrator_bypass: uiAttestation.administrator_bypass,
-    },
   };
-  derived.protection_snapshot.secret_names = [
-    'DEEPSEEK_API_KEY',
-    'AGENTIC_PR_REVIEW_STATE_KEY',
-    'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
-  ];
   if (
-    uiAttestation.repository !== authorizations.execution.coordinates.repository ||
-    uiAttestation.environment !== response.name ||
-    uiAttestation.source_kind !== 'github-environment-ui' ||
-    uiAttestation.maintainer_id !== '16307884' ||
-    uiAttestation.prevent_self_review !== false ||
-    uiAttestation.administrator_bypass !== false ||
+    authorizations.execution.coordinates.repository !== captureManifest.repository ||
     (host && canonicalJson(derived) !== canonicalJson(host.environment))
   ) {
     invalid('environment-derivation');
@@ -614,10 +685,10 @@ function deriveIdentities(
   concurrency,
 ) {
   const execution = authorizations.execution;
-  const normalOperation = execution.operation_runs.find(
+  const normalOperation = captureManifest.expected_roles.find(
     (run) => run.scope === 'normal',
   )?.operation_id;
-  const staleOperation = execution.operation_runs.find(
+  const staleOperation = captureManifest.expected_roles.find(
     (run) => run.scope === 'stale',
   )?.operation_id;
   const normalFixture = execution.fixture_prs.find((fixture) =>
@@ -627,6 +698,9 @@ function deriveIdentities(
     fixture.ref.endsWith(staleOperation),
   );
   const followOnRunId = concurrency.stale.terminal.waiter_run_id;
+  const followOnTrigger = execution.trigger_plan.find(
+    (trigger) => trigger.role === 'stale-follow-on',
+  );
   const followOnSource = captureManifest.sources.find(
     (source) => source.source_id === `run-terminal-${followOnRunId}:page:1`,
   );
@@ -637,6 +711,57 @@ function deriveIdentities(
   } catch {
     invalid('identity-follow-on-json');
   }
+  const followOnJobPrefix = `transition-stale-follow-on-jobs-run-${followOnRunId}:page:`;
+  const followOnJobSources = captureManifest.sources
+    .filter((source) => source.source_id.startsWith(followOnJobPrefix))
+    .sort((left, right) => left.page - right.page);
+  const followOnJobs = [];
+  let followOnJobTotal;
+  for (const [index, source] of followOnJobSources.entries()) {
+    const retained = capturedSourceBodies.get(source.source_id);
+    let page;
+    try {
+      page = JSON.parse(retained?.text ?? '');
+    } catch {
+      invalid('identity-follow-on-jobs-json');
+    }
+    if (
+      source.page !== index + 1 ||
+      retained === undefined ||
+      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
+      page === null ||
+      typeof page !== 'object' ||
+      !Number.isSafeInteger(page.total_count) ||
+      page.total_count < 0 ||
+      !Array.isArray(page.jobs) ||
+      (followOnJobTotal !== undefined && page.total_count !== followOnJobTotal)
+    ) {
+      invalid('identity-follow-on-jobs-source');
+    }
+    followOnJobTotal ??= page.total_count;
+    followOnJobs.push(...page.jobs);
+  }
+  const followOnJobTopology = new Map();
+  const followOnJobIds = new Set();
+  for (const job of followOnJobs) {
+    if (
+      job === null ||
+      typeof job !== 'object' ||
+      !Number.isSafeInteger(job.id) ||
+      job.id < 1 ||
+      followOnJobIds.has(job.id) ||
+      String(job.run_id) !== followOnRunId ||
+      job.run_attempt !== 1 ||
+      typeof job.name !== 'string' ||
+      followOnJobTopology.has(job.name)
+    ) {
+      invalid('identity-follow-on-jobs-values');
+    }
+    followOnJobIds.add(job.id);
+    followOnJobTopology.set(job.name, [job.status, job.conclusion]);
+  }
+  const exactJob = (name, status, conclusion) =>
+    canonicalJson(followOnJobTopology.get(name)) === canonicalJson([status, conclusion]);
   if (
     payloadReceipt.kind !== 'apr-r4-e2p-trusted-proof-payload-v2' ||
     payloadReceipt.source_commit !== 'edc594c29a8a6b5fdacfab48643bf221277af200' ||
@@ -648,10 +773,27 @@ function deriveIdentities(
     followOnSource === undefined ||
     followOnRetained === undefined ||
     sha256(Buffer.from(followOnRetained.text, 'utf8')) !== followOnSource.body_sha256 ||
+    followOnTrigger === undefined ||
+    followOnTrigger.operation_id !== staleOperation ||
+    followOnTrigger.pr_number !== staleFixture.number ||
+    followOnTrigger.source_coordinate?.kind !== 'advanced-ref-head' ||
+    !hex40.test(followOnTrigger.source_coordinate.value) ||
     followOn.event !== 'workflow_run' ||
+    String(followOn.id) !== followOnRunId ||
+    followOn.run_attempt !== 1 ||
     followOn.status !== 'completed' ||
-    followOn.conclusion !== 'failure' ||
-    !hex40.test(followOn.head_sha)
+    followOn.conclusion !== 'success' ||
+    followOn.head_sha !== execution.coordinates.workflow_sha ||
+    followOn.head_branch !== 'main' ||
+    !Array.isArray(followOn.pull_requests) ||
+    followOn.pull_requests.length !== 0 ||
+    followOnJobSources.length === 0 ||
+    followOnJobTotal !== 3 ||
+    followOnJobs.length !== followOnJobTotal ||
+    followOnJobTopology.size !== 3 ||
+    !exactJob('authorization-preflight', 'completed', 'success') ||
+    !exactJob('workflow-run-review', 'completed', 'skipped') ||
+    !exactJob('workflow-dispatch-review', 'completed', 'skipped')
   ) {
     invalid('identity-source-values');
   }
@@ -671,194 +813,170 @@ function deriveIdentities(
       run_attempt: 1,
       event: followOn.event,
       pr_number: staleFixture.number,
-      advanced_head_sha: followOn.head_sha,
+      advanced_head_sha: followOnTrigger.source_coordinate.value,
       terminal_result: 'inert-unauthorized',
     },
     operation_ids: [normalOperation, staleOperation],
   };
 }
 
-function validateAuthorizationDerivation(host, captureManifest, capturedSourceBodies) {
-  if (!(capturedSourceBodies instanceof Map)) invalid('captured-source-bodies');
-  const manifestById = new Map(captureManifest.sources.map((source) => [source.source_id, source]));
-  const read = (sourceId) => {
-    const retained = capturedSourceBodies.get(sourceId);
-    const manifest = manifestById.get(sourceId);
-    if (
-      retained === undefined ||
-      manifest === undefined ||
-      typeof retained.text !== 'string' ||
-      sha256(Buffer.from(retained.text, 'utf8')) !== manifest.body_sha256 ||
-      String(Buffer.byteLength(retained.text, 'utf8')) !== manifest.body_size
-    ) {
-      invalid('authorization-capture-binding');
-    }
-    let value;
-    try {
-      value = JSON.parse(retained.text);
-    } catch {
-      invalid('authorization-capture-json');
-    }
-    return { value, manifest };
-  };
-
-  for (const phase of ['setup', 'execution', 'cleanup']) {
-    const expected = host.authorizations[phase];
-    const commentSourceId = `authorization-${phase}-comment-${expected.source.comment_id}:page:1`;
-    const permissionSourceId = `authorization-${phase}-permission-maintainer:page:1`;
-    const commentCapture = read(commentSourceId);
-    const permissionCapture = read(permissionSourceId);
-    const response = commentCapture.value;
-    const permission = permissionCapture.value;
-    if (
-      response === null ||
-      typeof response !== 'object' ||
-      String(response.id) !== expected.source.comment_id ||
-      typeof response.body !== 'string' ||
-      response.user === null ||
-      typeof response.user !== 'object' ||
-      String(response.user.id) !== expected.source.author_id ||
-      typeof response.user.login !== 'string' ||
-      permission === null ||
-      typeof permission !== 'object' ||
-      !['admin', 'maintain'].includes(permission.permission) ||
-      permission.user === null ||
-      typeof permission.user !== 'object' ||
-      String(permission.user.id) !== expected.source.author_id ||
-      permission.user.login !== response.user.login
-    ) {
-      invalid(`authorization-${phase}-raw-response`);
-    }
-    const prefix = '<!-- apr-r4-e3-authorization ';
-    const suffix = ' -->';
-    if (!response.body.startsWith(prefix) || !response.body.endsWith(suffix)) {
-      invalid(`authorization-${phase}-marker`);
-    }
-    let marker;
-    try {
-      marker = JSON.parse(response.body.slice(prefix.length, -suffix.length));
-    } catch {
-      invalid(`authorization-${phase}-marker`);
-    }
-    exactKeys(
-      marker,
-      ['contract', 'phase', 'repository', 'issue_number', 'authorization'],
-      `authorization-${phase}-marker-shape`,
-    );
-    if (
-      marker.contract !== 'apr-r4-e3-maintainer-authorization-v1' ||
-      marker.phase !== phase ||
-      marker.repository !== host.identities.repository ||
-      String(marker.issue_number) !== expected.source.issue_number ||
-      response.body !== `${prefix}${JSON.stringify(marker)}${suffix}`
-    ) {
-      invalid(`authorization-${phase}-marker-values`);
-    }
-    const bodySha256 = sha256(Buffer.from(response.body, 'utf8'));
-    const derived = {
-      kind: marker.authorization.kind,
-      phase: marker.authorization.phase,
-      source: {
-        kind: 'maintainer-comment-readback',
-        phase,
-        repository: marker.repository,
-        issue_number: String(marker.issue_number),
-        comment_id: String(response.id),
-        author_id: String(response.user.id),
-        author_permission: permission.permission,
-        capture_body_sha256: commentCapture.manifest.body_sha256,
-        body_sha256: bodySha256,
-        readback_sha256: bodySha256,
-        observation: {
-          request_started: commentCapture.manifest.request_started_unix_milliseconds,
-          response_received: commentCapture.manifest.response_received_unix_milliseconds,
-        },
-      },
-      ...Object.fromEntries(
-        Object.entries(marker.authorization).filter(([key]) => key !== 'kind' && key !== 'phase'),
+function deriveAuthorizationReadback(phase, response, permission, captureBodySha256, observation) {
+  if (
+    response === null ||
+    typeof response !== 'object' ||
+    !Number.isSafeInteger(response.id) ||
+    response.id < 1 ||
+    typeof response.body !== 'string' ||
+    response.user === null ||
+    typeof response.user !== 'object' ||
+    !Number.isSafeInteger(response.user.id) ||
+    response.user.id < 1 ||
+    typeof response.user.login !== 'string' ||
+    permission === null ||
+    typeof permission !== 'object' ||
+    !['admin', 'write'].includes(permission.permission) ||
+    permission.user === null ||
+    typeof permission.user !== 'object' ||
+    String(permission.user.id) !== String(response.user.id) ||
+    permission.user.login !== response.user.login
+  ) {
+    invalid(`authorization-${phase}-raw-response`);
+  }
+  interval(observation, `authorization-${phase}-observation`);
+  const prefix = '<!-- apr-r4-e3-authorization ';
+  const suffix = ' -->';
+  if (!response.body.startsWith(prefix) || !response.body.endsWith(suffix)) {
+    invalid(`authorization-${phase}-marker`);
+  }
+  let marker;
+  try {
+    marker = JSON.parse(response.body.slice(prefix.length, -suffix.length));
+  } catch {
+    invalid(`authorization-${phase}-marker`);
+  }
+  exactKeys(
+    marker,
+    ['contract', 'phase', 'repository', 'issue_number', 'authorization'],
+    `authorization-${phase}-marker-shape`,
+  );
+  if (
+    marker.contract !== 'apr-r4-e3-maintainer-authorization-v1' ||
+    marker.phase !== phase ||
+    typeof marker.repository !== 'string' ||
+    !Number.isSafeInteger(marker.issue_number) ||
+    marker.issue_number < 1 ||
+    response.body !== `${prefix}${JSON.stringify(marker)}${suffix}` ||
+    !hex64.test(captureBodySha256)
+  ) {
+    invalid(`authorization-${phase}-marker-values`);
+  }
+  const bodySha256 = sha256(Buffer.from(response.body, 'utf8'));
+  return {
+    kind: marker.authorization?.kind,
+    phase: marker.authorization?.phase,
+    source: {
+      kind: 'maintainer-comment-readback',
+      phase,
+      repository: marker.repository,
+      issue_number: String(marker.issue_number),
+      comment_id: String(response.id),
+      author_id: String(response.user.id),
+      author_permission: permission.permission,
+      capture_body_sha256: captureBodySha256,
+      body_sha256: bodySha256,
+      readback_sha256: bodySha256,
+      observation,
+    },
+    ...Object.fromEntries(
+      Object.entries(marker.authorization ?? {}).filter(
+        ([key]) => key !== 'kind' && key !== 'phase',
       ),
-    };
-    if (canonicalJson(derived) !== canonicalJson(expected)) {
-      invalid(`authorization-${phase}-derivation`);
-    }
+    ),
+  };
+}
+
+function readCapturedAuthorizationSource(source, capturedSourceBodies) {
+  const retained = capturedSourceBodies.get(source.source_id);
+  if (
+    retained === undefined ||
+    typeof retained.text !== 'string' ||
+    sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
+    String(Buffer.byteLength(retained.text, 'utf8')) !== source.body_size
+  ) {
+    invalid('authorization-capture-binding');
+  }
+  try {
+    return JSON.parse(retained.text);
+  } catch {
+    invalid('authorization-capture-json');
   }
 }
 
-function deriveAuthorizations(captureManifest, capturedSourceBodies) {
-  const authorizations = {};
-  const manifestById = new Map(captureManifest.sources.map((source) => [source.source_id, source]));
-  for (const phase of ['setup', 'execution', 'cleanup']) {
-    const pattern = new RegExp(`^authorization-${phase}-comment-([1-9][0-9]*):page:1$`, 'u');
-    const matches = captureManifest.sources.filter((source) => pattern.test(source.source_id));
-    if (matches.length !== 1) invalid(`authorization-${phase}-source-cardinality`);
-    const source = matches[0];
-    const retained = capturedSourceBodies.get(source.source_id);
-    const permissionSourceId = `authorization-${phase}-permission-maintainer:page:1`;
-    const permissionSource = manifestById.get(permissionSourceId);
-    const permissionRetained = capturedSourceBodies.get(permissionSourceId);
-    if (
-      retained === undefined ||
-      permissionSource === undefined ||
-      permissionRetained === undefined ||
-      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256 ||
-      sha256(Buffer.from(permissionRetained.text, 'utf8')) !== permissionSource.body_sha256
-    ) {
-      invalid(`authorization-${phase}-source-binding`);
-    }
-    let response;
-    let permission;
-    try {
-      response = JSON.parse(retained.text);
-      permission = JSON.parse(permissionRetained.text);
-    } catch {
-      invalid(`authorization-${phase}-source-json`);
-    }
-    const prefix = '<!-- apr-r4-e3-authorization ';
-    const suffix = ' -->';
-    if (
-      typeof response.body !== 'string' ||
-      !response.body.startsWith(prefix) ||
-      !response.body.endsWith(suffix)
-    ) {
-      invalid(`authorization-${phase}-marker`);
-    }
-    let marker;
-    try {
-      marker = JSON.parse(response.body.slice(prefix.length, -suffix.length));
-    } catch {
-      invalid(`authorization-${phase}-marker`);
-    }
-    authorizations[phase] = {
-      kind: marker.authorization?.kind,
-      phase: marker.authorization?.phase,
-      source: {
-        kind: 'maintainer-comment-readback',
-        phase,
-        repository: marker.repository,
-        issue_number: String(marker.issue_number),
-        comment_id: String(response.id),
-        author_id: String(response.user?.id),
-        author_permission: permission.permission,
-        capture_body_sha256: source.body_sha256,
-        body_sha256: sha256(Buffer.from(response.body, 'utf8')),
-        readback_sha256: sha256(Buffer.from(response.body, 'utf8')),
-        observation: {
-          request_started: source.request_started_unix_milliseconds,
-          response_received: source.response_received_unix_milliseconds,
-        },
-      },
-      ...Object.fromEntries(
-        Object.entries(marker.authorization ?? {}).filter(
-          ([key]) => key !== 'kind' && key !== 'phase',
-        ),
+function derivePairedAuthorization(phase, captureManifest, capturedSourceBodies) {
+  const derivedByScope = [];
+  for (const scope of ['normal', 'stale']) {
+    const comments = captureManifest.sources.filter((source) =>
+      new RegExp(`^authorization-${phase}-comment-${scope}-[1-9][0-9]*:page:1$`, 'u').test(
+        source.source_id,
       ),
-    };
+    );
+    const permissions = captureManifest.sources.filter((source) =>
+      new RegExp(`^authorization-${phase}-permission-${scope}-[A-Za-z0-9-]+:page:1$`, 'u').test(
+        source.source_id,
+      ),
+    );
+    if (comments.length !== 1 || permissions.length !== 1) {
+      invalid(`authorization-${phase}-${scope}-source-cardinality`);
+    }
+    const comment = comments[0];
+    const permission = permissions[0];
+    const response = readCapturedAuthorizationSource(comment, capturedSourceBodies);
+    const permissionResponse = readCapturedAuthorizationSource(permission, capturedSourceBodies);
+    derivedByScope.push({
+      response,
+      permission: permissionResponse,
+      authorization: deriveAuthorizationReadback(
+        phase,
+        response,
+        permissionResponse,
+        comment.body_sha256,
+        {
+          request_started: comment.request_started_unix_milliseconds,
+          response_received: comment.response_received_unix_milliseconds,
+        },
+      ),
+    });
   }
-  const provisional = {
-    authorizations,
-    identities: { repository: authorizations.execution.coordinates?.repository },
+  if (
+    canonicalJson(derivedByScope[0].response) !== canonicalJson(derivedByScope[1].response) ||
+    canonicalJson(derivedByScope[0].permission) !== canonicalJson(derivedByScope[1].permission)
+  ) {
+    invalid(`authorization-${phase}-paired-baseline-drift`);
+  }
+  return derivedByScope[0].authorization;
+}
+
+function deriveAuthorizations(captureManifest, capturedSourceBodies, retainedDocuments) {
+  const authorizations = {
+    setup: derivePairedAuthorization('setup', captureManifest, capturedSourceBodies),
+    execution: derivePairedAuthorization('execution', captureManifest, capturedSourceBodies),
   };
-  validateAuthorizationDerivation(provisional, captureManifest, capturedSourceBodies);
+  const cleanup = retainedDocuments.get('cleanup-authorization-readback');
+  exactKeys(
+    cleanup,
+    ['kind', 'comment', 'permission', 'observation'],
+    'cleanup-authorization-readback-shape',
+  );
+  if (cleanup.kind !== 'apr-r4-e3-cleanup-authorization-readback-v1') {
+    invalid('cleanup-authorization-readback-values');
+  }
+  authorizations.cleanup = deriveAuthorizationReadback(
+    'cleanup',
+    cleanup.comment,
+    cleanup.permission,
+    sha256(canonicalJson(cleanup.comment)),
+    cleanup.observation,
+  );
   return authorizations;
 }
 
@@ -886,7 +1004,7 @@ function validateProofControlDerivation(host, captureManifest, capturedSourceBod
 
   for (const family of Object.values(host.proof_control)) {
     for (const expected of family.comments) {
-      const capture = read(`proof-control-comment-${expected.comment_id}:page:1`);
+      const capture = read(proofControlCommentSourceId(host, expected));
       const response = capture.value;
       if (
         response === null ||
@@ -961,9 +1079,7 @@ function validateProofControlDerivation(host, captureManifest, capturedSourceBod
           invalid('proof-control-ready-actor');
         }
       } else {
-        const permission = read(
-          `proof-control-permission-${expected.comment_id}-maintainer:page:1`,
-        ).value;
+        const permission = read(proofControlPermissionSourceId(host, expected)).value;
         if (
           String(response.user.id) !== '16307884' ||
           response.user.login !== 'maintainer' ||
@@ -1013,7 +1129,7 @@ function deriveProofControl(authorizations, identities, captureManifest, capture
   const byOperation = new Map(authorizations.execution.operation_ids.map((id) => [id, []]));
   const manifestById = new Map(captureManifest.sources.map((source) => [source.source_id, source]));
   const sources = captureManifest.sources.filter((source) =>
-    /^proof-control-comment-[1-9][0-9]*:page:1$/u.test(source.source_id),
+    /^proof-control-(bootstrap|stale)-comment-[1-9][0-9]*:page:1$/u.test(source.source_id),
   );
   for (const source of sources) {
     const retained = capturedSourceBodies.get(source.source_id);
@@ -1039,7 +1155,8 @@ function deriveProofControl(authorizations, identities, captureManifest, capture
     const readyActor = marker.kind === 'ready' || marker.kind === 'stale-ready';
     let actorPermission = 'workflow-token';
     if (!readyActor) {
-      const permissionSourceId = `proof-control-permission-${response.id}-maintainer:page:1`;
+      const phase = source.source_id.split('-')[2];
+      const permissionSourceId = `proof-control-${phase}-permission-${response.id}-maintainer:page:1`;
       const permissionSource = manifestById.get(permissionSourceId);
       const permissionRetained = capturedSourceBodies.get(permissionSourceId);
       if (
@@ -1084,8 +1201,65 @@ function deriveProofControl(authorizations, identities, captureManifest, capture
       readback_sha256: sha256(Buffer.from(response.body, 'utf8')),
     });
   }
+  for (const scope of ['normal', 'stale']) {
+    const pattern = new RegExp(`^proof-control-comments-${scope}-pr-[1-9][0-9]*:page:`, 'u');
+    const inventorySources = captureManifest.sources
+      .filter((source) => pattern.test(source.source_id))
+      .sort((left, right) => left.page - right.page);
+    if (
+      inventorySources.length === 0 ||
+      inventorySources.some(
+        (source, index) =>
+          source.page !== index + 1 ||
+          (index === inventorySources.length - 1
+            ? source.next_route !== null
+            : source.next_route !== inventorySources[index + 1].route),
+      )
+    ) {
+      invalid('proof-control-inventory-pagination');
+    }
+    const operationId = authorizations.execution.operation_ids[scope === 'normal' ? 0 : 1];
+    const inventoryIds = [];
+    for (const inventorySource of inventorySources) {
+      const retained = capturedSourceBodies.get(inventorySource.source_id);
+      if (
+        retained === undefined ||
+        sha256(Buffer.from(retained.text, 'utf8')) !== inventorySource.body_sha256
+      ) {
+        invalid('proof-control-inventory-binding');
+      }
+      let responses;
+      try {
+        responses = JSON.parse(retained.text);
+      } catch {
+        invalid('proof-control-inventory-json');
+      }
+      if (!Array.isArray(responses)) invalid('proof-control-inventory-json');
+      for (const response of responses) {
+        if (
+          typeof response?.body !== 'string' ||
+          !response.body.startsWith('<!-- apr-r4-e2p-control ')
+        ) {
+          continue;
+        }
+        try {
+          const marker = JSON.parse(response.body.slice('<!-- apr-r4-e2p-control '.length, -4));
+          if (marker.operation_id === operationId) inventoryIds.push(String(response.id));
+        } catch {
+          invalid('proof-control-inventory-marker');
+        }
+      }
+    }
+    const derivedIds = (byOperation.get(operationId) ?? []).map((comment) => comment.comment_id);
+    if (
+      new Set(inventoryIds).size !== inventoryIds.length ||
+      canonicalJson([...inventoryIds].sort()) !== canonicalJson([...derivedIds].sort())
+    ) {
+      invalid('proof-control-inventory-completeness');
+    }
+  }
   const operationForScope = (scope) =>
-    authorizations.execution.operation_runs.find((run) => run.scope === scope)?.operation_id;
+    captureManifest.expected_roles.find((run) => run.scope === scope)?.operation_id;
   const makeFamily = (scope, kinds) => {
     const operationId = operationForScope(scope);
     const comments = byOperation.get(operationId) ?? [];
@@ -1187,13 +1361,42 @@ function validateApprovalDerivation(host, captureManifest, capturedSourceBodies,
       }
       return page.value.jobs;
     });
-    if (jobPages[0].value.total_count !== jobs.length || jobs.length !== 1) {
+    if (
+      jobPages.some((page) => page.value.total_count !== jobs.length) ||
+      jobs.length !== 3 ||
+      new Set(jobs.map((job) => job?.name)).size !== jobs.length
+    ) {
       invalid(`approval-${phase}-jobs-cardinality`);
     }
-    const job = jobs[0];
+    const selectedName =
+      phase === 'continuation' ? 'workflow-dispatch-review' : 'workflow-run-review';
+    const otherProtectedName =
+      selectedName === 'workflow-run-review' ? 'workflow-dispatch-review' : 'workflow-run-review';
+    const expectedJobs = new Map([
+      ['authorization-preflight', 'success'],
+      [selectedName, 'success'],
+      [otherProtectedName, 'skipped'],
+    ]);
+    for (const candidate of jobs) {
+      if (
+        candidate === null ||
+        typeof candidate !== 'object' ||
+        !Number.isSafeInteger(candidate.id) ||
+        String(candidate.run_id) !== runId ||
+        candidate.run_attempt !== 1 ||
+        candidate.status !== 'completed' ||
+        expectedJobs.get(candidate.name) !== candidate.conclusion
+      ) {
+        invalid(`approval-${phase}-jobs-topology`);
+      }
+    }
+    if (!jobs.every((candidate) => expectedJobs.has(candidate.name))) {
+      invalid(`approval-${phase}-jobs-topology`);
+    }
+    const job = jobs.find((candidate) => candidate.name === selectedName);
     const reviewers = pending.reviewers?.map((reviewer) => String(reviewer.reviewer?.id));
     const environments = approval.environments;
-    const started = Date.parse(job.started_at);
+    const started = Date.parse(job?.started_at);
     if (
       pending.environment === null ||
       typeof pending.environment !== 'object' ||
@@ -1203,11 +1406,7 @@ function validateApprovalDerivation(host, captureManifest, capturedSourceBodies,
       String(approval.user?.id) !== '16307884' ||
       !Array.isArray(environments) ||
       environments.length !== 1 ||
-      !Number.isSafeInteger(job.id) ||
-      String(job.run_id) !== runId ||
-      job.run_attempt !== 1 ||
-      job.name !==
-        (phase === 'continuation' ? 'workflow-dispatch-review' : 'workflow-run-review') ||
+      job === undefined ||
       !Number.isSafeInteger(started)
     ) {
       invalid(`approval-${phase}-raw-values`);
@@ -1284,7 +1483,7 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
         if (matches.length !== 1) invalid(`concurrency-${scope}-source-cardinality`);
         const holderRunId = matches[0].source_id.match(pattern)[1];
         const first = read(matches[0].source_id).value;
-        if (!Array.isArray(first.ahead_of_run) || first.ahead_of_run.length !== 2) {
+        if (!Array.isArray(first.group_members) || first.group_members.length !== 2) {
           invalid(`concurrency-${scope}-member-cardinality`);
         }
         return [
@@ -1292,7 +1491,7 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
           {
             terminal: {
               holder_run_id: holderRunId,
-              waiter_run_id: String(first.ahead_of_run[1]?.run_id),
+              waiter_run_id: String(first.group_members[1]?.run_id),
             },
           },
         ];
@@ -1305,14 +1504,8 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
       .filter((source) => source.source_id.startsWith(`${base}:page:`))
       .sort((left, right) => left.page - right.page);
     if (
-      pageSources.length === 0 ||
-      pageSources.some(
-        (source, index) =>
-          source.page !== index + 1 ||
-          (index === pageSources.length - 1
-            ? source.next_route !== null
-            : source.next_route !== pageSources[index + 1].route),
-      )
+      pageSources.length !== 1 ||
+      pageSources.some((source, index) => source.page !== index + 1 || source.next_route !== null)
     ) {
       invalid(`concurrency-${scope}-pagination`);
     }
@@ -1323,14 +1516,21 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
         ({ value }) =>
           value === null ||
           typeof value !== 'object' ||
-          value.group !== first.group ||
-          value.cancel_in_progress !== false ||
-          !Array.isArray(value.ahead_of_run),
+          value.group_name !== first.group_name ||
+          !Number.isSafeInteger(value.total_count) ||
+          !Array.isArray(value.group_members) ||
+          value.total_count !== value.group_members.length,
       )
     ) {
       invalid(`concurrency-${scope}-raw-values`);
     }
-    const members = pageCaptures.flatMap(({ value }) => value.ahead_of_run);
+    if (
+      pageSources[0].route !==
+      `/repos/${captureManifest.repository}/actions/concurrency_groups/${encodeURIComponent(first.group_name)}?ahead_of_run=${expected.terminal.waiter_run_id}`
+    ) {
+      invalid(`concurrency-${scope}-route`);
+    }
+    const members = pageCaptures.flatMap(({ value }) => value.group_members);
     const holderCapture = read(`run-terminal-${expected.terminal.holder_run_id}:page:1`).value;
     const waiterCapture = read(`run-terminal-${expected.terminal.waiter_run_id}:page:1`).value;
     const holderCompleted = Date.parse(holderCapture.updated_at);
@@ -1347,7 +1547,7 @@ function validateConcurrencyDerivation(host, captureManifest, capturedSourceBodi
     }
     const derived = {
       api_version: '2026-03-10',
-      group: first.group,
+      group: first.group_name,
       pagination_complete: true,
       observation: {
         request_started: pageSources[0].request_started_unix_milliseconds,
@@ -1400,7 +1600,7 @@ function validateAuthorizationSource(value, phase) {
     value.issue_number !== '181' ||
     !decimal.test(value.comment_id) ||
     value.author_id !== '16307884' ||
-    !['admin', 'maintain'].includes(value.author_permission) ||
+    !['admin', 'write'].includes(value.author_permission) ||
     !hex64.test(value.capture_body_sha256) ||
     !hex64.test(value.body_sha256) ||
     value.readback_sha256 !== value.body_sha256
@@ -1409,59 +1609,63 @@ function validateAuthorizationSource(value, phase) {
   }
 }
 
-function validateAuthorization(value, identities) {
-  exactKeys(value, ['setup', 'execution', 'cleanup'], 'authorization-shape');
-  exactKeys(
-    value.setup,
-    ['kind', 'phase', 'source', 'coordinates', 'capabilities', 'branches'],
-    'setup-authorization-shape',
-  );
-  validateAuthorizationSource(value.setup.source, 'setup');
-  exactKeys(
-    value.setup.coordinates,
-    ['repository', 'workflow_sha', 'action_source_sha', 'payload_source_sha', 'payload_sha256'],
-    'setup-authorization-coordinate-shape',
-  );
-  if (
-    value.setup.kind !== 'apr-r4-e3-setup-authorization-v1' ||
-    value.setup.phase !== 'setup' ||
-    !Array.isArray(value.setup.branches) ||
-    value.setup.branches.length !== 2 ||
-    value.setup.branches.some((branch) => {
-      exactKeys(
-        branch,
-        ['ref', 'head_sha', 'parent_sha', 'tree_sha'],
-        'setup-authorization-branch-shape',
-      );
-      return (
-        !hex40.test(branch.head_sha) ||
-        !hex40.test(branch.parent_sha) ||
-        !hex40.test(branch.tree_sha) ||
-        !fixtureRef.test(branch.ref)
-      );
-    }) ||
-    JSON.stringify(value.setup.coordinates) !==
-      JSON.stringify({
-        repository: identities.repository,
-        workflow_sha: identities.workflow_sha,
-        action_source_sha: identities.action_source_sha,
-        payload_source_sha: identities.payload_source_sha,
-        payload_sha256: identities.payload_sha256,
-      })
-  ) {
-    invalid('setup-authorization-values');
+function validateAuthorization(value, identities, { executionOnly = false } = {}) {
+  if (executionOnly) {
+    value = { setup: { coordinates: value.coordinates }, execution: value };
+  } else {
+    exactKeys(value, ['setup', 'execution', 'cleanup'], 'authorization-shape');
+    exactKeys(
+      value.setup,
+      ['kind', 'phase', 'source', 'coordinates', 'capabilities', 'branches'],
+      'setup-authorization-shape',
+    );
+    validateAuthorizationSource(value.setup.source, 'setup');
+    exactKeys(
+      value.setup.coordinates,
+      ['repository', 'workflow_sha', 'action_source_sha', 'payload_source_sha', 'payload_sha256'],
+      'setup-authorization-coordinate-shape',
+    );
+    if (
+      value.setup.kind !== 'apr-r4-e3-setup-authorization-v1' ||
+      value.setup.phase !== 'setup' ||
+      !Array.isArray(value.setup.branches) ||
+      value.setup.branches.length !== 2 ||
+      value.setup.branches.some((branch) => {
+        exactKeys(
+          branch,
+          ['ref', 'head_sha', 'parent_sha', 'tree_sha'],
+          'setup-authorization-branch-shape',
+        );
+        return (
+          !hex40.test(branch.head_sha) ||
+          !hex40.test(branch.parent_sha) ||
+          !hex40.test(branch.tree_sha) ||
+          !fixtureRef.test(branch.ref)
+        );
+      }) ||
+      JSON.stringify(value.setup.coordinates) !==
+        JSON.stringify({
+          repository: identities.repository,
+          workflow_sha: identities.workflow_sha,
+          action_source_sha: identities.action_source_sha,
+          payload_source_sha: identities.payload_source_sha,
+          payload_sha256: identities.payload_sha256,
+        })
+    ) {
+      invalid('setup-authorization-values');
+    }
+    exactArray(
+      value.setup.capabilities,
+      [
+        'configure-environment-baseline',
+        'push-two-precomputed-heads',
+        'open-two-frozen-fixture-prs',
+        'observe-secret-free-ci-and-inert-preflight',
+        'bounded-setup-rollback',
+      ],
+      'setup-authorization-capabilities',
+    );
   }
-  exactArray(
-    value.setup.capabilities,
-    [
-      'configure-environment-baseline',
-      'push-two-precomputed-heads',
-      'open-two-frozen-fixture-prs',
-      'observe-secret-free-ci-and-inert-preflight',
-      'bounded-setup-rollback',
-    ],
-    'setup-authorization-capabilities',
-  );
 
   exactKeys(
     value.execution,
@@ -1472,12 +1676,17 @@ function validateAuthorization(value, identities) {
       'coordinates',
       'fixture_prs',
       'operation_ids',
-      'operation_runs',
+      'trigger_plan',
       'authorization_manifests',
-      'environment_snapshot_sha256',
+      'environment_baseline',
+      'authorization_variable_baseline',
       'actors',
-      'credential_files',
-      'destination_identity',
+      'credential_slots',
+      'active_secret_profile',
+      'credential_materializer',
+      'correction_gate',
+      'destinations',
+      'provider_mode',
       'oracle_build',
       'commands',
       'protected_scan_input',
@@ -1522,24 +1731,10 @@ function validateAuthorization(value, identities) {
     }) ||
     value.execution.operation_ids.length !== 2 ||
     value.execution.operation_ids.some((item) => !hex64.test(item)) ||
-    !Array.isArray(value.execution.operation_runs) ||
-    value.execution.operation_runs.length !== 4 ||
-    value.execution.operation_runs.some(
-      (run, index) =>
-        JSON.stringify(Object.keys(run)) !==
-          JSON.stringify(['operation_id', 'scope', 'run_id', 'run_attempt']) ||
-        run.operation_id !== value.execution.operation_ids[index < 2 ? 0 : 1] ||
-        run.scope !== (index < 2 ? 'normal' : 'stale') ||
-        !decimal.test(run.run_id) ||
-        run.run_attempt !== 1,
-    ) ||
-    new Set(value.execution.operation_runs.map(({ run_id }) => run_id)).size !== 4 ||
     value.execution.authorization_manifests.length !== 2 ||
     value.execution.authorization_manifests.some((item) => !hex64.test(item)) ||
-    !hex64.test(value.execution.environment_snapshot_sha256) ||
     JSON.stringify(value.execution.actors) !==
       JSON.stringify([{ id: '16307884', permission: 'admin' }]) ||
-    !hex64.test(value.execution.destination_identity) ||
     JSON.stringify(Object.keys(value.execution.oracle_build)) !==
       JSON.stringify([
         'source_commit',
@@ -1566,14 +1761,289 @@ function validateAuthorization(value, identities) {
   ) {
     invalid('execution-authorization-values');
   }
-  exactArray(
-    value.execution.credential_files.map(({ name }) => name),
-    ['github-token', 'current-state-key', 'previous-state-key'],
-    'execution-authorization-credentials',
+  const triggerRoles = [
+    'normal-bootstrap',
+    'normal-continuation',
+    'stale-protected',
+    'stale-follow-on',
+  ];
+  if (!Array.isArray(value.execution.trigger_plan) || value.execution.trigger_plan.length !== 4) {
+    invalid('execution-trigger-plan');
+  }
+  value.execution.trigger_plan.forEach((trigger, index) => {
+    exactKeys(
+      trigger,
+      [
+        'role',
+        'operation_id',
+        'scope',
+        'producer',
+        'expected_event',
+        'pr_number',
+        'ref',
+        'authorized_head_sha',
+        'source_coordinate',
+      ],
+      'execution-trigger-shape',
+    );
+    const fixture = value.execution.fixture_prs[index < 2 ? 0 : 1];
+    const expectedProducer =
+      index === 1
+        ? 'dispatch-proof-workflow'
+        : index === 3
+          ? 'advance-stale-ref'
+          : 'rerun-upstream-ci';
+    const expectedEvent = index === 1 ? 'workflow_dispatch' : 'workflow_run';
+    const coordinateKeys = index === 0 || index === 2 ? ['kind', 'id'] : ['kind', 'value'];
+    exactKeys(
+      trigger.source_coordinate,
+      coordinateKeys,
+      'execution-trigger-source-coordinate-shape',
+    );
+    if (
+      trigger.role !== triggerRoles[index] ||
+      trigger.operation_id !== value.execution.operation_ids[index < 2 ? 0 : 1] ||
+      trigger.scope !== (index < 2 ? 'normal' : 'stale') ||
+      trigger.producer !== expectedProducer ||
+      trigger.expected_event !== expectedEvent ||
+      trigger.pr_number !== fixture.number ||
+      trigger.ref !== fixture.ref ||
+      trigger.authorized_head_sha !== fixture.head_sha ||
+      (index === 0 || index === 2
+        ? trigger.source_coordinate.kind !== 'upstream-workflow-run' ||
+          !decimal.test(trigger.source_coordinate.id)
+        : index === 1
+          ? trigger.source_coordinate.kind !== 'workflow-dispatch-ref' ||
+            trigger.source_coordinate.value !== 'main'
+          : trigger.source_coordinate.kind !== 'advanced-ref-head' ||
+            !hex40.test(trigger.source_coordinate.value))
+    ) {
+      invalid('execution-trigger-values');
+    }
+  });
+  exactKeys(
+    value.execution.environment_baseline,
+    [
+      'environment_id',
+      'name',
+      'secret_names',
+      'deployment_branch_policy',
+      'required_reviewer_ids',
+      'prevent_self_review',
+      'can_admins_bypass',
+    ],
+    'execution-environment-baseline-shape',
   );
-  for (const credential of value.execution.credential_files) {
-    exactKeys(credential, ['name', 'file_identity_sha256'], 'execution-credential-shape');
-    if (!hex64.test(credential.file_identity_sha256)) invalid('execution-credential-values');
+  if (
+    value.execution.environment_baseline.environment_id !== '20766359842' ||
+    value.execution.environment_baseline.name !== 'r4-trusted-proof' ||
+    JSON.stringify(value.execution.environment_baseline.secret_names) !== '[]' ||
+    value.execution.environment_baseline.deployment_branch_policy !== 'main-only' ||
+    JSON.stringify(value.execution.environment_baseline.required_reviewer_ids) !== '["16307884"]' ||
+    value.execution.environment_baseline.prevent_self_review !== false ||
+    value.execution.environment_baseline.can_admins_bypass !== false
+  ) {
+    invalid('execution-environment-baseline-values');
+  }
+  exactKeys(
+    value.execution.authorization_variable_baseline,
+    ['name', 'state'],
+    'execution-variable-baseline-shape',
+  );
+  if (
+    value.execution.authorization_variable_baseline.name !== 'R4_TRUSTED_PROOF_AUTHORIZATION' ||
+    value.execution.authorization_variable_baseline.state !== 'absent'
+  ) {
+    invalid('execution-variable-baseline-values');
+  }
+  const expectedSlots = [
+    ['github-token', true, false],
+    ['current-state-key', true, true],
+    ['previous-state-key', false, true],
+  ];
+  if (
+    !Array.isArray(value.execution.credential_slots) ||
+    value.execution.credential_slots.length !== 3
+  ) {
+    invalid('execution-credential-slots');
+  }
+  value.execution.credential_slots.forEach((slot, index) => {
+    exactKeys(slot, ['name', 'required', 'base64_key'], 'execution-credential-slot-shape');
+    if (
+      canonicalJson([slot.name, slot.required, slot.base64_key]) !==
+      canonicalJson(expectedSlots[index])
+    ) {
+      invalid('execution-credential-slot-values');
+    }
+  });
+  exactKeys(
+    value.execution.active_secret_profile,
+    ['environment_secret_names', 'credential_slot_names'],
+    'execution-active-secret-profile-shape',
+  );
+  const allowedEnvironmentProfiles = [
+    ['AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+    [
+      'AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY',
+      'AGENTIC_PR_REVIEW_STATE_KEY',
+      'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
+    ],
+  ];
+  const allowedCredentialProfiles = [
+    ['github-token', 'current-state-key'],
+    ['github-token', 'current-state-key', 'previous-state-key'],
+  ];
+  const selectedProfile = allowedEnvironmentProfiles.findIndex(
+    (profile) =>
+      canonicalJson(profile) ===
+      canonicalJson(value.execution.active_secret_profile.environment_secret_names),
+  );
+  if (
+    selectedProfile < 0 ||
+    canonicalJson(value.execution.active_secret_profile.credential_slot_names) !==
+      canonicalJson(allowedCredentialProfiles[selectedProfile])
+  ) {
+    invalid('execution-active-secret-profile-values');
+  }
+  exactKeys(
+    value.execution.credential_materializer,
+    [
+      'kind',
+      'source_sha256',
+      'build_sha256',
+      'input_transport',
+      'admission_receipt_kind',
+      'disposition_receipt_kind',
+    ],
+    'execution-credential-materializer-shape',
+  );
+  if (
+    value.execution.credential_materializer.kind !==
+      'apr-r4-e3-credential-guardian-materializer-v1' ||
+    !hex64.test(value.execution.credential_materializer.source_sha256) ||
+    !hex64.test(value.execution.credential_materializer.build_sha256) ||
+    value.execution.credential_materializer.input_transport !== 'private-stdin' ||
+    value.execution.credential_materializer.admission_receipt_kind !==
+      'apr-r4-e3-credential-admission-v1' ||
+    value.execution.credential_materializer.disposition_receipt_kind !==
+      'apr-r4-e3-credential-disposition-v1'
+  ) {
+    invalid('execution-credential-materializer-values');
+  }
+  exactKeys(
+    value.execution.correction_gate,
+    [
+      'repository',
+      'pull_request_number',
+      'branch',
+      'commit',
+      'tree',
+      'authority_identities',
+      'contract_digests',
+    ],
+    'execution-correction-gate-shape',
+  );
+  const authorityComponents = [
+    'capture',
+    'credential-materializer',
+    'producer-journal-materializer',
+    'phase-fragment-materializer',
+    'oracle',
+    'assembler',
+  ];
+  const contractComponents = [
+    'cleanup-generator',
+    'projector',
+    'static-checker',
+    'source-map',
+    'host-schema',
+    'private-package-schema',
+    'public-schema',
+    'authorization-grammar',
+  ];
+  if (
+    value.execution.correction_gate.repository !== value.execution.coordinates.repository ||
+    !decimal.test(value.execution.correction_gate.pull_request_number) ||
+    value.execution.correction_gate.branch !== 'codex/issue-181-two-run-product-proof' ||
+    !hex40.test(value.execution.correction_gate.commit) ||
+    !hex40.test(value.execution.correction_gate.tree) ||
+    !Array.isArray(value.execution.correction_gate.authority_identities) ||
+    value.execution.correction_gate.authority_identities.length !== authorityComponents.length ||
+    value.execution.correction_gate.authority_identities.some((identity, index) => {
+      exactKeys(
+        identity,
+        ['component', 'source_sha256', 'build_sha256'],
+        'execution-correction-authority-shape',
+      );
+      return (
+        identity.component !== authorityComponents[index] ||
+        !hex64.test(identity.source_sha256) ||
+        !hex64.test(identity.build_sha256)
+      );
+    }) ||
+    !Array.isArray(value.execution.correction_gate.contract_digests) ||
+    value.execution.correction_gate.contract_digests.length !== contractComponents.length ||
+    value.execution.correction_gate.contract_digests.some((identity, index) => {
+      exactKeys(identity, ['component', 'sha256'], 'execution-correction-contract-shape');
+      return identity.component !== contractComponents[index] || !hex64.test(identity.sha256);
+    })
+  ) {
+    invalid('execution-correction-gate-values');
+  }
+  exactKeys(value.execution.destinations, ['private', 'public'], 'execution-destinations-shape');
+  exactKeys(
+    value.execution.destinations.private,
+    ['kind', 'identity_sha256'],
+    'execution-private-destination-shape',
+  );
+  exactKeys(
+    value.execution.destinations.public,
+    ['repository', 'branch', 'pull_request_number', 'worktree_identity_sha256', 'allowed_paths'],
+    'execution-public-destination-shape',
+  );
+  if (
+    value.execution.destinations.private.kind !== 'maintainer-approved-host-restricted-location' ||
+    !hex64.test(value.execution.destinations.private.identity_sha256) ||
+    value.execution.destinations.public.repository !== identities.repository ||
+    value.execution.destinations.public.branch !== 'codex/issue-181-two-run-product-proof' ||
+    !decimal.test(value.execution.destinations.public.pull_request_number) ||
+    value.execution.destinations.public.repository !== value.execution.correction_gate.repository ||
+    value.execution.destinations.public.branch !== value.execution.correction_gate.branch ||
+    value.execution.destinations.public.pull_request_number !==
+      value.execution.correction_gate.pull_request_number ||
+    !hex64.test(value.execution.destinations.public.worktree_identity_sha256) ||
+    canonicalJson(value.execution.destinations.public.allowed_paths) !==
+      canonicalJson([
+        'docs/20_architecture/r4-product-proof.md',
+        'runtime/tests/fixtures/action-host/trusted-proof/r4-product-proof-public-safe.json',
+        'docs/20_architecture/r4-actionhost-wrapper-plan.md',
+        'docs/90_roadmap/roadmap-seed.md',
+      ])
+  ) {
+    invalid('execution-destination-values');
+  }
+  exactKeys(
+    value.execution.provider_mode,
+    [
+      'provider',
+      'model',
+      'adapter',
+      'transport',
+      'network',
+      'deterministic_provider_contract_sha256',
+    ],
+    'execution-provider-mode-shape',
+  );
+  if (
+    value.execution.provider_mode.provider !== 'deepseek' ||
+    value.execution.provider_mode.model !== 'deepseek-v4-flash' ||
+    value.execution.provider_mode.adapter !== 'deepseek-v1' ||
+    value.execution.provider_mode.transport !== 'in-process-http-message-handler' ||
+    value.execution.provider_mode.network !== false ||
+    value.execution.provider_mode.deterministic_provider_contract_sha256 !==
+      '3da2dd332c21097cb30ece8cc80830b75dfd02fd146f159555899194eaf52d8c'
+  ) {
+    invalid('execution-provider-mode-values');
   }
   exactKeys(
     value.execution.protected_scan_input,
@@ -1600,20 +2070,172 @@ function validateAuthorization(value, identities) {
     invalid('execution-protected-scan-input-values');
   }
 
-  exactKeys(
-    value.cleanup,
-    ['kind', 'phase', 'source', 'coordinates', 'plan_sha256'],
-    'cleanup-authorization-shape',
-  );
-  validateAuthorizationSource(value.cleanup.source, 'cleanup');
-  if (
-    value.cleanup.kind !== 'apr-r4-e3-cleanup-authorization-v1' ||
-    value.cleanup.phase !== 'cleanup' ||
-    !hex64.test(value.cleanup.plan_sha256) ||
-    JSON.stringify(value.cleanup.coordinates) !== JSON.stringify(value.setup.coordinates)
-  ) {
-    invalid('cleanup-authorization-values');
+  if (!executionOnly) {
+    exactKeys(
+      value.cleanup,
+      ['kind', 'phase', 'source', 'coordinates', 'plan_sha256'],
+      'cleanup-authorization-shape',
+    );
+    validateAuthorizationSource(value.cleanup.source, 'cleanup');
+    if (
+      value.cleanup.kind !== 'apr-r4-e3-cleanup-authorization-v1' ||
+      value.cleanup.phase !== 'cleanup' ||
+      !hex64.test(value.cleanup.plan_sha256) ||
+      JSON.stringify(value.cleanup.coordinates) !== JSON.stringify(value.setup.coordinates)
+    ) {
+      invalid('cleanup-authorization-values');
+    }
   }
+}
+
+const enrollmentAuthoritySourceKeys = Object.freeze([
+  'source_id',
+  'operation_id',
+  'phase',
+  'route',
+  'page',
+  'status',
+  'body_path',
+  'body_sha256',
+  'body_size',
+  'body_file_identity',
+  'safe_headers_sha256',
+  'request_started_unix_milliseconds',
+  'response_received_unix_milliseconds',
+  'next_route',
+]);
+
+/**
+ * Validate the host-restricted paired GitHub readback that grants post-merge enrollment.
+ * This is deliberately narrower than final proof assembly: it reuses the E3 authorization
+ * grammar and capture-source contract without creating a second evidence collector.
+ */
+export function validateEnrollmentExecutionAuthorityPackage(value) {
+  exactKeys(
+    value,
+    ['kind', 'identities', 'sources', 'captured_source_bodies', 'execution_authorization'],
+    'enrollment-authority-package-shape',
+  );
+  exactKeys(
+    value.identities,
+    ['repository', 'workflow_sha', 'action_source_sha', 'payload_source_sha', 'payload_sha256'],
+    'enrollment-authority-identity-shape',
+  );
+  if (
+    value.kind !== 'apr-r4-e2p-enrollment-execution-authority-v1' ||
+    value.identities.repository !== 'SolusQuest/agentic-pr-review' ||
+    !hex40.test(value.identities.workflow_sha) ||
+    !hex40.test(value.identities.action_source_sha) ||
+    !hex40.test(value.identities.payload_source_sha) ||
+    !hex64.test(value.identities.payload_sha256) ||
+    !Array.isArray(value.sources) ||
+    value.sources.length !== 4 ||
+    !Array.isArray(value.captured_source_bodies) ||
+    value.captured_source_bodies.length !== 4
+  ) {
+    invalid('enrollment-authority-package-values');
+  }
+  const sourceIds = new Set();
+  for (const source of value.sources) {
+    exactKeys(source, enrollmentAuthoritySourceKeys, 'enrollment-authority-source-shape');
+    const match =
+      /^authorization-execution-(comment|permission)-(normal|stale)-([A-Za-z0-9-]+):page:1$/u.exec(
+        source.source_id,
+      );
+    if (
+      !match ||
+      sourceIds.has(source.source_id) ||
+      !hex64.test(source.operation_id) ||
+      source.phase !== `baseline-${match[2]}` ||
+      source.page !== 1 ||
+      source.status !== 200 ||
+      typeof source.body_path !== 'string' ||
+      !/^source-[0-9]{4}\.json$/u.test(source.body_path) ||
+      !hex64.test(source.body_sha256) ||
+      !decimal.test(source.body_size) ||
+      !hex64.test(source.body_file_identity) ||
+      !hex64.test(source.safe_headers_sha256) ||
+      !Number.isSafeInteger(source.request_started_unix_milliseconds) ||
+      !Number.isSafeInteger(source.response_received_unix_milliseconds) ||
+      source.request_started_unix_milliseconds < 0 ||
+      source.response_received_unix_milliseconds < source.request_started_unix_milliseconds ||
+      source.next_route !== null ||
+      (match[1] === 'comment'
+        ? !/^\/repos\/SolusQuest\/agentic-pr-review\/issues\/comments\/[1-9][0-9]*$/u.test(
+            source.route,
+          )
+        : !/^\/repos\/SolusQuest\/agentic-pr-review\/collaborators\/[A-Za-z0-9-]+\/permission$/u.test(
+            source.route,
+          ))
+    ) {
+      invalid('enrollment-authority-source-values');
+    }
+    sourceIds.add(source.source_id);
+  }
+  const capturedSourceBodies = new Map();
+  for (const body of value.captured_source_bodies) {
+    exactKeys(body, ['source_id', 'text'], 'enrollment-authority-body-shape');
+    if (
+      !sourceIds.has(body.source_id) ||
+      capturedSourceBodies.has(body.source_id) ||
+      typeof body.text !== 'string'
+    ) {
+      invalid('enrollment-authority-body-values');
+    }
+    capturedSourceBodies.set(body.source_id, { text: body.text });
+  }
+  if (capturedSourceBodies.size !== sourceIds.size) {
+    invalid('enrollment-authority-body-cardinality');
+  }
+  const derived = derivePairedAuthorization(
+    'execution',
+    { sources: value.sources },
+    capturedSourceBodies,
+  );
+  exactKeys(
+    derived,
+    ['kind', 'phase', 'source', 'enrollment_record_sha256', 'execution'],
+    'enrollment-authority-readback-shape',
+  );
+  if (
+    derived.kind !== 'apr-r4-e2p-enrollment-execution-authorization-v1' ||
+    derived.phase !== 'execution' ||
+    !hex64.test(derived.enrollment_record_sha256) ||
+    derived.execution === null ||
+    Array.isArray(derived.execution) ||
+    typeof derived.execution !== 'object'
+  ) {
+    invalid('enrollment-authority-readback-values');
+  }
+  const executionAuthorization = {
+    kind: 'apr-r4-e3-execution-authorization-v1',
+    phase: 'execution',
+    source: derived.source,
+    ...derived.execution,
+  };
+  if (canonicalJson(executionAuthorization) !== canonicalJson(value.execution_authorization)) {
+    invalid('enrollment-authority-derived-readback');
+  }
+  validateAuthorization(executionAuthorization, value.identities, { executionOnly: true });
+  const captureIdentity = executionAuthorization.correction_gate.authority_identities[0];
+  if (captureIdentity.component !== 'capture') invalid('enrollment-authority-capture-identity');
+  const phaseMaterializerIdentity =
+    executionAuthorization.correction_gate.authority_identities.find(
+      (identity) => identity.component === 'phase-fragment-materializer',
+    );
+  if (phaseMaterializerIdentity === undefined) {
+    invalid('enrollment-authority-phase-materializer-identity');
+  }
+  return Object.freeze({
+    kind: 'apr-r4-e2p-enrollment-authority-binding-v1',
+    execution_authorization_sha256: sha256(canonicalJson(executionAuthorization)),
+    enrollment_record_sha256: derived.enrollment_record_sha256,
+    capture_source_set_sha256: sha256(canonicalJson(value.sources)),
+    capture_source_sha256: captureIdentity.source_sha256,
+    capture_build_sha256: captureIdentity.build_sha256,
+    phase_materializer_source_sha256: phaseMaterializerIdentity.source_sha256,
+    phase_materializer_build_sha256: phaseMaterializerIdentity.build_sha256,
+  });
 }
 
 function validateApproval(approval, phase) {
@@ -1966,7 +2588,8 @@ export function generateCleanupPlan(input) {
         !['repository', 'normal', 'stale'].includes(record.scope) ||
         typeof record.artifact_name !== 'string' ||
         !decimal.test(record.producing_run_id) ||
-        record.producing_run_attempt !== 1 ||
+        !Number.isSafeInteger(record.producing_run_attempt) ||
+        record.producing_run_attempt <= 0 ||
         !hex64.test(record.archive_sha256) ||
         !hex64.test(record.encrypted_object_sha256) ||
         !decimal.test(record.encrypted_object_size) ||
@@ -2000,12 +2623,14 @@ export function generateCleanupPlan(input) {
     if (
       family.operation_id !== operationId ||
       !Array.isArray(family.comments) ||
-      family.comments.length !== expectedKinds.length
+      family.comments.length > expectedKinds.length ||
+      !Array.isArray(family.cleanup_outcomes) ||
+      family.cleanup_outcomes.length !== family.comments.length
     ) {
       invalid('cleanup-plan-control-values');
     }
     const familyIds = [];
-    for (let index = 0; index < expectedKinds.length; index += 1) {
+    for (let index = 0; index < family.comments.length; index += 1) {
       const comment = family.comments[index];
       const expectedPredecessor = index % 2 === 1 ? familyIds[index - 1] : null;
       if (
@@ -2018,6 +2643,9 @@ export function generateCleanupPlan(input) {
       }
       familyIds.push(comment.comment_id);
       controlIds.push(comment.comment_id);
+      if (family.cleanup_outcomes[index]?.comment_id !== comment.comment_id) {
+        invalid('cleanup-plan-control-values');
+      }
     }
   }
   if (new Set(controlIds).size !== controlIds.length) invalid('cleanup-plan-control-values');
@@ -2036,14 +2664,24 @@ export function generateCleanupPlan(input) {
     ],
     'cleanup-plan-resource-shape',
   );
+  const allowedSecretProfiles = [
+    ['AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY', 'AGENTIC_PR_REVIEW_STATE_KEY'],
+    [
+      'AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY',
+      'AGENTIC_PR_REVIEW_STATE_KEY',
+      'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
+    ],
+  ];
+  const selectedSecretProfile = allowedSecretProfiles.find(
+    (profile) => canonicalJson(profile) === canonicalJson(input.resources.secret_names),
+  );
+  const expectedCredentialCopies =
+    selectedSecretProfile?.length === 2
+      ? ['github-token', 'current-state-key']
+      : ['github-token', 'current-state-key', 'previous-state-key'];
   if (
     input.resources.authorization_variable !== 'R4_TRUSTED_PROOF_AUTHORIZATION' ||
-    JSON.stringify(input.resources.secret_names) !==
-      JSON.stringify([
-        'DEEPSEEK_API_KEY',
-        'AGENTIC_PR_REVIEW_STATE_KEY',
-        'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
-      ]) ||
+    selectedSecretProfile === undefined ||
     input.resources.environment !== 'r4-trusted-proof' ||
     input.resources.fixture_refs.length !== 2 ||
     new Set(input.resources.fixture_refs).size !== 2 ||
@@ -2052,26 +2690,28 @@ export function generateCleanupPlan(input) {
     input.resources.fixture_pr_numbers.some((value) => !decimal.test(value)) ||
     new Set(input.resources.fixture_pr_numbers).size !== 2 ||
     JSON.stringify(input.resources.credential_copies) !==
-      JSON.stringify(['github-token', 'current-state-key', 'previous-state-key']) ||
+      JSON.stringify(expectedCredentialCopies) ||
     !hex64.test(input.resources.environment_snapshot_sha256) ||
-    input.resources.run_ids.length !== 4 ||
+    input.resources.run_ids.length > 64 ||
     input.resources.run_ids.some((value) => !decimal.test(value)) ||
-    new Set(input.resources.run_ids).size !== 4
+    new Set(input.resources.run_ids).size !== input.resources.run_ids.length
   ) {
     invalid('cleanup-plan-resource-values');
   }
-  exactKeys(
-    input.resources.sticky,
-    ['pr_number', 'comment_id', 'body_sha256', 'marker_sha256'],
-    'cleanup-sticky-shape',
-  );
-  if (
-    !decimal.test(input.resources.sticky.pr_number) ||
-    !decimal.test(input.resources.sticky.comment_id) ||
-    !hex64.test(input.resources.sticky.body_sha256) ||
-    !hex64.test(input.resources.sticky.marker_sha256)
-  )
-    invalid('cleanup-sticky-values');
+  if (input.resources.sticky !== null) {
+    exactKeys(
+      input.resources.sticky,
+      ['pr_number', 'comment_id', 'body_sha256', 'marker_sha256'],
+      'cleanup-sticky-shape',
+    );
+    if (
+      !decimal.test(input.resources.sticky.pr_number) ||
+      !decimal.test(input.resources.sticky.comment_id) ||
+      !hex64.test(input.resources.sticky.body_sha256) ||
+      !hex64.test(input.resources.sticky.marker_sha256)
+    )
+      invalid('cleanup-sticky-values');
+  }
   const stateTargets = input.observed_cleanup
     .map((record) => ({
       artifact_id: record.artifact_id,
@@ -2118,8 +2758,9 @@ export function generateCleanupPlan(input) {
         post_readback: 'variable-name-absent',
       },
       secrets: input.resources.secret_names.map((name) => ({
+        environment: input.resources.environment,
         name,
-        mutation: 'delete-actions-secret',
+        mutation: 'delete-environment-secret',
         expected_response: '204-or-404-after-reconciliation',
         outcome_unknown: 'read-exact-secret-name-before-retry',
         post_readback: 'secret-name-absent',
@@ -2167,12 +2808,15 @@ export function generateCleanupPlan(input) {
         pagination: 'complete-cursor',
         post_readback: 'empty',
       })),
-      sticky: {
-        ...input.resources.sticky,
-        mutation: 'none-retain',
-        outcome_unknown: 'read-exact-comment-before-any-retry',
-        post_readback: 'exact-body-and-marker-retained',
-      },
+      sticky:
+        input.resources.sticky === null
+          ? null
+          : {
+              ...input.resources.sticky,
+              mutation: 'none-retain',
+              outcome_unknown: 'read-exact-comment-before-any-retry',
+              post_readback: 'exact-body-and-marker-retained',
+            },
     },
   };
   return { plan, canonical: canonicalJson(plan), digest: sha256(canonicalJson(plan)) };
@@ -2251,70 +2895,61 @@ export function validateHostEvidence(input) {
   validateSourceMap(input.source_map);
   validateSourceBindings(input);
   validateAuthorization(input.authorizations, input.identities);
+  exactKeys(input.environment, ['name', 'readiness_snapshot'], 'environment-shape');
+  const readiness = input.environment.readiness_snapshot;
   exactKeys(
-    input.environment,
-    ['name', 'prevent_self_review', 'protection_snapshot', 'ui_attestation'],
-    'environment-shape',
-  );
-  exactKeys(
-    input.environment.protection_snapshot,
+    readiness,
     [
-      'source_id',
+      'source_ids',
       'environment_id',
+      'can_admins_bypass',
       'deployment_branch_policy',
       'required_reviewer_ids',
-      'required_approvals',
+      'prevent_self_review',
+      'branch_policies',
       'secret_names',
       'token_permissions',
       'readback_sha256',
       'observation',
     ],
-    'environment-protection-shape',
+    'environment-readiness-shape',
   );
-  interval(input.environment.protection_snapshot.observation, 'environment-protection-observation');
-  if (
-    input.environment.protection_snapshot.source_id !== 'environment-protection' ||
-    !decimal.test(input.environment.protection_snapshot.environment_id) ||
-    input.environment.protection_snapshot.deployment_branch_policy !== 'main-only' ||
-    JSON.stringify(input.environment.protection_snapshot.required_reviewer_ids) !==
-      JSON.stringify(['16307884']) ||
-    input.environment.protection_snapshot.required_approvals !== 1 ||
-    JSON.stringify(input.environment.protection_snapshot.secret_names) !==
-      JSON.stringify([
-        'DEEPSEEK_API_KEY',
-        'AGENTIC_PR_REVIEW_STATE_KEY',
-        'AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY',
-      ]) ||
-    JSON.stringify(input.environment.protection_snapshot.token_permissions) !==
-      JSON.stringify({ actions: 'write', contents: 'read', pull_requests: 'write' }) ||
-    !hex64.test(input.environment.protection_snapshot.readback_sha256)
-  )
-    invalid('environment-protection-values');
   exactKeys(
-    input.environment.ui_attestation,
-    [
-      'repository',
-      'environment',
-      'source_kind',
-      'observation',
-      'capture_sha256',
-      'maintainer_id',
-      'administrator_bypass',
-    ],
-    'ui-attestation-shape',
+    readiness.source_ids,
+    ['environment', 'branch_policies', 'environment_secrets'],
+    'environment-source-ids-shape',
   );
-  interval(input.environment.ui_attestation.observation, 'ui-attestation-interval');
+  exactKeys(
+    readiness.deployment_branch_policy,
+    ['protected_branches', 'custom_branch_policies'],
+    'environment-deployment-policy-shape',
+  );
+  interval(readiness.observation, 'environment-readiness-observation');
   if (
     input.environment.name !== 'r4-trusted-proof' ||
-    input.environment.prevent_self_review !== false ||
-    input.environment.ui_attestation.repository !== input.identities.repository ||
-    input.environment.ui_attestation.environment !== input.environment.name ||
-    input.environment.ui_attestation.source_kind !== 'github-environment-ui' ||
-    !hex64.test(input.environment.ui_attestation.capture_sha256) ||
-    input.environment.ui_attestation.maintainer_id !== '16307884' ||
-    input.environment.ui_attestation.administrator_bypass !== false
+    canonicalJson(readiness.source_ids) !==
+      canonicalJson({
+        environment: 'readiness-stale-environment-protection',
+        branch_policies: 'readiness-stale-environment-branch-policies',
+        environment_secrets: 'readiness-stale-environment-secret-inventory',
+      }) ||
+    !decimal.test(readiness.environment_id) ||
+    readiness.can_admins_bypass !== false ||
+    readiness.deployment_branch_policy.protected_branches !== false ||
+    readiness.deployment_branch_policy.custom_branch_policies !== true ||
+    JSON.stringify(readiness.required_reviewer_ids) !== '["16307884"]' ||
+    readiness.prevent_self_review !== false ||
+    canonicalJson(readiness.branch_policies) !==
+      canonicalJson([{ id: '58463845', name: 'main', type: 'branch' }]) ||
+    JSON.stringify(readiness.secret_names) !==
+      JSON.stringify(
+        input.authorizations.execution.active_secret_profile.environment_secret_names,
+      ) ||
+    canonicalJson(readiness.token_permissions) !==
+      canonicalJson({ actions: 'write', contents: 'read', pull_requests: 'write' }) ||
+    !hex64.test(readiness.readback_sha256)
   ) {
-    invalid('ui-attestation-values');
+    invalid('environment-readiness-values');
   }
   exactKeys(input.approval_transitions, ['bootstrap', 'continuation', 'stale'], 'approval-shape');
   validateApproval(input.approval_transitions.bootstrap, 'bootstrap');
@@ -2558,7 +3193,7 @@ export function validateHostEvidence(input) {
   return { cleanupPlan: generated.plan, inventory, projectionEligible };
 }
 
-function validateCaptureManifest(value, host, captureManifestSha256) {
+export function validateCaptureManifest(value, host, captureManifestSha256) {
   exactKeys(
     value,
     [
@@ -2566,9 +3201,18 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
       'repository_id',
       'repository',
       'operation_ids',
-      'operation_runs',
+      'execution_authorization_sha256',
+      'producer_journal_directory',
+      'producer_journal_seal_sha256',
+      'producer_journal_seal_file_identity',
+      'disposition',
+      'expected_roles',
+      'observed_runs',
       'source_map_sha256',
       'destination_identity_sha256',
+      'phase_fragment_journal_path',
+      'phase_fragment_journal_sha256',
+      'phase_fragment_journal_file_identity',
       'sources',
       'artifacts',
       'finalized',
@@ -2580,64 +3224,118 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
     value.repository_id !== host.identities.repository_id ||
     value.repository !== host.identities.repository ||
     JSON.stringify(value.operation_ids) !== JSON.stringify(host.identities.operation_ids) ||
-    JSON.stringify(value.operation_runs) !==
-      JSON.stringify(
-        host.authorizations.execution.operation_runs.map((run) => ({
-          ...run,
-          run_attempt: String(run.run_attempt),
-        })),
-      ) ||
-    !Array.isArray(value.operation_runs) ||
-    value.operation_runs.length !== 4 ||
+    !hex64.test(value.execution_authorization_sha256) ||
+    !/^producer-journal-[a-z0-9-]+$/u.test(value.producer_journal_directory) ||
+    !hex64.test(value.producer_journal_seal_sha256) ||
+    !hex64.test(value.producer_journal_seal_file_identity) ||
+    !['success-candidate', 'recovery-only'].includes(value.disposition) ||
+    !Array.isArray(value.expected_roles) ||
+    value.expected_roles.length > 4 ||
+    !Array.isArray(value.observed_runs) ||
+    value.observed_runs.length < value.expected_roles.length ||
     value.source_map_sha256 !== sha256(canonicalJson(host.source_map)) ||
     value.destination_identity_sha256 !== host.restricted_package.destination_identity_sha256 ||
+    value.phase_fragment_journal_path !== 'phase-fragment-journal.json' ||
+    !hex64.test(value.phase_fragment_journal_sha256) ||
+    !hex64.test(value.phase_fragment_journal_file_identity) ||
     value.finalized !== true ||
     !Array.isArray(value.sources) ||
     value.sources.length === 0 ||
     !Array.isArray(value.artifacts) ||
-    value.artifacts.length === 0 ||
     captureManifestSha256 !== host.restricted_package.capture_manifest_sha256
   ) {
     invalid('capture-manifest-values');
   }
+  const successCandidate = value.disposition === 'success-candidate';
+  if (
+    (successCandidate && value.expected_roles.length !== 4) ||
+    (successCandidate && (value.observed_runs.length !== 4 || value.artifacts.length === 0))
+  ) {
+    invalid('capture-manifest-disposition');
+  }
+  const expectedRoleNames = [
+    'normal-bootstrap',
+    'normal-continuation',
+    'stale-protected',
+    'stale-follow-on',
+  ];
   const operationByRun = new Map();
-  for (const run of value.operation_runs) {
+  for (const run of value.observed_runs) {
     exactKeys(
       run,
-      ['operation_id', 'scope', 'run_id', 'run_attempt'],
-      'capture-operation-run-shape',
+      ['operation_id', 'scope', 'run_id', 'run_attempt', 'ownership'],
+      'capture-observed-run-shape',
     );
     if (
       operationByRun.has(run.run_id) ||
       !value.operation_ids.includes(run.operation_id) ||
       !['normal', 'stale'].includes(run.scope) ||
       !decimal.test(run.run_id) ||
-      run.run_attempt !== '1'
+      !decimal.test(run.run_attempt) ||
+      !['operation-owned', 'ownership-ambiguous'].includes(run.ownership)
     ) {
-      invalid('capture-operation-run-values');
+      invalid('capture-observed-run-values');
     }
     operationByRun.set(run.run_id, run);
   }
-  for (const operationId of value.operation_ids) {
-    const runs = value.operation_runs.filter(({ operation_id }) => operation_id === operationId);
-    if (runs.length !== 2 || new Set(runs.map(({ scope }) => scope)).size !== 1) {
-      invalid('capture-operation-run-values');
+  const successfulRunIds = new Set();
+  value.expected_roles.forEach((role, index) => {
+    exactKeys(
+      role,
+      ['role', 'operation_id', 'scope', 'run_id', 'run_attempt', 'producer_source_ids'],
+      'capture-expected-role-shape',
+    );
+    const triggerIndex = expectedRoleNames.indexOf(role.role);
+    const trigger = host.authorizations.execution.trigger_plan[triggerIndex];
+    if (
+      triggerIndex < 0 ||
+      (index > 0 &&
+        triggerIndex <= expectedRoleNames.indexOf(value.expected_roles[index - 1].role)) ||
+      role.operation_id !== trigger.operation_id ||
+      role.scope !== trigger.scope ||
+      role.run_attempt !== '1' ||
+      !decimal.test(role.run_id) ||
+      successfulRunIds.has(role.run_id) ||
+      !Array.isArray(role.producer_source_ids) ||
+      role.producer_source_ids.length === 0 ||
+      new Set(role.producer_source_ids).size !== role.producer_source_ids.length ||
+      !value.observed_runs.some(
+        (run) =>
+          run.operation_id === role.operation_id &&
+          run.scope === role.scope &&
+          run.run_id === role.run_id &&
+          run.run_attempt === role.run_attempt &&
+          run.ownership === 'operation-owned',
+      )
+    ) {
+      invalid('capture-expected-role-values');
     }
-  }
+    successfulRunIds.add(role.run_id);
+  });
   if (
-    value.operation_runs.filter(({ scope }) => scope === 'normal').length !== 2 ||
-    value.operation_runs.filter(({ scope }) => scope === 'stale').length !== 2
+    value.operation_ids.some(
+      (operationId) =>
+        value.expected_roles.filter(({ operation_id }) => operation_id === operationId).length > 2,
+    ) ||
+    (successCandidate &&
+      (value.expected_roles.filter(({ scope }) => scope === 'normal').length !== 2 ||
+        value.expected_roles.filter(({ scope }) => scope === 'stale').length !== 2))
   ) {
-    invalid('capture-operation-run-values');
+    invalid('capture-expected-role-values');
   }
   const sourceIds = new Set();
   const sourcePaths = new Set();
   for (const source of value.sources) {
     const sourceIdentity = /^(?<family>.+):page:(?<page>[1-9][0-9]*)$/u.exec(source.source_id);
+    const expectedVariableAbsence =
+      /^baseline-(normal|stale)-authorization-variable:page:1$/u.test(source.source_id) &&
+      source.status === 404;
     exactKeys(
       source,
       [
         'source_id',
+        'operation_id',
+        'phase',
         'route',
         'page',
         'status',
@@ -2655,12 +3353,15 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
     if (
       sourceIds.has(source.source_id) ||
       sourcePaths.has(source.body_path) ||
+      !value.operation_ids.includes(source.operation_id) ||
+      source.phase !==
+        expectedCaptureSourcePhase(source.source_id, source.operation_id, value.operation_ids) ||
       sourceIdentity === null ||
       Number(sourceIdentity.groups.page) !== source.page ||
       !source.route.startsWith(`/repos/${host.identities.repository}/`) ||
       !Number.isSafeInteger(source.page) ||
       source.page < 1 ||
-      source.status !== 200 ||
+      (source.status !== 200 && !expectedVariableAbsence) ||
       !/^source-[0-9]{4}\.json$/u.test(source.body_path) ||
       !decimal.test(source.body_size) ||
       !hex64.test(source.body_sha256) ||
@@ -2677,9 +3378,21 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
     sourceIds.add(source.source_id);
     sourcePaths.add(source.body_path);
   }
+  if (
+    value.expected_roles.some((role) =>
+      role.producer_source_ids.some((sourceId) => !sourceIds.has(sourceId)),
+    )
+  ) {
+    invalid('capture-expected-role-source');
+  }
   const artifactIds = new Set();
   const artifactNames = new Set();
   const artifactsById = new Map();
+  const handoffArtifactIds = new Set(
+    host.capture_disposition === 'recovery-only'
+      ? host.inventories.maintainer_handoff.map(({ artifact_id }) => artifact_id)
+      : [],
+  );
   for (const artifact of value.artifacts) {
     exactKeys(
       artifact,
@@ -2715,9 +3428,10 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
       !decimal.test(artifact.artifact_id) ||
       !decimal.test(artifact.producing_run_id) ||
       !decimal.test(artifact.producing_run_attempt) ||
-      !operationByRun.has(artifact.producing_run_id) ||
-      operationByRun.get(artifact.producing_run_id).run_attempt !==
-        artifact.producing_run_attempt ||
+      (!handoffArtifactIds.has(artifact.artifact_id) &&
+        (!operationByRun.has(artifact.producing_run_id) ||
+          operationByRun.get(artifact.producing_run_id).run_attempt !==
+            artifact.producing_run_attempt)) ||
       !sourceIds.has(`${artifact.metadata_source_id}:page:1`) ||
       metadataSources.length === 0 ||
       metadataSources.some(
@@ -2760,13 +3474,118 @@ function validateCaptureManifest(value, host, captureManifestSha256) {
     artifactNames.add(artifact.artifact_name.toLowerCase());
     artifactsById.set(artifact.artifact_id, artifact);
   }
-  const expectedIds = host.inventories.observed_cleanup.map(({ artifact_id }) => artifact_id);
+  const expectedIds = [
+    ...host.inventories.observed_cleanup.map(({ artifact_id }) => artifact_id),
+    ...handoffArtifactIds,
+  ];
   exactArray(
     [...artifactIds].sort((a, b) => a.localeCompare(b, 'en', { numeric: true })),
     [...expectedIds].sort((a, b) => a.localeCompare(b, 'en', { numeric: true })),
     'capture-artifact-inventory',
   );
   return artifactsById;
+}
+
+function validateProducerJournalSeal(value, captureManifest) {
+  exactKeys(
+    value,
+    [
+      'kind',
+      'destination_identity_sha256',
+      'execution_authorization_sha256',
+      'authority_sha256',
+      'authority_physical_identity_sha256',
+      'operation_ids',
+      'entry_sha256s',
+      'discovery_sources',
+      'derived_roles',
+      'observed_runs',
+      'disposition',
+      'finalized',
+    ],
+    'producer-journal-seal-shape',
+  );
+  if (
+    value.kind !== 'apr-r4-e3-producer-outcome-journal-seal-v1' ||
+    value.destination_identity_sha256 !== captureManifest.destination_identity_sha256 ||
+    value.execution_authorization_sha256 !== captureManifest.execution_authorization_sha256 ||
+    !hex64.test(value.authority_sha256) ||
+    !hex64.test(value.authority_physical_identity_sha256) ||
+    canonicalJson(value.operation_ids) !== canonicalJson(captureManifest.operation_ids) ||
+    !Array.isArray(value.entry_sha256s) ||
+    value.entry_sha256s.some((digest) => !hex64.test(digest)) ||
+    !Array.isArray(value.discovery_sources) ||
+    value.discovery_sources.length === 0 ||
+    canonicalJson(value.derived_roles) !== canonicalJson(captureManifest.expected_roles) ||
+    canonicalJson(value.observed_runs) !== canonicalJson(captureManifest.observed_runs) ||
+    value.disposition !== captureManifest.disposition ||
+    value.finalized !== true
+  ) {
+    invalid('producer-journal-seal-values');
+  }
+  const captureSources = new Map(
+    captureManifest.sources.map((source) => [source.source_id, source]),
+  );
+  const seen = new Set();
+  const discoveryEndpoint = `/repos/${captureManifest.repository}/actions/workflows/r4-trusted-proof.yml/runs`;
+  value.discovery_sources.forEach((source, index) => {
+    exactKeys(
+      source,
+      [
+        'source_id',
+        'route',
+        'page',
+        'status',
+        'body_path',
+        'body_sha256',
+        'body_size',
+        'body_physical_identity_sha256',
+        'safe_headers_sha256',
+        'request_started_unix_milliseconds',
+        'response_received_unix_milliseconds',
+        'next_route',
+      ],
+      'producer-discovery-source-shape',
+    );
+    const captured = captureSources.get(source.source_id);
+    const prior = index === 0 ? null : value.discovery_sources[index - 1];
+    const expectedNext =
+      index + 1 < value.discovery_sources.length ? value.discovery_sources[index + 1].route : null;
+    if (
+      seen.has(source.source_id) ||
+      source.source_id !== `producer-discovery-final:page:${index + 1}` ||
+      source.page !== index + 1 ||
+      source.status !== 200 ||
+      (index === 0
+        ? source.route !== `${discoveryEndpoint}?per_page=100`
+        : source.route !== prior.next_route) ||
+      source.next_route !== expectedNext ||
+      !/^producer-journal-[a-z0-9-]+\/discovery-final-page-[0-9]{4}\.json$/u.test(
+        source.body_path,
+      ) ||
+      !hex64.test(source.body_sha256) ||
+      !decimal.test(source.body_size) ||
+      !hex64.test(source.body_physical_identity_sha256) ||
+      !hex64.test(source.safe_headers_sha256) ||
+      !Number.isSafeInteger(source.request_started_unix_milliseconds) ||
+      !Number.isSafeInteger(source.response_received_unix_milliseconds) ||
+      source.response_received_unix_milliseconds < source.request_started_unix_milliseconds ||
+      captured === undefined ||
+      captured.phase !== 'producer-discovery' ||
+      captured.route !== source.route ||
+      captured.page !== source.page ||
+      captured.status !== source.status ||
+      captured.body_sha256 !== source.body_sha256 ||
+      captured.body_size !== source.body_size ||
+      captured.safe_headers_sha256 !== source.safe_headers_sha256 ||
+      captured.request_started_unix_milliseconds !== source.request_started_unix_milliseconds ||
+      captured.response_received_unix_milliseconds !== source.response_received_unix_milliseconds ||
+      captured.next_route !== source.next_route
+    ) {
+      invalid('producer-discovery-source-values');
+    }
+    seen.add(source.source_id);
+  });
 }
 
 function deriveInventoriesFromOracle(value, capturedArtifacts, operationIds) {
@@ -2810,6 +3629,49 @@ function deriveInventoriesFromOracle(value, capturedArtifacts, operationIds) {
   return { expected_success: expectedSuccess, observed_cleanup: observedCleanup };
 }
 
+function deriveRecoveryInventoriesFromOracle(value, capturedArtifacts, operationIds) {
+  return {
+    expected_success: [],
+    observed_cleanup: value.records.map((record) => {
+      const captured = capturedArtifacts.get(record.artifact_id);
+      if (captured === undefined || !operationIds.includes(record.operation_id)) {
+        invalid('oracle-capture-record-missing');
+      }
+      return {
+        artifact_id: record.artifact_id,
+        object_class: record.object_class,
+        scope: record.scope,
+        operation_id: record.operation_id,
+        artifact_name: captured.artifact_name,
+        producing_run_id: captured.producing_run_id,
+        producing_run_attempt: Number(captured.producing_run_attempt),
+        archive_sha256: captured.archive_sha256,
+        encrypted_object_sha256: captured.encrypted_object_sha256,
+        encrypted_object_size: captured.encrypted_object_size,
+        ownership_evidence_sha256: record.ownership_evidence_sha256,
+        authenticated: true,
+        operation_owned: true,
+        disposition: 'recovery-only-delete',
+      };
+    }),
+    maintainer_handoff: value.maintainer_handoff.map((item) => {
+      const captured = capturedArtifacts.get(item.artifact_id);
+      if (captured === undefined) invalid('oracle-handoff-capture-missing');
+      return {
+        artifact_id: item.artifact_id,
+        artifact_name: captured.artifact_name,
+        producing_run_id: captured.producing_run_id,
+        producing_run_attempt: Number(captured.producing_run_attempt),
+        archive_sha256: captured.archive_sha256,
+        encrypted_object_sha256: captured.encrypted_object_sha256,
+        encrypted_object_size: captured.encrypted_object_size,
+        disposition: item.disposition,
+        reason: item.reason,
+      };
+    }),
+  };
+}
+
 function validateOracleResult(
   value,
   host,
@@ -2817,6 +3679,7 @@ function validateOracleResult(
   oracleResultSha256,
   capturedArtifacts,
 ) {
+  const recoveryCapture = host.capture_disposition === 'recovery-only';
   exactKeys(
     value,
     [
@@ -2829,6 +3692,7 @@ function validateOracleResult(
       'exact_seven_success',
       'recovery_only',
       'records',
+      'maintainer_handoff',
     ],
     'oracle-result-shape',
   );
@@ -2839,17 +3703,12 @@ function validateOracleResult(
     value.oracle_source_tree !== host.identities.oracle_source_tree ||
     !hex64.test(value.oracle_assembly_sha256) ||
     !hex64.test(value.production_assembly_sha256) ||
-    value.exact_seven_success !==
-      !host.inventories.observed_cleanup.some(
-        ({ disposition }) => disposition === 'recovery-only-delete',
-      ) ||
-    value.recovery_only !==
-      host.inventories.observed_cleanup.some(
-        ({ disposition }) => disposition === 'recovery-only-delete',
-      ) ||
+    value.exact_seven_success !== !recoveryCapture ||
+    value.recovery_only !== recoveryCapture ||
     oracleResultSha256 !== host.restricted_package.oracle_result_sha256 ||
     !Array.isArray(value.records) ||
-    value.records.length !== host.inventories.observed_cleanup.length
+    value.records.length !== host.inventories.observed_cleanup.length ||
+    !Array.isArray(value.maintainer_handoff)
   ) {
     invalid('oracle-result-values');
   }
@@ -2888,6 +3747,26 @@ function validateOracleResult(
       invalid('oracle-record-values');
     }
     byId.set(record.artifact_id, record);
+  }
+  const handoffById = new Map();
+  for (const item of value.maintainer_handoff) {
+    exactKeys(item, ['artifact_id', 'disposition', 'reason'], 'oracle-handoff-shape');
+    if (
+      handoffById.has(item.artifact_id) ||
+      byId.has(item.artifact_id) ||
+      !decimal.test(item.artifact_id) ||
+      item.disposition !== 'non-deletable-maintainer-handoff' ||
+      ![
+        'codec-authentication-failed',
+        'codec-payload-invalid',
+        'locator-context-unavailable',
+        'operation-ownership-unverified',
+      ].includes(item.reason) ||
+      !capturedArtifacts.has(item.artifact_id)
+    ) {
+      invalid('oracle-handoff-values');
+    }
+    handoffById.set(item.artifact_id, item);
   }
   for (const expected of host.inventories.observed_cleanup) {
     const observed = byId.get(expected.artifact_id);
@@ -2932,16 +3811,39 @@ function validateOracleResult(
     const observed = byId.get(expected.artifact_id);
     if (!observed || observed.role !== expected.role) invalid('oracle-success-inventory');
   }
-  exactArray(
-    value.records.filter(({ role }) => expectedProductRoles.includes(role)).map(({ role }) => role),
-    expectedProductRoles,
-    'oracle-success-roles',
-  );
-  const derivedInventories = deriveInventoriesFromOracle(
-    value,
-    capturedArtifacts,
-    host.identities.operation_ids,
-  );
+  const expectedHandoff = recoveryCapture
+    ? host.inventories.maintainer_handoff.map(({ artifact_id, disposition, reason }) => ({
+        artifact_id,
+        disposition,
+        reason,
+      }))
+    : [];
+  if (canonicalJson(value.maintainer_handoff) !== canonicalJson(expectedHandoff)) {
+    invalid('oracle-handoff-inventory');
+  }
+  if (
+    recoveryCapture &&
+    [...capturedArtifacts.keys()].some(
+      (artifactId) => !byId.has(artifactId) && !handoffById.has(artifactId),
+    )
+  ) {
+    invalid('oracle-recovery-inventory-incomplete');
+  }
+  if (!recoveryCapture && value.maintainer_handoff.length !== 0) {
+    invalid('oracle-success-handoff');
+  }
+  if (!recoveryCapture) {
+    exactArray(
+      value.records
+        .filter(({ role }) => expectedProductRoles.includes(role))
+        .map(({ role }) => role),
+      expectedProductRoles,
+      'oracle-success-roles',
+    );
+  }
+  const derivedInventories = recoveryCapture
+    ? deriveRecoveryInventoriesFromOracle(value, capturedArtifacts, host.identities.operation_ids)
+    : deriveInventoriesFromOracle(value, capturedArtifacts, host.identities.operation_ids);
   if (canonicalJson(derivedInventories) !== canonicalJson(host.inventories)) {
     invalid('oracle-inventory-derivation');
   }
@@ -3055,7 +3957,7 @@ function validateCleanupExecution({
     'cleanup-execution-entry-shape',
   );
   interval(cleanupExecution.entry.observation, 'cleanup-execution-entry-observation');
-  const expectedRunSources = authorizations.execution.operation_runs.map(
+  const expectedRunSources = captureManifest.observed_runs.map(
     ({ run_id }) => `run-terminal-${run_id}:page:1`,
   );
   const captureSources = new Map(
@@ -3067,8 +3969,7 @@ function validateCleanupExecution({
     canonicalJson(cleanupExecution.operation_ids) !==
       canonicalJson(captureManifest.operation_ids) ||
     cleanupExecution.plan_sha256 !== sha256(canonicalJson(cleanupPlan)) ||
-    cleanupExecution.entry.cleanup_authorization_source_id !==
-      `authorization-cleanup-comment-${authorizations.cleanup.source.comment_id}:page:1` ||
+    cleanupExecution.entry.cleanup_authorization_source_id !== 'cleanup-authorization-readback' ||
     cleanupExecution.entry.capture_manifest_sha256 !== captureManifestSha256 ||
     cleanupExecution.entry.oracle_result_sha256 !== oracleResultSha256 ||
     canonicalJson(cleanupExecution.entry.run_terminal_source_ids) !==
@@ -3213,14 +4114,25 @@ export function derivePostCleanupEvidence({
 }) {
   if (
     !(postCleanupCapturedSourceBodies instanceof Map) ||
-    postCleanupCaptureManifest.kind !== 'apr-r4-e3-capture-manifest-v1' ||
+    postCleanupCaptureManifest.kind !== 'apr-r4-e3-post-cleanup-capture-manifest-v1' ||
     postCleanupCaptureManifest.finalized !== true ||
     postCleanupCaptureManifest.repository_id !== captureManifest.repository_id ||
     postCleanupCaptureManifest.repository !== captureManifest.repository ||
     canonicalJson(postCleanupCaptureManifest.operation_ids) !==
       canonicalJson(captureManifest.operation_ids) ||
-    canonicalJson(postCleanupCaptureManifest.operation_runs) !==
-      canonicalJson(captureManifest.operation_runs) ||
+    postCleanupCaptureManifest.execution_authorization_sha256 !==
+      captureManifest.execution_authorization_sha256 ||
+    postCleanupCaptureManifest.producer_journal_directory !==
+      captureManifest.producer_journal_directory ||
+    postCleanupCaptureManifest.producer_journal_seal_sha256 !==
+      captureManifest.producer_journal_seal_sha256 ||
+    postCleanupCaptureManifest.producer_journal_seal_file_identity !==
+      captureManifest.producer_journal_seal_file_identity ||
+    postCleanupCaptureManifest.disposition !== captureManifest.disposition ||
+    canonicalJson(postCleanupCaptureManifest.expected_roles) !==
+      canonicalJson(captureManifest.expected_roles) ||
+    canonicalJson(postCleanupCaptureManifest.observed_runs) !==
+      canonicalJson(captureManifest.observed_runs) ||
     postCleanupCaptureManifest.source_map_sha256 !== captureManifest.source_map_sha256 ||
     postCleanupCaptureManifest.destination_identity_sha256 !==
       captureManifest.destination_identity_sha256 ||
@@ -3230,7 +4142,7 @@ export function derivePostCleanupEvidence({
   }
   const repositoryRoute = `/repos/${captureManifest.repository}`;
   const fixtures = authorizations.execution.fixture_prs;
-  const runs = authorizations.execution.operation_runs.map(({ run_id }) => run_id);
+  const runs = captureManifest.observed_runs.map(({ run_id }) => run_id);
   const operations = authorizations.execution.operation_ids;
   const expectedSourceIds = new Set();
   const read = (sourceId, route, pagination = 'none') => {
@@ -3306,9 +4218,17 @@ export function derivePostCleanupEvidence({
   }
   const secrets = read(
     'post-cleanup-secrets',
-    `${repositoryRoute}/actions/secrets`,
+    `${repositoryRoute}/environments/${cleanupPlan.targets.environment.name}/secrets`,
     'complete-cursor',
   );
+  if (
+    cleanupPlan.targets.secrets.some(
+      ({ environment: targetEnvironment }) =>
+        targetEnvironment !== cleanupPlan.targets.environment.name,
+    )
+  ) {
+    invalid('post-cleanup-secret-scope');
+  }
   const secretNames = new Set(
     secrets.values.flatMap((page) => page.secrets ?? []).map(({ name }) => name),
   );
@@ -3587,6 +4507,592 @@ export function scanPublicCandidate({
   return scan;
 }
 
+function validateCredentialLifecycle(
+  correctionGateReceipt,
+  admission,
+  disposition,
+  authorizations,
+  captureManifest,
+) {
+  exactKeys(
+    admission,
+    [
+      'kind',
+      'destination_identity_sha256',
+      'operation_ids',
+      'execution_authorization_sha256',
+      'correction_gate_sha256',
+      'correction_gate_receipt_sha256',
+      'correction_gate_receipt_physical_identity_sha256',
+      'materializer_source_sha256',
+      'materializer_build_sha256',
+      'consumers',
+      'created_slots',
+      'omitted_slots',
+      'admission_observation',
+      'finalized',
+    ],
+    'credential-admission-shape',
+  );
+  const execution = authorizations.execution;
+  const gate = execution.correction_gate;
+  const identities = new Map(
+    gate.authority_identities.map((identity) => [identity.component, identity]),
+  );
+  const selectedSlots = execution.active_secret_profile.credential_slot_names;
+  const expectedConsumers = [
+    'producer-journal-materializer',
+    'phase-fragment-materializer',
+    'capture',
+    'oracle',
+    'assembler',
+  ];
+  const admissionObservation = admission.admission_observation;
+  exactKeys(
+    correctionGateReceipt,
+    [
+      'kind',
+      'destination_identity_sha256',
+      'execution_authorization_sha256',
+      'correction_gate_sha256',
+      'repository',
+      'pull_request_number',
+      'branch',
+      'commit',
+      'tree',
+      'worktree_identity_sha256',
+      'gate_assembly_sha256',
+      'remote_readbacks',
+      'authority_identities',
+      'contract_digests',
+      'worktree_clean',
+      'finalized',
+    ],
+    'correction-gate-receipt-shape',
+  );
+  if (
+    correctionGateReceipt.kind !== 'apr-r4-e3-correction-gate-readiness-v1' ||
+    correctionGateReceipt.destination_identity_sha256 !==
+      captureManifest.destination_identity_sha256 ||
+    correctionGateReceipt.execution_authorization_sha256 !==
+      captureManifest.execution_authorization_sha256 ||
+    correctionGateReceipt.correction_gate_sha256 !== sha256(canonicalJson(gate)) ||
+    correctionGateReceipt.repository !== gate.repository ||
+    correctionGateReceipt.pull_request_number !== gate.pull_request_number ||
+    correctionGateReceipt.branch !== gate.branch ||
+    correctionGateReceipt.commit !== gate.commit ||
+    correctionGateReceipt.tree !== gate.tree ||
+    correctionGateReceipt.worktree_identity_sha256 !==
+      execution.destinations.public.worktree_identity_sha256 ||
+    correctionGateReceipt.gate_assembly_sha256 !== identities.get('capture')?.build_sha256 ||
+    canonicalJson(correctionGateReceipt.authority_identities) !==
+      canonicalJson(gate.authority_identities) ||
+    canonicalJson(correctionGateReceipt.contract_digests) !==
+      canonicalJson(gate.contract_digests) ||
+    !Array.isArray(correctionGateReceipt.remote_readbacks) ||
+    correctionGateReceipt.remote_readbacks.length !== 4 ||
+    correctionGateReceipt.worktree_clean !== true ||
+    correctionGateReceipt.finalized !== true
+  ) {
+    invalid('correction-gate-receipt-values');
+  }
+  if (
+    admission.kind !== 'apr-r4-e3-credential-admission-v1' ||
+    admission.destination_identity_sha256 !== captureManifest.destination_identity_sha256 ||
+    canonicalJson(admission.operation_ids) !== canonicalJson(captureManifest.operation_ids) ||
+    admission.execution_authorization_sha256 !== captureManifest.execution_authorization_sha256 ||
+    admission.correction_gate_sha256 !== sha256(canonicalJson(gate)) ||
+    admission.correction_gate_receipt_sha256 !== sha256(canonicalJson(correctionGateReceipt)) ||
+    !hex64.test(admission.correction_gate_receipt_physical_identity_sha256) ||
+    admission.materializer_source_sha256 !== execution.credential_materializer.source_sha256 ||
+    admission.materializer_build_sha256 !== execution.credential_materializer.build_sha256 ||
+    admission.finalized !== true ||
+    !Number.isSafeInteger(admissionObservation?.request_started_unix_milliseconds) ||
+    !Number.isSafeInteger(admissionObservation?.response_received_unix_milliseconds) ||
+    admissionObservation.request_started_unix_milliseconds < 0 ||
+    admissionObservation.response_received_unix_milliseconds <
+      admissionObservation.request_started_unix_milliseconds ||
+    !Array.isArray(admission.consumers) ||
+    canonicalJson(admission.consumers.map(({ component }) => component)) !==
+      canonicalJson(expectedConsumers) ||
+    admission.consumers.some(
+      ({ component, build_sha256 }) => identities.get(component)?.build_sha256 !== build_sha256,
+    ) ||
+    !Array.isArray(admission.created_slots) ||
+    canonicalJson(admission.created_slots.map(({ name }) => name)) !==
+      canonicalJson(selectedSlots) ||
+    admission.created_slots.some(
+      (slot) =>
+        !hex64.test(slot.physical_identity_sha256) ||
+        slot.required !== (slot.name !== 'previous-state-key') ||
+        slot.base64_key !== (slot.name !== 'github-token') ||
+        slot.initial_state !== 'created',
+    )
+  ) {
+    invalid('credential-admission-values');
+  }
+  const expectsPrevious = selectedSlots.includes('previous-state-key');
+  if (
+    !Array.isArray(admission.omitted_slots) ||
+    (expectsPrevious
+      ? admission.omitted_slots.length !== 0
+      : canonicalJson(admission.omitted_slots) !==
+        canonicalJson([{ name: 'previous-state-key', final_state: 'not-created' }]))
+  ) {
+    invalid('credential-admission-omission');
+  }
+
+  exactKeys(
+    disposition,
+    [
+      'kind',
+      'destination_identity_sha256',
+      'operation_ids',
+      'admission_receipt_sha256',
+      'admission_receipt_physical_identity_sha256',
+      'created_slots',
+      'omitted_slots',
+      'absence_observation',
+      'absence_source_ids',
+      'finalized',
+    ],
+    'credential-disposition-shape',
+  );
+  const absenceObservation = disposition.absence_observation;
+  if (
+    disposition.kind !== 'apr-r4-e3-credential-disposition-v1' ||
+    disposition.destination_identity_sha256 !== admission.destination_identity_sha256 ||
+    canonicalJson(disposition.operation_ids) !== canonicalJson(admission.operation_ids) ||
+    disposition.admission_receipt_sha256 !== sha256(canonicalJson(admission)) ||
+    !hex64.test(disposition.admission_receipt_physical_identity_sha256) ||
+    disposition.finalized !== true ||
+    canonicalJson(disposition.omitted_slots) !== canonicalJson(admission.omitted_slots) ||
+    !Array.isArray(disposition.created_slots) ||
+    disposition.created_slots.length !== admission.created_slots.length ||
+    disposition.created_slots.some(
+      (slot, index) =>
+        slot.name !== admission.created_slots[index].name ||
+        slot.physical_identity_sha256 !== admission.created_slots[index].physical_identity_sha256 ||
+        slot.final_state !== 'created-then-deleted',
+    ) ||
+    !Number.isSafeInteger(absenceObservation?.request_started_unix_milliseconds) ||
+    !Number.isSafeInteger(absenceObservation?.response_received_unix_milliseconds) ||
+    absenceObservation.request_started_unix_milliseconds < 0 ||
+    absenceObservation.response_received_unix_milliseconds <
+      absenceObservation.request_started_unix_milliseconds ||
+    !Array.isArray(disposition.absence_source_ids) ||
+    disposition.absence_source_ids.length === 0 ||
+    new Set(disposition.absence_source_ids).size !== disposition.absence_source_ids.length ||
+    disposition.absence_source_ids.some(
+      (sourceId) => typeof sourceId !== 'string' || sourceId.length === 0,
+    )
+  ) {
+    invalid('credential-disposition-values');
+  }
+  return {
+    admissionSha256: sha256(canonicalJson(admission)),
+    dispositionSha256: sha256(canonicalJson(disposition)),
+  };
+}
+
+function deriveRecoveryProofControl(authorizations, captureManifest, capturedSourceBodies) {
+  const kinds = new Map([
+    [authorizations.execution.operation_ids[0], ['ready', 'release']],
+    [
+      authorizations.execution.operation_ids[1],
+      ['ready', 'release', 'stale-ready', 'stale-release'],
+    ],
+  ]);
+  const grouped = new Map([...kinds.keys()].map((operationId) => [operationId, []]));
+  for (const source of captureManifest.sources.filter(({ source_id }) =>
+    /^proof-control-(bootstrap|stale)-comment-[1-9][0-9]*:page:1$/u.test(source_id),
+  )) {
+    const retained = capturedSourceBodies.get(source.source_id);
+    if (
+      retained === undefined ||
+      sha256(Buffer.from(retained.text, 'utf8')) !== source.body_sha256
+    ) {
+      invalid('recovery-proof-control-source');
+    }
+    let response;
+    let marker;
+    try {
+      response = JSON.parse(retained.text);
+      const prefix = '<!-- apr-r4-e2p-control ';
+      const suffix = ' -->';
+      if (!response.body.startsWith(prefix) || !response.body.endsWith(suffix)) {
+        invalid('recovery-proof-control-marker');
+      }
+      marker = JSON.parse(response.body.slice(prefix.length, -suffix.length));
+    } catch {
+      invalid('recovery-proof-control-json');
+    }
+    const allowedKinds = kinds.get(marker.operation_id);
+    const preimage = JSON.stringify({ ...marker, body_sha256: '' });
+    if (
+      allowedKinds === undefined ||
+      source.operation_id !== marker.operation_id ||
+      marker.contract !== 'apr-r4-e2p-proof-control-v1' ||
+      marker.repository !== captureManifest.repository ||
+      String(response.id) !==
+        /^proof-control-(?:bootstrap|stale)-comment-([1-9][0-9]*):page:1$/u.exec(
+          source.source_id,
+        )?.[1] ||
+      marker.body_sha256 !== sha256(Buffer.from(preimage, 'utf8')) ||
+      response.body !== `<!-- apr-r4-e2p-control ${JSON.stringify(marker)} -->`
+    ) {
+      invalid('recovery-proof-control-values');
+    }
+    grouped.get(marker.operation_id).push({
+      kind: marker.kind,
+      comment_id: String(response.id),
+      predecessor_comment_id:
+        marker.predecessor_comment_id === null ? null : String(marker.predecessor_comment_id),
+      operation_id: marker.operation_id,
+    });
+  }
+  const family = (operationId) => {
+    const allowed = kinds.get(operationId);
+    const comments = grouped
+      .get(operationId)
+      .sort((left, right) => allowed.indexOf(left.kind) - allowed.indexOf(right.kind));
+    return {
+      operation_id: operationId,
+      comments,
+      cleanup_outcomes: comments.map(({ comment_id }) => ({
+        comment_id,
+        outcome: 'deleted-absent',
+      })),
+    };
+  };
+  return {
+    normal: family(authorizations.execution.operation_ids[0]),
+    stale: family(authorizations.execution.operation_ids[1]),
+  };
+}
+
+function validateRecoveryPostCleanupArtifactInventory({
+  captureManifest,
+  postCleanupCaptureManifest,
+  postCleanupCapturedSourceBodies,
+  inventories,
+  cleanupPlan,
+}) {
+  const repositoryRoute = `/repos/${captureManifest.repository}`;
+  const deletedIds = new Set(
+    cleanupPlan.targets.state_artifacts.map(({ artifact_id }) => artifact_id),
+  );
+  const expectedByRun = new Map(captureManifest.observed_runs.map(({ run_id }) => [run_id, []]));
+  for (const item of inventories.maintainer_handoff) {
+    const expected = expectedByRun.get(item.producing_run_id);
+    if (expected === undefined) invalid('recovery-handoff-run-unobserved');
+    expected.push(item);
+  }
+  for (const [runId, expected] of expectedByRun) {
+    const expectedIds = expected
+      .map(({ artifact_id }) => artifact_id)
+      .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
+    for (const phase of ['delete', 'empty']) {
+      const pages = capturedPages(
+        postCleanupCaptureManifest,
+        postCleanupCapturedSourceBodies,
+        `post-cleanup-state-${phase}-run-${runId}`,
+        `${repositoryRoute}/actions/runs/${runId}/artifacts`,
+        'complete-cursor',
+      ).values;
+      if (
+        pages.some(
+          (page) =>
+            page.total_count !== expected.length ||
+            !Array.isArray(page.artifacts) ||
+            page.artifacts.some(
+              (artifact) =>
+                !decimal.test(String(artifact.id)) ||
+                typeof artifact.name !== 'string' ||
+                deletedIds.has(String(artifact.id)),
+            ),
+        )
+      ) {
+        invalid('recovery-post-cleanup-state-inventory');
+      }
+      const observed = pages.flatMap(({ artifacts }) => artifacts);
+      const observedIds = observed
+        .map(({ id }) => String(id))
+        .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
+      if (
+        canonicalJson(observedIds) !== canonicalJson(expectedIds) ||
+        expected.some((item) => {
+          const artifact = observed.find(({ id }) => String(id) === item.artifact_id);
+          return artifact === undefined || artifact.name !== item.artifact_name;
+        })
+      ) {
+        invalid('recovery-post-cleanup-handoff-inventory');
+      }
+    }
+  }
+}
+
+function assembleRecoveryEvidence({
+  sourceMap,
+  sourceBundle,
+  documents,
+  captureManifest,
+  captureManifestSha256,
+  postCleanupCaptureManifest,
+  postCleanupCaptureManifestSha256,
+  oracleResult,
+  oracleResultSha256,
+  capturedSourceBodies,
+  postCleanupCapturedSourceBodies,
+  retainedDocuments,
+  authorizations,
+  credentialAdmission,
+  credentialDisposition,
+  producerJournalSeal,
+  oracleBinaries,
+  publicSurfaceCorpus,
+  credentialCopiesAbsent,
+}) {
+  const cleanupPlan = retainedDocuments.get('cleanup-plan');
+  const cleanupExecution = retainedDocuments.get('cleanup-execution');
+  const restrictedPackage = retainedDocuments.get('restricted-package-readback');
+  const publicLeakScan = retainedDocuments.get('public-leak-scan-result');
+  if (
+    [cleanupPlan, cleanupExecution, restrictedPackage, publicLeakScan].some(
+      (value) => value === undefined,
+    )
+  ) {
+    invalid('recovery-retained-document-set');
+  }
+  const unverifiedArtifacts = new Map(
+    captureManifest.artifacts.map((artifact) => [artifact.artifact_id, artifact]),
+  );
+  const inventories = deriveRecoveryInventoriesFromOracle(
+    oracleResult,
+    unverifiedArtifacts,
+    captureManifest.operation_ids,
+  );
+  const authorityHost = {
+    capture_disposition: 'recovery-only',
+    identities: {
+      repository_id: captureManifest.repository_id,
+      repository: authorizations.execution.coordinates.repository,
+      operation_ids: authorizations.execution.operation_ids,
+      oracle_source_sha: authorizations.execution.oracle_build.source_commit,
+      oracle_source_tree: authorizations.execution.oracle_build.source_tree,
+    },
+    source_map: sourceMap,
+    authorizations,
+    inventories,
+    restricted_package: {
+      destination_identity_sha256: captureManifest.destination_identity_sha256,
+      capture_manifest_sha256: captureManifestSha256,
+      oracle_result_sha256: oracleResultSha256,
+    },
+  };
+  const capturedArtifacts = validateCaptureManifest(
+    captureManifest,
+    authorityHost,
+    captureManifestSha256,
+  );
+  validateOracleResult(
+    oracleResult,
+    authorityHost,
+    captureManifestSha256,
+    oracleResultSha256,
+    capturedArtifacts,
+  );
+  const proofControl = deriveRecoveryProofControl(
+    authorizations,
+    captureManifest,
+    capturedSourceBodies,
+  );
+  const sticky =
+    cleanupPlan.targets?.sticky === null
+      ? null
+      : {
+          pr_number: cleanupPlan.targets?.sticky?.pr_number,
+          comment_id: cleanupPlan.targets?.sticky?.comment_id,
+          body_sha256: cleanupPlan.targets?.sticky?.body_sha256,
+          marker_sha256: cleanupPlan.targets?.sticky?.marker_sha256,
+        };
+  const regenerated = generateCleanupPlan({
+    operation_ids: captureManifest.operation_ids,
+    proof_control: proofControl,
+    observed_cleanup: inventories.observed_cleanup,
+    resources: {
+      authorization_variable: authorizations.execution.authorization_variable_baseline.name,
+      secret_names: authorizations.execution.active_secret_profile.environment_secret_names,
+      environment: authorizations.execution.environment_baseline.name,
+      fixture_refs: authorizations.execution.fixture_prs.map(({ ref }) => ref),
+      fixture_pr_numbers: authorizations.execution.fixture_prs.map(({ number }) => number),
+      credential_copies: authorizations.execution.active_secret_profile.credential_slot_names,
+      environment_snapshot_sha256: cleanupPlan.targets?.environment?.restore_snapshot_sha256,
+      run_ids: captureManifest.observed_runs.map(({ run_id }) => run_id),
+      sticky,
+    },
+  });
+  if (
+    canonicalJson(regenerated.plan) !== canonicalJson(cleanupPlan) ||
+    authorizations.cleanup.plan_sha256 !== regenerated.digest
+  ) {
+    invalid('recovery-cleanup-plan-derivation');
+  }
+  if (
+    postCleanupCaptureManifest.kind !== 'apr-r4-e3-post-cleanup-capture-manifest-v1' ||
+    postCleanupCaptureManifest.disposition !== 'recovery-only' ||
+    postCleanupCaptureManifest.repository !== captureManifest.repository ||
+    postCleanupCaptureManifest.repository_id !== captureManifest.repository_id ||
+    canonicalJson(postCleanupCaptureManifest.operation_ids) !==
+      canonicalJson(captureManifest.operation_ids) ||
+    postCleanupCaptureManifest.execution_authorization_sha256 !==
+      captureManifest.execution_authorization_sha256 ||
+    postCleanupCaptureManifest.producer_journal_directory !==
+      captureManifest.producer_journal_directory ||
+    postCleanupCaptureManifest.producer_journal_seal_sha256 !==
+      captureManifest.producer_journal_seal_sha256 ||
+    postCleanupCaptureManifest.producer_journal_seal_file_identity !==
+      captureManifest.producer_journal_seal_file_identity ||
+    canonicalJson(postCleanupCaptureManifest.expected_roles) !==
+      canonicalJson(captureManifest.expected_roles) ||
+    canonicalJson(postCleanupCaptureManifest.observed_runs) !==
+      canonicalJson(captureManifest.observed_runs) ||
+    postCleanupCaptureManifest.source_map_sha256 !== captureManifest.source_map_sha256 ||
+    postCleanupCaptureManifest.destination_identity_sha256 !==
+      captureManifest.destination_identity_sha256 ||
+    postCleanupCaptureManifest.finalized !== true ||
+    postCleanupCaptureManifest.artifacts.length !== 0
+  ) {
+    invalid('recovery-post-cleanup-capture');
+  }
+  validateRecoveryPostCleanupArtifactInventory({
+    captureManifest,
+    postCleanupCaptureManifest,
+    postCleanupCapturedSourceBodies,
+    inventories,
+    cleanupPlan,
+  });
+  validateCleanupExecution({
+    cleanupExecution,
+    cleanupPlan,
+    authorizations,
+    captureManifest,
+    captureManifestSha256,
+    postCleanupCaptureManifest,
+    postCleanupCaptureManifestSha256,
+    oracleResultSha256,
+    credentialCopiesAbsent,
+  });
+  const requiredBindings = new Map([
+    ['capture-manifest', captureManifestSha256],
+    ['oracle-result', oracleResultSha256],
+    ['producer-journal-seal', captureManifest.producer_journal_seal_sha256],
+    ['credential-admission-receipt', sha256(canonicalJson(credentialAdmission))],
+    ['credential-disposition-receipt', sha256(canonicalJson(credentialDisposition))],
+    ['cleanup-plan', sha256(canonicalJson(cleanupPlan))],
+    ['cleanup-execution', sha256(canonicalJson(cleanupExecution))],
+    ['post-cleanup-capture-manifest', postCleanupCaptureManifestSha256],
+  ]);
+  const actualBindings = new Map(
+    documents.flatMap(({ evidence }) =>
+      evidence.references.map(({ source_id, sha256 }) => [source_id, sha256]),
+    ),
+  );
+  if ([...requiredBindings].some(([sourceId, digest]) => actualBindings.get(sourceId) !== digest)) {
+    invalid('recovery-source-evidence-binding');
+  }
+  const expectedRestrictedPackage = {
+    destination_kind: 'maintainer-approved-host-restricted-location',
+    destination_identity_sha256: captureManifest.destination_identity_sha256,
+    capture_manifest_sha256: captureManifestSha256,
+    oracle_result_sha256: oracleResultSha256,
+    token_copy_absent: true,
+    current_key_copy_absent: true,
+    previous_key_copy_absent: true,
+    manifest_finalized: true,
+  };
+  if (
+    Object.keys(restrictedPackage).length !== Object.keys(expectedRestrictedPackage).length ||
+    Object.entries(expectedRestrictedPackage).some(
+      ([key, value]) => restrictedPackage[key] !== value,
+    )
+  ) {
+    invalid('recovery-restricted-package');
+  }
+  const publicCandidate = {
+    kind: 'apr-r4-e3-public-projection-closed-v1',
+    operation_ids: captureManifest.operation_ids,
+    reason: 'recovery-only',
+  };
+  const publicScanManifest = scanPublicCandidate({
+    candidate: publicCandidate,
+    corpus: publicSurfaceCorpus,
+    protectedDocuments: new Map([
+      ['source-bundle', canonicalJson(sourceBundle)],
+      ['oracle-result', canonicalJson(oracleResult)],
+      ['cleanup-plan', canonicalJson(cleanupPlan)],
+      [
+        'cleanup-authorization-readback',
+        canonicalJson(retainedDocuments.get('cleanup-authorization-readback')),
+      ],
+      ['credential-admission-receipt', canonicalJson(credentialAdmission)],
+      ['credential-disposition-receipt', canonicalJson(credentialDisposition)],
+      ['producer-journal-seal', canonicalJson(producerJournalSeal)],
+    ]),
+    protectedCategories: protectedCanaryCategories(authorizations, captureManifest.repository),
+  });
+  const expectedPublicLeakScan = {
+    source: 'post-cleanup-repository-and-output-scan',
+    candidate_sha256: publicScanManifest.candidate_sha256,
+    corpus_sha256: sha256(canonicalJson(publicScanManifest.corpus)),
+    scanned_files: publicScanManifest.corpus.length,
+    results: publicScanManifest.results,
+  };
+  if (canonicalJson(publicLeakScan) !== canonicalJson(expectedPublicLeakScan)) {
+    invalid('recovery-public-scan-derived');
+  }
+  const host = {
+    kind: 'apr-r4-e3-host-restricted-recovery-v1',
+    repository_id: captureManifest.repository_id,
+    repository: captureManifest.repository,
+    operation_ids: captureManifest.operation_ids,
+    disposition: 'recovery-only',
+    destination_identity_sha256: captureManifest.destination_identity_sha256,
+    execution_authorization_sha256: captureManifest.execution_authorization_sha256,
+    producer_journal_seal_sha256: captureManifest.producer_journal_seal_sha256,
+    producer_journal_seal_file_identity: captureManifest.producer_journal_seal_file_identity,
+    capture_manifest_sha256: captureManifestSha256,
+    post_cleanup_capture_manifest_sha256: postCleanupCaptureManifestSha256,
+    oracle_result_sha256: oracleResultSha256,
+    oracle_build_receipt_sha256: sha256(
+      canonicalJson(retainedDocuments.get('oracle-build-receipt')),
+    ),
+    oracle_assembly_sha256: oracleBinaries.oracle_assembly_sha256,
+    production_assembly_sha256: oracleBinaries.production_assembly_sha256,
+    inventories,
+    cleanup_plan_sha256: regenerated.digest,
+    cleanup_execution_sha256: sha256(canonicalJson(cleanupExecution)),
+    credential_admission_receipt_sha256: sha256(canonicalJson(credentialAdmission)),
+    credential_disposition_receipt_sha256: sha256(canonicalJson(credentialDisposition)),
+    correction_gate_receipt_sha256: sha256(
+      canonicalJson(retainedDocuments.get('correction-gate-receipt')),
+    ),
+    public_candidate_sha256: sha256(canonicalJson(publicCandidate)),
+    public_scan_manifest_sha256: sha256(canonicalJson(publicScanManifest)),
+    projection_eligible: false,
+    finalized: true,
+  };
+  return {
+    host,
+    publicEvidence: null,
+    cleanupPlan,
+    recoveryOnly: true,
+    projectionEligible: false,
+    publicCandidate,
+    publicScanManifest,
+  };
+}
+
 export function assembleTrustedProofEvidence({
   sourceMap,
   sourceBundle,
@@ -3598,8 +5104,6 @@ export function assembleTrustedProofEvidence({
   oracleResultSha256,
   capturedSourceBodies,
   postCleanupCapturedSourceBodies,
-  uiAttestation,
-  uiAttestationSha256,
   retainedDocuments,
   oracleBinaries,
   publicSurfaceCorpus,
@@ -3631,14 +5135,32 @@ export function assembleTrustedProofEvidence({
     invalid('assembler-oracle-binaries-values');
   }
   const documents = validateSourceBundle(sourceMap, sourceBundle);
-  const authorizations = deriveAuthorizations(captureManifest, capturedSourceBodies);
-  const approvalTransitions = validateApprovalDerivation(
-    null,
+  const authorizations = deriveAuthorizations(
     captureManifest,
     capturedSourceBodies,
-    authorizations.execution.operation_runs,
+    retainedDocuments,
   );
-  const concurrency = validateConcurrencyDerivation(null, captureManifest, capturedSourceBodies);
+  const credentialAdmission = retainedDocuments.get('credential-admission-receipt');
+  const credentialDisposition = retainedDocuments.get('credential-disposition-receipt');
+  const correctionGateReceipt = retainedDocuments.get('correction-gate-receipt');
+  const producerJournalSeal = retainedDocuments.get('producer-journal-seal');
+  if (
+    credentialAdmission === undefined ||
+    credentialDisposition === undefined ||
+    correctionGateReceipt === undefined ||
+    producerJournalSeal === undefined ||
+    sha256(canonicalJson(producerJournalSeal)) !== captureManifest.producer_journal_seal_sha256
+  ) {
+    invalid('assembler-credential-lifecycle');
+  }
+  validateProducerJournalSeal(producerJournalSeal, captureManifest);
+  validateCredentialLifecycle(
+    correctionGateReceipt,
+    credentialAdmission,
+    credentialDisposition,
+    authorizations,
+    captureManifest,
+  );
   const payloadReceipt = retainedDocuments.get('trusted-proof-payload-receipt-v2');
   const oracleBuildReceipt = retainedDocuments.get('oracle-build-receipt');
   if (payloadReceipt === undefined || oracleBuildReceipt === undefined) {
@@ -3680,6 +5202,36 @@ export function assembleTrustedProofEvidence({
   ) {
     invalid('oracle-build-receipt-values');
   }
+  if (captureManifest.disposition === 'recovery-only') {
+    return assembleRecoveryEvidence({
+      sourceMap,
+      sourceBundle,
+      documents,
+      captureManifest,
+      captureManifestSha256,
+      postCleanupCaptureManifest,
+      postCleanupCaptureManifestSha256,
+      oracleResult,
+      oracleResultSha256,
+      capturedSourceBodies,
+      postCleanupCapturedSourceBodies,
+      retainedDocuments,
+      authorizations,
+      credentialAdmission,
+      credentialDisposition,
+      producerJournalSeal,
+      oracleBinaries,
+      publicSurfaceCorpus,
+      credentialCopiesAbsent,
+    });
+  }
+  const approvalTransitions = validateApprovalDerivation(
+    null,
+    captureManifest,
+    capturedSourceBodies,
+    captureManifest.expected_roles,
+  );
+  const concurrency = validateConcurrencyDerivation(null, captureManifest, capturedSourceBodies);
   const identities = deriveIdentities(
     payloadReceipt,
     authorizations,
@@ -3698,8 +5250,6 @@ export function assembleTrustedProofEvidence({
     null,
     captureManifest,
     capturedSourceBodies,
-    uiAttestation,
-    uiAttestationSha256,
     authorizations,
   );
   const restrictedPackage = retainedDocuments.get('restricted-package-readback');
@@ -3781,6 +5331,14 @@ export function assembleTrustedProofEvidence({
       ['source-bundle', canonicalJson(sourceBundle)],
       ['oracle-result', canonicalJson(oracleResult)],
       ['cleanup-plan', canonicalJson(cleanupPlan)],
+      [
+        'cleanup-authorization-readback',
+        canonicalJson(retainedDocuments.get('cleanup-authorization-readback')),
+      ],
+      ['credential-admission-receipt', canonicalJson(credentialAdmission)],
+      ['credential-disposition-receipt', canonicalJson(credentialDisposition)],
+      ['correction-gate-receipt', canonicalJson(correctionGateReceipt)],
+      ['producer-journal-seal', canonicalJson(producerJournalSeal)],
       ...[...capturedSourceBodies].map(([key, value]) => [`capture:${key}`, value.text]),
       ...[...postCleanupCapturedSourceBodies].map(([key, value]) => [
         `post-cleanup:${key}`,
@@ -3814,7 +5372,6 @@ export function assembleTrustedProofEvidence({
     captureManifest,
     captureManifestSha256,
     oracleResultSha256,
-    uiAttestationSha256,
     bindingDocuments,
     host,
   );
@@ -3846,22 +5403,91 @@ export function buildFinalizedPrivatePackageManifest({
   postCleanupCaptureManifestSha256,
   oracleResultSha256,
   cleanupPlan,
+  credentialAdmissionReceiptSha256,
+  credentialDispositionReceiptSha256,
+  correctionGateReceiptSha256,
+  producerJournalSealSha256,
+  producerJournalSealFileIdentity,
   oracleBuildReceiptSha256,
   oracleAssemblySha256,
   productionAssemblySha256,
   publicCandidateSha256,
   publicScanManifestSha256,
 }) {
-  const validation = validateHostEvidence(host);
+  const recovery = host.kind === 'apr-r4-e3-host-restricted-recovery-v1';
+  const validation = recovery
+    ? { projectionEligible: false, cleanupPlan }
+    : validateHostEvidence(host);
+  if (recovery) {
+    exactKeys(
+      host,
+      [
+        'kind',
+        'repository_id',
+        'repository',
+        'operation_ids',
+        'disposition',
+        'destination_identity_sha256',
+        'execution_authorization_sha256',
+        'producer_journal_seal_sha256',
+        'producer_journal_seal_file_identity',
+        'capture_manifest_sha256',
+        'post_cleanup_capture_manifest_sha256',
+        'oracle_result_sha256',
+        'oracle_build_receipt_sha256',
+        'oracle_assembly_sha256',
+        'production_assembly_sha256',
+        'inventories',
+        'cleanup_plan_sha256',
+        'cleanup_execution_sha256',
+        'credential_admission_receipt_sha256',
+        'credential_disposition_receipt_sha256',
+        'correction_gate_receipt_sha256',
+        'public_candidate_sha256',
+        'public_scan_manifest_sha256',
+        'projection_eligible',
+        'finalized',
+      ],
+      'recovery-private-evidence-shape',
+    );
+  }
   if (
-    captureManifestSha256 !== host.restricted_package.capture_manifest_sha256 ||
+    captureManifestSha256 !==
+      (recovery ? host.capture_manifest_sha256 : host.restricted_package.capture_manifest_sha256) ||
     !hex64.test(postCleanupCaptureManifestSha256) ||
-    oracleResultSha256 !== host.restricted_package.oracle_result_sha256 ||
-    oracleBuildReceiptSha256 !== host.authorizations.execution.oracle_build.build_receipt_sha256 ||
-    oracleAssemblySha256 !== host.authorizations.execution.oracle_build.oracle_assembly_sha256 ||
+    postCleanupCaptureManifestSha256 !==
+      (recovery ? host.post_cleanup_capture_manifest_sha256 : postCleanupCaptureManifestSha256) ||
+    oracleResultSha256 !==
+      (recovery ? host.oracle_result_sha256 : host.restricted_package.oracle_result_sha256) ||
+    !hex64.test(credentialAdmissionReceiptSha256) ||
+    !hex64.test(credentialDispositionReceiptSha256) ||
+    !hex64.test(correctionGateReceiptSha256) ||
+    !hex64.test(producerJournalSealSha256) ||
+    !hex64.test(producerJournalSealFileIdentity) ||
+    oracleBuildReceiptSha256 !==
+      (recovery
+        ? host.oracle_build_receipt_sha256
+        : host.authorizations.execution.oracle_build.build_receipt_sha256) ||
+    oracleAssemblySha256 !==
+      (recovery
+        ? host.oracle_assembly_sha256
+        : host.authorizations.execution.oracle_build.oracle_assembly_sha256) ||
     productionAssemblySha256 !==
-      host.authorizations.execution.oracle_build.production_assembly_sha256 ||
-    publicCandidateSha256 !== host.canaries.public_leak_scan.candidate_sha256 ||
+      (recovery
+        ? host.production_assembly_sha256
+        : host.authorizations.execution.oracle_build.production_assembly_sha256) ||
+    (recovery
+      ? publicCandidateSha256 !== host.public_candidate_sha256 ||
+        publicScanManifestSha256 !== host.public_scan_manifest_sha256 ||
+        credentialAdmissionReceiptSha256 !== host.credential_admission_receipt_sha256 ||
+        credentialDispositionReceiptSha256 !== host.credential_disposition_receipt_sha256 ||
+        correctionGateReceiptSha256 !== host.correction_gate_receipt_sha256 ||
+        producerJournalSealSha256 !== host.producer_journal_seal_sha256 ||
+        producerJournalSealFileIdentity !== host.producer_journal_seal_file_identity ||
+        host.cleanup_plan_sha256 !== sha256(canonicalJson(cleanupPlan)) ||
+        host.projection_eligible !== false ||
+        host.finalized !== true
+      : publicCandidateSha256 !== host.canaries.public_leak_scan.candidate_sha256) ||
     !hex64.test(publicScanManifestSha256) ||
     canonicalJson(cleanupPlan) !== canonicalJson(validation.cleanupPlan)
   ) {
@@ -3869,7 +5495,9 @@ export function buildFinalizedPrivatePackageManifest({
   }
   return {
     kind: 'apr-r4-e3-private-package-manifest-v1',
-    destination_identity_sha256: host.restricted_package.destination_identity_sha256,
+    destination_identity_sha256: recovery
+      ? host.destination_identity_sha256
+      : host.restricted_package.destination_identity_sha256,
     host_evidence_sha256: sha256(canonicalJson(host)),
     source_bundle_sha256: sha256(canonicalJson(sourceBundle)),
     capture_manifest_sha256: captureManifestSha256,
@@ -3881,10 +5509,15 @@ export function buildFinalizedPrivatePackageManifest({
     public_candidate_sha256: publicCandidateSha256,
     public_scan_manifest_sha256: publicScanManifestSha256,
     cleanup_plan_sha256: sha256(canonicalJson(cleanupPlan)),
+    credential_admission_receipt_sha256: credentialAdmissionReceiptSha256,
+    credential_disposition_receipt_sha256: credentialDispositionReceiptSha256,
+    correction_gate_receipt_sha256: correctionGateReceiptSha256,
+    producer_journal_seal_sha256: producerJournalSealSha256,
+    producer_journal_seal_file_identity: producerJournalSealFileIdentity,
     credential_absence: {
-      github_token: host.restricted_package.token_copy_absent,
-      current_state_key: host.restricted_package.current_key_copy_absent,
-      previous_state_key: host.restricted_package.previous_key_copy_absent,
+      github_token: recovery ? true : host.restricted_package.token_copy_absent,
+      current_state_key: recovery ? true : host.restricted_package.current_key_copy_absent,
+      previous_state_key: recovery ? true : host.restricted_package.previous_key_copy_absent,
     },
     projection_eligible: validation.projectionEligible,
     finalized: true,
@@ -3898,6 +5531,11 @@ export function assertFinalizedPrivatePackage({
   postCleanupCaptureManifestSha256,
   oracleResultSha256,
   cleanupPlan,
+  credentialAdmissionReceiptSha256,
+  credentialDispositionReceiptSha256,
+  correctionGateReceiptSha256,
+  producerJournalSealSha256,
+  producerJournalSealFileIdentity,
   oracleBuildReceiptSha256,
   oracleAssemblySha256,
   productionAssemblySha256,
@@ -3912,6 +5550,11 @@ export function assertFinalizedPrivatePackage({
     postCleanupCaptureManifestSha256,
     oracleResultSha256,
     cleanupPlan,
+    credentialAdmissionReceiptSha256,
+    credentialDispositionReceiptSha256,
+    correctionGateReceiptSha256,
+    producerJournalSealSha256,
+    producerJournalSealFileIdentity,
     oracleBuildReceiptSha256,
     oracleAssemblySha256,
     productionAssemblySha256,

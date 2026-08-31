@@ -195,6 +195,36 @@ public sealed class ReviewedSnapshotArchitectureTests
     }
 
     [Fact]
+    public void SnapshotDoesNotOwnArchiveWireFormatOrAnOptionalArchiveCapability()
+    {
+        var root = FindRepositoryRoot();
+        var sources = Directory.EnumerateFiles(Path.Join(
+                root,
+                "runtime",
+                "src",
+                "AgenticPrReview.Runtime",
+                "Host",
+                "Action",
+                "Snapshot"), "*.cs", SearchOption.AllDirectories)
+            .Select(File.ReadAllText)
+            .ToArray();
+
+        Assert.DoesNotContain(sources, source => source.Contains(
+            "System.IO.Compression", StringComparison.Ordinal));
+        Assert.DoesNotContain(sources, source => source.Contains(
+            "System.Formats.Tar", StringComparison.Ordinal));
+        Assert.DoesNotContain(sources, source => source.Contains(
+            "IActionHostGitArchiveTransport", StringComparison.Ordinal));
+
+        var archiveMethod = typeof(IActionHostGitObjectTransport).GetMethod(
+            "GetHeadArchiveAsync");
+        Assert.NotNull(archiveMethod);
+        Assert.True(archiveMethod!.IsAbstract);
+        Assert.Equal(typeof(Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>),
+            archiveMethod!.ReturnType);
+    }
+
+    [Fact]
     public void AuthorityMintsHaveOnlyTheirExpectedProductionCallers()
     {
         AssertOnlyCalledBy(
@@ -333,4 +363,17 @@ public sealed class ReviewedSnapshotArchitectureTests
             StringComparison.Ordinal) ||
         name.StartsWith("AgenticPrReview.Runtime", StringComparison.Ordinal) &&
         name.Contains("Provider", StringComparison.Ordinal);
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Join(
+                   directory.FullName, "package.json")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? throw new InvalidOperationException(
+            "Repository root was not found.");
+    }
 }

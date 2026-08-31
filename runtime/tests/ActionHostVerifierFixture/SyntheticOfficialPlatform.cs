@@ -13,6 +13,8 @@ namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
 internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 {
+    internal const int SyntheticPrimaryLimit = 1000;
+    internal const int FrozenFinalPrimaryRemaining = 111;
     private sealed class Artifact(
         long id,
         string name,
@@ -39,8 +41,15 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private readonly Dictionary<string, byte[]> blocks =
         new(StringComparer.Ordinal);
     private readonly List<string> artifactNames = [];
+    private readonly List<RecordedRequest> requestEvents = [];
+    private readonly Dictionary<string, List<RecordedRequest>> scenarioRequestEvents =
+        new(StringComparer.Ordinal);
+    private readonly List<Task> handlers = [];
     private readonly object gate = new();
     private readonly string evidenceRoot;
+    private readonly FrameworkPrimaryRateLimitBucket primaryBucket;
+    private readonly Func<string, string, string>? workflowRenderer;
+    private readonly Func<long> epochSeconds;
     private Task? pump;
     private string activeMode = "sticky";
     private string activeScenarioRoot;
@@ -50,15 +59,35 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private DateTimeOffset pendingExpiry;
     private long nextId = 1000;
 
-    private SyntheticOfficialPlatform(string evidenceRoot, int port)
+    private SyntheticOfficialPlatform(string evidenceRoot, int port,
+        Func<string, string, string>? workflowRenderer,
+        Func<long>? epochSeconds = null)
     {
         this.evidenceRoot = evidenceRoot;
+        this.workflowRenderer = workflowRenderer;
+        this.epochSeconds = epochSeconds ??
+            (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         activeScenarioRoot = evidenceRoot;
+        scenarioRequestEvents[evidenceRoot] = [];
+        File.WriteAllLines(Path.Join(evidenceRoot,
+            "trusted-proof-request-domains.tsv"),
+        [
+            "node_artifact_rest\t0",
+            "host_head_source_rest\t0",
+            "host_other_github_rest\t0",
+            "trusted_control_rest\t0",
+            "actions_results_service\t0",
+            "anonymous_transfers\t0",
+        ]);
         BaseUrl = $"http://127.0.0.1:{port}";
         listener.Prefixes.Add(BaseUrl + "/");
+        primaryBucket = FrameworkPrimaryRateLimitBucket.Initialize(
+            evidenceRoot, SyntheticPrimaryLimit);
     }
 
     internal string BaseUrl { get; }
+
+    internal int PrimaryRemaining => primaryBucket.ReadRemaining();
 
     internal int InFlight => Volatile.Read(ref inFlight);
 
@@ -72,16 +101,33 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             activeMode = mode;
             activeScenarioRoot = scenarioRoot;
             activePayloadSha256 = payloadSha256;
+            scenarioRequestEvents[scenarioRoot] = [];
+            File.WriteAllLines(Path.Join(scenarioRoot,
+                "trusted-proof-request-domains.tsv"),
+            [
+                "node_artifact_rest\t0",
+                "host_head_source_rest\t0",
+                "host_other_github_rest\t0",
+                "trusted_control_rest\t0",
+                "actions_results_service\t0",
+                "anonymous_transfers\t0",
+            ]);
         }
     }
 
-    internal static SyntheticOfficialPlatform Start(string evidenceRoot)
+    internal static SyntheticOfficialPlatform Start(string evidenceRoot,
+        Func<string, string, string>? workflowRenderer = null,
+        Func<long>? epochSeconds = null)
     {
         using var socket = new TcpListener(IPAddress.Loopback, 0);
         socket.Start();
         var port = ((IPEndPoint)socket.LocalEndpoint).Port;
         socket.Stop();
-        var platform = new SyntheticOfficialPlatform(evidenceRoot, port);
+        var platform = new SyntheticOfficialPlatform(
+            evidenceRoot,
+            port,
+            workflowRenderer,
+            epochSeconds);
         platform.listener.Start();
         platform.pump = platform.PumpAsync();
         return platform;
@@ -130,8 +176,16 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
         }
 
+        Task[] pending;
+        lock (gate)
+        {
+            pending = [.. handlers];
+        }
+        await Task.WhenAll(pending).ConfigureAwait(false);
+
         listener.Close();
         shutdown.Dispose();
+        primaryBucket.Dispose();
     }
 
     private async Task PumpAsync()
@@ -150,30 +204,42 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
 
             Interlocked.Increment(ref inFlight);
-            _ = Task.Run(() => HandleAsync(context), CancellationToken.None);
+            var handler = Task.Run(() => HandleAsync(context),
+                CancellationToken.None);
+            lock (gate)
+            {
+                handlers.Add(handler);
+            }
         }
     }
 
     private async Task HandleAsync(HttpListenerContext context)
     {
+        var dispatchTimestamp = Stopwatch.GetTimestamp();
         try
         {
             var path = context.Request.Url?.AbsolutePath ?? "";
             if (path.StartsWith("/twirp/", StringComparison.Ordinal))
             {
                 await HandleTwirpAsync(context).ConfigureAwait(false);
+                RecordDispatch("actions_results_service", "actions_results_twirp", context,
+                    dispatchTimestamp);
                 return;
             }
 
             if (path == "/blob/upload")
             {
                 await HandleUploadAsync(context).ConfigureAwait(false);
+                RecordDispatch("anonymous_transfers", "actions_results_signed_upload", context,
+                    dispatchTimestamp);
                 return;
             }
 
             if (path.StartsWith("/blob/download/", StringComparison.Ordinal))
             {
                 await HandleSignedDownloadAsync(context).ConfigureAwait(false);
+                RecordDispatch("anonymous_transfers", "actions_results_signed_download", context,
+                    dispatchTimestamp);
                 return;
             }
 
@@ -186,7 +252,12 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 return;
             }
 
-            await HandleRestAsync(context).ConfigureAwait(false);
+            var nodeCounter = BeginNodeArtifactRestCounter(context.Request);
+            var responseClass = await HandleRestAsync(context).ConfigureAwait(false);
+            ReconcileNodeArtifactRestCounter(nodeCounter,
+                context.Response.StatusCode);
+            RecordDispatch(ClassifyRestDomain(context.Request), "github_rest", context,
+                dispatchTimestamp, responseClass);
         }
         catch (Exception error) when (IsNonFatal(error))
         {
@@ -408,9 +479,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         context.Response.Close();
     }
 
-    private async Task HandleRestAsync(HttpListenerContext context)
+    private async Task<string?> HandleRestAsync(HttpListenerContext context)
     {
-        Increment("official-rest-count");
         FrameworkCanaryCapture.CaptureAll(evidenceRoot,
             "artifact-rest.authorization",
             context.Request.Headers["Authorization"]);
@@ -424,8 +494,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         if (!path.StartsWith(prefix, StringComparison.Ordinal) &&
             !path.StartsWith(attemptPrefix, StringComparison.Ordinal))
         {
-            await ForwardGitHubAsync(context).ConfigureAwait(false);
-            return;
+            return await ForwardGitHubAsync(context).ConfigureAwait(false);
         }
 
         if (context.Request.HttpMethod == "GET" && path == prefix)
@@ -445,13 +514,13 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             if (values.Length > 0 && mode == "artifact-list-duplicate")
             {
                 var duplicate = MetadataDocument(values[0]);
-                await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+                await WriteEtaggedJsonAsync(context, HttpStatusCode.OK,
                     ArtifactList(2,
                     [
                         duplicate,
                         (JsonObject)duplicate.DeepClone(),
                     ])).ConfigureAwait(false);
-                return;
+                return null;
             }
 
             if (values.Length > 0 && mode is
@@ -462,25 +531,25 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     var firstPage = Enumerable.Range(0, 100)
                         .Select(index => MetadataDocument(values[0],
                             10_000 + index)).ToArray();
-                    await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+                    await WriteEtaggedJsonAsync(context, HttpStatusCode.OK,
                         ArtifactList(101, firstPage)).ConfigureAwait(false);
-                    return;
+                    return null;
                 }
 
                 if (mode == "artifact-pagination-late")
                 {
-                    await WriteJsonAsync(context.Response,
+                    await WriteGitHubJsonAsync(context.Response,
                         HttpStatusCode.InternalServerError, "{}")
                         .ConfigureAwait(false);
-                    return;
+                    return null;
                 }
 
-                await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+                await WriteEtaggedJsonAsync(context, HttpStatusCode.OK,
                     ArtifactList(102,
                     [
                         MetadataDocument(values[0], 10_100),
                     ])).ConfigureAwait(false);
-                return;
+                return null;
             }
 
             var selected = values.Skip((page - 1) * 100).Take(100)
@@ -488,9 +557,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     overrideDigest: mode == "artifact-digest-mismatch",
                     overrideExpiry: mode == "artifact-expired"))
                 .ToArray();
-            await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+            await WriteEtaggedJsonAsync(context, HttpStatusCode.OK,
                 ArtifactList(values.Length, selected)).ConfigureAwait(false);
-            return;
+            return null;
         }
 
         var archivePrefix = prefix + "/";
@@ -502,17 +571,19 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     CultureInfo.InvariantCulture, out var archiveId) ||
                 !TryArtifact(archiveId, out _))
             {
-                await WriteJsonAsync(context.Response, HttpStatusCode.NotFound,
+                await WriteGitHubJsonAsync(context.Response, HttpStatusCode.NotFound,
                     "{}").ConfigureAwait(false);
-                return;
+                return null;
             }
 
+            await StampGitHubPrimaryResponseAsync(context.Response, charged: true,
+                shutdown.Token).ConfigureAwait(false);
             context.Response.StatusCode = (int)HttpStatusCode.Redirect;
             context.Response.RedirectLocation = BaseUrl + "/blob/download/" +
                 archiveId.ToString(CultureInfo.InvariantCulture) + "?sig=" +
                 Uri.EscapeDataString(FrameworkCanaries.SignedUrl);
             context.Response.Close();
-            return;
+            return null;
         }
 
         if (path.StartsWith(prefix + "/", StringComparison.Ordinal) &&
@@ -562,31 +633,33 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                         Path.Join(evidenceRoot,
                             "delete-outcome-unknown-committed"),
                         id.ToString(CultureInfo.InvariantCulture));
-                    await WriteJsonAsync(context.Response,
+                    await WriteGitHubJsonAsync(context.Response,
                         HttpStatusCode.InternalServerError, "{}")
                         .ConfigureAwait(false);
-                    return;
+                    return null;
                 }
+                await StampGitHubPrimaryResponseAsync(context.Response, charged: true,
+                    shutdown.Token).ConfigureAwait(false);
                 context.Response.StatusCode = (int)HttpStatusCode.NoContent;
                 context.Response.Close();
-                return;
+                return null;
             }
 
             if (context.Request.HttpMethod == "GET" &&
                 TryArtifact(id, out var artifact))
             {
                 var mode = Mode();
-                await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+                await WriteEtaggedJsonAsync(context, HttpStatusCode.OK,
                     FrameworkJson.Serialize(MetadataDocument(artifact!,
                         overrideDigest: mode == "artifact-digest-mismatch",
                         overrideExpiry: mode == "artifact-expired")))
                     .ConfigureAwait(false);
-                return;
+                return null;
             }
 
-            await WriteJsonAsync(context.Response, HttpStatusCode.NotFound,
+            await WriteGitHubJsonAsync(context.Response, HttpStatusCode.NotFound,
                 "{\"message\":\"Not Found\"}").ConfigureAwait(false);
-            return;
+            return null;
         }
 
         if (context.Request.HttpMethod == "GET" &&
@@ -594,18 +667,19 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             TryRunAttempt(path[attemptPrefix.Length..], out var runId,
                 out var runAttempt))
         {
-            await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+            await WriteEtaggedJsonAsync(context, HttpStatusCode.OK,
                 FrameworkJson.Serialize(FrameworkJson.Object(
                     ("id", runId),
                     ("run_attempt", runAttempt)))).ConfigureAwait(false);
-            return;
+            return null;
         }
 
-        await WriteJsonAsync(context.Response, HttpStatusCode.NotFound, "{}")
+        await WriteGitHubJsonAsync(context.Response, HttpStatusCode.NotFound, "{}")
             .ConfigureAwait(false);
+        return null;
     }
 
-    private async Task ForwardGitHubAsync(HttpListenerContext context)
+    private async Task<string> ForwardGitHubAsync(HttpListenerContext context)
     {
         string scenarioRoot;
         string payloadSha256;
@@ -617,7 +691,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
         using var handler = new FrameworkGitHubHandler(
             scenarioRoot,
-            payloadSha256);
+            payloadSha256,
+            workflowRenderer,
+            primaryBucket.ObserveAsync);
         using var invoker = new HttpMessageInvoker(handler);
         using var request = new HttpRequestMessage(
             new HttpMethod(context.Request.HttpMethod),
@@ -655,7 +731,17 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         using var response = await invoker.SendAsync(
             request,
             shutdown.Token).ConfigureAwait(false);
+        var responseClass = TrustedProofOperationRequestAccounting.WitnessResponseClass(
+            await TrustedProofOperationRequestAccounting.ResponseClassifyAsync(
+                response, shutdown.Token, epochSeconds()).ConfigureAwait(false));
         context.Response.StatusCode = (int)response.StatusCode;
+        foreach (var name in new[] { "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after" })
+        {
+            if (response.Headers.TryGetValues(name, out var values))
+            {
+                context.Response.Headers[name] = string.Join(",", values);
+            }
+        }
         if (response.StatusCode != HttpStatusCode.NoContent &&
             response.Content is not null)
         {
@@ -676,6 +762,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         }
 
         context.Response.Close();
+        return responseClass;
     }
 
     private static JsonObject MetadataDocument(
@@ -876,7 +963,91 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         response.Close();
     }
 
+    private async Task WriteGitHubJsonAsync(
+        HttpListenerResponse response,
+        HttpStatusCode status,
+        string body)
+    {
+        await StampGitHubPrimaryResponseAsync(response,
+            charged: status != HttpStatusCode.NotModified, shutdown.Token)
+            .ConfigureAwait(false);
+        await WriteJsonAsync(response, status, body).ConfigureAwait(false);
+    }
+
+    private async Task WriteEtaggedJsonAsync(
+        HttpListenerContext context,
+        HttpStatusCode status,
+        string body)
+    {
+        var etag = "\"" + Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(body))).ToLowerInvariant() + "\"";
+        context.Response.Headers[HttpResponseHeader.ETag] = etag;
+        var notModified = MatchesIfNoneMatch(
+            context.Request.Headers["If-None-Match"], etag);
+        await StampGitHubPrimaryResponseAsync(context.Response,
+            charged: !notModified, shutdown.Token).ConfigureAwait(false);
+        if (notModified)
+        {
+            context.Response.StatusCode = (int)HttpStatusCode.NotModified;
+            context.Response.Close();
+            return;
+        }
+
+        await WriteJsonAsync(context.Response, status, body).ConfigureAwait(false);
+    }
+
+    private async ValueTask StampGitHubPrimaryResponseAsync(
+        HttpListenerResponse response,
+        bool charged,
+        CancellationToken cancellationToken)
+    {
+        var remaining = await primaryBucket.ObserveAsync(charged,
+            cancellationToken).ConfigureAwait(false);
+        response.Headers["x-ratelimit-limit"] =
+            SyntheticPrimaryLimit.ToString(CultureInfo.InvariantCulture);
+        response.Headers["x-ratelimit-remaining"] =
+            remaining.ToString(CultureInfo.InvariantCulture);
+        response.Headers["x-ratelimit-reset"] = "4102444800";
+    }
+
+    private static bool MatchesIfNoneMatch(string? header, string etag)
+    {
+        if (string.IsNullOrWhiteSpace(header)) return false;
+        foreach (var value in header.Split(',', StringSplitOptions.TrimEntries))
+        {
+            if (value == "*" || value == etag ||
+                (value.StartsWith("W/", StringComparison.Ordinal) &&
+                    value[2..] == etag))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void Increment(string name)
+    {
+        Add(name, 1);
+    }
+
+    private void Add(string name, int amount)
+    {
+        if (amount <= 0) return;
+        lock (gate)
+        {
+            var path = Path.Join(evidenceRoot, name);
+            var value = File.Exists(path) && int.TryParse(
+                File.ReadAllText(path), NumberStyles.None,
+                CultureInfo.InvariantCulture, out var parsed)
+                ? checked(parsed + amount)
+                : amount;
+            File.WriteAllText(path,
+                value.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    private void Decrement(string name)
     {
         lock (gate)
         {
@@ -884,11 +1055,164 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             var value = File.Exists(path) && int.TryParse(
                 File.ReadAllText(path), NumberStyles.None,
                 CultureInfo.InvariantCulture, out var parsed)
-                ? parsed + 1
-                : 1;
+                ? Math.Max(0, parsed - 1)
+                : 0;
             File.WriteAllText(path,
                 value.ToString(CultureInfo.InvariantCulture));
         }
+    }
+
+    // The fixture persists only normalized routing facts. In particular it
+    // never retains a token, ETag, query string, or request body. This is the
+    // independent witness for the payload/control receipts.
+    private void RecordDispatch(
+        string domain,
+        string route,
+        HttpListenerContext context,
+        long timestamp,
+        string? normalizedResponse = null)
+    {
+        var request = context.Request;
+        var statusCode = context.Response.StatusCode;
+        var isRead = request.HttpMethod is "GET" or "HEAD" or "OPTIONS";
+        var response = normalizedResponse ?? ClassifySyntheticResponse(statusCode);
+        var item = new RecordedRequest(domain, route, request.HttpMethod,
+            isRead ? 1 : 5, timestamp, response);
+        lock (gate)
+        {
+            requestEvents.Add(item);
+            if (!scenarioRequestEvents.TryGetValue(activeScenarioRoot,
+                    out var scenarioEvents))
+            {
+                throw new InvalidOperationException("synthetic_scenario_not_started");
+            }
+            scenarioEvents.Add(item);
+            File.WriteAllLines(Path.Join(evidenceRoot,
+                    "trusted-proof-request-events.tsv"),
+                requestEvents.Select(value => value.ToTsv()));
+            var scenarioPath = activeScenarioRoot == evidenceRoot
+                ? null
+                : Path.Join(activeScenarioRoot,
+                    "trusted-proof-request-events.tsv");
+            if (scenarioPath is not null)
+            {
+                File.AppendAllText(scenarioPath, item.ToTsv() + "\n");
+                File.WriteAllLines(Path.Join(activeScenarioRoot,
+                    "trusted-proof-request-domains.tsv"),
+                [
+                    "node_artifact_rest\t" + CountScenario("node_artifact_rest"),
+                    "host_head_source_rest\t" + CountScenario("host_head_source_rest"),
+                    "host_other_github_rest\t" + CountScenario("host_other_github_rest"),
+                    "trusted_control_rest\t" + CountScenario("trusted_control_rest"),
+                    "actions_results_service\t" + CountScenario("actions_results_service"),
+                    "anonymous_transfers\t" + CountScenario("anonymous_transfers"),
+                ]);
+            }
+        }
+
+        // Compatibility counters remain scoped to the Node artifact transport;
+        // forwarded Host/control traffic must not contaminate its receipt.
+        if (domain == "anonymous_transfers")
+        {
+            // This is the Actions Results signed-transfer subdomain.  Archive
+            // codeload is intentionally not sent through this listener and is
+            // joined separately to the Host receipt by FrameworkGitHubHandler's
+            // exact anonymous-codeload counter.
+            Increment(route == "actions_results_signed_upload"
+                ? "actions-results-signed-upload-count"
+                : "actions-results-signed-download-count");
+        }
+    }
+
+    private NodeArtifactRestCounter BeginNodeArtifactRestCounter(
+        HttpListenerRequest request)
+    {
+        if (ClassifyRestDomain(request) != "node_artifact_rest")
+        {
+            return NodeArtifactRestCounter.None;
+        }
+
+        Increment("official-rest-count");
+        Add("official-rest-secondary-points",
+            SecondaryPoints(request.HttpMethod));
+        var counter = string.IsNullOrWhiteSpace(
+            request.Headers["If-None-Match"])
+            ? NodeArtifactRestCounter.Primary
+            : NodeArtifactRestCounter.NotModified;
+        Increment(counter == NodeArtifactRestCounter.Primary
+            ? "official-rest-primary-count"
+            : "official-rest-not-modified-count");
+        return counter;
+    }
+
+    private void ReconcileNodeArtifactRestCounter(
+        NodeArtifactRestCounter predicted,
+        int statusCode)
+    {
+        if (predicted == NodeArtifactRestCounter.None)
+        {
+            return;
+        }
+
+        var actual = statusCode == (int)HttpStatusCode.NotModified
+            ? NodeArtifactRestCounter.NotModified
+            : NodeArtifactRestCounter.Primary;
+        if (actual == predicted) return;
+        Decrement(predicted == NodeArtifactRestCounter.Primary
+            ? "official-rest-primary-count"
+            : "official-rest-not-modified-count");
+        Increment(actual == NodeArtifactRestCounter.Primary
+            ? "official-rest-primary-count"
+            : "official-rest-not-modified-count");
+    }
+
+    private static string ClassifySyntheticResponse(int statusCode)
+    {
+        return statusCode switch
+        {
+            304 => "not_modified",
+            >= 200 and < 300 => "success",
+            403 => "permission_denied",
+            _ => "other_failure",
+        };
+    }
+
+    private int CountScenario(string domain) => scenarioRequestEvents[activeScenarioRoot]
+        .Count(value => value.Domain == domain);
+
+    private static string ClassifyRestDomain(HttpListenerRequest request)
+    {
+        var path = request.Url?.AbsolutePath ?? "";
+        var repository = "/repos/" + FrameworkCanaries.Repository;
+        if (path.StartsWith(repository + "/actions/artifacts", StringComparison.Ordinal) ||
+            path.StartsWith(repository + "/actions/runs/", StringComparison.Ordinal))
+        {
+            return "node_artifact_rest";
+        }
+
+        if (string.Equals(request.UserAgent, "agentic-pr-review-r4-e2p",
+                StringComparison.Ordinal))
+        {
+            return "trusted_control_rest";
+        }
+
+        return IsExactHeadSourcePath(path)
+            ? "host_head_source_rest"
+            : "host_other_github_rest";
+    }
+
+    private static bool IsExactHeadSourcePath(string path)
+    {
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var candidate = parts.Length switch
+        {
+            6 when parts[0] == "repos" && parts[3] == "git" &&
+                parts[4] is "commits" or "trees" => parts[5],
+            5 when parts[0] == "repos" && parts[3] == "tarball" => parts[4],
+            _ => null,
+        };
+        return candidate is not null && candidate.Length == 40 &&
+            candidate.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
     }
 
     private string Mode()
@@ -901,6 +1225,16 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         not StackOverflowException and
         not AccessViolationException;
 
+    private static int SecondaryPoints(string method) =>
+        method is "GET" or "HEAD" or "OPTIONS" ? 1 : 5;
+
+    private enum NodeArtifactRestCounter
+    {
+        None,
+        Primary,
+        NotModified,
+    }
+
     private sealed record ArtifactIdentity(
         long Id,
         string Name,
@@ -909,4 +1243,18 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         string ExpiresAt,
         long ProducingRunId,
         int ProducingRunAttempt);
+
+    private sealed record RecordedRequest(
+        string Domain,
+        string Route,
+        string Method,
+        int SecondaryPoints,
+        long Timestamp,
+        string ResponseClass)
+    {
+        internal string ToTsv() => Domain + "\t" + Route + "\t" + Method + "\t" +
+            SecondaryPoints.ToString(CultureInfo.InvariantCulture) + "\t" +
+            Timestamp.ToString(CultureInfo.InvariantCulture) + "\t" +
+            ResponseClass;
+    }
 }

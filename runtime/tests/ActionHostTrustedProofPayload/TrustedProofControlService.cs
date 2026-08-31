@@ -4,7 +4,7 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 
 internal static class TrustedProofControlService
 {
-    internal static Task<int> RunFromEnvironmentAsync(
+    internal static async Task<int> RunFromEnvironmentAsync(
         string[] args,
         CancellationToken cancellationToken)
     {
@@ -14,22 +14,43 @@ internal static class TrustedProofControlService
                 out var token) ||
             coordinates is null || token is null)
         {
-            return Task.FromResult(1);
+            return 1;
+        }
+        if (!TrustedProofRequestBudgetProfile.TrySelectProduction(
+                Environment.GetEnvironmentVariable, out var requestBudgetProfile) ||
+            requestBudgetProfile is null)
+        {
+            return 1;
         }
 
-        return RunAsync(
-            args,
-            coordinates,
-            TrustedProofControlTransport.Create(coordinates, token),
-            cancellationToken);
+        var requestBudget = new TrustedProofControlRequestBudget(
+            remainingTailGuard: requestBudgetProfile.ControlRemainingTailGuard(args));
+        try
+        {
+            return await RunAsync(
+                    args,
+                    coordinates,
+                    TrustedProofControlTransport.Create(
+                        coordinates,
+                        token,
+                        requestBudget: requestBudget),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            requestBudget.WriteReceipt(Console.Error);
+        }
     }
 
     internal static async Task<int> RunAsync(
         string[] args,
         TrustedProofControlCoordinates coordinates,
         TrustedProofControlTransport transport,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
+        delayAsync ??= Task.Delay;
         using (transport)
         {
             if (args is ["hold"])
@@ -37,7 +58,8 @@ internal static class TrustedProofControlService
                 return await HoldAsync(
                     coordinates,
                     transport,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    delayAsync).ConfigureAwait(false);
             }
 
             if (args is ["verify-completed"])
@@ -63,7 +85,8 @@ internal static class TrustedProofControlService
     private static async Task<int> HoldAsync(
         TrustedProofControlCoordinates coordinates,
         TrustedProofControlTransport transport,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<TimeSpan, CancellationToken, Task> delayAsync)
     {
         var comments = await transport.ListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -103,6 +126,11 @@ internal static class TrustedProofControlService
             var creation = await transport.CreateAsync(body, cancellationToken)
                 .ConfigureAwait(false);
             ready = creation.Comment;
+            if (creation.Outcome is TrustedProofMutationOutcome.RateLimited or
+                TrustedProofMutationOutcome.RequestBudgetExhausted)
+            {
+                return 1;
+            }
             if (creation.Outcome == TrustedProofMutationOutcome.KnownNotSent)
             {
                 if (!await transport.IsPullRequestCurrentAsync(
@@ -113,6 +141,11 @@ internal static class TrustedProofControlService
                 creation = await transport.CreateAsync(body, cancellationToken)
                     .ConfigureAwait(false);
                 ready = creation.Comment;
+                if (creation.Outcome is TrustedProofMutationOutcome.RateLimited or
+                    TrustedProofMutationOutcome.RequestBudgetExhausted)
+                {
+                    return 1;
+                }
             }
 
             if (ready is null)
@@ -169,6 +202,7 @@ internal static class TrustedProofControlService
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             deadline.Token);
+        var pollDelay = TimeSpan.FromSeconds(2);
         while (!linked.IsCancellationRequested)
         {
             comments = await transport.ListAsync(linked.Token)
@@ -216,8 +250,14 @@ internal static class TrustedProofControlService
                 return 0;
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(2), linked.Token)
+            if (transport.HasTerminalFailure)
+            {
+                return 1;
+            }
+
+            await delayAsync(pollDelay, linked.Token)
                 .ConfigureAwait(false);
+            pollDelay = NextPollDelay(pollDelay);
         }
 
         return 1;
@@ -300,6 +340,11 @@ internal static class TrustedProofControlService
             var initialOutcome = await transport.DeleteAsync(
                 comment.Id,
                 cancellationToken).ConfigureAwait(false);
+            if (initialOutcome is TrustedProofMutationOutcome.RateLimited or
+                TrustedProofMutationOutcome.RequestBudgetExhausted)
+            {
+                return 1;
+            }
             TrustedProofMutationOutcome? retryOutcome = null;
             if (initialOutcome is TrustedProofMutationOutcome.KnownNotSent or
                 TrustedProofMutationOutcome.OutcomeUnknown)
@@ -307,6 +352,11 @@ internal static class TrustedProofControlService
                 retryOutcome = await transport.DeleteAsync(
                     comment.Id,
                     cancellationToken).ConfigureAwait(false);
+                if (retryOutcome is TrustedProofMutationOutcome.RateLimited or
+                    TrustedProofMutationOutcome.RequestBudgetExhausted)
+                {
+                    return 1;
+                }
             }
 
             var reconciled = await transport.ListAsync(cancellationToken)
@@ -371,6 +421,11 @@ internal static class TrustedProofControlService
             _ => "reconciled-missing",
         };
     }
+
+    internal static TimeSpan NextPollDelay(TimeSpan current) =>
+        current >= TimeSpan.FromSeconds(60)
+            ? TimeSpan.FromSeconds(60)
+            : TimeSpan.FromSeconds(Math.Min(60, current.TotalSeconds * 2));
 
     private static bool TrySelectCurrent(
         IReadOnlyList<TrustedProofIssueComment> comments,

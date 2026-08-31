@@ -67,6 +67,7 @@ await runPrivateActionWrapperWithSeams({
   },
   hostProcessRunner: async () => ({
     exitCode: 0,
+    trustedProofBudgetReceiptLines: [],
     completionBytes: Buffer.from(
       JSON.stringify({
         build_discriminator: 'r4-h1',

@@ -31,6 +31,7 @@ using AgenticPrReview.Runtime.Tests.Host.Action.Policy;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 using AgenticPrReview.Runtime.Tests.Host.State.Locator;
+using OracleProgram = AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.Program;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Transactions;
 
@@ -1921,7 +1922,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             operationRuns,
             run => run.RunIdentity == item.Header.ProducingRunIdentity &&
                 run.RunAttempt == item.Header.ProducingRunAttempt));
-        Assert.True(TrustedProofEvidenceCodecOracle.TryDecode(
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "success-candidate",
             continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
             continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
             continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
@@ -1932,6 +1934,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.True(decodedOracle.ExactSevenSuccess);
         Assert.False(decodedOracle.RecoveryOnly);
         Assert.Equal(15, decodedOracle.Records.Length);
+        Assert.Empty(decodedOracle.MaintainerHandoff);
         Assert.All(decodedOracle.Records, record =>
         {
             Assert.NotEqual("unclassified", record.Role);
@@ -1951,19 +1954,135 @@ public sealed class RetainedStateTransactionEndToEndTests
                 StringComparer.Ordinal.Equals(
                     metadata.Reference.ObjectId.Value,
                     item.ArtifactId))));
-        var recoveryInputs = oracleInputs.Append(oracleInputs[^1] with
-        {
-            ArtifactId = "999999",
-        }).ToArray();
-        Assert.True(TrustedProofEvidenceCodecOracle.TryDecode(
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
             continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
             continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
             continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
-            recoveryInputs,
+            oracleInputs,
             operationRuns,
             out var recoveryResult));
-        Assert.False(Assert.IsType<TrustedProofCodecOracleResult>(recoveryResult).ExactSevenSuccess);
-        Assert.True(recoveryResult!.RecoveryOnly);
+        var decodedRecovery = Assert.IsType<TrustedProofCodecOracleResult>(recoveryResult);
+        Assert.False(decodedRecovery.ExactSevenSuccess);
+        Assert.True(decodedRecovery.RecoveryOnly);
+        Assert.Equal(15, decodedRecovery.Records.Length);
+        Assert.Empty(decodedRecovery.MaintainerHandoff);
+
+        var locatorInput = oracleInputs[0];
+        var ambiguousInput = oracleInputs.Skip(1).First(item =>
+            item.ProducingRunIdentity != locatorInput.ProducingRunIdentity);
+        var authorityWithoutAmbiguousRun = operationRuns.Where(run =>
+            run.RunIdentity != ambiguousInput.ProducingRunIdentity).ToArray();
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            [locatorInput, ambiguousInput],
+            authorityWithoutAmbiguousRun,
+            out var ambiguousRecoveryResult));
+        Assert.DoesNotContain(
+            ambiguousRecoveryResult!.Records,
+            record => record.ArtifactId == ambiguousInput.ArtifactId);
+        Assert.Contains(
+            ambiguousRecoveryResult.MaintainerHandoff,
+            item => item.ArtifactId == ambiguousInput.ArtifactId &&
+                item.Reason == "operation-ownership-unverified");
+
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            [],
+            [],
+            out var zeroArtifactResult));
+        Assert.Empty(zeroArtifactResult!.Records);
+        Assert.Empty(zeroArtifactResult.MaintainerHandoff);
+
+        var bootstrapOnly = new[]
+        {
+            oracleInputs[0],
+            oracleInputs[1],
+            oracleInputs[3],
+            oracleInputs[5],
+        };
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            bootstrapOnly,
+            operationRuns,
+            out var bootstrapOnlyResult));
+        Assert.Equal(4, bootstrapOnlyResult!.Records.Length);
+        Assert.Empty(bootstrapOnlyResult.MaintainerHandoff);
+
+        var attemptTwoLocator = new[]
+        {
+            oracleInputs[0] with { ProducingRunAttempt = 2 },
+        };
+        var attemptTwoRuns = operationRuns.Select(item =>
+            item.RunIdentity == attemptTwoLocator[0].ProducingRunIdentity
+                ? item with { RunAttempt = 2 }
+                : item).ToArray();
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            attemptTwoLocator,
+            attemptTwoRuns,
+            out var attemptTwoResult));
+        Assert.Equal(2, Assert.Single(attemptTwoResult!.Records).ProducingRunAttempt);
+        Assert.Empty(attemptTwoResult.MaintainerHandoff);
+
+        var fiveRuns = operationRuns.Append(new TrustedProofOperationRun(
+            normalOperation,
+            "normal",
+            "99999",
+            3)).ToArray();
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            oracleInputs,
+            fiveRuns,
+            out var fiveRunResult));
+        Assert.Equal(15, fiveRunResult!.Records.Length);
+
+        var undecodableExtra = oracleInputs.Append(oracleInputs[^1] with
+        {
+            ArtifactId = "999999",
+            OpaqueName = "apr-r4-undecodable-extra",
+        }).ToArray();
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            undecodableExtra,
+            operationRuns,
+            out var undecodableResult));
+        Assert.Equal(15, undecodableResult!.Records.Length);
+        Assert.Equal(
+            "codec-authentication-failed",
+            Assert.Single(undecodableResult.MaintainerHandoff).Reason);
+
+        var noLocator = new[] { oracleInputs[1] };
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            noLocator,
+            operationRuns,
+            out var noLocatorResult));
+        Assert.Empty(noLocatorResult!.Records);
+        Assert.Equal(
+            "locator-context-unavailable",
+            Assert.Single(noLocatorResult.MaintainerHandoff).Reason);
         Assert.Equal(
             "bootstrap-candidate",
             decodedOracle.Records.Single(item =>
@@ -1980,13 +2099,34 @@ public sealed class RetainedStateTransactionEndToEndTests
             }
             return run;
         }).ToArray();
-        Assert.False(TrustedProofEvidenceCodecOracle.TryDecode(
+        Assert.False(OracleProgram.TryDecodeForDisposition(
+            "success-candidate",
             continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
             continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
             continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
             oracleInputs,
             crossOperationRuns,
             out _));
+        var crossOperationArtifact = oracleInputs.ToArray();
+        crossOperationArtifact[1] = crossOperationArtifact[1] with
+        {
+            ProducingRunIdentity = stale.Launch.RunId.ToString(CultureInfo.InvariantCulture),
+        };
+        Assert.True(OracleProgram.TryDecodeForDisposition(
+            "recovery-only",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            crossOperationArtifact,
+            operationRuns,
+            out var crossOperationResult));
+        Assert.DoesNotContain(
+            crossOperationResult!.Records,
+            item => item.ArtifactId == crossOperationArtifact[1].ArtifactId);
+        Assert.Contains(
+            crossOperationResult.MaintainerHandoff,
+            item => item.ArtifactId == crossOperationArtifact[1].ArtifactId &&
+                item.Reason == "operation-ownership-unverified");
         foreach (var input in oracleInputs)
         {
             CryptographicOperations.ZeroMemory(input.Envelope);
@@ -4675,15 +4815,22 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Tree transport was called.");
 
-        public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
-            GetBlobObjectAsync(
+    public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
+        GetBlobObjectAsync(
                 string repositoryName,
                 string blobSha,
                 ActionHostGitBlobReadBudget budget,
-                CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Blob transport was called.");
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Blob transport was called.");
 
-        public void Dispose() { }
+    public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+        GetHeadArchiveAsync(
+            string repositoryName,
+            string headSha,
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Archive transport was called.");
+
+    public void Dispose() { }
     }
 
     private sealed class NoCallTransport : IActionHostGitObjectTransport
@@ -4702,15 +4849,22 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Bootstrap must not read Git.");
 
-        public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
-            GetBlobObjectAsync(
+    public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
+        GetBlobObjectAsync(
                 string repositoryName,
                 string blobSha,
                 ActionHostGitBlobReadBudget budget,
-                CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Bootstrap must not read Git.");
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Bootstrap must not read Git.");
 
-        public void Dispose() { }
+    public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+        GetHeadArchiveAsync(
+            string repositoryName,
+            string headSha,
+            CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Bootstrap must not read archive.");
+
+    public void Dispose() { }
     }
 
     private sealed class OneResponseChatClient(

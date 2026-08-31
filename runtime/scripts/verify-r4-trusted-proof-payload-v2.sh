@@ -131,6 +131,128 @@ fs.writeFileSync(output, bytes, { flag: 'wx' });
 NODE
 }
 
+validate_missing_github_stderr() {
+  local stderr="$1"
+  node --input-type=module - "$stderr" <<'NODE'
+import fs from 'node:fs';
+
+const [stderrPath] = process.argv.slice(2);
+const bytes = fs.readFileSync(stderrPath);
+if (bytes.includes(0x00) || bytes.includes(0x0d) ||
+    bytes.length === 0 || bytes.at(-1) !== 0x0a) {
+  process.exit(1);
+}
+const lines = bytes.subarray(0, bytes.length - 1).toString('utf8').split('\n');
+if (lines.length !== 3) process.exit(1);
+
+function exactKeys(value, expected) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) ||
+      JSON.stringify(Object.keys(value)) !== JSON.stringify(expected)) {
+    process.exit(1);
+  }
+}
+function prefixed(line, prefix) {
+  if (!line.startsWith(prefix)) process.exit(1);
+  return JSON.parse(line.slice(prefix.length));
+}
+
+const github = prefixed(
+  lines[0],
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET ',
+);
+exactKeys(github, [
+  'authenticated_rest_requests',
+  'authenticated_rest_limit',
+  'anonymous_codeload_requests',
+  'anonymous_codeload_limit',
+  'rejected_requests',
+  'measurement_only',
+  'invalid_remaining_header',
+  'terminal_rate_limited',
+  'low_remaining_guard',
+  'remaining_tail_reserve',
+  'host_head_source_rest',
+  'host_other_github_rest',
+]);
+const roleKeys = [
+  'raw',
+  'primary',
+  'not_modified',
+  'secondary_points',
+  'permission',
+  'primary_rate_limited',
+  'secondary_rate_limited',
+  'combined_rate_limited',
+  'invalid_rate_headers',
+  'remaining_tail_required',
+];
+exactKeys(github.host_head_source_rest, roleKeys);
+exactKeys(github.host_other_github_rest, roleKeys);
+if (github.authenticated_rest_requests !== 0 ||
+    github.authenticated_rest_limit !== 216 ||
+    github.anonymous_codeload_requests !== 0 ||
+    github.anonymous_codeload_limit !== 1 ||
+    github.rejected_requests !== 0 ||
+    github.measurement_only !== false ||
+    github.invalid_remaining_header !== false ||
+    github.terminal_rate_limited !== false ||
+    github.low_remaining_guard !== false ||
+    github.remaining_tail_reserve !== 64 ||
+    github.host_head_source_rest.remaining_tail_required !== 863 ||
+    github.host_other_github_rest.remaining_tail_required !== 878) {
+  process.exit(1);
+}
+for (const role of [
+  github.host_head_source_rest,
+  github.host_other_github_rest,
+]) {
+  for (const key of roleKeys.slice(0, -1)) {
+    if (role[key] !== 0) process.exit(1);
+  }
+}
+
+const control = prefixed(
+  lines[1],
+  'APR_R4_E2P_CONTROL_REQUEST_BUDGET ',
+);
+exactKeys(control, [
+  'consumed',
+  'limit',
+  'primary',
+  'not_modified',
+  'secondary_points',
+  'mutation_count',
+  'remaining_tail_required',
+  'remaining_tail_reserve',
+  'permission_denied',
+  'primary_rate_limited',
+  'secondary_rate_limited',
+  'combined_rate_limited',
+  'invalid_remaining_header',
+  'measurement_only',
+  'rate_limited',
+]);
+if (control.consumed !== 0 ||
+    control.limit !== 64 ||
+    control.primary !== 0 ||
+    control.not_modified !== 0 ||
+    control.secondary_points !== 0 ||
+    control.mutation_count !== 0 ||
+    control.remaining_tail_required !== 879 ||
+    control.remaining_tail_reserve !== 64 ||
+    control.permission_denied !== 0 ||
+    control.primary_rate_limited !== 0 ||
+    control.secondary_rate_limited !== 0 ||
+    control.combined_rate_limited !== 0 ||
+    control.invalid_remaining_header !== false ||
+    control.measurement_only !== false ||
+    control.rate_limited !== false ||
+    lines[2] !== 'APR_R4_E2P_UNHANDLED InvalidOperationException') {
+  process.exit(1);
+}
+NODE
+}
+
 run_production_smoke() {
   command -v strace >/dev/null || return 1
   printf '{}\n' > "$temporary_root/smoke-event.json"
@@ -142,19 +264,19 @@ run_production_smoke() {
     trace="$temporary_root/smoke-$mode.network"
     write_smoke_frame "$mode" "$frame"
     set +e
-    strace -qq -f -e trace=network -o "$trace" \
+    AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap \
+      strace -qq -f -e trace=network -o "$trace" \
       "$payload" < "$frame" > "$stdout" 2> "$stderr"
     status=$?
     set -e
     [[ "$status" -eq 1 && ! -s "$stdout" ]] || return 1
     if [[ "$mode" == missing-github ]]; then
-      [[ "$(cat "$stderr")" == \
-        'APR_R4_E2P_UNHANDLED InvalidOperationException' ]] || return 1
+      [[ "$(wc -c < "$stderr")" -le 4096 ]] &&
+        validate_missing_github_stderr "$stderr" || return 1
     else
-      [[ ! -s "$stderr" ]] || return 1
+      [[ ! -s "$stderr" && "$(wc -c < "$stderr")" -le 128 ]] || return 1
     fi
-    [[ "$(wc -c < "$stdout")" -le 128 &&
-        "$(wc -c < "$stderr")" -le 128 ]] || return 1
+    [[ "$(wc -c < "$stdout")" -le 128 ]] || return 1
     if grep -Eq '(^|[[:space:]])(socket|socketpair|connect|accept|accept4|bind|listen|sendto|sendmsg|recvfrom|recvmsg|getsockname|getpeername|setsockopt|getsockopt)\(' "$trace"; then
       return 1
     fi
@@ -273,7 +395,9 @@ execute_proof() {
     --verifier-runtime "$verifier_runtime_intermediate" \
     --proof-output "$architecture" \
     --verifier-output "$verifier_architecture"
-  if printf '\000\000\000\001x' | "$payload" >/dev/null 2>&1; then
+  if printf '\000\000\000\001x' |
+      env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap \
+        "$payload" >/dev/null 2>&1; then
     echo APR_R4_E2P_AOT_MALFORMED_FRAME_ACCEPTED >&2
     return 1
   fi
@@ -305,43 +429,81 @@ execute_proof() {
   normalized_evidence="$temporary_root/trusted-proof-payload-evidence.normalized.json"
   node --input-type=module - \
     "$proof_evidence/trusted-proof-payload-evidence.json" \
-    "$normalized_evidence" <<'NODE'
+    "$normalized_evidence" \
+    "$payload_source_commit" \
+    "$payload_source_tree" <<'NODE'
 import fs from 'node:fs';
-const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const expectedCases = ['dispatch-bootstrap', 'dispatch-continuation', 'stale-head'];
+const [inputPath, outputPath, expectedSourceCommit, expectedSourceTree] =
+  process.argv.slice(2);
+const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+const expectedCases = [
+  'dispatch-bootstrap',
+  'dispatch-continuation',
+  'stale-head',
+  'stale-unauthorized-follow-on',
+];
 const expectedFields = [
   'passed',
   'verifier_executable_sha256',
   'compiled_payload_proof_kind',
   'compiled_payload_source_commit',
   'compiled_payload_source_tree',
+  'launch_workflow_sha',
+  'launch_action_source_sha',
+  'fixture_base_sha',
+  'trusted_authority_exact',
+  'trusted_proof_request_budget_satisfied',
+  'shared_primary_bucket_start',
+  'shared_primary_bucket_end',
+  'shared_primary_bucket_exact',
   'cases',
 ];
 if (input === null || Array.isArray(input) || typeof input !== 'object' ||
     JSON.stringify(Object.keys(input)) !== JSON.stringify(expectedFields) ||
-    input.passed !== true || !Array.isArray(input.cases) ||
+    input.passed !== true || input.trusted_authority_exact !== true ||
+    input.trusted_proof_request_budget_satisfied !== true ||
+    !Array.isArray(input.cases) ||
     input.cases.length !== expectedCases.length ||
     !/^[0-9a-f]{64}$/.test(input.verifier_executable_sha256 ?? '') ||
     input.compiled_payload_proof_kind !==
       'apr-r4-e2p-trusted-proof-payload-v2' ||
-    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_commit ?? '') ||
-    !/^[0-9a-f]{40}$/.test(input.compiled_payload_source_tree ?? '')) {
+    input.compiled_payload_source_commit !== expectedSourceCommit ||
+    input.compiled_payload_source_tree !== expectedSourceTree ||
+    input.launch_workflow_sha !== expectedSourceCommit ||
+    input.launch_action_source_sha !== expectedSourceCommit ||
+    input.fixture_base_sha !== expectedSourceCommit) {
   throw new Error('The trusted-proof evidence envelope is invalid.');
 }
+if (input.shared_primary_bucket_start !== 1000 ||
+    input.shared_primary_bucket_end !== 111 ||
+    input.shared_primary_bucket_exact !== true) {
+  throw new Error('The shared primary bucket evidence is invalid.');
+}
 const cases = input.cases.map((item, index) => {
-  if (item?.Name !== expectedCases[index] || item.Passed !== true ||
-      !Number.isSafeInteger(item.HostPid) || item.HostPid <= 0) {
+  const expectedName = expectedCases[index];
+  const expectedHostPid = expectedName === 'stale-unauthorized-follow-on' ? 0 : null;
+  if (item?.Name !== expectedName || item.Passed !== true ||
+      !Number.isSafeInteger(item.HostPid) ||
+      (expectedHostPid === null ? item.HostPid <= 0 : item.HostPid !== expectedHostPid)) {
     throw new Error('The trusted-proof case evidence is invalid.');
   }
   const { HostPid: _hostPid, ...stable } = item;
   return stable;
 });
-fs.writeFileSync(process.argv[3], JSON.stringify({
+fs.writeFileSync(outputPath, JSON.stringify({
   passed: input.passed,
   verifier_executable_sha256: input.verifier_executable_sha256,
   compiled_payload_proof_kind: input.compiled_payload_proof_kind,
   compiled_payload_source_commit: input.compiled_payload_source_commit,
   compiled_payload_source_tree: input.compiled_payload_source_tree,
+  launch_workflow_sha: input.launch_workflow_sha,
+  launch_action_source_sha: input.launch_action_source_sha,
+  fixture_base_sha: input.fixture_base_sha,
+  trusted_authority_exact: input.trusted_authority_exact,
+  trusted_proof_request_budget_satisfied: input.trusted_proof_request_budget_satisfied,
+  shared_primary_bucket_start: input.shared_primary_bucket_start,
+  shared_primary_bucket_end: input.shared_primary_bucket_end,
+  shared_primary_bucket_exact: input.shared_primary_bucket_exact,
   cases,
 }) + '\n');
 NODE
@@ -553,7 +715,8 @@ export artifacts_root intermediate_root verifier_intermediate_root
 export architecture verifier_architecture identity publish_log verifier_publish_log
 export proof_evidence receipt_line receipt_json
 export payload_source_commit payload_source_tree
-export -f audit_warnings write_smoke_frame run_production_smoke
+export -f audit_warnings write_smoke_frame validate_missing_github_stderr
+export -f run_production_smoke
 export -f emit_safe_supervisor_failure verify_two_root_preparation execute_proof
 set +e
 node "$repo_root/scripts/run-clean-source-proof.mjs" --repo "$repo_root" -- \

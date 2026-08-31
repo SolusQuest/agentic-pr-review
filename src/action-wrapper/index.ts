@@ -3,6 +3,8 @@ import { getOctokit } from '@actions/github';
 
 import {
   ArtifactBridgeStaging,
+  ArtifactCacheLedger,
+  ArtifactRestRequestBudget,
   createArtifactActionsRestClient,
   OfficialArtifactOperations,
   type ArtifactBridgeExecutor,
@@ -26,6 +28,10 @@ import {
 import { readAndMaskActionInputs } from './launcher/inputs.js';
 import { OfficialCallTracker } from './launcher/official-calls.js';
 import {
+  artifactRestRequestBudgetProfile,
+  readTrustedProofRequestBudgetProfile,
+} from './launcher/request-budget-profile.js';
+import {
   digestEventJson,
   verifyPreparedPayload,
   type PreparedPayloadProof,
@@ -43,6 +49,8 @@ import {
 } from './presentation/toolkit.js';
 
 const OFFICIAL_QUIESCENCE_TIMEOUT_MS = 30_000;
+const GITHUB_REQUEST_BUDGET_PREFIX = 'APR_R4_E2P_GITHUB_REQUEST_BUDGET ';
+const CONTROL_REQUEST_BUDGET_PREFIX = 'APR_R4_E2P_CONTROL_REQUEST_BUDGET ';
 
 export interface PrivateActionWrapperSeams {
   readonly toolkit: ActionPresentationToolkit;
@@ -56,6 +64,12 @@ export interface PrivateActionWrapperSeams {
     context: ProductionArtifactExecutorContext,
     tracker: OfficialCallTracker,
   ) => Promise<ArtifactBridgeExecutor>;
+  /**
+   * Receives one complete, stable, secret-free receipt frame. Production writes
+   * the frame once to stderr, so a failing sink cannot publish a prefix of the
+   * Host/control/artifact evidence set.
+   */
+  readonly trustedProofBudgetReceiptSink?: (frame: string) => void;
   readonly fatalExit: (code: 1) => void;
   readonly officialQuiescenceTimeoutMs?: number;
 }
@@ -66,6 +80,12 @@ export interface ProductionArtifactExecutorContext {
   readonly runId: string;
   readonly runAttempt: string;
   readonly stagingRoot: string;
+  /** Passed only after verifyPreparedPayload admits the exact payload receipt. */
+  readonly verifiedPreparedPayload: {
+    readonly buildDiscriminator: string;
+  };
+  /** Created once from the verified prepared payload and shared by the bridge process. */
+  readonly artifactRestRequestBudget: ArtifactRestRequestBudget;
 }
 
 export async function runPrivateActionWrapper(
@@ -95,6 +115,8 @@ export async function runPrivateActionWrapperWithSeams(
   let bridge: ArtifactBridgeRuntime | undefined;
   let tracker: OfficialCallTracker | undefined;
   let completion: ActionHostCompletionDocument | undefined;
+  let artifactRestRequestBudget: ArtifactRestRequestBudget | undefined;
+  let hostBudgetReceiptLines: readonly string[] = [];
   let failed = false;
   let hostTerminationUnconfirmed = false;
   const inputs = (() => {
@@ -114,6 +136,28 @@ export async function runPrivateActionWrapperWithSeams(
     validateRuntimeFacts(runtimeFacts);
     if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
     const prepared = await verifyPreparedPayload(seams.preparedPayload);
+    // This profile is an explicit, protected-process capability. It is never
+    // inferred from an action input and ordinary r4-h1 payloads receive none.
+    const requestBudgetProfile = readTrustedProofRequestBudgetProfile(prepared.buildDiscriminator);
+    // This is intentionally derived from the verified payload, never from an
+    // action input or bridge command. The one instance is then shared by every
+    // authenticated artifact REST command in this wrapper process.
+    artifactRestRequestBudget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: prepared.buildDiscriminator,
+      identity: {
+        repository: runtimeFacts.repositoryName,
+        repositoryId: runtimeFacts.repositoryId,
+        workflowSha: runtimeFacts.workflowSha,
+        actionSourceSha: prepared.actionSourceSha,
+        payloadSha256: prepared.payloadSha256,
+        buildDiscriminator: prepared.buildDiscriminator,
+        runId: runtimeFacts.runId,
+        runAttempt: runtimeFacts.runAttempt,
+      },
+      ...(requestBudgetProfile === undefined
+        ? {}
+        : { profile: artifactRestRequestBudgetProfile(requestBudgetProfile) }),
+    });
     try {
       const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
       tracker = new OfficialCallTracker();
@@ -127,6 +171,8 @@ export async function runPrivateActionWrapperWithSeams(
               runId: runtimeFacts.runId,
               runAttempt: runtimeFacts.runAttempt,
               stagingRoot,
+              verifiedPreparedPayload: prepared,
+              artifactRestRequestBudget: artifactRestRequestBudget!,
             },
             tracker!,
           ),
@@ -145,7 +191,9 @@ export async function runPrivateActionWrapperWithSeams(
         launchBytes: serializeLaunchDocument(launch),
         tempRoot: bridge.tempRoot,
         signal: seams.signal,
+        ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
       });
+      hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
       completion = parseCompletionDocument(
         host.completionBytes,
         prepared.buildDiscriminator,
@@ -163,6 +211,22 @@ export async function runPrivateActionWrapperWithSeams(
   }
 
   if (hostTerminationUnconfirmed) {
+    if (bridge && tracker) {
+      try {
+        await bridge.stopAndDrain();
+        await tracker.awaitQuiescence(
+          seams.officialQuiescenceTimeoutMs ?? OFFICIAL_QUIESCENCE_TIMEOUT_MS,
+        );
+      } catch {
+        // Fatal termination still receives one best-effort cleanup attempt.
+      } finally {
+        try {
+          await bridge.cleanup();
+        } catch {
+          // The fatal exit below remains authoritative.
+        }
+      }
+    }
     seams.fatalExit(1);
     return 1;
   }
@@ -177,14 +241,26 @@ export async function runPrivateActionWrapperWithSeams(
     } catch {
       quiet = false;
     }
+    try {
+      if (quiet) {
+        writeTrustedProofBudgetReceiptFrame(
+          artifactRestRequestBudget,
+          hostBudgetReceiptLines,
+          seams.trustedProofBudgetReceiptSink,
+        );
+      }
+    } catch {
+      failed = true;
+    } finally {
+      try {
+        await bridge.cleanup();
+      } catch {
+        failed = true;
+      }
+    }
     if (!quiet) {
       seams.fatalExit(1);
       return 1;
-    }
-    try {
-      await bridge.cleanup();
-    } catch {
-      failed = true;
     }
   }
 
@@ -232,7 +308,17 @@ export async function createProductionArtifactExecutor(
   }
   const staging = await ArtifactBridgeStaging.create(context.stagingRoot);
   const octokit = getOctokit(context.githubToken);
-  const actions = tracker.wrap(createArtifactActionsRestClient(octokit));
+  // Conditional REST representations and decrypted verified records share one
+  // bounded ledger; neither cache receives an independent 64 MiB allowance.
+  const cacheLedger = new ArtifactCacheLedger();
+  const actions = tracker.wrap(
+    createArtifactActionsRestClient(
+      octokit,
+      context.artifactRestRequestBudget,
+      undefined,
+      cacheLedger,
+    ),
+  );
   const artifactClient = tracker.wrap(new DefaultArtifactClient());
   return new OfficialArtifactOperations({
     owner: context.repositoryName.slice(0, separator),
@@ -242,7 +328,36 @@ export async function createProductionArtifactExecutor(
     artifactClient,
     actions,
     staging,
+    cacheLedger,
+    artifactRestRequestBudget: context.artifactRestRequestBudget,
   });
+}
+
+function writeTrustedProofBudgetReceiptFrame(
+  budget: ArtifactRestRequestBudget | undefined,
+  lines: readonly string[],
+  sink: ((frame: string) => void) | undefined,
+): void {
+  // The verified R4 payload discriminator is the authority for all three
+  // proof-budget records. Ordinary payloads cannot enable this route with
+  // action inputs or Host stderr text.
+  if (!budget?.protectedRoute) return;
+  if (
+    lines.length !== 2 ||
+    !lines[0]?.startsWith(GITHUB_REQUEST_BUDGET_PREFIX) ||
+    !lines[0].endsWith('\n') ||
+    !lines[1]?.startsWith(CONTROL_REQUEST_BUDGET_PREFIX) ||
+    !lines[1].endsWith('\n')
+  ) {
+    throw new Error('trusted_proof_budget_receipt_frame_invalid');
+  }
+  const artifact = budget.sealAndCreateReceipt();
+  if (!artifact) throw new Error('trusted_proof_budget_receipt_frame_invalid');
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join('') + artifact);
+}
+
+function writeTrustedProofArtifactRestBudgetToStderr(frame: string): void {
+  process.stderr.write(frame);
 }
 
 function required(value: string | undefined): string {

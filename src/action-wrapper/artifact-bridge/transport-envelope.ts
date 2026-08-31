@@ -59,11 +59,17 @@ export function encodeArtifactTransportEnvelope(
     encrypted_object_base64: encryptedBytes.toString('base64'),
   };
   const encoded = Buffer.from(JSON.stringify(document), 'utf8');
-  if (encoded.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
-    throw new ArtifactTransportEnvelopeError();
+  try {
+    if (encoded.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
+      throw new ArtifactTransportEnvelopeError();
+    }
+    budget.throwIfExpired();
+    return encoded;
+  } catch (error) {
+    // The caller owns an encoded envelope only on successful return.
+    encoded.fill(0);
+    throw error;
   }
-  budget.throwIfExpired();
-  return encoded;
 }
 
 export async function readArtifactArchive(
@@ -229,23 +235,29 @@ function decodeEnvelope(
     throw new ArtifactTransportEnvelopeError();
   }
   const encryptedBytes = Buffer.from(encoded, 'base64');
-  budget.throwIfExpired();
-  if (
-    encryptedBytes.length !== size ||
-    encryptedBytes.length < 1 ||
-    encryptedBytes.length > ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes ||
-    encryptedBytes.toString('base64') !== encoded ||
-    digestBytes(encryptedBytes) !== parsed.encrypted_object_digest
-  ) {
-    throw new ArtifactTransportEnvelopeError();
+  try {
+    budget.throwIfExpired();
+    if (
+      encryptedBytes.length !== size ||
+      encryptedBytes.length < 1 ||
+      encryptedBytes.length > ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes ||
+      encryptedBytes.toString('base64') !== encoded ||
+      digestBytes(encryptedBytes) !== parsed.encrypted_object_digest
+    ) {
+      throw new ArtifactTransportEnvelopeError();
+    }
+    return {
+      producingRunId: parsed.producing_run_id,
+      producingRunAttempt: parsed.producing_run_attempt,
+      encryptedObjectDigest: parsed.encrypted_object_digest,
+      encryptedObjectSize: size,
+      encryptedBytes,
+    };
+  } catch (error) {
+    // Ownership transfers only with a successfully decoded envelope.
+    encryptedBytes.fill(0);
+    throw error;
   }
-  return {
-    producingRunId: parsed.producing_run_id,
-    producingRunAttempt: parsed.producing_run_attempt,
-    encryptedObjectDigest: parsed.encrypted_object_digest,
-    encryptedObjectSize: size,
-    encryptedBytes,
-  };
 }
 
 function isExactEnvelope(value: unknown): value is {

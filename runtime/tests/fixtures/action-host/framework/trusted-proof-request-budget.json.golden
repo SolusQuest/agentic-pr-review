@@ -1,0 +1,264 @@
+{
+  "schema": "apr.r4.trusted-proof.github-request-budget.v3",
+  "head_source_shape": "production_shaped_synthetic",
+  "head_source_authenticated_rest_requests": 180,
+  "head_source_formula": "commit:1 \u002B trees:178 \u002B tarball:1",
+  "head_source_scope": "synthetic tree-request and archive transport shape only",
+  "includes_resolve_initial_pr_get": true,
+  "payload_maximum_authenticated_rest_requests": 216,
+  "control_max_requests_per_phase": 64,
+  "artifact_bridge_maximum_total_authenticated_rest_requests": 2130,
+  "artifact_bridge_maximum_primary_rate_limit_requests": 136,
+  "artifact_bridge_secondary_point_maximum_per_minute": 600,
+  "artifact_bridge_minimum_mutative_spacing_milliseconds": 1000,
+  "external_control_max_requests_per_phase": 64,
+  "repository_primary_rate_limit_maximum": 1000,
+  "operation_primary_rate_limit_formula": "payload \u002B artifact \u002B embedded control \u002B external control \u002B cleanup",
+  "operation_primary_rate_limit_requests": 889,
+  "operation_primary_rate_limit_reserve": 111,
+  "minimum_required_operation_primary_rate_limit_reserve": 64,
+  "final_role_allocation_frozen": true,
+  "remaining_tail_guard_frozen": true,
+  "fixed_scenario_order": [
+    "dispatch-bootstrap",
+    "dispatch-continuation",
+    "stale-head"
+  ],
+  "suite_role_totals": {
+    "node_artifact_rest": 224,
+    "host_head_source_rest": 540,
+    "host_other_github_rest": 82,
+    "embedded_control": 12,
+    "external_control": 23,
+    "cleanup_control": 8
+  },
+  "domain_tails": {
+    "node_artifact_rest": 679,
+    "host_head_source_rest": 863,
+    "host_other_github_rest": 878,
+    "trusted_control_rest": 888
+  },
+  "primary_budget": {
+    "total": 889,
+    "reserve": 64,
+    "slack": 47,
+    "role_totals_within_budget": true,
+    "domain_tails_within_budget": true
+  },
+  "event_sequence": {
+    "digest": "6645e0c773a31ac54682fbf01fcbe486fd971f761ce1021ab413c5d6ccbc32d0",
+    "ordinal_policy": "one-based append order in fixed scenario aggregate",
+    "scenario_ordinals": [
+      {
+        "name": "dispatch-bootstrap",
+        "ordinal": 1
+      },
+      {
+        "name": "dispatch-continuation",
+        "ordinal": 2
+      },
+      {
+        "name": "stale-head",
+        "ordinal": 3
+      }
+    ],
+    "event_count": 4128,
+    "first_ordinal": 1,
+    "last_ordinal": 4128,
+    "primary_charged_events": 889
+  },
+  "operation_wide_measurement": {
+    "measurement_only": false,
+    "event_shape_valid": true,
+    "node_secondary_points_within_600": true,
+    "all_authenticated_secondary_points_below_900": true,
+    "node_artifact_rest_mutations_spaced": true,
+    "node_artifact_raw_events": 3280,
+    "host_head_source_raw_events": 540,
+    "host_other_raw_events": 82,
+    "trusted_control_raw_events": 43,
+    "actions_results_events": 70,
+    "anonymous_transfer_events": 113
+  },
+  "protected_event_receipt_joins": [
+    true,
+    true,
+    true
+  ],
+  "receipt_event_joins": [
+    {
+      "case": "dispatch-bootstrap",
+      "joined": true,
+      "reviewed_head_expected_raw": 180,
+      "historical_base_object_raw": 10,
+      "event_roles": {
+        "node_artifact_rest": 71,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 30,
+        "trusted_control_rest": 10
+      },
+      "receipt_roles": {
+        "node_artifact_rest": 71,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 30,
+        "trusted_control_rest": 10
+      }
+    },
+    {
+      "case": "dispatch-continuation",
+      "joined": true,
+      "reviewed_head_expected_raw": 180,
+      "historical_base_object_raw": 10,
+      "event_roles": {
+        "node_artifact_rest": 136,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 33,
+        "trusted_control_rest": 14
+      },
+      "receipt_roles": {
+        "node_artifact_rest": 136,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 33,
+        "trusted_control_rest": 14
+      }
+    },
+    {
+      "case": "stale-head",
+      "joined": true,
+      "reviewed_head_expected_raw": 180,
+      "historical_base_object_raw": 10,
+      "event_roles": {
+        "node_artifact_rest": 17,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 19,
+        "trusted_control_rest": 19
+      },
+      "receipt_roles": {
+        "node_artifact_rest": 17,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 19,
+        "trusted_control_rest": 19
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "dispatch-bootstrap",
+      "csharp_payload": {
+        "authenticated_rest_requests": 210,
+        "anonymous_codeload_requests": 1,
+        "rejected_requests": 0
+      },
+      "node_artifact_bridge": {
+        "total_authenticated_rest_requests": 1096,
+        "conditional_not_modified_requests": 1025,
+        "primary_rate_limit_requests": 71,
+        "secondary_limit_points": 1120,
+        "permission_denied": 0,
+        "anonymous_signed_downloads": 14
+      },
+      "embedded_control": {
+        "requests": 1,
+        "primary": 1
+      },
+      "external_control": [
+        {
+          "phase": "hold",
+          "requests": 9
+        }
+      ],
+      "post_operation_cleanup": [],
+      "roles": {
+        "node_artifact_rest": 71,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 30,
+        "embedded_control": 1,
+        "external_control": 9,
+        "cleanup_control": 0
+      },
+      "control_primary_total": 10,
+      "control_primary_within_64": true,
+      "receipt_event_join": true
+    },
+    {
+      "name": "dispatch-continuation",
+      "csharp_payload": {
+        "authenticated_rest_requests": 213,
+        "anonymous_codeload_requests": 1,
+        "rejected_requests": 0
+      },
+      "node_artifact_bridge": {
+        "total_authenticated_rest_requests": 2130,
+        "conditional_not_modified_requests": 1994,
+        "primary_rate_limit_requests": 136,
+        "secondary_limit_points": 2198,
+        "permission_denied": 0,
+        "anonymous_signed_downloads": 27
+      },
+      "embedded_control": {
+        "requests": 1,
+        "primary": 1
+      },
+      "external_control": [
+        {
+          "phase": "verify-completed",
+          "requests": 5
+        }
+      ],
+      "post_operation_cleanup": [
+        {
+          "requests": 8
+        }
+      ],
+      "roles": {
+        "node_artifact_rest": 136,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 33,
+        "embedded_control": 1,
+        "external_control": 5,
+        "cleanup_control": 8
+      },
+      "control_primary_total": 14,
+      "control_primary_within_64": true,
+      "receipt_event_join": true
+    },
+    {
+      "name": "stale-head",
+      "csharp_payload": {
+        "authenticated_rest_requests": 199,
+        "anonymous_codeload_requests": 1,
+        "rejected_requests": 0
+      },
+      "node_artifact_bridge": {
+        "total_authenticated_rest_requests": 54,
+        "conditional_not_modified_requests": 37,
+        "primary_rate_limit_requests": 17,
+        "secondary_limit_points": 54,
+        "permission_denied": 0,
+        "anonymous_signed_downloads": 2
+      },
+      "embedded_control": {
+        "requests": 10,
+        "primary": 10
+      },
+      "external_control": [
+        {
+          "phase": "hold",
+          "requests": 9
+        }
+      ],
+      "post_operation_cleanup": [],
+      "roles": {
+        "node_artifact_rest": 17,
+        "host_head_source_rest": 180,
+        "host_other_github_rest": 19,
+        "embedded_control": 10,
+        "external_control": 9,
+        "cleanup_control": 0
+      },
+      "control_primary_total": 19,
+      "control_primary_within_64": true,
+      "receipt_event_join": true
+    }
+  ]
+}

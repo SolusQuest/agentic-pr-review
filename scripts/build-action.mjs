@@ -7,6 +7,7 @@ import { build } from 'esbuild';
 
 export const ACTION_BUNDLE_RELATIVE_PATH = '.github/actions/agentic-pr-review/dist/index.js';
 export const WRAPPER_BUILD_DISCRIMINATOR = 'r4-w2';
+export const FRAMEWORK_FIXTURE_WRAPPER_BUILD_DISCRIMINATOR = 'r4-h1';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = path.resolve(path.dirname(scriptPath), '..');
@@ -25,10 +26,11 @@ const optionalDebugColorStub = {
     }));
   },
 };
-const entryPointSource = `
+function entryPointSource(wrapperBuildDiscriminator) {
+  return `
 import { runPrivateActionWrapper } from '../src/action-wrapper/index.js';
 
-const WRAPPER_BUILD_DISCRIMINATOR = ${JSON.stringify(WRAPPER_BUILD_DISCRIMINATOR)};
+const WRAPPER_BUILD_DISCRIMINATOR = ${JSON.stringify(wrapperBuildDiscriminator)};
 
 void runPrivateActionWrapper({
   trustedRoot: process.env.AGENTIC_PR_REVIEW_PREPARED_ROOT,
@@ -46,8 +48,14 @@ void runPrivateActionWrapper({
   },
 );
 `;
+}
 
 export async function generateActionBundle(repoRoot = defaultRepoRoot) {
+  return await generateActionBundleForDiscriminator(repoRoot, WRAPPER_BUILD_DISCRIMINATOR);
+}
+
+async function generateActionBundleForDiscriminator(repoRoot, wrapperBuildDiscriminator) {
+  const generatedEntryPoint = entryPointSource(wrapperBuildDiscriminator);
   const result = await build({
     absWorkingDir: path.resolve(repoRoot),
     banner: {
@@ -70,7 +78,7 @@ export async function generateActionBundle(repoRoot = defaultRepoRoot) {
     preserveSymlinks: true,
     sourcemap: false,
     stdin: {
-      contents: entryPointSource,
+      contents: generatedEntryPoint,
       loader: 'ts',
       resolveDir: path.join(path.resolve(repoRoot), 'scripts'),
       sourcefile: path.basename(virtualEntryPoint),
@@ -82,7 +90,11 @@ export async function generateActionBundle(repoRoot = defaultRepoRoot) {
   if (result.outputFiles.length !== 1 || !result.metafile) {
     throw new Error('action_bundle_generation_invalid');
   }
-  const sourceDigest = await actionSourceDigest(repoRoot, result.metafile);
+  const sourceDigest = await actionSourceDigestForEntryPoint(
+    repoRoot,
+    result.metafile,
+    generatedEntryPoint,
+  );
   return {
     bytes: Buffer.concat([
       Buffer.from(result.outputFiles[0].contents),
@@ -93,8 +105,16 @@ export async function generateActionBundle(repoRoot = defaultRepoRoot) {
 }
 
 export async function actionSourceDigest(repoRoot, metafile) {
+  return await actionSourceDigestForEntryPoint(
+    repoRoot,
+    metafile,
+    entryPointSource(WRAPPER_BUILD_DISCRIMINATOR),
+  );
+}
+
+async function actionSourceDigestForEntryPoint(repoRoot, metafile, generatedEntryPoint) {
   const sources = new Map([
-    ['scripts/action-entrypoint.generated.ts', Buffer.from(entryPointSource, 'utf8')],
+    ['scripts/action-entrypoint.generated.ts', Buffer.from(generatedEntryPoint, 'utf8')],
     ['action-build-stub:supports-color', Buffer.from(optionalDebugColorStubSource, 'utf8')],
     ['scripts/build-action.mjs', await readFile(path.join(repoRoot, 'scripts/build-action.mjs'))],
   ]);
@@ -118,8 +138,22 @@ export async function actionSourceDigest(repoRoot, metafile) {
 export async function writeActionBundle(repoRoot = defaultRepoRoot) {
   const root = path.resolve(repoRoot);
   const outputPath = path.join(root, ACTION_BUNDLE_RELATIVE_PATH);
+  await writeGeneratedActionBundle(outputPath, await generateActionBundle(root));
+}
+
+/**
+ * Generates the private E1 framework wrapper only. It is deliberately not a
+ * configurable CLI surface and is never written into the checked Action tree.
+ */
+export async function writeFrameworkFixtureActionBundle(outputPath, repoRoot = defaultRepoRoot) {
+  await writeGeneratedActionBundle(
+    path.resolve(outputPath),
+    await generateFrameworkFixtureActionBundle(repoRoot),
+  );
+}
+
+async function writeGeneratedActionBundle(outputPath, generated) {
   const temporaryPath = `${outputPath}.tmp-${process.pid}-${randomUUID()}`;
-  const generated = await generateActionBundle(root);
   await mkdir(path.dirname(outputPath), { recursive: true });
   try {
     await writeFile(temporaryPath, generated.bytes, { flag: 'wx' });
@@ -133,6 +167,13 @@ export async function writeActionBundle(repoRoot = defaultRepoRoot) {
   } finally {
     await rm(temporaryPath, { force: true });
   }
+}
+
+export async function generateFrameworkFixtureActionBundle(repoRoot = defaultRepoRoot) {
+  return await generateActionBundleForDiscriminator(
+    repoRoot,
+    FRAMEWORK_FIXTURE_WRAPPER_BUILD_DISCRIMINATOR,
+  );
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {

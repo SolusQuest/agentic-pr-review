@@ -6,10 +6,15 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace AgenticPrReview.Runtime.ActionHost.GitHub;
 
+using AgenticPrReview.Runtime.ActionHost.Snapshot;
+
 internal sealed class ActionHostGitObjectTransport :
     IActionHostGitObjectTransport
 {
-    private const int MaximumObjectResponseBytes = 2 * 1024 * 1024;
+    private const int MaximumObjectResponseBytes =
+        checked((int)ReviewedContentLimits.GitObjectResponseBytes);
+    private const int MaximumArchiveDecodedBytes =
+        checked((int)ReviewedContentLimits.HeadArchiveDecodedBytes);
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly string _token;
     private readonly HttpClient _client;
@@ -161,6 +166,126 @@ internal sealed class ActionHostGitObjectTransport :
                 document.CapturedResponseBytes);
     }
 
+    public async Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+        GetHeadArchiveAsync(
+            string repositoryName,
+            string headSha,
+            CancellationToken cancellationToken)
+    {
+        if (!TryRepositoryPath(repositoryName, out var repositoryPath) ||
+            !ActionHostGitObjectMapper.IsSha(headSha) || _disposed)
+        {
+            return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                ActionHostGitObjectFailure.InvalidRequest);
+        }
+
+        try
+        {
+            using var source = CreateAuthorizedRequest(new Uri(
+                ActionHostGitHubAuthorizationPolicy.Origin +
+                $"/repos/{repositoryPath}/tarball/{headSha}", UriKind.Absolute));
+            if (source is null)
+            {
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                    ActionHostGitObjectFailure.TransportFailure);
+            }
+
+            using var redirect = await _client.SendAsync(source,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var redirectRateLimit =
+                await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                    redirect, cancellationToken).ConfigureAwait(false);
+            if (redirectRateLimit != ActionHostGitHubRateLimitClassification.None)
+            {
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                    ClassifyRateLimit(redirectRateLimit));
+            }
+            if (redirect.StatusCode != HttpStatusCode.Found ||
+                !TryCodeloadRedirect(redirect.Headers.Location, repositoryPath,
+                    headSha, out var target))
+            {
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                    redirect.StatusCode == HttpStatusCode.Found
+                        ? ActionHostGitObjectFailure.InvalidResponse
+                        : ClassifyStatus(redirect, redirectRateLimit));
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, target);
+            if (!request.Headers.TryAddWithoutValidation("User-Agent",
+                    ActionHostGitHubAuthorizationPolicy.UserAgent) ||
+                !request.Headers.TryAddWithoutValidation("Accept", "application/x-gzip"))
+            {
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                    ActionHostGitObjectFailure.TransportFailure);
+            }
+
+            var response = await _client.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var responseRateLimit =
+                await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                    response, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                var failure = ClassifyStatus(response, responseRateLimit);
+                response.Dispose();
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                    failure);
+            }
+            if (responseRateLimit !=
+                ActionHostGitHubRateLimitClassification.None)
+            {
+                var failure = ClassifyRateLimit(responseRateLimit);
+                response.Dispose();
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                    failure);
+            }
+
+            if (response.Content.Headers.ContentLength is > MaximumObjectResponseBytes ||
+                !HasArchiveContentType(response.Content.Headers.ContentType))
+            {
+                response.Dispose();
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                    response.Content.Headers.ContentLength is > MaximumObjectResponseBytes
+                        ? ActionHostGitObjectFailure.ResponseTooLarge
+                        : ActionHostGitObjectFailure.InvalidResponse);
+            }
+
+            Stream stream;
+            try
+            {
+                stream = await response.Content.ReadAsStreamAsync(
+                    cancellationToken);
+            }
+            catch
+            {
+                response.Dispose();
+                throw;
+            }
+
+            try
+            {
+                return ActionHostGitObjectResult<ActionHostGitArchiveReader>
+                    .Success(new GitHubCodeloadArchiveReader(response, stream,
+                        MaximumObjectResponseBytes,
+                        MaximumArchiveDecodedBytes), 0);
+            }
+            catch
+            {
+                response.Dispose();
+                throw;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (IsNonFatal(exception))
+        {
+            return ActionHostGitObjectResult<ActionHostGitArchiveReader>.Failed(
+                ActionHostGitObjectFailure.TransportFailure);
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -191,37 +316,29 @@ internal sealed class ActionHostGitObjectTransport :
         var capturedResponseBytes = 0;
         try
         {
-            using var request = new HttpRequestMessage(
-                HttpMethod.Get,
-                new Uri(
-                    ActionHostGitHubAuthorizationPolicy.Origin + path,
-                    UriKind.Absolute));
-            if (!TryCreateAuthorizationHeader(
-                    _token,
-                    out var authorization) ||
-                !request.Headers.TryAddWithoutValidation(
-                    "User-Agent",
-                    ActionHostGitHubAuthorizationPolicy.UserAgent) ||
-                !request.Headers.TryAddWithoutValidation(
-                    "Accept",
-                    ActionHostGitHubAuthorizationPolicy.Accept) ||
-                !request.Headers.TryAddWithoutValidation(
-                    "X-GitHub-Api-Version",
-                    ActionHostGitHubAuthorizationPolicy.ApiVersion))
+            using var request = CreateAuthorizedRequest(new Uri(
+                ActionHostGitHubAuthorizationPolicy.Origin + path,
+                UriKind.Absolute));
+            if (request is null)
             {
                 return DocumentResult<T>.Failed(
                     ActionHostGitObjectFailure.TransportFailure);
             }
 
-            request.Headers.Authorization = authorization;
             using var response = await _client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
+            var rateLimit = await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return DocumentResult<T>.Failed(
-                    ClassifyStatus(response.StatusCode));
+                    ClassifyStatus(response, rateLimit));
+            }
+            if (rateLimit != ActionHostGitHubRateLimitClassification.None)
+            {
+                return DocumentResult<T>.Failed(ClassifyRateLimit(rateLimit));
             }
 
             if (!HasJsonContentType(response.Content.Headers.ContentType))
@@ -325,19 +442,82 @@ internal sealed class ActionHostGitObjectTransport :
         }
     }
 
-    private static ActionHostGitObjectFailure ClassifyStatus(
-        HttpStatusCode status) => status switch
+    private HttpRequestMessage? CreateAuthorizedRequest(Uri uri)
     {
-        HttpStatusCode.NotFound => ActionHostGitObjectFailure.NotFound,
-        HttpStatusCode.Unauthorized =>
-            ActionHostGitObjectFailure.Unauthorized,
-        HttpStatusCode.Forbidden => ActionHostGitObjectFailure.Forbidden,
-        HttpStatusCode.TooManyRequests =>
-            ActionHostGitObjectFailure.RateLimited,
-        _ when (int)status >= 500 =>
-            ActionHostGitObjectFailure.UpstreamFailure,
-        _ => ActionHostGitObjectFailure.InvalidResponse,
-    };
+        var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        if (!TryCreateAuthorizationHeader(_token, out var authorization) ||
+            !request.Headers.TryAddWithoutValidation("User-Agent",
+                ActionHostGitHubAuthorizationPolicy.UserAgent) ||
+            !request.Headers.TryAddWithoutValidation("Accept",
+                ActionHostGitHubAuthorizationPolicy.Accept) ||
+            !request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version",
+                ActionHostGitHubAuthorizationPolicy.ApiVersion))
+        {
+            request.Dispose();
+            return null;
+        }
+
+        request.Headers.Authorization = authorization;
+        return request;
+    }
+
+    private static bool TryCodeloadRedirect(
+        Uri? location,
+        string repositoryPath,
+        string headSha,
+        out Uri target)
+    {
+        target = null!;
+        if (location is null || !location.IsAbsoluteUri ||
+            !StringComparer.OrdinalIgnoreCase.Equals(location.Scheme, "https") ||
+            !StringComparer.OrdinalIgnoreCase.Equals(location.Host,
+                "codeload.github.com") || location.Port != 443 ||
+            location.UserInfo.Length != 0 || location.Query.Length != 0 ||
+            location.Fragment.Length != 0 ||
+            !StringComparer.Ordinal.Equals(location.AbsolutePath,
+                "/" + repositoryPath + "/legacy.tar.gz/" + headSha))
+        {
+            return false;
+        }
+
+        target = location;
+        return true;
+    }
+
+    private static ActionHostGitObjectFailure ClassifyStatus(
+        HttpResponseMessage response,
+        ActionHostGitHubRateLimitClassification rateLimit)
+    {
+        if (rateLimit is ActionHostGitHubRateLimitClassification.Primary or
+            ActionHostGitHubRateLimitClassification.Secondary or
+            ActionHostGitHubRateLimitClassification.Combined)
+        {
+            return ActionHostGitObjectFailure.RateLimited;
+        }
+        if (rateLimit == ActionHostGitHubRateLimitClassification.Invalid)
+        {
+            return ActionHostGitObjectFailure.InvalidResponse;
+        }
+
+        return response.StatusCode switch
+        {
+            HttpStatusCode.NotFound => ActionHostGitObjectFailure.NotFound,
+            HttpStatusCode.Unauthorized =>
+                ActionHostGitObjectFailure.Unauthorized,
+            HttpStatusCode.Forbidden => ActionHostGitObjectFailure.Forbidden,
+            _ when (int)response.StatusCode >= 500 =>
+                ActionHostGitObjectFailure.UpstreamFailure,
+            _ => ActionHostGitObjectFailure.InvalidResponse,
+        };
+    }
+
+    private static ActionHostGitObjectFailure ClassifyRateLimit(
+        ActionHostGitHubRateLimitClassification classification) =>
+        classification is ActionHostGitHubRateLimitClassification.Primary or
+            ActionHostGitHubRateLimitClassification.Secondary or
+            ActionHostGitHubRateLimitClassification.Combined
+            ? ActionHostGitObjectFailure.RateLimited
+            : ActionHostGitObjectFailure.InvalidResponse;
 
     private static bool HasJsonContentType(MediaTypeHeaderValue? contentType) =>
         contentType?.MediaType is { } mediaType &&
@@ -345,6 +525,12 @@ internal sealed class ActionHostGitObjectTransport :
             mediaType,
             "application/json") ||
         mediaType.EndsWith("+json", StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasArchiveContentType(MediaTypeHeaderValue? contentType) =>
+        contentType?.MediaType is { } mediaType &&
+        (StringComparer.OrdinalIgnoreCase.Equals(mediaType, "application/x-gzip") ||
+        StringComparer.OrdinalIgnoreCase.Equals(mediaType, "application/gzip") ||
+        StringComparer.OrdinalIgnoreCase.Equals(mediaType, "application/octet-stream"));
 
     private static async Task<BoundedResponse> ReadBoundedAsync(
         HttpContent content,

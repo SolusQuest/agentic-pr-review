@@ -45,7 +45,7 @@ function lowerHex(value, length) {
   return typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`, 'u').test(value);
 }
 
-export function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
+export function verifySealedReceiptV2({ receiptPath, sourceRoot }) {
   const contractPath = path.join(
     sourceRoot,
     'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/receipt-contract-v2.json',
@@ -119,6 +119,12 @@ export function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
       receipt.verifier_evidence_sha256,
     ].join('\n') + '\n';
   if (receipt.build_pair_sha256 !== sha256(buildPairPreimage)) fail('build-pair');
+  if (receipt.receipt_contract_sha256 !== sha256(contractBytes)) fail('contract-digest');
+  return receipt;
+}
+
+export function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
+  const receipt = verifySealedReceiptV2({ receiptPath, sourceRoot });
   const fixedFiles = new Map([
     ['action_metadata_sha256', '.github/actions/agentic-pr-review/action.yml'],
     ['wrapper_bundle_sha256', '.github/actions/agentic-pr-review/dist/index.js'],
@@ -163,7 +169,6 @@ export function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
       fail(`digest-${field}`);
     }
   }
-  if (receipt.receipt_contract_sha256 !== sha256(contractBytes)) fail('contract-digest');
   if (payloadPath && receipt.payload_sha256 !== sha256(read(payloadPath, 256 * 1024 * 1024))) {
     fail('payload-digest');
   }

@@ -33,6 +33,10 @@ public sealed record CredentialLeaseAuthorityTimeouts(
     public static CredentialLeaseAuthorityTimeouts OracleSuccessor { get; } = new(
         EvidenceLimits.OracleCredentialHandoffTimeout,
         EvidenceLimits.CredentialConnectedSessionTimeout);
+
+    public static CredentialLeaseAuthorityTimeouts OperationSuccessor { get; } = new(
+        EvidenceLimits.OperationCredentialHandoffTimeout,
+        EvidenceLimits.CredentialConnectedSessionTimeout);
 }
 
 public sealed class CredentialLeaseValue : IDisposable
@@ -633,7 +637,7 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
     }
 
     private static int MaximumGuardianTimeoutMilliseconds => checked(
-        (int)EvidenceLimits.CaptureCredentialHandoffTimeout.TotalMilliseconds);
+        (int)EvidenceLimits.OperationCredentialHandoffTimeout.TotalMilliseconds);
 
     private static void WriteCommand(Stream stream, string command) => WriteText(stream, command);
     private static string ReadCommand(Stream stream) => ReadText(stream, 16);

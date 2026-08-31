@@ -204,6 +204,7 @@ internal static class ActionHostGitObjectMapper
             !ActionHostGitHubBase64.TryDecode(
                 document.Content,
                 budget.MaximumEncodedCharacters,
+                budget.MaximumWhitespaceCharacters,
                 budget.MaximumDecodedBytes,
                 out var bytes) ||
             bytes.Length != document.Size ||
@@ -264,12 +265,14 @@ internal static class ActionHostGitHubBase64
     internal static bool TryDecode(
         string? content,
         int maximumEncodedCharacters,
+        int maximumWhitespaceCharacters,
         int maximumDecodedBytes,
         out byte[] bytes)
     {
         bytes = [];
         if (content is null ||
             maximumEncodedCharacters < 0 ||
+            maximumWhitespaceCharacters < 0 ||
             maximumDecodedBytes < 0)
         {
             return false;
@@ -279,6 +282,7 @@ internal static class ActionHostGitHubBase64
             content.Length,
             maximumEncodedCharacters)];
         var count = 0;
+        var whitespace = 0;
         for (var index = 0; index < content.Length; index++)
         {
             var character = content[index];
@@ -287,22 +291,26 @@ internal static class ActionHostGitHubBase64
                 if (index + 1 >= content.Length ||
                     content[index + 1] != '\n' ||
                     count == 0 ||
-                    count % 4 != 0)
+                    count % 4 != 0 ||
+                    whitespace > maximumWhitespaceCharacters - 2)
                 {
                     return false;
                 }
 
                 index++;
+                whitespace += 2;
                 continue;
             }
 
             if (character == '\n')
             {
-                if (count == 0 || count % 4 != 0)
+                if (count == 0 || count % 4 != 0 ||
+                    whitespace >= maximumWhitespaceCharacters)
                 {
                     return false;
                 }
 
+                whitespace++;
                 continue;
             }
 

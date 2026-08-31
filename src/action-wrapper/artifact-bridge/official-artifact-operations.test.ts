@@ -2,19 +2,27 @@ import type { ArtifactClient } from '@actions/artifact';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArtifactActionsRestClient } from './official-artifact-operations.js';
 import { OfficialArtifactOperations } from './official-artifact-operations.js';
-import { ArtifactBridgeStaging } from './staging.js';
+import { createArtifactActionsRestClient } from './actions-rest-client.js';
+import { ArtifactCacheLedger } from './artifact-cache-ledger.js';
+import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
 import { digestBytes, encodeArtifactTransportEnvelope } from './transport-envelope.js';
 import { ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import { ArtifactBridgeOperationBudget } from './operation-budget.js';
+import {
+  ArtifactRestAttemptDeadlineError,
+  ArtifactRestRequestBudget,
+} from './artifact-rest-request-budget.js';
 import { createTestZip } from './zip-test-helper.js';
+import { OfficialCallTracker } from '../launcher/official-calls.js';
 
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
 });
 
@@ -382,6 +390,137 @@ describe('artifact-specific producing attempt authority', () => {
   });
 });
 
+describe('verified envelope ownership', () => {
+  it.each(['run-attempt verification', 'cache store', 'cache copy'] as const)(
+    'zeroes decoded ciphertext when %s throws',
+    async (failurePoint) => {
+      const encrypted = Buffer.from('ephemeral-verified-ciphertext');
+      const envelope = encodeArtifactTransportEnvelope(
+        '7001',
+        '2',
+        encrypted,
+        digestBytes(encrypted),
+        testBudget(),
+      );
+      const archive = createTestZip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+      const operations = await createOperations({
+        getArtifact: async () => ({
+          status: 200,
+          data: {
+            id: 42,
+            name: 'opaque-state',
+            size_in_bytes: archive.length,
+            expired: false,
+            expires_at: '2030-01-01T00:00:00Z',
+            digest: `sha256:${digestBytes(archive)}`,
+            workflow_run: { id: 7001 },
+          },
+        }),
+        downloadArtifactArchive: async () => ({ status: 200, data: archive }),
+        getWorkflowRunAttempt: async () => {
+          if (failurePoint === 'run-attempt verification') {
+            throw new Error('synthetic verification failure');
+          }
+          return { status: 200, data: { id: 7001, run_attempt: 2 } };
+        },
+      });
+      const cache = (
+        operations as unknown as {
+          verifiedRecords: {
+            store: (...arguments_: readonly unknown[]) => void;
+            copy: (...arguments_: readonly unknown[]) => unknown;
+          };
+        }
+      ).verifiedRecords;
+      if (failurePoint === 'cache store') {
+        vi.spyOn(cache, 'store').mockImplementation(() => {
+          throw new Error('synthetic cache store failure');
+        });
+      }
+      if (failurePoint === 'cache copy') {
+        vi.spyOn(cache, 'copy').mockImplementation(() => {
+          throw new Error('synthetic cache copy failure');
+        });
+      }
+      const fill = vi.spyOn(Buffer.prototype, 'fill');
+
+      const result = await operations.execute(
+        {
+          operation: 'metadata',
+          correlation_id: `ownership-${failurePoint}`,
+          name: 'opaque-state',
+          object_id: '42',
+        },
+        new AbortController().signal,
+      );
+
+      expect(result.failure).toBe('io');
+      expect(
+        fill.mock.contexts.some(
+          (context, index) =>
+            fill.mock.calls[index]?.[0] === 0 &&
+            Buffer.isBuffer(context) &&
+            context.equals(Buffer.alloc(encrypted.length)),
+        ),
+      ).toBe(true);
+    },
+  );
+});
+
+describe('upload buffer ownership', () => {
+  it('zeroes source and encoded envelope if staging rejects persistence', async () => {
+    const source = Buffer.from('upload-ciphertext-must-not-survive');
+    let encodedEnvelope: Buffer | undefined;
+    const unsupported = async (): Promise<never> => {
+      throw new Error('unexpected provider call');
+    };
+    const staging = {
+      readSource: async () => source,
+      writeUploadEnvelope: async (_relative: string, bytes: Buffer) => {
+        encodedEnvelope = bytes;
+        throw new ArtifactBridgeStagingError();
+      },
+    } as unknown as ArtifactBridgeStaging;
+    const operations = new OfficialArtifactOperations({
+      owner: 'owner',
+      repository: 'repository',
+      currentRunId: '7001',
+      currentRunAttempt: '2',
+      staging,
+      artifactClient: {
+        uploadArtifact: unsupported,
+        downloadArtifact: unsupported,
+        listArtifacts: unsupported,
+        getArtifact: unsupported,
+        deleteArtifact: unsupported,
+      },
+      actions: {
+        listArtifactsForRepo: unsupported,
+        getArtifact: unsupported,
+        downloadArtifactArchive: unsupported,
+        getWorkflowRunAttempt: unsupported,
+        deleteArtifact: unsupported,
+      },
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'upload_immutable',
+        correlation_id: 'upload-owned-buffer-failure',
+        name: 'opaque-state',
+        source_relative_path: 'source/object.bin',
+        encrypted_object_digest: digestBytes(source),
+        minimum_expires_at_unix_seconds: '1',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'invalid', mutation_state: 'not_committed' });
+    expect(source.every((byte) => byte === 0)).toBe(true);
+    expect(encodedEnvelope?.every((byte) => byte === 0)).toBe(true);
+  });
+});
+
 describe('post-dispatch upload mutation truthfulness', () => {
   it.each([
     ['malformed platform expiry', 'expiry', 'invalid'],
@@ -554,7 +693,7 @@ describe('upload mutation phase matrix', () => {
         artifactClient,
         actions,
         staging,
-        now: () => elapsed,
+        monotonicNow: () => elapsed,
       });
 
       const result = await operations.execute(
@@ -592,8 +731,10 @@ describe('delete mutation phase matrix', () => {
       const expected = metadataFixture();
       let getCalls = 0;
       let deleteCalls = 0;
+      const invalidations: Array<Record<string, unknown>> = [];
       const controller = new AbortController();
       const operations = await createOperations({
+        invalidateArtifactMutation: (input) => invalidations.push(input),
         getArtifact: async () => {
           getCalls += 1;
           if (scenario === 'preflight_404' || (scenario === 'verified_absent' && getCalls === 2)) {
@@ -601,9 +742,10 @@ describe('delete mutation phase matrix', () => {
           }
           return { status: 200, data: platformRecord(expected) };
         },
-        deleteArtifact: (_input, requestSignal) => {
+        deleteArtifact: (_input, requestSignal, _latestAttemptStartAt, onDispatched) => {
           deleteCalls += 1;
           if (scenario === 'sync_error') throw new Error('synthetic local rejection');
+          onDispatched?.();
           if (scenario === 'delete_404') return Promise.resolve({ status: 404 });
           if (scenario === 'delete_cancelled') {
             controller.abort();
@@ -636,15 +778,576 @@ describe('delete mutation phase matrix', () => {
         mutation_state: expectedMutation,
       });
       expect(deleteCalls).toBe(scenario === 'preflight_404' ? 0 : 1);
+      const invalidationCount =
+        scenario === 'verified_absent' || scenario === 'still_present'
+          ? 2
+          : scenario === 'delete_404' || scenario === 'delete_cancelled'
+            ? 1
+            : 0;
+      expect(invalidations).toEqual(
+        Array.from({ length: invalidationCount }, () => ({
+          owner: 'owner',
+          repo: 'repository',
+          name: expected.name,
+          artifact_id: 42,
+        })),
+      );
     },
   );
 });
 
+describe('precise conditional-representation invalidation', () => {
+  it('invalidates the named list representation before an outcome-unknown upload', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'apr-upload-invalidation-test-'));
+    roots.push(root);
+    const sourceDirectory = path.join(root, 'source');
+    await mkdir(sourceDirectory, { mode: 0o700 });
+    const encrypted = Buffer.from('outcome-unknown-ciphertext');
+    await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
+    await writeFile(path.join(sourceDirectory, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
+    const invalidations: Array<Record<string, unknown>> = [];
+    const unsupported = async (): Promise<never> => {
+      throw new Error('unexpected official call');
+    };
+    const operations = new OfficialArtifactOperations({
+      owner: 'owner',
+      repository: 'repository',
+      currentRunId: '7001',
+      currentRunAttempt: '2',
+      artifactClient: {
+        uploadArtifact: async () => {
+          throw Object.assign(new Error('synthetic ambiguous upload'), { status: 503 });
+        },
+        downloadArtifact: unsupported,
+        listArtifacts: unsupported,
+        getArtifact: unsupported,
+        deleteArtifact: unsupported,
+      },
+      actions: {
+        invalidateArtifactMutation: (input) => invalidations.push(input),
+        listArtifactsForRepo: unsupported,
+        getArtifact: unsupported,
+        downloadArtifactArchive: unsupported,
+        getWorkflowRunAttempt: unsupported,
+        deleteArtifact: unsupported,
+      },
+      staging: await ArtifactBridgeStaging.create(root),
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'upload_immutable',
+        correlation_id: 'upload-outcome-unknown-invalidation',
+        name: 'opaque-state',
+        source_relative_path: 'source/object.bin',
+        encrypted_object_digest: digestBytes(encrypted),
+        minimum_expires_at_unix_seconds: '1',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'outcome_unknown', mutation_state: 'outcome_unknown' });
+    expect(invalidations).toEqual([{ owner: 'owner', repo: 'repository', name: 'opaque-state' }]);
+  });
+
+  it('invalidates the target before the delete postcondition requires a fresh 404', async () => {
+    const expected = metadataFixture();
+    const invalidations: Array<Record<string, unknown>> = [];
+    let getCalls = 0;
+    const operations = await createOperations({
+      invalidateArtifactMutation: (input) => invalidations.push(input),
+      getArtifact: async () => {
+        getCalls += 1;
+        if (getCalls === 1) return { status: 200, data: platformRecord(expected) };
+        expect(invalidations).toEqual([
+          { owner: 'owner', repo: 'repository', name: expected.name, artifact_id: 42 },
+          { owner: 'owner', repo: 'repository', name: expected.name, artifact_id: 42 },
+        ]);
+        throw Object.assign(new Error('fresh synthetic absence'), { status: 404 });
+      },
+      deleteArtifact: async (_input, _signal, _latestAttemptStartAt, onDispatched) => {
+        onDispatched?.();
+        return { status: 204 };
+      },
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'delete_exact',
+        correlation_id: 'delete-fresh-404-invalidation',
+        expected,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'none', mutation_state: 'committed' });
+    expect(getCalls).toBe(2);
+  });
+
+  it('evicts every list page participating in a rejected aggregate', async () => {
+    const invalidations: Array<Record<string, unknown>> = [];
+    let page = 0;
+    const operations = await createOperations({
+      invalidateArtifactListRepresentation: (input) => invalidations.push(input),
+      listArtifactsForRepo: async () => {
+        page += 1;
+        return {
+          status: 200,
+          data: {
+            total_count: page === 1 ? 101 : 102,
+            artifacts: Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
+              id: (page - 1) * 100 + index + 1,
+              name: 'opaque-state',
+              size_in_bytes: 1,
+              expired: false,
+              expires_at: '2030-01-01T00:00:00Z',
+            })),
+          },
+        };
+      },
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'list_exact',
+        correlation_id: 'semantic-list-invalidation',
+        name: 'opaque-state',
+        maximum_objects: '256',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'incomplete', complete: false });
+    expect(invalidations).toEqual([
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', per_page: 100, page: 1 },
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', per_page: 100, page: 2 },
+    ]);
+  });
+
+  it('evicts a rejected artifact descriptor and its verified-record identity', async () => {
+    const invalidations: Array<Record<string, unknown>> = [];
+    const expected = metadataFixture();
+    const operations = await createOperations({
+      invalidateArtifactRepresentation: (input) => invalidations.push(input),
+      getArtifact: async () => ({
+        status: 200,
+        data: { ...platformRecord(expected), name: 'wrong-name' },
+      }),
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'metadata',
+        correlation_id: 'semantic-artifact-invalidation',
+        name: expected.name,
+        object_id: expected.object_id,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'invalid' });
+    expect(invalidations).toEqual([{ owner: 'owner', repo: 'repository', artifact_id: 42 }]);
+  });
+
+  it('evicts rejected run-attempt and related artifact representations', async () => {
+    const encrypted = Buffer.from('semantic-attempt-ciphertext');
+    const envelope = encodeArtifactTransportEnvelope(
+      '7001',
+      '2',
+      encrypted,
+      digestBytes(encrypted),
+      testBudget(),
+    );
+    const archive = createTestZip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+    const expected = {
+      ...metadataFixture(),
+      archive_digest: digestBytes(archive),
+      encrypted_object_digest: digestBytes(encrypted),
+      size: String(encrypted.length),
+    };
+    const artifactInvalidations: Array<Record<string, unknown>> = [];
+    const attemptInvalidations: Array<Record<string, unknown>> = [];
+    const operations = await createOperations({
+      invalidateArtifactRepresentation: (input) => artifactInvalidations.push(input),
+      invalidateWorkflowRunAttemptRepresentation: (input) => attemptInvalidations.push(input),
+      getArtifact: async () => ({
+        status: 200,
+        data: { ...platformRecord(expected), size_in_bytes: archive.length },
+      }),
+      downloadArtifactArchive: async () => ({ status: 200, data: archive }),
+      getWorkflowRunAttempt: async () => ({ status: 200, data: { id: 7001, run_attempt: 9 } }),
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'metadata',
+        correlation_id: 'semantic-attempt-invalidation',
+        name: expected.name,
+        object_id: expected.object_id,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'conflict' });
+    expect(attemptInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', run_id: 7001, attempt_number: 2 },
+    ]);
+    expect(artifactInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', artifact_id: 42 },
+    ]);
+  });
+
+  it('revokes both cache families after an Octokit 404 and preserves unrelated records', async () => {
+    const target = integratedArtifactFixture({
+      id: 42,
+      name: 'target-state',
+      runId: 7001,
+      runAttempt: 2,
+      expiresAtUnixSeconds: 1_893_456_000,
+    });
+    const unrelated = integratedArtifactFixture({
+      id: 43,
+      name: 'unrelated-state',
+      runId: 7002,
+      runAttempt: 1,
+      expiresAtUnixSeconds: 1_893_456_000,
+    });
+    const getArtifact = vi.fn(async (input: IntegratedGetArtifactInput) => {
+      const callsForArtifact = getArtifact.mock.calls.filter(
+        ([candidate]) => candidate.artifact_id === input.artifact_id,
+      ).length;
+      if (input.artifact_id === target.id) {
+        if (callsForArtifact === 2) {
+          throw Object.assign(new Error('production-shaped Octokit 404'), {
+            status: 404,
+            response: { status: 404, headers: {} },
+          });
+        }
+        return {
+          status: 200,
+          headers: { etag: callsForArtifact === 1 ? '"target-v1"' : '"target-v2"' },
+          data: target.platform,
+        };
+      }
+      if (input.artifact_id === unrelated.id) {
+        return callsForArtifact === 1
+          ? { status: 200, headers: { etag: '"unrelated-v1"' }, data: unrelated.platform }
+          : { status: 304, headers: {}, data: unrelated.platform };
+      }
+      throw new Error('unexpected artifact id');
+    });
+    const downloadArtifact = vi.fn(async (input: { readonly artifact_id: number }) => ({
+      status: 302,
+      headers: { location: `https://blob.invalid/${input.artifact_id}` },
+    }));
+    const getWorkflowRunAttempt = vi.fn(
+      async (input: { readonly run_id: number; readonly attempt_number: number }) => ({
+        status: 200,
+        headers: { etag: `"attempt-${input.run_id}-${input.attempt_number}"` },
+        data: { id: input.run_id, run_attempt: input.attempt_number },
+      }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const id = Number(new URL(String(input)).pathname.slice(1));
+        const fixture = id === target.id ? target : id === unrelated.id ? unrelated : undefined;
+        if (!fixture) throw new Error('unexpected archive url');
+        return new Response(new Uint8Array(fixture.archive), {
+          status: 200,
+          headers: { 'content-length': String(fixture.archive.length) },
+        });
+      }),
+    );
+    const operations = await createIntegratedOperations(
+      { getArtifact, downloadArtifact, getWorkflowRunAttempt },
+      () => Date.parse('2029-01-01T00:00:00Z'),
+    );
+    const signal = new AbortController().signal;
+
+    expect(await executeMetadata(operations, target, 'target-initial', signal)).toMatchObject({
+      failure: 'none',
+    });
+    expect(await executeMetadata(operations, unrelated, 'unrelated-initial', signal)).toMatchObject(
+      { failure: 'none' },
+    );
+    expect(downloadArtifact.mock.calls.map(([input]) => input.artifact_id)).toEqual([42, 43]);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    expect(await executeMetadata(operations, target, 'target-404', signal)).toMatchObject({
+      failure: 'not_found',
+    });
+    expect(getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42)).toHaveLength(2);
+
+    expect(await executeMetadata(operations, target, 'target-recovered', signal)).toMatchObject({
+      failure: 'none',
+    });
+    const targetCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42);
+    expect(targetCalls[1]?.[0]).toMatchObject({ headers: { 'if-none-match': '"target-v1"' } });
+    expect(targetCalls[2]?.[0].headers).toBeUndefined();
+    expect(downloadArtifact.mock.calls.map(([input]) => input.artifact_id)).toEqual([42, 43, 42]);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(3);
+
+    expect(
+      await executeMetadata(operations, unrelated, 'unrelated-after-target-404', signal),
+    ).toMatchObject({ failure: 'none' });
+    const unrelatedCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 43);
+    expect(unrelatedCalls[1]?.[0]).toMatchObject({
+      headers: { 'if-none-match': '"unrelated-v1"' },
+    });
+    expect(downloadArtifact).toHaveBeenCalledTimes(3);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(3);
+  });
+
+  it('preserves a committed delete when the tracked production REST client observes 404', async () => {
+    const target = integratedArtifactFixture({
+      id: 42,
+      name: 'target-state',
+      runId: 7001,
+      runAttempt: 2,
+      expiresAtUnixSeconds: 1_893_456_000,
+    });
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { etag: '"target-v1"' },
+        data: target.platform,
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('production-shaped post-delete 404'), {
+          status: 404,
+          response: { status: 404, headers: {} },
+        }),
+      );
+    const deleteArtifact = vi.fn(async () => ({ status: 204, data: undefined }));
+    const tracker = new OfficialCallTracker();
+    const operations = await createIntegratedOperations(
+      { getArtifact, deleteArtifact },
+      () => Date.parse('2029-01-01T00:00:00Z'),
+      tracker,
+    );
+
+    const result = await operations.execute(
+      {
+        operation: 'delete_exact',
+        correlation_id: 'tracked-production-delete-404',
+        expected: target.metadata,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'none', mutation_state: 'committed' });
+    expect(getArtifact).toHaveBeenCalledTimes(2);
+    expect(getArtifact.mock.calls[1]?.[0].headers).toBeUndefined();
+    expect(deleteArtifact).toHaveBeenCalledTimes(1);
+    await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
+  });
+
+  it('revokes both cache families when UTC expiry follows an authenticated 304', async () => {
+    const expiry = Date.parse('2030-01-01T00:00:00Z');
+    let utcNow = expiry - 1_000;
+    const target = integratedArtifactFixture({
+      id: 42,
+      name: 'target-state',
+      runId: 7001,
+      runAttempt: 2,
+      expiresAtUnixSeconds: Math.floor(expiry / 1_000),
+    });
+    const unrelated = integratedArtifactFixture({
+      id: 43,
+      name: 'unrelated-state',
+      runId: 7002,
+      runAttempt: 1,
+      expiresAtUnixSeconds: Math.floor(Date.parse('2031-01-01T00:00:00Z') / 1_000),
+    });
+    const getArtifact = vi.fn(async (input: IntegratedGetArtifactInput) => {
+      const callsForArtifact = getArtifact.mock.calls.filter(
+        ([candidate]) => candidate.artifact_id === input.artifact_id,
+      ).length;
+      if (input.artifact_id === target.id) {
+        if (callsForArtifact === 1) {
+          return { status: 200, headers: { etag: '"target-v1"' }, data: target.platform };
+        }
+        if (callsForArtifact === 2) {
+          return { status: 304, headers: {}, data: target.platform };
+        }
+        return {
+          status: 200,
+          headers: { etag: '"target-expired"' },
+          data: { ...target.platform, expired: true },
+        };
+      }
+      if (input.artifact_id === unrelated.id) {
+        return callsForArtifact === 1
+          ? { status: 200, headers: { etag: '"unrelated-v1"' }, data: unrelated.platform }
+          : { status: 304, headers: {}, data: unrelated.platform };
+      }
+      throw new Error('unexpected artifact id');
+    });
+    const downloadArtifact = vi.fn(async (input: { readonly artifact_id: number }) => ({
+      status: 302,
+      headers: { location: `https://blob.invalid/${input.artifact_id}` },
+    }));
+    const getWorkflowRunAttempt = vi.fn(
+      async (input: { readonly run_id: number; readonly attempt_number: number }) => ({
+        status: 200,
+        headers: { etag: `"attempt-${input.run_id}-${input.attempt_number}"` },
+        data: { id: input.run_id, run_attempt: input.attempt_number },
+      }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const id = Number(new URL(String(input)).pathname.slice(1));
+        const fixture = id === target.id ? target : id === unrelated.id ? unrelated : undefined;
+        if (!fixture) throw new Error('unexpected archive url');
+        return new Response(new Uint8Array(fixture.archive), {
+          status: 200,
+          headers: { 'content-length': String(fixture.archive.length) },
+        });
+      }),
+    );
+    const operations = await createIntegratedOperations(
+      { getArtifact, downloadArtifact, getWorkflowRunAttempt },
+      () => utcNow,
+    );
+    const signal = new AbortController().signal;
+
+    expect(await executeMetadata(operations, target, 'target-before-expiry', signal)).toMatchObject(
+      {
+        failure: 'none',
+      },
+    );
+    expect(
+      await executeMetadata(operations, unrelated, 'unrelated-before-expiry', signal),
+    ).toMatchObject({ failure: 'none' });
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    utcNow = expiry;
+    expect(await executeMetadata(operations, target, 'target-expired-304', signal)).toMatchObject({
+      failure: 'expired',
+    });
+    let targetCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42);
+    expect(targetCalls).toHaveLength(2);
+    expect(targetCalls[1]?.[0]).toMatchObject({ headers: { 'if-none-match': '"target-v1"' } });
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    expect(
+      await operations.execute(
+        {
+          operation: 'readback_exact',
+          correlation_id: 'target-expired-readback',
+          expected: target.metadata,
+        },
+        signal,
+      ),
+    ).toMatchObject({ failure: 'expired' });
+    targetCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42);
+    expect(targetCalls).toHaveLength(3);
+    expect(targetCalls[2]?.[0].headers).toBeUndefined();
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    expect(
+      await executeMetadata(operations, unrelated, 'unrelated-after-target-expiry', signal),
+    ).toMatchObject({ failure: 'none' });
+    const unrelatedCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 43);
+    expect(unrelatedCalls[1]?.[0]).toMatchObject({
+      headers: { 'if-none-match': '"unrelated-v1"' },
+    });
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('delete dispatch marker', () => {
+  it('reports a pre-wire pacing deadline as cancelled and never marks deletion dispatched', async () => {
+    const expected = metadataFixture();
+    let deleteWireCalls = 0;
+    const operations = await createOperations({
+      getArtifact: async () => ({ status: 200, data: platformRecord(expected) }),
+      deleteArtifact: async (_input, _signal, _latestAttemptStartAt, onDispatched) => {
+        expect(onDispatched).toBeTypeOf('function');
+        throw new ArtifactRestAttemptDeadlineError();
+      },
+    });
+
+    const result = await operations.execute(
+      {
+        operation: 'delete_exact',
+        correlation_id: 'delete-prewire-deadline',
+        expected,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'cancelled', mutation_state: 'not_committed' });
+    expect(deleteWireCalls).toBe(0);
+  });
+});
+
 describe('official artifact lifecycle', () => {
+  it('uses UTC time for expiry while the monotonic clock remains deadline-only', async () => {
+    const expected = metadataFixture();
+    const invalidations: Array<Record<string, unknown>> = [];
+    let downloadCalls = 0;
+    const operations = await createOperations(
+      {
+        invalidateArtifactRepresentation: (input) => invalidations.push(input),
+        getArtifact: async () => ({ status: 200, data: platformRecord(expected) }),
+        downloadArtifactArchive: async () => {
+          downloadCalls += 1;
+          return { status: 200, data: Buffer.from('unexpected') };
+        },
+      },
+      () => 0,
+      () => Date.parse('2031-01-01T00:00:00Z'),
+    );
+
+    const result = await operations.execute(
+      {
+        operation: 'download',
+        correlation_id: 'utc-expiry',
+        expected,
+        destination_relative_path: 'destination/object.bin',
+        maximum_bytes: '1024',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ failure: 'expired' });
+    expect(downloadCalls).toBe(0);
+    expect(invalidations).toEqual([{ owner: 'owner', repo: 'repository', artifact_id: 42 }]);
+  });
+
   it('uploads, verifies, downloads, reads back, and authorizes exact deletion', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'apr-lifecycle-test-'));
     roots.push(root);
     const staging = await ArtifactBridgeStaging.create(root);
+    const writeDestination = staging.writeDestination.bind(staging);
+    let callerRecordBytes: Buffer | undefined;
+    let uploadSourceBytes: Buffer | undefined;
+    let uploadEnvelopeBytes: Buffer | undefined;
+    const readSource = staging.readSource.bind(staging);
+    const writeUploadEnvelope = staging.writeUploadEnvelope.bind(staging);
+    vi.spyOn(staging, 'readSource').mockImplementation(async (relative, budget) => {
+      const bytes = await readSource(relative, budget);
+      uploadSourceBytes = bytes;
+      return bytes;
+    });
+    vi.spyOn(staging, 'writeUploadEnvelope').mockImplementation(async (relative, bytes, budget) => {
+      uploadEnvelopeBytes = bytes;
+      return await writeUploadEnvelope(relative, bytes, budget);
+    });
+    vi.spyOn(staging, 'writeDestination').mockImplementation(
+      async (relativePath, bytes, budget) => {
+        callerRecordBytes = bytes;
+        await writeDestination(relativePath, bytes, budget);
+      },
+    );
     const sourceDirectory = path.join(root, 'source');
     const destinationDirectory = path.join(root, 'destination');
     await mkdir(sourceDirectory, { mode: 0o700 });
@@ -655,7 +1358,7 @@ describe('official artifact lifecycle', () => {
     await writeFile(path.join(destinationDirectory, 'object.bin'), Buffer.alloc(0));
 
     const now = Date.parse('2029-01-01T00:00:00Z');
-    const minimumExpiry = Math.floor(now / 1000) + 3600;
+    const minimumExpiry = Math.floor(now / 1000) + 86_401;
     const expiresAt = minimumExpiry + 86400;
     let nextId = 42;
     let stored:
@@ -669,14 +1372,21 @@ describe('official artifact lifecycle', () => {
     let deleted = false;
     let expired = false;
     let downloadCalls = 0;
+    let getArtifactCalls = 0;
     let deleteCalls = 0;
+    const conditionalCacheInvalidations: Array<{
+      readonly owner: string;
+      readonly repo: string;
+      readonly name: string;
+      readonly artifact_id?: number;
+    }> = [];
 
     const artifactClient: ArtifactClient = {
       uploadArtifact: async (name, files, operationRoot, options) => {
         expect(operationRoot).toBe(sourceDirectory);
         expect(files).toHaveLength(1);
         expect(options?.compressionLevel).toBe(0);
-        expect(options?.retentionDays).toBe(1);
+        expect(options?.retentionDays).toBe(2);
         const archive = createTestZip([
           {
             name: ARTIFACT_ENVELOPE_ENTRY,
@@ -710,10 +1420,14 @@ describe('official artifact lifecycle', () => {
       },
     };
     const actions: ArtifactActionsRestClient = {
+      invalidateArtifactMutation: (input) => {
+        conditionalCacheInvalidations.push(input);
+      },
       listArtifactsForRepo: async () => {
         throw new Error('unexpected repository list');
       },
       getArtifact: async (input) => {
+        getArtifactCalls += 1;
         if (deleted || !stored) {
           throw Object.assign(new Error('synthetic absence'), { status: 404 });
         }
@@ -741,9 +1455,10 @@ describe('official artifact lifecycle', () => {
         status: 200,
         data: { id: input.run_id, run_attempt: input.attempt_number },
       }),
-      deleteArtifact: async (input) => {
+      deleteArtifact: async (input, _signal, _latestAttemptStartAt, onDispatched) => {
         deleteCalls += 1;
         expect(input.artifact_id).toBe(stored?.id);
+        onDispatched?.();
         deleted = true;
         return { status: 204, data: undefined };
       },
@@ -756,7 +1471,8 @@ describe('official artifact lifecycle', () => {
       artifactClient,
       actions,
       staging,
-      now: () => now,
+      monotonicNow: () => 0,
+      utcNow: () => now,
     });
     const signal = new AbortController().signal;
     const uploadCommand = {
@@ -782,6 +1498,13 @@ describe('official artifact lifecycle', () => {
     });
     expect(uploaded.metadata?.archive_digest).toBe(stored?.archiveDigest);
     expect(uploaded.metadata?.archive_digest).not.toBe(digestBytes(encrypted));
+    expect(uploadSourceBytes?.every((byte) => byte === 0)).toBe(true);
+    expect(uploadEnvelopeBytes?.every((byte) => byte === 0)).toBe(true);
+    expect(conditionalCacheInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', name: 'opaque-state' },
+    ]);
+    expect(downloadCalls).toBe(1);
+    expect(getArtifactCalls).toBe(1);
 
     const readBack = await operations.execute(
       {
@@ -792,6 +1515,8 @@ describe('official artifact lifecycle', () => {
       signal,
     );
     expect(readBack.failure).toBe('none');
+    expect(downloadCalls).toBe(1);
+    expect(getArtifactCalls).toBe(2);
     const downloaded = await operations.execute(
       {
         operation: 'download',
@@ -803,10 +1528,12 @@ describe('official artifact lifecycle', () => {
       signal,
     );
     expect(downloaded.failure).toBe('none');
+    expect(downloadCalls).toBe(1);
+    expect(getArtifactCalls).toBe(3);
     await expect(readFile(path.join(destinationDirectory, 'object.bin'))).resolves.toEqual(
       encrypted,
     );
-
+    expect(callerRecordBytes?.every((byte) => byte === 0)).toBe(true);
     const wrongDelete = await operations.execute(
       {
         operation: 'delete_exact',
@@ -828,8 +1555,8 @@ describe('official artifact lifecycle', () => {
       },
       signal,
     );
-    expect(expiredMetadata.failure).toBe('none');
-    expect(downloadCalls).toBe(downloadsBeforeDelete + 1);
+    expect(expiredMetadata.failure).toBe('expired');
+    expect(downloadCalls).toBe(downloadsBeforeDelete);
     const expiredReadBack = await operations.execute(
       {
         operation: 'readback_exact',
@@ -838,8 +1565,8 @@ describe('official artifact lifecycle', () => {
       },
       signal,
     );
-    expect(expiredReadBack.failure).toBe('none');
-    expect(downloadCalls).toBe(downloadsBeforeDelete + 2);
+    expect(expiredReadBack.failure).toBe('expired');
+    expect(downloadCalls).toBe(downloadsBeforeDelete);
     const downloadsBeforeExpiredDownload = downloadCalls;
     const expiredDownload = await operations.execute(
       {
@@ -864,12 +1591,154 @@ describe('official artifact lifecycle', () => {
     expect(deletedResult).toMatchObject({ failure: 'none', mutation_state: 'committed' });
     expect(deleteCalls).toBe(1);
     expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
+    expect(getArtifactCalls).toBe(9);
+    expect(conditionalCacheInvalidations).toEqual([
+      { owner: 'owner', repo: 'repository', name: 'opaque-state' },
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
+      { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
+    ]);
+    await operations.dispose();
+    await expect(
+      operations.execute(
+        {
+          operation: 'metadata',
+          correlation_id: 'metadata-after-dispose',
+          name: uploaded.metadata!.name,
+          object_id: uploaded.metadata!.object_id,
+        },
+        signal,
+      ),
+    ).rejects.toThrow('artifact_lifecycle_coordinator_stopped');
   });
 });
+
+interface IntegratedGetArtifactInput {
+  readonly artifact_id: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly request?: { readonly signal?: AbortSignal };
+}
+
+function integratedArtifactFixture(input: {
+  readonly id: number;
+  readonly name: string;
+  readonly runId: number;
+  readonly runAttempt: number;
+  readonly expiresAtUnixSeconds: number;
+}) {
+  const encrypted = Buffer.from(`encrypted-${input.name}`);
+  const envelope = encodeArtifactTransportEnvelope(
+    String(input.runId),
+    String(input.runAttempt),
+    encrypted,
+    digestBytes(encrypted),
+    testBudget(),
+  );
+  const archive = createTestZip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+  const archiveDigest = digestBytes(archive);
+  return {
+    ...input,
+    archive,
+    platform: {
+      id: input.id,
+      name: input.name,
+      size_in_bytes: archive.length,
+      expired: false,
+      expires_at: new Date(input.expiresAtUnixSeconds * 1_000).toISOString(),
+      digest: `sha256:${archiveDigest}`,
+      workflow_run: { id: input.runId },
+    },
+    metadata: {
+      name: input.name,
+      object_id: String(input.id),
+      producing_run_id: String(input.runId),
+      producing_run_attempt: String(input.runAttempt),
+      archive_digest: archiveDigest,
+      encrypted_object_digest: digestBytes(encrypted),
+      expires_at_unix_seconds: String(input.expiresAtUnixSeconds),
+      size: String(encrypted.length),
+    },
+  };
+}
+
+async function createIntegratedOperations(
+  methods: Record<string, unknown>,
+  utcNow: () => number,
+  tracker?: OfficialCallTracker,
+): Promise<OfficialArtifactOperations> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'apr-integrated-cache-test-'));
+  roots.push(root);
+  const unsupported = async (): Promise<never> => {
+    throw new Error('unexpected official call');
+  };
+  const ledger = new ArtifactCacheLedger();
+  const requestBudget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+    buildDiscriminator: 'r4-h1',
+    limits: {
+      maximumTotalAuthenticatedApiRequests: 32,
+      maximumPrimaryRateLimitRequests: 32,
+    },
+  });
+  const untrackedActions = createArtifactActionsRestClient(
+    {
+      rest: {
+        actions: {
+          listArtifactsForRepo: unsupported,
+          getArtifact: unsupported,
+          downloadArtifact: unsupported,
+          getWorkflowRunAttempt: unsupported,
+          deleteArtifact: unsupported,
+          ...methods,
+        },
+      },
+    } as never,
+    requestBudget,
+    undefined,
+    ledger,
+  );
+  const actions = tracker?.wrap(untrackedActions) ?? untrackedActions;
+  const artifactClient: ArtifactClient = {
+    uploadArtifact: unsupported,
+    downloadArtifact: unsupported,
+    listArtifacts: unsupported,
+    getArtifact: unsupported,
+    deleteArtifact: unsupported,
+  };
+  return new OfficialArtifactOperations({
+    owner: 'owner',
+    repository: 'repository',
+    currentRunId: '7001',
+    currentRunAttempt: '2',
+    artifactClient,
+    actions,
+    staging: await ArtifactBridgeStaging.create(root),
+    monotonicNow: () => 0,
+    utcNow,
+    cacheLedger: ledger,
+    artifactRestRequestBudget: requestBudget,
+  });
+}
+
+async function executeMetadata(
+  operations: OfficialArtifactOperations,
+  fixture: ReturnType<typeof integratedArtifactFixture>,
+  correlationId: string,
+  signal: AbortSignal,
+) {
+  return await operations.execute(
+    {
+      operation: 'metadata',
+      correlation_id: correlationId,
+      name: fixture.name,
+      object_id: String(fixture.id),
+    },
+    signal,
+  );
+}
 
 async function createOperations(
   overrides: Partial<ArtifactActionsRestClient>,
   now?: () => number,
+  utcNow?: () => number,
 ): Promise<OfficialArtifactOperations> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'apr-official-test-'));
   roots.push(root);
@@ -900,7 +1769,8 @@ async function createOperations(
     artifactClient,
     actions,
     staging,
-    now,
+    monotonicNow: now,
+    utcNow,
   });
 }
 

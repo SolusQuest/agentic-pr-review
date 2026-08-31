@@ -94,6 +94,49 @@ public sealed class ReviewedTreeReaderTests
     }
 
     [Fact]
+    public async Task ReusedTreeShaAtSiblingPrefixesRemainsAValidLogicalTree()
+    {
+        var bytes = "shared-leaf"u8.ToArray();
+        var blobSha = GitBlobSha(bytes);
+        var rootSha = new string('a', 40);
+        var reusedTreeSha = new string('b', 40);
+        var transport = new ScriptedTransport(
+            ActionHostAuthorizationScenario.HeadSha,
+            rootSha,
+            new Dictionary<string, IReadOnlyList<ReviewedGitTreeEntryFact>>
+            {
+                [rootSha] =
+                [
+                    Entry("first", "040000", "tree", reusedTreeSha, null),
+                    Entry("second", "040000", "tree", reusedTreeSha, null),
+                ],
+                [reusedTreeSha] =
+                [
+                    Entry("leaf.txt", "100644", "blob", blobSha,
+                        bytes.Length),
+                ],
+            },
+            new Dictionary<string, byte[]> { [blobSha] = bytes });
+        var result = await Read(transport);
+        try
+        {
+            var snapshot = Assert.IsType<ReviewedTreeSnapshot>(
+                result.Result.Snapshot);
+            Assert.Equal(ReviewedTreeFailure.None, result.Result.Failure);
+            Assert.Equal(["first/leaf.txt", "second/leaf.txt"],
+                snapshot.Records.Select(static record => record.Path));
+            Assert.Equal(2, transport.TreeCalls);
+            Assert.Single(transport.StageCalls);
+
+            await snapshot.DisposeAsync();
+        }
+        finally
+        {
+            Directory.Delete(result.Parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ApiEntryOrderCannotChangeReviewedTreeIdentity()
     {
         var bytes = "same"u8.ToArray();
@@ -747,6 +790,8 @@ public sealed class ReviewedTreeReaderTests
 
         internal int CommitCalls { get; private set; }
 
+        internal int TreeCalls { get; private set; }
+
         internal List<string> StageCalls { get; } = [];
 
         public Task<ReviewedGitObjectResult<ReviewedGitCommitFact>>
@@ -769,6 +814,7 @@ public sealed class ReviewedTreeReaderTests
             string treeSha,
             CancellationToken cancellationToken)
         {
+            TreeCalls++;
             if (!Budget!.TryReserveRequest(cancellationToken))
             {
                 return Task.FromResult(
@@ -829,6 +875,36 @@ public sealed class ReviewedTreeReaderTests
                 ? ReviewedGitObjectResult<ReviewedStagedBlob>.Failed(
                     ReviewedGitObjectFailure.IdentityMismatch)
                 : ReviewedGitObjectResult<ReviewedStagedBlob>.Success(staged);
+        }
+
+        public async Task<ReviewedGitObjectResult<ReviewedHeadArchiveBatch>>
+            StageHeadRegularBlobsAsync(
+                IReadOnlyList<ReviewedHeadArchiveEntry> entries,
+                ReviewedBlobStagingLease staging,
+                CancellationToken cancellationToken)
+        {
+            var staged = new Dictionary<string, ReviewedStagedBlob>(
+                StringComparer.Ordinal);
+            foreach (var entry in entries)
+            {
+                if (staged.ContainsKey(entry.Sha))
+                {
+                    continue;
+                }
+
+                var result = await StageBlobAsync(entry.Sha, entry.Size,
+                    staging, cancellationToken);
+                if (result.Value is null)
+                {
+                    return ReviewedGitObjectResult<ReviewedHeadArchiveBatch>.Failed(
+                        result.Failure);
+                }
+
+                staged.Add(entry.Sha, result.Value);
+            }
+
+            return ReviewedGitObjectResult<ReviewedHeadArchiveBatch>.Success(
+                new ReviewedHeadArchiveBatch(staged));
         }
 
         public void Dispose()

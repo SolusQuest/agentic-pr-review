@@ -13,7 +13,6 @@ internal sealed class TrustedProofV2WorkflowAdmission :
 
     internal const string ProofKind =
         "apr-r4-e2p-trusted-proof-payload-v2";
-    internal const string PayloadSourcePlaceholder = "__PAYLOAD_SOURCE_SHA__";
     private const string ResourceName =
         "AgenticPrReview.Runtime.ActionHostTrustedProofPayload.TrustedProofWorkflowTemplateV2";
     private static readonly Lazy<string> Template = new(LoadTemplate);
@@ -22,14 +21,25 @@ internal sealed class TrustedProofV2WorkflowAdmission :
         byte[]? source,
         ActionHostAuthorizationPolicy policy,
         ActionHostLaunchContract launch,
-        out ActionHostTrustedWorkflowEvidence? evidence) =>
-        ActionHostTrustedWorkflowPolicy.TryValidateExact(
+        out ActionHostTrustedWorkflowEvidence? evidence)
+    {
+        evidence = null;
+        if (!StringComparer.Ordinal.Equals(launch.WorkflowSha, launch.ActionSourceSha) ||
+            !StringComparer.Ordinal.Equals(
+                launch.WorkflowSha,
+                TrustedProofPayloadBuildIdentity.SourceCommit))
+        {
+            return false;
+        }
+
+        return ActionHostTrustedWorkflowPolicy.TryValidateExact(
             source,
             policy,
             launch.ActionSourceSha,
             Render(launch.ActionSourceSha, launch.PayloadSha256),
             out evidence,
             out _);
+    }
 
     public bool IsPullRequestAdmitted(
         ActionHostGitHubRepositoryFact repository,
@@ -48,14 +58,7 @@ internal sealed class TrustedProofV2WorkflowAdmission :
             throw new ArgumentException("Workflow identities are invalid.");
         }
 
-        return Template.Value
-            .Replace(ActionHostTrustedWorkflowContract.ActionSourcePlaceholder,
-                actionSourceSha, StringComparison.Ordinal)
-            .Replace(PayloadSourcePlaceholder,
-                TrustedProofPayloadBuildIdentity.SourceCommit,
-                StringComparison.Ordinal)
-            .Replace(ActionHostTrustedWorkflowContract.PayloadShaPlaceholder,
-                payloadSha256, StringComparison.Ordinal);
+        return Template.Value;
     }
 
     private static string LoadTemplate()
@@ -73,26 +76,16 @@ internal sealed class TrustedProofV2WorkflowAdmission :
             throw new InvalidOperationException("The v2 workflow template is invalid.");
         }
 
-        if (v2.Contains(PayloadSourcePlaceholder, StringComparison.Ordinal) is false ||
-            Count(v2, PayloadSourcePlaceholder) != 5)
+        if (v2.Contains("__PAYLOAD_SOURCE_SHA__", StringComparison.Ordinal) ||
+            v2.Contains(ActionHostTrustedWorkflowContract.ActionSourcePlaceholder,
+                StringComparison.Ordinal) ||
+            v2.Contains(ActionHostTrustedWorkflowContract.PayloadShaPlaceholder,
+                StringComparison.Ordinal))
         {
             throw new InvalidOperationException("The v2 workflow topology is invalid.");
         }
 
         return v2;
-    }
-
-    private static int Count(string value, string needle)
-    {
-        var count = 0;
-        for (var index = 0;
-             (index = value.IndexOf(needle, index, StringComparison.Ordinal)) >= 0;
-             index += needle.Length)
-        {
-            count++;
-        }
-
-        return count;
     }
 
     private static bool IsLowerHex(string value, int length) =>

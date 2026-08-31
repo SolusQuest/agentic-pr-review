@@ -14,6 +14,10 @@ internal static class FrameworkCanaries
         "proof-owner/apr178-repository-canary";
     internal const string ProofControlRepository =
         "SolusQuest/agentic-pr-review";
+    internal const string ProofOperationId =
+        "1111111111111111111111111111111111111111111111111111111111111111";
+    internal const string StaleProofOperationId =
+        "7777777777777777777777777777777777777777777777777777777777777777";
     internal const string ReviewedPath =
         "proof/apr178-path-canary.txt";
     internal const string Workflow =
@@ -32,7 +36,10 @@ internal static class FrameworkCanaries
         "APR178_SIGNED_URL_SIG_CANARY";
     internal const string OutputSentinel =
         "APR178_OUTPUT_SENTINEL\n";
-    internal const string BuildDiscriminator = "r4-w2";
+    // The generic E1 verifier uses an uncommitted, proof-only wrapper. It must
+    // never claim the trusted product-wrapper identity.
+    internal const string FrameworkFixtureBuildDiscriminator = "r4-h1";
+    internal const string TrustedProofBuildDiscriminator = "r4-w2";
     internal const string RunBackendId =
         "apr178-proof-run-backend-id";
     internal const string JobBackendId =

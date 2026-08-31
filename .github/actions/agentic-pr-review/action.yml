@@ -5,7 +5,7 @@ inputs:
     description: GitHub token supplied only to supported trusted routes.
     required: false
   provider-api-key:
-    description: DeepSeek API key supplied only to the provider transport on supported trusted routes.
+    description: Private provider credential or trusted-proof canary supplied only to the selected provider boundary.
     required: false
   state-key:
     description: Current downstream-owned state encryption key for supported trusted routes.

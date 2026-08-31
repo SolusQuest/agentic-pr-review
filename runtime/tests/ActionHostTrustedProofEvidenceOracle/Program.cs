@@ -33,6 +33,11 @@ internal sealed record OracleOwnershipEvidence(
     string EncryptedObjectSha256,
     string EncryptedObjectSize);
 
+internal sealed record OracleMaintainerHandoff(
+    string ArtifactId,
+    string Disposition,
+    string Reason);
+
 internal sealed record OracleDocument(
     string Kind,
     string CaptureManifestSha256,
@@ -42,7 +47,8 @@ internal sealed record OracleDocument(
     string ProductionAssemblySha256,
     bool ExactSevenSuccess,
     bool RecoveryOnly,
-    OracleRecord[] Records);
+    OracleRecord[] Records,
+    OracleMaintainerHandoff[] MaintainerHandoff);
 
 internal static class Program
 {
@@ -55,9 +61,10 @@ internal static class Program
         byte[] current = [];
         byte[]? previous = null;
         RestrictedEvidenceRoot? root = null;
+        CredentialAdmissionMaterialization? admission = null;
+        var completed = false;
         string? currentCredentialPath = null;
         string? previousCredentialPath = null;
-        var credentialLeaseLaunchAttempted = false;
         CredentialFileRepresentations? currentRepresentations = null;
         CredentialFileRepresentations? previousRepresentations = null;
         var operation = Stopwatch.StartNew();
@@ -116,30 +123,23 @@ internal static class Program
                 {
                     CryptographicOperations.ZeroMemory(canonical);
                 }
-                if (manifest.Kind != "apr-r4-e3-capture-manifest-v1" ||
-                     manifest.OperationIds.Length != 2 ||
-                     manifest.OperationIds.Distinct(StringComparer.Ordinal).Count() != 2 ||
-                     manifest.OperationRuns.Length != 4 ||
-                     manifest.OperationRuns.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() != 4 ||
-                     manifest.OperationRuns.Any(item =>
-                         !manifest.OperationIds.Contains(item.OperationId, StringComparer.Ordinal) ||
-                         !new[] { "normal", "stale" }.Contains(item.Scope, StringComparer.Ordinal) ||
-                         !PositiveDecimal(item.RunId) ||
-                         item.RunAttempt != "1") ||
-                     manifest.OperationRuns.GroupBy(item => item.OperationId, StringComparer.Ordinal)
-                         .Any(group => group.Count() != 2 ||
-                             group.Select(item => item.Scope).Distinct(StringComparer.Ordinal).Count() != 1) ||
-                     manifest.Sources.Length == 0 ||
-                    manifest.Artifacts.Length == 0 ||
-                    manifest.Artifacts.Select(item => item.ArtifactId).Distinct(StringComparer.Ordinal).Count() != manifest.Artifacts.Length ||
-                    manifest.Artifacts.Select(item => item.ArtifactName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Artifacts.Length)
-                {
-                    throw new InvalidDataException("capture_manifest_invalid");
-                }
+                OracleCaptureAdmission.Validate(manifest);
+                PhaseFragmentJournal.Validate(root, options["--capture-manifest"], manifest);
+                ProducerOutcomeJournal.ValidateCapture(root, manifest);
             }
             finally
             {
                 CryptographicOperations.ZeroMemory(manifestBytes);
+            }
+
+            admission = CredentialAdmissionReceipt.Read(
+                root,
+                options["--credential-admission-receipt"],
+                manifest.OperationIds);
+            var oracleIdentity = admission.Document.Consumers.Single(item => item.Component == "oracle");
+            if (oracleIdentity.BuildSha256 != AssemblyDigest(oracleAssembly))
+            {
+                throw new InvalidDataException("credential_admission_invalid");
             }
 
             currentCredentialPath = options["--current-state-key-file"];
@@ -160,6 +160,15 @@ internal static class Program
                 {
                     throw new InvalidDataException("state_keys_duplicate");
                 }
+            }
+            var admittedIdentities = CredentialAdmissionReceipt.AuthorizedIdentities(admission.Document);
+            if (!admittedIdentities.TryGetValue("current-state-key", out var expectedCurrent) ||
+                expectedCurrent != currentRepresentations.PhysicalIdentitySha256 ||
+                (previousRepresentations is null) != !admittedIdentities.ContainsKey("previous-state-key") ||
+                previousRepresentations is not null &&
+                    admittedIdentities["previous-state-key"] != previousRepresentations.PhysicalIdentitySha256)
+            {
+                throw new InvalidDataException("credential_admission_invalid");
             }
 
             var encrypted = new List<TrustedProofEncryptedArtifact>(manifest.Artifacts.Length);
@@ -243,17 +252,14 @@ internal static class Program
                         CryptographicOperations.ZeroMemory(archive.Bytes);
                     }
                 }
-                if (!TrustedProofEvidenceCodecOracle.TryDecode(
+                if (!TryDecodeForDisposition(
+                        manifest.Disposition,
                         manifest.RepositoryId,
                         Convert.ToBase64String(current),
-                         previous is null ? null : Convert.ToBase64String(previous),
-                         encrypted,
-                         manifest.OperationRuns.Select(item => new TrustedProofOperationRun(
-                             item.OperationId,
-                             item.Scope,
-                             item.RunId,
-                             long.Parse(item.RunAttempt))).ToArray(),
-                         out var decoded) ||
+                        previous is null ? null : Convert.ToBase64String(previous),
+                        encrypted,
+                        OperationAuthority(manifest),
+                        out var decoded) ||
                     decoded is null)
                 {
                     throw new InvalidDataException("codec_oracle_invalid");
@@ -270,23 +276,27 @@ internal static class Program
                     productionAssemblySha256,
                     decoded.ExactSevenSuccess,
                     decoded.RecoveryOnly,
-                     decoded.Records.Select(record =>
-                     {
-                         var artifact = manifest.Artifacts.Single(item =>
-                             StringComparer.Ordinal.Equals(item.ArtifactId, record.ArtifactId));
-                         return new OracleRecord(
-                             record.ArtifactId,
-                             record.Role,
-                             record.Scope,
-                             record.BaseScopeDigest,
-                             record.ObjectClass,
-                             record.ObjectIdentity,
-                             record.ProducingRunIdentity,
-                             record.ProducingRunAttempt.ToString(),
-                             record.OperationId,
-                             OwnershipEvidenceSha256(record, artifact),
-                             record.PayloadSha256);
-                     }).ToArray());
+                    decoded.Records.Select(record =>
+                    {
+                        var artifact = manifest.Artifacts.Single(item =>
+                            StringComparer.Ordinal.Equals(item.ArtifactId, record.ArtifactId));
+                        return new OracleRecord(
+                            record.ArtifactId,
+                            record.Role,
+                            record.Scope,
+                            record.BaseScopeDigest,
+                            record.ObjectClass,
+                            record.ObjectIdentity,
+                            record.ProducingRunIdentity,
+                            record.ProducingRunAttempt.ToString(),
+                            record.OperationId,
+                            OwnershipEvidenceSha256(record, artifact),
+                            record.PayloadSha256);
+                    }).ToArray(),
+                    decoded.MaintainerHandoff.Select(item => new OracleMaintainerHandoff(
+                        item.ArtifactId,
+                        "non-deletable-maintainer-handoff",
+                        item.Reason)).ToArray());
                 var output = CanonicalEvidence.Encode(document, EvidenceJson.Options);
                 try
                 {
@@ -306,35 +316,7 @@ internal static class Program
                 {
                     throw new InvalidDataException("codec_oracle_timeout");
                 }
-                var specs = new List<CredentialLeaseSpec>
-                {
-                    new(currentCredentialPath, Base64Key: true),
-                };
-                var representations = new List<CredentialFileRepresentations>
-                {
-                    currentRepresentations,
-                };
-                if (previousCredentialPath is not null && previousRepresentations is not null)
-                {
-                    specs.Add(new(previousCredentialPath, Base64Key: true));
-                    representations.Add(previousRepresentations);
-                }
-                credentialLeaseLaunchAttempted = true;
-                CredentialLeaseAuthorityClient.LaunchCurrentProcess(
-                    root,
-                    options["--destination-identity"],
-                    [options["--repository-root"], options["--worktree-root"]],
-                    CredentialLeaseAuthorityClient.StateKeyDescriptorName,
-                    specs,
-                    representations,
-                    timeouts: CredentialLeaseAuthorityTimeouts.OracleSuccessor);
-
-                currentCredentialPath = null;
-                if (previousCredentialPath is not null)
-                {
-                    previousCredentialPath = null;
-                }
-
+                completed = true;
                 Console.Out.WriteLine("APR_R4_E3_CODEC_ORACLE_OK");
                 return 0;
             }
@@ -373,65 +355,81 @@ internal static class Program
             {
                 CryptographicOperations.ZeroMemory(previous);
             }
-            if (root is not null && currentCredentialPath is not null)
+            if (!completed && root is not null && admission is not null)
             {
-                if (credentialLeaseLaunchAttempted)
-                {
-                    try
-                    {
-                        var specs = new List<CredentialLeaseSpec>
-                        {
-                            new(currentCredentialPath, Base64Key: true),
-                        };
-                        if (previousCredentialPath is not null)
-                        {
-                            specs.Add(new(previousCredentialPath, Base64Key: true));
-                        }
-                        CredentialLeaseAuthorityClient.DeleteAbandoned(
-                            root,
-                            CredentialLeaseAuthorityClient.StateKeyDescriptorName,
-                            specs);
-                    }
-                    catch (Exception exception) when (
-                        exception is InvalidDataException or IOException or UnauthorizedAccessException)
-                    {
-                        // Never fall back to pathname deletion after lease authority was attempted.
-                    }
-                }
-                else
-                {
-                    if (currentRepresentations is not null)
-                    {
-                        TryDeleteExactCredential(currentRepresentations);
-                    }
-                    if (previousRepresentations is not null)
-                    {
-                        TryDeleteExactCredential(previousRepresentations);
-                    }
-                }
+                DeleteAbandonedCredentials(root, admission.Document);
             }
             currentRepresentations?.Dispose();
             previousRepresentations?.Dispose();
         }
     }
 
-    private static void TryDeleteExactCredential(CredentialFileRepresentations value)
+    internal static bool TryDecodeForDisposition(
+        string disposition,
+        string repositoryId,
+        string currentKeyBase64,
+        string? previousKeyBase64,
+        IReadOnlyList<TrustedProofEncryptedArtifact> artifacts,
+        IReadOnlyList<TrustedProofOperationRun> operationRuns,
+        out TrustedProofCodecOracleResult? result) => disposition switch
+        {
+            "success-candidate" => TrustedProofEvidenceCodecOracle.TryDecode(
+                repositoryId,
+                currentKeyBase64,
+                previousKeyBase64,
+                artifacts,
+                operationRuns,
+                out result),
+            "recovery-only" => TrustedProofEvidenceCodecOracle.TryDecodeRecovery(
+                repositoryId,
+                currentKeyBase64,
+                previousKeyBase64,
+                artifacts,
+                operationRuns,
+                out result),
+            _ => InvalidDisposition(out result),
+        };
+
+    internal static TrustedProofOperationRun[] OperationAuthority(CaptureManifestDocument manifest) =>
+        manifest.ObservedRuns
+            .Where(item => item.Ownership == "operation-owned")
+            .Select(item => new TrustedProofOperationRun(
+                item.OperationId,
+                item.Scope,
+                item.RunId,
+                long.Parse(item.RunAttempt)))
+            .ToArray();
+
+    private static bool InvalidDisposition(out TrustedProofCodecOracleResult? result)
     {
-        try
+        result = null;
+        return false;
+    }
+
+    private static void DeleteAbandonedCredentials(
+        RestrictedEvidenceRoot root,
+        CredentialAdmissionDocument admission)
+    {
+        var keySpecs = admission.CreatedSlots
+            .Where(slot => slot.Name != "github-token")
+            .Select(slot => new CredentialLeaseSpec(slot.Name, Base64Key: true))
+            .ToArray();
+        foreach (var item in new[]
         {
-            value.DeleteExactIdentity();
-        }
-        catch (InvalidDataException)
+            (Descriptor: CredentialLeaseAuthorityClient.GitHubDescriptorName,
+                Specs: new[] { new CredentialLeaseSpec("github-token", Base64Key: false) }),
+            (Descriptor: CredentialLeaseAuthorityClient.StateKeyDescriptorName, Specs: keySpecs),
+        })
         {
-            // Failure is already terminal; do not replace the stable non-leaking error marker.
-        }
-        catch (IOException)
-        {
-            // Failure is already terminal; do not replace the stable non-leaking error marker.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Failure is already terminal; do not replace the stable non-leaking error marker.
+            try
+            {
+                CredentialLeaseAuthorityClient.DeleteAbandoned(root, item.Descriptor, item.Specs);
+            }
+            catch (Exception exception) when (
+                exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                // Never fall back to pathname deletion after guardian admission.
+            }
         }
     }
 
@@ -459,6 +457,7 @@ internal static class Program
             "--capture-manifest-sha256",
             "--oracle-source-sha",
             "--oracle-source-tree",
+            "--credential-admission-receipt",
             "--current-state-key-file",
             "--output",
         };

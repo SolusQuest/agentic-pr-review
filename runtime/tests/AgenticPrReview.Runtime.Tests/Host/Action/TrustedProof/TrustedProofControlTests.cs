@@ -88,6 +88,8 @@ public sealed class TrustedProofControlTests
         Assert.Equal(0, exit);
         Assert.All(handler.Requests, request =>
             Assert.Equal(HttpMethod.Get, request.Method));
+        Assert.All(handler.Requests, request =>
+            Assert.Equal("trusted_control_rest", request.Domain));
         Assert.Contains(handler.Requests, request =>
             request.Path.Contains(
                 "/collaborators/maintainer/permission",
@@ -115,6 +117,25 @@ public sealed class TrustedProofControlTests
             request.Path.EndsWith("/pulls/147", StringComparison.Ordinal)));
         Assert.DoesNotContain(handler.Requests, request =>
             request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task FixturePullRequestPreflightIsTaggedAsControlOnly()
+    {
+        var budget = new TrustedProofControlRequestBudget(maximumRequests: 1);
+        var handler = new DomainRecordingHandler();
+
+        var result = await TrustedProofControlTransport.ReadFixturePullRequestAsync(
+            Coordinates.Repository,
+            Coordinates.PullRequestNumber,
+            "github-token-canary",
+            handler,
+            budget,
+            CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(1, budget.Consumed);
+        Assert.Equal("trusted_control_rest", handler.Domain);
     }
 
     [Fact]
@@ -203,6 +224,116 @@ public sealed class TrustedProofControlTests
             Coordinates,
             transport,
             CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HoldPollingCannotExceedSharedRequestBudget()
+    {
+        var ready = Comment(
+            10,
+            TrustedProofControlMarker.CreateBody(
+                "ready",
+                Coordinates,
+                predecessorCommentId: null),
+            "proof-bot");
+        var handler = new ControlHandler([ready]);
+        var budget = new TrustedProofControlRequestBudget(maximumRequests: 6);
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler,
+            budget);
+        var delays = new List<TimeSpan>();
+
+        var exit = await TrustedProofControlService.RunAsync(
+            ["hold"],
+            Coordinates,
+            transport,
+            CancellationToken.None,
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        Assert.Equal(1, exit);
+        Assert.Equal(6, budget.Consumed);
+        Assert.Equal(6, handler.Requests.Count);
+        Assert.Equal([TimeSpan.FromSeconds(2)], delays);
+    }
+
+    [Fact]
+    public async Task ListChargesEveryPageAgainstSharedRequestBudget()
+    {
+        var handler = new FullPageControlHandler();
+        var budget = new TrustedProofControlRequestBudget(maximumRequests: 10);
+        using var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler,
+            budget);
+
+        Assert.Null(await transport.ListAsync(CancellationToken.None));
+        Assert.Equal(10, budget.Consumed);
+        Assert.Equal(10, handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(403, true)]
+    [InlineData(429, false)]
+    public async Task MutationRateLimitsAreClassifiedAndStopFurtherRequests(
+        int statusCode,
+        bool exhaustedHeader)
+    {
+        var handler = new RateLimitedControlHandler(
+            (HttpStatusCode)statusCode,
+            exhaustedHeader);
+        using var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler);
+
+        var creation = await transport.CreateAsync("body", CancellationToken.None);
+        var deletion = await transport.DeleteAsync(10, CancellationToken.None);
+
+        Assert.Equal(TrustedProofMutationOutcome.RateLimited, creation.Outcome);
+        Assert.Equal(TrustedProofMutationOutcome.RateLimited, deletion);
+        Assert.Equal(1, handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.NotModified)]
+    public async Task MalformedSuccessOr304ResponseDoesNotReachControlConsumer(
+        HttpStatusCode status)
+    {
+        var handler = new MalformedSuccessControlHandler(status);
+        var budget = new TrustedProofControlRequestBudget(maximumRequests: 4);
+        using var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler,
+            budget);
+
+        Assert.Null(await transport.ListAsync(CancellationToken.None));
+        Assert.True(budget.IsRateLimited);
+        Assert.Equal(1, handler.Requests);
+    }
+
+    [Fact]
+    public void PollingBackoffIsBoundedAtOneMinute()
+    {
+        var delays = new List<TimeSpan>();
+        var current = TimeSpan.FromSeconds(2);
+        for (var index = 0; index < 8; index++)
+        {
+            delays.Add(current);
+            current = TrustedProofControlService.NextPollDelay(current);
+        }
+
+        Assert.Equal(
+            [2, 4, 8, 16, 32, 60, 60, 60],
+            delays.Select(delay => delay.TotalSeconds));
     }
 
     [Fact]
@@ -398,7 +529,7 @@ public sealed class TrustedProofControlTests
                 pullRequestBaseShas ?? [Coordinates.WorkflowSha]);
         }
 
-        internal List<(HttpMethod Method, string Path)> Requests { get; } = [];
+        internal List<(HttpMethod Method, string Path, string? Domain)> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -406,7 +537,10 @@ public sealed class TrustedProofControlTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             var path = request.RequestUri!.PathAndQuery;
-            Requests.Add((request.Method, path));
+            request.Options.TryGetValue(
+                TrustedProofOperationRequestAccounting.WitnessDomainOption,
+                out string? domain);
+            Requests.Add((request.Method, path, domain));
             if (request.Method == HttpMethod.Get &&
                 path.EndsWith("/pulls/147", StringComparison.Ordinal))
             {
@@ -540,6 +674,23 @@ public sealed class TrustedProofControlTests
         }
     }
 
+    private sealed class DomainRecordingHandler : HttpMessageHandler
+    {
+        internal string? Domain { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            request.Options.TryGetValue(
+                TrustedProofOperationRequestAccounting.WitnessDomainOption,
+                out string? domain);
+            Domain = domain;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
     private sealed class OversizedControlHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
@@ -554,6 +705,131 @@ public sealed class TrustedProofControlTests
                     Encoding.UTF8,
                     "application/json"),
             });
+        }
+    }
+
+    private sealed class FullPageControlHandler : HttpMessageHandler
+    {
+        internal int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Requests++;
+            var page = int.Parse(
+                request.RequestUri!.Query.Split('&').Single(part =>
+                    part.StartsWith("page=", StringComparison.Ordinal))["page=".Length..],
+                System.Globalization.CultureInfo.InvariantCulture);
+            return Json(Enumerable.Range(1, 100).Select(index => Comment(
+                page * 1_000 + index,
+                "ordinary",
+                "proof-bot")).ToArray());
+        }
+    }
+
+    private sealed class RateLimitedControlHandler : HttpMessageHandler
+    {
+        private readonly HttpStatusCode statusCode;
+        private readonly bool exhaustedHeader;
+
+        internal RateLimitedControlHandler(
+            HttpStatusCode statusCode,
+            bool exhaustedHeader)
+        {
+            this.statusCode = statusCode;
+            this.exhaustedHeader = exhaustedHeader;
+        }
+
+        internal int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Requests++;
+            var response = new HttpResponseMessage(statusCode);
+            if (exhaustedHeader)
+            {
+                response.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
+            }
+
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class MalformedSuccessControlHandler(HttpStatusCode statusCode) :
+        HttpMessageHandler
+    {
+        internal int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Requests++;
+            var response = new HttpResponseMessage(statusCode)
+            {
+                Content = new ByteArrayContent(Encoding.UTF8.GetBytes("[]")),
+            };
+            response.Headers.TryAddWithoutValidation(
+                "x-ratelimit-remaining", "malformed");
+            response.Content.Headers.ContentType = new("application/json");
+            return Task.FromResult(response);
+        }
+    }
+
+    private static Task<HttpResponseMessage> Json<T>(T value)
+    {
+        var node = JsonNode.Parse(JsonSerializer.Serialize(value))!;
+        AddGitHubFields(node);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(node);
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(bytes)
+            {
+                Headers =
+                {
+                    ContentType = new("application/json"),
+                },
+            },
+        });
+    }
+
+    private static void AddGitHubFields(JsonNode node)
+    {
+        if (node is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                if (item is not null)
+                {
+                    AddGitHubFields(item);
+                }
+            }
+
+            return;
+        }
+
+        if (node is not JsonObject value)
+        {
+            return;
+        }
+
+        if (value.ContainsKey("id") && value.ContainsKey("body"))
+        {
+            value["url"] = "https://api.github.com/issues/comments/10";
+            value["node_id"] = "IC_test";
+            value["author_association"] = "MEMBER";
+            value["reactions"] = new JsonObject { ["total_count"] = 0 };
+            if (value["user"] is JsonObject user)
+            {
+                user["id"] = 100;
+                user["avatar_url"] = "https://avatars.example.test/100";
+            }
         }
     }
 }

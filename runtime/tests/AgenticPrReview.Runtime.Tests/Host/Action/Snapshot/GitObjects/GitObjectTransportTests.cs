@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Formats.Tar;
 using System.Globalization;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
@@ -135,6 +137,342 @@ public sealed partial class GitObjectTransportTests
         finally
         {
             Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveStagesOnlyRegularFilesAndVerifiesGitArchiveMetadata()
+    {
+        var regular = "regular"u8.ToArray();
+        var executable = "#!/bin/sh\necho trusted\n"u8.ToArray();
+        var symlinkTarget = "README.md"u8.ToArray();
+        var entries = new[]
+        {
+            ArchiveEntry("README.md", "100644", regular),
+            ArchiveEntry("COPY.md", "100644", regular),
+            ArchiveEntry("bin/run", "100755", executable),
+            ArchiveEntry("readme-link", "120000", symlinkTarget),
+        };
+        var archive = GzipTar(
+            DirectoryEntry("fixture-root/"),
+            FileEntry("fixture-root/README.md", regular, 0x1b4),
+            FileEntry("fixture-root/COPY.md", regular, 0x1b4),
+            DirectoryEntry("fixture-root/bin/"),
+            FileEntry("fixture-root/bin/run", executable, 0x1fd),
+            SymlinkEntry("fixture-root/readme-link", "README.md", 0x1ff));
+        var attempt = await StageHeadArchive(entries, archive);
+        try
+        {
+            var batch = Assert.IsType<ReviewedHeadArchiveBatch>(
+                attempt.Result.Value);
+            Assert.Equal(2, batch.StagedBySha.Count);
+            Assert.DoesNotContain(GitBlobSha(symlinkTarget),
+                batch.StagedBySha.Keys);
+            await AssertStagedBytes(batch.StagedBySha[GitBlobSha(regular)], regular);
+            await AssertStagedBytes(batch.StagedBySha[GitBlobSha(executable)], executable);
+
+            Assert.Equal(2, attempt.Handler.Requests.Count);
+            Assert.Contains("/tarball/", attempt.Handler.Requests[0].Uri,
+                StringComparison.Ordinal);
+            Assert.Equal("https://codeload.github.com",
+                attempt.Handler.Requests[1].Origin);
+            Assert.DoesNotContain("Authorization",
+                attempt.Handler.Requests[1].Headers.Keys,
+                StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(attempt.Handler.Requests, request =>
+                request.Uri.Contains("/git/blobs/", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Cleanup(attempt);
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveRejectsMissingExtraDuplicateTraversalAndNonRegularMembers()
+    {
+        var bytes = "trusted"u8.ToArray();
+        var expected = new[] { ArchiveEntry("README.md", "100644", bytes) };
+        var cases = new[]
+        {
+            GzipTar(DirectoryEntry("fixture-root/")),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                FileEntry("fixture-root/README.md", bytes, 0x1b4),
+                FileEntry("fixture-root/extra.md", bytes, 0x1b4)),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                FileEntry("fixture-root/README.md", bytes, 0x1b4),
+                FileEntry("fixture-root/README.md", bytes, 0x1b4)),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                FileEntry("fixture-root/../README.md", bytes, 0x1b4)),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                SymlinkEntry("fixture-root/README.md", "README.md", 0x1ff)),
+        };
+
+        foreach (var archive in cases)
+        {
+            var attempt = await StageHeadArchive(expected, archive);
+            try
+            {
+                Assert.Null(attempt.Result.Value);
+                Assert.Equal(ReviewedGitObjectFailure.IdentityMismatch,
+                    attempt.Result.Failure);
+            }
+            finally
+            {
+                Cleanup(attempt);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveRejectsWrongModeSizeAndGitBlobIdentity()
+    {
+        var bytes = "trusted"u8.ToArray();
+        var expected = new[] { ArchiveEntry("README.md", "100644", bytes) };
+        var wrongSha = new ReviewedHeadArchiveEntry(
+            "README.md", "100644", new string('e', 40), bytes.Length);
+        var cases = new[]
+        {
+            (expected, GzipTar(DirectoryEntry("fixture-root/"),
+                FileEntry("fixture-root/README.md", bytes, 0x1a4))),
+            (expected, GzipTar(DirectoryEntry("fixture-root/"),
+                FileEntry("fixture-root/README.md", "longer"u8.ToArray(), 0x1b4))),
+            (new[] { wrongSha }, GzipTar(DirectoryEntry("fixture-root/"),
+                FileEntry("fixture-root/README.md", bytes, 0x1b4))),
+        };
+
+        foreach (var testCase in cases)
+        {
+            var attempt = await StageHeadArchive(testCase.Item1, testCase.Item2);
+            try
+            {
+                Assert.Null(attempt.Result.Value);
+                Assert.Equal(ReviewedGitObjectFailure.IdentityMismatch,
+                    attempt.Result.Failure);
+            }
+            finally
+            {
+                Cleanup(attempt);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveRejectsSymlinkTargetOrMetadataMismatch()
+    {
+        var target = "README.md"u8.ToArray();
+        var expected = new[] { ArchiveEntry("readme-link", "120000", target) };
+        var cases = new[]
+        {
+            GzipTar(DirectoryEntry("fixture-root/"),
+                SymlinkEntry("fixture-root/readme-link", "other.md", 0x1ff)),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                SymlinkEntry("fixture-root/readme-link", "README.md", 0x1fd)),
+        };
+
+        foreach (var archive in cases)
+        {
+            var attempt = await StageHeadArchive(expected, archive);
+            try
+            {
+                Assert.Null(attempt.Result.Value);
+                Assert.Equal(ReviewedGitObjectFailure.IdentityMismatch,
+                    attempt.Result.Failure);
+            }
+            finally
+            {
+                Cleanup(attempt);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveRejectsDirectoryPayloadBeforeItCanConsumeInflatedBudget()
+    {
+        var bytes = "trusted"u8.ToArray();
+        var raw = RawTarDirectoryWithPayload("fixture-root/", "x"u8.ToArray());
+        var attempt = await StageHeadArchive(
+            [ArchiveEntry("README.md", "100644", bytes)], Gzip(raw));
+        try
+        {
+            Assert.Null(attempt.Result.Value);
+            Assert.Equal(ReviewedGitObjectFailure.IdentityMismatch,
+                attempt.Result.Failure);
+        }
+        finally
+        {
+            Cleanup(attempt);
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveRejectsDeclaredDirectoryBombBeforeReadingItsPayload()
+    {
+        var bytes = "trusted"u8.ToArray();
+        var raw = RawTarDirectoryWithDeclaredLength(
+            "fixture-root/",
+            checked((int)ReviewedContentLimits.HeadArchiveDecodedBytes));
+        var attempt = await StageHeadArchive(
+            [ArchiveEntry("README.md", "100644", bytes)], Gzip(raw));
+        try
+        {
+            Assert.Null(attempt.Result.Value);
+            Assert.Equal(ReviewedGitObjectFailure.IdentityMismatch,
+                attempt.Result.Failure);
+            Assert.Equal(2, attempt.Handler.Requests.Count);
+        }
+        finally
+        {
+            Cleanup(attempt);
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveTransportMemberCapAcceptsItsBoundaryAndRejectsOneExtraDirectory()
+    {
+        var atCap = BuildTransportCapArchive(extraDirectory: false);
+        var accepted = await StageHeadArchive(atCap.Entries, atCap.Archive);
+        try
+        {
+            Assert.NotNull(accepted.Result.Value);
+            Assert.True(accepted.Budget.TryGetRemaining(out var remaining));
+            Assert.Equal(
+                ReviewedContentLimits.GitObjectRequests - 2,
+                remaining!.Requests);
+            Assert.Equal(
+                ReviewedContentLimits.AggregateResponseBytes -
+                    atCap.Archive.Length,
+                remaining.ResponseBytes);
+            Assert.Equal("Bearer token-canary",
+                accepted.Handler.Requests[0].Header("Authorization"));
+            Assert.DoesNotContain("Authorization",
+                accepted.Handler.Requests[1].Headers.Keys,
+                StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Cleanup(accepted);
+        }
+
+        var capPlusOne = BuildTransportCapArchive(extraDirectory: true);
+        var rejected = await StageHeadArchive(
+            capPlusOne.Entries, capPlusOne.Archive);
+        try
+        {
+            Assert.Null(rejected.Result.Value);
+            Assert.Equal(ReviewedGitObjectFailure.UnsupportedSize,
+                rejected.Result.Failure);
+            Assert.Equal(2, rejected.Handler.Requests.Count);
+        }
+        finally
+        {
+            Cleanup(rejected);
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveRequiresEveryCanonicalDirectoryExactlyOnce()
+    {
+        var bytes = "trusted"u8.ToArray();
+        var expected = new[] { ArchiveEntry("bin/run", "100644", bytes) };
+        var cases = new[]
+        {
+            // Root and each logical parent are part of the physical archive
+            // inventory; neither may be silently inferred from a file entry.
+            GzipTar(DirectoryEntry("fixture-root/bin/"),
+                FileEntry("fixture-root/bin/run", bytes, 0x1b4)),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                FileEntry("fixture-root/bin/run", bytes, 0x1b4)),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                DirectoryEntry("fixture-root/"),
+                DirectoryEntry("fixture-root/bin/"),
+                FileEntry("fixture-root/bin/run", bytes, 0x1b4)),
+            Gzip(RawTarDirectoryWithPayload("fixture-root", Array.Empty<byte>())),
+            Gzip(RawTarDirectoryWithPayload("fixture-root//", Array.Empty<byte>())),
+            GzipTar(DirectoryEntry("fixture-root/"),
+                DirectoryEntry("fixture-root/bin/"),
+                FileEntry("fixture-root/bin/run/", bytes, 0x1b4)),
+        };
+
+        foreach (var archive in cases)
+        {
+            var attempt = await StageHeadArchive(expected, archive);
+            try
+            {
+                Assert.Null(attempt.Result.Value);
+                Assert.Equal(ReviewedGitObjectFailure.IdentityMismatch,
+                    attempt.Result.Failure);
+            }
+            finally
+            {
+                Cleanup(attempt);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DecodedArchiveLimitMapsToUnsupportedSizeInSnapshotTransport()
+    {
+        var invocation = await AuthorizedInvocation();
+        var parent = CreateTemporaryDirectory();
+        var budget = ProductionBudget();
+        var staging = ReviewedSnapshotTestAccess.Staging(parent, budget);
+        try
+        {
+            using var transport = ReviewedSnapshotTestAccess.Transport(
+                invocation, budget, new ArchiveReadFailureTransport(
+                    ActionHostGitArchiveReadFailure.DecodedLimitExceeded));
+            var result = await transport.StageHeadRegularBlobsAsync(
+                [ArchiveEntry("README.md", "100644", "trusted"u8.ToArray())],
+                staging,
+                CancellationToken.None);
+
+            Assert.Null(result.Value);
+            Assert.Equal(ReviewedGitObjectFailure.UnsupportedSize,
+                result.Failure);
+            Assert.True(budget.TryGetRemaining(out var remaining));
+            Assert.Equal(ReviewedContentLimits.GitObjectRequests - 2,
+                remaining!.Requests);
+        }
+        finally
+        {
+            staging.Cleanup();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task HeadArchiveRejectsSizeAndRequestLimitWithoutBlobFallback()
+    {
+        var bytes = "trusted"u8.ToArray();
+        var archive = GzipTar(DirectoryEntry("fixture-root/"),
+            FileEntry("fixture-root/README.md", bytes, 0x1b4));
+        var oversize = new ReviewedHeadArchiveEntry("README.md", "100644",
+            GitBlobSha(bytes), ReviewedContentLimits.HeadBlobBytes + 1);
+        var beforeSend = await StageHeadArchive([oversize], archive);
+        try
+        {
+            Assert.Equal(ReviewedGitObjectFailure.InvalidRequest,
+                beforeSend.Result.Failure);
+            Assert.Empty(beforeSend.Handler.Requests);
+        }
+        finally
+        {
+            Cleanup(beforeSend);
+        }
+
+        var requestLimited = await StageHeadArchive(
+            [ArchiveEntry("README.md", "100644", bytes)], archive,
+            maximumRequests: 1);
+        try
+        {
+            Assert.Equal(ReviewedGitObjectFailure.UnsupportedSize,
+                requestLimited.Result.Failure);
+            Assert.Empty(requestLimited.Handler.Requests);
+        }
+        finally
+        {
+            Cleanup(requestLimited);
         }
     }
 
@@ -434,7 +772,7 @@ public sealed partial class GitObjectTransportTests
     }
 
     [Fact]
-    public async Task RateLimitIsNotRetriedAndReturnsNoValue()
+    public async Task IncompleteRateEvidenceIsNotRetriedAndReturnsNoValue()
     {
         var invocation = await AuthorizedInvocation();
         var handler = new CapturingHandler(_ => new HttpResponseMessage(
@@ -448,7 +786,7 @@ public sealed partial class GitObjectTransportTests
         var result = await transport.GetCommitAsync(CancellationToken.None);
 
         Assert.Null(result.Value);
-        Assert.Equal(ReviewedGitObjectFailure.RateLimited, result.Failure);
+        Assert.Equal(ReviewedGitObjectFailure.InvalidResponse, result.Failure);
         Assert.Single(handler.Requests);
     }
 
@@ -495,6 +833,240 @@ public sealed partial class GitObjectTransportTests
             ReviewedContentLimits.AggregateResponseBytes,
             TimeSpan.FromMilliseconds(50),
             TimeProvider.System);
+
+    private static ReviewedHeadArchiveEntry ArchiveEntry(
+        string path,
+        string mode,
+        byte[] bytes) => new(path, mode, GitBlobSha(bytes), bytes.Length);
+
+    private static async Task<ArchiveAttempt> StageHeadArchive(
+        IReadOnlyList<ReviewedHeadArchiveEntry> entries,
+        byte[] archive,
+        int maximumRequests = ReviewedContentLimits.GitObjectRequests)
+    {
+        var invocation = await AuthorizedInvocation();
+        var parent = CreateTemporaryDirectory();
+        var budget = ReviewedSnapshotTestAccess.Budget(
+            maximumRequests,
+            ReviewedContentLimits.GitObjectResponseBytes,
+            ReviewedContentLimits.AggregateResponseBytes,
+            ReviewedContentLimits.AcquisitionAndMaterializationTimeout,
+            TimeProvider.System);
+        var staging = ReviewedSnapshotTestAccess.Staging(parent, budget);
+        var handler = new CapturingHandler(request =>
+        {
+            if (StringComparer.Ordinal.Equals(
+                    request.RequestUri!.Host, "api.github.com"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri(
+                            "https://codeload.github.com/SolusQuest/agentic-pr-review/legacy.tar.gz/" +
+                            ActionHostAuthorizationScenario.HeadSha),
+                    },
+                };
+            }
+
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(archive),
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue(
+                "application/x-gzip");
+            return response;
+        });
+        using var transport = ReviewedSnapshotTestAccess.Transport(
+            invocation, Token(), budget, handler);
+        var result = await transport.StageHeadRegularBlobsAsync(
+            entries, staging, CancellationToken.None);
+        return new ArchiveAttempt(result, handler, staging, budget, parent);
+    }
+
+    private static async Task AssertStagedBytes(
+        ReviewedStagedBlob staged,
+        byte[] expected)
+    {
+        using var copied = new MemoryStream();
+        Assert.True(await staged.CopyVerifiedToAsync(copied,
+            CancellationToken.None));
+        Assert.Equal(expected, copied.ToArray());
+    }
+
+    private static void Cleanup(ArchiveAttempt attempt)
+    {
+        attempt.Staging.Cleanup();
+        Directory.Delete(attempt.Parent, recursive: true);
+    }
+
+    private static TarEntry DirectoryEntry(string name) =>
+        new PaxTarEntry(TarEntryType.Directory, name)
+        {
+            Mode = (UnixFileMode)0x1fd,
+        };
+
+    private static TarEntry FileEntry(
+        string name,
+        byte[] bytes,
+        int mode) => new PaxTarEntry(TarEntryType.RegularFile, name)
+        {
+            DataStream = new MemoryStream(bytes, writable: false),
+            Mode = (UnixFileMode)mode,
+        };
+
+    private static TarEntry SymlinkEntry(
+        string name,
+        string target,
+        int mode) => new PaxTarEntry(TarEntryType.SymbolicLink, name)
+        {
+            LinkName = target,
+            Mode = (UnixFileMode)mode,
+        };
+
+    private static byte[] GzipTar(params TarEntry[] entries) =>
+        GzipTar((IEnumerable<TarEntry>)entries);
+
+    private static byte[] GzipTar(IEnumerable<TarEntry> entries)
+    {
+        using var archive = new MemoryStream();
+        using (var gzip = new GZipStream(archive, CompressionLevel.SmallestSize,
+                   leaveOpen: true))
+        using (var writer = new TarWriter(gzip, leaveOpen: true))
+        {
+            foreach (var entry in entries)
+            {
+                writer.WriteEntry(entry);
+            }
+        }
+
+        return archive.ToArray();
+    }
+
+    private static byte[] Gzip(byte[] bytes)
+    {
+        using var archive = new MemoryStream();
+        using (var gzip = new GZipStream(archive, CompressionLevel.SmallestSize,
+                   leaveOpen: true))
+        {
+            gzip.Write(bytes);
+        }
+
+        return archive.ToArray();
+    }
+
+    private static byte[] RawTarDirectoryWithPayload(string name, byte[] payload)
+    {
+        var header = new byte[512];
+        WriteAscii(header, 0, 100, name);
+        WriteOctal(header, 100, 8, 0x1fd);
+        WriteOctal(header, 124, 12, payload.Length);
+        Array.Fill(header, (byte)' ', 148, 8);
+        header[156] = (byte)'5';
+        WriteAscii(header, 257, 6, "ustar");
+        header[263] = (byte)'0';
+        header[264] = (byte)'0';
+        var checksum = header.Sum(static value => value);
+        var checksumText = checksum.ToString("D6", CultureInfo.InvariantCulture) + "\0 ";
+        WriteAscii(header, 148, 8, checksumText);
+
+        using var stream = new MemoryStream();
+        stream.Write(header);
+        stream.Write(payload);
+        var padding = (512 - payload.Length % 512) % 512;
+        if (padding > 0)
+        {
+            stream.Write(new byte[padding]);
+        }
+
+        stream.Write(new byte[1024]);
+        return stream.ToArray();
+    }
+
+    private static byte[] RawTarDirectoryWithDeclaredLength(
+        string name,
+        int declaredLength)
+    {
+        var header = new byte[512];
+        WriteAscii(header, 0, 100, name);
+        WriteOctal(header, 100, 8, 0x1fd);
+        WriteOctal(header, 124, 12, declaredLength);
+        Array.Fill(header, (byte)' ', 148, 8);
+        header[156] = (byte)'5';
+        WriteAscii(header, 257, 6, "ustar");
+        header[263] = (byte)'0';
+        header[264] = (byte)'0';
+        var checksum = header.Sum(static value => value);
+        WriteAscii(header, 148, 8,
+            checksum.ToString("D6", CultureInfo.InvariantCulture) + "\0 ");
+
+        using var stream = new MemoryStream();
+        stream.Write(header);
+        stream.Write(new byte[1024]);
+        return stream.ToArray();
+    }
+
+    private static (IReadOnlyList<ReviewedHeadArchiveEntry> Entries,
+        byte[] Archive) BuildTransportCapArchive(bool extraDirectory)
+    {
+        var bytes = "x"u8.ToArray();
+        // This is an independent archive transport ceiling, not a derivation
+        // from the Git graph's unique-object budget.  More than 4,000 logical
+        // directories are intentionally admitted here.
+        var directories = 5_000;
+        var files = ReviewedContentLimits.HeadArchiveMembers - 1 - directories;
+        var entries = new List<ReviewedHeadArchiveEntry>(
+            files);
+        var members = new List<TarEntry>(
+            ReviewedContentLimits.HeadArchiveMembers +
+            (extraDirectory ? 1 : 0))
+        {
+            DirectoryEntry("fixture-root/"),
+        };
+        for (var directory = 0; directory < directories; directory++)
+        {
+            members.Add(DirectoryEntry(
+                "fixture-root/d" + directory.ToString("D4", CultureInfo.InvariantCulture) +
+                "/"));
+        }
+
+        for (var file = 0; file < files; file++)
+        {
+            var directory = file % directories;
+            var path = "d" + directory.ToString("D4", CultureInfo.InvariantCulture) +
+                "/f" + file.ToString("D5", CultureInfo.InvariantCulture);
+            entries.Add(ArchiveEntry(path, "100644", bytes));
+            members.Add(FileEntry("fixture-root/" + path, bytes, 0x1b4));
+        }
+
+        if (extraDirectory)
+        {
+            members.Add(DirectoryEntry("fixture-root/excess/"));
+        }
+
+        return (entries, GzipTar(members));
+    }
+
+    private static void WriteAscii(
+        byte[] destination,
+        int offset,
+        int length,
+        string value)
+    {
+        var bytes = Encoding.ASCII.GetBytes(value);
+        Assert.True(bytes.Length <= length);
+        bytes.CopyTo(destination, offset);
+    }
+
+    private static void WriteOctal(
+        byte[] destination,
+        int offset,
+        int length,
+        int value)
+    {
+        var text = Convert.ToString(value, 8)!.PadLeft(length - 1, '0') + "\0";
+        WriteAscii(destination, offset, length, text);
+    }
 
     private static async Task<(
         ReviewedStagedBlob Blob,
@@ -573,6 +1145,13 @@ public sealed partial class GitObjectTransportTests
         return path;
     }
 
+    private sealed record ArchiveAttempt(
+        ReviewedGitObjectResult<ReviewedHeadArchiveBatch> Result,
+        CapturingHandler Handler,
+        ReviewedBlobStagingLease Staging,
+        ReviewedContentBudget Budget,
+        string Parent);
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _response;
@@ -591,6 +1170,75 @@ public sealed partial class GitObjectTransportTests
         {
             Requests.Add(CapturedRequest.From(request));
             return Task.FromResult(_response(request));
+        }
+    }
+
+    private sealed class ArchiveReadFailureTransport :
+        IActionHostGitObjectTransport
+    {
+        private readonly ActionHostGitArchiveReadFailure _failure;
+
+        internal ArchiveReadFailureTransport(ActionHostGitArchiveReadFailure failure)
+        {
+            _failure = failure;
+        }
+
+        public Task<ActionHostGitObjectResult<ActionHostGitCommitObject>>
+            GetCommitObjectAsync(
+                string repositoryName,
+                string commitSha,
+                CancellationToken cancellationToken) =>
+            Task.FromResult(ActionHostGitObjectResult<ActionHostGitCommitObject>
+                .Failed(ActionHostGitObjectFailure.InvalidRequest));
+
+        public Task<ActionHostGitObjectResult<ActionHostGitTreeObject>>
+            GetTreeObjectAsync(
+                string repositoryName,
+                string treeSha,
+                CancellationToken cancellationToken) =>
+            Task.FromResult(ActionHostGitObjectResult<ActionHostGitTreeObject>
+                .Failed(ActionHostGitObjectFailure.InvalidRequest));
+
+        public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
+            GetBlobObjectAsync(
+                string repositoryName,
+                string blobSha,
+                ActionHostGitBlobReadBudget budget,
+                CancellationToken cancellationToken) =>
+            Task.FromResult(ActionHostGitObjectResult<ActionHostGitBlobObject>
+                .Failed(ActionHostGitObjectFailure.InvalidRequest));
+
+        public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+            GetHeadArchiveAsync(
+                string repositoryName,
+                string headSha,
+                CancellationToken cancellationToken) =>
+            Task.FromResult(ActionHostGitObjectResult<ActionHostGitArchiveReader>
+                .Success(new ArchiveReadFailureReader(_failure), 0));
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ArchiveReadFailureReader : ActionHostGitArchiveReader
+    {
+        private readonly ActionHostGitArchiveReadFailure _failure;
+
+        internal ArchiveReadFailureReader(ActionHostGitArchiveReadFailure failure)
+        {
+            _failure = failure;
+        }
+
+        internal override int CapturedResponseBytes => 0;
+
+        internal override Task<ActionHostGitArchiveEntry?> GetNextEntryAsync(
+            CancellationToken cancellationToken) =>
+            Task.FromException<ActionHostGitArchiveEntry?>(
+                new ActionHostGitArchiveReadException(_failure));
+
+        public override void Dispose()
+        {
         }
     }
 

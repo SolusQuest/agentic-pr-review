@@ -103,17 +103,18 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 The guard enumerates cached tracked files plus non-ignored untracked files with `git ls-files --cached --others --exclude-standard`. It skips binary or invalid-UTF-8 content and excludes exactly four paths from match discovery: the W2-owned derived bundle `.github/actions/agentic-pr-review/dist/index.js`, the lifecycle machinery `src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts`, and the W15-owned detector vectors `src/root-shared-module-retirement.test.ts`. It scans all remaining text and enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
-| Rules       | Owned residual                                 | Consumer and deletion gate                                                            |
-| ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| RR-001..002 | Exact direct-runtime selector vocabulary       | Permanent narrow C# schema and synthetic-fixture conformance                          |
-| RR-009      | S2 artifact-provenance and provider vocabulary | Permanent executable negative and transport evidence; preserve equivalent coverage    |
-| RR-014..030 | Governing or historical documentation          | Permanent path-specific status, owner, interpretation, and supersession records       |
-| RR-031      | Claude provider/model identity fixtures        | Permanent narrow synthetic C# protocol/ledger conformance                             |
-| RR-034      | Root `CLAUDE.md` entrypoint                    | Supported thin agent instruction entrypoint governed by collaboration policy          |
-| RR-037      | R3 single-shot removal handoff                 | Permanent checked deletion, retained-consumer, and later-owner record                 |
-| RR-038      | E1 base inventory and replacement record       | Permanent framework source/deletion evidence; W13 replacement must preserve the proof |
-| RR-039      | E1 architecture assertions                     | Permanent exact W3/W11 reference-set conformance; replace only with equivalent proof  |
-| RR-040      | E1 supervisor deletion assertions              | Permanent W6 absence and replacement evidence; replace only with equivalent proof     |
+| Rules       | Owned residual                                  | Consumer and deletion gate                                                            |
+| ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------- |
+| RR-001..002 | Exact direct-runtime selector vocabulary        | Permanent narrow C# schema and synthetic-fixture conformance                          |
+| RR-009      | S2 artifact-provenance and provider vocabulary  | Permanent executable negative and transport evidence; preserve equivalent coverage    |
+| RR-014..030 | Governing or historical documentation           | Permanent path-specific status, owner, interpretation, and supersession records       |
+| RR-031      | Claude provider/model identity fixtures         | Permanent narrow synthetic C# protocol/ledger conformance                             |
+| RR-034      | Root `CLAUDE.md` entrypoint                     | Supported thin agent instruction entrypoint governed by collaboration policy          |
+| RR-037      | R3 single-shot removal handoff                  | Permanent checked deletion, retained-consumer, and later-owner record                 |
+| RR-038      | E1 base inventory and replacement record        | Permanent framework source/deletion evidence; W13 replacement must preserve the proof |
+| RR-039      | E1 architecture assertions                      | Permanent exact W3/W11 reference-set conformance; replace only with equivalent proof  |
+| RR-040      | E1 supervisor deletion assertions               | Permanent W6 absence and replacement evidence; replace only with equivalent proof     |
+| RR-041      | Git-object Codeload route and verifier fixtures | Permanent narrow production-shaped archive redirect and download conformance          |
 
 Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
 

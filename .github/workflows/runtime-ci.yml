@@ -23,6 +23,10 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: R4 historical and prospective fixture admission
+        if: github.event_name == 'pull_request'
+        run: npm run r4:trusted-proof:fixture-admission
+
       - name: Install AOT build dependencies
         run: |
           sudo apt-get update
@@ -58,23 +62,11 @@ jobs:
       - name: R4 framework ActionHost replacement proof second fresh process
         run: bash runtime/scripts/verify-action-host.sh framework
 
-      - name: R4 Linux x64 Native AOT ActionHost proof first fresh process
-        run: |
-          set -o pipefail
-          bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-first.log"
+      - name: R4 generic Linux x64 Native AOT ActionHost conformance first fresh process
+        run: bash runtime/scripts/verify-action-host.sh aot
 
-      - name: R4 Linux x64 Native AOT ActionHost proof second fresh process
-        run: |
-          set -o pipefail
-          bash runtime/scripts/verify-action-host.sh aot | tee "$RUNNER_TEMP/r4-e2-aot-second.log"
-
-      - name: R4 Native AOT receipts are byte-identical
-        run: |
-          grep '^APR_R4_E2_RECEIPT ' "$RUNNER_TEMP/r4-e2-aot-first.log" > "$RUNNER_TEMP/r4-e2-aot-first.receipt"
-          grep '^APR_R4_E2_RECEIPT ' "$RUNNER_TEMP/r4-e2-aot-second.log" > "$RUNNER_TEMP/r4-e2-aot-second.receipt"
-          test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-first.receipt")" -eq 1
-          test "$(wc -l < "$RUNNER_TEMP/r4-e2-aot-second.receipt")" -eq 1
-          cmp "$RUNNER_TEMP/r4-e2-aot-first.receipt" "$RUNNER_TEMP/r4-e2-aot-second.receipt"
+      - name: R4 generic Linux x64 Native AOT ActionHost conformance second fresh process
+        run: bash runtime/scripts/verify-action-host.sh aot
 
   trusted-proof-payload:
     runs-on: ubuntu-24.04
@@ -124,55 +116,67 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Check out exact merged descendant payload source
-        uses: actions/checkout@v6
-        with:
-          ref: edc594c29a8a6b5fdacfab48643bf221277af200
-          path: payload-source
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Verify exact merged descendant payload source
+      - name: Verify exact event-selected payload source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          test "$(git -C payload-source rev-parse HEAD)" = "edc594c29a8a6b5fdacfab48643bf221277af200"
-          test "$(git -C payload-source rev-parse 'HEAD^{tree}')" = "8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$(git show -s --format=%T HEAD)"
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
 
-      - name: Install staged E2P Native AOT and network-audit dependencies
+      - run: npm ci
+
+      - name: Install current-head E2P Native AOT and network-audit dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang strace zlib1g-dev
 
-      - name: Set up exact staged R4 E2P .NET SDK
+      - name: Set up exact current-head R4 E2P .NET SDK
         uses: actions/setup-dotnet@v5
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-v2-dotnet
         with:
           dotnet-version: 10.0.109
 
-      - name: Staged R4 E2P first clean production and verifier Native AOT build
-        run: bash payload-source/runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
+      - name: Current-head R4 E2P first clean production and verifier Native AOT build
+        run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
 
-      - name: Staged R4 E2P second clean production and verifier Native AOT build
-        run: bash payload-source/runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
+      - name: Current-head R4 E2P second clean production and verifier Native AOT build
+        run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
 
-      - name: Staged R4 E2P receipts are byte-identical
+      - name: Current-head R4 E2P receipts and source identities are exact
         run: |
           grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
           grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
           cmp "$RUNNER_TEMP/r4-e2p-v2-first.receipt" "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
-          sed 's/^/APR_R4_E2P_RECEIPT_V2 /' \
-            runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json \
-            > "$RUNNER_TEMP/r4-e2p-v2-checked.receipt"
-          cmp "$RUNNER_TEMP/r4-e2p-v2-first.receipt" "$RUNNER_TEMP/r4-e2p-v2-checked.receipt"
+          node --input-type=module - \
+            "$RUNNER_TEMP/r4-e2p-v2-first.receipt" \
+            "$(git rev-parse HEAD)" \
+            "$(git rev-parse 'HEAD^{tree}')" <<'NODE'
+          import fs from 'node:fs';
+          const [receiptPath, sourceCommit, sourceTree] = process.argv.slice(2);
+          const prefix = 'APR_R4_E2P_RECEIPT_V2 ';
+          const line = fs.readFileSync(receiptPath, 'utf8');
+          if (!line.startsWith(prefix) || line.indexOf('\n') !== line.length - 1) {
+            throw new Error('The current-head receipt framing is invalid.');
+          }
+          const receipt = JSON.parse(line.slice(prefix.length));
+          if (receipt.source_commit !== sourceCommit ||
+              receipt.source_tree !== sourceTree ||
+              receipt.compiled_payload_source_commit !== sourceCommit ||
+              receipt.compiled_payload_source_tree !== sourceTree) {
+            throw new Error('The current-head receipt source identity is invalid.');
+          }
+          NODE
 
   integration:
     runs-on: ubuntu-latest

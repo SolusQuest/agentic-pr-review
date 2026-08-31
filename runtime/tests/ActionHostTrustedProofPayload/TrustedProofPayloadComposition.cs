@@ -11,27 +11,46 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 internal static class TrustedProofPayloadComposition
 {
     internal static ActionHostCompositionDependencies CreateProductionLike(
+        TrustedProofGitHubRequestBudget githubBudget,
+        TrustedProofPayloadRuntimePorts ports,
         ITrustedProofStaleSignal? staleSignal = null)
     {
-        var github = new ActionHostGitHubAuthorizationTransportFactory();
-        var publisher = new BoundedGitHubPublisherTransportFactory();
+        ArgumentNullException.ThrowIfNull(githubBudget);
+        ArgumentNullException.ThrowIfNull(ports);
+        var github = new ActionHostGitHubAuthorizationTransportFactory(
+            githubBudget.CreateOtherGitHubHandler);
+        // This capability is passed only to ReviewedTreeReader.  It labels
+        // the authenticated commit/tree/tarball acquisition of the frozen
+        // reviewed head; policy, base-diff, revalidation, and snapshot outer
+        // routes remain on the ordinary GitHub capability above.
+        var reviewedHeadSource = new ActionHostGitHubAuthorizationTransportFactory(
+            githubBudget.CreateHeadSourceHandler);
+        var publisher = new BoundedGitHubPublisherTransportFactory(
+            githubBudget.CreateHandler);
         var provider = new ActionHostDeepSeekProviderRunnerFactory(
-            credential => DeepSeekTransport.CreateForTesting(
-                credential,
-                new TrustedProofDeterministicDeepSeekHandler(
-                    credential.Value,
-                    staleSignal),
-                TimeSpan.FromSeconds(30)));
+            credential =>
+            {
+                HttpMessageHandler deterministic =
+                    new TrustedProofDeterministicDeepSeekHandler(
+                        credential.Value,
+                        staleSignal);
+                return DeepSeekTransport.CreateForTesting(
+                    credential,
+                    ports.WrapProviderHandler(deterministic),
+                    TimeSpan.FromSeconds(30));
+            });
         return new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,
             github,
             github,
-            new AcceptedStateProductionDependencies(github),
+            ports.CreateStateDependencies(github),
             publisher,
             provider,
-            TimeProvider.System,
-            inlineHook: new PostAcceptanceInlinePublisherHook(publisher),
-            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance);
+            ports.TimeProvider,
+            ports.StagingParentFactory,
+            new PostAcceptanceInlinePublisherHook(publisher),
+            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance,
+            reviewedHeadSourceFactory: reviewedHeadSource);
     }
 }

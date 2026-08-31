@@ -15,52 +15,40 @@ internal static class TrustedProofPayloadHost
 
     internal static async Task<int> RunAsync()
     {
+        if (!TrustedProofRequestBudgetProfile.TrySelectProduction(
+                Environment.GetEnvironmentVariable, out var requestBudgetProfile) ||
+            requestBudgetProfile is null)
+        {
+            return 1;
+        }
         using var signals = new CancellationTokenSource();
         using var sigterm = Register(PosixSignal.SIGTERM, signals);
         using var sigint = Register(PosixSignal.SIGINT, signals);
-        var input = Console.OpenStandardInput();
-        var output = Console.OpenStandardOutput();
-        var bytes = await ReadFrameAsync(
-            input,
-            ActionHostContractBounds.MaximumLaunchDocumentBytes,
-            CancellationToken.None).ConfigureAwait(false);
-        if (!TryReadLaunch(bytes, out var launch))
-        {
-            return 1;
-        }
-
-        using var coordinator = await TrustedProofStaleWindowCoordinator
-            .ResolveAsync(launch!, signals.Token).ConfigureAwait(false);
-        var dependencies = TrustedProofPayloadComposition.CreateProductionLike(
-            coordinator?.Signal);
-        var coordinatorTask = coordinator?.CoordinateAsync(signals.Token);
-        var completion = await new ActionHostComposition(dependencies)
-            .RunAsync(launch!, signals.Token)
-            .ConfigureAwait(false);
-        signals.Cancel();
-        if (coordinatorTask is not null &&
-            !await coordinatorTask.ConfigureAwait(false) &&
-            completion.ProcessExitCode == 0)
-        {
-            return 1;
-        }
-
-        return await WriteCompletionAsync(output, completion)
+        return await RunCoreAsync(
+                Console.OpenStandardInput(),
+                Console.OpenStandardOutput(),
+                static _ => Task.FromResult(
+                    TrustedProofPayloadRuntimePorts.Production),
+                signals.Token,
+                requestBudgetProfile)
             .ConfigureAwait(false);
     }
 
-    internal static async Task<int> RunAsync(
+    // This is deliberately the only payload execution path.  The native
+    // verifier supplies narrow outer ports; it cannot construct a composition,
+    // a coordinator, or an unmetered GitHub transport.
+    internal static async Task<int> RunCoreAsync(
         Stream input,
         Stream output,
-        ActionHostCompositionDependencies dependencies,
-        CancellationToken cancellationToken)
+        Func<ActionHostLaunchContract,
+            Task<TrustedProofPayloadRuntimePorts>> createPortsAsync,
+        CancellationToken cancellationToken,
+        TrustedProofRequestBudgetProfile? requestBudgetProfile = null)
     {
-        using var signals = new CancellationTokenSource();
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken,
-            signals.Token);
-        using var sigterm = Register(PosixSignal.SIGTERM, signals);
-        using var sigint = Register(PosixSignal.SIGINT, signals);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(createPortsAsync);
+        requestBudgetProfile ??= TrustedProofRequestBudgetProfile.Measurement;
         var bytes = await ReadFrameAsync(
             input,
             ActionHostContractBounds.MaximumLaunchDocumentBytes,
@@ -70,11 +58,80 @@ internal static class TrustedProofPayloadHost
             return 1;
         }
 
-        var completion = await new ActionHostComposition(dependencies)
-            .RunAsync(launch!, linked.Token)
-            .ConfigureAwait(false);
-        return await WriteCompletionAsync(output, completion)
-            .ConfigureAwait(false);
+        var ports = await createPortsAsync(launch!).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(ports);
+
+        // The host's head/other transports and embedded control requests use
+        // one token bucket.  Give all three views the same operation ledger;
+        // a standalone control transport still creates its own ledger by
+        // default for its independent caller boundary.
+        var primaryRemainingLedger = new TrustedProofPrimaryRemainingLedger();
+        var githubBudget = new TrustedProofGitHubRequestBudget(
+            TrustedProofGitHubRequestBudget.MaximumAuthenticatedRestRequests,
+            TrustedProofGitHubRequestBudget.MaximumAnonymousCodeloadRequests,
+            ports.CreateGitHubInnerHandler,
+            requestBudgetProfile.HostRemainingTailGuard,
+            remainingLedger: primaryRemainingLedger);
+        var controlBudget = new TrustedProofControlRequestBudget(
+            remainingTailGuard: requestBudgetProfile.HostRemainingTailGuard,
+            remainingLedger: primaryRemainingLedger);
+        TrustedProofStaleWindowCoordinator? coordinator = null;
+        Task<bool>? coordinatorTask = null;
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        try
+        {
+            coordinator = await TrustedProofStaleWindowCoordinator
+                .ResolveAsync(
+                    launch!,
+                    // Embedded stale control owns its separate ledger.  Giving
+                    // it a GitHub-budget handler would account each physical
+                    // request twice when the operation totals are assembled.
+                    ports.CreateGitHubInnerHandler,
+                    controlBudget,
+                    operation.Token).ConfigureAwait(false);
+            var dependencies = TrustedProofPayloadComposition.CreateProductionLike(
+                githubBudget,
+                ports,
+                coordinator?.Signal);
+            coordinatorTask = coordinator?.CoordinateAsync(operation.Token);
+            var completion = await new ActionHostComposition(dependencies)
+                .RunAsync(launch!, operation.Token)
+                .ConfigureAwait(false);
+            if (completion.ProcessExitCode != 0)
+            {
+                operation.Cancel();
+            }
+
+            var coordinatorSucceeded = coordinatorTask is null ||
+                await coordinatorTask.ConfigureAwait(false);
+            if (!coordinatorSucceeded && completion.ProcessExitCode == 0)
+            {
+                return 1;
+            }
+
+            return await WriteCompletionAsync(output, completion)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            operation.Cancel();
+            if (coordinatorTask is not null && !coordinatorTask.IsCompleted)
+            {
+                try
+                {
+                    await coordinatorTask.ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Preserve the primary Host failure while observing the
+                    // canceled coordinator task before its transport is disposed.
+                }
+            }
+            coordinator?.Dispose();
+            githubBudget.WriteReceipt(Console.Error);
+            controlBudget.WriteReceipt(Console.Error);
+        }
     }
 
     private static bool TryReadLaunch(

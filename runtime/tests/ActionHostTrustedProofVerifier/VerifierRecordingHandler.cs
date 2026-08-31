@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,14 @@ internal sealed class VerifierRecordingHandler(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
+        var dispatchTimestamp = Stopwatch.GetTimestamp();
+        var recordTrustedRequest = channel is "github" or "control" &&
+            request.RequestUri is { } requestUri && !string.Equals(
+                requestUri.Host, "codeload.github.com",
+                StringComparison.OrdinalIgnoreCase);
+        var trustedSequence = recordTrustedRequest
+            ? Increment("verifier-" + channel + "-event-sequence")
+            : 0;
         var sequence = channel == "provider"
             ? Increment("provider-request-count")
             : 0;
@@ -34,6 +43,12 @@ internal sealed class VerifierRecordingHandler(
 
         var response = await base.SendAsync(request, cancellationToken)
             .ConfigureAwait(false);
+        if (recordTrustedRequest)
+        {
+            await RecordTrustedProofRequestAsync(request, response,
+                dispatchTimestamp, trustedSequence, cancellationToken)
+                .ConfigureAwait(false);
+        }
         lock (Gate)
         {
             File.AppendAllText(
@@ -49,6 +64,59 @@ internal sealed class VerifierRecordingHandler(
         }
 
         return response;
+    }
+
+    // Persist only canonical, secret-free facts.  URI queries, headers,
+    // bodies, and credentials are intentionally outside the witness format.
+    private async Task RecordTrustedProofRequestAsync(
+        HttpRequestMessage request,
+        HttpResponseMessage response,
+        long dispatchTimestamp,
+        int localSequence,
+        CancellationToken cancellationToken)
+    {
+        if (request.RequestUri is not { } uri)
+        {
+            throw new InvalidOperationException("trusted request uri is missing");
+        }
+
+        if (!request.Options.TryGetValue(
+                TrustedProofOperationRequestAccounting.WitnessDomainOption,
+                out string? witnessedDomain) ||
+            witnessedDomain is not ("host_head_source_rest" or
+                "host_other_github_rest" or "trusted_control_rest") ||
+            (channel == "control" && witnessedDomain != "trusted_control_rest"))
+        {
+            throw new InvalidOperationException(
+                "github witness is missing canonical request domain");
+        }
+        var domain = witnessedDomain;
+        var method = request.Method.Method;
+        if (method is not ("GET" or "HEAD" or "OPTIONS" or "POST" or "PUT" or
+                "PATCH" or "DELETE"))
+        {
+            throw new InvalidOperationException("unexpected verifier request method");
+        }
+        var points = method is "GET" or "HEAD" or "OPTIONS" ? 1 : 5;
+        var classified = await TrustedProofOperationRequestAccounting
+            .ResponseClassifyAsync(response, cancellationToken)
+            .ConfigureAwait(false);
+        var responseClass = TrustedProofOperationRequestAccounting
+            .WitnessResponseClass(classified);
+        lock (Gate)
+        {
+            File.AppendAllText(
+                Path.Join(scenarioRoot, "verifier-" + channel + "-requests.tsv"),
+                string.Join('\t',
+                    "verifier_" + channel,
+                    localSequence.ToString(CultureInfo.InvariantCulture),
+                    domain,
+                    "github_rest",
+                    method,
+                    points.ToString(CultureInfo.InvariantCulture),
+                    dispatchTimestamp.ToString(CultureInfo.InvariantCulture),
+                    responseClass) + "\n");
+        }
     }
 
     private static async Task<string> ReadProviderRequestShapeAsync(

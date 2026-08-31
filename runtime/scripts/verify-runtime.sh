@@ -87,7 +87,7 @@ _assert_absent() {
 
 run_test() {
   _require_file "${TEST_PROJECT}"
-  dotnet test "${TEST_PROJECT}" --nologo
+  dotnet test "${TEST_PROJECT}" --nologo --maxcpucount:1
 }
 
 run_framework() {

@@ -23,7 +23,6 @@ golden="$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidenc
 record="$repo_root/runtime/tests/fixtures/action-host/framework/replacement-record.json"
 inventory="$repo_root/runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
 canaries="$repo_root/runtime/tests/fixtures/action-host/framework/canary-routes.tsv"
-receipt_contract="$repo_root/runtime/tests/fixtures/action-host/aot/receipt-contract.json"
 warning_policy="$repo_root/runtime/tests/fixtures/action-host/aot/warning-policy.txt"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/apr-action-host-${mode}.XXXXXXXX")"
 cleanup() {
@@ -57,14 +56,38 @@ import fs from 'node:fs';
 const [expectedPath, actualPath] = process.argv.slice(2);
 const expected = JSON.parse(fs.readFileSync(expectedPath, 'utf8'));
 const actual = JSON.parse(fs.readFileSync(actualPath, 'utf8'));
-const keys = [...new Set([...Object.keys(expected), ...Object.keys(actual)])]
-  .filter((key) => JSON.stringify(expected[key]) !== JSON.stringify(actual[key]))
-  .sort();
-const details = keys.map((key) =>
-  typeof expected[key] !== 'object' && typeof actual[key] !== 'object'
-    ? `${key}:${JSON.stringify(expected[key])}->${JSON.stringify(actual[key])}`
-    : key,
-);
+const maximumDetails = 256;
+const details = [];
+const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const encode = (value) => {
+  if (value === undefined) return '<missing>';
+  const encoded = JSON.stringify(value);
+  return encoded.length <= 160 ? encoded : `${encoded.slice(0, 157)}...`;
+};
+const visit = (left, right, location) => {
+  if (same(left, right) || details.length >= maximumDetails) return;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) {
+      details.push(`${location}.length:${left.length}->${right.length}`);
+    }
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+      visit(left[index], right[index], `${location}[${index}]`);
+    }
+    return;
+  }
+  if (
+    left !== null && right !== null &&
+    typeof left === 'object' && typeof right === 'object' &&
+    !Array.isArray(left) && !Array.isArray(right)
+  ) {
+    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+    for (const key of keys) visit(left[key], right[key], location ? `${location}.${key}` : key);
+    return;
+  }
+  details.push(`${location}:${encode(left)}->${encode(right)}`);
+};
+visit(expected, actual, '');
+if (!same(expected, actual) && details.length === maximumDetails) details.push('<truncated>');
 process.stderr.write(`APR_ACTION_HOST_FRAMEWORK_EVIDENCE_MISMATCH ${details.join(',')}\n`);
 NODE
     fi
@@ -96,9 +119,9 @@ if git -C "$repo_root" config --local --get-regexp \
 fi
 
 checked_bundle="$repo_root/.github/actions/agentic-pr-review/dist/index.js"
-action_metadata="$repo_root/.github/actions/agentic-pr-review/action.yml"
 publish_root="$temporary_root/payload"
 payload="$publish_root/AgenticPrReview.Runtime.ActionHostVerifierFixture"
+framework_bundle="$temporary_root/framework-wrapper/index.js"
 evidence_root="$temporary_root/evidence"
 isolated_home="$temporary_root/home"
 isolated_tmp="$temporary_root/tmp"
@@ -208,6 +231,17 @@ execute_action_host_proof() {
     echo "checked action bundle is not reproducible" >&2
     return 1
   fi
+  node --input-type=module - "$repo_root" "$framework_bundle" <<'NODE'
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [repoRoot, outputPath] = process.argv.slice(2);
+const { writeFrameworkFixtureActionBundle } = await import(
+  pathToFileURL(path.join(repoRoot, 'scripts', 'build-action.mjs')).href,
+);
+await writeFrameworkFixtureActionBundle(outputPath, repoRoot);
+NODE
+  test -f "$framework_bundle"
   local -a publish_arguments=(
     "$project" --configuration Release --runtime linux-x64
     --output "$publish_root" --artifacts-path "$artifacts_root" --nologo
@@ -262,21 +296,15 @@ execute_action_host_proof() {
     GIT_CONFIG_GLOBAL=/dev/null PATH="$PATH" CI=true \
     "$payload" supervise \
     --root "$evidence_root" --repo "$repo_root" --payload "$payload" \
-    --bundle "$checked_bundle" --record "$record" --inventory "$inventory" \
+    --bundle "$framework_bundle" --record "$record" --inventory "$inventory" \
     --golden "$golden" --canaries "$canaries" --node "$node_path" \
     "${aot_arguments[@]}"
 }
 
 export mode repo_root project runtime_project golden record inventory canaries
-export receipt_contract warning_policy temporary_root checked_bundle action_metadata
+export warning_policy temporary_root checked_bundle framework_bundle
 export publish_root payload evidence_root isolated_home isolated_tmp isolated_config
 export artifacts_root intermediate_root build_pair identity_output publish_log node_path PATH
 export -f audit_aot_warnings verify_aot_warning_audit execute_action_host_proof
 node "$repo_root/scripts/run-clean-source-proof.mjs" --repo "$repo_root" -- \
   bash -euo pipefail -c execute_action_host_proof | tee "$proof_log"
-if [[ "$mode" == aot ]]; then
-  node "$repo_root/scripts/compose-r4-e2-receipt.mjs" \
-    --identity "$identity_output" --contract "$receipt_contract" \
-    --source-log "$proof_log" --action "$action_metadata" \
-    --bundle "$checked_bundle" --warning-policy "$warning_policy"
-fi

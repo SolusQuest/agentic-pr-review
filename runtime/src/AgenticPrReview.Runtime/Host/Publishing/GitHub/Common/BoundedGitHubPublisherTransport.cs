@@ -696,6 +696,24 @@ internal sealed class BoundedGitHubPublisherTransport :
                         ? BoundedGitHubHttpOutcome.OutcomeUnknown
                         : BoundedGitHubHttpOutcome.KnownNotSent,
                     BoundedGitHubPublisherReason.Deadline);
+            var rateLimit = ActionHostGitHubRateLimitClassifier.Classify(
+                response.StatusCode, response.Headers, read.Body);
+            if (rateLimit == ActionHostGitHubRateLimitClassification.Invalid)
+            {
+                return Fail<CapturedResponse>(mutation
+                        ? BoundedGitHubHttpOutcome.OutcomeUnknown
+                        : BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.InvalidResponse);
+            }
+            if (rateLimit is ActionHostGitHubRateLimitClassification.Primary or
+                ActionHostGitHubRateLimitClassification.Secondary or
+                ActionHostGitHubRateLimitClassification.Combined)
+            {
+                return Fail<CapturedResponse>(
+                    BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure,
+                    BoundedGitHubPublisherReason.RateLimited,
+                    RateLimitEvidence(response.StatusCode, rateLimit));
+            }
             if (response.StatusCode != expected)
             {
                 if (exactBatchValidation && response.StatusCode ==
@@ -721,9 +739,7 @@ internal sealed class BoundedGitHubPublisherTransport :
                     return Fail<CapturedResponse>(
                         BoundedGitHubHttpOutcome
                             .AuthorizationOrValidationFailure,
-                        response.StatusCode == (HttpStatusCode)429
-                            ? BoundedGitHubPublisherReason.RateLimited
-                            : response.StatusCode ==
+                        response.StatusCode ==
                                 HttpStatusCode.UnprocessableEntity
                                 ? BoundedGitHubPublisherReason
                                     .ValidationRejected
@@ -1018,6 +1034,16 @@ internal sealed class BoundedGitHubPublisherTransport :
         catch (JsonException) { return false; }
     }
 
+    private static BoundedGitHubValidationEvidence RateLimitEvidence(
+        HttpStatusCode status,
+        ActionHostGitHubRateLimitClassification classification) => new(
+            (int)status,
+            reviewIdentityReturned: false,
+            "rate_limit_" + classification.ToString().ToLowerInvariant(),
+            documentationUrl: null,
+            errors: [],
+            rateLimitClassification: classification.ToString().ToLowerInvariant());
+
     private static bool IsBounded(string? value) => value is null or
         { Length: <= 256 };
 
@@ -1041,8 +1067,7 @@ internal sealed class BoundedGitHubPublisherTransport :
     private static bool IsRecognized4xx(HttpStatusCode status) =>
         status is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or
             HttpStatusCode.Forbidden or HttpStatusCode.NotFound or
-            HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity ||
-        status == (HttpStatusCode)429;
+            HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity;
 
     private static bool HasJsonContentType(MediaTypeHeaderValue? value) =>
         value is not null && StringComparer.OrdinalIgnoreCase.Equals(

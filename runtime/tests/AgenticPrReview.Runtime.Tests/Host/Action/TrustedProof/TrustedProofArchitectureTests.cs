@@ -97,7 +97,7 @@ public sealed class TrustedProofArchitectureTests
             root,
             "runtime",
             "scripts",
-            "prepare-r4-trusted-proof-payload-v2.sh"));
+            "prepare-r4-trusted-proof-payload-current.sh"));
         var launchSources = string.Join('\n',
             Directory.EnumerateFiles(
                     Path.Join(
@@ -142,18 +142,16 @@ public sealed class TrustedProofArchitectureTests
         Assert.DoesNotContain("payload_source_sha", launchSources,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "-p:PayloadSourceCommit=$source_commit",
+            "-p:PayloadSourceCommit=$expected_source_sha",
             preparation,
             StringComparison.Ordinal);
         Assert.Contains(
-            "action_source_sha=%s\\npayload_build_discriminator=r4-w2",
+            "action_source_sha=%s\\npayload_source_sha=%s\\npayload_source_tree=%s\\npayload_build_discriminator=r4-w2",
             preparation,
             StringComparison.Ordinal);
-        Assert.DoesNotContain("payload_source_sha=", preparation,
+        Assert.Contains("--expected-payload-sha256", preparation,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "\"5b5769753653bb3fd3e68cf8b7bb88a1bd350613\"",
-            preparation,
+        Assert.Contains("payload_sha256\" == \"$expected_payload_sha256", preparation,
             StringComparison.Ordinal);
         Assert.Contains("trusted-proof-payload:\n", workflow,
             StringComparison.Ordinal);
@@ -163,14 +161,66 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("trusted-proof-payload-v2:\n", workflow,
             StringComparison.Ordinal);
-        Assert.Contains("verify-r4-trusted-proof-payload-v2.sh", workflow,
+        var v2JobStart = workflow.IndexOf("  trusted-proof-payload-v2:\n",
+            StringComparison.Ordinal);
+        var v2JobEnd = workflow.IndexOf("\n  integration:\n", v2JobStart,
+            StringComparison.Ordinal);
+        Assert.True(v2JobStart >= 0 && v2JobEnd > v2JobStart);
+        var v2Job = workflow[v2JobStart..v2JobEnd];
+        var checkout = v2Job.IndexOf("uses: actions/checkout@v6",
+            StringComparison.Ordinal);
+        var setupNode = v2Job.IndexOf("uses: actions/setup-node@v6",
+            StringComparison.Ordinal);
+        var installDependencies = v2Job.IndexOf("- run: npm ci",
+            StringComparison.Ordinal);
+        var firstProof = v2Job.IndexOf(
+            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-first.log\"",
+            StringComparison.Ordinal);
+        var secondProof = v2Job.IndexOf(
+            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-second.log\"",
+            StringComparison.Ordinal);
+        Assert.True(checkout >= 0 && checkout < setupNode &&
+            setupNode < installDependencies && installDependencies < firstProof &&
+            firstProof < secondProof);
+        Assert.Equal(2, v2Job.Split(
+            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh",
+            StringSplitOptions.None).Length - 1);
+        Assert.Contains(
+            "ref: ${{ github.event_name == 'pull_request' && " +
+            "github.event.pull_request.head.sha || github.sha }}",
+            workflow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "node \"$control_checker\"",
-            preparation,
+            "receipt.source_commit !== sourceCommit",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "receipt.source_tree !== sourceTree",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "receipt.compiled_payload_source_commit !== sourceCommit",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "receipt.compiled_payload_source_tree !== sourceTree",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "cmp \"$RUNNER_TEMP/r4-e2p-v2-first.receipt\" " +
+            "\"$RUNNER_TEMP/r4-e2p-v2-second.receipt\"",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("path: payload-source", workflow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("git -C payload-source", workflow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("r4-e2p-v2-checked.receipt", workflow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("trusted-proof-payload-receipt-v2.json", workflow,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "node \"$source_root/scripts/check-r4-e2p-receipt-v2.mjs\"",
+            "trusted-proof-payload-receipt-v2.json",
             preparation,
             StringComparison.Ordinal);
 
@@ -187,7 +237,7 @@ public sealed class TrustedProofArchitectureTests
             preflightV2.RootElement.GetProperty("base_ref").GetString());
         Assert.Equal("exact-workflow-sha",
             preflightV2.RootElement.GetProperty("base_sha").GetString());
-        Assert.Equal("exact-compiled-payload-source-commit",
+        Assert.Equal("exact-workflow-action-payload-source-commit",
             preflightV2.RootElement.GetProperty("payload_source_identity")
                 .GetString());
 
@@ -206,6 +256,8 @@ public sealed class TrustedProofArchitectureTests
                 "prepared_executable",
                 "prepared_payload_sha256",
                 "action_source_sha",
+                "payload_source_sha",
+                "payload_source_tree",
                 "payload_build_discriminator",
             },
             preparationV2.RootElement.GetProperty("outputs")
@@ -228,6 +280,79 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("compiled_payload_source_tree", ordered);
         Assert.Contains("compiled_payload_proof_kind", ordered);
         Assert.DoesNotContain("transaction_partition", ordered);
+    }
+
+    [Fact]
+    public void TrustedOnlyEvidenceNormalizerRequiresTheBudgetAndDeniedFollowOnBoundary()
+    {
+        var source = File.ReadAllText(Path.Join(
+            FindRepositoryRoot(),
+            "runtime",
+            "scripts",
+            "verify-r4-trusted-proof-payload-v2.sh"));
+
+        Assert.Contains("'trusted_proof_request_budget_satisfied',", source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "input.trusted_proof_request_budget_satisfied !== true",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("'shared_primary_bucket_start',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'shared_primary_bucket_end',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'shared_primary_bucket_exact',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.shared_primary_bucket_start !== 1000", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.shared_primary_bucket_end !== 111", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.shared_primary_bucket_exact !== true", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'stale-unauthorized-follow-on',", source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "expectedName === 'stale-unauthorized-follow-on' ? 0 : null",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("item.HostPid !== expectedHostPid", source,
+            StringComparison.Ordinal);
+        Assert.Contains("request-budget-profile: ${{ steps.authorization.outputs.request-budget-profile }}",
+            File.ReadAllText(Path.Join(FindRepositoryRoot(), ".github",
+                "workflows", "r4-trusted-proof.yml")), StringComparison.Ordinal);
+        Assert.Contains("'launch_workflow_sha',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'launch_action_source_sha',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("'fixture_base_sha',", source,
+            StringComparison.Ordinal);
+        Assert.Contains("input.launch_workflow_sha !== expectedSourceCommit",
+            source, StringComparison.Ordinal);
+        Assert.Contains("input.launch_action_source_sha !== expectedSourceCommit",
+            source, StringComparison.Ordinal);
+        Assert.Contains("input.fixture_base_sha !== expectedSourceCommit",
+            source, StringComparison.Ordinal);
+        Assert.Contains("input.trusted_authority_exact !== true", source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap",
+            source, StringComparison.Ordinal);
+        Assert.Contains(
+            "env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap",
+            source, StringComparison.Ordinal);
+        Assert.Contains("validate_missing_github_stderr", source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "github.host_head_source_rest.remaining_tail_required !== 863",
+            source, StringComparison.Ordinal);
+        Assert.Contains(
+            "github.host_other_github_rest.remaining_tail_required !== 878",
+            source, StringComparison.Ordinal);
+        Assert.Contains("control.remaining_tail_required !== 879", source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\"rejected_requests\":0}\\nAPR_R4_E2P_CONTROL_REQUEST_BUDGET",
+            source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -277,6 +402,9 @@ public sealed class TrustedProofArchitectureTests
         var composition = File.ReadAllText(Path.Join(
             proofRoot,
             "TrustedProofPayloadComposition.cs"));
+        var ports = File.ReadAllText(Path.Join(
+            proofRoot,
+            "TrustedProofPayloadRuntimePorts.cs"));
         var productionSources = string.Join(
             '\n',
             Directory.EnumerateFiles(proofRoot, "*.cs")
@@ -298,11 +426,11 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("DeepSeekTransport.CreateForTesting", composition);
         Assert.DoesNotContain("DeepSeekTransport.Create(", composition);
         Assert.Contains("ActionHostGitHubAuthorizationTransportFactory", composition);
-        Assert.Contains("AcceptedStateProductionDependencies", composition);
+        Assert.Contains("AcceptedStateProductionDependencies", ports);
         Assert.Contains("BoundedGitHubPublisherTransportFactory", composition);
-        Assert.Contains("TimeProvider.System", composition);
+        Assert.Contains("TimeProvider.System", ports);
         Assert.DoesNotContain("Framework", composition, StringComparison.Ordinal);
-        Assert.Contains("CreateForVerifier", coordinator,
+        Assert.DoesNotContain("CreateForVerifier", coordinator,
             StringComparison.Ordinal);
         Assert.DoesNotContain("ActionHostTrustedProofVerifier", composition,
             StringComparison.Ordinal);
@@ -311,7 +439,7 @@ public sealed class TrustedProofArchitectureTests
         Assert.DoesNotContain("\"http://", productionSources,
             StringComparison.Ordinal);
         Assert.Equal(
-            2,
+            1,
             productionSources.Split(
                 "new Uri(\"https://api.github.com/\")",
                 StringSplitOptions.None).Length - 1);
@@ -358,18 +486,22 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("FrameworkGitHubHandler.cs", project,
             StringComparison.Ordinal);
+        Assert.Contains("FrameworkPrimaryRateLimitBucket.cs", project,
+            StringComparison.Ordinal);
         Assert.Contains("FrameworkStateDependencies.cs", project,
             StringComparison.Ordinal);
         Assert.DoesNotContain("ActionHostVerifierFixture.csproj", project,
             StringComparison.Ordinal);
-        Assert.Contains("TrustedProofPayloadHost.RunAsync", host,
+        Assert.Contains("TrustedProofPayloadHost.RunCoreAsync", host,
             StringComparison.Ordinal);
-        Assert.Contains("TrustedProofDeterministicDeepSeekHandler", host,
+        Assert.Contains("TrustedProofPayloadRuntimePorts", host,
             StringComparison.Ordinal);
-        Assert.Contains("TrustedProofStaleWindowCoordinator.CreateForVerifier",
-            host, StringComparison.Ordinal);
-        Assert.Contains("FrameworkCanaries.ProofControlRepository",
-            host, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActionHostCompositionDependencies", host,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("CreateForVerifier", host,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("TrustedProofControlTransport.Create", host,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new TrustedProofControlCoordinates(\n            launch.RepositoryName",
             host,
@@ -420,6 +552,132 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("> \"$proof_log\" 2>&1", verification,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProductionAndVerifierShareTheMeteredPayloadCore()
+    {
+        var root = FindRepositoryRoot();
+        var proofRoot = Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "ActionHostTrustedProofPayload");
+        var payload = File.ReadAllText(Path.Join(
+            proofRoot,
+            "TrustedProofPayloadHost.cs"));
+        var coordinator = File.ReadAllText(Path.Join(
+            proofRoot,
+            "TrustedProofStaleWindowCoordinator.cs"));
+        var transport = File.ReadAllText(Path.Join(
+            proofRoot,
+            "TrustedProofControlTransport.cs"));
+        var verifier = File.ReadAllText(Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "ActionHostTrustedProofVerifier",
+            "TrustedProofVerifierHost.cs"));
+        var architectureAudit = File.ReadAllText(Path.Join(
+            root,
+            "scripts",
+            "check-r4-e2p-managed-architecture.mjs"));
+        var requiredVerifierStart = architectureAudit.IndexOf(
+            "const requiredVerifier = [", StringComparison.Ordinal);
+        var forbiddenVerifierStart = architectureAudit.IndexOf(
+            "const forbiddenVerifier = [", StringComparison.Ordinal);
+        var verifierChecksStart = architectureAudit.IndexOf(
+            "for (const name of requiredProof)", StringComparison.Ordinal);
+        Assert.True(requiredVerifierStart >= 0 &&
+            forbiddenVerifierStart > requiredVerifierStart &&
+            verifierChecksStart > forbiddenVerifierStart);
+        var requiredVerifier = architectureAudit[
+            requiredVerifierStart..forbiddenVerifierStart];
+        var forbiddenVerifier = architectureAudit[
+            forbiddenVerifierStart..verifierChecksStart];
+
+        Assert.Contains("RunCoreAsync", payload, StringComparison.Ordinal);
+        Assert.Contains("TrustedProofPayloadRuntimePorts.Production", payload,
+            StringComparison.Ordinal);
+        Assert.Contains("new TrustedProofGitHubRequestBudget", payload,
+            StringComparison.Ordinal);
+        Assert.Contains("new TrustedProofControlRequestBudget", payload,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "var primaryRemainingLedger = new TrustedProofPrimaryRemainingLedger();",
+            payload, StringComparison.Ordinal);
+        Assert.Contains("remainingLedger: primaryRemainingLedger", payload,
+            StringComparison.Ordinal);
+        Assert.Contains("ports.CreateGitHubInnerHandler", payload,
+            StringComparison.Ordinal);
+        Assert.Contains("controlBudget", payload, StringComparison.Ordinal);
+        Assert.Contains("WriteReceipt(Console.Error)", payload,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofControlRequestBudget requestBudget",
+            coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("new TrustedProofControlRequestBudget", coordinator,
+            StringComparison.Ordinal);
+        Assert.Contains("if (!requestBudget.TryClaim(out var lease))", transport,
+            StringComparison.Ordinal);
+        Assert.Contains("CloseOutcomeUnknown(lease)", transport,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofPayloadHost.RunCoreAsync", verifier,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("new ActionHostCompositionDependencies", verifier,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("CreateForVerifier", verifier,
+            StringComparison.Ordinal);
+        Assert.Contains("'TrustedProofPayloadRuntimePorts',",
+            requiredVerifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("'ActionHostCompositionDependencies',",
+            requiredVerifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("'TrustedProofStaleWindowCoordinator',",
+            requiredVerifier, StringComparison.Ordinal);
+        Assert.Contains("'ActionHostCompositionDependencies',",
+            forbiddenVerifier, StringComparison.Ordinal);
+        Assert.Contains("'TrustedProofStaleWindowCoordinator',",
+            forbiddenVerifier, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OperationRequestEvidenceSeparatesAnonymousRoutesAndSharesTheFreezeSource()
+    {
+        var root = FindRepositoryRoot();
+        var synthetic = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "SyntheticOfficialPlatform.cs"));
+        var supervisor = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture", "FrameworkSupervisor.cs"));
+        var verifierProject = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostVerifierFixture",
+            "AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj"));
+        var accounting = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostTrustedProofPayload",
+            "TrustedProofOperationRequestAccounting.cs"));
+
+        Assert.Contains("actions_results_signed_upload", synthetic,
+            StringComparison.Ordinal);
+        Assert.Contains("actions_results_signed_download", synthetic,
+            StringComparison.Ordinal);
+        Assert.Contains("string Route", synthetic, StringComparison.Ordinal);
+        Assert.Contains("anonymous.SignedUploads == result.AnonymousSignedUploads",
+            supervisor, StringComparison.Ordinal);
+        Assert.Contains("anonymous.SignedDownloads == result.AnonymousSignedDownloads",
+            supervisor, StringComparison.Ordinal);
+        Assert.Contains("!IsExactEventRoute(domain, route)", supervisor,
+            StringComparison.Ordinal);
+        Assert.Contains("anonymous.Raw == anonymous.SignedUploads + anonymous.SignedDownloads",
+            supervisor, StringComparison.Ordinal);
+        Assert.Contains("declared.Length != domains.Length", supervisor,
+            StringComparison.Ordinal);
+        Assert.Contains("TrustedProofOperationRequestAccounting.cs", verifierProject,
+            StringComparison.Ordinal);
+        Assert.Contains("TryGetFrozenTailProfile", accounting,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("FrozenRemainingTailByDomain", supervisor,
+            StringComparison.Ordinal);
+        Assert.Equal(3, supervisor.Split(
+            "TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve",
+            StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
@@ -483,32 +741,37 @@ public sealed class TrustedProofArchitectureTests
                 .Select(property => property.Name)
                 .ToArray());
 
-        using var immutableDocument = JsonDocument.Parse(File.ReadAllBytes(
-            Path.Join(
-                root,
-                "runtime",
-                "tests",
-                "fixtures",
-                "action-host",
-                "trusted-proof-payload",
-                "immutable-base-sha256.json")));
+        var immutablePath = Path.Join(
+            root,
+            "runtime",
+            "tests",
+            "fixtures",
+            "action-host",
+            "trusted-proof-payload",
+            "immutable-base-sha256.json");
+        var immutableBytes = File.ReadAllBytes(immutablePath);
+        Assert.Equal(
+            "f42b7791276659b9df01b159d330ae8b" +
+            "90d8d3e881ba7e2ed81fbb3aede2fc2f",
+            Convert.ToHexString(SHA256.HashData(immutableBytes)).ToLowerInvariant());
+        using var immutableDocument = JsonDocument.Parse(immutableBytes);
         var immutable = immutableDocument.RootElement;
-        AssertDigest(
-            root,
-            ".github/actions/agentic-pr-review/action.yml",
-            immutable.GetProperty("action_metadata_sha256").GetString()!);
-        AssertDigest(
-            root,
-            ".github/actions/agentic-pr-review/dist/index.js",
-            immutable.GetProperty("wrapper_bundle_sha256").GetString()!);
-        AssertDigest(
-            root,
-            "runtime/tests/fixtures/action-host/aot/receipt-contract.json",
-            immutable.GetProperty("e2_receipt_contract_sha256").GetString()!);
-        AssertDigest(
-            root,
-            "runtime/tests/fixtures/action-host/aot/warning-policy.txt",
-            immutable.GetProperty("e2_warning_policy_sha256").GetString()!);
+        Assert.Equal("apr-r4-e2p-immutable-base-sha256-v1",
+            immutable.GetProperty("kind").GetString());
+        Assert.Equal("0b5c96a6fea12906024c68b3d8457ccb7b026ebe",
+            immutable.GetProperty("base_commit").GetString());
+        Assert.Equal("eb7095fbb055002637233be328aa3cc78" +
+            "b229a670aaedd1d13ac04559d700771",
+            immutable.GetProperty("action_metadata_sha256").GetString());
+        Assert.Equal("7c62221e415d97e632b9cd79e0bfe069" +
+            "d18c0900f5013a3cf2db309530153fd9",
+            immutable.GetProperty("wrapper_bundle_sha256").GetString());
+        Assert.Equal("0423f3085734d2bed14d659e2281397e" +
+            "73dfc40fcbaf5fa47adc48d3d52bc70a",
+            immutable.GetProperty("e2_receipt_contract_sha256").GetString());
+        Assert.Equal("11801e05c616676bf9470fe16ad6751e" +
+            "56fad0a7444d8f47bc12c7e5c92d712e",
+            immutable.GetProperty("e2_warning_policy_sha256").GetString());
     }
 
     private static void AssertDigest(

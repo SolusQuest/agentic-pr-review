@@ -664,6 +664,13 @@ internal static class InlineCandidateTestData
                     100));
         }
 
+        public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+            GetHeadArchiveAsync(
+                string repositoryName,
+                string headSha,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Archive transport was called.");
+
         public void Dispose()
         {
         }

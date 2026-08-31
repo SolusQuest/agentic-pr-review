@@ -56,4 +56,66 @@ describe('W1 official SDK quiescence', () => {
     await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
     expect(() => client.read()).toThrow('wrapper_official_calls_sealed');
   });
+
+  it('allows every precise local cache operation after sealing', async () => {
+    const tracker = new OfficialCallTracker();
+    const operations: Array<{ readonly method: string; readonly input?: unknown }> = [];
+    const client = tracker.wrap({
+      async read() {
+        return 'remote';
+      },
+      invalidateArtifactMutation(input: unknown) {
+        operations.push({ method: 'invalidateArtifactMutation', input });
+      },
+      invalidateArtifactListRepresentation(input: unknown) {
+        operations.push({ method: 'invalidateArtifactListRepresentation', input });
+      },
+      invalidateArtifactRepresentation(input: unknown) {
+        operations.push({ method: 'invalidateArtifactRepresentation', input });
+      },
+      invalidateWorkflowRunAttemptRepresentation(input: unknown) {
+        operations.push({ method: 'invalidateWorkflowRunAttemptRepresentation', input });
+      },
+      dispose() {
+        operations.push({ method: 'dispose' });
+      },
+    });
+
+    await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
+    const target = { owner: 'owner', repo: 'repo', name: 'target', artifact_id: 7 };
+    client.invalidateArtifactMutation(target);
+    client.invalidateArtifactListRepresentation({ ...target, per_page: 100, page: 2 });
+    client.invalidateArtifactRepresentation(target);
+    client.invalidateWorkflowRunAttemptRepresentation({
+      owner: 'owner',
+      repo: 'repo',
+      run_id: 9,
+      attempt_number: 3,
+    });
+    client.dispose();
+
+    expect(operations).toEqual([
+      { method: 'invalidateArtifactMutation', input: target },
+      {
+        method: 'invalidateArtifactListRepresentation',
+        input: { ...target, per_page: 100, page: 2 },
+      },
+      { method: 'invalidateArtifactRepresentation', input: target },
+      {
+        method: 'invalidateWorkflowRunAttemptRepresentation',
+        input: { owner: 'owner', repo: 'repo', run_id: 9, attempt_number: 3 },
+      },
+      { method: 'dispose' },
+    ]);
+    expect(() => client.read()).toThrow('wrapper_official_calls_sealed');
+  });
+
+  it('does not admit a near-miss synchronous method as a local cache operation', () => {
+    const tracker = new OfficialCallTracker();
+    const client = tracker.wrap({ invalidateArtifactRepresentations: () => undefined });
+
+    expect(() => client.invalidateArtifactRepresentations()).toThrow(
+      'wrapper_official_call_invalid',
+    );
+  });
 });

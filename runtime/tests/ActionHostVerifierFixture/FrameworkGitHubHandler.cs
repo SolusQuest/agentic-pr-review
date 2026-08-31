@@ -1,5 +1,8 @@
 using System.Globalization;
+using System.Formats.Tar;
+using System.IO.Compression;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -12,7 +15,8 @@ using AgenticPrReview.Runtime.ActionHost.Authorization;
 internal sealed class FrameworkGitHubHandler(
     string scenarioRoot,
     string payloadSha256,
-    Func<string, string, string>? workflowRenderer = null) :
+    Func<string, string, string>? workflowRenderer = null,
+    Func<bool, CancellationToken, ValueTask<int>>? observePrimaryRemaining = null) :
     HttpMessageHandler
 {
     internal const long RepositoryId = 42;
@@ -34,25 +38,74 @@ internal sealed class FrameworkGitHubHandler(
     private static readonly string BaseRoot = new('4', 40);
     private static readonly string HeadRoot = new('5', 40);
     private static readonly string ProofRoot = new('6', 40);
+    private static readonly string HeadGitHubRoot = new('8', 40);
+    private static readonly string ActionsRoot = new('9', 40);
+    private static readonly string ActionRoot = new('0', 40);
+    private static readonly string DistRoot = new('a', 40);
+    internal const int ProductionShapedHeadTreeObjectCount = 178;
+    private static readonly string[] BudgetTreeRoots = Enumerable.Range(0,
+            ProductionShapedHeadTreeObjectCount - 6)
+        .Select(index => (0x1000 + index).ToString("x40",
+            CultureInfo.InvariantCulture))
+        .ToArray();
+    private const string ArchivePrefix = "agentic-pr-review-fixture/";
     private static readonly byte[] FileBytes = Encoding.UTF8.GetBytes(
         FrameworkCanaries.ToolData + "\n");
     private static readonly byte[] InstructionsBytes = Encoding.UTF8.GetBytes(
         FrameworkCanaries.Prompt + "\n");
+    internal const int ProductionShapedLargeBlobByteCount = 3_585_824;
+    private static readonly byte[] ProductionShapedLargeBlobBytes =
+        CreateProductionShapedLargeBlob();
 
     private readonly string scenarioRoot = scenarioRoot;
     private readonly string payloadSha256 = payloadSha256;
     private readonly Func<string, string, string> workflowRenderer =
         workflowRenderer ?? ActionHostTrustedWorkflowContract.Render;
+    private readonly bool hasExplicitWorkflowRenderer =
+        workflowRenderer is not null;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
+        var response = await SendCoreAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+        if (observePrimaryRemaining is not null &&
+            request.RequestUri?.Host.Equals("api.github.com",
+                StringComparison.OrdinalIgnoreCase) == true &&
+            request.Headers.Authorization?.Parameter == FrameworkCanaries.GitHubToken)
+        {
+            var remaining = await observePrimaryRemaining(
+                response.StatusCode != HttpStatusCode.NotModified,
+                cancellationToken).ConfigureAwait(false);
+            response.Headers.TryAddWithoutValidation("x-ratelimit-limit", "1000");
+            response.Headers.TryAddWithoutValidation("x-ratelimit-remaining",
+                remaining.ToString(CultureInfo.InvariantCulture));
+            response.Headers.TryAddWithoutValidation("x-ratelimit-reset",
+                "4102444800");
+        }
+        return response;
+    }
+
+    private async Task<HttpResponseMessage> SendCoreAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
+        if (request.RequestUri is null)
+        {
+            return Json(HttpStatusCode.Unauthorized, "{}");
+        }
+
+        if (request.RequestUri.Host.Equals("codeload.github.com",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return CodeloadArchive(request);
+        }
+
         if (request.Headers.Authorization?.Scheme != "Bearer" ||
             request.Headers.Authorization.Parameter !=
-                FrameworkCanaries.GitHubToken ||
-            request.RequestUri is null)
+                FrameworkCanaries.GitHubToken)
         {
             return Json(HttpStatusCode.Unauthorized, "{}");
         }
@@ -78,8 +131,14 @@ internal sealed class FrameworkGitHubHandler(
         }
 
         var suffix = path[prefix.Length..];
+        if (IsPublisherRoute(suffix))
+        {
+            Increment("publisher-api-count");
+        }
+
         if (request.Method == HttpMethod.Get && suffix.Length == 0)
         {
+            Increment("authorization-api-count");
             var response = $$"""
                 {"id":{{RepositoryId}},"full_name":"{{FrameworkCanaries.Repository}}","default_branch":"main"}
                 """;
@@ -92,6 +151,7 @@ internal sealed class FrameworkGitHubHandler(
             suffix.StartsWith("/actions/runs/", StringComparison.Ordinal) &&
             suffix.Contains("/attempts/", StringComparison.Ordinal))
         {
+            Increment("authorization-api-count");
             return Json(HttpStatusCode.OK,
                 suffix.Contains("/" + ReadCurrentRunId() + "/",
                     StringComparison.Ordinal)
@@ -102,6 +162,7 @@ internal sealed class FrameworkGitHubHandler(
         if (request.Method == HttpMethod.Get &&
             suffix == "/contents/.github/workflows/r4-trusted-proof.yml")
         {
+            Increment("policy-api-count");
             var workflow = Encoding.UTF8.GetBytes(Workflow(mode));
             FrameworkCanaryCapture.CaptureAll(scenarioRoot,
                 "github.workflow-source", workflow);
@@ -120,6 +181,7 @@ internal sealed class FrameworkGitHubHandler(
             suffix.StartsWith("/commits/", StringComparison.Ordinal) &&
             suffix.EndsWith("/pulls", StringComparison.Ordinal))
         {
+            Increment("authorization-api-count");
             return Json(HttpStatusCode.OK,
                 "[" + PullRequest(mode, proofControlRequest) + "]");
         }
@@ -127,6 +189,7 @@ internal sealed class FrameworkGitHubHandler(
         if (request.Method == HttpMethod.Get &&
             suffix == "/collaborators/maintainer/permission")
         {
+            Increment("authorization-api-count");
             return Json(HttpStatusCode.OK,
                 mode == "permission" ? "{\"permission\":\"read\"}" :
                     "{\"permission\":\"write\"}");
@@ -136,6 +199,7 @@ internal sealed class FrameworkGitHubHandler(
             suffix == "/pulls/147")
         {
             Increment("pull-request-revalidation-count");
+            Increment("revalidation-api-count");
             return Json(HttpStatusCode.OK,
                 PullRequest(mode, proofControlRequest));
         }
@@ -144,13 +208,37 @@ internal sealed class FrameworkGitHubHandler(
             suffix.StartsWith("/git/commits/", StringComparison.Ordinal))
         {
             var sha = suffix["/git/commits/".Length..];
+            Increment(IsSyntheticHeadSha(sha) ? "head-commit-api-count" :
+                "base-api-count");
             return Json(HttpStatusCode.OK, Commit(sha));
+        }
+
+        if (request.Method == HttpMethod.Get &&
+            suffix.StartsWith("/tarball/", StringComparison.Ordinal))
+        {
+            var sha = suffix["/tarball/".Length..];
+            if (!IsSyntheticHeadSha(sha))
+            {
+                return Json(HttpStatusCode.NotFound, "{}");
+            }
+
+            Increment("head-archive-api-count");
+            return new HttpResponseMessage(HttpStatusCode.Found)
+            {
+                Headers =
+                {
+                    Location = new Uri("https://codeload.github.com/" +
+                        FrameworkCanaries.Repository + "/legacy.tar.gz/" + sha),
+                },
+            };
         }
 
         if (request.Method == HttpMethod.Get &&
             suffix.StartsWith("/git/trees/", StringComparison.Ordinal))
         {
             var sha = suffix["/git/trees/".Length..];
+            Increment(IsHeadTreeSha(sha) ? "head-tree-api-count" :
+                "base-api-count");
             return Json(HttpStatusCode.OK, Tree(sha, mode));
         }
 
@@ -158,20 +246,31 @@ internal sealed class FrameworkGitHubHandler(
             suffix.StartsWith("/git/blobs/", StringComparison.Ordinal))
         {
             var sha = suffix["/git/blobs/".Length..];
+            if (IsHeadBlobSha(sha))
+            {
+                Increment("head-blob-api-count");
+            }
+            else
+            {
+                Increment("base-api-count");
+            }
             var bytes = Blob(sha, mode);
-            return bytes is null
-                ? Json(HttpStatusCode.NotFound, "{}")
-                : Json(HttpStatusCode.OK, FrameworkJson.Serialize(
-                    FrameworkJson.Object(
-                        ("sha", sha),
-                        ("size", bytes.Length),
-                        ("encoding", "base64"),
-                        ("content", Convert.ToBase64String(bytes)))));
+            if (bytes is null)
+            {
+                return Json(HttpStatusCode.NotFound, "{}");
+            }
+
+            return Json(HttpStatusCode.OK, FrameworkJson.Serialize(FrameworkJson.Object(
+                ("sha", sha),
+                ("size", bytes.Length),
+                ("encoding", "base64"),
+                ("content", Convert.ToBase64String(bytes)))));
         }
 
         if (request.Method == HttpMethod.Get &&
             suffix == "/pulls/147/files")
         {
+            Increment("diff-api-count");
             var response = FrameworkJson.Serialize(FrameworkJson.Array([
                 FrameworkJson.Object(
                     ("sha", GitBlobSha(FileBytes)),
@@ -401,7 +500,7 @@ internal sealed class FrameworkGitHubHandler(
             ("name", "R4 trusted proof"),
             ("path", ".github/workflows/r4-trusted-proof.yml"),
             ("head_branch", "main"),
-            ("head_sha", WorkflowSha),
+            ("head_sha", CurrentWorkflowSha()),
             ("event", mode == "workflow-run" ||
                 IsTrustedProofPayload() && mode == "continuation-seed"
                     ? "workflow_run"
@@ -471,8 +570,8 @@ internal sealed class FrameworkGitHubHandler(
         if (IsTrustedProofPayload())
         {
             head.Add("ref", "r4-trusted-proof/" +
-                (mode == "stale" ? new string('7', 64) :
-                    new string('1', 64)));
+                (mode == "stale" ? FrameworkCanaries.StaleProofOperationId :
+                    FrameworkCanaries.ProofOperationId));
         }
 
         return FrameworkJson.Serialize(FrameworkJson.Object(
@@ -490,13 +589,22 @@ internal sealed class FrameworkGitHubHandler(
 
     private string Workflow(string mode)
     {
+        if (HasTrustedProofCurrentHeadAuthority() &&
+            !hasExplicitWorkflowRenderer)
+        {
+            throw new InvalidOperationException(
+                "Trusted proof current-head scenarios require the v2 renderer.");
+        }
+
         var workflow = workflowRenderer(
-            ActionSha,
+            CurrentActionSourceSha(),
             payloadSha256);
         return mode switch
         {
+            "wrong-action" when HasTrustedProofCurrentHeadAuthority() =>
+                workflow + "# trusted-proof-wrong-action\n",
             "wrong-action" => workflow.Replace(
-                ActionSha,
+                CurrentActionSourceSha(),
                 new string('9', 40),
                 StringComparison.Ordinal),
             "concurrency" => workflow.Replace(
@@ -520,7 +628,63 @@ internal sealed class FrameworkGitHubHandler(
         trustedProofPayload ? WorkflowSha : BaseSha;
 
     private string CurrentBaseSha() =>
-        PullRequestBaseSha(IsTrustedProofPayload());
+        IsTrustedProofPayload() ? CurrentWorkflowSha() : BaseSha;
+
+    private string CurrentWorkflowSha() =>
+        HasTrustedProofCurrentHeadAuthority()
+            ? ReadTrustedProofSourceCommit()
+            : WorkflowSha;
+
+    private string CurrentActionSourceSha() =>
+        HasTrustedProofCurrentHeadAuthority()
+            ? ReadTrustedProofSourceCommit()
+            : ActionSha;
+
+    private bool HasTrustedProofCurrentHeadAuthority() =>
+        IsTrustedProofPayload() && File.Exists(Path.Join(scenarioRoot,
+            "trusted-proof-authority.json"));
+
+    private string ReadTrustedProofSourceCommit()
+    {
+        var path = Path.Join(scenarioRoot, "trusted-proof-authority.json");
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "The trusted proof authority is invalid.");
+            }
+
+            var properties = document.RootElement.EnumerateObject().ToArray();
+            if (properties.Length != 1 ||
+                !StringComparer.Ordinal.Equals(properties[0].Name,
+                    "source_commit") ||
+                properties[0].Value.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidOperationException(
+                    "The trusted proof authority is invalid.");
+            }
+
+            var sourceCommit = properties[0].Value.GetString();
+            if (sourceCommit is null || !IsLowerHex(sourceCommit, 40))
+            {
+                throw new InvalidOperationException(
+                    "The trusted proof authority is invalid.");
+            }
+
+            return sourceCommit;
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException(
+                "The trusted proof authority is invalid.", exception);
+        }
+    }
+
+    private static bool IsLowerHex(string value, int length) =>
+        value.Length == length && value.All(static character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private long ReadCurrentRunId() => long.Parse(
         File.ReadAllText(Path.Join(scenarioRoot, "run-id")),
@@ -541,7 +705,7 @@ internal sealed class FrameworkGitHubHandler(
 
     private string Commit(string sha)
     {
-        var tree = sha == WorkflowSha ? WorkflowRoot :
+        var tree = sha == CurrentWorkflowSha() ? WorkflowRoot :
             sha == BaseSha ? BaseRoot : HeadRoot;
         var baseSha = CurrentBaseSha();
         var parents = sha == HeadSha ? new[] { baseSha } :
@@ -573,17 +737,42 @@ internal sealed class FrameworkGitHubHandler(
                         GitBlobSha(InstructionsBytes), InstructionsBytes.Length),
                 ],
             var value when value == BaseRoot => [],
-            var value when value == HeadRoot =>
-                [TreeEntry("proof", "040000", "tree", ProofRoot)],
+            var value when value == HeadRoot => HeadRootEntries(),
             var value when value == ProofRoot =>
                 [TreeEntry("apr178-path-canary.txt", "100644", "blob",
                     GitBlobSha(FileBytes), FileBytes.Length)],
+            var value when value == HeadGitHubRoot =>
+                [TreeEntry("actions", "040000", "tree", ActionsRoot)],
+            var value when value == ActionsRoot =>
+                [TreeEntry("agentic-pr-review", "040000", "tree",
+                    ActionRoot)],
+            var value when value == ActionRoot =>
+                [TreeEntry("dist", "040000", "tree", DistRoot)],
+            var value when value == DistRoot =>
+                [TreeEntry("index.js", "100644", "blob",
+                    GitBlobSha(ProductionShapedLargeBlobBytes),
+                    ProductionShapedLargeBlobBytes.Length)],
+            var value when BudgetTreeRoots.Contains(value,
+                StringComparer.Ordinal) => [],
             _ => [],
         };
         return FrameworkJson.Serialize(FrameworkJson.Object(
             ("sha", sha),
             ("truncated", false),
             ("tree", FrameworkJson.Array(entries))));
+    }
+
+    private static JsonObject[] HeadRootEntries()
+    {
+        var entries = new List<JsonObject>(BudgetTreeRoots.Length + 2)
+        {
+            TreeEntry(".github", "040000", "tree", HeadGitHubRoot),
+            TreeEntry("proof", "040000", "tree", ProofRoot),
+        };
+        entries.AddRange(BudgetTreeRoots.Select((sha, index) => TreeEntry(
+            "request-budget-" + index.ToString("D3",
+                CultureInfo.InvariantCulture), "040000", "tree", sha)));
+        return [.. entries];
     }
 
     private static JsonObject TreeEntry(
@@ -603,8 +792,122 @@ internal sealed class FrameworkGitHubHandler(
         var config = ConfigBytes(mode);
         if (sha == GitBlobSha(config)) return config;
         if (sha == GitBlobSha(InstructionsBytes)) return InstructionsBytes;
+        if (sha == GitBlobSha(ProductionShapedLargeBlobBytes))
+        {
+            return ProductionShapedLargeBlobBytes;
+        }
         return sha == GitBlobSha(FileBytes) ? FileBytes : null;
     }
+
+    private static byte[] CreateProductionShapedLargeBlob()
+    {
+        var bytes = new byte[ProductionShapedLargeBlobByteCount];
+        var segment = Encoding.ASCII.GetBytes(
+            "const aprR4ProductionBundleSegment = \"trusted-proof-fixture\";\n");
+        for (var offset = 0; offset < bytes.Length; offset += segment.Length)
+        {
+            Array.Copy(segment, 0, bytes, offset,
+                Math.Min(segment.Length, bytes.Length - offset));
+        }
+
+        return bytes;
+    }
+
+    private HttpResponseMessage CodeloadArchive(HttpRequestMessage request)
+    {
+        if (request.Method != HttpMethod.Get ||
+            request.Headers.Authorization is not null ||
+            request.RequestUri!.Scheme != Uri.UriSchemeHttps ||
+            request.RequestUri.Port != 443 ||
+            !TryCodeloadHeadSha(request.RequestUri.AbsolutePath, out var sha))
+        {
+            return Json(HttpStatusCode.Unauthorized, "{}");
+        }
+
+        var archive = HeadArchive(sha);
+        EnsureCounter("head-blob-api-count");
+        Increment("head-archive-anonymous-codeload-count");
+        Increment("head-archive-credential-not-forwarded-count");
+        File.WriteAllText(Path.Join(scenarioRoot, "head-archive-served"),
+            ProductionShapedLargeBlobByteCount.ToString(
+                CultureInfo.InvariantCulture) + "\t" +
+            archive.Length.ToString(CultureInfo.InvariantCulture) + "\t" +
+            (ProductionShapedLargeBlobByteCount + FileBytes.Length).ToString(
+                CultureInfo.InvariantCulture) + "\t" + ArchivePrefix + "\n");
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(archive),
+        };
+        response.Content.Headers.ContentType = new MediaTypeHeaderValue(
+            "application/x-gzip");
+        return response;
+    }
+
+    private static bool TryCodeloadHeadSha(string path, out string sha)
+    {
+        const string prefix = "/" + FrameworkCanaries.Repository +
+            "/legacy.tar.gz/";
+        sha = path.StartsWith(prefix, StringComparison.Ordinal)
+            ? path[prefix.Length..]
+            : string.Empty;
+        return IsSyntheticHeadSha(sha);
+    }
+
+    private static bool IsSyntheticHeadSha(string sha) => sha == HeadSha ||
+        sha == ContinuedHeadSha || sha == ConflictHeadSha;
+
+    private static bool IsHeadBlobSha(string sha) => sha ==
+        GitBlobSha(ProductionShapedLargeBlobBytes) || sha == GitBlobSha(FileBytes);
+
+    private static bool IsHeadTreeSha(string sha) => sha == HeadRoot ||
+        sha == HeadGitHubRoot || sha == ActionsRoot || sha == ActionRoot ||
+        sha == DistRoot || sha == ProofRoot || BudgetTreeRoots.Contains(sha,
+            StringComparer.Ordinal);
+
+    private static bool IsPublisherRoute(string suffix) =>
+        suffix.StartsWith("/issues/", StringComparison.Ordinal) ||
+        suffix.StartsWith("/pulls/147/comments", StringComparison.Ordinal) ||
+        suffix.StartsWith("/pulls/147/reviews", StringComparison.Ordinal) ||
+        suffix.StartsWith("/pulls/comments/", StringComparison.Ordinal);
+
+    private static byte[] HeadArchive(string sha)
+    {
+        using var output = new MemoryStream();
+        using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize,
+                   leaveOpen: true))
+        using (var writer = new TarWriter(gzip, leaveOpen: true))
+        {
+            writer.WriteEntry(DirectoryEntry(ArchivePrefix));
+            writer.WriteEntry(DirectoryEntry(ArchivePrefix + ".github/"));
+            writer.WriteEntry(DirectoryEntry(ArchivePrefix +
+                ".github/actions/"));
+            writer.WriteEntry(DirectoryEntry(ArchivePrefix +
+                ".github/actions/agentic-pr-review/"));
+            writer.WriteEntry(DirectoryEntry(ArchivePrefix +
+                ".github/actions/agentic-pr-review/dist/"));
+            writer.WriteEntry(FileEntry(ArchivePrefix +
+                ".github/actions/agentic-pr-review/dist/index.js",
+                ProductionShapedLargeBlobBytes));
+            writer.WriteEntry(DirectoryEntry(ArchivePrefix + "proof/"));
+            writer.WriteEntry(FileEntry(ArchivePrefix +
+                "proof/apr178-path-canary.txt", FileBytes));
+        }
+
+        return output.ToArray();
+    }
+
+    private static TarEntry DirectoryEntry(string name) =>
+        new PaxTarEntry(TarEntryType.Directory, name)
+        {
+            Mode = (UnixFileMode)0x1fd,
+        };
+
+    private static TarEntry FileEntry(string name, byte[] bytes) =>
+        new PaxTarEntry(TarEntryType.RegularFile, name)
+        {
+            DataStream = new MemoryStream(bytes, writable: false),
+            Mode = (UnixFileMode)0x1b4,
+        };
 
     private static byte[] ConfigBytes(string mode) => Encoding.UTF8.GetBytes(
         "{\"schema\":\"agentic-pr-review.config.v1\"," +
@@ -635,7 +938,9 @@ internal sealed class FrameworkGitHubHandler(
             releaseId,
             releaseBody,
             "maintainer");
-        WriteProofControlComments(mode, [ready, release]);
+        WriteProofControlComments(
+            mode,
+            [.. ReadProofControlComments(mode), ready, release]);
         if (stale)
         {
             File.WriteAllText(Path.Join(scenarioRoot, "stale-released"), "1");
@@ -804,6 +1109,15 @@ internal sealed class FrameworkGitHubHandler(
             ? parsed + 1
             : 1;
         File.WriteAllText(path, value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private void EnsureCounter(string name)
+    {
+        var path = Path.Join(scenarioRoot, name);
+        if (!File.Exists(path))
+        {
+            File.WriteAllText(path, "0");
+        }
     }
 
     private static string GitBlobSha(byte[] bytes)

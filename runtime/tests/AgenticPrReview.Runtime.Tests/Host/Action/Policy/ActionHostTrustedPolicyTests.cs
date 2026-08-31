@@ -967,6 +967,14 @@ public sealed class ActionHostTrustedPolicyTests
                         : Failure));
         }
 
+        public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+            GetHeadArchiveAsync(
+                string repositoryName,
+                string headSha,
+                CancellationToken cancellationToken) =>
+            Task.FromResult(ActionHostGitObjectResult<ActionHostGitArchiveReader>
+                .Failed(ActionHostGitObjectFailure.InvalidRequest));
+
         public void Dispose() { }
 
         private ActionHostGitObjectResult<ActionHostGitCommitObject> Result(

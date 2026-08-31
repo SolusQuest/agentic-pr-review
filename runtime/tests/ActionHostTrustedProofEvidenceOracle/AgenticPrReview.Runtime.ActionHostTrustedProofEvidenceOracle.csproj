@@ -13,6 +13,9 @@
            Text="TrustedProofOracleSourceTree must be an explicit lowercase 40-hex tree." />
   </Target>
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>AgenticPrReview.Runtime.Tests</_Parameter1>
+    </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>TrustedProofOracleSourceSha</_Parameter1>
       <_Parameter2>$(TrustedProofOracleSourceSha)</_Parameter2>

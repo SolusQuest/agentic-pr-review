@@ -2332,6 +2332,13 @@ public sealed class AcceptedStateProductionEndToEndTests
                 CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Same-head E2E read Git.");
 
+        public Task<ActionHostGitObjectResult<ActionHostGitArchiveReader>>
+            GetHeadArchiveAsync(
+                string repositoryName,
+                string headSha,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Same-head E2E read archive.");
+
         public void Dispose() { }
     }
 

@@ -18,5 +18,6 @@ public static class EvidenceLimits
     public static readonly TimeSpan CaptureCredentialHandoffTimeout =
         LogicalOperationTimeout + RequestTimeout;
     public static readonly TimeSpan OracleCredentialHandoffTimeout = RequestTimeout;
+    public static readonly TimeSpan OperationCredentialHandoffTimeout = TimeSpan.FromHours(6);
     public static readonly TimeSpan CredentialConnectedSessionTimeout = RequestTimeout;
 }

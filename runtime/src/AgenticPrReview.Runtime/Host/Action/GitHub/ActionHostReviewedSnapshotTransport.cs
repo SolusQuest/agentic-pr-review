@@ -219,10 +219,22 @@ internal sealed class ActionHostReviewedSnapshotTransport :
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
+            var rateLimit = await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return ActionHostGitObjectResult<ActionHostStreamedBlobObject>
-                    .Failed(ClassifyStatus(response.StatusCode));
+                    .Failed(ClassifyStatus(response.StatusCode, rateLimit));
+            }
+            if (rateLimit != ActionHostGitHubRateLimitClassification.None)
+            {
+                return ActionHostGitObjectResult<ActionHostStreamedBlobObject>
+                    .Failed(rateLimit is
+                        ActionHostGitHubRateLimitClassification.Primary or
+                        ActionHostGitHubRateLimitClassification.Secondary or
+                        ActionHostGitHubRateLimitClassification.Combined
+                        ? ActionHostGitObjectFailure.RateLimited
+                        : ActionHostGitObjectFailure.InvalidResponse);
             }
 
             if (response.Content.Headers.ContentLength is { } contentLength &&
@@ -333,10 +345,21 @@ internal sealed class ActionHostReviewedSnapshotTransport :
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
+            var rateLimit = await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
+                response, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return DocumentResult<T>.Failed(
-                    ClassifyStatus(response.StatusCode));
+                    ClassifyStatus(response.StatusCode, rateLimit));
+            }
+            if (rateLimit != ActionHostGitHubRateLimitClassification.None)
+            {
+                return DocumentResult<T>.Failed(
+                    rateLimit is ActionHostGitHubRateLimitClassification.Primary or
+                        ActionHostGitHubRateLimitClassification.Secondary or
+                        ActionHostGitHubRateLimitClassification.Combined
+                        ? ActionHostGitObjectFailure.RateLimited
+                        : ActionHostGitObjectFailure.InvalidResponse);
             }
 
             if (!HasJsonContentType(response.Content.Headers.ContentType))
@@ -459,14 +482,20 @@ internal sealed class ActionHostReviewedSnapshotTransport :
     }
 
     private static ActionHostGitObjectFailure ClassifyStatus(
-        HttpStatusCode status) => status switch
+        HttpStatusCode status,
+        ActionHostGitHubRateLimitClassification rateLimit) =>
+        rateLimit is ActionHostGitHubRateLimitClassification.Primary or
+            ActionHostGitHubRateLimitClassification.Secondary or
+            ActionHostGitHubRateLimitClassification.Combined
+            ? ActionHostGitObjectFailure.RateLimited
+            : rateLimit == ActionHostGitHubRateLimitClassification.Invalid
+            ? ActionHostGitObjectFailure.InvalidResponse
+            : status switch
     {
         HttpStatusCode.NotFound => ActionHostGitObjectFailure.NotFound,
         HttpStatusCode.Unauthorized =>
             ActionHostGitObjectFailure.Unauthorized,
         HttpStatusCode.Forbidden => ActionHostGitObjectFailure.Forbidden,
-        HttpStatusCode.TooManyRequests =>
-            ActionHostGitObjectFailure.RateLimited,
         _ when (int)status >= 500 =>
             ActionHostGitObjectFailure.UpstreamFailure,
         _ => ActionHostGitObjectFailure.InvalidResponse,

@@ -25,15 +25,18 @@ internal sealed class FrameworkStateDependencies(
         string scenarioRoot,
         IRestrictedStateStore inner) : IRestrictedStateStore
     {
+        private readonly FrameworkStateEvidenceRecorder recorder =
+            new(scenarioRoot);
+
         public async Task<OpaqueStoreListResult> ListExactAsync(
             OpaqueStoreListRequest request,
             CancellationToken cancellationToken)
         {
             var result = await inner.ListExactAsync(request, cancellationToken)
                 .ConfigureAwait(false);
-            Record("list", result.Failure,
-                result.Objects.IsDefault ? -1 : result.Objects.Length);
-            RecordIdentity("list", request.Name.Value, "-", "-",
+            recorder.Record("list", result.Failure,
+                result.Objects.IsDefault ? -1 : result.Objects.Length,
+                request.Name.Value, "-", "-",
                 result.Failure.ToString(), "-",
                 result.Objects.IsDefault
                     ? "-"
@@ -48,8 +51,9 @@ internal sealed class FrameworkStateDependencies(
         {
             var result = await inner.ReadMetadataAsync(request,
                 cancellationToken).ConfigureAwait(false);
-            Record("metadata", result.Failure, result.Metadata is null ? 0 : 1);
-            RecordIdentity("metadata", request.Reference.Name.Value,
+            recorder.Record("metadata", result.Failure,
+                result.Metadata is null ? 0 : 1,
+                request.Reference.Name.Value,
                 request.Reference.ObjectId.Value, "-",
                 result.Failure.ToString(), "-", Describe(result.Metadata));
             return result;
@@ -61,8 +65,9 @@ internal sealed class FrameworkStateDependencies(
         {
             var result = await inner.DownloadAsync(request, cancellationToken)
                 .ConfigureAwait(false);
-            Record("download", result.Failure, result.EncryptedBytes.Length);
-            RecordIdentity("download", request.Expected.Reference.Name.Value,
+            recorder.Record("download", result.Failure,
+                result.EncryptedBytes.Length,
+                request.Expected.Reference.Name.Value,
                 request.Expected.Reference.ObjectId.Value,
                 request.Expected.EncryptedObjectDigest.Sha256,
                 result.Failure.ToString(), "-", Describe(result.Metadata));
@@ -75,8 +80,9 @@ internal sealed class FrameworkStateDependencies(
         {
             var result = await inner.UploadImmutableAsync(request,
                 cancellationToken).ConfigureAwait(false);
-            Record("upload", result.Failure, (int)result.MutationState);
-            RecordIdentity("upload", request.Name.Value,
+            recorder.Record("upload", result.Failure,
+                (int)result.MutationState,
+                request.Name.Value,
                 request.CorrelationId.Value,
                 request.EncryptedObjectDigest.Sha256,
                 result.Failure.ToString(), result.MutationState.ToString(),
@@ -90,8 +96,9 @@ internal sealed class FrameworkStateDependencies(
         {
             var result = await inner.ReadBackExactAsync(request,
                 cancellationToken).ConfigureAwait(false);
-            Record("readback", result.Failure, result.Metadata is null ? 0 : 1);
-            RecordIdentity("readback", request.Expected.Reference.Name.Value,
+            recorder.Record("readback", result.Failure,
+                result.Metadata is null ? 0 : 1,
+                request.Expected.Reference.Name.Value,
                 request.Expected.Reference.ObjectId.Value,
                 request.Expected.EncryptedObjectDigest.Sha256,
                 result.Failure.ToString(), "-", Describe(result.Metadata));
@@ -104,35 +111,15 @@ internal sealed class FrameworkStateDependencies(
         {
             var result = await inner.DeleteExactAsync(request,
                 cancellationToken).ConfigureAwait(false);
-            Record("delete", result.Failure, (int)result.MutationState);
-            RecordIdentity("delete", request.Expected.Reference.Name.Value,
+            recorder.Record("delete", result.Failure,
+                (int)result.MutationState,
+                request.Expected.Reference.Name.Value,
                 request.Expected.Reference.ObjectId.Value,
                 request.Expected.EncryptedObjectDigest.Sha256,
                 result.Failure.ToString(), result.MutationState.ToString(),
                 Describe(request.Expected));
             return result;
         }
-
-        private void Record(
-            string operation,
-            OpaqueStoreFailure failure,
-            int structuralValue) => File.AppendAllText(
-            Path.Join(scenarioRoot, "state-operations.tsv"),
-            operation + "\t" + failure + "\t" +
-                structuralValue.ToString(
-                    System.Globalization.CultureInfo.InvariantCulture) + "\n");
-
-        private void RecordIdentity(
-            string operation,
-            string name,
-            string requestedIdentity,
-            string requestedDigest,
-            string failure,
-            string mutation,
-            string result) => File.AppendAllText(
-            Path.Join(scenarioRoot, "state-operation-identities.tsv"),
-            string.Join('\t', operation, name, requestedIdentity,
-                requestedDigest, failure, mutation, result) + "\n");
 
         private static string Describe(OpaqueStoreObjectMetadata? metadata) =>
             metadata is null
@@ -148,5 +135,36 @@ internal sealed class FrameworkStateDependencies(
                         System.Globalization.CultureInfo.InvariantCulture),
                     metadata.Size.ToString(
                         System.Globalization.CultureInfo.InvariantCulture));
+    }
+}
+
+internal sealed class FrameworkStateEvidenceRecorder(string scenarioRoot)
+{
+    private readonly object gate = new();
+
+    internal void Record(
+        string operation,
+        OpaqueStoreFailure failureValue,
+        int structuralValue,
+        string name,
+        string requestedIdentity,
+        string requestedDigest,
+        string failure,
+        string mutation,
+        string result)
+    {
+        lock (gate)
+        {
+            File.AppendAllText(
+                Path.Join(scenarioRoot, "state-operations.tsv"),
+                operation + "\t" + failureValue + "\t" +
+                    structuralValue.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture) +
+                    "\n");
+            File.AppendAllText(
+                Path.Join(scenarioRoot, "state-operation-identities.tsv"),
+                string.Join('\t', operation, name, requestedIdentity,
+                    requestedDigest, failure, mutation, result) + "\n");
+        }
     }
 }

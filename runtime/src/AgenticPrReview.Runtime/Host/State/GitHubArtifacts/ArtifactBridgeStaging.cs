@@ -589,12 +589,12 @@ internal sealed class ArtifactBridgeStagingScope(
                 CleanupSucceeded = false;
                 return ValueTask.CompletedTask;
             }
-            _ = Task.Run(() => DeleteIsolated(
+            CleanupSucceeded = DeleteIsolated(
                 anchoredTombstone,
                 tombstoneGuard,
                 operationIdentity,
                 objectIdentity,
-                envelopeIdentity));
+                envelopeIdentity);
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException)
@@ -617,7 +617,7 @@ internal sealed class ArtifactBridgeStagingScope(
         }
     }
 
-    private static void DeleteIsolated(
+    private static bool DeleteIsolated(
         string anchoredTombstone,
         SafeFileHandle tombstoneGuard,
         RestrictedStateFileIdentity expectedDirectoryIdentity,
@@ -632,7 +632,7 @@ internal sealed class ArtifactBridgeStagingScope(
                         tombstoneGuard,
                         expectDirectory: true) != expectedDirectoryIdentity)
                 {
-                    return;
+                    return false;
                 }
                 var expectedNames = expectedEnvelopeIdentity is null
                     ? new HashSet<string>(
@@ -649,7 +649,7 @@ internal sealed class ArtifactBridgeStagingScope(
                         entry is null || !expectedNames.Remove(entry)) ||
                     expectedNames.Count != 0)
                 {
-                    return;
+                    return false;
                 }
                 if (!OperatingSystem.IsWindows())
                 {
@@ -672,12 +672,13 @@ internal sealed class ArtifactBridgeStagingScope(
                 }
             }
             Directory.Delete(anchoredTombstone, recursive: false);
+            return true;
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or
             ObjectDisposedException)
         {
-            return;
+            return false;
         }
     }
 

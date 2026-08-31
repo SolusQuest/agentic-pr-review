@@ -1,4 +1,5 @@
 name: R4 trusted proof
+run-name: apr-r4-e2p-${{ github.event_name == 'workflow_dispatch' && inputs.operation-id || github.event.workflow_run.pull_requests[0].head.ref }}
 on:
   workflow_run:
     workflows:
@@ -11,6 +12,10 @@ on:
         description: Pull request number
         required: true
         type: number
+      operation-id:
+        description: Authorized fixture operation id
+        required: true
+        type: string
 permissions: {}
 concurrency:
   group: agentic-pr-review-r4-${{ github.repository_id }}-pr-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr-number }}
@@ -25,6 +30,8 @@ jobs:
       fixture-head-sha: ${{ steps.authorization.outputs.fixture-head-sha }}
       operation-id: ${{ steps.authorization.outputs.operation-id }}
       authorization-manifest-digest: ${{ steps.authorization.outputs.authorization-manifest-digest }}
+      expected-payload-sha256: ${{ steps.authorization.outputs.expected-payload-sha256 }}
+      request-budget-profile: ${{ steps.authorization.outputs.request-budget-profile }}
     steps:
       - id: authorization
         env:
@@ -43,12 +50,10 @@ jobs:
           EVENT_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
           EVENT_HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
           INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+          INPUT_OPERATION_ID: ${{ inputs.operation-id }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          ACTION_SOURCE_SHA: __ACTION_SOURCE_SHA__
-          PAYLOAD_SOURCE_SHA: __PAYLOAD_SOURCE_SHA__
-          PAYLOAD_SHA256: __PAYLOAD_SHA256__
           R4_TRUSTED_PROOF_AUTHORIZATION: ${{ vars.R4_TRUSTED_PROOF_AUTHORIZATION }}
         run: |
           node <<'APR_R4_E2P_PREFLIGHT' >> "$GITHUB_OUTPUT"
@@ -101,13 +106,57 @@ jobs:
             );
             const repositoryId = required('REPOSITORY_ID', positiveInteger);
             const workflowSha = required('WORKFLOW_SHA', lowerHex40);
-            const actionSourceSha = required('ACTION_SOURCE_SHA', lowerHex40);
-            const payloadSourceSha = required('PAYLOAD_SOURCE_SHA', lowerHex40);
-            const payloadSha256 = required('PAYLOAD_SHA256', lowerHex64);
-            const authorization = required(
+            const authorizationText = required(
               'R4_TRUSTED_PROOF_AUTHORIZATION',
-              lowerHex64,
+              /^[\x20-\x7e]{1,2048}$/u,
             );
+            if (new TextEncoder().encode(authorizationText).length > 2048) {
+              fail('authorization-size');
+            }
+            rejectDuplicateKeys(authorizationText);
+            const authorization = JSON.parse(authorizationText);
+            const manifestKeys = [
+              'kind',
+              'repository_id',
+              'repository',
+              'pr_number',
+              'proof_scope',
+              'fixture_head_sha',
+              'operation_id',
+              'workflow_sha',
+              'action_source_sha',
+              'payload_source_sha',
+              'payload_sha256',
+            ];
+            if (
+              authorization === null ||
+              Array.isArray(authorization) ||
+              typeof authorization !== 'object' ||
+              JSON.stringify(Object.keys(authorization)) !== JSON.stringify(manifestKeys) ||
+              authorization.kind !== 'apr-r4-e2p-authorization-manifest-v2' ||
+              authorization.repository_id !== repositoryId ||
+              authorization.repository !== repository ||
+              !positiveInteger.test(String(authorization.pr_number ?? '')) ||
+              !/^(?:normal|stale)$/u.test(authorization.proof_scope ?? '') ||
+              !lowerHex40.test(authorization.fixture_head_sha ?? '') ||
+              !lowerHex64.test(authorization.operation_id ?? '') ||
+              !lowerHex40.test(authorization.workflow_sha ?? '') ||
+              !lowerHex40.test(authorization.action_source_sha ?? '') ||
+              !lowerHex40.test(authorization.payload_source_sha ?? '') ||
+              !lowerHex64.test(authorization.payload_sha256 ?? '')
+            ) {
+              fail('authorization-manifest');
+            }
+            const actionSourceSha = authorization.action_source_sha;
+            const payloadSourceSha = authorization.payload_source_sha;
+            const payloadSha256 = authorization.payload_sha256;
+            if (
+              authorization.workflow_sha !== workflowSha ||
+              actionSourceSha !== workflowSha ||
+              payloadSourceSha !== workflowSha
+            ) {
+              fail('authorization-source-identity');
+            }
             const eventName = required(
               'EVENT_NAME',
               /^(?:workflow_run|workflow_dispatch)$/u,
@@ -142,6 +191,14 @@ jobs:
                 : 'INPUT_PR_NUMBER',
               positiveInteger,
             );
+            const requestBudgetProfile =
+              eventName === 'workflow_run'
+                ? authorization.proof_scope === 'normal'
+                  ? 'final-bootstrap'
+                  : 'final-stale'
+                : authorization.proof_scope === 'normal'
+                  ? 'final-continuation'
+                  : fail('workflow-dispatch-proof-scope');
             const response = await fetch(
               `https://api.github.com/repos/${repository}/pulls/${prNumber}`,
               {
@@ -192,18 +249,33 @@ jobs:
               fail('workflow-run-cross-check');
             }
             const operationId = pull.head.ref.slice('r4-trusted-proof/'.length);
+            if (
+              eventName === 'workflow_dispatch' &&
+              required('INPUT_OPERATION_ID', lowerHex64) !== operationId
+            ) {
+              fail('workflow-dispatch-operation-id');
+            }
             const manifest = JSON.stringify({
-              kind: 'apr-r4-e2p-authorization-manifest-v2',
-              repository_id: repositoryId,
-              repository,
-              pr_number: prNumber,
-              fixture_head_sha: fixtureHeadSha,
-              operation_id: operationId,
-              workflow_sha: workflowSha,
-              action_source_sha: actionSourceSha,
-              payload_source_sha: payloadSourceSha,
-              payload_sha256: payloadSha256,
+              kind: authorization.kind,
+              repository_id: authorization.repository_id,
+              repository: authorization.repository,
+              pr_number: authorization.pr_number,
+              proof_scope: authorization.proof_scope,
+              fixture_head_sha: authorization.fixture_head_sha,
+              operation_id: authorization.operation_id,
+              workflow_sha: authorization.workflow_sha,
+              action_source_sha: authorization.action_source_sha,
+              payload_source_sha: authorization.payload_source_sha,
+              payload_sha256: authorization.payload_sha256,
             });
+            if (
+              authorizationText !== manifest ||
+              authorization.pr_number !== prNumber ||
+              authorization.fixture_head_sha !== fixtureHeadSha ||
+              authorization.operation_id !== operationId
+            ) {
+              fail('authorization-mismatch');
+            }
             const digest = Array.from(
               new Uint8Array(
                 await crypto.subtle.digest(
@@ -213,9 +285,9 @@ jobs:
               ),
               (byte) => byte.toString(16).padStart(2, '0'),
             ).join('');
-            if (digest !== authorization) fail('authorization-mismatch');
+            if (!lowerHex64.test(digest)) fail('authorization-digest');
             process.stdout.write(
-              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\n`,
+              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\nexpected-payload-sha256=${payloadSha256}\nrequest-budget-profile=${requestBudgetProfile}\n`,
             );
           })().catch((error) => {
             const code =
@@ -224,7 +296,7 @@ jobs:
                 : 'preflight-failed';
             process.stderr.write(`APR_R4_E2P_PREFLIGHT_REJECTED ${code}\n`);
             process.stdout.write(
-              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\n',
+              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n',
             );
           });
           APR_R4_E2P_PREFLIGHT
@@ -238,20 +310,44 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - id: checkout-control-root
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          repository: SolusQuest/agentic-pr-review
-          ref: ${{ github.workflow_sha }}
-          path: control-root
-          persist-credentials: false
-      - id: checkout-payload-source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          repository: SolusQuest/agentic-pr-review
-          ref: __PAYLOAD_SOURCE_SHA__
-          path: payload-source
-          persist-credentials: false
+      - id: acquire-exact-sources
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          CONTROL_ROOT_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SOURCE_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
+          acquire_exact_public_commit() {
+            local destination="$1"
+            local expected_sha="$2"
+            if [ -e "$destination" ]; then
+              echo "APR_R4_E2P_SOURCE_PATH_NOT_FRESH $destination" >&2
+              exit 1
+            fi
+            git init --quiet "$destination"
+            git -C "$destination" remote add origin https://github.com/SolusQuest/agentic-pr-review.git
+            if git -C "$destination" config --local --get-regexp '^(credential\.helper|http\..*\.extraheader)$'; then
+              echo "APR_R4_E2P_SOURCE_CREDENTIAL_CONFIGURATION" >&2
+              exit 1
+            fi
+            git -C "$destination" fetch --depth=1 --no-tags origin "$expected_sha"
+            if [ "$(git -C "$destination" rev-parse FETCH_HEAD)" != "$expected_sha" ]; then
+              echo "APR_R4_E2P_SOURCE_FETCH_IDENTITY" >&2
+              exit 1
+            fi
+            git -C "$destination" checkout --quiet --detach "$expected_sha"
+            if [ "$(git -C "$destination" rev-parse HEAD)" != "$expected_sha" ]; then
+              echo "APR_R4_E2P_SOURCE_CHECKOUT_IDENTITY" >&2
+              exit 1
+            fi
+          }
+          acquire_exact_public_commit "$GITHUB_WORKSPACE/control-root" "$CONTROL_ROOT_SHA"
+          acquire_exact_public_commit "$GITHUB_WORKSPACE/payload-source" "$PAYLOAD_SOURCE_SHA"
       - id: setup-node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
@@ -268,9 +364,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang zlib1g-dev
       - id: prepare
         run: |
-          bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
+          unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
+          bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-hold
         env:
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -278,24 +377,25 @@ jobs:
           FIXTURE_HEAD_SHA: ${{ needs.authorization-preflight.outputs.fixture-head-sha }}
           OPERATION_ID: ${{ needs.authorization-preflight.outputs.operation-id }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          ACTION_SOURCE_SHA: __ACTION_SOURCE_SHA__
-          PAYLOAD_SOURCE_SHA: __PAYLOAD_SOURCE_SHA__
-          PAYLOAD_SHA256: __PAYLOAD_SHA256__
+          ACTION_SOURCE_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SOURCE_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SHA256: ${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           "${{ steps.prepare.outputs.prepared_root }}/${{ steps.prepare.outputs.prepared_executable }}" barrier hold
       - id: review
-        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@__ACTION_SOURCE_SHA__
+        uses: ./control-root/.github/actions/agentic-pr-review
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          provider-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          provider-api-key: ${{ secrets.AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY }}
           state-key: ${{ secrets.AGENTIC_PR_REVIEW_STATE_KEY }}
           previous-state-key: ${{ secrets.AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY || '' }}
           config-path: .github/agentic-pr-review/trusted-proof.json
           pr-number: ''
           state-mode: auto
         env:
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           AGENTIC_PR_REVIEW_PREPARED_ROOT: ${{ steps.prepare.outputs.prepared_root }}
           AGENTIC_PR_REVIEW_PREPARED_EXECUTABLE: ${{ steps.prepare.outputs.prepared_executable }}
           AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}
@@ -311,20 +411,44 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - id: checkout-control-root
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          repository: SolusQuest/agentic-pr-review
-          ref: ${{ github.workflow_sha }}
-          path: control-root
-          persist-credentials: false
-      - id: checkout-payload-source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          repository: SolusQuest/agentic-pr-review
-          ref: __PAYLOAD_SOURCE_SHA__
-          path: payload-source
-          persist-credentials: false
+      - id: acquire-exact-sources
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          CONTROL_ROOT_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SOURCE_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
+          acquire_exact_public_commit() {
+            local destination="$1"
+            local expected_sha="$2"
+            if [ -e "$destination" ]; then
+              echo "APR_R4_E2P_SOURCE_PATH_NOT_FRESH $destination" >&2
+              exit 1
+            fi
+            git init --quiet "$destination"
+            git -C "$destination" remote add origin https://github.com/SolusQuest/agentic-pr-review.git
+            if git -C "$destination" config --local --get-regexp '^(credential\.helper|http\..*\.extraheader)$'; then
+              echo "APR_R4_E2P_SOURCE_CREDENTIAL_CONFIGURATION" >&2
+              exit 1
+            fi
+            git -C "$destination" fetch --depth=1 --no-tags origin "$expected_sha"
+            if [ "$(git -C "$destination" rev-parse FETCH_HEAD)" != "$expected_sha" ]; then
+              echo "APR_R4_E2P_SOURCE_FETCH_IDENTITY" >&2
+              exit 1
+            fi
+            git -C "$destination" checkout --quiet --detach "$expected_sha"
+            if [ "$(git -C "$destination" rev-parse HEAD)" != "$expected_sha" ]; then
+              echo "APR_R4_E2P_SOURCE_CHECKOUT_IDENTITY" >&2
+              exit 1
+            fi
+          }
+          acquire_exact_public_commit "$GITHUB_WORKSPACE/control-root" "$CONTROL_ROOT_SHA"
+          acquire_exact_public_commit "$GITHUB_WORKSPACE/payload-source" "$PAYLOAD_SOURCE_SHA"
       - id: setup-node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
@@ -341,9 +465,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang zlib1g-dev
       - id: prepare
         run: |
-          bash payload-source/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
+          unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
+          bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-verify-completed
         env:
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
@@ -351,24 +478,25 @@ jobs:
           FIXTURE_HEAD_SHA: ${{ needs.authorization-preflight.outputs.fixture-head-sha }}
           OPERATION_ID: ${{ needs.authorization-preflight.outputs.operation-id }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          ACTION_SOURCE_SHA: __ACTION_SOURCE_SHA__
-          PAYLOAD_SOURCE_SHA: __PAYLOAD_SOURCE_SHA__
-          PAYLOAD_SHA256: __PAYLOAD_SHA256__
+          ACTION_SOURCE_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SOURCE_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SHA256: ${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           "${{ steps.prepare.outputs.prepared_root }}/${{ steps.prepare.outputs.prepared_executable }}" barrier verify-completed
       - id: review
-        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@__ACTION_SOURCE_SHA__
+        uses: ./control-root/.github/actions/agentic-pr-review
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          provider-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          provider-api-key: ${{ secrets.AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY }}
           state-key: ${{ secrets.AGENTIC_PR_REVIEW_STATE_KEY }}
           previous-state-key: ${{ secrets.AGENTIC_PR_REVIEW_PREVIOUS_STATE_KEY || '' }}
           config-path: .github/agentic-pr-review/trusted-proof.json
           pr-number: ${{ inputs.pr-number }}
           state-mode: auto
         env:
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           AGENTIC_PR_REVIEW_PREPARED_ROOT: ${{ steps.prepare.outputs.prepared_root }}
           AGENTIC_PR_REVIEW_PREPARED_EXECUTABLE: ${{ steps.prepare.outputs.prepared_executable }}
           AGENTIC_PR_REVIEW_PREPARED_PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}
