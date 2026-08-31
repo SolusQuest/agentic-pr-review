@@ -171,6 +171,8 @@ public sealed class ArtifactBridgeContractTests
                 new FileInfo(scope.FullPath).Length);
             await scope.DisposeAsync();
             Assert.True(scope.CleanupSucceeded);
+            Assert.Empty(Directory.GetFileSystemEntries(
+                Path.Join(root, "csharp")));
 
             await Assert.ThrowsAsync<IOException>(() =>
                 staging.StageUploadAsync(
