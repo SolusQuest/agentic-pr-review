@@ -352,6 +352,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     budget: ArtifactBridgeOperationBudget,
   ): Promise<ArtifactBridgeResult> {
     const platform = await this.loadPlatformArtifact(command.name, command.object_id, budget);
+    this.assertNotExpired(platform);
     const record = await this.readRecord(platform, budget);
     try {
       return successWithMetadata(command, record.metadata);
@@ -567,6 +568,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       budget,
     );
     this.assertExpectedPlatform(command.expected, platform);
+    this.assertNotExpired(platform);
     const record = await this.readRecord(platform, budget);
     try {
       try {
@@ -687,22 +689,28 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     objectId: string,
     budget: ArtifactBridgeOperationBudget,
   ): Promise<PlatformArtifact> {
-    const response = await this.callOfficial(
-      (requestSignal) =>
-        this.context.actions.getArtifact(
-          {
-            owner: this.context.owner,
-            repo: this.context.repository,
-            artifact_id: Number(objectId),
-          },
-          requestSignal,
-          budget.latestHttpAttemptStartAt(),
-        ),
-      budget,
-    );
+    let response: Awaited<ReturnType<ArtifactActionsRestClient['getArtifact']>>;
+    try {
+      response = await this.callOfficial(
+        (requestSignal) =>
+          this.context.actions.getArtifact(
+            {
+              owner: this.context.owner,
+              repo: this.context.repository,
+              artifact_id: Number(objectId),
+            },
+            requestSignal,
+            budget.latestHttpAttemptStartAt(),
+          ),
+        budget,
+      );
+    } catch (error) {
+      if (isNotFound(error)) this.invalidatePlatformRepresentation(expectedName, objectId);
+      throw error;
+    }
     budget.throwIfExpired();
     if (response.status === 404) {
-      this.verifiedRecords.deleteByNameAndId(expectedName, objectId);
+      this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure('not_found');
     }
     if (response.status !== 200 || !responseFits(response.data)) {
@@ -746,6 +754,10 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     // Every caller first obtains a fresh platform observation. GitHub artifact
     // archives are immutable, so an exact observed platform identity may reuse
     // a prior fully verified envelope without weakening that observation.
+    // Expiry is authority, not identity: evaluate the current UTC clock before
+    // every cache lookup even when the descriptor came from an authenticated
+    // 304 reconstruction.
+    this.assertNotExpired(platform);
     const cached = this.verifiedRecords.get(platform);
     if (cached) return cached;
     const response = await this.callOfficial(
@@ -795,6 +807,9 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         },
         bytes: envelope.encryptedBytes,
       };
+      // Verification can cross the descriptor's expiry boundary. Never admit
+      // such a record into the process-local verified cache.
+      this.assertNotExpired(platform);
       this.verifiedRecords.store(platform, record);
       const output = this.verifiedRecords.copy(record);
       return output;

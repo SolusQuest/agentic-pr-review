@@ -100075,6 +100075,7 @@ var OfficialArtifactOperations = class {
   }
   async metadata(command, budget) {
     const platform2 = await this.loadPlatformArtifact(command.name, command.object_id, budget);
+    this.assertNotExpired(platform2);
     const record = await this.readRecord(platform2, budget);
     try {
       return successWithMetadata(command, record.metadata);
@@ -100246,6 +100247,7 @@ var OfficialArtifactOperations = class {
       budget
     );
     this.assertExpectedPlatform(command.expected, platform2);
+    this.assertNotExpired(platform2);
     const record = await this.readRecord(platform2, budget);
     try {
       try {
@@ -100343,21 +100345,27 @@ var OfficialArtifactOperations = class {
     }
   }
   async loadPlatformArtifact(expectedName, objectId, budget) {
-    const response = await this.callOfficial(
-      (requestSignal) => this.context.actions.getArtifact(
-        {
-          owner: this.context.owner,
-          repo: this.context.repository,
-          artifact_id: Number(objectId)
-        },
-        requestSignal,
-        budget.latestHttpAttemptStartAt()
-      ),
-      budget
-    );
+    let response;
+    try {
+      response = await this.callOfficial(
+        (requestSignal) => this.context.actions.getArtifact(
+          {
+            owner: this.context.owner,
+            repo: this.context.repository,
+            artifact_id: Number(objectId)
+          },
+          requestSignal,
+          budget.latestHttpAttemptStartAt()
+        ),
+        budget
+      );
+    } catch (error3) {
+      if (isNotFound(error3)) this.invalidatePlatformRepresentation(expectedName, objectId);
+      throw error3;
+    }
     budget.throwIfExpired();
     if (response.status === 404) {
-      this.verifiedRecords.deleteByNameAndId(expectedName, objectId);
+      this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("not_found");
     }
     if (response.status !== 200 || !responseFits(response.data)) {
@@ -100384,6 +100392,7 @@ var OfficialArtifactOperations = class {
     };
   }
   async readRecord(platform2, budget) {
+    this.assertNotExpired(platform2);
     const cached = this.verifiedRecords.get(platform2);
     if (cached) return cached;
     const response = await this.callOfficial(
@@ -100427,6 +100436,7 @@ var OfficialArtifactOperations = class {
         },
         bytes: envelope.encryptedBytes
       };
+      this.assertNotExpired(platform2);
       this.verifiedRecords.store(platform2, record);
       const output = this.verifiedRecords.copy(record);
       return output;
@@ -102270,4 +102280,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 88d9693bf1ed73b5d5e01d76cf05a8b3d4645c91aa3e98da870f9ec43a7f1c9c
+// Action source inventory sha256: 6cfc12dd793d72e30ccb52b9abd1df514682172d58a7e8302f1c8f67b2c05fc4

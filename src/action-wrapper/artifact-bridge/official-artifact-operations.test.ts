@@ -6,16 +6,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArtifactActionsRestClient } from './official-artifact-operations.js';
 import { OfficialArtifactOperations } from './official-artifact-operations.js';
+import { createArtifactActionsRestClient } from './actions-rest-client.js';
+import { ArtifactCacheLedger } from './artifact-cache-ledger.js';
 import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
 import { digestBytes, encodeArtifactTransportEnvelope } from './transport-envelope.js';
 import { ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import { ArtifactBridgeOperationBudget } from './operation-budget.js';
-import { ArtifactRestAttemptDeadlineError } from './artifact-rest-request-budget.js';
+import {
+  ArtifactRestAttemptDeadlineError,
+  ArtifactRestRequestBudget,
+} from './artifact-rest-request-budget.js';
 import { createTestZip } from './zip-test-helper.js';
 
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
 });
 
@@ -989,6 +995,226 @@ describe('precise conditional-representation invalidation', () => {
       { owner: 'owner', repo: 'repository', artifact_id: 42 },
     ]);
   });
+
+  it('revokes both cache families after an Octokit 404 and preserves unrelated records', async () => {
+    const target = integratedArtifactFixture({
+      id: 42,
+      name: 'target-state',
+      runId: 7001,
+      runAttempt: 2,
+      expiresAtUnixSeconds: 1_893_456_000,
+    });
+    const unrelated = integratedArtifactFixture({
+      id: 43,
+      name: 'unrelated-state',
+      runId: 7002,
+      runAttempt: 1,
+      expiresAtUnixSeconds: 1_893_456_000,
+    });
+    const getArtifact = vi.fn(async (input: IntegratedGetArtifactInput) => {
+      const callsForArtifact = getArtifact.mock.calls.filter(
+        ([candidate]) => candidate.artifact_id === input.artifact_id,
+      ).length;
+      if (input.artifact_id === target.id) {
+        if (callsForArtifact === 2) {
+          throw Object.assign(new Error('production-shaped Octokit 404'), {
+            status: 404,
+            response: { status: 404, headers: {} },
+          });
+        }
+        return {
+          status: 200,
+          headers: { etag: callsForArtifact === 1 ? '"target-v1"' : '"target-v2"' },
+          data: target.platform,
+        };
+      }
+      if (input.artifact_id === unrelated.id) {
+        return callsForArtifact === 1
+          ? { status: 200, headers: { etag: '"unrelated-v1"' }, data: unrelated.platform }
+          : { status: 304, headers: {}, data: unrelated.platform };
+      }
+      throw new Error('unexpected artifact id');
+    });
+    const downloadArtifact = vi.fn(async (input: { readonly artifact_id: number }) => ({
+      status: 302,
+      headers: { location: `https://blob.invalid/${input.artifact_id}` },
+    }));
+    const getWorkflowRunAttempt = vi.fn(
+      async (input: { readonly run_id: number; readonly attempt_number: number }) => ({
+        status: 200,
+        headers: { etag: `"attempt-${input.run_id}-${input.attempt_number}"` },
+        data: { id: input.run_id, run_attempt: input.attempt_number },
+      }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const id = Number(new URL(String(input)).pathname.slice(1));
+        const fixture = id === target.id ? target : id === unrelated.id ? unrelated : undefined;
+        if (!fixture) throw new Error('unexpected archive url');
+        return new Response(new Uint8Array(fixture.archive), {
+          status: 200,
+          headers: { 'content-length': String(fixture.archive.length) },
+        });
+      }),
+    );
+    const operations = await createIntegratedOperations(
+      { getArtifact, downloadArtifact, getWorkflowRunAttempt },
+      () => Date.parse('2029-01-01T00:00:00Z'),
+    );
+    const signal = new AbortController().signal;
+
+    expect(await executeMetadata(operations, target, 'target-initial', signal)).toMatchObject({
+      failure: 'none',
+    });
+    expect(await executeMetadata(operations, unrelated, 'unrelated-initial', signal)).toMatchObject(
+      { failure: 'none' },
+    );
+    expect(downloadArtifact.mock.calls.map(([input]) => input.artifact_id)).toEqual([42, 43]);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    expect(await executeMetadata(operations, target, 'target-404', signal)).toMatchObject({
+      failure: 'not_found',
+    });
+    expect(getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42)).toHaveLength(2);
+
+    expect(await executeMetadata(operations, target, 'target-recovered', signal)).toMatchObject({
+      failure: 'none',
+    });
+    const targetCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42);
+    expect(targetCalls[1]?.[0]).toMatchObject({ headers: { 'if-none-match': '"target-v1"' } });
+    expect(targetCalls[2]?.[0].headers).toBeUndefined();
+    expect(downloadArtifact.mock.calls.map(([input]) => input.artifact_id)).toEqual([42, 43, 42]);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(3);
+
+    expect(
+      await executeMetadata(operations, unrelated, 'unrelated-after-target-404', signal),
+    ).toMatchObject({ failure: 'none' });
+    const unrelatedCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 43);
+    expect(unrelatedCalls[1]?.[0]).toMatchObject({
+      headers: { 'if-none-match': '"unrelated-v1"' },
+    });
+    expect(downloadArtifact).toHaveBeenCalledTimes(3);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(3);
+  });
+
+  it('revokes both cache families when UTC expiry follows an authenticated 304', async () => {
+    const expiry = Date.parse('2030-01-01T00:00:00Z');
+    let utcNow = expiry - 1_000;
+    const target = integratedArtifactFixture({
+      id: 42,
+      name: 'target-state',
+      runId: 7001,
+      runAttempt: 2,
+      expiresAtUnixSeconds: Math.floor(expiry / 1_000),
+    });
+    const unrelated = integratedArtifactFixture({
+      id: 43,
+      name: 'unrelated-state',
+      runId: 7002,
+      runAttempt: 1,
+      expiresAtUnixSeconds: Math.floor(Date.parse('2031-01-01T00:00:00Z') / 1_000),
+    });
+    const getArtifact = vi.fn(async (input: IntegratedGetArtifactInput) => {
+      const callsForArtifact = getArtifact.mock.calls.filter(
+        ([candidate]) => candidate.artifact_id === input.artifact_id,
+      ).length;
+      if (input.artifact_id === target.id) {
+        if (callsForArtifact === 1) {
+          return { status: 200, headers: { etag: '"target-v1"' }, data: target.platform };
+        }
+        if (callsForArtifact === 2) {
+          return { status: 304, headers: {}, data: target.platform };
+        }
+        return {
+          status: 200,
+          headers: { etag: '"target-expired"' },
+          data: { ...target.platform, expired: true },
+        };
+      }
+      if (input.artifact_id === unrelated.id) {
+        return callsForArtifact === 1
+          ? { status: 200, headers: { etag: '"unrelated-v1"' }, data: unrelated.platform }
+          : { status: 304, headers: {}, data: unrelated.platform };
+      }
+      throw new Error('unexpected artifact id');
+    });
+    const downloadArtifact = vi.fn(async (input: { readonly artifact_id: number }) => ({
+      status: 302,
+      headers: { location: `https://blob.invalid/${input.artifact_id}` },
+    }));
+    const getWorkflowRunAttempt = vi.fn(
+      async (input: { readonly run_id: number; readonly attempt_number: number }) => ({
+        status: 200,
+        headers: { etag: `"attempt-${input.run_id}-${input.attempt_number}"` },
+        data: { id: input.run_id, run_attempt: input.attempt_number },
+      }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const id = Number(new URL(String(input)).pathname.slice(1));
+        const fixture = id === target.id ? target : id === unrelated.id ? unrelated : undefined;
+        if (!fixture) throw new Error('unexpected archive url');
+        return new Response(new Uint8Array(fixture.archive), {
+          status: 200,
+          headers: { 'content-length': String(fixture.archive.length) },
+        });
+      }),
+    );
+    const operations = await createIntegratedOperations(
+      { getArtifact, downloadArtifact, getWorkflowRunAttempt },
+      () => utcNow,
+    );
+    const signal = new AbortController().signal;
+
+    expect(await executeMetadata(operations, target, 'target-before-expiry', signal)).toMatchObject(
+      {
+        failure: 'none',
+      },
+    );
+    expect(
+      await executeMetadata(operations, unrelated, 'unrelated-before-expiry', signal),
+    ).toMatchObject({ failure: 'none' });
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    utcNow = expiry;
+    expect(await executeMetadata(operations, target, 'target-expired-304', signal)).toMatchObject({
+      failure: 'expired',
+    });
+    let targetCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42);
+    expect(targetCalls).toHaveLength(2);
+    expect(targetCalls[1]?.[0]).toMatchObject({ headers: { 'if-none-match': '"target-v1"' } });
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    expect(
+      await operations.execute(
+        {
+          operation: 'readback_exact',
+          correlation_id: 'target-expired-readback',
+          expected: target.metadata,
+        },
+        signal,
+      ),
+    ).toMatchObject({ failure: 'expired' });
+    targetCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 42);
+    expect(targetCalls).toHaveLength(3);
+    expect(targetCalls[2]?.[0].headers).toBeUndefined();
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+
+    expect(
+      await executeMetadata(operations, unrelated, 'unrelated-after-target-expiry', signal),
+    ).toMatchObject({ failure: 'none' });
+    const unrelatedCalls = getArtifact.mock.calls.filter(([input]) => input.artifact_id === 43);
+    expect(unrelatedCalls[1]?.[0]).toMatchObject({
+      headers: { 'if-none-match': '"unrelated-v1"' },
+    });
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(getWorkflowRunAttempt).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('delete dispatch marker', () => {
@@ -1283,8 +1509,8 @@ describe('official artifact lifecycle', () => {
       },
       signal,
     );
-    expect(expiredMetadata.failure).toBe('none');
-    expect(downloadCalls).toBe(downloadsBeforeDelete + 1);
+    expect(expiredMetadata.failure).toBe('expired');
+    expect(downloadCalls).toBe(downloadsBeforeDelete);
     const expiredReadBack = await operations.execute(
       {
         operation: 'readback_exact',
@@ -1293,8 +1519,8 @@ describe('official artifact lifecycle', () => {
       },
       signal,
     );
-    expect(expiredReadBack.failure).toBe('none');
-    expect(downloadCalls).toBe(downloadsBeforeDelete + 1);
+    expect(expiredReadBack.failure).toBe('expired');
+    expect(downloadCalls).toBe(downloadsBeforeDelete);
     const downloadsBeforeExpiredDownload = downloadCalls;
     const expiredDownload = await operations.execute(
       {
@@ -1339,6 +1565,127 @@ describe('official artifact lifecycle', () => {
     ).rejects.toThrow('artifact_lifecycle_coordinator_stopped');
   });
 });
+
+interface IntegratedGetArtifactInput {
+  readonly artifact_id: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly request?: { readonly signal?: AbortSignal };
+}
+
+function integratedArtifactFixture(input: {
+  readonly id: number;
+  readonly name: string;
+  readonly runId: number;
+  readonly runAttempt: number;
+  readonly expiresAtUnixSeconds: number;
+}) {
+  const encrypted = Buffer.from(`encrypted-${input.name}`);
+  const envelope = encodeArtifactTransportEnvelope(
+    String(input.runId),
+    String(input.runAttempt),
+    encrypted,
+    digestBytes(encrypted),
+    testBudget(),
+  );
+  const archive = createTestZip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+  const archiveDigest = digestBytes(archive);
+  return {
+    ...input,
+    archive,
+    platform: {
+      id: input.id,
+      name: input.name,
+      size_in_bytes: archive.length,
+      expired: false,
+      expires_at: new Date(input.expiresAtUnixSeconds * 1_000).toISOString(),
+      digest: `sha256:${archiveDigest}`,
+      workflow_run: { id: input.runId },
+    },
+    metadata: {
+      name: input.name,
+      object_id: String(input.id),
+      producing_run_id: String(input.runId),
+      producing_run_attempt: String(input.runAttempt),
+      archive_digest: archiveDigest,
+      encrypted_object_digest: digestBytes(encrypted),
+      expires_at_unix_seconds: String(input.expiresAtUnixSeconds),
+      size: String(encrypted.length),
+    },
+  };
+}
+
+async function createIntegratedOperations(
+  methods: Record<string, unknown>,
+  utcNow: () => number,
+): Promise<OfficialArtifactOperations> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'apr-integrated-cache-test-'));
+  roots.push(root);
+  const unsupported = async (): Promise<never> => {
+    throw new Error('unexpected official call');
+  };
+  const ledger = new ArtifactCacheLedger();
+  const requestBudget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+    buildDiscriminator: 'r4-h1',
+    limits: {
+      maximumTotalAuthenticatedApiRequests: 32,
+      maximumPrimaryRateLimitRequests: 32,
+    },
+  });
+  const actions = createArtifactActionsRestClient(
+    {
+      rest: {
+        actions: {
+          listArtifactsForRepo: unsupported,
+          getArtifact: unsupported,
+          downloadArtifact: unsupported,
+          getWorkflowRunAttempt: unsupported,
+          deleteArtifact: unsupported,
+          ...methods,
+        },
+      },
+    } as never,
+    requestBudget,
+    undefined,
+    ledger,
+  );
+  const artifactClient: ArtifactClient = {
+    uploadArtifact: unsupported,
+    downloadArtifact: unsupported,
+    listArtifacts: unsupported,
+    getArtifact: unsupported,
+    deleteArtifact: unsupported,
+  };
+  return new OfficialArtifactOperations({
+    owner: 'owner',
+    repository: 'repository',
+    currentRunId: '7001',
+    currentRunAttempt: '2',
+    artifactClient,
+    actions,
+    staging: await ArtifactBridgeStaging.create(root),
+    monotonicNow: () => 0,
+    utcNow,
+    cacheLedger: ledger,
+    artifactRestRequestBudget: requestBudget,
+  });
+}
+
+async function executeMetadata(
+  operations: OfficialArtifactOperations,
+  fixture: ReturnType<typeof integratedArtifactFixture>,
+  correlationId: string,
+  signal: AbortSignal,
+) {
+  return await operations.execute(
+    {
+      operation: 'metadata',
+      correlation_id: correlationId,
+      name: fixture.name,
+      object_id: String(fixture.id),
+    },
+    signal,
+  );
+}
 
 async function createOperations(
   overrides: Partial<ArtifactActionsRestClient>,
