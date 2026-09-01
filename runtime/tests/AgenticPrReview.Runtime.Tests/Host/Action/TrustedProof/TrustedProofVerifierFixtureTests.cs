@@ -469,7 +469,7 @@ public sealed class TrustedProofVerifierFixtureTests
     }
 
     [Fact]
-    public async Task TrustedProofContinuationAdvancesTheReviewedHead()
+    public async Task TrustedProofContinuationKeepsTheRefreshedHeadWhileGenericContinuationAdvances()
     {
         var root = Path.Join(
             Path.GetTempPath(),
@@ -496,8 +496,31 @@ public sealed class TrustedProofVerifierFixtureTests
             using var document = JsonDocument.Parse(
                 await response.Content.ReadAsStringAsync());
             Assert.Equal(
-                FrameworkGitHubHandler.ContinuedHeadSha,
+                FrameworkGitHubHandler.HeadSha,
                 document.RootElement.GetProperty("head")
+                    .GetProperty("sha").GetString());
+
+            using var headResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/git/commits/" +
+                FrameworkGitHubHandler.HeadSha);
+            headResponse.EnsureSuccessStatusCode();
+            using var head = JsonDocument.Parse(
+                await headResponse.Content.ReadAsStringAsync());
+            Assert.Equal(2, head.RootElement.GetProperty("parents").GetArrayLength());
+            Assert.Equal(
+                FrameworkGitHubHandler.WorkflowSha,
+                head.RootElement.GetProperty("parents")[0]
+                    .GetProperty("sha").GetString());
+
+            File.Delete(Path.Join(root, "trusted-proof-payload"));
+            using var genericResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/pulls/147");
+            genericResponse.EnsureSuccessStatusCode();
+            using var generic = JsonDocument.Parse(
+                await genericResponse.Content.ReadAsStringAsync());
+            Assert.Equal(
+                FrameworkGitHubHandler.ContinuedHeadSha,
+                generic.RootElement.GetProperty("head")
                     .GetProperty("sha").GetString());
         }
         finally
@@ -536,6 +559,10 @@ public sealed class TrustedProofVerifierFixtureTests
                 FrameworkGitHubHandler.BaseSha,
                 FrameworkGitHubHandler.PullRequestBaseSha(
                     trustedProofPayload: false));
+            Assert.Equal(
+                FrameworkGitHubHandler.BaseSha,
+                FrameworkSupervisor.WorkflowRunReportedBaseShaForTest(
+                    trustedProofPayload: true));
 
             using var triggerResponse = await client.GetAsync(
                 "repos/" + FrameworkCanaries.Repository +

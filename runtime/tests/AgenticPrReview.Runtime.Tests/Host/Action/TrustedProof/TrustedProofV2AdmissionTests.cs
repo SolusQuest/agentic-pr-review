@@ -129,6 +129,22 @@ public sealed class TrustedProofV2AdmissionTests
             ActionHostAuthorizationScenario.BaseSha,
             v2Invocation.PullRequest.ReportedBaseSha);
 
+        var workflowRun = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        SetV2Workflow(workflowRun);
+        var workflowRunResult = await CreateV2Authorizer(workflowRun).AuthorizeAsync(
+            CreateCurrentHeadLaunch(workflowRun),
+            CancellationToken.None);
+        var workflowRunInvocation =
+            Assert.IsType<ActionHostAuthorizer.AuthorizedInvocation>(
+                workflowRunResult.Invocation);
+        Assert.Equal(
+            TrustedProofPayloadBuildIdentity.SourceCommit,
+            workflowRunInvocation.PullRequest.BaseSha);
+        Assert.Equal(
+            ActionHostAuthorizationScenario.BaseSha,
+            workflowRunInvocation.PullRequest.ReportedBaseSha);
+
         v2 = CreateV2Scenario();
         v2.Transport.Repository = v2.Transport.Repository with
         {

@@ -1069,8 +1069,11 @@ internal static class FrameworkSupervisor
         spec.TrustedProofSourceCommit ?? FrameworkGitHubHandler.ActionSha;
 
     private static string FixtureBaseSha(CaseSpec spec) =>
-        spec.TrustedProofSourceCommit ?? FrameworkGitHubHandler.PullRequestBaseSha(
-            trustedProofPayload: false);
+        WorkflowRunReportedBaseShaForTest(spec.TrustedProofPayload);
+
+    internal static string WorkflowRunReportedBaseShaForTest(
+        bool trustedProofPayload) =>
+        FrameworkGitHubHandler.PullRequestBaseSha(trustedProofPayload);
 
     private static async Task<int> RunTrustedProofPayloadAsync(
         string root,
@@ -1119,6 +1122,7 @@ internal static class FrameworkSupervisor
             "stale-head",
             "stale",
             "stale_head",
+            WorkflowRun: true,
             ExpectedStickyMutations: 0,
             TrustedProofPayload: true,
             TrustedProofSourceCommit: requiredSourceExpectation.SourceCommit,

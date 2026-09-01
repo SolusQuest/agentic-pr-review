@@ -185,6 +185,51 @@ describe('R4 post-merge fixture refresh contract', () => {
         resolveTestedMainCheckout({ runGit: materialized.runGit, head: mergeMismatch }),
       ).toThrow(/checkout-(first-parent-delta|merge-tree)/u);
 
+      const missingCanary = commit(
+        materialized.runGit,
+        baseTree,
+        [testedMain, normalPrior],
+        REFRESH_CONTRACT.normal.message.trim(),
+      );
+      const wrongPathTree = treeWith(materialized.runGit, baseTree, [
+        {
+          mode: REFRESH_CONTRACT.canaryMode,
+          path: 'proof/apr178-wrong-path.txt',
+          bytes: REFRESH_CONTRACT.initialCanary.toString('utf8'),
+        },
+      ]);
+      const wrongPathCanary = commit(
+        materialized.runGit,
+        wrongPathTree,
+        [testedMain, normalPrior],
+        REFRESH_CONTRACT.normal.message.trim(),
+      );
+
+      for (const [malformedHead, malformedTree] of [
+        [missingCanary, baseTree],
+        [wrongPathCanary, wrongPathTree],
+      ]) {
+        expect(() =>
+          resolveTestedMainCheckout({
+            runGit: materialized.runGit,
+            head: malformedHead,
+          }),
+        ).toThrow(/checkout-canary/u);
+
+        const syntheticMerge = commit(
+          materialized.runGit,
+          malformedTree,
+          [testedMain, malformedHead],
+          'test: synthetic merge with malformed fixture intent',
+        );
+        expect(() =>
+          resolveTestedMainCheckout({
+            runGit: materialized.runGit,
+            head: syntheticMerge,
+          }),
+        ).toThrow(/checkout-canary/u);
+      }
+
       for (const [mode, bytes] of [
         ['100644', 'WRONG_CANARY\n'],
         ['100755', REFRESH_CONTRACT.initialCanary.toString('utf8')],

@@ -158,6 +158,29 @@ function exactCanaryDelta(run, base, head) {
   return actual === expected;
 }
 
+const fixtureMessages = new Set(
+  [REFRESH_CONTRACT.normal, REFRESH_CONTRACT.stale, REFRESH_CONTRACT.advance].map(({ message }) =>
+    message.trim(),
+  ),
+);
+
+function hasFixtureCommitIntent(runGit, commit) {
+  const fields = text(runGit, [
+    'show',
+    '-s',
+    '--format=%an%x00%ae%x00%cn%x00%ce%x00%B',
+    commit,
+  ]).split('\0');
+  return (
+    fields.length === 5 &&
+    fields[0] === REFRESH_CONTRACT.identity.name &&
+    fields[1] === REFRESH_CONTRACT.identity.email &&
+    fields[2] === REFRESH_CONTRACT.identity.name &&
+    fields[3] === REFRESH_CONTRACT.identity.email &&
+    fixtureMessages.has(fields[4])
+  );
+}
+
 /** Resolve only the ordinary, exact fixture-head, and GitHub merge-checkout shapes. */
 export function resolveTestedMainCheckout({ runGit, head }) {
   if (typeof runGit !== 'function') fail('checkout-runner');
@@ -167,7 +190,12 @@ export function resolveTestedMainCheckout({ runGit, head }) {
     'checkout-tree',
   );
   const canaryEntry = text(runGit, ['ls-tree', checkoutTree, '--', REFRESH_CONTRACT.canaryPath]);
+  const checkoutParents = parents(runGit, checkoutHead);
+  const hasFixtureIntent =
+    canaryEntry !== '' ||
+    [checkoutHead, ...checkoutParents].some((commit) => hasFixtureCommitIntent(runGit, commit));
   if (canaryEntry === '') {
+    if (hasFixtureIntent) fail('checkout-canary');
     return Object.freeze({
       testedMainHead: checkoutHead,
       testedMainTree: checkoutTree,
@@ -184,7 +212,6 @@ export function resolveTestedMainCheckout({ runGit, head }) {
     fail('checkout-canary');
   }
 
-  const checkoutParents = parents(runGit, checkoutHead);
   if (checkoutParents.length !== 2) fail('checkout-parent-shape');
   const testedMainHead = objectId(checkoutParents[0], 'checkout-first-parent');
   const testedMainTree = objectId(

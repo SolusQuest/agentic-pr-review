@@ -622,7 +622,7 @@ internal sealed class FrameworkGitHubHandler(
 
     private string CurrentHead(string mode) =>
         mode == "cross-head-conflict" ? ConflictHeadSha :
-        mode == "continuation" ||
+        mode == "continuation" && !IsTrustedProofPayload() ||
             mode == "stale" &&
                 (ReadCounter("provider-sequence") >= 6 ||
                     File.Exists(Path.Join(scenarioRoot, "stale-released")))
