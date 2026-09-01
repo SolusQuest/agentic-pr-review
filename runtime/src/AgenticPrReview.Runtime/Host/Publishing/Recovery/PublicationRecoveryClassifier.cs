@@ -51,7 +51,7 @@ internal static class PublicationRecoveryClassifier
 
         if (observation.Candidate is null)
         {
-            if (observation.CurrentAcceptedHeadMatchesReviewedHead)
+            if (observation.CurrentAcceptanceMatchesReviewedExecution)
             {
                 return marker == PublicationMarkerObservation.Exact &&
                     observation.Inventory?

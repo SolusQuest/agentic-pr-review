@@ -507,7 +507,8 @@ internal sealed class FrameworkGitHubHandler(
             ("head_branch", "main"),
             ("head_sha", CurrentWorkflowSha()),
             ("event", mode == "workflow-run" ||
-                IsTrustedProofPayload() && mode == "continuation-seed"
+                IsTrustedProofPayload() && mode is
+                    "continuation-seed" or "stale"
                     ? "workflow_run"
                     : "workflow_dispatch"),
             ("conclusion", null),

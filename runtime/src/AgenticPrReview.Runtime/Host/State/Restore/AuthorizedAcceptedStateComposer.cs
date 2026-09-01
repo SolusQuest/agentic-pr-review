@@ -86,6 +86,13 @@ internal sealed class AuthorizedAcceptedStateRestoreContext : IDisposable
             true;
     }
 
+    internal bool TryGetProducingRun(out OpaqueStoreProducingRun? run)
+    {
+        run = null;
+        return Volatile.Read(ref transaction)?.TryGetProducingRun(out run) ==
+            true;
+    }
+
     internal bool TryGetTransactionAuthority(
         object issuer,
         out RetainedStateTransactionAuthority? authority)

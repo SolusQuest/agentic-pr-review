@@ -55,6 +55,12 @@ internal static class PublicationRecoveryInventoryFactory
                 return Fail();
             }
 
+            if (!context.TryGetProducingRun(out var currentProducingRun) ||
+                currentProducingRun is null)
+            {
+                return Fail();
+            }
+
             var pending = inventory.Candidate;
             if (pending is not null &&
                 (!StringComparer.Ordinal.Equals(
@@ -215,12 +221,18 @@ internal static class PublicationRecoveryInventoryFactory
                 }
             }
 
-            var currentHeadMatches =
+            var currentAcceptanceMatchesExecution =
                 acceptedPublication is not null &&
                 StringComparer.Ordinal.Equals(
                     acceptedPublication.ReviewedHeadSha,
-                    reviewedHeadSha);
-            if (!currentHeadMatches)
+                    reviewedHeadSha) &&
+                inventory.CurrentAcceptance is { } currentAcceptance &&
+                // A higher attempt of the same GitHub run is recovery. A
+                // distinct run on the same head is a new continuation.
+                StringComparer.Ordinal.Equals(
+                    currentAcceptance.ReceiptMetadata.ProducingRun.Identity,
+                    currentProducingRun.Identity);
+            if (!currentAcceptanceMatchesExecution)
             {
                 if (!TryAddAcceptedCleanupRecords(
                         acceptedSet,
@@ -246,21 +258,22 @@ internal static class PublicationRecoveryInventoryFactory
                 ? inventory.CurrentAcceptance is not null &&
                     inventory.CurrentAcceptancePublicationReceipt is not null
                 : matched is not null;
-            if (currentHeadMatches && !terminalProven)
+            if (currentAcceptanceMatchesExecution && !terminalProven)
             {
                 return Fail();
             }
 
             var selected = pending is not null
                 ? pendingSet
-                : currentHeadMatches
+                : currentAcceptanceMatchesExecution
                     ? acceptedSet
                     : new ParsedRecordSet();
             var selectedPublication = pending?.Publication ??
-                (currentHeadMatches ? acceptedPublication : null);
+                (currentAcceptanceMatchesExecution ? acceptedPublication : null);
             var selectedIdentity = pendingIdentity ??
-                (currentHeadMatches ? acceptedIdentity : null);
-            var selectedMatched = pending is null && currentHeadMatches
+                (currentAcceptanceMatchesExecution ? acceptedIdentity : null);
+            var selectedMatched = pending is null &&
+                currentAcceptanceMatchesExecution
                 ? matched
                 : null;
             if (inventory.Anchors.Any(anchor =>
@@ -323,8 +336,8 @@ internal static class PublicationRecoveryInventoryFactory
                 acceptedAnchors.ToImmutableArray(),
                 inventory.CleanupRecords,
                 pending?.MatchesCurrentReviewedHead ?? false,
-                currentHeadMatches,
-                terminalProven && !currentHeadMatches,
+                currentAcceptanceMatchesExecution,
+                terminalProven && !currentAcceptanceMatchesExecution,
                 hasHistoricalCleanupDebt,
                 anchors);
             return RetainedStateTransactionResult<
@@ -800,7 +813,7 @@ internal static class PublicationRecoveryInventoryFactory
         if (observation is null ||
             record is null ||
             !observation.IsLive ||
-            !observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            !observation.CurrentAcceptanceMatchesReviewedExecution ||
             observation.Candidate is not null ||
             !observation.HistoricalRecords.Any(item =>
                 item.Metadata == record.Metadata &&
@@ -837,7 +850,7 @@ internal static class PublicationRecoveryInventoryFactory
         if (observation is null ||
             anchor is null ||
             !observation.IsLive ||
-            !observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            !observation.CurrentAcceptanceMatchesReviewedExecution ||
             observation.Candidate is not null ||
             !observation.CompletedAnchors.Contains(anchor))
         {

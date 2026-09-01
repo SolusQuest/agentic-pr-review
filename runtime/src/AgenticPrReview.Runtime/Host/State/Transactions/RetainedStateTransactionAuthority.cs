@@ -103,6 +103,16 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
     internal bool HasTerminalAcceptance =>
         Volatile.Read(ref terminalAcceptance) is not null;
 
+    internal bool TryGetProducingRun(out OpaqueStoreProducingRun? run)
+    {
+        run = IsLive
+            ? new OpaqueStoreProducingRun(
+                producingRunIdentity,
+                producingRunAttempt)
+            : null;
+        return run is not null;
+    }
+
     internal static bool TryCreate(
         object issuer,
         AcceptedStateProductionAuthorization production,

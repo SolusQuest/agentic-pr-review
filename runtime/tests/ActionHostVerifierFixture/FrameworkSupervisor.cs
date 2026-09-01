@@ -20,7 +20,7 @@ internal static class FrameworkSupervisor
         "eyJzY3AiOiJBY3Rpb25zLlJlc3VsdHM6YXByMTc4LXByb29mLXJ1bi1iYWNrZW5kLWlkOmFw" +
         "cjE3OC1wcm9vZi1qb2ItYmFja2VuZC1pZCJ9.";
     private const int ProductionShapedReviewedHeadRequests = 180;
-    private const int ProductionShapedHistoricalBaseObjectRequests = 10;
+    private const int ProductionShapedHistoricalBaseObjectRequests = 11;
 
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(5);
 
@@ -352,9 +352,9 @@ internal static class FrameworkSupervisor
         {
             await using (var platform = SyntheticOfficialPlatform.Start(probeRoot))
             using (var client = new HttpClient
-                   {
-                       Timeout = TimeSpan.FromSeconds(10),
-                   })
+            {
+                Timeout = TimeSpan.FromSeconds(10),
+            })
             {
                 using var create = new HttpRequestMessage(HttpMethod.Post,
                     platform.BaseUrl +
@@ -800,7 +800,8 @@ internal static class FrameworkSupervisor
                 "body")
                 .Contains("Trusted continuation complete&#x2E;",
                     StringComparison.Ordinal) &&
-            ValidateContinuationStateTrace(scenario);
+            ValidateContinuationStateTrace(scenario) &&
+            ContinuationHeadRemained(root);
         var successfulContinuation = !spec.RequireSuccessfulContinuation ||
             trustedContinuation ||
             File.Exists(Path.Join(scenario,
@@ -1730,14 +1731,14 @@ internal static class FrameworkSupervisor
     private static readonly IReadOnlyDictionary<string, int>
         FrozenOperationPrimaryRoleCaps = new Dictionary<string, int>(
             StringComparer.Ordinal)
-            {
-                ["node_artifact_rest"] = 224,
-                ["host_head_source_rest"] = 540,
-                ["host_other_github_rest"] = 82,
-                ["embedded_control"] = 12,
-                ["external_control"] = 23,
-                ["cleanup_control"] = 8,
-            };
+        {
+            ["node_artifact_rest"] = 224,
+            ["host_head_source_rest"] = 540,
+            ["host_other_github_rest"] = 82,
+            ["embedded_control"] = 12,
+            ["external_control"] = 23,
+            ["cleanup_control"] = 8,
+        };
 
     private static IReadOnlyDictionary<string, int> ObservedRoleTotals(
         FrameworkRequestBudgetReceipt?[] host,
@@ -4771,12 +4772,11 @@ internal static class FrameworkSupervisor
     private static int ExpectedTrustedProofHeadCommitRequests(string scenario) =>
         scenario switch
         {
-            // Continuation revalidates the exact reviewed head after it restores
-            // the predecessor.  It remains in the already-frozen 180-request
-            // head role: the second commit GET replaces one other head request,
-            // it does not expand the role or relax the join.
-            "dispatch-continuation" => 2,
-            "dispatch-bootstrap" or "stale-head" => 1,
+            // Trusted continuation preserves the reviewed head, so the initial
+            // exact commit lookup also covers the restored continuation. The
+            // complete 180-request head role remains frozen below.
+            "dispatch-bootstrap" or "dispatch-continuation" or
+                "stale-head" => 1,
             _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
         };
 
@@ -5311,8 +5311,7 @@ internal static class FrameworkSupervisor
             .Order(StringComparer.Ordinal)
             .Select(path => TryReadControlRequestBudgetReceipt(path) is { } receipt
                 ? new FrameworkExternalControlRequestBudgetReceipt(
-                    Path.GetFileName(path)["trusted-proof-external-control-".Length..
-                        ^"-request-budget.json".Length],
+                    Path.GetFileName(path)["trusted-proof-external-control-".Length..^"-request-budget.json".Length],
                     receipt.Consumed,
                     receipt.Limit,
                     receipt.RateLimited,
@@ -5478,6 +5477,23 @@ internal static class FrameworkSupervisor
             !predecessor.Contains(FrameworkGitHubHandler.ContinuedHeadSha,
                 StringComparison.Ordinal) &&
             successor.Contains(FrameworkGitHubHandler.ContinuedHeadSha,
+                StringComparison.Ordinal);
+    }
+
+    private static bool ContinuationHeadRemained(string root)
+    {
+        var scenario = Path.Join(root, "dispatch-continuation");
+        var predecessor = ReadOptionalText(scenario,
+            "sticky-predecessor-comment.json");
+        var successor = ReadOptionalText(scenario,
+            "sticky-successor-comment.json");
+        return predecessor.Contains(FrameworkGitHubHandler.HeadSha,
+                StringComparison.Ordinal) &&
+            successor.Contains(FrameworkGitHubHandler.HeadSha,
+                StringComparison.Ordinal) &&
+            !predecessor.Contains(FrameworkGitHubHandler.ContinuedHeadSha,
+                StringComparison.Ordinal) &&
+            !successor.Contains(FrameworkGitHubHandler.ContinuedHeadSha,
                 StringComparison.Ordinal);
     }
 

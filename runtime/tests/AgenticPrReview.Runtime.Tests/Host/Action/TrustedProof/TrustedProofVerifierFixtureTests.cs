@@ -1,6 +1,7 @@
 using System.Formats.Tar;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
@@ -54,9 +55,9 @@ public sealed class TrustedProofVerifierFixtureTests
 
     [Theory]
     [InlineData("dispatch-bootstrap", 1)]
-    [InlineData("dispatch-continuation", 2)]
+    [InlineData("dispatch-continuation", 1)]
     [InlineData("stale-head", 1)]
-    public void ProtectedRequestJoinFreezesTheContinuationHeadRevalidation(
+    public void ProtectedRequestJoinFreezesOneCommitLookupPerReviewedHead(
         string scenario,
         int expectedCommitRequests)
     {
@@ -522,6 +523,53 @@ public sealed class TrustedProofVerifierFixtureTests
                 FrameworkGitHubHandler.ContinuedHeadSha,
                 generic.RootElement.GetProperty("head")
                     .GetProperty("sha").GetString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TrustedStaleCurrentRunMirrorsWorkflowRunWithoutChangingDispatchRoutes()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-current-run-event-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await PrepareProofScenarioAsync(root, "stale", 902);
+            using var handler = new FrameworkGitHubHandler(
+                root,
+                new string('f', 64));
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            Assert.Equal(
+                "workflow_run",
+                await CurrentRunEventAsync(client, 902));
+
+            await File.WriteAllTextAsync(
+                Path.Join(root, "mode"),
+                "continuation");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "901");
+            Assert.Equal(
+                "workflow_dispatch",
+                await CurrentRunEventAsync(client, 901));
+
+            File.Delete(Path.Join(root, "trusted-proof-payload"));
+            await File.WriteAllTextAsync(Path.Join(root, "mode"), "stale");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "902");
+            Assert.Equal(
+                "workflow_dispatch",
+                await CurrentRunEventAsync(client, 902));
         }
         finally
         {
@@ -1125,6 +1173,19 @@ public sealed class TrustedProofVerifierFixtureTests
         await File.WriteAllTextAsync(
             Path.Join(scenario, "run-id"), runId.ToString());
         await File.WriteAllTextAsync(Path.Join(scenario, "run-attempt"), "1");
+    }
+
+    private static async Task<string?> CurrentRunEventAsync(
+        HttpClient client,
+        long runId)
+    {
+        using var response = await client.GetAsync(
+            "repos/" + FrameworkCanaries.Repository + "/actions/runs/" +
+            runId.ToString(CultureInfo.InvariantCulture) + "/attempts/1");
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("event").GetString();
     }
 
     private static ActionHostLaunchContract StaleCancelledLaunch(
