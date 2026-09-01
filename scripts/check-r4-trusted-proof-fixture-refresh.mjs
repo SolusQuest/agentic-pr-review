@@ -44,6 +44,7 @@ export const REFRESH_CONTRACT = Object.freeze({
 
 const hex40 = /^[0-9a-f]{40}$/u;
 const utf8 = new TextDecoder('utf-8', { fatal: true });
+const initialCanaryBlob = '6fb1e09fc322bc85611172c171f4e3fce8bdee1c';
 
 function fail(code) {
   throw new Error(`APR_R4_TRUSTED_PROOF_FIXTURE_ADMISSION_INVALID ${code}`);
@@ -142,6 +143,87 @@ function assertAdvanceOnly(run, initial, advanced, advancedBlob) {
   if (actual !== expected) fail('fixture-advanced-delta');
 }
 
+function exactCanaryEntry(run, tree) {
+  const actual = text(run, ['ls-tree', tree, '--', REFRESH_CONTRACT.canaryPath]);
+  const expected = [
+    `${REFRESH_CONTRACT.canaryMode} blob`,
+    `${initialCanaryBlob}\t${REFRESH_CONTRACT.canaryPath}`,
+  ].join(' ');
+  return actual === expected;
+}
+
+function exactCanaryDelta(run, base, head) {
+  const actual = text(run, ['diff-tree', '--no-commit-id', '--raw', '-r', base, head]);
+  const expected = `:000000 ${REFRESH_CONTRACT.canaryMode} ${'0'.repeat(40)} ${initialCanaryBlob} A\t${REFRESH_CONTRACT.canaryPath}`;
+  return actual === expected;
+}
+
+/** Resolve only the ordinary, exact fixture-head, and GitHub merge-checkout shapes. */
+export function resolveTestedMainCheckout({ runGit, head }) {
+  if (typeof runGit !== 'function') fail('checkout-runner');
+  const checkoutHead = objectId(head, 'checkout-head');
+  const checkoutTree = objectId(
+    text(runGit, ['rev-parse', `${checkoutHead}^{tree}`]),
+    'checkout-tree',
+  );
+  const canaryEntry = text(runGit, ['ls-tree', checkoutTree, '--', REFRESH_CONTRACT.canaryPath]);
+  if (canaryEntry === '') {
+    return Object.freeze({
+      testedMainHead: checkoutHead,
+      testedMainTree: checkoutTree,
+      disposition: 'ordinary',
+      includeWorktree: true,
+    });
+  }
+  if (
+    !exactCanaryEntry(runGit, checkoutTree) ||
+    !Buffer.from(
+      runGit(['cat-file', 'blob', `${checkoutHead}:${REFRESH_CONTRACT.canaryPath}`]),
+    ).equals(REFRESH_CONTRACT.initialCanary)
+  ) {
+    fail('checkout-canary');
+  }
+
+  const checkoutParents = parents(runGit, checkoutHead);
+  if (checkoutParents.length !== 2) fail('checkout-parent-shape');
+  const testedMainHead = objectId(checkoutParents[0], 'checkout-first-parent');
+  const testedMainTree = objectId(
+    text(runGit, ['rev-parse', `${testedMainHead}^{tree}`]),
+    'checkout-first-parent-tree',
+  );
+  if (
+    text(runGit, ['ls-tree', testedMainTree, '--', REFRESH_CONTRACT.canaryPath]) !== '' ||
+    !exactCanaryDelta(runGit, testedMainHead, checkoutHead)
+  ) {
+    fail('checkout-first-parent-delta');
+  }
+
+  const secondParent = objectId(checkoutParents[1], 'checkout-second-parent');
+  const secondTree = objectId(
+    text(runGit, ['rev-parse', `${secondParent}^{tree}`]),
+    'checkout-second-parent-tree',
+  );
+  const secondParents = parents(runGit, secondParent);
+  const secondIsCurrentFixture =
+    secondParents.length === 2 &&
+    secondParents[0] === testedMainHead &&
+    exactCanaryEntry(runGit, secondTree) &&
+    exactCanaryDelta(runGit, testedMainHead, secondParent);
+  if (secondIsCurrentFixture && checkoutTree !== secondTree) {
+    fail('checkout-merge-tree');
+  }
+  if (!secondIsCurrentFixture && checkoutTree === secondTree) {
+    fail('checkout-topology-ambiguous');
+  }
+
+  return Object.freeze({
+    testedMainHead,
+    testedMainTree,
+    disposition: secondIsCurrentFixture ? 'synthetic-merge' : 'fixture-head',
+    includeWorktree: false,
+  });
+}
+
 /** Build all object identities before any live ref is mutated. */
 export function materializeRefreshedFixtures({
   repositoryRoot = path.resolve(import.meta.dirname, '..'),
@@ -151,7 +233,15 @@ export function materializeRefreshedFixtures({
   sourceRunGit,
 } = {}) {
   const source = sourceRunGit ?? ((args, input) => exec(repositoryRoot, args, input));
-  const merge = objectId(mergeSha ?? text(source, ['rev-parse', 'HEAD^{commit}']), 'merge-sha');
+  const requestedHead = objectId(
+    mergeSha ?? text(source, ['rev-parse', 'HEAD^{commit}']),
+    'merge-sha',
+  );
+  const resolved = resolveTestedMainCheckout({
+    runGit: source,
+    head: requestedHead,
+  });
+  const merge = resolved.testedMainHead;
   const normalPrior = objectId(priorNormalHead, 'normal-prior-head');
   const stalePrior = objectId(priorStaleHead, 'stale-prior-head');
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-fixture-refresh-'));
@@ -239,6 +329,7 @@ export function materializeRefreshedFixtures({
     });
     return Object.freeze({
       expected,
+      runGit: run,
       dispose() {
         fs.rmSync(temporaryRoot, { recursive: true, force: true });
       },

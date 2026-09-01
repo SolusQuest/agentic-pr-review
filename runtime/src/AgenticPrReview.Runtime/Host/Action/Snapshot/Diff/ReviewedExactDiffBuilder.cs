@@ -96,7 +96,25 @@ internal sealed class ReviewedExactDiffBuilder
             }
 
             ReviewedBaseOperand? baseOperand = null;
-            if (file.Status != "added")
+            if (file.Status == "added" &&
+                changedFiles.RequireAddedBaseAbsence)
+            {
+                var resolved = await baseResolver.ResolveAsync(
+                    file.Path,
+                    cancellationToken);
+                if (resolved.Value is null)
+                {
+                    return ReviewedSnapshotReadResult<ReviewedDiffBuildSet>
+                        .Failed(resolved.Failure);
+                }
+
+                if (resolved.Value.Kind != ReviewedBaseOperandKind.Missing)
+                {
+                    return ReviewedSnapshotReadResult<ReviewedDiffBuildSet>
+                        .Failed(ReviewedSnapshotReadFailure.IdentityMismatch);
+                }
+            }
+            else if (file.Status != "added")
             {
                 var basePath = file.Status is "renamed" or "copied"
                     ? file.PreviousPath!

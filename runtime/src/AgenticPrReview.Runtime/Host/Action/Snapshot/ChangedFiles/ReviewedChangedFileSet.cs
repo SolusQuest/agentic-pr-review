@@ -36,18 +36,48 @@ internal sealed class ReviewedChangedFileSet
 {
     internal ReviewedChangedFileSet(
         IEnumerable<ReviewedPullRequestFileFact> files,
-        ReviewedChangedFileIdentity identity)
+        ReviewedChangedFileIdentity identity,
+        bool requireAddedBaseAbsence = false)
     {
         Files = files.OrderBy(static file => file.Path, StringComparer.Ordinal)
             .ToImmutableArray();
         Identity = identity;
+        RequireAddedBaseAbsence = requireAddedBaseAbsence;
     }
 
     internal ImmutableArray<ReviewedPullRequestFileFact> Files { get; }
     internal ReviewedChangedFileIdentity Identity { get; }
+    internal bool RequireAddedBaseAbsence { get; }
 }
 
-internal sealed class ReviewedChangedFileReader
+internal interface IReviewedChangedFileSource
+{
+    Task<ReviewedSnapshotReadResult<ReviewedChangedFileSet>> ReadAsync(
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        Contracts.ActionHostGitHubToken token,
+        ReviewedTreeSnapshot tree,
+        CancellationToken cancellationToken);
+}
+
+internal interface IReviewedChangedFileSourceFactory
+{
+    IReviewedChangedFileSource Create(
+        IReviewedSnapshotTransportFactory transportFactory);
+}
+
+internal sealed class ReviewedChangedFileSourceFactory :
+    IReviewedChangedFileSourceFactory
+{
+    internal static ReviewedChangedFileSourceFactory Instance { get; } = new();
+
+    private ReviewedChangedFileSourceFactory() { }
+
+    public IReviewedChangedFileSource Create(
+        IReviewedSnapshotTransportFactory transportFactory) =>
+        new ReviewedChangedFileReader(transportFactory);
+}
+
+internal sealed class ReviewedChangedFileReader : IReviewedChangedFileSource
 {
     private const int MaximumPatchEvidenceBytes = 512 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -60,7 +90,7 @@ internal sealed class ReviewedChangedFileReader
             throw new ArgumentNullException(nameof(transportFactory));
     }
 
-    internal async Task<ReviewedSnapshotReadResult<ReviewedChangedFileSet>>
+    public async Task<ReviewedSnapshotReadResult<ReviewedChangedFileSet>>
         ReadAsync(
             ActionHostAuthorizer.AuthorizedInvocation invocation,
             Contracts.ActionHostGitHubToken token,
@@ -270,7 +300,9 @@ internal sealed class ReviewedChangedFileReader
         StringComparer.Ordinal.Equals(
             current.HeadRepository.FullName,
             frozen.HeadRepositoryName) &&
-        StringComparer.Ordinal.Equals(current.BaseSha, frozen.BaseSha) &&
+        StringComparer.Ordinal.Equals(
+            current.BaseSha,
+            frozen.ReportedBaseSha) &&
         StringComparer.Ordinal.Equals(current.HeadSha, frozen.HeadSha);
 }
 

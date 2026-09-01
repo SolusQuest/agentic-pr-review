@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveTestedMainCheckout } from './check-r4-trusted-proof-fixture-refresh.mjs';
 
 export const FROZEN_FIXTURES = Object.freeze({
   normalHead: '1dcec1b90429643338787fdb36fe33dfcac7dfa9',
@@ -709,10 +710,19 @@ export function materializeProspectiveFixture({
   const indexFile = path.join(temporaryRoot, 'index');
   fs.mkdirSync(objectDirectory);
   try {
-    const sourceHead = baseHead ?? runText(sourceRunGit, ['rev-parse', 'HEAD^{commit}']);
-    if (!isObjectId(sourceHead)) fail('prospective-base-head');
-    const sourceTree = runText(sourceRunGit, ['rev-parse', `${sourceHead}^{tree}`]);
-    if (!isObjectId(sourceTree)) fail('prospective-base-tree');
+    const checkoutHead = baseHead ?? runText(sourceRunGit, ['rev-parse', 'HEAD^{commit}']);
+    if (!isObjectId(checkoutHead)) fail('prospective-base-head');
+    const resolved =
+      baseHead === undefined
+        ? resolveTestedMainCheckout({ runGit: sourceRunGit, head: checkoutHead })
+        : {
+            testedMainHead: checkoutHead,
+            testedMainTree: runText(sourceRunGit, ['rev-parse', `${checkoutHead}^{tree}`]),
+            includeWorktree: false,
+          };
+    const sourceHead = resolved.testedMainHead;
+    const sourceTree = resolved.testedMainTree;
+    if (!isObjectId(sourceHead) || !isObjectId(sourceTree)) fail('prospective-base-tree');
     if (
       runText(sourceRunGit, [
         'ls-tree',
@@ -723,8 +733,6 @@ export function materializeProspectiveFixture({
     ) {
       fail('prospective-canary-already-present');
     }
-    const sourceIndexPath = runText(sourceRunGit, ['rev-parse', '--git-path', 'index']);
-    if (sourceIndexPath.length === 0) fail('prospective-index-unavailable');
     const commonDirectory = runText(sourceRunGit, ['rev-parse', '--git-common-dir']);
     const environment = prospectiveMaterializationEnvironment({
       objectDirectory,
@@ -736,16 +744,25 @@ export function materializeProspectiveFixture({
       ? (args, input) => interceptMaterializedGit(directRunGit, args, input)
       : directRunGit;
 
-    const resolvedSourceIndex = path.resolve(repositoryRoot, sourceIndexPath);
-    if (fs.existsSync(resolvedSourceIndex)) {
-      fs.copyFileSync(resolvedSourceIndex, indexFile);
+    if (resolved.includeWorktree) {
+      const sourceIndexPath = runText(sourceRunGit, ['rev-parse', '--git-path', 'index']);
+      if (sourceIndexPath.length === 0) fail('prospective-index-unavailable');
+      const resolvedSourceIndex = path.resolve(repositoryRoot, sourceIndexPath);
+      if (fs.existsSync(resolvedSourceIndex)) {
+        fs.copyFileSync(resolvedSourceIndex, indexFile);
+      } else {
+        // A fresh checkout without an index still has a well-defined final
+        // worktree base. Normal PR runners take the copying branch above.
+        runText(runGit, ['read-tree', sourceTree]);
+      }
+      if (runText(runGit, ['ls-files', '--unmerged']) !== '') fail('prospective-unmerged-index');
+      runText(runGit, ['add', '--all']);
     } else {
-      // A fresh checkout without an index still has a well-defined final
-      // worktree base.  Normal PR runners take the copying branch above.
+      // Explicit bases and enrolled fixture/merge checkouts use only the
+      // resolved committed main tree. Their canary-bearing index/worktree is
+      // never staged as candidate content.
       runText(runGit, ['read-tree', sourceTree]);
     }
-    if (runText(runGit, ['ls-files', '--unmerged']) !== '') fail('prospective-unmerged-index');
-    runText(runGit, ['add', '--all']);
     const prospectiveBaseTree = runText(runGit, ['write-tree']);
     if (!isObjectId(prospectiveBaseTree)) fail('prospective-base-tree');
     if (

@@ -235,8 +235,9 @@ public sealed class TrustedProofArchitectureTests
             "preflight-contract-v2.json")));
         Assert.Equal("main",
             preflightV2.RootElement.GetProperty("base_ref").GetString());
-        Assert.Equal("exact-workflow-sha",
-            preflightV2.RootElement.GetProperty("base_sha").GetString());
+        Assert.False(preflightV2.RootElement.TryGetProperty(
+            "base_sha",
+            out _));
         Assert.Equal("exact-workflow-action-payload-source-commit",
             preflightV2.RootElement.GetProperty("payload_source_identity")
                 .GetString());

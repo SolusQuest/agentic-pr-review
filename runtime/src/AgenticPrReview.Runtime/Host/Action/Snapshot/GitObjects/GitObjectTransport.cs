@@ -116,7 +116,7 @@ internal sealed class ReviewedGitObjectTransport :
 
                 return result.Value is { } value
                     ? ReviewedGitObjectResult<ReviewedGitCommitFact>.Success(
-                        new(value.Sha, value.TreeSha))
+                        new(value.Sha, value.TreeSha, value.ParentShas))
                     : ReviewedGitObjectResult<ReviewedGitCommitFact>.Failed(
                         MapFailure(result.Failure));
             }

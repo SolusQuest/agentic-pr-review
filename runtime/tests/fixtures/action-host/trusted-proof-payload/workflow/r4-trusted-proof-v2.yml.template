@@ -232,7 +232,7 @@ jobs:
               pull.base?.repo?.full_name !== repository ||
               String(pull.base?.repo?.id) !== repositoryId ||
               pull.base?.ref !== 'main' ||
-              pull.base?.sha !== workflowSha ||
+              !lowerHex40.test(pull.base?.sha ?? '') ||
               pull.head?.repo?.full_name !== repository ||
               String(pull.head?.repo?.id) !== repositoryId ||
               !lowerHex40.test(pull.head?.sha ?? '') ||

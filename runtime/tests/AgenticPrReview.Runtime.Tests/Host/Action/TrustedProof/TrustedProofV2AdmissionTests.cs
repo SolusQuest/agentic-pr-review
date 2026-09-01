@@ -31,7 +31,9 @@ public sealed class TrustedProofV2AdmissionTests
             StringComparison.Ordinal);
         Assert.Contains("pull.base?.ref !== 'main'", rendered,
             StringComparison.Ordinal);
-        Assert.Contains("pull.base?.sha !== workflowSha", rendered,
+        Assert.Contains("!lowerHex40.test(pull.base?.sha ?? '')", rendered,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("pull.base?.sha !== workflowSha", rendered,
             StringComparison.Ordinal);
         Assert.Contains("id: acquire-exact-sources", rendered,
             StringComparison.Ordinal);
@@ -80,14 +82,21 @@ public sealed class TrustedProofV2AdmissionTests
     }
 
     [Fact]
-    public async Task V2FinalAdmissionRejectsWrongBaseWhileDefaultV1RemainsStable()
+    public async Task V2UsesWorkflowAsEffectiveBaseWhileDefaultV1UsesReportedBase()
     {
         var v1 = ActionHostAuthorizationScenario.Valid(
             ActionHostAuthorizationRoute.WorkflowDispatch);
         var v1Result = await v1.CreateAuthorizer().AuthorizeAsync(
             v1.Launch,
             CancellationToken.None);
-        Assert.NotNull(v1Result.Invocation);
+        var v1Invocation = Assert.IsType<ActionHostAuthorizer.AuthorizedInvocation>(
+            v1Result.Invocation);
+        Assert.Equal(
+            ActionHostAuthorizationScenario.BaseSha,
+            v1Invocation.PullRequest.BaseSha);
+        Assert.Equal(
+            ActionHostAuthorizationScenario.BaseSha,
+            v1Invocation.PullRequest.ReportedBaseSha);
 
         var v2 = CreateV2Scenario();
         v2.Transport.PullRequest = v2.Transport.PullRequest with
@@ -108,13 +117,17 @@ public sealed class TrustedProofV2AdmissionTests
             BaseRef = "main",
             BaseSha = ActionHostAuthorizationScenario.BaseSha,
         };
-        var rejectedSha = await CreateV2Authorizer(v2).AuthorizeAsync(
+        var historicalBase = await CreateV2Authorizer(v2).AuthorizeAsync(
             CreateCurrentHeadLaunch(v2),
             CancellationToken.None);
-        Assert.Null(rejectedSha.Invocation);
+        var v2Invocation = Assert.IsType<ActionHostAuthorizer.AuthorizedInvocation>(
+            historicalBase.Invocation);
         Assert.Equal(
-            ActionHostAuthorizationFailure.PullRequestInvalid,
-            rejectedSha.Failure);
+            TrustedProofPayloadBuildIdentity.SourceCommit,
+            v2Invocation.PullRequest.BaseSha);
+        Assert.Equal(
+            ActionHostAuthorizationScenario.BaseSha,
+            v2Invocation.PullRequest.ReportedBaseSha);
 
         v2 = CreateV2Scenario();
         v2.Transport.Repository = v2.Transport.Repository with
@@ -160,10 +173,6 @@ public sealed class TrustedProofV2AdmissionTests
         var scenario = ActionHostAuthorizationScenario.Valid(
             ActionHostAuthorizationRoute.WorkflowDispatch);
         SetV2Workflow(scenario);
-        scenario.Transport.PullRequest = scenario.Transport.PullRequest with
-        {
-            BaseSha = TrustedProofPayloadBuildIdentity.SourceCommit,
-        };
         return scenario;
     }
 

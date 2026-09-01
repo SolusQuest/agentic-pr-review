@@ -25,8 +25,8 @@ const actionSourceSha = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
 const payloadSourceSha = 'edc594c29a8a6b5fdacfab48643bf221277af200';
 const payloadSourceTree = '8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089';
 const payloadSha256 = 'b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e';
-const templateSha256 = '8efe56c6da52b37c22e05fc97b5c1bfd1a842798c78be8b43c7b6937932fe1d9';
-const renderedWorkflowSha256 = '8efe56c6da52b37c22e05fc97b5c1bfd1a842798c78be8b43c7b6937932fe1d9';
+const templateSha256 = 'bbb5a5bda19d9c24bcab6f94f472f92bbc36d2251bd613133a7cca4d795218ab';
+const renderedWorkflowSha256 = 'bbb5a5bda19d9c24bcab6f94f472f92bbc36d2251bd613133a7cca4d795218ab';
 const sealedReceiptTemplateSha256 =
   '46ff02fc0e107bdff5d4d4fbe185d8a4f97b8cb8059b99485a285c8d11a45768';
 const sealedRenderedWorkflowSha256 =
@@ -1043,7 +1043,7 @@ export function checkR4TrustedProof(options = {}) {
     !stagedInline.includes('authorization-source-identity') ||
     !stagedInline.includes('pull.merged_at !== null') ||
     !stagedInline.includes("pull.base?.ref !== 'main'") ||
-    !stagedInline.includes('pull.base?.sha !== workflowSha')
+    !stagedInline.includes("!lowerHex40.test(pull.base?.sha ?? '')")
   ) {
     fail('staged-v2-preflight');
   }
@@ -1061,7 +1061,6 @@ export function checkR4TrustedProof(options = {}) {
       'maximum_response_bytes',
       'branch_pattern',
       'base_ref',
-      'base_sha',
       'payload_source_identity',
       'workflow_run',
       'authorization_variable',
@@ -1077,7 +1076,6 @@ export function checkR4TrustedProof(options = {}) {
     stagedPreflight.authentication !== 'none' ||
     stagedPreflight.redirect !== 'error' ||
     stagedPreflight.base_ref !== 'main' ||
-    stagedPreflight.base_sha !== 'exact-workflow-sha' ||
     stagedPreflight.payload_source_identity !== 'exact-workflow-action-payload-source-commit' ||
     stagedPreflight.authorization_value !== 'strict-canonical-manifest-json' ||
     stagedPreflight.authorization_manifest_kind !== 'apr-r4-e2p-authorization-manifest-v2'

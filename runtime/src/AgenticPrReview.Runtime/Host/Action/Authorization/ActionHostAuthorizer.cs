@@ -241,10 +241,12 @@ internal sealed class ActionHostAuthorizer
                 };
             }
 
-            if (!_workflowAdmission.IsPullRequestAdmitted(
+            if (!_workflowAdmission.TryAdmitPullRequest(
                     repository,
                     pullRequest,
-                    launch))
+                    launch,
+                    out var effectiveReviewBaseSha) ||
+                string.IsNullOrEmpty(effectiveReviewBaseSha))
             {
                 return Reject(
                     ActionHostStatus.AuthorizationFailed,
@@ -255,7 +257,7 @@ internal sealed class ActionHostAuthorizer
                 MintAuthority,
                 repository.Id,
                 pullRequest.Number,
-                pullRequest.BaseSha,
+                effectiveReviewBaseSha,
                 pullRequest.BaseRepository.Id,
                 pullRequest.BaseRepository.FullName,
                 pullRequest.HeadSha,
@@ -263,7 +265,8 @@ internal sealed class ActionHostAuthorizer
                 pullRequest.HeadRepository.FullName,
                 pullRequest.State,
                 pullRequest.Draft,
-                pullRequest.MergedAt is not null);
+                pullRequest.MergedAt is not null,
+                reportedBaseSha: pullRequest.BaseSha);
             var concurrencyIdentity =
                 $"agentic-pr-review-r4-{repository.Id}-pr-{pullRequest.Number}";
             var invocation = AuthorizedInvocation.Mint(
@@ -703,11 +706,13 @@ internal sealed class ActionHostAuthorizer
             string headRepositoryName,
             string state,
             bool draft,
-            bool merged)
+            bool merged,
+            string reportedBaseSha)
         {
             RepositoryId = repositoryId;
             Number = number;
             BaseSha = baseSha;
+            ReportedBaseSha = reportedBaseSha;
             BaseRepositoryId = baseRepositoryId;
             BaseRepositoryName = baseRepositoryName;
             HeadSha = headSha;
@@ -730,7 +735,8 @@ internal sealed class ActionHostAuthorizer
             string headRepositoryName,
             string state,
             bool draft,
-            bool merged)
+            bool merged,
+            string? reportedBaseSha = null)
         {
             if (!ReferenceEquals(authority, MintAuthority))
             {
@@ -749,12 +755,14 @@ internal sealed class ActionHostAuthorizer
                 headRepositoryName,
                 state,
                 draft,
-                merged);
+                merged,
+                reportedBaseSha ?? baseSha);
         }
 
         internal long RepositoryId { get; }
         internal long Number { get; }
         internal string BaseSha { get; }
+        internal string ReportedBaseSha { get; }
         internal long BaseRepositoryId { get; }
         internal string BaseRepositoryName { get; }
         internal string HeadSha { get; }

@@ -139,12 +139,12 @@ public sealed class TrustedProofControlTests
     }
 
     [Fact]
-    public async Task BaseShaDriftBetweenSelectionAndCreateStopsBeforeMutation()
+    public async Task MalformedReportedBaseShaStopsBeforeMutation()
     {
         var handler = new ControlHandler(
             [],
             pullRequestBaseShas:
-            [Coordinates.WorkflowSha, new string('f', 40)]);
+            [Coordinates.WorkflowSha, "not-a-sha"]);
         var transport = TrustedProofControlTransport.Create(
             Coordinates,
             "github-token-canary",

@@ -11,10 +11,11 @@ internal interface IActionHostTrustedWorkflowAdmission
         ActionHostLaunchContract launch,
         out ActionHostTrustedWorkflowEvidence? evidence);
 
-    bool IsPullRequestAdmitted(
+    bool TryAdmitPullRequest(
         ActionHostGitHubRepositoryFact repository,
         ActionHostGitHubPullRequestFact pullRequest,
-        ActionHostLaunchContract launch);
+        ActionHostLaunchContract launch,
+        out string? effectiveReviewBaseSha);
 }
 
 internal sealed class ActionHostV1TrustedWorkflowAdmission :
@@ -37,8 +38,13 @@ internal sealed class ActionHostV1TrustedWorkflowAdmission :
             launch.PayloadSha256,
             out evidence);
 
-    public bool IsPullRequestAdmitted(
+    public bool TryAdmitPullRequest(
         ActionHostGitHubRepositoryFact repository,
         ActionHostGitHubPullRequestFact pullRequest,
-        ActionHostLaunchContract launch) => true;
+        ActionHostLaunchContract launch,
+        out string? effectiveReviewBaseSha)
+    {
+        effectiveReviewBaseSha = pullRequest.BaseSha;
+        return true;
+    }
 }

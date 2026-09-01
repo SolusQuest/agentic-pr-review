@@ -54,16 +54,41 @@ internal static class H5SnapshotTestSupport
         ActionHostAuthorizer.AuthorizedInvocation invocation,
         string parent,
         params H5HeadEntry[] entries) =>
+        await TreeWithParentsAsync(
+            invocation,
+            parent,
+            parentShas: null,
+            entries);
+
+    internal static async Task<ReviewedTreeSnapshot> TreeWithParentsAsync(
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        string parent,
+        IReadOnlyList<string>? parentShas,
+        params H5HeadEntry[] entries) =>
         await TreeWithBudgetAsync(
             invocation,
             parent,
             ReviewedSnapshotTestAccess.ProductionBudget(),
+            parentShas,
             entries);
 
     internal static async Task<ReviewedTreeSnapshot> TreeWithBudgetAsync(
         ActionHostAuthorizer.AuthorizedInvocation invocation,
         string parent,
         ReviewedContentBudget budget,
+        params H5HeadEntry[] entries) =>
+        await TreeWithBudgetAsync(
+            invocation,
+            parent,
+            budget,
+            parentShas: null,
+            entries);
+
+    internal static async Task<ReviewedTreeSnapshot> TreeWithBudgetAsync(
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        string parent,
+        ReviewedContentBudget budget,
+        IReadOnlyList<string>? parentShas,
         params H5HeadEntry[] entries)
     {
         var authority = MintAuthority();
@@ -117,7 +142,8 @@ internal static class H5SnapshotTestSupport
             new string('9', 40),
             records,
             budget,
-            staging);
+            staging,
+            parentShas);
     }
 
     internal static ActionHostGitHubPullRequestFact PullRequest(
@@ -133,7 +159,7 @@ internal static class H5SnapshotTestSupport
             state,
             draft,
             mergedAt,
-            baseSha ?? frozen.BaseSha,
+            baseSha ?? frozen.ReportedBaseSha,
             new(
                 frozen.BaseRepositoryId,
                 frozen.BaseRepositoryName),

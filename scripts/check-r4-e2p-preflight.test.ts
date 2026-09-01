@@ -282,7 +282,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     merged_at: null,
     base: {
       ref: 'main',
-      sha: v2Values.workflowSha,
+      sha: 'c'.repeat(40),
       repo: { id: 42, full_name: v2Values.repository },
     },
     head: {
@@ -373,7 +373,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     ['merged pull request', {}, { merged_at: '2026-08-24T00:00:00Z' }],
     ['wrong base ref', {}, { base: { ...v2Pull().base, ref: 'release' } }],
     ['missing base ref', {}, { base: { ...v2Pull().base, ref: null } }],
-    ['wrong base sha', {}, { base: { ...v2Pull().base, sha: '0'.repeat(40) } }],
+    ['malformed base sha', {}, { base: { ...v2Pull().base, sha: 'not-a-sha' } }],
     ['missing base sha', {}, { base: { ...v2Pull().base, sha: null } }],
     [
       'wrong base repository',
@@ -440,8 +440,8 @@ describe('R4 E2P v2 exact inline preflight', () => {
 
   it('rejects duplicate v2 base identity keys', async () => {
     const body = JSON.stringify(v2Pull()).replace(
-      `"sha":"${v2Values.workflowSha}"`,
-      `"sha":"${'0'.repeat(40)}","sha":"${v2Values.workflowSha}"`,
+      `"sha":"${'c'.repeat(40)}"`,
+      `"sha":"${'0'.repeat(40)}","sha":"${'c'.repeat(40)}"`,
     );
     const result = await runExtractedPreflight({
       source: v2Source,
