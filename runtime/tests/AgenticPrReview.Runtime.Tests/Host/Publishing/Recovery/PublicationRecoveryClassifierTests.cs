@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
@@ -384,8 +387,7 @@ public sealed class PublicationRecoveryClassifierTests
     public async Task DifferentRunOnSameHeadContinuesAfterTerminalRecoveryCleanup(
         bool cleanBeforeNextRun)
     {
-        var fixture = await RetainedStateTransactionEndToEndTests
-            .CreateFixtureAsync();
+        var fixture = await CreateTrustedV2FixtureAsync();
         var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(fixture, commentId: 902);
         Assert.True(PublicationRecoveryService.TryRestoreRendered(
@@ -473,6 +475,48 @@ public sealed class PublicationRecoveryClassifierTests
             ready.Decision.Action);
         Assert.True(ready.Decision.AllowsProvider);
         Assert.Equal(0, factory.Transport.Lists);
+        Assert.Equal(0, factory.Transport.Creates);
+        Assert.Equal(0, factory.Transport.Updates);
+    }
+
+    [Fact]
+    public async Task DefaultV1DifferentRunOnSameHeadReturnsCommitted()
+    {
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync();
+        var accepted = await RetainedStateTransactionEndToEndTests
+            .AcceptGenerationAsync(fixture, commentId: 904);
+        Assert.True(PublicationRecoveryService.TryRestoreRendered(
+            accepted.Publication,
+            out var rendered));
+        var exactComment = StickyPublicationTestData.Comment(
+            904,
+            rendered!.Comment);
+        var predecessorRunId = fixture.Launch.RunId;
+        fixture.Context.Dispose();
+        fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var context = fixture.Context;
+        Assert.Equal(predecessorRunId + 1, fixture.Launch.RunId);
+        var uploadsBeforeRecovery = fixture.Store.UploadCalls;
+        var deletesBeforeRecovery = fixture.Store.DeleteCalls;
+
+        var factory = ExactMarkerFactory(exactComment);
+        using var result = await new PublicationRecoveryService(
+                new StickyCommentPublisher(factory))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+
+        Assert.Equal(
+            PublicationRecoveryAction.ReturnCommitted,
+            result.Decision.Action);
+        Assert.False(result.Decision.AllowsProvider);
+        Assert.Equal(uploadsBeforeRecovery, fixture.Store.UploadCalls);
+        Assert.Equal(deletesBeforeRecovery, fixture.Store.DeleteCalls);
         Assert.Equal(0, factory.Transport.Creates);
         Assert.Equal(0, factory.Transport.Updates);
     }
@@ -1938,6 +1982,30 @@ public sealed class PublicationRecoveryClassifierTests
         Assert.Equal(PublicationRecoveryAction.Conflict,
             replacement.Decision.Action);
         Assert.Equal(0, replacementFactory.Transport.Reads);
+    }
+
+    private static async Task<
+        RetainedStateTransactionEndToEndTests.TransactionFixture>
+        CreateTrustedV2FixtureAsync()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var workflow = Encoding.UTF8.GetBytes(
+            TrustedProofV2WorkflowAdmission.Render(
+                TrustedProofPayloadBuildIdentity.SourceCommit,
+                ActionHostAuthorizationScenario.PayloadSha));
+        var header = Encoding.ASCII.GetBytes($"blob {workflow.Length}\0");
+        scenario.Transport.Source = scenario.Transport.Source with
+        {
+            BlobSha = Convert.ToHexString(SHA1.HashData(
+                header.Concat(workflow).ToArray())).ToLowerInvariant(),
+            Bytes = workflow,
+        };
+        return await RetainedStateTransactionEndToEndTests.CreateFixtureAsync(
+            scenario: scenario,
+            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance,
+            workflowSha: TrustedProofPayloadBuildIdentity.SourceCommit,
+            actionSourceSha: TrustedProofPayloadBuildIdentity.SourceCommit);
     }
 
     private static async Task<(

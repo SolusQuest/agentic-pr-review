@@ -161,7 +161,9 @@ internal sealed class ActionHostAuthorizer
                     source.Bytes,
                     _policy,
                     launch,
-                    out var workflowEvidence))
+                    out var workflowEvidence) ||
+                workflowEvidence is null ||
+                !Enum.IsDefined(workflowEvidence.SameHeadContinuationPolicy))
             {
                 return RejectGitHubOr(
                     sourceResult.Failure,
@@ -280,6 +282,7 @@ internal sealed class ActionHostAuthorizer
                 workflowEvidence!.ConcurrencyGroup,
                 concurrencyIdentity,
                 "actions:write,contents:read,pull-requests:write",
+                workflowEvidence.SameHeadContinuationPolicy,
                 frozen);
             return ActionHostAuthorizationResult.Granted(invocation);
         }
@@ -787,6 +790,7 @@ internal sealed class ActionHostAuthorizer
             string concurrencyDefinition,
             string concurrencyIdentity,
             string declaredPermissions,
+            ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy,
             FrozenPullRequest pullRequest)
         {
             this.authorizedLaunch = authorizedLaunch;
@@ -798,6 +802,7 @@ internal sealed class ActionHostAuthorizer
             ConcurrencyDefinition = concurrencyDefinition;
             ConcurrencyIdentity = concurrencyIdentity;
             DeclaredPermissions = declaredPermissions;
+            SameHeadContinuationPolicy = sameHeadContinuationPolicy;
             PullRequest = pullRequest;
         }
 
@@ -812,6 +817,7 @@ internal sealed class ActionHostAuthorizer
             string concurrencyDefinition,
             string concurrencyIdentity,
             string declaredPermissions,
+            ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy,
             FrozenPullRequest pullRequest)
         {
             if (!ReferenceEquals(authority, MintAuthority))
@@ -830,6 +836,7 @@ internal sealed class ActionHostAuthorizer
                 concurrencyDefinition,
                 concurrencyIdentity,
                 declaredPermissions,
+                sameHeadContinuationPolicy,
                 pullRequest);
         }
 
@@ -841,6 +848,8 @@ internal sealed class ActionHostAuthorizer
         internal string ConcurrencyDefinition { get; }
         internal string ConcurrencyIdentity { get; }
         internal string DeclaredPermissions { get; }
+        internal ActionHostSameHeadContinuationPolicy
+            SameHeadContinuationPolicy { get; }
         internal FrozenPullRequest PullRequest { get; }
 
         internal bool IsBoundTo(ActionHostLaunchContract? launch) =>

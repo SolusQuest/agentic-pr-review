@@ -3511,25 +3511,37 @@ public sealed class RetainedStateTransactionEndToEndTests
         ScriptedLocatorStore? store = null,
         MutableLineageTimeProvider? time = null,
         long? runId = null,
-        int? runAttempt = null)
+        int? runAttempt = null,
+        IActionHostTrustedWorkflowAdmission? workflowAdmission = null,
+        string? workflowSha = null,
+        string? actionSourceSha = null)
     {
         scenario ??= ActionHostAuthorizationScenario.Valid(route);
         var launch = StateLaunch(
             scenario.Launch,
             currentKeyByte: 0x42,
             runId: runId,
-            runAttempt: runAttempt);
-        if (runId is not null || runAttempt is not null)
+            runAttempt: runAttempt,
+            workflowSha: workflowSha,
+            actionSourceSha: actionSourceSha);
+        if (runId is not null ||
+            runAttempt is not null ||
+            workflowSha is not null)
         {
             scenario.Transport.CurrentRun = scenario.Transport.CurrentRun with
             {
                 Id = launch.RunId,
                 Attempt = launch.RunAttempt,
+                HeadSha = launch.WorkflowSha,
             };
         }
-        var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
-            launch,
-            CancellationToken.None);
+        workflowAdmission ??= ActionHostV1TrustedWorkflowAdmission.Instance;
+        var authorization = await new ActionHostAuthorizer(
+                scenario.EventReader,
+                scenario.Factory,
+                ActionHostAuthorizationPolicy.TrustedProof,
+                workflowAdmission: workflowAdmission)
+            .AuthorizeAsync(launch, CancellationToken.None);
         Assert.Equal(
             ActionHostAuthorizationFailure.None,
             authorization.Failure);
@@ -3542,11 +3554,17 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var policyRequest,
             out var bindFailure));
         Assert.Equal(ActionHostTrustedPolicyFailure.None, bindFailure);
-        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
-            policyRequest!,
+        var policyTransport =
             ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
                 ActionHostTrustedPolicyTests.Config("sticky", null),
-                Encoding.UTF8.GetBytes("trusted transaction policy")),
+                Encoding.UTF8.GetBytes("trusted transaction policy"));
+        policyTransport.Commit = policyTransport.Commit with
+        {
+            Sha = launch.WorkflowSha,
+        };
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            policyTransport,
             CancellationToken.None);
         var policy = Assert.IsType<ActionHostTrustedPolicy>(
             materialized.Policy);
@@ -3606,7 +3624,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             policy,
             currentReview,
             selected!,
-            publicationScope);
+            publicationScope,
+            workflowAdmission);
     }
 
     private static async Task ExecuteCleanupAsync(
@@ -3742,7 +3761,11 @@ public sealed class RetainedStateTransactionEndToEndTests
                     Id = launch.RunId,
                     Attempt = launch.RunAttempt,
                 };
-            var authorization = await fixture.Scenario.CreateAuthorizer()
+            var authorization = await new ActionHostAuthorizer(
+                    fixture.Scenario.EventReader,
+                    fixture.Scenario.Factory,
+                    ActionHostAuthorizationPolicy.TrustedProof,
+                    workflowAdmission: fixture.WorkflowAdmission)
                 .AuthorizeAsync(launch, CancellationToken.None);
             Assert.Equal(
                 ActionHostAuthorizationFailure.None,
@@ -4700,7 +4723,9 @@ public sealed class RetainedStateTransactionEndToEndTests
         byte currentKeyByte,
         byte? previousKeyByte = null,
         long? runId = null,
-        int? runAttempt = null)
+        int? runAttempt = null,
+        string? workflowSha = null,
+        string? actionSourceSha = null)
     {
         Assert.True(ActionHostStateKey.TryCreate(
             Convert.ToBase64String(
@@ -4734,8 +4759,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             runAttempt ?? launch.RunAttempt,
             launch.WorkflowPath,
             launch.WorkflowRef,
-            launch.WorkflowSha,
-            launch.ActionSourceSha,
+            workflowSha ?? launch.WorkflowSha,
+            actionSourceSha ?? launch.ActionSourceSha,
             launch.PayloadSha256,
             launch.BuildDiscriminator,
             launch.Cancellation,
@@ -4757,7 +4782,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         ActionHostTrustedPolicy Policy,
         ProjectChatMessage CurrentReview,
         SelectedLineageSnapshot Selected,
-        R4PublicationScopeV1 PublicationScope);
+        R4PublicationScopeV1 PublicationScope,
+        IActionHostTrustedWorkflowAdmission WorkflowAdmission);
 
     internal sealed record CompletedRun(
         AgentRunRequest Run,

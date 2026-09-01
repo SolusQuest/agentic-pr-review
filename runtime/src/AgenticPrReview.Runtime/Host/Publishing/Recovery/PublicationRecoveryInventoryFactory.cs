@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.State;
@@ -55,7 +56,9 @@ internal static class PublicationRecoveryInventoryFactory
                 return Fail();
             }
 
-            if (!context.TryGetProducingRun(out var currentProducingRun) ||
+            if (!context.TryGetRecoveryExecutionPolicy(
+                    out var currentProducingRun,
+                    out var sameHeadContinuationPolicy) ||
                 currentProducingRun is null)
             {
                 return Fail();
@@ -227,11 +230,13 @@ internal static class PublicationRecoveryInventoryFactory
                     acceptedPublication.ReviewedHeadSha,
                     reviewedHeadSha) &&
                 inventory.CurrentAcceptance is { } currentAcceptance &&
-                // A higher attempt of the same GitHub run is recovery. A
-                // distinct run on the same head is a new continuation.
-                StringComparer.Ordinal.Equals(
-                    currentAcceptance.ReceiptMetadata.ProducingRun.Identity,
-                    currentProducingRun.Identity);
+                (sameHeadContinuationPolicy != ActionHostSameHeadContinuationPolicy
+                        .ContinueAcrossWorkflowRuns ||
+                    // Trusted v2 treats a higher attempt of the same run as
+                    // recovery and a distinct run as a continuation.
+                    StringComparer.Ordinal.Equals(
+                        currentAcceptance.ReceiptMetadata.ProducingRun.Identity,
+                        currentProducingRun.Identity));
             if (!currentAcceptanceMatchesExecution)
             {
                 if (!TryAddAcceptedCleanupRecords(

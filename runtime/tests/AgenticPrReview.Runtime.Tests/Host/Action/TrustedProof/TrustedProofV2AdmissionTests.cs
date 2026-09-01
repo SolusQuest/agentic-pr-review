@@ -92,6 +92,9 @@ public sealed class TrustedProofV2AdmissionTests
         var v1Invocation = Assert.IsType<ActionHostAuthorizer.AuthorizedInvocation>(
             v1Result.Invocation);
         Assert.Equal(
+            ActionHostSameHeadContinuationPolicy.ReuseAcceptedState,
+            v1Invocation.SameHeadContinuationPolicy);
+        Assert.Equal(
             ActionHostAuthorizationScenario.BaseSha,
             v1Invocation.PullRequest.BaseSha);
         Assert.Equal(
@@ -122,6 +125,9 @@ public sealed class TrustedProofV2AdmissionTests
             CancellationToken.None);
         var v2Invocation = Assert.IsType<ActionHostAuthorizer.AuthorizedInvocation>(
             historicalBase.Invocation);
+        Assert.Equal(
+            ActionHostSameHeadContinuationPolicy.ContinueAcrossWorkflowRuns,
+            v2Invocation.SameHeadContinuationPolicy);
         Assert.Equal(
             TrustedProofPayloadBuildIdentity.SourceCommit,
             v2Invocation.PullRequest.BaseSha);

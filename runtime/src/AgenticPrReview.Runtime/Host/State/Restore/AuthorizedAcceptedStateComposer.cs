@@ -86,11 +86,16 @@ internal sealed class AuthorizedAcceptedStateRestoreContext : IDisposable
             true;
     }
 
-    internal bool TryGetProducingRun(out OpaqueStoreProducingRun? run)
+    internal bool TryGetRecoveryExecutionPolicy(
+        out OpaqueStoreProducingRun? run,
+        out ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy)
     {
         run = null;
-        return Volatile.Read(ref transaction)?.TryGetProducingRun(out run) ==
-            true;
+        sameHeadContinuationPolicy =
+            ActionHostSameHeadContinuationPolicy.ReuseAcceptedState;
+        return Volatile.Read(ref transaction)?.TryGetRecoveryExecutionPolicy(
+                out run,
+                out sameHeadContinuationPolicy) == true;
     }
 
     internal bool TryGetTransactionAuthority(

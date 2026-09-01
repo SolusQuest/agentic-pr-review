@@ -32,13 +32,24 @@ internal sealed class TrustedProofV2WorkflowAdmission :
             return false;
         }
 
-        return ActionHostTrustedWorkflowPolicy.TryValidateExact(
+        if (!ActionHostTrustedWorkflowPolicy.TryValidateExact(
             source,
             policy,
             launch.ActionSourceSha,
             Render(launch.ActionSourceSha, launch.PayloadSha256),
             out evidence,
-            out _);
+            out _) ||
+            evidence is null)
+        {
+            return false;
+        }
+
+        evidence = evidence with
+        {
+            SameHeadContinuationPolicy = ActionHostSameHeadContinuationPolicy
+                .ContinueAcrossWorkflowRuns,
+        };
+        return true;
     }
 
     public bool TryAdmitPullRequest(
