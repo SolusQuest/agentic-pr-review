@@ -1082,6 +1082,47 @@ public sealed class TrustedProofVerifierFixtureTests
     }
 
     [Fact]
+    public async Task StaleCoordinatorRejectsReleaseFromAnotherPayloadBuild()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-r4-e2p-stale-payload-pair-" +
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await PrepareProofScenarioAsync(root, "stale", 902);
+            var eventPath = Path.Join(root, "event.json");
+            var eventBytes = Encoding.UTF8.GetBytes("{}");
+            await File.WriteAllBytesAsync(eventPath, eventBytes);
+            var launch = StaleCancelledLaunch(eventPath, eventBytes);
+            var requestBudget = new TrustedProofControlRequestBudget(
+                maximumRequests: 32);
+            using var coordinator = await TrustedProofStaleWindowCoordinator
+                .ResolveAsync(
+                    launch,
+                    () => new FrameworkGitHubHandler(
+                        root,
+                        launch.PayloadSha256,
+                        proofReleasePayloadSha256: new string('0', 64)),
+                    requestBudget,
+                    CancellationToken.None);
+            Assert.NotNull(coordinator);
+            var hostWait = coordinator.Signal.SignalReadyAndWaitForReleaseAsync(
+                CancellationToken.None).AsTask();
+
+            Assert.False(await coordinator.CoordinateAsync(
+                CancellationToken.None,
+                (_, _) => Task.CompletedTask));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                await hostWait);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SyntheticOfficialPlatformConditionalArtifactAndAttemptGetsAreFreeOfPrimaryCharge()
     {
         var root = Path.Join(

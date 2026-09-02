@@ -16,7 +16,8 @@ internal sealed class FrameworkGitHubHandler(
     string scenarioRoot,
     string payloadSha256,
     Func<string, string, string>? workflowRenderer = null,
-    Func<bool, CancellationToken, ValueTask<int>>? observePrimaryRemaining = null) :
+    Func<bool, CancellationToken, ValueTask<int>>? observePrimaryRemaining = null,
+    string? proofReleasePayloadSha256 = null) :
     HttpMessageHandler
 {
     internal const long RepositoryId = 42;
@@ -947,7 +948,8 @@ internal sealed class FrameworkGitHubHandler(
         var releaseBody = CreateReleaseBody(
             readyBody,
             stale ? "stale-release" : "release",
-            readyId);
+            readyId,
+            proofReleasePayloadSha256);
         var release = ProofControlComment(
             releaseId,
             releaseBody,
@@ -966,7 +968,8 @@ internal sealed class FrameworkGitHubHandler(
     private static string CreateReleaseBody(
         string readyBody,
         string kind,
-        long predecessorCommentId)
+        long predecessorCommentId,
+        string? releasePayloadSha256)
     {
         const string prefix = "<!-- apr-r4-e2p-control ";
         const string suffix = " -->";
@@ -974,6 +977,10 @@ internal sealed class FrameworkGitHubHandler(
             readyBody[prefix.Length..^suffix.Length])!.AsObject();
         value["kind"] = kind;
         value["predecessor_comment_id"] = predecessorCommentId;
+        if (releasePayloadSha256 is not null)
+        {
+            value["payload_sha256"] = releasePayloadSha256;
+        }
         value["body_sha256"] = string.Empty;
         var preimage = value.ToJsonString();
         value["body_sha256"] = Convert.ToHexString(SHA256.HashData(

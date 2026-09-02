@@ -21,7 +21,12 @@ public sealed class TrustedProofControlTests
         900,
         2);
     private static readonly TrustedProofControlCoordinates ProducerCoordinates =
-        Coordinates with { RunId = 899, RunAttempt = 1 };
+        Coordinates with
+        {
+            PayloadSha256 = new string('2', 64),
+            RunId = 899,
+            RunAttempt = 1,
+        };
 
     [Fact]
     public void MarkerRoundTripsAsOneCanonicalBody()
@@ -43,13 +48,13 @@ public sealed class TrustedProofControlTests
     [Fact]
     public void MarkerPredicatesSeparateFamilyCurrentRunAndProducerPair()
     {
-        var otherPayload = Coordinates with
+        var otherProducer = ProducerCoordinates with
         {
             PayloadSha256 = new string('0', 64),
         };
         var body = TrustedProofControlMarker.CreateBody(
             "ready",
-            otherPayload,
+            ProducerCoordinates,
             predecessorCommentId: null);
         Assert.True(TrustedProofControlMarker.TryParse(body, out var marker));
 
@@ -58,7 +63,7 @@ public sealed class TrustedProofControlTests
 
         var releaseBody = TrustedProofControlMarker.CreateBody(
             "release",
-            Coordinates,
+            otherProducer,
             predecessorCommentId: 10);
         Assert.True(TrustedProofControlMarker.TryParse(
             releaseBody,
@@ -235,6 +240,70 @@ public sealed class TrustedProofControlTests
             Coordinates,
             conflictTransport,
             CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ServicesRejectWrongCurrentDigestAndMismatchedProducerPair()
+    {
+        var wrongCurrent = Coordinates with
+        {
+            PayloadSha256 = new string('0', 64),
+        };
+        var holdHandler = new ControlHandler([
+            Comment(
+                20,
+                TrustedProofControlMarker.CreateBody(
+                    "ready",
+                    wrongCurrent,
+                    predecessorCommentId: null),
+                "proof-bot"),
+        ]);
+        var holdTransport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            holdHandler);
+
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["hold"],
+            Coordinates,
+            holdTransport,
+            CancellationToken.None));
+        Assert.DoesNotContain(
+            holdHandler.Requests,
+            request => request.Method == HttpMethod.Post);
+
+        var mismatchedRelease = ProducerCoordinates with
+        {
+            PayloadSha256 = new string('0', 64),
+        };
+        var dispatchHandler = new ControlHandler([
+            Comment(
+                30,
+                TrustedProofControlMarker.CreateBody(
+                    "ready",
+                    ProducerCoordinates,
+                    predecessorCommentId: null),
+                "proof-bot"),
+            Comment(
+                31,
+                TrustedProofControlMarker.CreateBody(
+                    "release",
+                    mismatchedRelease,
+                    predecessorCommentId: 30),
+                "maintainer"),
+        ]);
+        var dispatchTransport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            dispatchHandler);
+
+        Assert.Equal(1, await TrustedProofControlService.RunAsync(
+            ["verify-completed"],
+            Coordinates,
+            dispatchTransport,
+            CancellationToken.None));
+        Assert.All(dispatchHandler.Requests, request =>
+            Assert.Equal(HttpMethod.Get, request.Method));
     }
 
     [Fact]
