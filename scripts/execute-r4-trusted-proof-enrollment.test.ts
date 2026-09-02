@@ -77,6 +77,10 @@ function record() {
   const input = {
     repository_id: '42',
     payload_sha256: digest('payload'),
+    reported_base_shas: {
+      normal: sha('e'),
+      stale: sha('f'),
+    },
     materialized: {
       merge_sha: workflow,
       merge_tree: workflowTree,
@@ -119,7 +123,7 @@ function pullBinding(value: ReturnType<typeof record>, fixture: any, head: strin
     state: 'open',
     draft: false,
     base_ref: 'main',
-    base_sha: value.coordinates.workflow_sha,
+    base_sha: fixture.reported_base_sha,
     head_ref: fixture.ref.slice('refs/heads/'.length),
     head_sha: head,
   });
@@ -433,6 +437,10 @@ describe('R4 post-merge enrollment executor', () => {
     expect(value.kind).not.toBe(ENROLLMENT_CONTRACT.authorizationKind);
     expect(value.fixtures.normal.pr_number).toBe('225');
     expect(value.fixtures.stale.pr_number).toBe('226');
+    expect(value.fixtures.normal.reported_base_sha).toBe(sha('e'));
+    expect(value.fixtures.stale.reported_base_sha).toBe(sha('f'));
+    expect(value.fixtures.normal.reported_base_sha).not.toBe(value.coordinates.workflow_sha);
+    expect(value.fixtures.stale.reported_base_sha).not.toBe(value.coordinates.workflow_sha);
     expect(value.objects.initial_tree.body.base_tree).toBe(value.coordinates.workflow_tree_sha);
     const normal = JSON.parse(value.fixtures.normal.manifest);
     const stale = JSON.parse(value.fixtures.stale.manifest);
@@ -458,6 +466,9 @@ describe('R4 post-merge enrollment executor', () => {
     const changed = structuredClone(value);
     changed.objects.initial_tree.body.base_tree = value.coordinates.workflow_sha;
     expect(() => validateEnrollmentRecord(changed)).toThrow(/record-canonical/u);
+    const reportedBaseChanged = structuredClone(value);
+    reportedBaseChanged.fixtures.normal.reported_base_sha = sha('9');
+    expect(() => validateEnrollmentRecord(reportedBaseChanged)).toThrow(/record-canonical/u);
     expect(() =>
       canonicalAuthorizationManifest({
         kind: ENROLLMENT_CONTRACT.authorizationKind,
