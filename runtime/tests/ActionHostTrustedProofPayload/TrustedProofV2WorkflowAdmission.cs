@@ -32,22 +32,42 @@ internal sealed class TrustedProofV2WorkflowAdmission :
             return false;
         }
 
-        return ActionHostTrustedWorkflowPolicy.TryValidateExact(
+        if (!ActionHostTrustedWorkflowPolicy.TryValidateExact(
             source,
             policy,
             launch.ActionSourceSha,
             Render(launch.ActionSourceSha, launch.PayloadSha256),
             out evidence,
-            out _);
+            out _) ||
+            evidence is null)
+        {
+            return false;
+        }
+
+        evidence = evidence with
+        {
+            SameHeadContinuationPolicy = ActionHostSameHeadContinuationPolicy
+                .ContinueAcrossWorkflowRuns,
+        };
+        return true;
     }
 
-    public bool IsPullRequestAdmitted(
+    public bool TryAdmitPullRequest(
         ActionHostGitHubRepositoryFact repository,
         ActionHostGitHubPullRequestFact pullRequest,
-        ActionHostLaunchContract launch) =>
-        StringComparer.Ordinal.Equals(repository.DefaultBranch, "main") &&
-        StringComparer.Ordinal.Equals(pullRequest.BaseRef, "main") &&
-        StringComparer.Ordinal.Equals(pullRequest.BaseSha, launch.WorkflowSha);
+        ActionHostLaunchContract launch,
+        out string? effectiveReviewBaseSha)
+    {
+        effectiveReviewBaseSha = null;
+        if (!StringComparer.Ordinal.Equals(repository.DefaultBranch, "main") ||
+            !StringComparer.Ordinal.Equals(pullRequest.BaseRef, "main"))
+        {
+            return false;
+        }
+
+        effectiveReviewBaseSha = launch.WorkflowSha;
+        return true;
+    }
 
     internal static string Render(string actionSourceSha, string payloadSha256)
     {

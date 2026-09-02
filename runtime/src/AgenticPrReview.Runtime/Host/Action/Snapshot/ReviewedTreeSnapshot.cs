@@ -220,7 +220,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
         string rootTreeSha,
         IEnumerable<ReviewedTreePathRecord> records,
         ReviewedContentBudget budget,
-        ReviewedBlobStagingLease staging)
+        ReviewedBlobStagingLease staging,
+        IReadOnlyList<string>? parentShas)
     {
         ArgumentNullException.ThrowIfNull(records);
         Budget = budget ?? throw new ArgumentNullException(nameof(budget));
@@ -250,10 +251,23 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
             throw new ArgumentException("Reviewed-tree records are invalid.");
         }
 
+        var parents = parentShas is null
+            ? default
+            : parentShas.ToImmutableArray();
+        if (!parents.IsDefault &&
+            (parents.Any(parent =>
+                !ReviewedGitObjectValidation.IsSha(parent) ||
+                StringComparer.Ordinal.Equals(parent, headSha)) ||
+             parents.Distinct(StringComparer.Ordinal).Count() != parents.Length))
+        {
+            throw new ArgumentException("Reviewed-tree parents are invalid.");
+        }
+
         RepositoryId = repositoryId;
         PullRequestNumber = pullRequestNumber;
         HeadSha = headSha;
         RootTreeSha = rootTreeSha;
+        ParentShas = parents;
         Records = ordered;
         Identity = ReviewedTreeIdentityWriter.Mint(
             authority,
@@ -272,6 +286,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
 
     internal string RootTreeSha { get; }
 
+    internal ImmutableArray<string> ParentShas { get; }
+
     internal ImmutableArray<ReviewedTreePathRecord> Records { get; }
 
     internal ReviewedTreeIdentity Identity { get; }
@@ -286,7 +302,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
         string rootTreeSha,
         IEnumerable<ReviewedTreePathRecord> records,
         ReviewedContentBudget budget,
-        ReviewedBlobStagingLease staging) => new(
+        ReviewedBlobStagingLease staging,
+        IReadOnlyList<string>? parentShas = null) => new(
             authority,
             repositoryId,
             pullRequestNumber,
@@ -294,7 +311,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
             rootTreeSha,
             records,
             budget,
-            staging);
+            staging,
+            parentShas);
 
     public ValueTask DisposeAsync()
     {

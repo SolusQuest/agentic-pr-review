@@ -429,7 +429,8 @@ internal sealed class ActionHostCompositionDependencies
         Func<string>? stagingParentFactory = null,
         IActionHostPostAcceptanceInlineHook? inlineHook = null,
         IActionHostTrustedWorkflowAdmission? workflowAdmission = null,
-        IActionHostGitObjectTransportFactory? reviewedHeadSourceFactory = null)
+        IActionHostGitObjectTransportFactory? reviewedHeadSourceFactory = null,
+        IReviewedChangedFileSourceFactory? changedFileSourceFactory = null)
     {
         EventReader = eventReader ??
             throw new ArgumentNullException(nameof(eventReader));
@@ -453,6 +454,8 @@ internal sealed class ActionHostCompositionDependencies
         InlineHook = inlineHook;
         WorkflowAdmission = workflowAdmission ??
             ActionHostV1TrustedWorkflowAdmission.Instance;
+        ChangedFileSourceFactory = changedFileSourceFactory ??
+            ReviewedChangedFileSourceFactory.Instance;
     }
 
     internal IActionHostEventReader EventReader { get; }
@@ -478,6 +481,7 @@ internal sealed class ActionHostCompositionDependencies
     internal Func<string> StagingParentFactory { get; }
     internal IActionHostPostAcceptanceInlineHook? InlineHook { get; }
     internal IActionHostTrustedWorkflowAdmission WorkflowAdmission { get; }
+    internal IReviewedChangedFileSourceFactory ChangedFileSourceFactory { get; }
 
     internal static ActionHostCompositionDependencies Production()
     {
@@ -660,7 +664,8 @@ internal sealed class ActionHostComposition
             }
 
             var snapshotResult = await new BoundedReviewedSnapshotBuilder(
-                    dependencies.SnapshotFactory)
+                    dependencies.SnapshotFactory,
+                    dependencies.ChangedFileSourceFactory)
                 .BuildAsync(
                     invocation,
                     launch.Inputs.GitHubToken!,

@@ -270,6 +270,11 @@ internal sealed class FrameworkGitHubHandler(
         if (request.Method == HttpMethod.Get &&
             suffix == "/pulls/147/files")
         {
+            if (IsTrustedProofPayload())
+            {
+                throw new InvalidOperationException(
+                    "Trusted-v2 must not read the historical PR-files view.");
+            }
             Increment("diff-api-count");
             var response = FrameworkJson.Serialize(FrameworkJson.Array([
                 FrameworkJson.Object(
@@ -502,7 +507,8 @@ internal sealed class FrameworkGitHubHandler(
             ("head_branch", "main"),
             ("head_sha", CurrentWorkflowSha()),
             ("event", mode == "workflow-run" ||
-                IsTrustedProofPayload() && mode == "continuation-seed"
+                IsTrustedProofPayload() && mode is
+                    "continuation-seed" or "stale"
                     ? "workflow_run"
                     : "workflow_dispatch"),
             ("conclusion", null),
@@ -617,7 +623,7 @@ internal sealed class FrameworkGitHubHandler(
 
     private string CurrentHead(string mode) =>
         mode == "cross-head-conflict" ? ConflictHeadSha :
-        mode == "continuation" ||
+        mode == "continuation" && !IsTrustedProofPayload() ||
             mode == "stale" &&
                 (ReadCounter("provider-sequence") >= 6 ||
                     File.Exists(Path.Join(scenarioRoot, "stale-released")))
@@ -625,10 +631,10 @@ internal sealed class FrameworkGitHubHandler(
             : HeadSha;
 
     internal static string PullRequestBaseSha(bool trustedProofPayload) =>
-        trustedProofPayload ? WorkflowSha : BaseSha;
+        BaseSha;
 
     private string CurrentBaseSha() =>
-        IsTrustedProofPayload() ? CurrentWorkflowSha() : BaseSha;
+        BaseSha;
 
     private string CurrentWorkflowSha() =>
         HasTrustedProofCurrentHeadAuthority()
@@ -707,10 +713,18 @@ internal sealed class FrameworkGitHubHandler(
     {
         var tree = sha == CurrentWorkflowSha() ? WorkflowRoot :
             sha == BaseSha ? BaseRoot : HeadRoot;
-        var baseSha = CurrentBaseSha();
-        var parents = sha == HeadSha ? new[] { baseSha } :
+        var effectiveBaseSha = IsTrustedProofPayload()
+            ? CurrentWorkflowSha()
+            : CurrentBaseSha();
+        var parents = sha == HeadSha
+            ? IsTrustedProofPayload()
+                ? new[] { effectiveBaseSha, TriggerSha }
+                : new[] { effectiveBaseSha }
+            :
             sha == ContinuedHeadSha ? new[] { HeadSha } :
-            sha == ConflictHeadSha ? new[] { baseSha } : Array.Empty<string>();
+            sha == ConflictHeadSha
+                ? new[] { effectiveBaseSha }
+                : Array.Empty<string>();
         return FrameworkJson.Serialize(FrameworkJson.Object(
             ("sha", sha),
             ("tree", FrameworkJson.Object(("sha", tree))),

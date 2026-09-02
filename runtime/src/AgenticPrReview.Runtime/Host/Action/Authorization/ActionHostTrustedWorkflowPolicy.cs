@@ -5,7 +5,18 @@ namespace AgenticPrReview.Runtime.ActionHost.Authorization;
 internal sealed record ActionHostTrustedWorkflowEvidence(
     string ConcurrencyGroup,
     string ActionReference,
-    string PreflightJobId);
+    string PreflightJobId)
+{
+    internal ActionHostSameHeadContinuationPolicy SameHeadContinuationPolicy
+        { get; init; } =
+        ActionHostSameHeadContinuationPolicy.ReuseAcceptedState;
+}
+
+internal enum ActionHostSameHeadContinuationPolicy
+{
+    ReuseAcceptedState = 0,
+    ContinueAcrossWorkflowRuns,
+}
 
 internal enum ActionHostTrustedWorkflowFailure
 {

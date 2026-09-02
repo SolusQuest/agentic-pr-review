@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.State;
@@ -51,6 +52,14 @@ internal static class PublicationRecoveryInventoryFactory
                         inventory.InventoryDigest)) ||
                 inventory.CleanupRecords.IsDefault ||
                 inventory.CleanupRecords.Length > 1)
+            {
+                return Fail();
+            }
+
+            if (!context.TryGetRecoveryExecutionPolicy(
+                    out var currentProducingRun,
+                    out var sameHeadContinuationPolicy) ||
+                currentProducingRun is null)
             {
                 return Fail();
             }
@@ -215,12 +224,20 @@ internal static class PublicationRecoveryInventoryFactory
                 }
             }
 
-            var currentHeadMatches =
+            var currentAcceptanceMatchesExecution =
                 acceptedPublication is not null &&
                 StringComparer.Ordinal.Equals(
                     acceptedPublication.ReviewedHeadSha,
-                    reviewedHeadSha);
-            if (!currentHeadMatches)
+                    reviewedHeadSha) &&
+                inventory.CurrentAcceptance is { } currentAcceptance &&
+                (sameHeadContinuationPolicy != ActionHostSameHeadContinuationPolicy
+                        .ContinueAcrossWorkflowRuns ||
+                    // Trusted v2 treats a higher attempt of the same run as
+                    // recovery and a distinct run as a continuation.
+                    StringComparer.Ordinal.Equals(
+                        currentAcceptance.ReceiptMetadata.ProducingRun.Identity,
+                        currentProducingRun.Identity));
+            if (!currentAcceptanceMatchesExecution)
             {
                 if (!TryAddAcceptedCleanupRecords(
                         acceptedSet,
@@ -246,21 +263,22 @@ internal static class PublicationRecoveryInventoryFactory
                 ? inventory.CurrentAcceptance is not null &&
                     inventory.CurrentAcceptancePublicationReceipt is not null
                 : matched is not null;
-            if (currentHeadMatches && !terminalProven)
+            if (currentAcceptanceMatchesExecution && !terminalProven)
             {
                 return Fail();
             }
 
             var selected = pending is not null
                 ? pendingSet
-                : currentHeadMatches
+                : currentAcceptanceMatchesExecution
                     ? acceptedSet
                     : new ParsedRecordSet();
             var selectedPublication = pending?.Publication ??
-                (currentHeadMatches ? acceptedPublication : null);
+                (currentAcceptanceMatchesExecution ? acceptedPublication : null);
             var selectedIdentity = pendingIdentity ??
-                (currentHeadMatches ? acceptedIdentity : null);
-            var selectedMatched = pending is null && currentHeadMatches
+                (currentAcceptanceMatchesExecution ? acceptedIdentity : null);
+            var selectedMatched = pending is null &&
+                currentAcceptanceMatchesExecution
                 ? matched
                 : null;
             if (inventory.Anchors.Any(anchor =>
@@ -323,8 +341,8 @@ internal static class PublicationRecoveryInventoryFactory
                 acceptedAnchors.ToImmutableArray(),
                 inventory.CleanupRecords,
                 pending?.MatchesCurrentReviewedHead ?? false,
-                currentHeadMatches,
-                terminalProven && !currentHeadMatches,
+                currentAcceptanceMatchesExecution,
+                terminalProven && !currentAcceptanceMatchesExecution,
                 hasHistoricalCleanupDebt,
                 anchors);
             return RetainedStateTransactionResult<
@@ -800,7 +818,7 @@ internal static class PublicationRecoveryInventoryFactory
         if (observation is null ||
             record is null ||
             !observation.IsLive ||
-            !observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            !observation.CurrentAcceptanceMatchesReviewedExecution ||
             observation.Candidate is not null ||
             !observation.HistoricalRecords.Any(item =>
                 item.Metadata == record.Metadata &&
@@ -837,7 +855,7 @@ internal static class PublicationRecoveryInventoryFactory
         if (observation is null ||
             anchor is null ||
             !observation.IsLive ||
-            !observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            !observation.CurrentAcceptanceMatchesReviewedExecution ||
             observation.Candidate is not null ||
             !observation.CompletedAnchors.Contains(anchor))
         {

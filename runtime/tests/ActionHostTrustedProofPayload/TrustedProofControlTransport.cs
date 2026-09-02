@@ -475,9 +475,7 @@ internal sealed class TrustedProofControlTransport : IDisposable
             pull.MergedAt is null &&
             pull.Base is not null &&
             StringComparer.Ordinal.Equals(pull.Base.Ref, "main") &&
-            StringComparer.Ordinal.Equals(
-                pull.Base.Sha,
-                coordinates.WorkflowSha) &&
+            IsLowerHex(pull.Base.Sha, 40) &&
             MatchesRepository(pull.Base.Repository) &&
             pull.Head is not null &&
             StringComparer.Ordinal.Equals(
@@ -488,6 +486,12 @@ internal sealed class TrustedProofControlTransport : IDisposable
                 coordinates.FixtureHeadSha) &&
             MatchesRepository(pull.Head.Repository);
     }
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value is not null &&
+        value.Length == length &&
+        value.All(static character => character is >= '0' and <= '9' or
+            >= 'a' and <= 'f');
 
     internal async Task<TrustedProofMutationOutcome> DeleteAsync(
         long commentId,

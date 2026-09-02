@@ -55,7 +55,8 @@ internal sealed class ReviewedGitObjectResult<T>
 
 internal sealed record ReviewedGitCommitFact(
     string Sha,
-    string TreeSha);
+    string TreeSha,
+    IReadOnlyList<string>? ParentShas = null);
 
 internal sealed record ReviewedGitTreeEntryFact(
     string Path,

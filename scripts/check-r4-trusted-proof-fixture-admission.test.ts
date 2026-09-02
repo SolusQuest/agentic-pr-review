@@ -269,19 +269,21 @@ describe('R4 prospective fixture admission', () => {
       }),
     ).toThrow(/prospective-base-tree-or-path-drift/u);
 
-    let readTreeCalls = 0;
+    let prospectiveBaseWritten = false;
     expect(() =>
       materializeProspectiveFixture({
         repositoryRoot: root,
         interceptMaterializedGit: (runMaterializedGit, args, input) => {
-          if (args[0] === 'read-tree') {
-            readTreeCalls += 1;
-            if (readTreeCalls === 1) {
-              return runMaterializedGit(
-                ['read-tree', '1a15b59dd21fe0ff04d0e728680acaebfedb1195^{tree}'],
-                input,
-              );
-            }
+          if (args[0] === 'write-tree') {
+            const result = runMaterializedGit(args, input);
+            prospectiveBaseWritten = true;
+            return result;
+          }
+          if (args[0] === 'read-tree' && prospectiveBaseWritten) {
+            return runMaterializedGit(
+              ['read-tree', '1a15b59dd21fe0ff04d0e728680acaebfedb1195^{tree}'],
+              input,
+            );
           }
           return runMaterializedGit(args, input);
         },

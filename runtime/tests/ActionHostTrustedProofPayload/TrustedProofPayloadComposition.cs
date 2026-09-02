@@ -51,6 +51,8 @@ internal static class TrustedProofPayloadComposition
             ports.StagingParentFactory,
             new PostAcceptanceInlinePublisherHook(publisher),
             workflowAdmission: TrustedProofV2WorkflowAdmission.Instance,
-            reviewedHeadSourceFactory: reviewedHeadSource);
+            reviewedHeadSourceFactory: reviewedHeadSource,
+            changedFileSourceFactory:
+                TrustedProofChangedFileSourceFactory.Instance);
     }
 }

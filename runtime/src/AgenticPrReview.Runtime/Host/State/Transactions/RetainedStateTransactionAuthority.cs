@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
@@ -102,6 +103,25 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
 
     internal bool HasTerminalAcceptance =>
         Volatile.Read(ref terminalAcceptance) is not null;
+
+    internal bool TryGetRecoveryExecutionPolicy(
+        out OpaqueStoreProducingRun? run,
+        out ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy)
+    {
+        sameHeadContinuationPolicy =
+            ActionHostSameHeadContinuationPolicy.ReuseAcceptedState;
+        run = IsLive
+            ? new OpaqueStoreProducingRun(
+                producingRunIdentity,
+                producingRunAttempt)
+            : null;
+        if (run is not null)
+        {
+            sameHeadContinuationPolicy =
+                production.Invocation.SameHeadContinuationPolicy;
+        }
+        return run is not null;
+    }
 
     internal static bool TryCreate(
         object issuer,

@@ -1,6 +1,7 @@
 using System.Formats.Tar;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
@@ -54,9 +55,9 @@ public sealed class TrustedProofVerifierFixtureTests
 
     [Theory]
     [InlineData("dispatch-bootstrap", 1)]
-    [InlineData("dispatch-continuation", 2)]
+    [InlineData("dispatch-continuation", 1)]
     [InlineData("stale-head", 1)]
-    public void ProtectedRequestJoinFreezesTheContinuationHeadRevalidation(
+    public void ProtectedRequestJoinFreezesOneCommitLookupPerReviewedHead(
         string scenario,
         int expectedCommitRequests)
     {
@@ -469,7 +470,7 @@ public sealed class TrustedProofVerifierFixtureTests
     }
 
     [Fact]
-    public async Task TrustedProofContinuationAdvancesTheReviewedHead()
+    public async Task TrustedProofContinuationKeepsTheRefreshedHeadWhileGenericContinuationAdvances()
     {
         var root = Path.Join(
             Path.GetTempPath(),
@@ -496,8 +497,31 @@ public sealed class TrustedProofVerifierFixtureTests
             using var document = JsonDocument.Parse(
                 await response.Content.ReadAsStringAsync());
             Assert.Equal(
-                FrameworkGitHubHandler.ContinuedHeadSha,
+                FrameworkGitHubHandler.HeadSha,
                 document.RootElement.GetProperty("head")
+                    .GetProperty("sha").GetString());
+
+            using var headResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/git/commits/" +
+                FrameworkGitHubHandler.HeadSha);
+            headResponse.EnsureSuccessStatusCode();
+            using var head = JsonDocument.Parse(
+                await headResponse.Content.ReadAsStringAsync());
+            Assert.Equal(2, head.RootElement.GetProperty("parents").GetArrayLength());
+            Assert.Equal(
+                FrameworkGitHubHandler.WorkflowSha,
+                head.RootElement.GetProperty("parents")[0]
+                    .GetProperty("sha").GetString());
+
+            File.Delete(Path.Join(root, "trusted-proof-payload"));
+            using var genericResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/pulls/147");
+            genericResponse.EnsureSuccessStatusCode();
+            using var generic = JsonDocument.Parse(
+                await genericResponse.Content.ReadAsStringAsync());
+            Assert.Equal(
+                FrameworkGitHubHandler.ContinuedHeadSha,
+                generic.RootElement.GetProperty("head")
                     .GetProperty("sha").GetString());
         }
         finally
@@ -507,7 +531,54 @@ public sealed class TrustedProofVerifierFixtureTests
     }
 
     [Fact]
-    public async Task TrustedProofGitFactsShareTheWorkflowBaseAndPolicyTree()
+    public async Task TrustedStaleCurrentRunMirrorsWorkflowRunWithoutChangingDispatchRoutes()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            "apr-r4-e2p-current-run-event-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await PrepareProofScenarioAsync(root, "stale", 902);
+            using var handler = new FrameworkGitHubHandler(
+                root,
+                new string('f', 64));
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://api.github.com/"),
+            };
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    FrameworkCanaries.GitHubToken);
+
+            Assert.Equal(
+                "workflow_run",
+                await CurrentRunEventAsync(client, 902));
+
+            await File.WriteAllTextAsync(
+                Path.Join(root, "mode"),
+                "continuation");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "901");
+            Assert.Equal(
+                "workflow_dispatch",
+                await CurrentRunEventAsync(client, 901));
+
+            File.Delete(Path.Join(root, "trusted-proof-payload"));
+            await File.WriteAllTextAsync(Path.Join(root, "mode"), "stale");
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "902");
+            Assert.Equal(
+                "workflow_dispatch",
+                await CurrentRunEventAsync(client, 902));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TrustedProofGitFactsSeparateReportedAndEffectiveBase()
     {
         var root = Path.Join(
             Path.GetTempPath(),
@@ -529,13 +600,17 @@ public sealed class TrustedProofVerifierFixtureTests
                     FrameworkCanaries.GitHubToken);
 
             Assert.Equal(
-                FrameworkGitHubHandler.WorkflowSha,
+                FrameworkGitHubHandler.BaseSha,
                 FrameworkGitHubHandler.PullRequestBaseSha(
                     trustedProofPayload: true));
             Assert.Equal(
                 FrameworkGitHubHandler.BaseSha,
                 FrameworkGitHubHandler.PullRequestBaseSha(
                     trustedProofPayload: false));
+            Assert.Equal(
+                FrameworkGitHubHandler.BaseSha,
+                FrameworkSupervisor.WorkflowRunReportedBaseShaForTest(
+                    trustedProofPayload: true));
 
             using var triggerResponse = await client.GetAsync(
                 "repos/" + FrameworkCanaries.Repository +
@@ -544,7 +619,7 @@ public sealed class TrustedProofVerifierFixtureTests
             using var trigger = JsonDocument.Parse(
                 await triggerResponse.Content.ReadAsStringAsync());
             Assert.Equal(
-                FrameworkGitHubHandler.WorkflowSha,
+                FrameworkGitHubHandler.BaseSha,
                 trigger.RootElement.GetProperty("pull_requests")[0]
                     .GetProperty("base").GetProperty("sha").GetString());
 
@@ -555,7 +630,7 @@ public sealed class TrustedProofVerifierFixtureTests
             using var associated = JsonDocument.Parse(
                 await associatedResponse.Content.ReadAsStringAsync());
             Assert.Equal(
-                FrameworkGitHubHandler.WorkflowSha,
+                FrameworkGitHubHandler.BaseSha,
                 associated.RootElement[0].GetProperty("base")
                     .GetProperty("sha").GetString());
 
@@ -565,8 +640,20 @@ public sealed class TrustedProofVerifierFixtureTests
             using var pull = JsonDocument.Parse(
                 await pullResponse.Content.ReadAsStringAsync());
             Assert.Equal(
-                FrameworkGitHubHandler.WorkflowSha,
+                FrameworkGitHubHandler.BaseSha,
                 pull.RootElement.GetProperty("base")
+                    .GetProperty("sha").GetString());
+
+            using var headResponse = await client.GetAsync(
+                "repos/" + FrameworkCanaries.Repository + "/git/commits/" +
+                FrameworkGitHubHandler.HeadSha);
+            headResponse.EnsureSuccessStatusCode();
+            using var head = JsonDocument.Parse(
+                await headResponse.Content.ReadAsStringAsync());
+            Assert.Equal(2, head.RootElement.GetProperty("parents").GetArrayLength());
+            Assert.Equal(
+                FrameworkGitHubHandler.WorkflowSha,
+                head.RootElement.GetProperty("parents")[0]
                     .GetProperty("sha").GetString());
 
             using var commitResponse = await client.GetAsync(
@@ -636,7 +723,11 @@ public sealed class TrustedProofVerifierFixtureTests
             pullResponse.EnsureSuccessStatusCode();
             using var pull = JsonDocument.Parse(
                 await pullResponse.Content.ReadAsStringAsync());
-            Assert.Equal(sourceCommit,
+            Assert.Equal(FrameworkGitHubHandler.BaseSha,
+                pull.RootElement.GetProperty("base").GetProperty("sha")
+                    .GetString());
+            Assert.NotEqual(
+                sourceCommit,
                 pull.RootElement.GetProperty("base").GetProperty("sha")
                     .GetString());
 
@@ -1082,6 +1173,19 @@ public sealed class TrustedProofVerifierFixtureTests
         await File.WriteAllTextAsync(
             Path.Join(scenario, "run-id"), runId.ToString());
         await File.WriteAllTextAsync(Path.Join(scenario, "run-attempt"), "1");
+    }
+
+    private static async Task<string?> CurrentRunEventAsync(
+        HttpClient client,
+        long runId)
+    {
+        using var response = await client.GetAsync(
+            "repos/" + FrameworkCanaries.Repository + "/actions/runs/" +
+            runId.ToString(CultureInfo.InvariantCulture) + "/attempts/1");
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("event").GetString();
     }
 
     private static ActionHostLaunchContract StaleCancelledLaunch(

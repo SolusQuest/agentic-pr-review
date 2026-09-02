@@ -175,7 +175,7 @@ internal sealed class PublicationRecoveryObservation : IDisposable
         ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
             cleanupRecords,
         bool candidateMatchesCurrentHead,
-        bool currentAcceptedHeadMatchesReviewedHead,
+        bool currentAcceptanceMatchesReviewedExecution,
         bool historicalTerminalRecovery,
         bool hasHistoricalCleanupDebt,
         PublicationRecoveryAnchorState anchors)
@@ -196,8 +196,8 @@ internal sealed class PublicationRecoveryObservation : IDisposable
         CompletedAnchors = completedAnchors;
         CleanupRecords = cleanupRecords;
         CandidateMatchesCurrentHead = candidateMatchesCurrentHead;
-        CurrentAcceptedHeadMatchesReviewedHead =
-            currentAcceptedHeadMatchesReviewedHead;
+        CurrentAcceptanceMatchesReviewedExecution =
+            currentAcceptanceMatchesReviewedExecution;
         HistoricalTerminalRecovery = historicalTerminalRecovery;
         HasHistoricalCleanupDebt = hasHistoricalCleanupDebt;
         Anchors = anchors;
@@ -230,11 +230,13 @@ internal sealed class PublicationRecoveryObservation : IDisposable
         get;
     }
     internal ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
-        CompletedAnchors { get; }
+        CompletedAnchors
+    { get; }
     internal ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
-        CleanupRecords { get; }
+        CleanupRecords
+    { get; }
     internal bool CandidateMatchesCurrentHead { get; }
-    internal bool CurrentAcceptedHeadMatchesReviewedHead { get; }
+    internal bool CurrentAcceptanceMatchesReviewedExecution { get; }
     internal bool HistoricalTerminalRecovery { get; }
     internal bool HasHistoricalCleanupDebt { get; }
     internal PublicationRecoveryAnchorState Anchors { get; }

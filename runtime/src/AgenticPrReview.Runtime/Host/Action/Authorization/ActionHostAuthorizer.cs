@@ -161,7 +161,9 @@ internal sealed class ActionHostAuthorizer
                     source.Bytes,
                     _policy,
                     launch,
-                    out var workflowEvidence))
+                    out var workflowEvidence) ||
+                workflowEvidence is null ||
+                !Enum.IsDefined(workflowEvidence.SameHeadContinuationPolicy))
             {
                 return RejectGitHubOr(
                     sourceResult.Failure,
@@ -241,10 +243,12 @@ internal sealed class ActionHostAuthorizer
                 };
             }
 
-            if (!_workflowAdmission.IsPullRequestAdmitted(
+            if (!_workflowAdmission.TryAdmitPullRequest(
                     repository,
                     pullRequest,
-                    launch))
+                    launch,
+                    out var effectiveReviewBaseSha) ||
+                string.IsNullOrEmpty(effectiveReviewBaseSha))
             {
                 return Reject(
                     ActionHostStatus.AuthorizationFailed,
@@ -255,7 +259,7 @@ internal sealed class ActionHostAuthorizer
                 MintAuthority,
                 repository.Id,
                 pullRequest.Number,
-                pullRequest.BaseSha,
+                effectiveReviewBaseSha,
                 pullRequest.BaseRepository.Id,
                 pullRequest.BaseRepository.FullName,
                 pullRequest.HeadSha,
@@ -263,7 +267,8 @@ internal sealed class ActionHostAuthorizer
                 pullRequest.HeadRepository.FullName,
                 pullRequest.State,
                 pullRequest.Draft,
-                pullRequest.MergedAt is not null);
+                pullRequest.MergedAt is not null,
+                reportedBaseSha: pullRequest.BaseSha);
             var concurrencyIdentity =
                 $"agentic-pr-review-r4-{repository.Id}-pr-{pullRequest.Number}";
             var invocation = AuthorizedInvocation.Mint(
@@ -277,6 +282,7 @@ internal sealed class ActionHostAuthorizer
                 workflowEvidence!.ConcurrencyGroup,
                 concurrencyIdentity,
                 "actions:write,contents:read,pull-requests:write",
+                workflowEvidence.SameHeadContinuationPolicy,
                 frozen);
             return ActionHostAuthorizationResult.Granted(invocation);
         }
@@ -703,11 +709,13 @@ internal sealed class ActionHostAuthorizer
             string headRepositoryName,
             string state,
             bool draft,
-            bool merged)
+            bool merged,
+            string reportedBaseSha)
         {
             RepositoryId = repositoryId;
             Number = number;
             BaseSha = baseSha;
+            ReportedBaseSha = reportedBaseSha;
             BaseRepositoryId = baseRepositoryId;
             BaseRepositoryName = baseRepositoryName;
             HeadSha = headSha;
@@ -730,7 +738,8 @@ internal sealed class ActionHostAuthorizer
             string headRepositoryName,
             string state,
             bool draft,
-            bool merged)
+            bool merged,
+            string? reportedBaseSha = null)
         {
             if (!ReferenceEquals(authority, MintAuthority))
             {
@@ -749,12 +758,14 @@ internal sealed class ActionHostAuthorizer
                 headRepositoryName,
                 state,
                 draft,
-                merged);
+                merged,
+                reportedBaseSha ?? baseSha);
         }
 
         internal long RepositoryId { get; }
         internal long Number { get; }
         internal string BaseSha { get; }
+        internal string ReportedBaseSha { get; }
         internal long BaseRepositoryId { get; }
         internal string BaseRepositoryName { get; }
         internal string HeadSha { get; }
@@ -779,6 +790,7 @@ internal sealed class ActionHostAuthorizer
             string concurrencyDefinition,
             string concurrencyIdentity,
             string declaredPermissions,
+            ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy,
             FrozenPullRequest pullRequest)
         {
             this.authorizedLaunch = authorizedLaunch;
@@ -790,6 +802,7 @@ internal sealed class ActionHostAuthorizer
             ConcurrencyDefinition = concurrencyDefinition;
             ConcurrencyIdentity = concurrencyIdentity;
             DeclaredPermissions = declaredPermissions;
+            SameHeadContinuationPolicy = sameHeadContinuationPolicy;
             PullRequest = pullRequest;
         }
 
@@ -804,6 +817,7 @@ internal sealed class ActionHostAuthorizer
             string concurrencyDefinition,
             string concurrencyIdentity,
             string declaredPermissions,
+            ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy,
             FrozenPullRequest pullRequest)
         {
             if (!ReferenceEquals(authority, MintAuthority))
@@ -822,6 +836,7 @@ internal sealed class ActionHostAuthorizer
                 concurrencyDefinition,
                 concurrencyIdentity,
                 declaredPermissions,
+                sameHeadContinuationPolicy,
                 pullRequest);
         }
 
@@ -833,6 +848,8 @@ internal sealed class ActionHostAuthorizer
         internal string ConcurrencyDefinition { get; }
         internal string ConcurrencyIdentity { get; }
         internal string DeclaredPermissions { get; }
+        internal ActionHostSameHeadContinuationPolicy
+            SameHeadContinuationPolicy { get; }
         internal FrozenPullRequest PullRequest { get; }
 
         internal bool IsBoundTo(ActionHostLaunchContract? launch) =>

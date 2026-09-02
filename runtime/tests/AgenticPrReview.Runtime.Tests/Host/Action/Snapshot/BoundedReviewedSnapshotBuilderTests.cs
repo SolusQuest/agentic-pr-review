@@ -14,6 +14,54 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.Snapshot;
 public sealed class BoundedReviewedSnapshotBuilderTests
 {
     [Fact]
+    public async Task ProofAddedFileRequirementRejectsAPathPresentInEffectiveBase()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var canary = "APR178_TOOL_DATA_CANARY\n"u8.ToArray();
+        const string canaryPath = "apr178-path-canary.txt";
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                canaryPath,
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                canary));
+        var file = new ActionHostPullRequestFileObject(
+            H5SnapshotTestSupport.BlobSha(canary),
+            canaryPath,
+            null,
+            "added",
+            1,
+            0,
+            1,
+            null);
+        var script = new Script(
+            H5SnapshotTestSupport.PullRequest(invocation.PullRequest),
+            file,
+            invocation.PullRequest.BaseSha,
+            "already-present\n"u8.ToArray());
+
+        var result = await new BoundedReviewedSnapshotBuilder(
+                new ScriptedFactory(script),
+                new RequiredAbsentSourceFactory(file))
+            .BuildAsync(
+                invocation,
+                H5SnapshotTestSupport.Token(),
+                tree,
+                parent,
+                CancellationToken.None);
+
+        Assert.Null(result.Lease);
+        Assert.Equal(
+            ReviewedSnapshotReadFailure.IdentityMismatch,
+            result.Failure);
+        Assert.Equal(1, script.BaseBlobCalls);
+        Directory.Delete(parent, recursive: true);
+    }
+
+    [Fact]
     public async Task CompositionReturnsCompleteImmutableAgentViewAndCleansStaging()
     {
         var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
@@ -370,7 +418,7 @@ public sealed class BoundedReviewedSnapshotBuilderTests
                         treeSha,
                         [
                             new(
-                                "file.txt",
+                                _script.File.Path,
                                 "100644",
                                 "blob",
                                 _script.BaseBlobSha,
@@ -397,6 +445,44 @@ public sealed class BoundedReviewedSnapshotBuilderTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class RequiredAbsentSourceFactory(
+        ActionHostPullRequestFileObject file) :
+        IReviewedChangedFileSourceFactory
+    {
+        public IReviewedChangedFileSource Create(
+            IReviewedSnapshotTransportFactory transportFactory) =>
+            new RequiredAbsentSource(file);
+    }
+
+    private sealed class RequiredAbsentSource(
+        ActionHostPullRequestFileObject file) : IReviewedChangedFileSource
+    {
+        public Task<ReviewedSnapshotReadResult<ReviewedChangedFileSet>> ReadAsync(
+            ActionHostAuthorizer.AuthorizedInvocation invocation,
+            ActionHostGitHubToken token,
+            ReviewedTreeSnapshot tree,
+            CancellationToken cancellationToken)
+        {
+            var fact = new ReviewedPullRequestFileFact(
+                file.Sha,
+                file.Path,
+                file.PreviousPath,
+                file.Status,
+                file.Additions,
+                file.Deletions,
+                file.Changes,
+                file.Patch,
+                false);
+            var facts = System.Collections.Immutable.ImmutableArray.Create(fact);
+            return Task.FromResult(
+                ReviewedSnapshotReadResult<ReviewedChangedFileSet>.Success(
+                    new(
+                        facts,
+                        ReviewedChangedFileIdentityWriter.Write(facts),
+                        requireAddedBaseAbsence: true)));
         }
     }
 }

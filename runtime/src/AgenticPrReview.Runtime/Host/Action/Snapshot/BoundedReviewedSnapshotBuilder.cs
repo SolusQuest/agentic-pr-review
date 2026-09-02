@@ -79,18 +79,25 @@ internal sealed class BoundedReviewedSnapshotResult
 internal sealed class BoundedReviewedSnapshotBuilder
 {
     private readonly IReviewedSnapshotTransportFactory _transportFactory;
+    private readonly IReviewedChangedFileSourceFactory _changedFileSourceFactory;
 
     internal BoundedReviewedSnapshotBuilder(
-        IActionHostReviewedSnapshotTransportFactory transportFactory)
-        : this(new ReviewedSnapshotTransportFactory(transportFactory))
+        IActionHostReviewedSnapshotTransportFactory transportFactory,
+        IReviewedChangedFileSourceFactory? changedFileSourceFactory = null)
+        : this(
+            new ReviewedSnapshotTransportFactory(transportFactory),
+            changedFileSourceFactory)
     {
     }
 
     internal BoundedReviewedSnapshotBuilder(
-        IReviewedSnapshotTransportFactory transportFactory)
+        IReviewedSnapshotTransportFactory transportFactory,
+        IReviewedChangedFileSourceFactory? changedFileSourceFactory = null)
     {
         _transportFactory = transportFactory ??
             throw new ArgumentNullException(nameof(transportFactory));
+        _changedFileSourceFactory = changedFileSourceFactory ??
+            ReviewedChangedFileSourceFactory.Instance;
     }
 
     internal async Task<BoundedReviewedSnapshotResult> BuildAsync(
@@ -111,8 +118,8 @@ internal sealed class BoundedReviewedSnapshotBuilder
         ReviewedRootLease? root = null;
         try
         {
-            var changed = await new ReviewedChangedFileReader(
-                    _transportFactory)
+            var changed = await _changedFileSourceFactory
+                .Create(_transportFactory)
                 .ReadAsync(invocation, token, tree, cancellationToken);
             if (changed.Value is null)
             {

@@ -451,7 +451,8 @@ internal sealed class ReviewedTreeReader
             commit.TreeSha,
             records.MoveToImmutable(),
             budget,
-            staging);
+            staging,
+            commit.ParentShas);
         return CoreResult.Success(snapshot);
     }
 

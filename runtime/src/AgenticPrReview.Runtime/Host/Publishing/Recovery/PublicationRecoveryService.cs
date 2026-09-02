@@ -87,7 +87,7 @@ internal sealed class PublicationRecoveryService
         }
 
         if (observation.Candidate is null &&
-            !observation.CurrentAcceptedHeadMatchesReviewedHead)
+            !observation.CurrentAcceptanceMatchesReviewedExecution)
         {
             return Evaluation(
                 PublicationRecoveryClassifier.Classify(
@@ -679,7 +679,7 @@ internal sealed class PublicationRecoveryService
         var initial = evaluation.Observation;
         var currentTerminal = evaluation.Decision.Action ==
                 PublicationRecoveryAction.ReturnCommitted &&
-            initial?.CurrentAcceptedHeadMatchesReviewedHead == true;
+            initial?.CurrentAcceptanceMatchesReviewedExecution == true;
         var supersededTerminal = evaluation.Decision.Action ==
                 PublicationRecoveryAction.CleanupSupersededRecovery &&
             evaluation.Decision.Lifecycle ==
@@ -798,7 +798,7 @@ internal sealed class PublicationRecoveryService
                     ownedObservation is null ||
                     ownedObservation.Candidate is not null ||
                     !ownedObservation
-                        .CurrentAcceptedHeadMatchesReviewedHead)
+                        .CurrentAcceptanceMatchesReviewedExecution)
                 {
                     return CleanupFailure(observationResult.Code);
                 }
@@ -1049,14 +1049,14 @@ internal sealed class PublicationRecoveryService
             observation is null ||
             refreshedInventory is null ||
             observation.Candidate is not null ||
-            observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            observation.CurrentAcceptanceMatchesReviewedExecution ||
             !observation.HistoricalTerminalRecovery ||
             refreshedInventory.CurrentAcceptance is null ||
             !StringComparer.Ordinal.Equals(
                 refreshedInventory.CurrentAcceptanceCandidateObjectIdentity,
                 acceptedCandidateIdentity) ||
             refreshedInventory.CurrentAcceptedPublication is not
-                { } publication ||
+            { } publication ||
             !StringComparer.Ordinal.Equals(
                 publication.ReviewedHeadSha,
                 acceptedPublication.ReviewedHeadSha) ||
@@ -1196,7 +1196,7 @@ internal sealed class PublicationRecoveryService
             observation.Recovery is not null ||
             inventory?.CurrentAcceptedPublication is not { } accepted ||
             inventory.CurrentAcceptancePublicationReceipt is not
-                { } durableReceipt ||
+            { } durableReceipt ||
             !TryRestoreRendered(accepted, out var rendered) ||
             rendered is null ||
             !AuthorizedStickyReadbackRequest.TryCreateRecovery(

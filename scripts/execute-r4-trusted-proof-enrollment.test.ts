@@ -57,16 +57,18 @@ function record() {
   const workflowTree = sha('b');
   const initialTree = sha('c');
   const advancedTree = sha('d');
+  const normalPriorHead = sha('1');
+  const stalePriorHead = sha('2');
   const initialBlob = gitObjectSha('blob', ENROLLMENT_CONTRACT.initialCanary);
   const advancedBlob = gitObjectSha('blob', ENROLLMENT_CONTRACT.advancedCanary);
   const normalCommit = commitSha(
     initialTree,
-    [workflow, ENROLLMENT_CONTRACT.normal.oldHead],
+    [workflow, normalPriorHead],
     ENROLLMENT_CONTRACT.commitMetadata.normal,
   );
   const staleCommit = commitSha(
     initialTree,
-    [workflow, ENROLLMENT_CONTRACT.stale.oldHead],
+    [workflow, stalePriorHead],
     ENROLLMENT_CONTRACT.commitMetadata.stale,
   );
   const advancedCommit = commitSha(
@@ -77,20 +79,24 @@ function record() {
   const input = {
     repository_id: '42',
     payload_sha256: digest('payload'),
+    reported_base_shas: {
+      normal: sha('e'),
+      stale: sha('f'),
+    },
     materialized: {
       merge_sha: workflow,
       merge_tree: workflowTree,
       normal: {
-        prior_head: ENROLLMENT_CONTRACT.normal.oldHead,
+        prior_head: normalPriorHead,
         head: normalCommit,
         tree: initialTree,
-        parents: [workflow, ENROLLMENT_CONTRACT.normal.oldHead],
+        parents: [workflow, normalPriorHead],
       },
       stale: {
-        prior_head: ENROLLMENT_CONTRACT.stale.oldHead,
+        prior_head: stalePriorHead,
         head: staleCommit,
         tree: initialTree,
-        parents: [workflow, ENROLLMENT_CONTRACT.stale.oldHead],
+        parents: [workflow, stalePriorHead],
         advanced_head: advancedCommit,
         advanced_tree: advancedTree,
         advanced_parents: [staleCommit],
@@ -119,7 +125,7 @@ function pullBinding(value: ReturnType<typeof record>, fixture: any, head: strin
     state: 'open',
     draft: false,
     base_ref: 'main',
-    base_sha: value.coordinates.workflow_sha,
+    base_sha: fixture.reported_base_sha,
     head_ref: fixture.ref.slice('refs/heads/'.length),
     head_sha: head,
   });
@@ -433,6 +439,16 @@ describe('R4 post-merge enrollment executor', () => {
     expect(value.kind).not.toBe(ENROLLMENT_CONTRACT.authorizationKind);
     expect(value.fixtures.normal.pr_number).toBe('225');
     expect(value.fixtures.stale.pr_number).toBe('226');
+    expect(value.fixtures.normal.old_head).toBe(sha('1'));
+    expect(value.fixtures.stale.old_head).toBe(sha('2'));
+    expect(value.fixtures.normal.old_head).not.toBe(ENROLLMENT_CONTRACT.normal.oldHead);
+    expect(value.fixtures.stale.old_head).not.toBe(ENROLLMENT_CONTRACT.stale.oldHead);
+    expect(value.fixtures.normal.parents).toEqual([value.coordinates.workflow_sha, sha('1')]);
+    expect(value.fixtures.stale.parents).toEqual([value.coordinates.workflow_sha, sha('2')]);
+    expect(value.fixtures.normal.reported_base_sha).toBe(sha('e'));
+    expect(value.fixtures.stale.reported_base_sha).toBe(sha('f'));
+    expect(value.fixtures.normal.reported_base_sha).not.toBe(value.coordinates.workflow_sha);
+    expect(value.fixtures.stale.reported_base_sha).not.toBe(value.coordinates.workflow_sha);
     expect(value.objects.initial_tree.body.base_tree).toBe(value.coordinates.workflow_tree_sha);
     const normal = JSON.parse(value.fixtures.normal.manifest);
     const stale = JSON.parse(value.fixtures.stale.manifest);
@@ -458,6 +474,20 @@ describe('R4 post-merge enrollment executor', () => {
     const changed = structuredClone(value);
     changed.objects.initial_tree.body.base_tree = value.coordinates.workflow_sha;
     expect(() => validateEnrollmentRecord(changed)).toThrow(/record-canonical/u);
+    const reportedBaseChanged = structuredClone(value);
+    reportedBaseChanged.fixtures.normal.reported_base_sha = sha('9');
+    expect(() => validateEnrollmentRecord(reportedBaseChanged)).toThrow(/record-canonical/u);
+    const priorHeadChanged = structuredClone(value);
+    priorHeadChanged.fixtures.normal.old_head = sha('3');
+    expect(() => validateEnrollmentRecord(priorHeadChanged)).toThrow(/commit-object-identity/u);
+    const parentOrderChanged = structuredClone(value);
+    parentOrderChanged.fixtures.stale.parents.reverse();
+    expect(() => validateEnrollmentRecord(parentOrderChanged)).toThrow(/record-canonical/u);
+    const commitIdentityChanged = structuredClone(value);
+    commitIdentityChanged.objects.normal_commit.sha = sha('4');
+    expect(() => validateEnrollmentRecord(commitIdentityChanged)).toThrow(
+      /commit-object-identity/u,
+    );
     expect(() =>
       canonicalAuthorizationManifest({
         kind: ENROLLMENT_CONTRACT.authorizationKind,
