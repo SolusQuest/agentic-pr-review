@@ -218,7 +218,7 @@ function rolePlan(fixtures, workflowSha) {
   ]);
 }
 
-function buildEnrollmentPlan({ coordinates, objects, reportedBaseShas }) {
+function buildEnrollmentPlan({ coordinates, objects, priorHeads, reportedBaseShas }) {
   keys(
     coordinates,
     ['repository_id', 'workflow_sha', 'workflow_tree_sha', 'payload_sha256'],
@@ -237,11 +237,16 @@ function buildEnrollmentPlan({ coordinates, objects, reportedBaseShas }) {
     ],
     'object-keys',
   );
+  keys(priorHeads, ['normal', 'stale'], 'prior-head-keys');
   keys(reportedBaseShas, ['normal', 'stale'], 'reported-base-sha-keys');
   const repositoryId = positive(coordinates.repository_id, 'repository-id');
   const workflowSha = sha(coordinates.workflow_sha, 'workflow-sha');
   const workflowTreeSha = sha(coordinates.workflow_tree_sha, 'workflow-tree-sha');
   const payloadSha256 = operation(coordinates.payload_sha256, 'payload-sha256');
+  const priors = Object.freeze({
+    normal: sha(priorHeads.normal, 'normal-prior-head'),
+    stale: sha(priorHeads.stale, 'stale-prior-head'),
+  });
   const reportedBases = Object.freeze({
     normal: sha(reportedBaseShas.normal, 'normal-reported-base-sha'),
     stale: sha(reportedBaseShas.stale, 'stale-reported-base-sha'),
@@ -258,8 +263,8 @@ function buildEnrollmentPlan({ coordinates, objects, reportedBaseShas }) {
   ) {
     fail('object-identity');
   }
-  const normalParents = [workflowSha, ENROLLMENT_CONTRACT.normal.oldHead];
-  const staleParents = [workflowSha, ENROLLMENT_CONTRACT.stale.oldHead];
+  const normalParents = [workflowSha, priors.normal];
+  const staleParents = [workflowSha, priors.stale];
   const advancedParents = [ids.stale_commit];
   const commits = [
     [ids.normal_commit, ids.initial_tree, normalParents, ENROLLMENT_CONTRACT.commitMetadata.normal],
@@ -301,7 +306,7 @@ function buildEnrollmentPlan({ coordinates, objects, reportedBaseShas }) {
       pr_number: frozen.prNumber,
       ref: fixtureRef(frozen.operationId),
       operation_id: frozen.operationId,
-      old_head: frozen.oldHead,
+      old_head: priors[scope],
       new_head: head,
       tree: ids.initial_tree,
       parents: scope === 'normal' ? normalParents : staleParents,
@@ -477,13 +482,11 @@ function enrollmentPlanFromMaterialized(input) {
     'materialized-stale',
   );
   keys(materialized.canary, ['path', 'initial_blob', 'advanced_blob'], 'materialized-canary');
+  const normalPriorHead = sha(materialized.normal.prior_head, 'materialized-normal-prior-head');
+  const stalePriorHead = sha(materialized.stale.prior_head, 'materialized-stale-prior-head');
   if (
-    materialized.normal.prior_head !== ENROLLMENT_CONTRACT.normal.oldHead ||
-    materialized.stale.prior_head !== ENROLLMENT_CONTRACT.stale.oldHead ||
-    json(materialized.normal.parents) !==
-      json([materialized.merge_sha, ENROLLMENT_CONTRACT.normal.oldHead]) ||
-    json(materialized.stale.parents) !==
-      json([materialized.merge_sha, ENROLLMENT_CONTRACT.stale.oldHead]) ||
+    json(materialized.normal.parents) !== json([materialized.merge_sha, normalPriorHead]) ||
+    json(materialized.stale.parents) !== json([materialized.merge_sha, stalePriorHead]) ||
     materialized.normal.tree !== materialized.stale.tree ||
     json(materialized.stale.advanced_parents) !== json([materialized.stale.head]) ||
     materialized.canary.path !== ENROLLMENT_CONTRACT.canaryPath
@@ -505,6 +508,10 @@ function enrollmentPlanFromMaterialized(input) {
       normal_commit: materialized.normal.head,
       stale_commit: materialized.stale.head,
       advanced_commit: materialized.stale.advanced_head,
+    },
+    priorHeads: {
+      normal: normalPriorHead,
+      stale: stalePriorHead,
     },
     reportedBaseShas: input.reported_base_shas,
   });
@@ -561,6 +568,10 @@ export function validateEnrollmentRecord(record) {
         'advanced_commit',
       ].map((name) => [name, record.objects?.[name]?.sha]),
     ),
+    priorHeads: {
+      normal: record.fixtures?.normal?.old_head,
+      stale: record.fixtures?.stale?.old_head,
+    },
     reportedBaseShas: {
       normal: record.fixtures?.normal?.reported_base_sha,
       stale: record.fixtures?.stale?.reported_base_sha,
