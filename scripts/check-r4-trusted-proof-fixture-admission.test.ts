@@ -243,12 +243,18 @@ describe('R4 prospective fixture admission', () => {
   }, 30_000);
 
   test('fails closed when the frozen canary is already in the base tree', () => {
-    expect(() =>
-      materializeProspectiveFixture({
-        repositoryRoot: root,
-        baseHead: FROZEN_FIXTURES.normalHead,
-      }),
-    ).toThrow(/prospective-canary-already-present/u);
+    const frozen = materializeFrozenFixtures({ repositoryRoot: root });
+    try {
+      expect(() =>
+        materializeProspectiveFixture({
+          repositoryRoot: root,
+          baseHead: FROZEN_FIXTURES.normalHead,
+          sourceRunGit: frozen.runGit,
+        }),
+      ).toThrow(/prospective-canary-already-present/u);
+    } finally {
+      frozen.dispose();
+    }
   });
 
   test('fails closed when construction changes either the base tree or the frozen canary path', () => {
