@@ -41,6 +41,32 @@ public sealed class TrustedProofControlTests
     }
 
     [Fact]
+    public void MarkerPredicatesSeparateFamilyCurrentRunAndProducerPair()
+    {
+        var otherPayload = Coordinates with
+        {
+            PayloadSha256 = new string('0', 64),
+        };
+        var body = TrustedProofControlMarker.CreateBody(
+            "ready",
+            otherPayload,
+            predecessorCommentId: null);
+        Assert.True(TrustedProofControlMarker.TryParse(body, out var marker));
+
+        Assert.True(marker!.MatchesFamily(Coordinates));
+        Assert.False(marker.Matches(Coordinates));
+
+        var releaseBody = TrustedProofControlMarker.CreateBody(
+            "release",
+            Coordinates,
+            predecessorCommentId: 10);
+        Assert.True(TrustedProofControlMarker.TryParse(
+            releaseBody,
+            out var release));
+        Assert.False(release!.MatchesProducerPair(marker));
+    }
+
+    [Fact]
     public async Task StaleSignalIsValueFreeOneShotAndReleaseBound()
     {
         var signal = new TrustedProofStaleSignal();
@@ -387,6 +413,40 @@ public sealed class TrustedProofControlTests
         Assert.DoesNotContain(handler.Requests, request =>
             request.Method == HttpMethod.Delete &&
             request.Path.EndsWith("/99", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CleanupOwnsTheExactFamilyAcrossProducerPayloadDigests()
+    {
+        var otherPayload = Coordinates with
+        {
+            PayloadSha256 = new string('0', 64),
+            RunId = Coordinates.RunId - 1,
+            RunAttempt = 1,
+        };
+        var owned = Comment(
+            10,
+            TrustedProofControlMarker.CreateBody(
+                "ready",
+                otherPayload,
+                predecessorCommentId: null),
+            "proof-bot");
+        var handler = new ControlHandler([owned]);
+        var transport = TrustedProofControlTransport.Create(
+            Coordinates,
+            "github-token-canary",
+            handler);
+
+        var exit = await TrustedProofControlService.RunAsync(
+            ["cleanup"],
+            Coordinates,
+            transport,
+            CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.Path.EndsWith("/10", StringComparison.Ordinal));
     }
 
     [Theory]

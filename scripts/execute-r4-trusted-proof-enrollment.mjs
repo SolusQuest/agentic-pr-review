@@ -7,7 +7,6 @@ import {
   createEnrollmentObservationMaterializer,
   defaultEnrollmentObservationProcess,
 } from './materialize-r4-enrollment-observation.mjs';
-import { validateEnrollmentExecutionAuthorityPackage } from './r4-trusted-proof-contract.mjs';
 
 const hex40 = /^[0-9a-f]{40}$/u;
 const hex64 = /^[0-9a-f]{64}$/u;
@@ -22,7 +21,6 @@ const manifestKeys = Object.freeze([
   'workflow_sha',
   'action_source_sha',
   'payload_source_sha',
-  'payload_sha256',
 ]);
 
 export const ENROLLMENT_CONTRACT = Object.freeze({
@@ -143,8 +141,7 @@ export function canonicalAuthorizationManifest(value) {
     value.operation_id !== frozen.operationId ||
     !hex40.test(value.workflow_sha) ||
     value.action_source_sha !== value.workflow_sha ||
-    value.payload_source_sha !== value.workflow_sha ||
-    !hex64.test(value.payload_sha256)
+    value.payload_source_sha !== value.workflow_sha
   ) {
     fail('authorization-values');
   }
@@ -219,11 +216,7 @@ function rolePlan(fixtures, workflowSha) {
 }
 
 function buildEnrollmentPlan({ coordinates, objects, priorHeads, reportedBaseShas }) {
-  keys(
-    coordinates,
-    ['repository_id', 'workflow_sha', 'workflow_tree_sha', 'payload_sha256'],
-    'coordinate-keys',
-  );
+  keys(coordinates, ['repository_id', 'workflow_sha', 'workflow_tree_sha'], 'coordinate-keys');
   keys(
     objects,
     [
@@ -242,7 +235,6 @@ function buildEnrollmentPlan({ coordinates, objects, priorHeads, reportedBaseSha
   const repositoryId = positive(coordinates.repository_id, 'repository-id');
   const workflowSha = sha(coordinates.workflow_sha, 'workflow-sha');
   const workflowTreeSha = sha(coordinates.workflow_tree_sha, 'workflow-tree-sha');
-  const payloadSha256 = operation(coordinates.payload_sha256, 'payload-sha256');
   const priors = Object.freeze({
     normal: sha(priorHeads.normal, 'normal-prior-head'),
     stale: sha(priorHeads.stale, 'stale-prior-head'),
@@ -294,7 +286,6 @@ function buildEnrollmentPlan({ coordinates, objects, priorHeads, reportedBaseSha
       workflow_sha: workflowSha,
       action_source_sha: workflowSha,
       payload_source_sha: workflowSha,
-      payload_sha256: payloadSha256,
     });
   };
   const normalManifest = manifest('normal', ids.normal_commit);
@@ -334,7 +325,6 @@ function buildEnrollmentPlan({ coordinates, objects, priorHeads, reportedBaseSha
       workflow_tree_sha: workflowTreeSha,
       action_source_sha: workflowSha,
       payload_source_sha: workflowSha,
-      payload_sha256: payloadSha256,
     }),
     canary: Object.freeze({
       path: ENROLLMENT_CONTRACT.canaryPath,
@@ -425,51 +415,10 @@ function buildEnrollmentPlan({ coordinates, objects, priorHeads, reportedBaseSha
   });
 }
 
-/** Consume only the deterministic post-merge materializer's exact object package. */
+/** Bind only the deterministic post-merge materializer's exact source/object package. */
 export function bindEnrollmentRecord(input) {
-  keys(
-    input,
-    [
-      'repository_id',
-      'payload_sha256',
-      'reported_base_shas',
-      'materialized',
-      'execution_authority',
-    ],
-    'binding-keys',
-  );
-  const plan = enrollmentPlanFromMaterialized(input);
-  const authority = input.execution_authority;
-  keys(
-    authority,
-    [
-      'kind',
-      'execution_authorization_sha256',
-      'enrollment_record_sha256',
-      'capture_source_set_sha256',
-      'capture_source_sha256',
-      'capture_build_sha256',
-      'phase_materializer_source_sha256',
-      'phase_materializer_build_sha256',
-    ],
-    'execution-authority-keys',
-  );
-  if (
-    authority.kind !== 'apr-r4-e2p-enrollment-authority-binding-v1' ||
-    ![
-      authority.execution_authorization_sha256,
-      authority.enrollment_record_sha256,
-      authority.capture_source_set_sha256,
-      authority.capture_source_sha256,
-      authority.capture_build_sha256,
-      authority.phase_materializer_source_sha256,
-      authority.phase_materializer_build_sha256,
-    ].every((value) => typeof value === 'string' && hex64.test(value)) ||
-    authority.enrollment_record_sha256 !== hash(json(plan))
-  ) {
-    fail('execution-authority-values');
-  }
-  return Object.freeze({ ...plan, authority: Object.freeze({ ...authority }) });
+  keys(input, ['repository_id', 'reported_base_shas', 'materialized'], 'binding-keys');
+  return enrollmentPlanFromMaterialized(input);
 }
 
 function enrollmentPlanFromMaterialized(input) {
@@ -498,7 +447,6 @@ function enrollmentPlanFromMaterialized(input) {
       repository_id: input.repository_id,
       workflow_sha: materialized.merge_sha,
       workflow_tree_sha: materialized.merge_tree,
-      payload_sha256: input.payload_sha256,
     },
     objects: {
       initial_blob: materialized.canary.initial_blob,
@@ -519,11 +467,7 @@ function enrollmentPlanFromMaterialized(input) {
 
 /** Prepare the exact unsigned plan digest that the maintainer execution record must authorize. */
 export function prepareEnrollmentRecord(input) {
-  keys(
-    input,
-    ['repository_id', 'payload_sha256', 'reported_base_shas', 'materialized'],
-    'preparation-binding-keys',
-  );
+  keys(input, ['repository_id', 'reported_base_shas', 'materialized'], 'preparation-binding-keys');
   const plan = enrollmentPlanFromMaterialized(input);
   return Object.freeze({ plan, sha256: hash(json(plan)) });
 }
@@ -540,7 +484,6 @@ export function validateEnrollmentRecord(record) {
       'fixtures',
       'role_plan',
       'mutation_envelope',
-      'authority',
     ],
     'record-keys',
   );
@@ -555,7 +498,6 @@ export function validateEnrollmentRecord(record) {
       repository_id: record.coordinates?.repository_id,
       workflow_sha: record.coordinates?.workflow_sha,
       workflow_tree_sha: record.coordinates?.workflow_tree_sha,
-      payload_sha256: record.coordinates?.payload_sha256,
     },
     objects: Object.fromEntries(
       [
@@ -577,29 +519,7 @@ export function validateEnrollmentRecord(record) {
       stale: record.fixtures?.stale?.reported_base_sha,
     },
   });
-  const rebuilt = Object.freeze({ ...rebuiltPlan, authority: record.authority });
-  keys(
-    record.authority,
-    [
-      'kind',
-      'execution_authorization_sha256',
-      'enrollment_record_sha256',
-      'capture_source_set_sha256',
-      'capture_source_sha256',
-      'capture_build_sha256',
-      'phase_materializer_source_sha256',
-      'phase_materializer_build_sha256',
-    ],
-    'record-authority-keys',
-  );
-  if (
-    record.authority.kind !== 'apr-r4-e2p-enrollment-authority-binding-v1' ||
-    record.authority.enrollment_record_sha256 !== hash(json(rebuiltPlan)) ||
-    !Object.values(record.authority)
-      .slice(1)
-      .every((value) => typeof value === 'string' && hex64.test(value)) ||
-    json(record) !== json(rebuilt)
-  ) {
+  if (json(record) !== json(rebuiltPlan)) {
     fail('record-canonical');
   }
   return true;
@@ -2289,7 +2209,6 @@ export async function executeDurableEnrollmentPhase(argumentsObject) {
 const cliFlags = Object.freeze([
   '--record',
   '--record-sha256',
-  '--execution-authority',
   '--observation-context',
   '--journal-dir',
   '--phase',
@@ -2328,10 +2247,6 @@ export async function runEnrollmentCli(argumentsList = process.argv.slice(2), ad
   const values = parseCli(argumentsList);
   if (values === null) return { usage: true };
   const record = readCanonicalJson(values.get('--record'), 'cli-record');
-  const authorityPackage = readCanonicalJson(
-    values.get('--execution-authority'),
-    'cli-execution-authority',
-  );
   const observationContext = readCanonicalJson(
     values.get('--observation-context'),
     'cli-observation-context',
@@ -2341,18 +2256,10 @@ export async function runEnrollmentCli(argumentsList = process.argv.slice(2), ad
   if (!hex64.test(expectedRecordSha) || recordSha256(record) !== expectedRecordSha) {
     fail('cli-record-sha256');
   }
-  let authority;
-  try {
-    authority = validateEnrollmentExecutionAuthorityPackage(authorityPackage);
-  } catch {
-    fail('cli-execution-authority');
-  }
-  if (json(authority) !== json(record.authority)) fail('cli-execution-authority-binding');
   const observationMaterializer =
     adapters.observationMaterializer ??
     createEnrollmentObservationMaterializer({
       ...observationContext,
-      authority,
       run_process: adapters.runObservationProcess ?? defaultEnrollmentObservationProcess,
     });
   const transport =
@@ -2375,7 +2282,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     .then((result) => {
       if (result.usage) {
         process.stdout.write(
-          'usage: --execute --record <canonical-B> --record-sha256 <sha256> --execution-authority <canonical-host-restricted-package> --observation-context <canonical-private-context> --journal-dir <dir> --phase <next> --observations <canonical-run-locators>\n',
+          'usage: --execute --record <canonical-source-record> --record-sha256 <sha256> --observation-context <canonical-private-context> --journal-dir <dir> --phase <next> --observations <canonical-run-locators>\n',
         );
       }
     })

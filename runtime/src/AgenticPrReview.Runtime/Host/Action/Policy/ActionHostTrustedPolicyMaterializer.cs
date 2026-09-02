@@ -115,6 +115,8 @@ internal sealed partial class ActionHostTrustedPolicy
                 request.WorkflowBlobSha,
                 request.ActionSourceSha,
                 request.PayloadSha256,
+                request.PayloadContinuitySha256,
+                request.PayloadContinuityMode,
                 request.BuildDiscriminator,
                 request.ConfigPath.Value,
                 instructionsPath!.Value,
@@ -285,7 +287,7 @@ internal sealed partial class ActionHostTrustedPolicy
         Write(ref writer, "limits_sha256", limitsSha);
         Write(ref writer, "maximum_inline_comments", InlineCommentCap);
         Write(ref writer, "model_id", DeepSeekAdapterContext.Model);
-        Write(ref writer, "payload_sha256", request.PayloadSha256);
+        Write(ref writer, "payload_sha256", request.PayloadContinuitySha256);
         Write(ref writer, "prompt_caching", PromptCaching);
         Write(ref writer, "provider_id", DeepSeekAdapterContext.Provider);
         Write(ref writer, "publication_mode", PublicationName(publicationMode));

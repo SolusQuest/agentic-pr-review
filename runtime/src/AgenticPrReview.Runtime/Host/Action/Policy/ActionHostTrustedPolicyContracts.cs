@@ -2,6 +2,8 @@ using System.Collections.Immutable;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Canonical;
 
 namespace AgenticPrReview.Runtime.ActionHost.Policy;
 
@@ -114,6 +116,8 @@ internal sealed class ActionHostTrustedPolicyRequest
 {
     internal const string DefaultConfigPath =
         ".github/agentic-pr-review.json";
+    private const string PayloadContinuityDomain =
+        "apr.action-host.payload-continuity.v1";
 
     private ActionHostTrustedPolicyRequest(
         long repositoryId,
@@ -123,6 +127,8 @@ internal sealed class ActionHostTrustedPolicyRequest
         string workflowBlobSha,
         string actionSourceSha,
         string payloadSha256,
+        string payloadContinuitySha256,
+        ActionHostPayloadContinuityMode payloadContinuityMode,
         string buildDiscriminator,
         ActionHostTrustedPolicyPath configPath)
     {
@@ -133,6 +139,8 @@ internal sealed class ActionHostTrustedPolicyRequest
         WorkflowBlobSha = workflowBlobSha;
         ActionSourceSha = actionSourceSha;
         PayloadSha256 = payloadSha256;
+        PayloadContinuitySha256 = payloadContinuitySha256;
+        PayloadContinuityMode = payloadContinuityMode;
         BuildDiscriminator = buildDiscriminator;
         ConfigPath = configPath;
     }
@@ -144,6 +152,8 @@ internal sealed class ActionHostTrustedPolicyRequest
     internal string WorkflowBlobSha { get; }
     internal string ActionSourceSha { get; }
     internal string PayloadSha256 { get; }
+    internal string PayloadContinuitySha256 { get; }
+    internal ActionHostPayloadContinuityMode PayloadContinuityMode { get; }
     internal string BuildDiscriminator { get; }
     internal ActionHostTrustedPolicyPath ConfigPath { get; }
 
@@ -185,6 +195,15 @@ internal sealed class ActionHostTrustedPolicyRequest
             return false;
         }
 
+        if (!TryPayloadContinuityIdentity(
+                launch,
+                invocation,
+                out var payloadContinuitySha256))
+        {
+            failure = ActionHostTrustedPolicyFailure.AuthorityMismatch;
+            return false;
+        }
+
         request = new(
             launch.RepositoryId,
             launch.RepositoryName,
@@ -193,11 +212,87 @@ internal sealed class ActionHostTrustedPolicyRequest
             invocation.WorkflowBlobSha,
             invocation.ActionSourceSha,
             launch.PayloadSha256,
+            payloadContinuitySha256!,
+            invocation.PayloadContinuityMode,
             launch.BuildDiscriminator,
             configPath!);
         failure = ActionHostTrustedPolicyFailure.None;
         return true;
     }
+
+    private static bool TryPayloadContinuityIdentity(
+        ActionHostLaunchContract launch,
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        out string? identity)
+    {
+        identity = null;
+        if (invocation.PayloadContinuityMode ==
+                ActionHostPayloadContinuityMode.ExactExecutable &&
+            invocation.PayloadSourceCommit is null &&
+            invocation.PayloadSourceTree is null)
+        {
+            identity = launch.PayloadSha256;
+            return true;
+        }
+
+        if (invocation.PayloadContinuityMode !=
+                ActionHostPayloadContinuityMode.ExactSource ||
+            !IsLowerHex(invocation.PayloadSourceCommit, 40) ||
+            !IsLowerHex(invocation.PayloadSourceTree, 40) ||
+            !StringComparer.Ordinal.Equals(
+                invocation.PayloadSourceCommit,
+                invocation.WorkflowCommitSha))
+        {
+            return false;
+        }
+
+        identity = ComputeExactSourceContinuitySha256(
+            invocation.ActionSourceSha,
+            launch.BuildDiscriminator,
+            invocation.PayloadSourceCommit!,
+            invocation.PayloadSourceTree!,
+            invocation.WorkflowBlobSha,
+            invocation.WorkflowCommitSha,
+            invocation.WorkflowPath);
+        return true;
+    }
+
+    internal static string ComputeExactSourceContinuitySha256(
+        string actionSourceSha,
+        string buildDiscriminator,
+        string payloadSourceCommit,
+        string payloadSourceTree,
+        string workflowBlobSha,
+        string workflowCommitSha,
+        string workflowPath)
+    {
+        var writer = new Rfc8785Writer(1024);
+        writer.WriteObjectStart();
+        Write(ref writer, "action_source_sha", actionSourceSha);
+        Write(ref writer, "build_discriminator", buildDiscriminator);
+        Write(ref writer, "payload_source_commit", payloadSourceCommit);
+        Write(ref writer, "payload_source_tree", payloadSourceTree);
+        Write(ref writer, "workflow_blob_sha", workflowBlobSha);
+        Write(ref writer, "workflow_commit_sha", workflowCommitSha);
+        Write(ref writer, "workflow_path", workflowPath);
+        writer.WriteObjectEnd();
+        return AgentCanonical.HashDomain(
+            PayloadContinuityDomain,
+            writer.ToImmutableArray().AsSpan());
+    }
+
+    private static void Write(
+        ref Rfc8785Writer writer,
+        string name,
+        string value)
+    {
+        writer.WriteProperty(name);
+        writer.WriteString(value);
+    }
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value?.Length == length && value.All(static character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     public override string ToString() => "trusted_policy_request";
 }
@@ -240,6 +335,8 @@ internal sealed partial class ActionHostTrustedPolicy
         WorkflowBlobSha = values.WorkflowBlobSha;
         ActionSourceSha = values.ActionSourceSha;
         PayloadSha256 = values.PayloadSha256;
+        PayloadContinuitySha256 = values.PayloadContinuitySha256;
+        PayloadContinuityMode = values.PayloadContinuityMode;
         BuildDiscriminator = values.BuildDiscriminator;
         ConfigPath = values.ConfigPath;
         InstructionsPath = values.InstructionsPath;
@@ -272,6 +369,8 @@ internal sealed partial class ActionHostTrustedPolicy
     internal string WorkflowBlobSha { get; }
     internal string ActionSourceSha { get; }
     internal string PayloadSha256 { get; }
+    internal string PayloadContinuitySha256 { get; }
+    internal ActionHostPayloadContinuityMode PayloadContinuityMode { get; }
     internal string BuildDiscriminator { get; }
     internal string ConfigPath { get; }
     internal string InstructionsPath { get; }
@@ -306,6 +405,8 @@ internal sealed partial class ActionHostTrustedPolicy
         string WorkflowBlobSha,
         string ActionSourceSha,
         string PayloadSha256,
+        string PayloadContinuitySha256,
+        ActionHostPayloadContinuityMode PayloadContinuityMode,
         string BuildDiscriminator,
         string ConfigPath,
         string InstructionsPath,

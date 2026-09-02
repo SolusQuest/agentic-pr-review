@@ -234,6 +234,10 @@ internal sealed class TrustedProofStaleWindowCoordinator : IDisposable
                     TrustedProofControlMarker.TryParse(
                         release.Body,
                         out var releaseMarker) &&
+                    TrustedProofControlMarker.TryParse(
+                        ready.Body,
+                        out var readyMarker) &&
+                    releaseMarker!.MatchesProducerPair(readyMarker!) &&
                     releaseMarker!.PredecessorCommentId == ready.Id &&
                     release.CreatedAt > ready.CreatedAt &&
                     release.CreatedAt == release.UpdatedAt &&

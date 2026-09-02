@@ -4,10 +4,12 @@ using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Policy;
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using Xunit;
 
@@ -58,6 +60,10 @@ public sealed class ActionHostTrustedPolicyTests
         Assert.Equal(5, policy.MaximumInlineComments);
         Assert.Equal(ActionHostTrustedPolicy.SecurityPolicy,
             policy.SecurityPolicyId);
+        Assert.Equal(ActionHostPayloadContinuityMode.ExactExecutable,
+            policy.PayloadContinuityMode);
+        Assert.Equal(policy.PayloadSha256,
+            policy.PayloadContinuitySha256);
         Assert.Equal(
             "0b8da22450401fb26cc219dc8c6c5af771dbd8f6f7c02c27409d313468c792f5",
             policy.PolicySha256);
@@ -504,6 +510,82 @@ public sealed class ActionHostTrustedPolicyTests
     }
 
     [Fact]
+    public async Task TrustedV2UsesExactSourceForCrossBuildContinuity()
+    {
+        var firstRequest = await TrustedV2Request(new string('a', 64));
+        var secondRequest = await TrustedV2Request(new string('b', 64));
+        var first = await Materialize(firstRequest);
+        var second = await Materialize(secondRequest);
+
+        Assert.Equal(ActionHostPayloadContinuityMode.ExactSource,
+            first.PayloadContinuityMode);
+        Assert.Equal(new string('a', 64), first.PayloadSha256);
+        Assert.Equal(new string('b', 64), second.PayloadSha256);
+        Assert.NotEqual(first.PayloadSha256, second.PayloadSha256);
+        Assert.Equal(first.PayloadContinuitySha256,
+            second.PayloadContinuitySha256);
+        Assert.Equal(first.PolicySha256, second.PolicySha256);
+        Assert.Equal(
+            AuthorizedAcceptedStateComposer.PayloadBuildIdentity(first),
+            AuthorizedAcceptedStateComposer.PayloadBuildIdentity(second));
+    }
+
+    [Theory]
+    [InlineData("action-source")]
+    [InlineData("build-discriminator")]
+    [InlineData("payload-source-commit")]
+    [InlineData("payload-source-tree")]
+    [InlineData("workflow-blob")]
+    [InlineData("workflow-commit")]
+    [InlineData("workflow-path")]
+    public void ExactSourceContinuityBindsEveryStableProjectionField(
+        string mutation)
+    {
+        var original = new ExactSourceProjection(
+            new string('a', 40),
+            "runtime-payload-v1",
+            new string('b', 40),
+            new string('c', 40),
+            new string('d', 40),
+            new string('b', 40),
+            ".github/workflows/r4-trusted-proof.yml");
+        var changed = mutation switch
+        {
+            "action-source" => original with
+            {
+                ActionSourceSha = new string('e', 40),
+            },
+            "build-discriminator" => original with
+            {
+                BuildDiscriminator = "runtime-payload-v2",
+            },
+            "payload-source-commit" => original with
+            {
+                PayloadSourceCommit = new string('e', 40),
+            },
+            "payload-source-tree" => original with
+            {
+                PayloadSourceTree = new string('e', 40),
+            },
+            "workflow-blob" => original with
+            {
+                WorkflowBlobSha = new string('e', 40),
+            },
+            "workflow-commit" => original with
+            {
+                WorkflowCommitSha = new string('e', 40),
+            },
+            "workflow-path" => original with
+            {
+                WorkflowPath = ".github/workflows/other.yml",
+            },
+            _ => throw new InvalidOperationException("Unknown mutation."),
+        };
+
+        Assert.NotEqual(Continuity(original), Continuity(changed));
+    }
+
+    [Fact]
     public async Task MissingAndInconsistentTrustedObjectsNeverFallback()
     {
         var (request, _) = await Request();
@@ -690,6 +772,76 @@ public sealed class ActionHostTrustedPolicyTests
         return (request!, scenario);
     }
 
+    private static async Task<ActionHostTrustedPolicyRequest> TrustedV2Request(
+        string payloadSha256,
+        string? buildDiscriminator = null)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var source = TrustedProofPayloadBuildIdentity.SourceCommit;
+        var workflowBytes = Encoding.UTF8.GetBytes(
+            TrustedProofV2WorkflowAdmission.Render(source));
+        scenario.Transport.Source = scenario.Transport.Source with
+        {
+            BlobSha = GitBlobSha(workflowBytes),
+            Bytes = workflowBytes,
+        };
+        scenario.Transport.CurrentRun = scenario.Transport.CurrentRun with
+        {
+            HeadSha = source,
+        };
+        var launch = CloneLaunch(
+            scenario.Launch,
+            workflowSha: source,
+            actionSourceSha: source,
+            payloadSha256: payloadSha256,
+            buildDiscriminator: buildDiscriminator);
+        var authorizer = new ActionHostAuthorizer(
+            scenario.EventReader,
+            scenario.Factory,
+            ActionHostAuthorizationPolicy.TrustedProof,
+            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance);
+        var authorization = await authorizer.AuthorizeAsync(
+            launch,
+            CancellationToken.None);
+        Assert.NotNull(authorization.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch,
+            authorization.Invocation,
+            out var request,
+            out var failure));
+        Assert.Equal(ActionHostTrustedPolicyFailure.None, failure);
+        return request!;
+    }
+
+    private static async Task<ActionHostTrustedPolicy> Materialize(
+        ActionHostTrustedPolicyRequest request)
+    {
+        var transport = ScriptedObjectTransport.Valid(
+            Config("sticky", null),
+            Encoding.UTF8.GetBytes("instructions"));
+        transport.Commit = transport.Commit with
+        {
+            Sha = request.WorkflowCommitSha,
+        };
+        var result = await ActionHostTrustedPolicy.MaterializeAsync(
+            request,
+            transport,
+            CancellationToken.None);
+        Assert.True(result.Succeeded, result.Failure.ToString());
+        return result.Policy!;
+    }
+
+    private static string Continuity(ExactSourceProjection value) =>
+        ActionHostTrustedPolicyRequest.ComputeExactSourceContinuitySha256(
+            value.ActionSourceSha,
+            value.BuildDiscriminator,
+            value.PayloadSourceCommit,
+            value.PayloadSourceTree,
+            value.WorkflowBlobSha,
+            value.WorkflowCommitSha,
+            value.WorkflowPath);
+
     internal static byte[] Config(
         string mode,
         string? inlineSeverity,
@@ -737,6 +889,7 @@ public sealed class ActionHostTrustedPolicyTests
     private static ActionHostLaunchContract CloneLaunch(
         ActionHostLaunchContract launch,
         string? workflowSha = null,
+        string? actionSourceSha = null,
         string? configPath = null,
         string? payloadSha256 = null,
         string? buildDiscriminator = null)
@@ -761,7 +914,7 @@ public sealed class ActionHostTrustedPolicyTests
             launch.WorkflowPath,
             launch.WorkflowRef,
             workflowSha ?? launch.WorkflowSha,
-            launch.ActionSourceSha,
+            actionSourceSha ?? launch.ActionSourceSha,
             payloadSha256 ?? launch.PayloadSha256,
             buildDiscriminator ?? launch.BuildDiscriminator,
             launch.Cancellation,
@@ -769,6 +922,15 @@ public sealed class ActionHostTrustedPolicyTests
             out var clone));
         return clone!;
     }
+
+    private sealed record ExactSourceProjection(
+        string ActionSourceSha,
+        string BuildDiscriminator,
+        string PayloadSourceCommit,
+        string PayloadSourceTree,
+        string WorkflowBlobSha,
+        string WorkflowCommitSha,
+        string WorkflowPath);
 
     internal sealed class ScriptedObjectTransport :
         IActionHostGitObjectTransport

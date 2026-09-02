@@ -20,8 +20,7 @@ public sealed class TrustedProofV2AdmissionTests
             TrustedProofPayloadBuildIdentity.SourceTree);
 
         var rendered = TrustedProofV2WorkflowAdmission.Render(
-            ActionHostAuthorizationScenario.ActionSha,
-            ActionHostAuthorizationScenario.PayloadSha);
+            ActionHostAuthorizationScenario.ActionSha);
         var activeV1 = ActionHostTrustedWorkflowContract.Render(
             ActionHostAuthorizationScenario.ActionSha,
             ActionHostAuthorizationScenario.PayloadSha);
@@ -230,8 +229,7 @@ public sealed class TrustedProofV2AdmissionTests
     {
         var bytes = Encoding.UTF8.GetBytes(
             TrustedProofV2WorkflowAdmission.Render(
-                ActionHostAuthorizationScenario.ActionSha,
-                ActionHostAuthorizationScenario.PayloadSha));
+                ActionHostAuthorizationScenario.ActionSha));
         var header = Encoding.ASCII.GetBytes($"blob {bytes.Length}\0");
         scenario.Transport.Source = scenario.Transport.Source with
         {

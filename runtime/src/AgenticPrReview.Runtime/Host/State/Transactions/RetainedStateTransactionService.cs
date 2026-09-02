@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
@@ -2417,12 +2418,19 @@ internal sealed class RetainedStateTransactionService
                 pending[0].Payload,
                 out var generation) ||
             generation is null ||
-            !MatchesRecoveredGeneration(generation, binding) ||
+            !MatchesRecoveredGeneration(
+                generation,
+                pending[0].Header,
+                binding) ||
             !AcceptedStatePublicationPayloadCodec.TryDecode(
                 generation.PublicationPayloadBytes.AsSpan(),
                 out var publication) ||
             publication is null ||
-            !MatchesRecoveredPublication(publication, generation, binding) ||
+            !MatchesRecoveredPublication(
+                publication,
+                generation,
+                pending[0].Header,
+                binding) ||
             pending[0].Header.ObjectClass != StateObjectClass.Candidate ||
             pending[0].Header.CreatedAtUnixSeconds !=
                 generation.PreparedAtUnixSeconds ||
@@ -5831,6 +5839,7 @@ internal sealed class RetainedStateTransactionService
     private static bool MatchesRecoveredPublication(
         ValidatedPublicationPayloadV1 publication,
         StateGenerationRecordV1 generation,
+        StateControlHeaderV1 header,
         RetainedStateTransactionBinding binding) =>
         R4PublicationIdentityV1.IsValidScope(binding.Publication.Scope) &&
         binding.Publication.Scope.RepositoryId <= long.MaxValue &&
@@ -5863,10 +5872,14 @@ internal sealed class RetainedStateTransactionService
             binding.Publication.Scope.PolicyIdentitySha256) &&
         StringComparer.Ordinal.Equals(
             publication.PayloadSha256,
-            binding.Policy.PayloadSha256) &&
-        StringComparer.Ordinal.Equals(
-            publication.PayloadSha256,
-            binding.Publication.PayloadSha256) &&
+            generation.PayloadSha256) &&
+        (AllowsRecoveredPayloadMismatch(header, binding) ||
+            StringComparer.Ordinal.Equals(
+                publication.PayloadSha256,
+                binding.Policy.PayloadSha256) &&
+            StringComparer.Ordinal.Equals(
+                publication.PayloadSha256,
+                binding.Publication.PayloadSha256)) &&
         StringComparer.Ordinal.Equals(
             publication.BuildDiscriminator,
             binding.Policy.BuildDiscriminator) &&
@@ -6211,6 +6224,7 @@ internal sealed class RetainedStateTransactionService
 
     private static bool MatchesRecoveredGeneration(
         StateGenerationRecordV1 generation,
+        StateControlHeaderV1 header,
         RetainedStateTransactionBinding binding) =>
         generation.Generation ==
             (binding.CurrentGeneration is null
@@ -6234,12 +6248,24 @@ internal sealed class RetainedStateTransactionService
         StringComparer.Ordinal.Equals(
             generation.InstructionsSha256,
             binding.Policy.InstructionsSha256) &&
-        StringComparer.Ordinal.Equals(
-            generation.PayloadSha256,
-            binding.Policy.PayloadSha256) &&
+        (AllowsRecoveredPayloadMismatch(header, binding) ||
+            StringComparer.Ordinal.Equals(
+                generation.PayloadSha256,
+                binding.Policy.PayloadSha256)) &&
         StringComparer.Ordinal.Equals(
             generation.BuildDiscriminator,
             binding.Policy.BuildDiscriminator);
+
+    private static bool AllowsRecoveredPayloadMismatch(
+        StateControlHeaderV1 header,
+        RetainedStateTransactionBinding binding) =>
+        binding.Policy.PayloadContinuityMode ==
+            ActionHostPayloadContinuityMode.ExactSource &&
+        StringComparer.Ordinal.Equals(
+            header.ProducingRunIdentity,
+            binding.ProducingRunIdentity) &&
+        header.ProducingRunAttempt > 0 &&
+        header.ProducingRunAttempt < binding.ProducingRunAttempt;
 
     private static bool MatchesObservedGeneration(
         StateGenerationRecordV1 generation,

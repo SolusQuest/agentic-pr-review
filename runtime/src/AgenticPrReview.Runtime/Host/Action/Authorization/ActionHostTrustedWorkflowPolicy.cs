@@ -10,6 +10,19 @@ internal sealed record ActionHostTrustedWorkflowEvidence(
     internal ActionHostSameHeadContinuationPolicy SameHeadContinuationPolicy
         { get; init; } =
         ActionHostSameHeadContinuationPolicy.ReuseAcceptedState;
+
+    internal ActionHostPayloadContinuityMode PayloadContinuityMode
+        { get; init; } = ActionHostPayloadContinuityMode.ExactExecutable;
+
+    internal string? PayloadSourceCommit { get; init; }
+
+    internal string? PayloadSourceTree { get; init; }
+}
+
+internal enum ActionHostPayloadContinuityMode
+{
+    ExactExecutable = 0,
+    ExactSource,
 }
 
 internal enum ActionHostSameHeadContinuationPolicy

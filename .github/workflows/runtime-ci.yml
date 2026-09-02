@@ -157,24 +157,27 @@ jobs:
           grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
-          cmp "$RUNNER_TEMP/r4-e2p-v2-first.receipt" "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
           node --input-type=module - \
             "$RUNNER_TEMP/r4-e2p-v2-first.receipt" \
+            "$RUNNER_TEMP/r4-e2p-v2-second.receipt" \
             "$(git rev-parse HEAD)" \
             "$(git rev-parse 'HEAD^{tree}')" <<'NODE'
           import fs from 'node:fs';
-          const [receiptPath, sourceCommit, sourceTree] = process.argv.slice(2);
+          const [firstReceiptPath, secondReceiptPath, sourceCommit, sourceTree] =
+            process.argv.slice(2);
           const prefix = 'APR_R4_E2P_RECEIPT_V2 ';
-          const line = fs.readFileSync(receiptPath, 'utf8');
-          if (!line.startsWith(prefix) || line.indexOf('\n') !== line.length - 1) {
-            throw new Error('The current-head receipt framing is invalid.');
-          }
-          const receipt = JSON.parse(line.slice(prefix.length));
-          if (receipt.source_commit !== sourceCommit ||
-              receipt.source_tree !== sourceTree ||
-              receipt.compiled_payload_source_commit !== sourceCommit ||
-              receipt.compiled_payload_source_tree !== sourceTree) {
-            throw new Error('The current-head receipt source identity is invalid.');
+          for (const receiptPath of [firstReceiptPath, secondReceiptPath]) {
+            const line = fs.readFileSync(receiptPath, 'utf8');
+            if (!line.startsWith(prefix) || line.indexOf('\n') !== line.length - 1) {
+              throw new Error('The current-head receipt framing is invalid.');
+            }
+            const receipt = JSON.parse(line.slice(prefix.length));
+            if (receipt.source_commit !== sourceCommit ||
+                receipt.source_tree !== sourceTree ||
+                receipt.compiled_payload_source_commit !== sourceCommit ||
+                receipt.compiled_payload_source_tree !== sourceTree) {
+              throw new Error('The current-head receipt source identity is invalid.');
+            }
           }
           NODE
 

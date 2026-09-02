@@ -699,7 +699,8 @@ public sealed class TrustedProofVerifierFixtureTests
             using var handler = new FrameworkGitHubHandler(
                 root,
                 payloadSha256,
-                TrustedProofV2WorkflowAdmission.Render);
+                (actionSourceSha, _) =>
+                    TrustedProofV2WorkflowAdmission.Render(actionSourceSha));
             using var client = new HttpClient(handler)
             {
                 BaseAddress = new Uri("https://api.github.com/"),
@@ -750,8 +751,7 @@ public sealed class TrustedProofVerifierFixtureTests
             var source = Encoding.UTF8.GetString(Convert.FromBase64String(
                 workflow.RootElement.GetProperty("content").GetString()!));
             Assert.Equal(TrustedProofV2WorkflowAdmission.Render(
-                    sourceCommit,
-                    payloadSha256),
+                    sourceCommit),
                 source);
             Assert.NotEqual(ActionHostTrustedWorkflowContract.Render(
                 sourceCommit,
@@ -849,7 +849,8 @@ public sealed class TrustedProofVerifierFixtureTests
             using var handler = new FrameworkGitHubHandler(
                 root,
                 new string('f', 64),
-                TrustedProofV2WorkflowAdmission.Render);
+                (actionSourceSha, _) =>
+                    TrustedProofV2WorkflowAdmission.Render(actionSourceSha));
             using var client = new HttpClient(handler)
             {
                 BaseAddress = new Uri("https://api.github.com/"),

@@ -181,8 +181,7 @@ public sealed class TrustedProofChangedFileSourceTests
             ActionHostAuthorizationRoute.WorkflowDispatch);
         var workflow = Encoding.UTF8.GetBytes(
             TrustedProofV2WorkflowAdmission.Render(
-                ActionHostAuthorizationScenario.ActionSha,
-                ActionHostAuthorizationScenario.PayloadSha));
+                ActionHostAuthorizationScenario.ActionSha));
         var header = Encoding.ASCII.GetBytes($"blob {workflow.Length}\0");
         scenario.Transport.Source = scenario.Transport.Source with
         {

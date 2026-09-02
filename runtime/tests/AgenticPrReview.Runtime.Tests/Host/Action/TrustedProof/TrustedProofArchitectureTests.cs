@@ -149,9 +149,11 @@ public sealed class TrustedProofArchitectureTests
             "action_source_sha=%s\\npayload_source_sha=%s\\npayload_source_tree=%s\\npayload_build_discriminator=r4-w2",
             preparation,
             StringComparison.Ordinal);
-        Assert.Contains("--expected-payload-sha256", preparation,
+        Assert.DoesNotContain("--expected-payload-sha256", preparation,
             StringComparison.Ordinal);
-        Assert.Contains("payload_sha256\" == \"$expected_payload_sha256", preparation,
+        Assert.DoesNotContain("expected_payload_sha256", preparation,
+            StringComparison.Ordinal);
+        Assert.Contains("sha256sum \"$payload\"", preparation,
             StringComparison.Ordinal);
         Assert.Contains("trusted-proof-payload:\n", workflow,
             StringComparison.Ordinal);
@@ -206,9 +208,17 @@ public sealed class TrustedProofArchitectureTests
             "receipt.compiled_payload_source_tree !== sourceTree",
             workflow,
             StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain(
             "cmp \"$RUNNER_TEMP/r4-e2p-v2-first.receipt\" " +
             "\"$RUNNER_TEMP/r4-e2p-v2-second.receipt\"",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"$RUNNER_TEMP/r4-e2p-v2-first.receipt\" \\",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"$RUNNER_TEMP/r4-e2p-v2-second.receipt\" \\",
             workflow,
             StringComparison.Ordinal);
         Assert.DoesNotContain("path: payload-source", workflow,
