@@ -327,10 +327,13 @@ public sealed partial class GitObjectTransportTests
         }
     }
 
-    [Fact]
-    public async Task HeadArchiveTransportMemberCapAcceptsItsBoundaryAndRejectsOneExtraDirectory()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HeadArchiveTransportMemberCapAcceptsItsBoundaryAndRejectsOneExtraDirectory(
+        bool globalComment)
     {
-        var atCap = BuildTransportCapArchive(extraDirectory: false);
+        var atCap = BuildTransportCapArchive(extraDirectory: false, globalComment);
         var accepted = await StageHeadArchive(atCap.Entries, atCap.Archive);
         try
         {
@@ -354,7 +357,7 @@ public sealed partial class GitObjectTransportTests
             Cleanup(accepted);
         }
 
-        var capPlusOne = BuildTransportCapArchive(extraDirectory: true);
+        var capPlusOne = BuildTransportCapArchive(extraDirectory: true, globalComment);
         var rejected = await StageHeadArchive(
             capPlusOne.Entries, capPlusOne.Archive);
         try
@@ -1007,7 +1010,7 @@ public sealed partial class GitObjectTransportTests
     }
 
     private static (IReadOnlyList<ReviewedHeadArchiveEntry> Entries,
-        byte[] Archive) BuildTransportCapArchive(bool extraDirectory)
+        byte[] Archive) BuildTransportCapArchive(bool extraDirectory, bool globalComment)
     {
         var bytes = "x"u8.ToArray();
         // This is an independent archive transport ceiling, not a derivation
@@ -1044,6 +1047,7 @@ public sealed partial class GitObjectTransportTests
             members.Add(DirectoryEntry("fixture-root/excess/"));
         }
 
+        if (globalComment) members.Insert(0, GlobalComment());
         return (entries, GzipTar(members));
     }
 

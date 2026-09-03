@@ -892,6 +892,11 @@ internal sealed class FrameworkGitHubHandler(
                    leaveOpen: true))
         using (var writer = new TarWriter(gzip, leaveOpen: true))
         {
+            // Match git archive/codeload's global preamble in both the
+            // framework and AOT full-route verifier, not only unit fixtures.
+            writer.WriteEntry(new PaxGlobalExtendedAttributesTarEntry([
+                new("comment", sha),
+            ]));
             writer.WriteEntry(DirectoryEntry(ArchivePrefix));
             writer.WriteEntry(DirectoryEntry(ArchivePrefix + ".github/"));
             writer.WriteEntry(DirectoryEntry(ArchivePrefix +
