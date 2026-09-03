@@ -36,7 +36,7 @@ internal sealed class TrustedProofV2WorkflowAdmission :
             source,
             policy,
             launch.ActionSourceSha,
-            Render(launch.ActionSourceSha, launch.PayloadSha256),
+            Render(launch.ActionSourceSha),
             out evidence,
             out _) ||
             evidence is null)
@@ -48,6 +48,9 @@ internal sealed class TrustedProofV2WorkflowAdmission :
         {
             SameHeadContinuationPolicy = ActionHostSameHeadContinuationPolicy
                 .ContinueAcrossWorkflowRuns,
+            PayloadContinuityMode = ActionHostPayloadContinuityMode.ExactSource,
+            PayloadSourceCommit = TrustedProofPayloadBuildIdentity.SourceCommit,
+            PayloadSourceTree = TrustedProofPayloadBuildIdentity.SourceTree,
         };
         return true;
     }
@@ -69,11 +72,11 @@ internal sealed class TrustedProofV2WorkflowAdmission :
         return true;
     }
 
-    internal static string Render(string actionSourceSha, string payloadSha256)
+    internal static string Render(string actionSourceSha)
     {
         if (!IsLowerHex(actionSourceSha, 40) ||
-            !IsLowerHex(payloadSha256, 64) ||
-            !IsLowerHex(TrustedProofPayloadBuildIdentity.SourceCommit, 40))
+            !IsLowerHex(TrustedProofPayloadBuildIdentity.SourceCommit, 40) ||
+            !IsLowerHex(TrustedProofPayloadBuildIdentity.SourceTree, 40))
         {
             throw new ArgumentException("Workflow identities are invalid.");
         }

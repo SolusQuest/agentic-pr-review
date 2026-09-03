@@ -30,7 +30,6 @@ jobs:
       fixture-head-sha: ${{ steps.authorization.outputs.fixture-head-sha }}
       operation-id: ${{ steps.authorization.outputs.operation-id }}
       authorization-manifest-digest: ${{ steps.authorization.outputs.authorization-manifest-digest }}
-      expected-payload-sha256: ${{ steps.authorization.outputs.expected-payload-sha256 }}
       request-budget-profile: ${{ steps.authorization.outputs.request-budget-profile }}
     steps:
       - id: authorization
@@ -126,7 +125,6 @@ jobs:
               'workflow_sha',
               'action_source_sha',
               'payload_source_sha',
-              'payload_sha256',
             ];
             if (
               authorization === null ||
@@ -142,14 +140,12 @@ jobs:
               !lowerHex64.test(authorization.operation_id ?? '') ||
               !lowerHex40.test(authorization.workflow_sha ?? '') ||
               !lowerHex40.test(authorization.action_source_sha ?? '') ||
-              !lowerHex40.test(authorization.payload_source_sha ?? '') ||
-              !lowerHex64.test(authorization.payload_sha256 ?? '')
+              !lowerHex40.test(authorization.payload_source_sha ?? '')
             ) {
               fail('authorization-manifest');
             }
             const actionSourceSha = authorization.action_source_sha;
             const payloadSourceSha = authorization.payload_source_sha;
-            const payloadSha256 = authorization.payload_sha256;
             if (
               authorization.workflow_sha !== workflowSha ||
               actionSourceSha !== workflowSha ||
@@ -266,7 +262,6 @@ jobs:
               workflow_sha: authorization.workflow_sha,
               action_source_sha: authorization.action_source_sha,
               payload_source_sha: authorization.payload_source_sha,
-              payload_sha256: authorization.payload_sha256,
             });
             if (
               authorizationText !== manifest ||
@@ -287,7 +282,7 @@ jobs:
             ).join('');
             if (!lowerHex64.test(digest)) fail('authorization-digest');
             process.stdout.write(
-              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\nexpected-payload-sha256=${payloadSha256}\nrequest-budget-profile=${requestBudgetProfile}\n`,
+              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\nrequest-budget-profile=${requestBudgetProfile}\n`,
             );
           })().catch((error) => {
             const code =
@@ -296,7 +291,7 @@ jobs:
                 : 'preflight-failed';
             process.stderr.write(`APR_R4_E2P_PREFLIGHT_REJECTED ${code}\n`);
             process.stdout.write(
-              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n',
+              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n',
             );
           });
           APR_R4_E2P_PREFLIGHT
@@ -366,7 +361,7 @@ jobs:
         run: |
           unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
           unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
-          bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
+          bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-hold
         env:
           AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
@@ -379,7 +374,7 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ACTION_SOURCE_SHA: ${{ github.workflow_sha }}
           PAYLOAD_SOURCE_SHA: ${{ github.workflow_sha }}
-          PAYLOAD_SHA256: ${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}
+          PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -467,7 +462,7 @@ jobs:
         run: |
           unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
           unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
-          bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
+          bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
       - id: barrier-verify-completed
         env:
           AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
@@ -480,7 +475,7 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ACTION_SOURCE_SHA: ${{ github.workflow_sha }}
           PAYLOAD_SOURCE_SHA: ${{ github.workflow_sha }}
-          PAYLOAD_SHA256: ${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}
+          PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |

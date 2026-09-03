@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Locator;
 
@@ -12,6 +13,7 @@ internal sealed record AcceptedStatePolicyBinding(
     string ConfigSha256,
     string InstructionsSha256,
     string PayloadSha256,
+    ActionHostPayloadContinuityMode PayloadContinuityMode,
     string BuildDiscriminator);
 
 internal sealed record AcceptedStatePublicationBinding(
@@ -310,9 +312,7 @@ internal sealed class AcceptedStateRestoreService
         StringComparer.Ordinal.Equals(
             generation.InstructionsSha256,
             expected.InstructionsSha256) &&
-        StringComparer.Ordinal.Equals(
-            generation.PayloadSha256,
-            expected.PayloadSha256) &&
+        MatchesProducerPayload(generation.PayloadSha256, expected) &&
         StringComparer.Ordinal.Equals(
             generation.BuildDiscriminator,
             expected.BuildDiscriminator);
@@ -383,7 +383,7 @@ internal sealed class AcceptedStateRestoreService
                 expected.Scope.PolicyIdentitySha256) &&
             StringComparer.Ordinal.Equals(
                 publication.PayloadSha256,
-                expected.PayloadSha256) &&
+                generation.PayloadSha256) &&
             StringComparer.Ordinal.Equals(
                 publication.BuildDiscriminator,
                 expected.BuildDiscriminator) &&
@@ -391,6 +391,21 @@ internal sealed class AcceptedStateRestoreService
                 generation.PublicationPayloadSha256,
                 receipt.PublicationPayloadSha256);
     }
+
+    private static bool MatchesProducerPayload(
+        string producerPayloadSha256,
+        AcceptedStatePolicyBinding expected) =>
+        expected.PayloadContinuityMode switch
+        {
+            ActionHostPayloadContinuityMode.ExactExecutable =>
+                StringComparer.Ordinal.Equals(
+                    producerPayloadSha256,
+                    expected.PayloadSha256),
+            ActionHostPayloadContinuityMode.ExactSource =>
+                Lineage.LineageValidation.IsSha256(
+                    producerPayloadSha256),
+            _ => false,
+        };
 
     private static void Zero(RestrictedStateAdmittedSession admitted)
     {

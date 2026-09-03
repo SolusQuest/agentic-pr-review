@@ -114,8 +114,8 @@ describe('R4 E3 trusted proof policy', () => {
       'uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
     ],
     [
-      '--expected-payload-sha256 "${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}"',
-      '--receipt "$GITHUB_WORKSPACE/control-root/runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json"',
+      'PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}',
+      'PAYLOAD_SHA256: ${{ needs.authorization-preflight.outputs.expected-payload-sha256 }}',
     ],
     [
       '      - id: prepare\n',

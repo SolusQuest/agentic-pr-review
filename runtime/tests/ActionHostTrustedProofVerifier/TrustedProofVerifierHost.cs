@@ -91,7 +91,8 @@ internal static class TrustedProofVerifierHost
             new FrameworkGitHubHandler(
                 scenarioRoot,
                 launch.PayloadSha256,
-                TrustedProofV2WorkflowAdmission.Render,
+                (actionSourceSha, _) =>
+                    TrustedProofV2WorkflowAdmission.Render(actionSourceSha),
                 primaryBucket.ObserveAsync));
         return new TrustedProofPayloadRuntimePorts(
             createGitHubInnerHandler,

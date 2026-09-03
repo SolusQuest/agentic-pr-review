@@ -680,6 +680,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                             policy.ConfigSha256,
                             policy.InstructionsSha256,
                             policy.PayloadSha256,
+                            policy.PayloadContinuityMode,
                             policy.BuildDiscriminator),
                         publicationBinding,
                         trustedRequest,
@@ -858,7 +859,7 @@ internal sealed class AuthorizedAcceptedStateComposer
         Hash(
             "apr.payload-build.s5",
             policy.PolicySha256,
-            policy.PayloadSha256,
+            policy.PayloadContinuitySha256,
             policy.BuildDiscriminator);
 
     private static async Task<LineageResolveResult> ResolveResetAsync(
@@ -1030,6 +1031,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                 policy.ConfigSha256,
                 policy.InstructionsSha256,
                 policy.PayloadSha256,
+                policy.PayloadContinuityMode,
                 policy.BuildDiscriminator);
             if (!RetainedStateTransactionAuthority.TryCreate(
                     issuer,

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
@@ -35,6 +36,8 @@ public sealed class AcceptedStateRestoreServiceTests
     [InlineData("publication-corruption")]
     [InlineData("predecessor-publication")]
     [InlineData("predecessor-session")]
+    [InlineData("trusted-v2-different-current")]
+    [InlineData("trusted-v2-pair-mismatch")]
     public async Task RealEncryptedAgentSessionRequiresExactPublicationBinding(
         string mutation)
     {
@@ -148,7 +151,8 @@ public sealed class AcceptedStateRestoreServiceTests
             ? "other/repository"
             : AcceptedStateTestData.RepositoryName;
         var publicationPolicy = publicationScope.PolicyIdentitySha256;
-        var publicationPayload = mutation == "payload"
+        var publicationPayload = mutation is "payload" or
+                "trusted-v2-pair-mismatch"
             ? new string('e', 64)
             : AcceptedStateTestData.PayloadSha256;
         var publicationBuild = mutation == "build"
@@ -272,6 +276,12 @@ public sealed class AcceptedStateRestoreServiceTests
             head,
             AcceptedStateTestData.LogicalExpiresAtUnixSeconds);
         using var transport = new NoCallGitObjectTransport();
+        var trustedV2 = mutation.StartsWith(
+            "trusted-v2-",
+            StringComparison.Ordinal);
+        var currentPayload = trustedV2
+            ? new string('b', 64)
+            : AcceptedStateTestData.PayloadSha256;
 
         var result = await new AcceptedStateRestoreService().RestoreAsync(
             stateAccess,
@@ -282,14 +292,17 @@ public sealed class AcceptedStateRestoreServiceTests
                 AcceptedStateTestData.PolicySha256,
                 AcceptedStateTestData.ConfigSha256,
                 AcceptedStateTestData.InstructionsSha256,
-                AcceptedStateTestData.PayloadSha256,
+                currentPayload,
+                trustedV2
+                    ? ActionHostPayloadContinuityMode.ExactSource
+                    : ActionHostPayloadContinuityMode.ExactExecutable,
                 document.BuildId),
             new AcceptedStatePublicationBinding(
                 authorizedPublicationScope,
                 R4PublicationIdentityV1.ComputeScopeSha256(
                     authorizedPublicationScope),
                 AcceptedStateTestData.RepositoryName,
-                AcceptedStateTestData.PayloadSha256,
+                currentPayload,
                 document.BuildId),
             fixture.Trusted,
             fixture.Identity,
@@ -301,7 +314,7 @@ public sealed class AcceptedStateRestoreServiceTests
             AcceptedStateTestData.RepositoryName,
             CancellationToken.None);
 
-        if (mutation == "none")
+        if (mutation is "none" or "trusted-v2-different-current")
         {
             Assert.True(result.Succeeded, result.Code);
             using var context = Assert.IsType<AcceptedStateContext>(

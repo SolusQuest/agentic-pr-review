@@ -7,8 +7,8 @@ fail() {
 }
 
 declare -A options=()
-names=(--source-root --control-root --expected-source-sha --expected-payload-sha256 --output-root --github-output)
-if [[ "$#" -ne 12 ]]; then
+names=(--source-root --control-root --expected-source-sha --output-root --github-output)
+if [[ "$#" -ne 10 ]]; then
   fail usage
 fi
 while [[ "$#" -gt 0 ]]; do
@@ -42,14 +42,12 @@ done
 source_root="${options[--source-root]}"
 control_root="${options[--control-root]}"
 expected_source_sha="${options[--expected-source-sha]}"
-expected_payload_sha256="${options[--expected-payload-sha256]}"
 output_root="${options[--output-root]}"
 github_output="${options[--github-output]}"
 for candidate in "$source_root" "$control_root" "$output_root" "$github_output"; do
   [[ "$candidate" == /* ]] || fail absolute-path
 done
 [[ "$expected_source_sha" =~ ^[0-9a-f]{40}$ ]] || fail expected-source
-[[ "$expected_payload_sha256" =~ ^[0-9a-f]{64}$ ]] || fail expected-payload
 [[ -d "$source_root" && ! -L "$source_root" ]] || fail source-root
 [[ -d "$control_root" && ! -L "$control_root" ]] || fail control-root
 source_root="$(realpath -e "$source_root")"
@@ -117,7 +115,7 @@ dotnet publish "$project" --configuration Release --runtime linux-x64 \
 payload="$output_root/AgenticPrReview.Runtime.ActionHostTrustedProofPayload"
 [[ -x "$payload" && -f "$payload" && ! -L "$payload" ]] || fail payload-file
 payload_sha256="$(sha256sum "$payload" | cut -d ' ' -f 1)"
-[[ "$payload_sha256" == "$expected_payload_sha256" ]] || fail payload-digest
+[[ "$payload_sha256" =~ ^[0-9a-f]{64}$ ]] || fail payload-digest
 
 output_lines="$(mktemp "${RUNNER_TEMP}/apr-r4-e2p-output.XXXXXXXX")"
 printf 'prepared_root=%s\nprepared_executable=%s\nprepared_payload_sha256=%s\naction_source_sha=%s\npayload_source_sha=%s\npayload_source_tree=%s\npayload_build_discriminator=r4-w2\n' \

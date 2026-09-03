@@ -163,7 +163,8 @@ internal sealed class ActionHostAuthorizer
                     launch,
                     out var workflowEvidence) ||
                 workflowEvidence is null ||
-                !Enum.IsDefined(workflowEvidence.SameHeadContinuationPolicy))
+                !Enum.IsDefined(workflowEvidence.SameHeadContinuationPolicy) ||
+                !ValidPayloadContinuityEvidence(workflowEvidence, launch))
             {
                 return RejectGitHubOr(
                     sourceResult.Failure,
@@ -283,6 +284,9 @@ internal sealed class ActionHostAuthorizer
                 concurrencyIdentity,
                 "actions:write,contents:read,pull-requests:write",
                 workflowEvidence.SameHeadContinuationPolicy,
+                workflowEvidence.PayloadContinuityMode,
+                workflowEvidence.PayloadSourceCommit,
+                workflowEvidence.PayloadSourceTree,
                 frozen);
             return ActionHostAuthorizationResult.Granted(invocation);
         }
@@ -684,6 +688,27 @@ internal sealed class ActionHostAuthorizer
         not StackOverflowException and
         not AccessViolationException;
 
+    private static bool ValidPayloadContinuityEvidence(
+        ActionHostTrustedWorkflowEvidence evidence,
+        ActionHostLaunchContract launch) =>
+        evidence.PayloadContinuityMode switch
+        {
+            ActionHostPayloadContinuityMode.ExactExecutable =>
+                evidence.PayloadSourceCommit is null &&
+                evidence.PayloadSourceTree is null,
+            ActionHostPayloadContinuityMode.ExactSource =>
+                IsLowerHex(evidence.PayloadSourceCommit, 40) &&
+                IsLowerHex(evidence.PayloadSourceTree, 40) &&
+                StringComparer.Ordinal.Equals(
+                    evidence.PayloadSourceCommit,
+                    launch.WorkflowSha),
+            _ => false,
+        };
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value?.Length == length && value.All(static character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     private sealed record WorkflowRunSelection(
         ActionHostGitHubPullRequestFact? PullRequest,
         ActionHostAuthorizationFailure Failure)
@@ -791,6 +816,9 @@ internal sealed class ActionHostAuthorizer
             string concurrencyIdentity,
             string declaredPermissions,
             ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy,
+            ActionHostPayloadContinuityMode payloadContinuityMode,
+            string? payloadSourceCommit,
+            string? payloadSourceTree,
             FrozenPullRequest pullRequest)
         {
             this.authorizedLaunch = authorizedLaunch;
@@ -803,6 +831,9 @@ internal sealed class ActionHostAuthorizer
             ConcurrencyIdentity = concurrencyIdentity;
             DeclaredPermissions = declaredPermissions;
             SameHeadContinuationPolicy = sameHeadContinuationPolicy;
+            PayloadContinuityMode = payloadContinuityMode;
+            PayloadSourceCommit = payloadSourceCommit;
+            PayloadSourceTree = payloadSourceTree;
             PullRequest = pullRequest;
         }
 
@@ -818,6 +849,9 @@ internal sealed class ActionHostAuthorizer
             string concurrencyIdentity,
             string declaredPermissions,
             ActionHostSameHeadContinuationPolicy sameHeadContinuationPolicy,
+            ActionHostPayloadContinuityMode payloadContinuityMode,
+            string? payloadSourceCommit,
+            string? payloadSourceTree,
             FrozenPullRequest pullRequest)
         {
             if (!ReferenceEquals(authority, MintAuthority))
@@ -837,6 +871,9 @@ internal sealed class ActionHostAuthorizer
                 concurrencyIdentity,
                 declaredPermissions,
                 sameHeadContinuationPolicy,
+                payloadContinuityMode,
+                payloadSourceCommit,
+                payloadSourceTree,
                 pullRequest);
         }
 
@@ -850,6 +887,9 @@ internal sealed class ActionHostAuthorizer
         internal string DeclaredPermissions { get; }
         internal ActionHostSameHeadContinuationPolicy
             SameHeadContinuationPolicy { get; }
+        internal ActionHostPayloadContinuityMode PayloadContinuityMode { get; }
+        internal string? PayloadSourceCommit { get; }
+        internal string? PayloadSourceTree { get; }
         internal FrozenPullRequest PullRequest { get; }
 
         internal bool IsBoundTo(ActionHostLaunchContract? launch) =>

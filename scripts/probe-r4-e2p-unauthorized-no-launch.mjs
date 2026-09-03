@@ -82,7 +82,6 @@ function unauthorizedEnvironment() {
     workflow_sha: workflowSha,
     action_source_sha: workflowSha,
     payload_source_sha: workflowSha,
-    payload_sha256: 'f'.repeat(64),
   });
   return {
     EVENT_NAME: 'workflow_run',
@@ -176,7 +175,7 @@ export async function probeUnauthorizedNoLaunch(workflowPath) {
     fetches !== 1 ||
     authorizationHeaderPresent ||
     preflight.stdout !==
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n' ||
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n' ||
     !preflight.stderr.startsWith('APR_R4_E2P_PREFLIGHT_REJECTED authorization-mismatch\n') ||
     workflowRunEligible ||
     workflowDispatchEligible ||

@@ -1992,8 +1992,7 @@ public sealed class PublicationRecoveryClassifierTests
             ActionHostAuthorizationRoute.WorkflowRun);
         var workflow = Encoding.UTF8.GetBytes(
             TrustedProofV2WorkflowAdmission.Render(
-                TrustedProofPayloadBuildIdentity.SourceCommit,
-                ActionHostAuthorizationScenario.PayloadSha));
+                TrustedProofPayloadBuildIdentity.SourceCommit));
         var header = Encoding.ASCII.GetBytes($"blob {workflow.Length}\0");
         scenario.Transport.Source = scenario.Transport.Source with
         {

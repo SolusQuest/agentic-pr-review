@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
@@ -13,9 +14,11 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.State.Locator;
@@ -583,6 +586,191 @@ public sealed class ActionHostCompositionTests
     }
 
     [Fact]
+    public async Task TrustedV2ContinuesAcrossRebuiltPayloadsAndRecoversHigherAttempt()
+    {
+        const long bootstrapRunId = 910;
+        const long continuationRunId = 911;
+        const int bootstrapAttempt = 1;
+        const int continuationAttempt = 1;
+        const int recoveryAttempt = 2;
+        var payloadA = new string('a', 64);
+        var payloadB = new string('b', 64);
+        var payloadC = new string('c', 64);
+        var bootstrap = TrustedV2Scenario(
+            bootstrapRunId,
+            bootstrapAttempt,
+            payloadA);
+        var github = new FullPathGitHubFactory(
+            bootstrap.Scenario.Transport.PullRequest,
+            workflowSha: TrustedProofPayloadBuildIdentity.SourceCommit);
+        var store = FullPathStore(bootstrap.Launch);
+        var publisher = SuccessfulPublisher(791);
+        var provider = new FullPathProviderFactory();
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+
+        var first = await RunTrustedV2Async(
+            bootstrap,
+            github,
+            store,
+            publisher,
+            provider,
+            time);
+
+        Assert.Equal(ActionHostStatus.Reviewed, first.Status);
+        Assert.Equal(ActionHostStateDisposition.Accepted,
+            first.Summary.StateDisposition);
+        Assert.Equal(1, provider.Runs);
+        Assert.Single(provider.Requests);
+        Assert.Null(provider.Requests[0].Continuation);
+        Assert.Single(publisher.Transport.Bodies);
+        var bootstrapUploads = store.UploadCalls;
+        var bootstrapLists = store.ListCalls;
+        var bootstrapDeletes = store.DeleteCalls;
+        var bootstrapObjects = store.Objects.Length;
+
+        var continuation = TrustedV2Scenario(
+            continuationRunId,
+            continuationAttempt,
+            payloadB);
+        store.ProducingRunIdentity = continuationRunId.ToString(
+            System.Globalization.CultureInfo.InvariantCulture);
+        store.ProducingRunAttempt = continuationAttempt;
+        var second = await RunTrustedV2Async(
+            continuation,
+            github,
+            store,
+            publisher,
+            provider,
+            time);
+
+        Assert.True(second.Status == ActionHostStatus.Reviewed,
+            $"status={second.Status}; provider={provider.Runs}; " +
+            $"sticky={publisher.Transport.Bodies.Count}; " +
+            $"stickyLists={publisher.Transport.Lists}; " +
+            $"uploads={bootstrapUploads}->{store.UploadCalls}; " +
+            $"lists={bootstrapLists}->{store.ListCalls}; " +
+            $"deletes={bootstrapDeletes}->{store.DeleteCalls}; " +
+            $"objects={bootstrapObjects}->{store.Objects.Length}; " +
+            $"names={string.Join(',', store.Objects.Select(item =>
+                item.Reference.Name.Value))}");
+        Assert.Equal(ActionHostStateDisposition.Accepted,
+            second.Summary.StateDisposition);
+        Assert.Equal(2, provider.Runs);
+        Assert.Equal(2, provider.Requests.Count);
+        Assert.NotNull(provider.Requests[1].Continuation);
+        Assert.Equal(provider.Requests[0].SessionId,
+            provider.Requests[1].SessionId);
+        Assert.Equal(2, publisher.Transport.Bodies.Count);
+        var accepted = ReadAcceptedStateRecords(
+            store,
+            continuation.Launch,
+            time);
+        var bootstrapAcceptance = Assert.Single(accepted.Acceptances.Where(
+            item => item.Header.ProducingRunIdentity ==
+                bootstrapRunId.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture) &&
+                item.Header.ProducingRunAttempt == bootstrapAttempt));
+        var continuationAcceptance = Assert.Single(accepted.Acceptances.Where(
+            item => item.Header.ProducingRunIdentity ==
+                continuationRunId.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture) &&
+                item.Header.ProducingRunAttempt == continuationAttempt));
+        var continuationGeneration = Assert.Single(accepted.Generations.Where(
+            item => item.Header.ObjectIdentity ==
+                continuationAcceptance.Receipt.OriginalCandidateObjectIdentity));
+        Assert.Equal(
+            accepted.Generations.Max(item => item.Generation.Generation),
+            continuationGeneration.Generation.Generation);
+        Assert.Equal(payloadB, continuationGeneration.Generation.PayloadSha256);
+        Assert.Equal(payloadB, continuationGeneration.Publication.PayloadSha256);
+        Assert.Equal(
+            continuationRunId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            continuationGeneration.Header.ProducingRunIdentity);
+        Assert.Equal(
+            continuationAttempt,
+            continuationGeneration.Header.ProducingRunAttempt);
+        Assert.Equal(
+            bootstrapAcceptance.Receipt.LogicalGenerationIdentity,
+            continuationGeneration.Generation.PreviousLogicalGenerationIdentity);
+        Assert.Equal(
+            bootstrapAcceptance.Header.ObjectIdentity,
+            continuationGeneration.Header.PredecessorIdentity);
+        Assert.Equal(
+            continuationRunId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            continuationAcceptance.Receipt.ProducingRunIdentity);
+        Assert.Equal(
+            continuationAttempt,
+            continuationAcceptance.Receipt.ProducingRunAttempt);
+        Assert.Equal(
+            bootstrapAcceptance.Receipt.LogicalGenerationIdentity,
+            continuationAcceptance.Receipt.PreviousLogicalGenerationIdentity);
+        Assert.Equal(
+            bootstrapAcceptance.Header.ObjectIdentity,
+            continuationAcceptance.Receipt.PreviousAcceptanceReceiptIdentity);
+        Assert.Equal(
+            bootstrapAcceptance.Header.ObjectIdentity,
+            continuationAcceptance.Header.PredecessorIdentity);
+        var continuationUploads = store.UploadCalls;
+        var continuationDeletes = store.DeleteCalls;
+        var continuationObjects = store.Objects.Length;
+        var recovery = TrustedV2Scenario(
+            continuationRunId,
+            recoveryAttempt,
+            payloadC);
+        store.ProducingRunAttempt = recoveryAttempt;
+        var recovered = await RunTrustedV2Async(
+            recovery with { Launch = WithoutProviderKey(recovery.Launch) },
+            github,
+            store,
+            publisher,
+            provider,
+            time);
+
+        Assert.Equal(ActionHostStatus.Reviewed, recovered.Status);
+        Assert.Equal(ActionHostStateDisposition.Accepted,
+            recovered.Summary.StateDisposition);
+        Assert.Equal(2, provider.Runs);
+        Assert.Equal(2, provider.Requests.Count);
+        Assert.Equal(2, publisher.Transport.Bodies.Count);
+        // ReturnCommitted may retire historical recovery records. Idempotence
+        // here means that it cannot create or replace durable product state;
+        // the raw store activity is the bounded authenticated cleanup below.
+        Assert.Equal(continuationUploads + 5, store.UploadCalls);
+        Assert.Equal(continuationDeletes + 9, store.DeleteCalls);
+        Assert.Equal(continuationObjects - 4, store.Objects.Length);
+        var recoveredAccepted = ReadAcceptedStateRecords(
+            store,
+            recovery.Launch,
+            time);
+        Assert.Equal(
+            accepted.Generations.Select(item => item.Header.ObjectIdentity)
+                .Order(StringComparer.Ordinal),
+            recoveredAccepted.Generations
+                .Select(item => item.Header.ObjectIdentity)
+                .Order(StringComparer.Ordinal));
+        Assert.Equal(
+            accepted.Acceptances.Select(item => item.Header.ObjectIdentity)
+                .Order(StringComparer.Ordinal),
+            recoveredAccepted.Acceptances
+                .Select(item => item.Header.ObjectIdentity)
+                .Order(StringComparer.Ordinal));
+        Assert.DoesNotContain(
+            recoveredAccepted.Generations,
+            item => item.Header.ProducingRunIdentity ==
+                    continuationRunId.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture) &&
+                item.Header.ProducingRunAttempt == recoveryAttempt);
+        Assert.DoesNotContain(
+            recoveredAccepted.Acceptances,
+            item => item.Header.ProducingRunIdentity ==
+                    continuationRunId.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture) &&
+                item.Header.ProducingRunAttempt == recoveryAttempt);
+    }
+
+    [Fact]
     public async Task OwnershipDriftDuringTheSecondH5BlocksStickyMutation()
     {
         var authorization = ActionHostAuthorizationScenario.Valid(
@@ -902,6 +1090,173 @@ public sealed class ActionHostCompositionTests
             stagingParentFactory);
     }
 
+    private static async Task<ActionHostCompletion> RunTrustedV2Async(
+        TrustedV2CompositionScenario value,
+        FullPathGitHubFactory github,
+        ScriptedLocatorStore store,
+        FakePublisherTransportFactory publisher,
+        FullPathProviderFactory provider,
+        TimeProvider time)
+    {
+        var staging = StagingPath();
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    value.Scenario.EventReader,
+                    value.Scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    time,
+                    () => staging,
+                    workflowAdmission: TrustedProofV2WorkflowAdmission.Instance))
+            .RunAsync(value.Launch, CancellationToken.None);
+        Assert.False(Directory.Exists(staging));
+        return completion;
+    }
+
+    private static AcceptedStateRecordSnapshot ReadAcceptedStateRecords(
+        ScriptedLocatorStore store,
+        ActionHostLaunchContract launch,
+        TimeProvider time)
+    {
+        var repositoryId = launch.RepositoryId.ToString(
+            System.Globalization.CultureInfo.InvariantCulture);
+        using var access = AuthorizedLocatorAccess
+            .IssueTrustedProofEvidenceOracle(repositoryId);
+        Assert.True(LocatorStateKeyRing.TryCreate(
+            access,
+            repositoryId,
+            launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            out var keyRing,
+            out var keyCode), keyCode);
+        using var keys = Assert.IsType<LocatorStateKeyRing>(keyRing);
+        var rootMetadata = Assert.Single(store.Objects.Where(item =>
+            item.Reference.Name.Value == LocatorRootFormat.StoreName));
+        Assert.True(LocatorRootSentinelCodec.TryDecrypt(
+            access,
+            keys,
+            store.Bytes(rootMetadata),
+            out var sentinel,
+            out var rootCode), rootCode);
+        var selectedRoot = Assert.IsType<LocatorRootSentinel>(sentinel);
+        try
+        {
+            Assert.True(LocatorContext.TryCreate(
+                access,
+                keys,
+                selectedRoot.Root,
+                currentSingletonProven: true,
+                selectedRoot.RequiredExpiresAtUnixSeconds,
+                time,
+                out var locator));
+            using var context = Assert.IsType<LocatorContext>(locator);
+            var generations = ImmutableArray.CreateBuilder<
+                AcceptedGenerationRecord>();
+            var acceptances = ImmutableArray.CreateBuilder<
+                AcceptedAcceptanceRecord>();
+            foreach (var metadata in store.Objects.Where(item =>
+                !ReferenceEquals(item, rootMetadata)))
+            {
+                Assert.True(StateControlEnvelopeV1Codec.TryDecrypt(
+                    context,
+                    access,
+                    metadata.Reference.Name,
+                    store.Bytes(metadata),
+                    out var header,
+                    out var payload,
+                    out var envelopeCode), envelopeCode);
+                try
+                {
+                    var authenticated = Assert.IsType<StateControlHeaderV1>(
+                        header);
+                    if (authenticated.ObjectClass == StateObjectClass.Candidate)
+                    {
+                        Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(
+                            payload,
+                            out var generation));
+                        var decoded = Assert.IsType<StateGenerationRecordV1>(
+                            generation);
+                        Assert.True(AcceptedStatePublicationPayloadCodec.TryDecode(
+                            decoded.PublicationPayloadBytes.AsSpan(),
+                            out var publication));
+                        generations.Add(new(
+                            authenticated,
+                            decoded,
+                            Assert.IsType<ValidatedPublicationPayloadV1>(
+                                publication)));
+                    }
+                    else if (authenticated.ObjectClass ==
+                        StateObjectClass.Acceptance)
+                    {
+                        Assert.True(AcceptedStateAcceptanceReceiptCodec.TryDecode(
+                            payload,
+                            out var receipt));
+                        acceptances.Add(new(
+                            authenticated,
+                            Assert.IsType<AcceptanceReceiptV1>(receipt)));
+                    }
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(payload);
+                }
+            }
+
+            return new(generations.ToImmutable(), acceptances.ToImmutable());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(selectedRoot.Root);
+        }
+    }
+
+    private static TrustedV2CompositionScenario TrustedV2Scenario(
+        long runId,
+        int runAttempt,
+        string payloadSha256)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var source = TrustedProofPayloadBuildIdentity.SourceCommit;
+        var workflow = Encoding.UTF8.GetBytes(
+            TrustedProofV2WorkflowAdmission.Render(source));
+        var header = Encoding.ASCII.GetBytes($"blob {workflow.Length}\0");
+        scenario.Transport.Source = scenario.Transport.Source with
+        {
+            BlobSha = Convert.ToHexString(SHA1.HashData(
+                header.Concat(workflow).ToArray())).ToLowerInvariant(),
+            Bytes = workflow,
+        };
+        scenario.Transport.CurrentRun = scenario.Transport.CurrentRun with
+        {
+            Id = runId,
+            Attempt = runAttempt,
+            HeadSha = source,
+        };
+        var keyed = FullLaunch(scenario.Launch);
+        Assert.True(ActionHostLaunchContract.TryCreate(
+            keyed.Inputs,
+            keyed.EventJsonPath,
+            keyed.EventJsonSha256,
+            keyed.RepositoryName,
+            keyed.RepositoryId,
+            runId,
+            runAttempt,
+            keyed.WorkflowPath,
+            keyed.WorkflowRef,
+            source,
+            source,
+            payloadSha256,
+            keyed.BuildDiscriminator,
+            keyed.Cancellation,
+            keyed.ArtifactBridgeEndpoint,
+            out var launch));
+        return new(scenario, launch!);
+    }
+
     private static ActionHostLaunchContract FullLaunch(
         ActionHostLaunchContract launch)
     {
@@ -1083,6 +1438,7 @@ public sealed class ActionHostCompositionTests
         internal int Creates { get; private set; }
         internal int Runs { get; private set; }
         internal AgentRunOutcome? LastOutcome { get; private set; }
+        internal List<AgentRunRequest> Requests { get; } = [];
 
         public IActionHostProviderRunner Create(
             ActionHostProviderPolicy policy,
@@ -1106,6 +1462,9 @@ public sealed class ActionHostCompositionTests
                 CancellationToken cancellationToken)
             {
                 owner.Runs++;
+                owner.Requests.Add(request);
+                var callSuffix = owner.Runs.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
                 if (owner.cancelledOutcome)
                 {
                     var cancelled = AgentRunOutcome.Failure(
@@ -1132,7 +1491,9 @@ public sealed class ActionHostCompositionTests
                         "\"line_count\":20}",
                         out var arguments));
                     scriptedExecution = await executor.ExecuteAsync(
-                        new PreparedReadFileCall("read-file", arguments!),
+                        new PreparedReadFileCall(
+                            $"read-file-{callSuffix}",
+                            arguments!),
                         cancellationToken);
                     var observation = Assert.IsType<AgentObservation>(
                         scriptedExecution.Observation);
@@ -1148,7 +1509,7 @@ public sealed class ActionHostCompositionTests
                 }
 
                 var terminal = AgentToolArguments.WriteFinishReview(
-                    "Synthetic full transaction completed.",
+                    $"Synthetic full transaction completed {callSuffix}.",
                     finding is null
                         ? ImmutableArray<AgentFinding>.Empty
                         : [finding]);
@@ -1159,6 +1520,7 @@ public sealed class ActionHostCompositionTests
                         new TerminalChatClient(
                             request,
                             terminal,
+                            callSuffix,
                             readFileFirst: executor is not null),
                         toolExecutor,
                         timeProvider)
@@ -1175,6 +1537,7 @@ public sealed class ActionHostCompositionTests
     private sealed class TerminalChatClient(
         AgentRunRequest run,
         byte[] terminal,
+        string callSuffix,
         bool readFileFirst = false) : IProjectChatClient
     {
         private int calls;
@@ -1198,12 +1561,12 @@ public sealed class ActionHostCompositionTests
                     reasoning,
                     readFileFirst && Interlocked.Increment(ref calls) == 1
                         ? new ProjectToolCallContent(
-                            "read-file",
+                            $"read-file-{callSuffix}",
                             AgentToolRegistry.ReadFileName,
                             "{\"path\":\"file.txt\",\"start_line\":1," +
                             "\"line_count\":20}")
                         : new ProjectToolCallContent(
-                            "finish-review",
+                            $"finish-review-{callSuffix}",
                             AgentToolRegistry.FinishReviewName,
                             Encoding.UTF8.GetString(terminal)),
                 ]);
@@ -1369,6 +1732,7 @@ public sealed class ActionHostCompositionTests
         private readonly ActionHostGitHubPullRequestFact pullRequest;
         private readonly bool withInlineFile;
         private readonly byte[] config;
+        private readonly string workflowSha;
 
         internal int CurrentPullRequestCalls { get; private set; }
         internal int GitCommitCalls { get; private set; }
@@ -1380,10 +1744,13 @@ public sealed class ActionHostCompositionTests
 
         internal FullPathGitHubFactory(
             ActionHostGitHubPullRequestFact pullRequest,
-            bool withInlineFile = false)
+            bool withInlineFile = false,
+            string? workflowSha = null)
         {
             this.pullRequest = pullRequest;
             this.withInlineFile = withInlineFile;
+            this.workflowSha = workflowSha ??
+                ActionHostAuthorizationScenario.WorkflowSha;
             config = Encoding.UTF8.GetBytes(
                 "{\"schema\":\"agentic-pr-review.config.v1\"," +
                 "\"instructionsPath\":\".github/agentic-pr-review/" +
@@ -1412,8 +1779,7 @@ public sealed class ActionHostCompositionTests
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 owner.GitCommitCalls++;
-                var value = commitSha ==
-                        ActionHostAuthorizationScenario.WorkflowSha
+                var value = commitSha == owner.workflowSha
                     ? new ActionHostGitCommitObject(commitSha, WorkflowRoot)
                     : new ActionHostGitCommitObject(
                         commitSha,
@@ -1680,4 +2046,21 @@ public sealed class ActionHostCompositionTests
             public void Dispose() { }
         }
     }
+
+    private sealed record TrustedV2CompositionScenario(
+        ActionHostAuthorizationScenario Scenario,
+        ActionHostLaunchContract Launch);
+
+    private sealed record AcceptedGenerationRecord(
+        StateControlHeaderV1 Header,
+        StateGenerationRecordV1 Generation,
+        ValidatedPublicationPayloadV1 Publication);
+
+    private sealed record AcceptedAcceptanceRecord(
+        StateControlHeaderV1 Header,
+        AcceptanceReceiptV1 Receipt);
+
+    private sealed record AcceptedStateRecordSnapshot(
+        ImmutableArray<AcceptedGenerationRecord> Generations,
+        ImmutableArray<AcceptedAcceptanceRecord> Acceptances);
 }

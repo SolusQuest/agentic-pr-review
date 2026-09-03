@@ -699,7 +699,8 @@ public sealed class TrustedProofVerifierFixtureTests
             using var handler = new FrameworkGitHubHandler(
                 root,
                 payloadSha256,
-                TrustedProofV2WorkflowAdmission.Render);
+                (actionSourceSha, _) =>
+                    TrustedProofV2WorkflowAdmission.Render(actionSourceSha));
             using var client = new HttpClient(handler)
             {
                 BaseAddress = new Uri("https://api.github.com/"),
@@ -750,8 +751,7 @@ public sealed class TrustedProofVerifierFixtureTests
             var source = Encoding.UTF8.GetString(Convert.FromBase64String(
                 workflow.RootElement.GetProperty("content").GetString()!));
             Assert.Equal(TrustedProofV2WorkflowAdmission.Render(
-                    sourceCommit,
-                    payloadSha256),
+                    sourceCommit),
                 source);
             Assert.NotEqual(ActionHostTrustedWorkflowContract.Render(
                 sourceCommit,
@@ -849,7 +849,8 @@ public sealed class TrustedProofVerifierFixtureTests
             using var handler = new FrameworkGitHubHandler(
                 root,
                 new string('f', 64),
-                TrustedProofV2WorkflowAdmission.Render);
+                (actionSourceSha, _) =>
+                    TrustedProofV2WorkflowAdmission.Render(actionSourceSha));
             using var client = new HttpClient(handler)
             {
                 BaseAddress = new Uri("https://api.github.com/"),
@@ -1073,6 +1074,47 @@ public sealed class TrustedProofVerifierFixtureTests
             Assert.Equal(1, await run.WaitAsync(TimeSpan.FromSeconds(2)));
             Assert.Equal("1", await File.ReadAllTextAsync(Path.Join(root,
                 "pull-request-revalidation-count")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StaleCoordinatorRejectsReleaseFromAnotherPayloadBuild()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-r4-e2p-stale-payload-pair-" +
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await PrepareProofScenarioAsync(root, "stale", 902);
+            var eventPath = Path.Join(root, "event.json");
+            var eventBytes = Encoding.UTF8.GetBytes("{}");
+            await File.WriteAllBytesAsync(eventPath, eventBytes);
+            var launch = StaleCancelledLaunch(eventPath, eventBytes);
+            var requestBudget = new TrustedProofControlRequestBudget(
+                maximumRequests: 32);
+            using var coordinator = await TrustedProofStaleWindowCoordinator
+                .ResolveAsync(
+                    launch,
+                    () => new FrameworkGitHubHandler(
+                        root,
+                        launch.PayloadSha256,
+                        proofReleasePayloadSha256: new string('0', 64)),
+                    requestBudget,
+                    CancellationToken.None);
+            Assert.NotNull(coordinator);
+            var hostWait = coordinator.Signal.SignalReadyAndWaitForReleaseAsync(
+                CancellationToken.None).AsTask();
+
+            Assert.False(await coordinator.CoordinateAsync(
+                CancellationToken.None,
+                (_, _) => Task.CompletedTask));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                await hostWait);
         }
         finally
         {

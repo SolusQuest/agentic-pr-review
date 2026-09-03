@@ -214,6 +214,7 @@ internal sealed record TrustedProofControlMarker(
 
     internal bool Matches(TrustedProofControlCoordinates coordinates) =>
         MatchesFamily(coordinates) &&
+        PayloadSha256 == coordinates.PayloadSha256 &&
         RunId == coordinates.RunId &&
         RunAttempt == coordinates.RunAttempt;
 
@@ -224,11 +225,12 @@ internal sealed record TrustedProofControlMarker(
         PullRequestNumber == coordinates.PullRequestNumber &&
         FixtureHeadSha == coordinates.FixtureHeadSha &&
         WorkflowSha == coordinates.WorkflowSha &&
-        ActionSourceSha == coordinates.ActionSourceSha &&
-        PayloadSha256 == coordinates.PayloadSha256;
+        ActionSourceSha == coordinates.ActionSourceSha;
 
-    internal bool HasSameProducer(TrustedProofControlMarker other) =>
-        RunId == other.RunId && RunAttempt == other.RunAttempt;
+    internal bool MatchesProducerPair(TrustedProofControlMarker other) =>
+        RunId == other.RunId &&
+        RunAttempt == other.RunAttempt &&
+        PayloadSha256 == other.PayloadSha256;
 
     private static bool IsLowerHex(string? value, int length) =>
         value?.Length == length && value.All(static character =>

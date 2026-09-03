@@ -317,7 +317,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
 
       expect(result.stderr).toBe('');
       expect(result.stdout).toBe(
-        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(v2Values)}\nexpected-payload-sha256=${v2Values.payloadSha256}\nrequest-budget-profile=${route === 'workflow_run' ? 'final-bootstrap' : 'final-continuation'}\n`,
+        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(v2Values)}\nrequest-budget-profile=${route === 'workflow_run' ? 'final-bootstrap' : 'final-continuation'}\n`,
       );
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(fetchImpl.mock.calls[0][1]).toMatchObject({
@@ -400,7 +400,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
 
     expect(result.stdout).toBe(
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n',
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n',
     );
     expect(result.stdout).not.toContain('authorized=true');
     expect(result.stderr).toMatch(/^APR_R4_E2P_PREFLIGHT_REJECTED /u);
@@ -459,10 +459,14 @@ describe('R4 E2P v2 exact inline preflight', () => {
     ['noncanonical whitespace', ` ${v2Authorization()}`],
     ['extra manifest member', v2Authorization().replace(/\}$/u, ',"extra":"x"}')],
     [
+      'retired prospective payload digest',
+      v2Authorization().replace(/\}$/u, `,"payload_sha256":"${'0'.repeat(64)}"}`),
+    ],
+    [
       'duplicate manifest member',
       v2Authorization().replace(
-        '"payload_sha256":',
-        '"payload_sha256":"' + '0'.repeat(64) + '","payload_sha256":',
+        '"payload_source_sha":',
+        '"payload_source_sha":"' + '0'.repeat(40) + '","payload_source_sha":',
       ),
     ],
   ])('rejects v2 authorization manifest: %s', async (_name, authorization) => {
@@ -473,7 +477,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
 
     expect(result.stdout).toBe(
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nexpected-payload-sha256=\nrequest-budget-profile=\n',
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n',
     );
   });
 

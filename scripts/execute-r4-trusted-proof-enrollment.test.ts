@@ -52,7 +52,7 @@ function commitSha(tree: string, parents: string[], metadata: { date: string; me
   );
 }
 
-function record() {
+function enrollmentInput() {
   const workflow = sha('a');
   const workflowTree = sha('b');
   const initialTree = sha('c');
@@ -78,7 +78,6 @@ function record() {
   );
   const input = {
     repository_id: '42',
-    payload_sha256: digest('payload'),
     reported_base_shas: {
       normal: sha('e'),
       stale: sha('f'),
@@ -108,13 +107,18 @@ function record() {
       },
     },
   };
-  const prepared = prepareEnrollmentRecord(input);
-  const authority = validateEnrollmentExecutionAuthorityPackage(
-    executionAuthorityPackage(prepared.sha256),
-  );
-  return bindEnrollmentRecord({
-    ...input,
-    execution_authority: authority,
+  return input;
+}
+
+function record() {
+  return bindEnrollmentRecord(enrollmentInput());
+}
+
+function observationAuthority() {
+  return Object.freeze({
+    execution_authorization_sha256: digest('execution-authorization'),
+    phase_materializer_source_sha256: digest('phase-materializer-source'),
+    phase_materializer_build_sha256: digest('phase-materializer-build'),
   });
 }
 
@@ -140,6 +144,7 @@ function observations(value: ReturnType<typeof record>) {
 
 function fakeObservationMaterializer(value: ReturnType<typeof record>) {
   const destinationIdentity = digest('observation-destination');
+  const authority = observationAuthority();
   const source = (role: string, runId: string, kind: string, page = 1) => ({
     source_id:
       kind === 'run'
@@ -158,7 +163,7 @@ function fakeObservationMaterializer(value: ReturnType<typeof record>) {
   });
   const validate = (receipt: any, expected: any) =>
     validateEnrollmentObservationReceipt(receipt, {
-      authority: value.authority,
+      authority,
       destination_identity_sha256: destinationIdentity,
       ...expected,
     });
@@ -182,10 +187,10 @@ function fakeObservationMaterializer(value: ReturnType<typeof record>) {
       return validate(
         {
           kind: 'apr-r4-e2p-enrollment-role-observation-v1',
-          execution_authorization_sha256: value.authority.execution_authorization_sha256,
+          execution_authorization_sha256: authority.execution_authorization_sha256,
           destination_identity_sha256: destinationIdentity,
-          materializer_source_sha256: value.authority.phase_materializer_source_sha256,
-          materializer_build_sha256: value.authority.phase_materializer_build_sha256,
+          materializer_source_sha256: authority.phase_materializer_source_sha256,
+          materializer_build_sha256: authority.phase_materializer_build_sha256,
           operation_id: expected.operation_id,
           role: expected.role,
           run_id: expected.run_id,
@@ -420,11 +425,12 @@ function writeJournal(directory: string, recordValue: ReturnType<typeof record>,
 }
 
 describe('R4 post-merge enrollment executor', () => {
-  test('derives enrollment authority only from paired captured comment and permission readbacks', () => {
+  test('retains the historical authority validator without using it as the record gate', () => {
     const value = record();
-    const prepared = executionAuthorityPackage(value.authority.enrollment_record_sha256);
+    const recordDigest = recordSha256(value);
+    const prepared = executionAuthorityPackage(recordDigest);
     const authority = validateEnrollmentExecutionAuthorityPackage(prepared);
-    expect(authority.enrollment_record_sha256).toBe(value.authority.enrollment_record_sha256);
+    expect(authority.enrollment_record_sha256).toBe(recordDigest);
     expect(authority.capture_source_sha256).toBe('1'.repeat(64));
     const changed = structuredClone(prepared);
     changed.captured_source_bodies[0].text = '{}\n';
@@ -463,8 +469,10 @@ describe('R4 post-merge enrollment executor', () => {
       'workflow_sha',
       'action_source_sha',
       'payload_source_sha',
-      'payload_sha256',
     ]);
+    expect(value.coordinates).not.toHaveProperty('payload_sha256');
+    expect(normal).not.toHaveProperty('payload_sha256');
+    expect(stale).not.toHaveProperty('payload_sha256');
     expect(normal.proof_scope).toBe('normal');
     expect(stale.proof_scope).toBe('stale');
     expect(value.fixtures.normal.manifest).toBe(canonicalAuthorizationManifest(normal));
@@ -476,13 +484,36 @@ describe('R4 post-merge enrollment executor', () => {
     expect(() => validateEnrollmentRecord(changed)).toThrow(/record-canonical/u);
     const reportedBaseChanged = structuredClone(value);
     reportedBaseChanged.fixtures.normal.reported_base_sha = sha('9');
-    expect(() => validateEnrollmentRecord(reportedBaseChanged)).toThrow(/record-canonical/u);
+    expect(validateEnrollmentRecord(reportedBaseChanged)).toBe(true);
+    expect(recordSha256(reportedBaseChanged)).not.toBe(recordSha256(value));
     const priorHeadChanged = structuredClone(value);
     priorHeadChanged.fixtures.normal.old_head = sha('3');
     expect(() => validateEnrollmentRecord(priorHeadChanged)).toThrow(/commit-object-identity/u);
     const parentOrderChanged = structuredClone(value);
     parentOrderChanged.fixtures.stale.parents.reverse();
     expect(() => validateEnrollmentRecord(parentOrderChanged)).toThrow(/record-canonical/u);
+
+    expect(() =>
+      prepareEnrollmentRecord({
+        ...enrollmentInput(),
+        payload_sha256: digest('retired-payload'),
+      }),
+    ).toThrow(/preparation-binding-keys/u);
+    expect(() =>
+      bindEnrollmentRecord({
+        ...enrollmentInput(),
+        payload_sha256: digest('retired-payload'),
+      }),
+    ).toThrow(/binding-keys/u);
+    expect(() =>
+      canonicalAuthorizationManifest({
+        ...normal,
+        payload_sha256: digest('retired-payload'),
+      }),
+    ).toThrow(/authorization-keys/u);
+    const retiredCoordinate = structuredClone(value);
+    Reflect.set(retiredCoordinate.coordinates, 'payload_sha256', digest('retired-payload'));
+    expect(() => validateEnrollmentRecord(retiredCoordinate)).toThrow(/record-canonical/u);
     const commitIdentityChanged = structuredClone(value);
     commitIdentityChanged.objects.normal_commit.sha = sha('4');
     expect(() => validateEnrollmentRecord(commitIdentityChanged)).toThrow(
@@ -1479,17 +1510,11 @@ describe('R4 post-merge enrollment executor', () => {
     const value = record();
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-enrollment-cli-'));
     const recordFile = path.join(root, 'record.json');
-    const authorityFile = path.join(root, 'authority.json');
     const observationContextFile = path.join(root, 'observation-context.json');
     const observationsFile = path.join(root, 'observations.json');
     const journal = path.join(root, 'journal');
     try {
       fs.writeFileSync(recordFile, `${JSON.stringify(value)}\n`, 'utf8');
-      fs.writeFileSync(
-        authorityFile,
-        `${JSON.stringify(executionAuthorityPackage(value.authority.enrollment_record_sha256))}\n`,
-        'utf8',
-      );
       fs.writeFileSync(observationsFile, '[]\n', 'utf8');
       fs.writeFileSync(
         observationContextFile,
@@ -1503,6 +1528,7 @@ describe('R4 post-merge enrollment executor', () => {
           execution_authorization: 'execution.json',
           producer_journal_directory: 'producer-journal',
           package_name: 'capture-package',
+          authority: observationAuthority(),
         })}\n`,
         'utf8',
       );
@@ -1514,8 +1540,6 @@ describe('R4 post-merge enrollment executor', () => {
             recordFile,
             '--record-sha256',
             recordSha256(value),
-            '--execution-authority',
-            authorityFile,
             '--observation-context',
             observationContextFile,
             '--journal-dir',

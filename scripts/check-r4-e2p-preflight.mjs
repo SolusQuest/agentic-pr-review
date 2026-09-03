@@ -55,7 +55,6 @@ export function authorizationManifestV2(values) {
     workflow_sha: values.workflowSha,
     action_source_sha: values.actionSourceSha,
     payload_source_sha: values.payloadSourceSha,
-    payload_sha256: values.payloadSha256,
   });
 }
 
