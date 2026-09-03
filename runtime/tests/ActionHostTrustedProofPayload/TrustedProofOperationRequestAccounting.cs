@@ -8,9 +8,9 @@ namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 #endif
 
-// The allocation is deliberately a measurement contract until the first
-// complete synthetic AOT run supplies the reviewed role maxima.  It must not
-// be mistaken for a production primary-rate-limit bound.
+// Domains label actual per-execution request evidence. Final profiles use
+// independent runaway ceilings and live remaining authority, not fixed role
+// allocations or historical measurement maxima.
 internal enum TrustedProofRequestDomain
 {
     NodeArtifactRest,
