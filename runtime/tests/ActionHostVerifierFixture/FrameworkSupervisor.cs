@@ -765,6 +765,9 @@ internal static class FrameworkSupervisor
             File.Exists(Path.Join(
                 scenario,
                 "provider-reordered-history-rejected"));
+        var stateReadClockAdvanced = !spec.TrustedProofPayload ||
+            spec.ExpectedStatus is not ("reviewed" or "stale_head") ||
+            ReadOptionalText(scenario, "state-read-clock-advanced") == "1\n";
         var outputUnchanged = output == FrameworkCanaries.OutputSentinel;
         var groupQuiet = !(spec.CrashHost ||
                 spec.CrashAfterProviderCheckpoint ||
@@ -877,7 +880,8 @@ internal static class FrameworkSupervisor
                 anonymousSignedDownloads);
         var artifactRestBudgetSatisfied = trustedProofRequestBudgetSatisfied;
         var passed = exited && expected && barrierAfterPassed && noLeak &&
-            closedEnvironment && reorderedHistoryRejected && outputUnchanged &&
+            closedEnvironment && reorderedHistoryRejected &&
+            stateReadClockAdvanced && outputUnchanged &&
             groupQuiet && platformQuiet && continuation &&
             canonicalRequestEvents &&
             successfulContinuation && sixTools && signalGateReached &&
@@ -903,6 +907,7 @@ internal static class FrameworkSupervisor
                     ("canary_safe", noLeak),
                     ("environment_recorded", closedEnvironment),
                     ("reordered_history_rejected", reorderedHistoryRejected),
+                    ("state_read_clock_advanced", stateReadClockAdvanced),
                     ("output_unchanged", outputUnchanged),
                     ("process_group_quiet", groupQuiet),
                     ("platform_quiet", platformQuiet),

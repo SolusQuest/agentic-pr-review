@@ -8,6 +8,8 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.Host.State.Locator;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofVerifier;
 
@@ -84,6 +86,7 @@ internal static class TrustedProofVerifierHost
 
         var primaryBucket = FrameworkPrimaryRateLimitBucket.OpenForScenario(
             scenarioRoot);
+        var time = new VerifierTimeProvider(scenarioRoot);
         Func<HttpMessageHandler> createGitHubInnerHandler = () =>
             new VerifierRecordingHandler(
             scenarioRoot,
@@ -96,12 +99,15 @@ internal static class TrustedProofVerifierHost
                 primaryBucket.ObserveAsync));
         return new TrustedProofPayloadRuntimePorts(
             createGitHubInnerHandler,
-            github => new FrameworkStateDependencies(scenarioRoot, github),
+            github => new FrameworkStateDependencies(scenarioRoot, github)
+            {
+                AfterSuccessfulList = time.AfterSuccessfulList,
+            },
             providerInner => new VerifierRecordingHandler(
                 scenarioRoot,
                 "provider",
                 providerInner),
-            new VerifierTimeProvider(),
+            time,
             () => Path.Join(scenarioRoot, "host-staging"));
     }
 
@@ -218,9 +224,26 @@ internal static class TrustedProofVerifierHost
                 Environment.GetEnvironmentVariable("TMPDIR"));
     }
 
-    private sealed class VerifierTimeProvider : TimeProvider
+    private sealed class VerifierTimeProvider(string scenarioRoot) : TimeProvider
     {
+        private long advanced;
+
         public override DateTimeOffset GetUtcNow() =>
-            DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+            DateTimeOffset.FromUnixTimeSeconds(
+                1_800_000_000 + Interlocked.Read(ref advanced));
+
+        internal void AfterSuccessfulList(OpaqueStoreListRequest request)
+        {
+            // Model ordinary read latency inside the first scoped observation,
+            // before initialization re-observes it. Each fresh process crosses
+            // the same second boundary, including accepted-state continuation.
+            if (request.Name.Value != LocatorRootFormat.StoreName &&
+                Interlocked.CompareExchange(ref advanced, 1, 0) == 0)
+            {
+                File.WriteAllText(
+                    Path.Join(scenarioRoot, "state-read-clock-advanced"),
+                    "1\n");
+            }
+        }
     }
 }

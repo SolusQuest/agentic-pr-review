@@ -761,8 +761,11 @@ internal sealed class AcceptedStateSelector
             ProducingRunAttempt == request.ProducingRunAttempt &&
             RequiredLogicalExpiresAtUnixSeconds ==
                 request.RequiredLogicalExpiresAtUnixSeconds &&
-            RequiredPlatformExpiresAtUnixSeconds ==
-                observation.RequiredPlatformExpiresAtUnixSeconds &&
+            // This is an authorized retention floor, not inventory identity.
+            // A later observation may require longer retention as time moves;
+            // initialization uses that fresh requirement and checks coverage.
+            observation.RequiredPlatformExpiresAtUnixSeconds >=
+                RequiredPlatformExpiresAtUnixSeconds &&
             observation.Selection.IsAbsent &&
             observation.Snapshot is
             {

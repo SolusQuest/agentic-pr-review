@@ -29,6 +29,124 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
 public sealed class AcceptedStateProductionEndToEndTests
 {
     [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(5)]
+    public async Task BootstrapAllowsTimeToAdvanceDuringEmptyInventoryRead(
+        long elapsedSeconds)
+    {
+        var (request, store, time) = await BootstrapClockRequestAsync();
+        AdvanceDuringFirstScopedRead(store, time, elapsedSeconds);
+
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        using var context = result.Context;
+
+        Assert.True(result.Succeeded, result.Code);
+        Assert.True(result.IsBootstrap);
+        Assert.Equal(2, store.UploadCalls);
+        var lineage = Assert.Single(store.Objects.Where(item =>
+            item.Reference.Name.Value != LocatorRootFormat.StoreName));
+        Assert.Equal(
+            time.UnixSeconds + StateRetentionRequirements.ScopedPlatformRequestSeconds +
+                store.ExtraRetentionSeconds,
+            lineage.ExpiresAtUnixSeconds);
+    }
+
+    [Theory]
+    [InlineData(3 * 24 * 60 * 60)]
+    [InlineData(8 * 24 * 60 * 60)]
+    public async Task ElapsedTimeCannotBypassRootCoverageOrLogicalExpiry(
+        long elapsedSeconds)
+    {
+        var (request, store, time) = await BootstrapClockRequestAsync();
+        AdvanceDuringFirstScopedRead(store, time, elapsedSeconds);
+
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        using var context = result.Context;
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, result.Code);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(LocatorRootFormat.StoreName,
+            Assert.Single(store.Objects).Reference.Name.Value);
+    }
+
+    [Fact]
+    public async Task LaterObservationStillRejectsUnderRetainedScopedUpload()
+    {
+        var (request, store, time) = await BootstrapClockRequestAsync();
+        AdvanceDuringFirstScopedRead(store, time, 1);
+        store.AfterUpload = (upload, _) =>
+        {
+            if (upload.Name.Value == LocatorRootFormat.StoreName)
+            {
+                store.ExtraRetentionSeconds = -1;
+            }
+        };
+
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        using var context = result.Context;
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(2, store.UploadCalls);
+        Assert.True(store.DeleteCalls > 0);
+        Assert.Equal(LocatorRootFormat.StoreName,
+            Assert.Single(store.Objects).Reference.Name.Value);
+    }
+
+    private static void AdvanceDuringFirstScopedRead(
+        ScriptedLocatorStore store,
+        MutableLineageTimeProvider time,
+        long elapsedSeconds)
+    {
+        store.BeforeList = (request, _) =>
+        {
+            if (request.Name.Value != LocatorRootFormat.StoreName)
+            {
+                store.BeforeList = null;
+                time.UnixSeconds += elapsedSeconds;
+            }
+        };
+    }
+
+    private static async Task<(
+        ArtifactStateRestoreRequest Request,
+        ScriptedLocatorStore Store,
+        MutableLineageTimeProvider Time)> BootstrapClockRequestAsync()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch, CancellationToken.None);
+        var invocation = Assert.IsType<ActionHostAuthorizer.AuthorizedInvocation>(
+            authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch, invocation, out var policyRequest, out _));
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("trusted clock-boundary policy")),
+            CancellationToken.None);
+        Assert.True(materialized.Succeeded);
+        var time = new MutableLineageTimeProvider(
+            AcceptedStateTestData.AcceptedAtUnixSeconds);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+        };
+        return (new ArtifactStateRestoreRequest(
+            launch, invocation, materialized.Policy!,
+            User("current review context"), DeepSeekReasoningContinuationCodec.Instance,
+            new EndToEndDependencies(store), time), store, time);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]

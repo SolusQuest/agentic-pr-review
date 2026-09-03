@@ -13,17 +13,21 @@ internal sealed class FrameworkStateDependencies(
     private readonly AcceptedStateProductionDependencies inner =
         new(gitFactory);
 
+    internal Action<OpaqueStoreListRequest>? AfterSuccessfulList { get; init; }
+
     public IRestrictedStateStore CreateArtifactStore(
         ActionHostLaunchContract launch) => new RecordingStore(
             scenarioRoot,
-            inner.CreateArtifactStore(launch));
+            inner.CreateArtifactStore(launch),
+            AfterSuccessfulList);
 
     public IActionHostGitObjectTransport CreateAncestryTransport(
         ActionHostGitHubToken token) => inner.CreateAncestryTransport(token);
 
     private sealed class RecordingStore(
         string scenarioRoot,
-        IRestrictedStateStore inner) : IRestrictedStateStore
+        IRestrictedStateStore inner,
+        Action<OpaqueStoreListRequest>? afterSuccessfulList) : IRestrictedStateStore
     {
         private readonly FrameworkStateEvidenceRecorder recorder =
             new(scenarioRoot);
@@ -42,6 +46,10 @@ internal sealed class FrameworkStateDependencies(
                     ? "-"
                     : string.Join(',', result.Objects.Select(value =>
                         value.ObjectId.Value)));
+            if (result.Succeeded && result.Complete)
+            {
+                afterSuccessfulList?.Invoke(request);
+            }
             return result;
         }
 

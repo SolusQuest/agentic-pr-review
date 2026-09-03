@@ -59,6 +59,85 @@ public sealed class AcceptedStateSelectorTests
         Assert.Null(result.Selection);
     }
 
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(5, true)]
+    public void InitialAbsenceRetainsMinimumPlatformExpiry(
+        long expiryDelta,
+        bool expected)
+    {
+        using var fixture = SelectorFixture.Absent();
+        var authority = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request).InitialAbsence!;
+        using var observed = ReobserveAbsence(fixture, expiryDelta);
+
+        Assert.Equal(expected, authority.Allows(
+            fixture.Request.Access, fixture.Request, observed));
+    }
+
+    [Theory]
+    [InlineData("repository")]
+    [InlineData("scope")]
+    [InlineData("inventory")]
+    [InlineData("key")]
+    [InlineData("run")]
+    [InlineData("attempt")]
+    [InlineData("logical-expiry")]
+    [InlineData("physical-count")]
+    public void LongerPlatformRetentionDoesNotRelaxAbsenceIdentity(
+        string mutation)
+    {
+        using var fixture = SelectorFixture.Absent();
+        var authority = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request).InitialAbsence!;
+        var request = mutation switch
+        {
+            "repository" => fixture.Request with
+            {
+                BaseScope = fixture.Request.BaseScope with
+                {
+                    RepositoryId = "other/repository",
+                },
+            },
+            "run" => fixture.Request with
+            {
+                ProducingRunIdentity = "other-run",
+            },
+            "attempt" => fixture.Request with
+            {
+                ProducingRunAttempt = fixture.Request.ProducingRunAttempt + 1,
+            },
+            "logical-expiry" => fixture.Request with
+            {
+                RequiredLogicalExpiresAtUnixSeconds =
+                    fixture.Request.RequiredLogicalExpiresAtUnixSeconds + 1,
+            },
+            _ => fixture.Request,
+        };
+        using var observed = ReobserveAbsence(fixture, 5, mutation);
+
+        Assert.False(authority.Allows(request.Access, request, observed));
+    }
+
+    private static LineageReadOnlyObservationContext ReobserveAbsence(
+        SelectorFixture fixture,
+        long expiryDelta,
+        string? mutation = null)
+    {
+        var before = fixture.Observation;
+        return new LineageReadOnlyObservationContext(
+            new ScopedStateInventorySnapshot(
+                before.Snapshot!.Names, [], [], [],
+                PhysicalCount: mutation == "physical-count" ? 1 : 0),
+            LineageSelectionResult.Absent(),
+            mutation == "scope" ? new string('1', 64) : before.BaseScopeDigest,
+            mutation == "key" ? new string('2', 64) : before.CurrentKeyId,
+            mutation == "inventory" ? new string('3', 64) : before.InventoryDigest,
+            before.RequiredPlatformExpiresAtUnixSeconds + expiryDelta);
+    }
+
     [Fact]
     public void UniqueInitialCandidateWithoutReceiptPreservesBootstrapForP5()
     {
