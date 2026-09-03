@@ -225,8 +225,8 @@ function canonicalGitHubRequestBudget(
       'host_head_source_rest',
       'host_other_github_rest',
     ]) ||
-    !boundedInteger(value.authenticated_rest_requests, 0, 216) ||
-    value.authenticated_rest_limit !== 216 ||
+    !boundedInteger(value.authenticated_rest_requests, 0, 256) ||
+    value.authenticated_rest_limit !== 256 ||
     !boundedInteger(value.anonymous_codeload_requests, 0, 1) ||
     value.anonymous_codeload_limit !== 1 ||
     value.rejected_requests !== 0 ||
@@ -304,15 +304,15 @@ function validGitHubBudgetRole(value: unknown, expectedTail: number): value is G
   }
   const role = value as Record<string, unknown>;
   return (
-    boundedInteger(role.raw, 0, 216) &&
-    boundedInteger(role.primary, 0, 216) &&
-    boundedInteger(role.not_modified, 0, 216) &&
-    boundedInteger(role.secondary_points, 0, 216 * 5) &&
-    boundedInteger(role.permission, 0, 216) &&
-    boundedInteger(role.primary_rate_limited, 0, 216) &&
-    boundedInteger(role.secondary_rate_limited, 0, 216) &&
-    boundedInteger(role.combined_rate_limited, 0, 216) &&
-    boundedInteger(role.invalid_rate_headers, 0, 216) &&
+    boundedInteger(role.raw, 0, 256) &&
+    boundedInteger(role.primary, 0, 256) &&
+    boundedInteger(role.not_modified, 0, 256) &&
+    boundedInteger(role.secondary_points, 0, 256 * 5) &&
+    boundedInteger(role.permission, 0, 256) &&
+    boundedInteger(role.primary_rate_limited, 0, 256) &&
+    boundedInteger(role.secondary_rate_limited, 0, 256) &&
+    boundedInteger(role.combined_rate_limited, 0, 256) &&
+    boundedInteger(role.invalid_rate_headers, 0, 256) &&
     role.remaining_tail_required === expectedTail &&
     role.raw === role.primary + role.not_modified &&
     role.secondary_points >= role.raw &&

@@ -1186,8 +1186,76 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         Assert.False(ledger.IsClosed);
     }
 
+    [Theory]
+    [InlineData("final-bootstrap")]
+    [InlineData("final-continuation")]
+    [InlineData("final-stale")]
+    public void FinalSafetyProfilesDoNotRequireHistoricalRequestTails(string requested)
+    {
+        Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
+            name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
+                ? requested : null,
+            out var profile));
+        Assert.False(profile!.MeasurementOnly);
+        Assert.Equal(64, profile.HostRemainingTailGuard.Reserve);
+        Assert.Equal(64, profile.ExternalControlRemainingTailGuard.Reserve);
+        Assert.Equal(0, profile.CleanupControlRemainingTailGuard.Reserve);
+        Assert.All(new[]
+        {
+            profile.HostRemainingTailGuard,
+            profile.ExternalControlRemainingTailGuard,
+            profile.CleanupControlRemainingTailGuard,
+        }, guard => Assert.All(Enum.GetValues<TrustedProofRequestDomain>()
+            .Where(domain => domain is TrustedProofRequestDomain.NodeArtifactRest or
+                TrustedProofRequestDomain.HostHeadSourceRest or
+                TrustedProofRequestDomain.HostOtherGitHubRest or
+                TrustedProofRequestDomain.TrustedControlRest),
+            domain => Assert.Equal(0, guard.RequiredTail(domain))));
+    }
+
+    [Theory]
+    [InlineData(64)]
+    [InlineData(1_000)]
+    public void CleanupAloneCanSpendTheReserveAndRemainsCappedAt64(int initialRemaining)
+    {
+        Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
+            _ => "final-continuation", out var profile));
+        const TrustedProofRequestDomain domain =
+            TrustedProofRequestDomain.TrustedControlRest;
+        var workLedger = new TrustedProofPrimaryRemainingLedger();
+        using (var initial = RemainingResponse("64"))
+        {
+            workLedger.Observe(null, initial, TrustedProofResponseClass.Success,
+                domain, profile!.ExternalControlRemainingTailGuard);
+        }
+        Assert.False(workLedger.TryLease(domain,
+            profile!.ExternalControlRemainingTailGuard, out _));
+
+        // Cleanup is a fresh process/lane, not a resurrection of the closed work ledger.
+        var cleanupLedger = new TrustedProofPrimaryRemainingLedger();
+        var cleanupGuard = profile.CleanupControlRemainingTailGuard;
+        using (var initial = RemainingResponse(initialRemaining.ToString(
+            System.Globalization.CultureInfo.InvariantCulture)))
+        {
+            cleanupLedger.Observe(null, initial, TrustedProofResponseClass.Success,
+                domain, cleanupGuard);
+        }
+        var cleanup = new TrustedProofControlRequestBudget(
+            remainingTailGuard: cleanupGuard, remainingLedger: cleanupLedger);
+        for (var index = 0; index < 64; index++)
+        {
+            Assert.True(cleanup.TryClaim(out var lease));
+            using var response = RemainingResponse((initialRemaining - index - 1)
+                .ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Observe(cleanup, response, HttpMethod.Delete, lease);
+        }
+        Assert.Equal(64, cleanup.Consumed);
+        Assert.False(cleanup.TryClaim(out _));
+        Assert.True(workLedger.IsClosed);
+    }
+
     [Fact]
-    public void ProductionProfileSelectsOnlyTheExplicitMeasurementOrFrozenFinalProfile()
+    public void ProductionProfileSelectsOnlyTheExplicitMeasurementOrFinalSafetyProfile()
     {
         Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
             name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
@@ -1212,15 +1280,15 @@ public sealed class TrustedProofGitHubRequestBudgetTests
         Assert.False(final!.MeasurementOnly);
         Assert.Equal(TrustedProofOperationRequestAccounting.OperationPrimaryReserve,
             final.HostRemainingTailGuard.Reserve);
-        Assert.Equal(679, final.HostRemainingTailGuard.RequiredTail(
+        Assert.Equal(0, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.NodeArtifactRest));
-        Assert.Equal(863, final.HostRemainingTailGuard.RequiredTail(
+        Assert.Equal(0, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.HostHeadSourceRest));
-        Assert.Equal(878, final.HostRemainingTailGuard.RequiredTail(
+        Assert.Equal(0, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.HostOtherGitHubRest));
-        Assert.Equal(879, final.HostRemainingTailGuard.RequiredTail(
+        Assert.Equal(0, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.TrustedControlRest));
-        Assert.Equal(888, final.ExternalControlRemainingTailGuard.RequiredTail(
+        Assert.Equal(0, final.ExternalControlRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.TrustedControlRest));
 
         Assert.False(TrustedProofRequestBudgetProfile.TrySelectProduction(
@@ -1235,44 +1303,13 @@ public sealed class TrustedProofGitHubRequestBudgetTests
     }
 
     [Theory]
-    [InlineData("final-bootstrap", 679, 863, 878, 879, 888, 888)]
-    [InlineData("final-continuation", 393, 577, 591, 592, 597, 242)]
-    [InlineData("final-stale", 26, 210, 224, 225, 234, 234)]
-    public void FrozenProfilesBindEveryStageAndProcessLane(
-        string requested,
-        int node,
-        int head,
-        int other,
-        int embeddedControl,
-        int externalControl,
-        int cleanupControl)
-    {
-        Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
-            name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
-                ? requested : null,
-            out var profile));
-        Assert.Equal(node, profile!.HostRemainingTailGuard.RequiredTail(
-            TrustedProofRequestDomain.NodeArtifactRest));
-        Assert.Equal(head, profile.HostRemainingTailGuard.RequiredTail(
-            TrustedProofRequestDomain.HostHeadSourceRest));
-        Assert.Equal(other, profile.HostRemainingTailGuard.RequiredTail(
-            TrustedProofRequestDomain.HostOtherGitHubRest));
-        Assert.Equal(embeddedControl, profile.HostRemainingTailGuard.RequiredTail(
-            TrustedProofRequestDomain.TrustedControlRest));
-        Assert.Equal(externalControl,
-            profile.ExternalControlRemainingTailGuard.RequiredTail(
-                TrustedProofRequestDomain.TrustedControlRest));
-        Assert.Equal(cleanupControl,
-            profile.CleanupControlRemainingTailGuard.RequiredTail(
-                TrustedProofRequestDomain.TrustedControlRest));
-    }
-
-    [Theory]
-    [InlineData("661", false)]
-    [InlineData("660", true)]
-    public void ContinuationExternalFirstResponsePreservesTheExactLowStartBoundary(
+    [InlineData("65", false, true)]
+    [InlineData("64", false, false)]
+    [InlineData("63", true, false)]
+    public void CompletedResponsePreservesTheReserveAndClosesOnlyLaterDispatch(
         string remaining,
-        bool closes)
+        bool closes,
+        bool nextAllowed)
     {
         Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
             name => name == "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE"
@@ -1288,13 +1325,9 @@ public sealed class TrustedProofGitHubRequestBudgetTests
             TrustedProofRequestDomain.TrustedControlRest, guard);
 
         Assert.Equal(closes, ledger.IsClosed);
-        if (!closes)
-        {
-            Assert.True(ledger.TryLease(
-                TrustedProofRequestDomain.TrustedControlRest, guard,
-                out var next));
-            ledger.AbortBeforeWire(next!);
-        }
+        Assert.Equal(nextAllowed, ledger.TryLease(
+            TrustedProofRequestDomain.TrustedControlRest, guard, out var next));
+        if (next is not null) ledger.AbortBeforeWire(next);
     }
 
     [Fact]

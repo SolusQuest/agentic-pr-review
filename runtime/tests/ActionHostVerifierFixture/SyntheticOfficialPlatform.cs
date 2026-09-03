@@ -14,7 +14,6 @@ namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 {
     internal const int SyntheticPrimaryLimit = 1000;
-    internal const int FrozenFinalPrimaryRemaining = 111;
     private sealed class Artifact(
         long id,
         string name,

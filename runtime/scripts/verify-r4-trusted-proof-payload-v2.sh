@@ -189,7 +189,7 @@ const roleKeys = [
 exactKeys(github.host_head_source_rest, roleKeys);
 exactKeys(github.host_other_github_rest, roleKeys);
 if (github.authenticated_rest_requests !== 0 ||
-    github.authenticated_rest_limit !== 216 ||
+    github.authenticated_rest_limit !== 256 ||
     github.anonymous_codeload_requests !== 0 ||
     github.anonymous_codeload_limit !== 1 ||
     github.rejected_requests !== 0 ||
@@ -198,8 +198,8 @@ if (github.authenticated_rest_requests !== 0 ||
     github.terminal_rate_limited !== false ||
     github.low_remaining_guard !== false ||
     github.remaining_tail_reserve !== 64 ||
-    github.host_head_source_rest.remaining_tail_required !== 863 ||
-    github.host_other_github_rest.remaining_tail_required !== 878) {
+    github.host_head_source_rest.remaining_tail_required !== 0 ||
+    github.host_other_github_rest.remaining_tail_required !== 0) {
   process.exit(1);
 }
 for (const role of [
@@ -238,7 +238,7 @@ if (control.consumed !== 0 ||
     control.not_modified !== 0 ||
     control.secondary_points !== 0 ||
     control.mutation_count !== 0 ||
-    control.remaining_tail_required !== 879 ||
+    control.remaining_tail_required !== 0 ||
     control.remaining_tail_reserve !== 64 ||
     control.permission_denied !== 0 ||
     control.primary_rate_limited !== 0 ||
@@ -474,8 +474,11 @@ if (input === null || Array.isArray(input) || typeof input !== 'object' ||
     input.fixture_base_sha !== expectedSourceCommit) {
   throw new Error('The trusted-proof evidence envelope is invalid.');
 }
-if (input.shared_primary_bucket_start !== 1000 ||
-    input.shared_primary_bucket_end !== 111 ||
+if (!Number.isSafeInteger(input.shared_primary_bucket_start) ||
+    !Number.isSafeInteger(input.shared_primary_bucket_end) ||
+    input.shared_primary_bucket_start > 1000 ||
+    input.shared_primary_bucket_end < 64 ||
+    input.shared_primary_bucket_end > input.shared_primary_bucket_start ||
     input.shared_primary_bucket_exact !== true) {
   throw new Error('The shared primary bucket evidence is invalid.');
 }

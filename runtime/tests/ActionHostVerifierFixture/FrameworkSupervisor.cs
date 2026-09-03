@@ -1156,11 +1156,10 @@ internal static class FrameworkSupervisor
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceTree,
                 requiredSourceExpectation.SourceTree);
-        var requestBudgetValid = await VerifyTrustedProofRequestBudgetAsync(
-            root, repository, cases).ConfigureAwait(false);
         var sharedPrimaryRemaining = platform.PrimaryRemaining;
-        var sharedPrimaryBucketValid = sharedPrimaryRemaining ==
-            SyntheticOfficialPlatform.FrozenFinalPrimaryRemaining;
+        var (requestBudgetValid, sharedPrimaryBucketValid) =
+            await VerifyTrustedProofRequestBudgetAsync(
+                root, cases, sharedPrimaryRemaining).ConfigureAwait(false);
         var authorityExact = payloadCases.All(result =>
             TrustedProofAuthorityIsExact(root, result.Name,
                 requiredSourceExpectation.SourceCommit));
@@ -1393,19 +1392,12 @@ internal static class FrameworkSupervisor
         }
     }
 
-    private static async Task<bool> VerifyTrustedProofRequestBudgetAsync(
+    private static async Task<(bool Valid, bool SharedPrimaryBucketExact)>
+        VerifyTrustedProofRequestBudgetAsync(
         string root,
-        string repository,
-        IReadOnlyList<CaseResult> cases)
+        IReadOnlyList<CaseResult> cases,
+        int primaryRemaining)
     {
-        var golden = Path.Join(repository, "runtime", "tests", "fixtures",
-            "action-host", "framework",
-            "trusted-proof-request-budget.json.golden");
-        if (!File.Exists(golden))
-        {
-            return false;
-        }
-
         var names = new[]
         {
             "dispatch-bootstrap",
@@ -1416,7 +1408,7 @@ internal static class FrameworkSupervisor
             result.Name == name)).ToArray();
         if (selected.Any(result => result is null))
         {
-            return false;
+            return (false, false);
         }
 
         var payloadReceipts = selected.Select(result =>
@@ -1441,10 +1433,10 @@ internal static class FrameworkSupervisor
             artifactReceipts.Any(receipt => receipt is null) ||
             embeddedControlReceipts.Any(receipt => receipt is null))
         {
-            return false;
+            return (false, false);
         }
 
-        const int payloadMaximum = 216;
+        const int payloadMaximum = 256;
         const int controlMaximum = 64;
         const int repositoryPrimaryMaximum = 1_000;
         const int minimumPrimaryReserve = 64;
@@ -1459,7 +1451,7 @@ internal static class FrameworkSupervisor
         if (artifactMaximumTotals.Length != 1 ||
             artifactMaximumPrimaries.Length != 1)
         {
-            return false;
+            return (false, false);
         }
         var roleTotals = ObservedRoleTotals(payloadReceipts,
             artifactReceipts, embeddedControlReceipts,
@@ -1467,13 +1459,13 @@ internal static class FrameworkSupervisor
         var operationPrimaryRequests = roleTotals.Values.Sum();
         var operationPrimaryReserve = repositoryPrimaryMaximum -
             operationPrimaryRequests;
-        var finalAllocationValid = SatisfiesFrozenRoleAllocation(
-            roleTotals, FrozenOperationPrimaryRoleCaps,
-            minimumPrimaryReserve);
         var operationEvents = ReadOperationRequestEvents(root, names);
         var domainTails = operationEvents.DomainTails;
-        var finalRemainingTailValid = SatisfiesFrozenRemainingTailGuard(
-            domainTails);
+        var chargedEvents = operationEvents.Events.Count(IsPrimaryCharged);
+        var sharedPrimaryBucketExact = primaryRemaining >= minimumPrimaryReserve &&
+            repositoryPrimaryMaximum - primaryRemaining == chargedEvents;
+        var operationAccountingValid = OperationPrimaryBudgetIsValid(
+            roleTotals, repositoryPrimaryMaximum, primaryRemaining, chargedEvents);
         var perScenarioControlPrimary = Enumerable.Range(0, selected.Length)
             .Select(index => checked(embeddedControlReceipts[index]!.Primary +
                 protectedExternalControlReceipts[index].Sum(receipt => receipt.Primary) +
@@ -1600,8 +1592,7 @@ internal static class FrameworkSupervisor
             ("operation_primary_rate_limit_reserve", operationPrimaryReserve),
             ("minimum_required_operation_primary_rate_limit_reserve",
                 minimumPrimaryReserve),
-            ("final_role_allocation_frozen", finalAllocationValid),
-            ("remaining_tail_guard_frozen", finalRemainingTailValid),
+            ("operation_accounting_valid", operationAccountingValid),
             ("fixed_scenario_order", FrameworkJson.Array(names)),
             ("suite_role_totals", roleTotalEvidence),
             ("domain_tails", domainTailEvidence),
@@ -1647,7 +1638,7 @@ internal static class FrameworkSupervisor
         await File.WriteAllBytesAsync(Path.Join(root,
             "trusted-proof-request-budget-evidence.json"), actualBytes)
             .ConfigureAwait(false);
-        return payloadReceipts.Select((receipt, index) =>
+        return (payloadReceipts.Select((receipt, index) =>
                 PayloadRequestBudgetReceiptIsExact(receipt!, payloadMaximum,
                     selected[index]!.Name)).All(value => value) &&
             selected.Select((result, index) =>
@@ -1685,11 +1676,10 @@ internal static class FrameworkSupervisor
             roleTotalsWithinBudget &&
             domainTailsWithinBudget &&
             !measurementOnly &&
-            finalAllocationValid &&
-            finalRemainingTailValid &&
+            operationAccountingValid &&
             operationPrimaryReserve >= minimumPrimaryReserve &&
-            JsonEquivalent(actualBytes, await File.ReadAllBytesAsync(golden)
-                .ConfigureAwait(false));
+            sharedPrimaryBucketExact,
+            sharedPrimaryBucketExact);
     }
 
     private static string RequiredProtectedExternalControlPhase(string name) =>
@@ -1723,27 +1713,11 @@ internal static class FrameworkSupervisor
         ? receipt.RemainingTailReserve ==
             TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.RemainingTailRequired == 0
-        : FrozenTailReceiptIsExact(scenarioName,
+        : FinalBudgetProfileIsExact(scenarioName,
             receipt.Phase == "cleanup" ? TrustedProofRequestBudgetLane.CleanupControl :
                 TrustedProofRequestBudgetLane.ExternalControl,
             TrustedProofRequestDomain.TrustedControlRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve);
-
-    // These exact role totals are frozen from two byte-identical clean AOT
-    // measurements.  The final verifier rejects either a new charged role
-    // or a change to an existing role, rather than treating this as a broad
-    // upper-bound budget.
-    private static readonly IReadOnlyDictionary<string, int>
-        FrozenOperationPrimaryRoleCaps = new Dictionary<string, int>(
-            StringComparer.Ordinal)
-        {
-            ["node_artifact_rest"] = 224,
-            ["host_head_source_rest"] = 540,
-            ["host_other_github_rest"] = 82,
-            ["embedded_control"] = 12,
-            ["external_control"] = 23,
-            ["cleanup_control"] = 8,
-        };
 
     private static IReadOnlyDictionary<string, int> ObservedRoleTotals(
         FrameworkRequestBudgetReceipt?[] host,
@@ -1761,50 +1735,31 @@ internal static class FrameworkSupervisor
             ["cleanup_control"] = cleanup.Sum(values => values.Sum(value => value.Primary)),
         };
 
-    private static bool SatisfiesFrozenRoleAllocation(
+    internal static bool OperationPrimaryBudgetIsValid(
         IReadOnlyDictionary<string, int> observed,
-        IReadOnlyDictionary<string, int> frozen,
-        int reserve)
+        int initialRemaining,
+        int finalRemaining,
+        int chargedEvents)
     {
         var roles = new[]
         {
             "node_artifact_rest", "host_head_source_rest", "host_other_github_rest",
             "embedded_control", "external_control", "cleanup_control",
         };
-        return observed.Count == roles.Length && frozen.Count == roles.Length &&
-            roles.All(observed.ContainsKey) && roles.All(frozen.ContainsKey) &&
-            roles.All(role => observed[role] >= 0 && frozen[role] == observed[role]) &&
-            frozen.Values.Sum() + reserve <=
-                TrustedProofOperationRequestAccounting.OperationPrimaryBudget;
-    }
-
-    private static bool SatisfiesFrozenRemainingTailGuard(
-        IReadOnlyDictionary<string, int> observed)
-    {
-        var domains = new[]
+        if (observed.Count != roles.Length || !roles.All(observed.ContainsKey) ||
+            observed.Values.Any(value => value < 0) ||
+            initialRemaining > TrustedProofOperationRequestAccounting.OperationPrimaryBudget ||
+            finalRemaining < TrustedProofOperationRequestAccounting.OperationPrimaryReserve ||
+            finalRemaining > initialRemaining)
         {
-            "node_artifact_rest", "host_head_source_rest", "host_other_github_rest",
-            "trusted_control_rest",
-        };
-        return TrustedProofRequestBudgetProfile.TryGetFrozenTailProfile(
-                "final-bootstrap", TrustedProofRequestBudgetLane.ExternalControl,
-                out var frozen, out var reserve) &&
-            observed.Count == domains.Length && domains.All(observed.ContainsKey) &&
-            domains.All(domain => observed[domain] >= 0 &&
-                frozen[DomainForTailName(domain)] == observed[domain]) &&
-            domains.All(domain => frozen[DomainForTailName(domain)] + reserve <
-                TrustedProofOperationRequestAccounting.OperationPrimaryBudget);
+            return false;
+        }
+        // Join this execution's receipts, independent events and shared bucket.
+        // None of these counts is required to equal a historical measurement.
+        var primary = observed.Values.Sum(value => (long)value);
+        return primary == chargedEvents &&
+            initialRemaining - finalRemaining == primary;
     }
-
-    private static TrustedProofRequestDomain DomainForTailName(string domain) =>
-        domain switch
-        {
-            "node_artifact_rest" => TrustedProofRequestDomain.NodeArtifactRest,
-            "host_head_source_rest" => TrustedProofRequestDomain.HostHeadSourceRest,
-            "host_other_github_rest" => TrustedProofRequestDomain.HostOtherGitHubRest,
-            "trusted_control_rest" => TrustedProofRequestDomain.TrustedControlRest,
-            _ => throw new ArgumentOutOfRangeException(nameof(domain)),
-        };
 
     private static CompiledPayloadSourceExpectation?
         ReadCompiledPayloadSourceExpectation(
@@ -4975,7 +4930,7 @@ internal static class FrameworkSupervisor
         int anonymousSignedDownloads) =>
         TryReadTrustedProofRequestBudgetReceipt(scenario) is { } payload &&
         PayloadRequestBudgetReceiptIsExact(payload,
-            payload.AuthenticatedRestLimit, Path.GetFileName(scenario)) &&
+            256, Path.GetFileName(scenario)) &&
         TryReadArtifactRestRequestBudgetReceipt(scenario) is { } artifact &&
         ArtifactRestRequestBudgetReceiptIsExact(
             artifact,
@@ -5025,7 +4980,7 @@ internal static class FrameworkSupervisor
         receipt.AnonymousCodeloadLimit == 1 &&
         receipt.RejectedRequests == 0;
 
-    private static bool ArtifactRestRequestBudgetReceiptIsExact(
+    internal static bool ArtifactRestRequestBudgetReceiptIsExact(
         FrameworkArtifactRestRequestBudgetReceipt receipt,
         string scenario,
         int artifactRestRequests,
@@ -5036,11 +4991,11 @@ internal static class FrameworkSupervisor
         receipt.Kind == "apr-r4-trusted-proof-artifact-rest-budget-v2" &&
         ArtifactRestReceiptIdentityIsExact(receipt, scenario) &&
         receipt.ProtectedRoute &&
-        receipt.MaximumTotalAuthenticatedApiRequests == 2130 &&
+        receipt.MaximumTotalAuthenticatedApiRequests == 4096 &&
         receipt.TotalAuthenticatedApiRequests >= 0 &&
         receipt.TotalAuthenticatedApiRequests <=
             receipt.MaximumTotalAuthenticatedApiRequests &&
-        receipt.MaximumPrimaryRateLimitRequests == 136 &&
+        receipt.MaximumPrimaryRateLimitRequests == 256 &&
         receipt.PrimaryRateLimitRequests >= 0 &&
         receipt.PrimaryRateLimitRequests <=
             receipt.MaximumPrimaryRateLimitRequests &&
@@ -5052,8 +5007,7 @@ internal static class FrameworkSupervisor
                 receipt.ConditionalNotModifiedRequests &&
         receipt.SecondaryLimitPoints >=
             receipt.TotalAuthenticatedApiRequests &&
-        receipt.PermissionDenied >= 0 &&
-        receipt.PermissionDenied <= receipt.PrimaryRateLimitRequests &&
+        receipt.PermissionDenied == 0 &&
         receipt.RemainingTotalAuthenticatedApiRequests ==
             receipt.MaximumTotalAuthenticatedApiRequests -
                 receipt.TotalAuthenticatedApiRequests &&
@@ -5063,7 +5017,7 @@ internal static class FrameworkSupervisor
         receipt.Disposition == "active" &&
         receipt.CapProfile == "apr-r4-artifact-rest-request-budget-v2" &&
         !receipt.MeasurementOnly &&
-        FrozenTailReceiptIsExact(Path.GetFileName(scenario),
+        FinalBudgetProfileIsExact(Path.GetFileName(scenario),
             TrustedProofRequestBudgetLane.Host,
             TrustedProofRequestDomain.NodeArtifactRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve) &&
@@ -5122,12 +5076,12 @@ internal static class FrameworkSupervisor
             TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.HostHeadSourceRemainingTailRequired == 0 &&
             receipt.HostOtherGitHubRemainingTailRequired == 0
-        : FrozenTailReceiptIsExact(scenarioName,
+        : FinalBudgetProfileIsExact(scenarioName,
                 TrustedProofRequestBudgetLane.Host,
                 TrustedProofRequestDomain.HostHeadSourceRest,
                 receipt.HostHeadSourceRemainingTailRequired,
                 receipt.RemainingTailReserve) &&
-            FrozenTailReceiptIsExact(scenarioName,
+            FinalBudgetProfileIsExact(scenarioName,
                 TrustedProofRequestBudgetLane.Host,
                 TrustedProofRequestDomain.HostOtherGitHubRest,
                 receipt.HostOtherGitHubRemainingTailRequired,
@@ -5139,17 +5093,17 @@ internal static class FrameworkSupervisor
         ? receipt.RemainingTailReserve ==
             TrustedProofOperationRequestAccounting.MeasurementPrimaryReserve &&
             receipt.RemainingTailRequired == 0
-        : FrozenTailReceiptIsExact(scenarioName,
+        : FinalBudgetProfileIsExact(scenarioName,
             TrustedProofRequestBudgetLane.Host,
             TrustedProofRequestDomain.TrustedControlRest,
             receipt.RemainingTailRequired, receipt.RemainingTailReserve);
 
-    private static bool FrozenTailReceiptIsExact(
+    private static bool FinalBudgetProfileIsExact(
         string scenarioName,
         TrustedProofRequestBudgetLane lane,
         TrustedProofRequestDomain domain,
         int requiredTail,
-        int reserve) => TrustedProofRequestBudgetProfile.TryGetFrozenTailProfile(
+        int reserve) => TrustedProofRequestBudgetProfile.TryGetFinalSafetyProfile(
             RequestBudgetProfileForScenario(scenarioName), lane,
             out var frozen, out var frozenReserve) && reserve == frozenReserve &&
         frozen[domain] == requiredTail;
@@ -5641,7 +5595,7 @@ internal static class FrameworkSupervisor
         int HostOtherGitHubInvalidRateHeaders,
         int HostOtherGitHubRemainingTailRequired);
 
-    private sealed record FrameworkArtifactRestRequestBudgetReceipt(
+    internal sealed record FrameworkArtifactRestRequestBudgetReceipt(
         string Kind,
         bool ProtectedRoute,
         int MaximumTotalAuthenticatedApiRequests,

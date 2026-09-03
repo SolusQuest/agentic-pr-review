@@ -318,7 +318,7 @@ export class ArtifactRestRequestBudget {
 
   /**
    * A completed response may reveal a lower primary allocation than our local
-   * measurement cap. Before a command starts, its known mandatory tail must
+   * runaway cap. Before a command starts, its known mandatory tail must
    * fit in that allocation as one unit; missing headers remain conservatively
    * charged by the local ledger instead of being treated as free capacity.
    */
@@ -331,11 +331,11 @@ export class ArtifactRestRequestBudget {
       throw new ArtifactRestRateLimitHeadersError();
     }
     if (this.disposition !== 'active') throw new ArtifactRestRequestBudgetError(this.disposition);
-    const requiredWithFinalProfileTail =
+    const requiredWithReserve =
       Math.max(required, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve();
     if (
       this.observedPrimaryRemaining !== undefined &&
-      this.observedPrimaryRemaining < requiredWithFinalProfileTail
+      this.observedPrimaryRemaining < requiredWithReserve
     ) {
       this.disposition = 'primary_exhausted';
       throw new ArtifactRestRequestBudgetError(this.disposition);
