@@ -11,7 +11,7 @@ using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.GitHub;
 
-public sealed class ActionHostGitObjectTransportTests
+public sealed partial class ActionHostGitObjectTransportTests
 {
     [Fact]
     public async Task HeadArchiveUsesOnlyPinnedHttpsCodeloadRedirectWithoutBearer()

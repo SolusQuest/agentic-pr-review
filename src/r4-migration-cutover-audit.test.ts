@@ -95,6 +95,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/execute-r4-trusted-proof-enrollment.mjs',
       'scripts/execute-r4-trusted-proof-enrollment.test.ts',
       'scripts/generate-r4-trusted-proof-cleanup-plan.mjs',
+      'scripts/linux-toolchain.test.ts',
       'scripts/materialize-r4-enrollment-observation.mjs',
       'scripts/materialize-r4-enrollment-observation.test.ts',
       'scripts/probe-r4-e2p-unauthorized-no-launch.mjs',

@@ -15,6 +15,7 @@ internal sealed class GitHubCodeloadArchiveReader : ActionHostGitArchiveReader
     private readonly GZipStream _gzip;
     private readonly ActionHostBoundedReadStream _decoded;
     private readonly TarReader _tar;
+    private bool _hasReadEntry;
     private bool _completed;
     private bool _disposed;
 
@@ -47,8 +48,28 @@ internal sealed class GitHubCodeloadArchiveReader : ActionHostGitArchiveReader
         TarEntry? entry;
         try
         {
-            entry = await _tar.GetNextEntryAsync(
-                cancellationToken: cancellationToken);
+            while (true)
+            {
+                entry = await _tar.GetNextEntryAsync(
+                    cancellationToken: cancellationToken);
+                if (entry is null) break;
+
+                var leadingEntry = !_hasReadEntry;
+                _hasReadEntry = true;
+                if (entry.EntryType != TarEntryType.GlobalExtendedAttributes) break;
+
+                // Git archives carry one leading global comment. It is bounded
+                // transport metadata, not a repository path or Git authority.
+                // Do not admit global overrides or skip unsupported file types.
+                if (!leadingEntry ||
+                    entry is not PaxGlobalExtendedAttributesTarEntry metadata ||
+                    metadata.GlobalExtendedAttributes.Count != 1 ||
+                    !metadata.GlobalExtendedAttributes.ContainsKey("comment"))
+                {
+                    throw new InvalidDataException(
+                        "The codeload archive contains unsupported global metadata.");
+                }
+            }
         }
         catch (InvalidDataException) when (_compressed.Exceeded)
         {
