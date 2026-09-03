@@ -673,10 +673,8 @@ _live_prepared_root() {
 }
 
 _require_live_linux() {
-  [[ "$(uname -s)" == Linux ]] ||
-    _fail APR_R3_TRUSTED_LIVE_PLATFORM_INVALID
-  [[ ! -r /proc/sys/kernel/osrelease ]] ||
-    [[ "$(tr '[:upper:]' '[:lower:]' </proc/sys/kernel/osrelease)" != *microsoft* ]] ||
+  source "${SCRIPT_DIR}/require-linux-toolchain.sh"
+  apr_require_linux_toolchain "${DOTNET_CMD}" node ||
     _fail APR_R3_TRUSTED_LIVE_PLATFORM_INVALID
 }
 

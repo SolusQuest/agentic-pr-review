@@ -5,8 +5,8 @@ if [[ "$#" -ne 0 ]]; then
   printf 'APR_R4_E2P_V2_FAILURE stage=proof case=clean-source code=usage status=failed\n' >&2
   exit 2
 fi
-if [[ "$(uname -s)" != Linux ]] ||
-  grep -Eqi '(microsoft|wsl)' /proc/sys/kernel/osrelease 2>/dev/null; then
+source "$(dirname "${BASH_SOURCE[0]}")/require-linux-toolchain.sh"
+if ! apr_require_linux_toolchain dotnet node; then
   printf 'APR_R4_E2P_V2_FAILURE stage=proof case=clean-source code=native-linux-required status=failed\n' >&2
   exit 2
 fi

@@ -24,8 +24,8 @@ for name in "${names[@]}"; do
   [[ -n "${options[$name]+x}" ]] || fail arguments
 done
 
-if [[ "$(uname -s)" != Linux ]] ||
-  grep -Eqi '(microsoft|wsl)' /proc/sys/kernel/osrelease 2>/dev/null; then
+source "$(dirname "${BASH_SOURCE[0]}")/require-linux-toolchain.sh"
+if ! apr_require_linux_toolchain dotnet node; then
   fail native-linux-required
 fi
 

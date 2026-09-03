@@ -10,10 +10,12 @@ if [[ "$(uname -s)" != Linux ]]; then
   echo "$mode verification requires Linux" >&2
   exit 2
 fi
-if [[ "$mode" == aot ]] &&
-  grep -Eqi '(microsoft|wsl)' /proc/sys/kernel/osrelease 2>/dev/null; then
-  echo "aot verification requires native Linux" >&2
-  exit 2
+if [[ "$mode" == aot ]]; then
+  source "$(dirname "${BASH_SOURCE[0]}")/require-linux-toolchain.sh"
+  if ! apr_require_linux_toolchain dotnet node; then
+    echo "aot verification requires Linux-native dotnet and Node executables" >&2
+    exit 2
+  fi
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
