@@ -1197,8 +1197,8 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 ? requested : null,
             out var profile));
         Assert.False(profile!.MeasurementOnly);
-        Assert.Equal(64, profile.HostRemainingTailGuard.Reserve);
-        Assert.Equal(64, profile.ExternalControlRemainingTailGuard.Reserve);
+        Assert.Equal(80, profile.HostRemainingTailGuard.Reserve);
+        Assert.Equal(80, profile.ExternalControlRemainingTailGuard.Reserve);
         Assert.Equal(0, profile.CleanupControlRemainingTailGuard.Reserve);
         Assert.All(new[]
         {
@@ -1211,6 +1211,56 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 TrustedProofRequestDomain.HostOtherGitHubRest or
                 TrustedProofRequestDomain.TrustedControlRest),
             domain => Assert.Equal(0, guard.RequiredTail(domain))));
+    }
+
+    [Fact]
+    public void FinalCoordinationHeadroomCoversColdStartsAndSharedStaleObservation()
+    {
+        Assert.True(TrustedProofRequestBudgetProfile.TrySelectProduction(
+            _ => "final-bootstrap", out var profile));
+        Assert.Equal(16,
+            TrustedProofOperationRequestAccounting.UncoordinatedPrimaryHeadroom);
+        Assert.Equal(80,
+            TrustedProofOperationRequestAccounting.NormalProcessPrimaryReserve);
+
+        var realRemaining =
+            TrustedProofOperationRequestAccounting.NormalProcessPrimaryReserve;
+        var leases = Enumerable.Range(0,
+                TrustedProofOperationRequestAccounting.UncoordinatedPrimaryHeadroom)
+            .Select(_ =>
+            {
+                var ledger = new TrustedProofPrimaryRemainingLedger();
+                Assert.True(ledger.TryLease(
+                    TrustedProofRequestDomain.TrustedControlRest,
+                    profile!.ExternalControlRemainingTailGuard, out var lease));
+                return lease!;
+            })
+            .ToArray();
+
+        realRemaining -= leases.Length;
+        Assert.Equal(TrustedProofOperationRequestAccounting.OperationPrimaryReserve,
+            realRemaining);
+
+        var sharedObservation =
+            TrustedProofOperationRequestAccounting.NormalProcessPrimaryReserve + 1;
+        var independentlyAdmitted = Enumerable.Range(0,
+                TrustedProofOperationRequestAccounting.UncoordinatedPrimaryHeadroom)
+            .Count(index =>
+            {
+                _ = index;
+                var ledger = new TrustedProofPrimaryRemainingLedger();
+                using var response = RemainingResponse(sharedObservation.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture));
+                ledger.Observe(null, response, TrustedProofResponseClass.Success,
+                    TrustedProofRequestDomain.TrustedControlRest,
+                    profile!.ExternalControlRemainingTailGuard);
+                return ledger.TryLease(TrustedProofRequestDomain.TrustedControlRest,
+                    profile.ExternalControlRemainingTailGuard, out _);
+            });
+        Assert.Equal(TrustedProofOperationRequestAccounting.UncoordinatedPrimaryHeadroom,
+            independentlyAdmitted);
+        Assert.True(sharedObservation - independentlyAdmitted >=
+            TrustedProofOperationRequestAccounting.OperationPrimaryReserve);
     }
 
     [Theory]
@@ -1278,7 +1328,7 @@ public sealed class TrustedProofGitHubRequestBudgetTests
                 ? "final-bootstrap" : null,
             out var final));
         Assert.False(final!.MeasurementOnly);
-        Assert.Equal(TrustedProofOperationRequestAccounting.OperationPrimaryReserve,
+        Assert.Equal(TrustedProofOperationRequestAccounting.NormalProcessPrimaryReserve,
             final.HostRemainingTailGuard.Reserve);
         Assert.Equal(0, final.HostRemainingTailGuard.RequiredTail(
             TrustedProofRequestDomain.NodeArtifactRest));
@@ -1303,9 +1353,9 @@ public sealed class TrustedProofGitHubRequestBudgetTests
     }
 
     [Theory]
-    [InlineData("65", false, true)]
-    [InlineData("64", false, false)]
-    [InlineData("63", true, false)]
+    [InlineData("81", false, true)]
+    [InlineData("80", false, false)]
+    [InlineData("79", true, false)]
     public void CompletedResponsePreservesTheReserveAndClosesOnlyLaterDispatch(
         string remaining,
         bool closes,

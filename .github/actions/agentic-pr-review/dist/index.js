@@ -101150,6 +101150,9 @@ import { TextDecoder as TextDecoder2 } from "node:util";
 // src/action-wrapper/launcher/request-budget-profile.ts
 var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
 var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
+var TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE = 64;
+var TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM = 16;
+var TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE = TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE + TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM;
 var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
   capProfile: "apr-r4-artifact-rest-request-budget-v2",
   limits: Object.freeze({
@@ -101170,7 +101173,7 @@ var finalArtifactProfile = Object.freeze({
     maximumPrimaryRateLimitRequests: 256
   }),
   remainingTailRequired: 0,
-  remainingTailReserve: 64,
+  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
   measurementOnly: false
 });
 var TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile;
@@ -101185,7 +101188,7 @@ var TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE = Object.freeze({
 });
 var finalHostReceiptProfile = Object.freeze({
   measurementOnly: false,
-  remainingTailReserve: 64,
+  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
   hostHeadSourceRestTail: 0,
   hostOtherGitHubRestTail: 0,
   trustedControlRestTail: 0
@@ -102278,4 +102281,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: b774a27181117f6a325bde15ae1df76428c4124dbbf087731d384dd522eb68f0
+// Action source inventory sha256: 397a9d634b6379d56eb5ccafcf6c27421ddbccacf0e5812e1da29931b962dfaf

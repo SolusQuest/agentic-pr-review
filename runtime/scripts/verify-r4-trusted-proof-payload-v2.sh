@@ -197,7 +197,7 @@ if (github.authenticated_rest_requests !== 0 ||
     github.invalid_remaining_header !== false ||
     github.terminal_rate_limited !== false ||
     github.low_remaining_guard !== false ||
-    github.remaining_tail_reserve !== 64 ||
+    github.remaining_tail_reserve !== 80 ||
     github.host_head_source_rest.remaining_tail_required !== 0 ||
     github.host_other_github_rest.remaining_tail_required !== 0) {
   process.exit(1);
@@ -239,7 +239,7 @@ if (control.consumed !== 0 ||
     control.secondary_points !== 0 ||
     control.mutation_count !== 0 ||
     control.remaining_tail_required !== 0 ||
-    control.remaining_tail_reserve !== 64 ||
+    control.remaining_tail_reserve !== 80 ||
     control.permission_denied !== 0 ||
     control.primary_rate_limited !== 0 ||
     control.secondary_rate_limited !== 0 ||

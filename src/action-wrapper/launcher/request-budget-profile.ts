@@ -6,6 +6,15 @@ export const R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE =
 
 const TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = 'r4-w2';
 
+export const TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE = 64;
+// Normal ledgers are process-local while one installation-token bucket is
+// shared. Nine admitted cold starts, three more for the sole infrastructure
+// retry, and one unpropagated Node/Host peer charge derive a maximum of 13;
+// the rounded 16-request margin is not a measured role allocation.
+export const TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM = 16;
+export const TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE =
+  TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE + TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM;
+
 /**
  * Closed proof profiles. Final scenario labels share one bounded safety policy;
  * observed request counts do not define their capacity.
@@ -38,7 +47,7 @@ const finalArtifactProfile: ArtifactRestRequestBudgetProfile = Object.freeze({
     maximumPrimaryRateLimitRequests: 256,
   }),
   remainingTailRequired: 0,
-  remainingTailReserve: 64,
+  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
   measurementOnly: false,
 });
 
@@ -72,7 +81,7 @@ const TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE: TrustedProofHostReceiptPro
 
 const finalHostReceiptProfile: TrustedProofHostReceiptProfile = Object.freeze({
   measurementOnly: false,
-  remainingTailReserve: 64,
+  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
   hostHeadSourceRestTail: 0,
   hostOtherGitHubRestTail: 0,
   trustedControlRestTail: 0,

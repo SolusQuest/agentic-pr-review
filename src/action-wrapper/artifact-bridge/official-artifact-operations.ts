@@ -1170,11 +1170,11 @@ function mutationStateForPhase(phase: MutationPhase): ArtifactBridgeMutationStat
 }
 
 /**
- * The final profile will freeze these route tails from AOT evidence. They are
- * structured here rather than inferred from a response header: every listed
- * command must perform exactly a platform GET, archive redirect, and
- * producing-run attempt verification before it can publish a verified result.
- * Mutations reserve their own raw/primary/point compound before any wire call.
+ * Each command reserves its mandatory local request sequence from live
+ * remaining authority before it can publish a verified result. This is not a
+ * historical role tail: final profiles keep those tails at zero and separately
+ * retain the bounded cross-process coordination margin. Mutations reserve
+ * their own raw/primary/point compound before any wire call.
  */
 function mandatoryPrimaryAllocation(command: ArtifactBridgeCommand): number | undefined {
   switch (command.operation) {

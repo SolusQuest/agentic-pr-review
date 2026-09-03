@@ -14,6 +14,8 @@ using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using Xunit;
+using VerifierRequestAccounting =
+    AgenticPrReview.Runtime.ActionHostVerifierFixture.TrustedProofOperationRequestAccounting;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
@@ -89,7 +91,8 @@ public sealed class TrustedProofVerifierFixtureTests
                 CapProfile: "apr-r4-artifact-rest-request-budget-v2",
                 MeasurementOnly: false,
                 RemainingTailRequired: 0,
-                RemainingTailReserve: 64);
+                RemainingTailReserve:
+                    VerifierRequestAccounting.NormalProcessPrimaryReserve);
             bool Valid(FrameworkSupervisor.FrameworkArtifactRestRequestBudgetReceipt candidate) =>
                 FrameworkSupervisor.ArtifactRestRequestBudgetReceiptIsExact(
                     candidate, scenario, raw, raw - primary, primary, raw, 0);
@@ -109,7 +112,8 @@ public sealed class TrustedProofVerifierFixtureTests
                 receipt with { MeasurementOnly = true },
                 receipt with { ProtectedRoute = false },
                 receipt with { RemainingTailRequired = 1 },
-                receipt with { RemainingTailReserve = 63 },
+                receipt with { RemainingTailReserve =
+                    VerifierRequestAccounting.NormalProcessPrimaryReserve - 1 },
                 receipt with { RunId = "802" },
                 receipt with { PayloadSha256 = new string('e', 64) },
             }, candidate => Assert.False(Valid(candidate)));

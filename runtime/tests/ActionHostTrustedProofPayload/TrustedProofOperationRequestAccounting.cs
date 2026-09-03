@@ -55,6 +55,13 @@ internal static class TrustedProofOperationRequestAccounting
     // Normal work leaves this safety/cleanup reserve. Cleanup alone may spend
     // it under its separate 64-request ceiling; successful proof still leaves 64.
     internal const int OperationPrimaryReserve = 64;
+    // The three admitted stages start nine normal process-local ledgers. The
+    // sole infrastructure retry may start three more, and serial per-process
+    // dispatch permits one unpropagated Node/Host peer charge. The derived
+    // maximum is 13; round it to 16 without restoring measured role tails.
+    internal const int UncoordinatedPrimaryHeadroom = 16;
+    internal const int NormalProcessPrimaryReserve =
+        OperationPrimaryReserve + UncoordinatedPrimaryHeadroom;
     // The trusted payload attaches this secret-free semantic route label before
     // its in-process verifier handler dispatches.  The independent verifier
     // witness must consume this value rather than infer meaning from a SHA in
@@ -170,10 +177,10 @@ internal static class TrustedProofOperationRequestAccounting
 }
 
 // A remaining header is a shared-token observation, not a local transport
-// quota.  The eventual AOT freeze supplies the primary requests still needed
-// by every protected role after each domain's observation, plus an explicit
-// reserve.  The measurement profile deliberately has no tail allocations and
-// is therefore evidence-only; Framework refuses it as a final/live verdict.
+// quota. Final normal processes therefore guard the operation floor plus a
+// bounded cross-process coordination margin. Historical role tails stay zero.
+// The measurement profile has neither protection and remains evidence-only;
+// Framework refuses it as a final/live verdict.
 internal sealed class TrustedProofRemainingTailGuard(
     IReadOnlyDictionary<TrustedProofRequestDomain, int> remainingTailByDomain,
     int reserve,
@@ -556,7 +563,7 @@ internal sealed class TrustedProofRequestBudgetProfile(
         "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
 
     private const int SafetyReserve =
-        TrustedProofOperationRequestAccounting.OperationPrimaryReserve;
+        TrustedProofOperationRequestAccounting.NormalProcessPrimaryReserve;
 
     internal static readonly TrustedProofRequestBudgetProfile Measurement = new(
         TrustedProofRemainingTailGuard.Measurement,

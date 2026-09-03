@@ -12,6 +12,9 @@ import {
   TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
   TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
   TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+  TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
+  TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE,
+  TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM,
 } from '../launcher/request-budget-profile.js';
 
 afterEach(() => {
@@ -181,7 +184,7 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('uses the final safety ceilings without a measured Node tail', () => {
+  it('uses the final safety ceilings and coordination margin without a measured Node tail', () => {
     const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
       buildDiscriminator: 'r4-w2',
       identity: trustedProofIdentity(),
@@ -191,9 +194,12 @@ describe('trusted proof artifact REST budget', () => {
       maximum_total_authenticated_api_requests: 4_096,
       maximum_primary_rate_limit_requests: 256,
       remaining_tail_required: 0,
-      remaining_tail_reserve: 64,
+      remaining_tail_reserve: 80,
       measurement_only: false,
     });
+    expect(TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE).toBe(
+      TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE + TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM,
+    );
   });
 
   it('allows 2304 measured raw requests and rejects the 2305th before wire dispatch', async () => {

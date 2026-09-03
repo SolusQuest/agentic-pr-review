@@ -32,6 +32,7 @@ import {
   artifactRestRequestBudgetProfile,
   R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE,
   readTrustedProofRequestBudgetProfile,
+  TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
 } from './launcher/request-budget-profile.js';
 import type { ActionPresentationToolkit } from './presentation/toolkit.js';
 
@@ -435,7 +436,7 @@ describe('W1 production composition', () => {
         maximumPrimaryRateLimitRequests: 256,
       },
       remainingTailRequired: 0,
-      remainingTailReserve: 64,
+      remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
       measurementOnly: false,
     });
   });

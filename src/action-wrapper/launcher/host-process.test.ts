@@ -36,9 +36,9 @@ const controlBudgetReceipt =
   'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
 const finalGitHubBudgetReceipt = githubBudgetReceipt
   .replace('"measurement_only":true', '"measurement_only":false')
-  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":64');
+  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":80');
 const finalControlBudgetReceipt = controlBudgetReceipt
-  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":64')
+  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":80')
   .replace('"measurement_only":true', '"measurement_only":false');
 
 afterEach(async () => {
@@ -133,7 +133,7 @@ describe('W1 private Host framing', () => {
     finalGitHubBudgetReceipt + finalControlBudgetReceipt.replace('"limit":64', '"limit":63'),
     finalGitHubBudgetReceipt.replace('"measurement_only":false', '"measurement_only":true') +
       finalControlBudgetReceipt,
-    finalGitHubBudgetReceipt.replace('"remaining_tail_reserve":64', '"remaining_tail_reserve":63') +
+    finalGitHubBudgetReceipt.replace('"remaining_tail_reserve":80', '"remaining_tail_reserve":79') +
       finalControlBudgetReceipt,
     finalGitHubBudgetReceipt.replace(
       '"remaining_tail_required":0}',
