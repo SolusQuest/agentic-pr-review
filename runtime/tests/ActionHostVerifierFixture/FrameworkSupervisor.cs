@@ -1137,6 +1137,7 @@ internal static class FrameworkSupervisor
                 root, repository, payload, bundle, node, platform)
                 .ConfigureAwait(false),
         };
+        platform.ResetArtifacts();
         cases.Add(await RunCaseAsync(new CaseSpec(
             "stale-head",
             "stale",
