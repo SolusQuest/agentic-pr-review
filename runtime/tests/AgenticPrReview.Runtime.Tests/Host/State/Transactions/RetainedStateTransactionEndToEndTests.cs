@@ -367,6 +367,85 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(uploadsBeforeRecovery, fixture.Store.UploadCalls);
     }
 
+    [Fact]
+    public async Task CandidateUploadWaitsForDelayedVisibility()
+    {
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+        var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        fixture.Store.HideUploadedObjectOnUploadCall =
+            fixture.Store.UploadCalls + 1;
+        fixture.Store.HideNextUploadedObjectForNextLists = 2;
+
+        var persisted = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.True(persisted.Succeeded, persisted.Code);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            fixture.Time.ScheduledDelays);
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public async Task DefinitelyUncommittedCandidateDoesNotOpenVisibilityWindow()
+    {
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+        var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        fixture.Store.NextUploadFailure = OpaqueStoreFailure.Invalid;
+        fixture.Store.NextUploadMutationState =
+            OpaqueStoreMutationState.NotCommitted;
+
+        var rejected = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.Equal(RetainedStateTransactionCodes.Invalid, rejected.Code);
+        Assert.Empty(fixture.Time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOwner.Candidate, diagnostic.Owner);
+        Assert.Equal(StateReconciliationOutcome.NotCommitted,
+            diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.NotApplicable,
+            diagnostic.ExactReadBack);
+        Assert.Equal(0, diagnostic.Observations);
+        Assert.Equal(StateReconciliationTerminal.NotCommitted,
+            diagnostic.Terminal);
+        Assert.Equal(0, diagnostic.ScheduleIndex);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -891,30 +970,25 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(
             semanticHorizon,
             recoveredWrite.SemanticRequiredExpiresAtUnixSeconds);
+        var reconciledTarget = Assert.Single(resumed.Store.Objects.Where(
+            item => item.Reference.Name == recoveredWrite.Name));
+        resumed.Store.HideObjectForNextLists(reconciledTarget, 3);
         var uploadsBeforeReconcile = resumed.Store.UploadCalls;
+        var delaysBeforeReconcile = resumed.Time.ScheduledDelays.Count;
         var reconciled = await RestrictedStateService
             .PersistPreparedRetainedOpaqueWriteAsync(
                 resumed.Context,
                 recoveredWrite,
                 new CancellationToken(canceled: true));
-        for (var attempt = 0;
-            attempt < 5 &&
-            StringComparer.Ordinal.Equals(
-                reconciled.Code,
-                RetainedStateTransactionCodes.OutcomeUnknown);
-            attempt++)
-        {
-            reconciled = await RestrictedStateService
-                .PersistPreparedRetainedOpaqueWriteAsync(
-                    resumed.Context,
-                    recoveredWrite,
-                    new CancellationToken(canceled: true));
-        }
 
+        Assert.True(reconciled.Succeeded, reconciled.Code);
         using var record = Assert.IsType<RetainedStateOpaqueRecord>(
             reconciled.Value);
         Assert.Equal(RetainedStateTransactionCodes.Persisted, reconciled.Code);
         Assert.Equal(uploadsBeforeReconcile, resumed.Store.UploadCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            resumed.Time.ScheduledDelays[delaysBeforeReconcile..]);
         Assert.Equal(StateObjectClass.PublicationFailure, record.ObjectClass);
         resumed.Context.Dispose();
     }
@@ -3514,7 +3588,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         int? runAttempt = null,
         IActionHostTrustedWorkflowAdmission? workflowAdmission = null,
         string? workflowSha = null,
-        string? actionSourceSha = null)
+        string? actionSourceSha = null,
+        IStateReconciliationDiagnosticSink? diagnosticSink = null)
     {
         scenario ??= ActionHostAuthorizationScenario.Valid(route);
         var launch = StateLaunch(
@@ -3588,7 +3663,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             currentReview,
             DeepSeekReasoningContinuationCodec.Instance,
             new TestDependencies(store),
-            time);
+            time,
+            diagnosticSink);
         var restored = await RestrictedStateService
             .RestoreAuthorizedArtifactStateAsync(
                 request,

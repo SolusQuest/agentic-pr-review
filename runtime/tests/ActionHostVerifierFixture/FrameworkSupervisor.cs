@@ -141,6 +141,15 @@ internal static class FrameworkSupervisor
             payload, bundle, node, platform).ConfigureAwait(false));
         platform.ResetArtifacts();
         cases.Add(await RunCaseAsync(new CaseSpec(
+            "artifact-delayed-visibility",
+            "artifact-delayed-visibility",
+            "reviewed",
+            RequiredScenarioEvidence:
+                "artifact-delayed-visibility-observed"),
+            root, repository, payload, bundle, node, platform)
+            .ConfigureAwait(false));
+        platform.ResetArtifacts();
+        cases.Add(await RunCaseAsync(new CaseSpec(
             "artifact-upload-outcome-unknown",
             "artifact-upload-outcome-unknown", "outcome_ambiguous",
             RequiredGlobalEvidence: "upload-outcome-unknown-committed",
@@ -841,8 +850,13 @@ internal static class FrameworkSupervisor
             providerRequests == spec.ExpectedProviderRequests;
         var stickyCountSatisfied = spec.ExpectedStickyMutations is null ||
             stickyMutations == spec.ExpectedStickyMutations;
-        var scenarioEvidenceSatisfied = spec.RequiredScenarioEvidence is null ||
-            File.Exists(Path.Join(scenario, spec.RequiredScenarioEvidence));
+        var scenarioEvidenceSatisfied =
+            (spec.RequiredScenarioEvidence is null ||
+                File.Exists(Path.Join(
+                    scenario,
+                    spec.RequiredScenarioEvidence))) &&
+            (spec.Mode != "artifact-delayed-visibility" ||
+                DelayedVisibilityEvidenceIsExact(scenario));
         var archiveTransportSatisfied = spec.RequiredScenarioEvidence ==
             "head-archive-served"
             ? HeadArchiveTransportEvidenceIsExact(scenario)
@@ -1123,7 +1137,6 @@ internal static class FrameworkSupervisor
                 root, repository, payload, bundle, node, platform)
                 .ConfigureAwait(false),
         };
-        platform.ResetArtifacts();
         cases.Add(await RunCaseAsync(new CaseSpec(
             "stale-head",
             "stale",
@@ -2014,6 +2027,7 @@ internal static class FrameworkSupervisor
         "artifact-expired" => 906,
         "artifact-upload-outcome-unknown" => 907,
         "artifact-delete-outcome-unknown" => 908,
+        "artifact-delayed-visibility" => 931,
         "workflow-run" => 909,
         "delete-exact" => 910,
         "inline" => 911,
@@ -3751,7 +3765,8 @@ internal static class FrameworkSupervisor
         "dispatch-cross-head-conflict",
         "artifact-pagination-changed", "artifact-pagination-late",
         "artifact-list-duplicate", "artifact-digest-mismatch",
-        "artifact-expired", "artifact-upload-outcome-unknown",
+        "artifact-expired", "artifact-delayed-visibility",
+        "artifact-upload-outcome-unknown",
         "artifact-delete-outcome-unknown", "workflow-run", "delete-exact",
         "inline", "inline-warning", "unsupported", "fork", "permission",
         "wrong-action", "concurrency", "stale-head", "provider-malformed",
@@ -4878,6 +4893,31 @@ internal static class FrameworkSupervisor
             ReadInt(scenario,
                 "head-archive-credential-not-forwarded-count") == 1 &&
             ReadInt(scenario, "head-blob-api-count") == 0;
+    }
+
+    private static bool DelayedVisibilityEvidenceIsExact(string scenario)
+    {
+        var observationPath = Path.Join(
+            scenario,
+            "artifact-delayed-visibility-observed");
+        var delayPath = Path.Join(
+            scenario,
+            "state-reconciliation-delays.tsv");
+        if (!File.Exists(observationPath) || !File.Exists(delayPath))
+        {
+            return false;
+        }
+
+        var observation = File.ReadAllText(observationPath).Split('\t');
+        return observation is [var id, var name, "3"] &&
+            long.TryParse(
+                id,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var parsedId) &&
+            parsedId > 0 &&
+            !string.IsNullOrWhiteSpace(name) &&
+            File.ReadAllLines(delayPath) is ["5000", "10000"];
     }
 
     private static void CaptureTrustedProofRequestBudgetReceipts(

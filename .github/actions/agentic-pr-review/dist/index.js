@@ -101240,6 +101240,7 @@ var HOST_STDERR_CAPTURE_MAXIMUM_BYTES = 8 * 1024;
 var HOST_EXECUTABLE_FD = 3;
 var GITHUB_REQUEST_BUDGET_PREFIX = "APR_R4_E2P_GITHUB_REQUEST_BUDGET ";
 var CONTROL_REQUEST_BUDGET_PREFIX = "APR_R4_E2P_CONTROL_REQUEST_BUDGET ";
+var STATE_RECONCILIATION_DIAGNOSTIC_PREFIX = "APR_R4_E2P_STATE_RECONCILIATION ";
 var HostProcessTerminationUnconfirmedError = class extends Error {
   constructor() {
     super("wrapper_host_termination_unconfirmed");
@@ -101322,19 +101323,23 @@ async function runHostProcess(request2) {
   request2.signal.addEventListener("abort", forwardCancellation, { once: true });
   if (request2.signal.aborted) forwardCancellation();
   const outputPromise = readSingleFrame(child.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
-  const receiptPromise = readTrustedProofBudgetReceiptLines(
-    child.stderr,
-    request2.requestBudgetProfile
-  );
+  const stderrPromise = readTrustedProofStderr(child.stderr, request2.requestBudgetProfile);
   try {
     child.stdin.end(encodeFrame(request2.launchBytes));
-    const [, completionBytes, trustedProofBudgetReceiptLines, closed] = await Promise.race([
-      Promise.all([finished(child.stdin), outputPromise, receiptPromise, closePromise]),
+    const [, completionBytes, admittedStderr, closed] = await Promise.race([
+      Promise.all([finished(child.stdin), outputPromise, stderrPromise, closePromise]),
       processErrorPromise,
       unconfirmedPromise
     ]);
     if (closed.signal !== null || closed.code === null) fail("wrapper_host_process_failed");
-    return { completionBytes, exitCode: closed.code, trustedProofBudgetReceiptLines };
+    return {
+      completionBytes,
+      exitCode: closed.code,
+      trustedProofBudgetReceiptLines: admittedStderr.budgetReceiptLines,
+      ...admittedStderr.stateReconciliationDiagnosticLine === void 0 ? {} : {
+        trustedProofStateReconciliationDiagnosticLine: admittedStderr.stateReconciliationDiagnosticLine
+      }
+    };
   } catch (error3) {
     if (error3 instanceof HostProcessTerminationUnconfirmedError) throw error3;
     if (!spawned) return fail("wrapper_host_process_failed");
@@ -101351,8 +101356,9 @@ async function runHostProcess(request2) {
     child.off("error", onError);
   }
 }
-async function readTrustedProofBudgetReceiptLines(stream4, profile, maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES) {
-  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return [];
+async function readTrustedProofStderr(stream4, profile, maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES) {
+  const empty = { budgetReceiptLines: [] };
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return empty;
   const expected = profile === void 0 ? void 0 : trustedProofHostReceiptProfile(profile);
   const chunks = [];
   let total = 0;
@@ -101363,30 +101369,99 @@ async function readTrustedProofBudgetReceiptLines(stream4, profile, maximumBytes
     if (total <= maximumBytes) chunks.push(chunk);
     else overflow = true;
   }
-  if (overflow || expected === void 0) return [];
+  if (overflow || expected === void 0) return empty;
   let decoded;
   try {
     decoded = new TextDecoder2("utf-8", { fatal: true }).decode(Buffer.concat(chunks, total));
   } catch {
-    return [];
+    return empty;
   }
   let github;
   let control;
+  let budgetInvalid = false;
+  let diagnostic;
+  let diagnosticInvalid = false;
   for (const raw of decoded.split("\n")) {
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     if (line.startsWith(GITHUB_REQUEST_BUDGET_PREFIX)) {
-      if (github !== void 0) return [];
+      if (github !== void 0) {
+        budgetInvalid = true;
+        continue;
+      }
       github = canonicalGitHubRequestBudget(line, expected);
-      if (github === void 0) return [];
+      if (github === void 0) budgetInvalid = true;
     } else if (line.startsWith(CONTROL_REQUEST_BUDGET_PREFIX)) {
-      if (control !== void 0) return [];
+      if (control !== void 0) {
+        budgetInvalid = true;
+        continue;
+      }
       control = canonicalControlRequestBudget(line, expected);
-      if (control === void 0) return [];
+      if (control === void 0) budgetInvalid = true;
+    } else if (line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX)) {
+      if (diagnostic !== void 0 || diagnosticInvalid) {
+        diagnostic = void 0;
+        diagnosticInvalid = true;
+        continue;
+      }
+      diagnostic = canonicalStateReconciliationDiagnostic(line);
+      if (diagnostic === void 0) diagnosticInvalid = true;
     }
   }
-  return github === void 0 || control === void 0 ? [] : [`${github}
+  return {
+    budgetReceiptLines: budgetInvalid || github === void 0 || control === void 0 ? [] : [`${github}
 `, `${control}
-`];
+`],
+    ...diagnosticInvalid || diagnostic === void 0 ? {} : { stateReconciliationDiagnosticLine: `${diagnostic}
+` }
+  };
+}
+function canonicalStateReconciliationDiagnostic(line) {
+  const value = parseRecord(line.slice(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX.length));
+  if (value === void 0 || !hasExactKeys(value, [
+    "owner",
+    "outcome",
+    "exact_readback",
+    "observations",
+    "terminal",
+    "schedule_index"
+  ]) || ![
+    "locator_root",
+    "lineage_head",
+    "lineage_intent",
+    "candidate",
+    "publication_intent",
+    "acceptance",
+    "publication_failure",
+    "abandonment",
+    "reset",
+    "expiry_transition",
+    "cleanup"
+  ].includes(value.owner) || !["committed", "outcome_unknown", "not_committed", "reconcile_only"].includes(
+    value.outcome
+  ) || !["matched", "failed", "not_available", "not_applicable"].includes(
+    value.exact_readback
+  ) || !boundedInteger(value.observations, 0, 32) || ![
+    "not_committed",
+    "target_absent",
+    "unavailable",
+    "conflict",
+    "authentication_failed",
+    "key_unavailable",
+    "retention_failed",
+    "cleanup_failed",
+    "cancelled",
+    "invalid"
+  ].includes(value.terminal) || !boundedInteger(value.schedule_index, 0, 2)) {
+    return void 0;
+  }
+  return STATE_RECONCILIATION_DIAGNOSTIC_PREFIX + JSON.stringify({
+    owner: value.owner,
+    outcome: value.outcome,
+    exact_readback: value.exact_readback,
+    observations: value.observations,
+    terminal: value.terminal,
+    schedule_index: value.schedule_index
+  });
 }
 function canonicalGitHubRequestBudget(line, expected) {
   const value = parseRecord(line.slice(GITHUB_REQUEST_BUDGET_PREFIX.length));
@@ -102039,6 +102114,7 @@ async function runPrivateActionWrapperWithSeams(seams) {
   let completion;
   let artifactRestRequestBudget;
   let hostBudgetReceiptLines = [];
+  let hostStateReconciliationDiagnosticLine;
   let failed = false;
   let hostTerminationUnconfirmed = false;
   const inputs = (() => {
@@ -102108,6 +102184,7 @@ async function runPrivateActionWrapperWithSeams(seams) {
         ...requestBudgetProfile === void 0 ? {} : { requestBudgetProfile }
       });
       hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
+      hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
       completion = parseCompletionDocument(
         host.completionBytes,
         prepared.buildDiscriminator,
@@ -102153,10 +102230,19 @@ async function runPrivateActionWrapperWithSeams(seams) {
     }
     try {
       if (quiet) {
-        writeTrustedProofBudgetReceiptFrame(
+        try {
+          writeTrustedProofBudgetReceiptFrame(
+            artifactRestRequestBudget,
+            hostBudgetReceiptLines,
+            seams.trustedProofBudgetReceiptSink
+          );
+        } catch {
+          failed = true;
+        }
+        writeTrustedProofStateReconciliationDiagnostic(
           artifactRestRequestBudget,
-          hostBudgetReceiptLines,
-          seams.trustedProofBudgetReceiptSink
+          hostStateReconciliationDiagnosticLine,
+          seams.trustedProofStateReconciliationDiagnosticSink
         );
       }
     } catch {
@@ -102246,6 +102332,13 @@ function writeTrustedProofBudgetReceiptFrame(budget, lines, sink) {
 function writeTrustedProofArtifactRestBudgetToStderr(frame) {
   process.stderr.write(frame);
 }
+function writeTrustedProofStateReconciliationDiagnostic(budget, line, sink) {
+  if (!budget?.protectedRoute || line === void 0) return;
+  if (!line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX) || !line.endsWith("\n") || line.indexOf("\n") !== line.length - 1) {
+    return;
+  }
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(line);
+}
 function required(value) {
   if (value === void 0 || value.length === 0) fail("wrapper_runtime_facts_invalid");
   return value;
@@ -102281,4 +102374,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 397a9d634b6379d56eb5ccafcf6c27421ddbccacf0e5812e1da29931b962dfaf
+// Action source inventory sha256: 0f5ebd0e81b84142fe18d8a53dbf8de135e0f56b85dd39bc7ccc5b8ef196a14e

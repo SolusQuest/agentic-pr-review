@@ -9,6 +9,71 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 public sealed class LineageServiceLifecycleTests
 {
     [Fact]
+    public async Task NewlyUploadedInitialHeadWaitsForDelayedVisibility()
+    {
+        using var context = LineageTestData.Context();
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            HideNextUploadedObjectForNextLists = 2,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LineageService(
+                store,
+                context.Time,
+                diagnostics)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            context.Time.ScheduledDelays);
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public async Task MissingUploadedInitialHeadEmitsOneBoundedDiagnostic()
+    {
+        using var context = LineageTestData.Context();
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            HideNextUploadedObjectForNextLists = 3,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LineageService(
+                store,
+                context.Time,
+                diagnostics)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.Equal(LineageCodes.Unavailable, result.Code);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            context.Time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOwner.LineageHead, diagnostic.Owner);
+        Assert.Equal(StateReconciliationOutcome.Committed, diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.Matched,
+            diagnostic.ExactReadBack);
+        Assert.Equal(3, diagnostic.Observations);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
+        Assert.Equal(2, diagnostic.ScheduleIndex);
+    }
+
+    [Fact]
     public async Task LocalStoreSupportsInitialNextProcessResetAndExpiry()
     {
         await WithRootAsync(async root =>

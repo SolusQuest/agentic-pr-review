@@ -9,6 +9,7 @@ using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
+using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
@@ -141,9 +142,11 @@ internal static class FrameworkHost
             new FrameworkStateDependencies(scenarioRoot, github),
             publisher,
             provider,
-            new FrameworkTimeProvider(),
+            new FrameworkTimeProvider(scenarioRoot),
             () => Path.Join(scenarioRoot, "host-staging"),
-            new PostAcceptanceInlinePublisherHook(publisher));
+            new PostAcceptanceInlinePublisherHook(publisher),
+            stateReconciliationDiagnosticSink:
+                StateReconciliationStderrSink.Instance);
         var completion = await new ActionHostComposition(dependencies)
             .RunAsync(launch, cancellation.Token)
             .ConfigureAwait(false);
@@ -268,7 +271,42 @@ internal static class FrameworkHost
 
     private sealed class FrameworkTimeProvider : TimeProvider
     {
+        private readonly object gate = new();
+        private readonly string scenarioRoot;
+
+        internal FrameworkTimeProvider(string scenarioRoot) =>
+            this.scenarioRoot = scenarioRoot;
+
         public override DateTimeOffset GetUtcNow() =>
             DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            var fixedVisibilityDelay = dueTime == TimeSpan.FromSeconds(5) ||
+                dueTime == TimeSpan.FromSeconds(10);
+            if (fixedVisibilityDelay)
+            {
+                lock (gate)
+                {
+                    File.AppendAllText(
+                        Path.Join(
+                            scenarioRoot,
+                            "state-reconciliation-delays.tsv"),
+                        ((long)dueTime.TotalMilliseconds).ToString(
+                            global::System.Globalization.CultureInfo.InvariantCulture) +
+                        "\n");
+                }
+            }
+
+            return TimeProvider.System.CreateTimer(
+                callback,
+                state,
+                fixedVisibilityDelay ? TimeSpan.Zero : dueTime,
+                period);
+        }
     }
 }

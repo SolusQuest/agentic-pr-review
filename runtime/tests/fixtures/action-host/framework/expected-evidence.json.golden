@@ -1,6 +1,6 @@
 {
   "schema": "apr.action-host.framework-evidence.v3",
-  "source_inventory_digest": "95739ead10a7ff6f40f658df589c8a640a6aad84a1449df6a26ab5d9761ec9c3",
+  "source_inventory_digest": "3c2244eb155013bffd7fc03e41eb50b2953f30a81a50b598b5a377acc725b29c",
   "replacement_record_digest": "3eaa3a127ce1da98eb993334ec2b391ff6cecd0b1a77dcf64f4eb0306f5e3bdd",
   "base_inventory_digest": "7eacf6e0aacac15a99330e1c54050d4d259688f60ab729c9b0d6383b1f584b6d",
   "canary_table_digest": "e66aaf2ab5881094a6c7425b579c65d4fd4989b3486b0e5464105355837acd4b",
@@ -105,6 +105,19 @@
       "GitHubRequests": 198,
       "StateOperations": 2,
       "StickyMutations": 0,
+      "InlineMutations": 0,
+      "CanarySafe": true,
+      "ContinuationObserved": true
+    },
+    {
+      "name": "artifact-delayed-visibility",
+      "status": "reviewed",
+      "ExitCode": 0,
+      "ProviderRequests": 6,
+      "ToolSequence": 6,
+      "GitHubRequests": 209,
+      "StateOperations": 1074,
+      "StickyMutations": 1,
       "InlineMutations": 0,
       "CanarySafe": true,
       "ContinuationObserved": true
@@ -424,15 +437,15 @@
     "all_process_groups_quiet": true
   },
   "official_bridge": {
-    "twirp": 304,
-    "blob": 300,
-    "rest": 11750,
-    "rest_not_modified": 10859,
-    "rest_primary": 891,
-    "rest_secondary_points": 12022,
-    "finalize": 154,
-    "signed_download": 173,
-    "delete": 68
+    "twirp": 332,
+    "blob": 328,
+    "rest": 12864,
+    "rest_not_modified": 11901,
+    "rest_primary": 963,
+    "rest_secondary_points": 13160,
+    "finalize": 168,
+    "signed_download": 187,
+    "delete": 74
   },
   "exact_child_environment": true,
   "output_file_unchanged": true,
@@ -440,5 +453,5 @@
   "canary_route_coverage_digest": "0ed17cb12269bedc80a2b993db7897fd8a1308afb362c8b6fa44d0eb91acfa1a",
   "canary_negative_injection_count": 59,
   "artifact_metadata_route_probe_count": 3,
-  "normalized_exact_delete_identity_digest": "5eae351c0e7aa85b915d463b250db1e659eea77e0f240963bf33fb3e65d1d671"
+  "normalized_exact_delete_identity_digest": "e5bf02dd0e915d9ff3f3414ec789898fabc9ce92e968cddd0e0f3fa11b96b9c2"
 }

@@ -43,6 +43,8 @@ const githubBudgetReceipt =
   'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":256,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0}}\n';
 const controlBudgetReceipt =
   'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
+const reconciliationDiagnostic =
+  'APR_R4_E2P_STATE_RECONCILIATION {"owner":"lineage_head","outcome":"committed","exact_readback":"matched","observations":3,"terminal":"target_absent","schedule_index":2}\n';
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -156,12 +158,13 @@ describe('W1 production composition', () => {
     expect(presentation.summaries[0]).not.toContain('github-canary');
   });
 
-  it('emits only exact protected budget receipts after drain and quiescence', async () => {
+  it('emits only exact protected receipts after drain and quiescence', async () => {
     vi.stubEnv('AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE', 'measurement');
     const fixture = await wrapperFixture('r4-w2');
     const presentation = recordingToolkit({ 'github-token': 'github-canary' });
     const events = presentation.events;
     const receipts: string[] = [];
+    const diagnostics: string[] = [];
     let artifactBudgetReceipt: ReturnType<ArtifactRestRequestBudget['receipt']> | undefined;
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
@@ -193,11 +196,16 @@ describe('W1 production composition', () => {
           completionBytes: validCompletion('r4-w2'),
           exitCode: 0,
           trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+          trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
         };
       },
       trustedProofBudgetReceiptSink: (frame) => {
         receipts.push(frame);
         events.push('budget:frame');
+      },
+      trustedProofStateReconciliationDiagnosticSink: (line) => {
+        diagnostics.push(line);
+        events.push('diagnostic:line');
       },
       fatalExit: () => events.push('fatal'),
     });
@@ -231,6 +239,9 @@ describe('W1 production composition', () => {
     });
     expect(events.indexOf('bridge:drain')).toBeLessThan(events.indexOf('budget:frame'));
     expect(events.indexOf('budget:frame')).toBeLessThan(events.indexOf('bridge:cleanup'));
+    expect(diagnostics).toEqual([reconciliationDiagnostic]);
+    expect(events.indexOf('bridge:drain')).toBeLessThan(events.indexOf('diagnostic:line'));
+    expect(events.indexOf('diagnostic:line')).toBeLessThan(events.indexOf('bridge:cleanup'));
   });
 
   it('cleans the bridge and fails closed when the protected receipt sink throws', async () => {
@@ -343,6 +354,7 @@ describe('W1 production composition', () => {
       'provider-api-key': 'r4-w2',
     });
     const receipts: string[] = [];
+    const diagnostics: string[] = [];
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
       preparedPayload: fixture.proof,
@@ -360,13 +372,16 @@ describe('W1 production composition', () => {
         completionBytes: validCompletion('r4-h1'),
         exitCode: 0,
         trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+        trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
       }),
       trustedProofBudgetReceiptSink: (line) => receipts.push(line),
+      trustedProofStateReconciliationDiagnosticSink: (line) => diagnostics.push(line),
       fatalExit: () => undefined,
     });
 
     expect(exit).toBe(0);
     expect(receipts).toEqual([]);
+    expect(diagnostics).toEqual([]);
   });
 
   it.each([

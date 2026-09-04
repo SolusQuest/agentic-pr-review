@@ -24,7 +24,9 @@ import {
   HostProcessTerminationUnconfirmedError,
   readSingleFrame,
   readTrustedProofBudgetReceiptLines,
+  readTrustedProofStderr,
   runHostProcess,
+  STATE_RECONCILIATION_DIAGNOSTIC_PREFIX,
 } from './host-process.js';
 import { verifyPreparedPayload } from './prepared-payload.js';
 
@@ -40,6 +42,9 @@ const finalGitHubBudgetReceipt = githubBudgetReceipt
 const finalControlBudgetReceipt = controlBudgetReceipt
   .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":80')
   .replace('"measurement_only":true', '"measurement_only":false');
+const reconciliationDiagnostic =
+  STATE_RECONCILIATION_DIAGNOSTIC_PREFIX +
+  '{"owner":"lineage_head","outcome":"committed","exact_readback":"matched","observations":3,"terminal":"target_absent","schedule_index":2}\n';
 
 afterEach(async () => {
   await Promise.all(handles.splice(0).map(async (handle) => await handle.close()));
@@ -108,6 +113,42 @@ describe('W1 private Host framing', () => {
     );
 
     await expect(reading).resolves.toEqual([githubBudgetReceipt, controlBudgetReceipt]);
+  });
+
+  it('admits one canonical safe reconciliation diagnostic independently of budget receipts', async () => {
+    const stream = new PassThrough();
+    const reading = readTrustedProofStderr(stream, 'measurement');
+    stream.end(
+      `private-provider-canary\n${controlBudgetReceipt}${reconciliationDiagnostic}${githubBudgetReceipt}`,
+    );
+
+    await expect(reading).resolves.toEqual({
+      budgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+      stateReconciliationDiagnosticLine: reconciliationDiagnostic,
+    });
+  });
+
+  it.each([
+    reconciliationDiagnostic + reconciliationDiagnostic,
+    reconciliationDiagnostic.replace('"owner":"lineage_head"', '"owner":"unknown"'),
+    reconciliationDiagnostic.replace('"observations":3', '"observations":33'),
+    reconciliationDiagnostic.replace('"schedule_index":2', '"schedule_index":3'),
+    reconciliationDiagnostic.replace('"terminal":"target_absent"', '"secret":"canary"'),
+  ])('suppresses duplicate or malformed reconciliation diagnostics', async (diagnostic) => {
+    const stream = new PassThrough();
+    const reading = readTrustedProofStderr(stream, 'measurement');
+    stream.end(`${githubBudgetReceipt}${controlBudgetReceipt}${diagnostic}`);
+
+    await expect(reading).resolves.toEqual({
+      budgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+    });
+  });
+
+  it('suppresses the reconciliation diagnostic without the verified profile capability', async () => {
+    const stream = new PassThrough();
+    const reading = readTrustedProofStderr(stream, undefined);
+    stream.end(reconciliationDiagnostic);
+    await expect(reading).resolves.toEqual({ budgetReceiptLines: [] });
   });
 
   it('never admits Host stderr receipts without the verified profile capability', async () => {

@@ -47,14 +47,20 @@ internal sealed class RetainedStatePersistence
     private const int ReconciliationAttempts = 3;
     private readonly IRestrictedStateStore store;
     private readonly ScopedStateInventory inventory;
+    private readonly TimeProvider timeProvider;
+    private readonly IStateReconciliationDiagnosticSink? diagnosticSink;
 
     internal RetainedStatePersistence(
         object issuer,
-        IRestrictedStateStore store)
+        IRestrictedStateStore store,
+        TimeProvider? timeProvider = null,
+        IStateReconciliationDiagnosticSink? diagnosticSink = null)
     {
         RetainedStateCapabilityIssuer.Require(issuer);
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         inventory = new ScopedStateInventory(store);
+        this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.diagnosticSink = diagnosticSink;
     }
 
     internal static bool TryPrepareEnvelope(
@@ -236,6 +242,11 @@ internal sealed class RetainedStatePersistence
 
         if (upload?.MutationState == OpaqueStoreMutationState.NotCommitted)
         {
+            var failed = CreateVisibilityWindow(
+                expectedHeader.ObjectClass,
+                StateReconciliationOutcome.NotCommitted,
+                StateReconciliationExactReadBack.NotApplicable);
+            failed.ReportFailure(StateReconciliationTerminal.NotCommitted);
             return RetainedStatePersistenceResult.Fail(
                 MapStoreFailure(upload.Failure));
         }
@@ -249,6 +260,9 @@ internal sealed class RetainedStatePersistence
                 expectedProducingRunAttempt)
             ? upload!.Metadata
             : null;
+        var exactReadBack = returned is null
+            ? StateReconciliationExactReadBack.NotAvailable
+            : StateReconciliationExactReadBack.Failed;
         if (returned is not null)
         {
             for (var attempt = 0;
@@ -261,10 +275,18 @@ internal sealed class RetainedStatePersistence
                     .ConfigureAwait(false);
                 if (readBack.Succeeded && readBack.Metadata == returned)
                 {
+                    exactReadBack = StateReconciliationExactReadBack.Matched;
                     break;
                 }
             }
         }
+
+        var visibility = CreateVisibilityWindow(
+            expectedHeader.ObjectClass,
+            upload?.MutationState == OpaqueStoreMutationState.Committed
+                ? StateReconciliationOutcome.Committed
+                : StateReconciliationOutcome.OutcomeUnknown,
+            exactReadBack);
 
         for (var attempt = 0;
             attempt < ReconciliationAttempts;
@@ -277,15 +299,19 @@ internal sealed class RetainedStatePersistence
                     baseScopeDigest,
                     CancellationToken.None)
                 .ConfigureAwait(false);
+            visibility.RecordObservation();
             if (!read.Succeeded || read.Snapshot is null)
             {
                 if (StringComparer.Ordinal.Equals(
                         read.Code,
                         LineageCodes.Unavailable))
                 {
+                    _ = await visibility.WaitForNextObservationAsync()
+                        .ConfigureAwait(false);
                     continue;
                 }
 
+                visibility.ReportFailure(Terminal(MapLineageCode(read.Code)));
                 return RetainedStatePersistenceResult.Fail(
                     MapLineageCode(read.Code),
                     mayHaveCommitted: true);
@@ -297,6 +323,8 @@ internal sealed class RetainedStatePersistence
                 if (snapshot.Unknown.Any(item =>
                     item.Metadata.Reference.Name == name))
                 {
+                    visibility.ReportFailure(
+                        StateReconciliationTerminal.Unavailable);
                     return RetainedStatePersistenceResult.Fail(
                         RetainedStateTransactionCodes.OutcomeUnknown,
                         mayHaveCommitted: true);
@@ -322,6 +350,8 @@ internal sealed class RetainedStatePersistence
                     .ToArray();
                 if (all.Length > 1)
                 {
+                    visibility.ReportFailure(
+                        StateReconciliationTerminal.Conflict);
                     return RetainedStatePersistenceResult.Fail(
                         RetainedStateTransactionCodes.Conflict,
                         mayHaveCommitted: true);
@@ -329,6 +359,8 @@ internal sealed class RetainedStatePersistence
 
                 if (all.Length == 0)
                 {
+                    _ = await visibility.WaitForNextObservationAsync()
+                        .ConfigureAwait(false);
                     continue;
                 }
 
@@ -341,6 +373,10 @@ internal sealed class RetainedStatePersistence
                             match.Metadata,
                             CancellationToken.None)
                         .ConfigureAwait(false);
+                    visibility.ReportFailure(removed ==
+                            RetainedStateTransactionCodes.Ready
+                        ? StateReconciliationTerminal.RetentionFailed
+                        : StateReconciliationTerminal.CleanupFailed);
                     return RetainedStatePersistenceResult.Fail(
                         StringComparer.Ordinal.Equals(
                             removed,
@@ -370,6 +406,7 @@ internal sealed class RetainedStatePersistence
             }
         }
 
+        visibility.ReportFailure(StateReconciliationTerminal.TargetAbsent);
         return RetainedStatePersistenceResult.Fail(
             RetainedStateTransactionCodes.OutcomeUnknown,
             mayHaveCommitted: true);
@@ -416,6 +453,10 @@ internal sealed class RetainedStatePersistence
 
         var encryptedDigest = new OpaqueStoreEncryptedObjectDigest(
             OpaqueStoreHash.Sha256(immutableEnvelope.Span));
+        var visibility = CreateVisibilityWindow(
+            expectedHeader.ObjectClass,
+            StateReconciliationOutcome.ReconcileOnly,
+            StateReconciliationExactReadBack.NotApplicable);
         for (var attempt = 0;
             attempt < ReconciliationAttempts;
             attempt++)
@@ -427,15 +468,19 @@ internal sealed class RetainedStatePersistence
                     baseScopeDigest,
                     CancellationToken.None)
                 .ConfigureAwait(false);
+            visibility.RecordObservation();
             if (!read.Succeeded || read.Snapshot is null)
             {
                 if (StringComparer.Ordinal.Equals(
                         read.Code,
                         LineageCodes.Unavailable))
                 {
+                    _ = await visibility.WaitForNextObservationAsync()
+                        .ConfigureAwait(false);
                     continue;
                 }
 
+                visibility.ReportFailure(Terminal(MapLineageCode(read.Code)));
                 return RetainedStatePersistenceResult.Fail(
                     MapLineageCode(read.Code),
                     mayHaveCommitted: true);
@@ -447,6 +492,8 @@ internal sealed class RetainedStatePersistence
                 if (snapshot.Unknown.Any(item =>
                     item.Metadata.Reference.Name == name))
                 {
+                    visibility.ReportFailure(
+                        StateReconciliationTerminal.Unavailable);
                     return RetainedStatePersistenceResult.Fail(
                         RetainedStateTransactionCodes.OutcomeUnknown,
                         mayHaveCommitted: true);
@@ -472,6 +519,8 @@ internal sealed class RetainedStatePersistence
                     .ToArray();
                 if (all.Length > 1)
                 {
+                    visibility.ReportFailure(
+                        StateReconciliationTerminal.Conflict);
                     return RetainedStatePersistenceResult.Fail(
                         RetainedStateTransactionCodes.Conflict,
                         mayHaveCommitted: true);
@@ -479,6 +528,8 @@ internal sealed class RetainedStatePersistence
 
                 if (all.Length == 0)
                 {
+                    _ = await visibility.WaitForNextObservationAsync()
+                        .ConfigureAwait(false);
                     continue;
                 }
 
@@ -491,6 +542,10 @@ internal sealed class RetainedStatePersistence
                             match.Metadata,
                             CancellationToken.None)
                         .ConfigureAwait(false);
+                    visibility.ReportFailure(removed ==
+                            RetainedStateTransactionCodes.Ready
+                        ? StateReconciliationTerminal.RetentionFailed
+                        : StateReconciliationTerminal.CleanupFailed);
                     return RetainedStatePersistenceResult.Fail(
                         StringComparer.Ordinal.Equals(
                             removed,
@@ -520,6 +575,7 @@ internal sealed class RetainedStatePersistence
             }
         }
 
+        visibility.ReportFailure(StateReconciliationTerminal.TargetAbsent);
         return RetainedStatePersistenceResult.Fail(
             RetainedStateTransactionCodes.OutcomeUnknown,
             mayHaveCommitted: true);
@@ -619,6 +675,54 @@ internal sealed class RetainedStatePersistence
         LineageBaseScopeCodec.TryDigest(scope, out var value)
             ? value
             : string.Empty;
+
+    private PostUploadVisibilityWindow CreateVisibilityWindow(
+        StateObjectClass objectClass,
+        StateReconciliationOutcome outcome,
+        StateReconciliationExactReadBack exactReadBack) =>
+        new(
+            timeProvider,
+            diagnosticSink,
+            Owner(objectClass),
+            outcome,
+            exactReadBack);
+
+    private static StateReconciliationOwner Owner(
+        StateObjectClass objectClass) => objectClass switch
+    {
+        StateObjectClass.LocatorRoot => StateReconciliationOwner.LocatorRoot,
+        StateObjectClass.LineageHead => StateReconciliationOwner.LineageHead,
+        StateObjectClass.Candidate => StateReconciliationOwner.Candidate,
+        StateObjectClass.PublicationIntent =>
+            StateReconciliationOwner.PublicationIntent,
+        StateObjectClass.Acceptance => StateReconciliationOwner.Acceptance,
+        StateObjectClass.PublicationFailure =>
+            StateReconciliationOwner.PublicationFailure,
+        StateObjectClass.Abandonment => StateReconciliationOwner.Abandonment,
+        StateObjectClass.Reset => StateReconciliationOwner.Reset,
+        StateObjectClass.ExpiryTransition =>
+            StateReconciliationOwner.ExpiryTransition,
+        StateObjectClass.Cleanup => StateReconciliationOwner.Cleanup,
+        _ => throw new ArgumentOutOfRangeException(nameof(objectClass)),
+    };
+
+    private static StateReconciliationTerminal Terminal(string code) =>
+        code switch
+        {
+            RetainedStateTransactionCodes.Conflict =>
+                StateReconciliationTerminal.Conflict,
+            RetainedStateTransactionCodes.KeyUnavailable =>
+                StateReconciliationTerminal.KeyUnavailable,
+            RetainedStateTransactionCodes.RetentionFailed =>
+                StateReconciliationTerminal.RetentionFailed,
+            RetainedStateTransactionCodes.CleanupDebt =>
+                StateReconciliationTerminal.CleanupFailed,
+            RetainedStateTransactionCodes.Cancelled =>
+                StateReconciliationTerminal.Cancelled,
+            RetainedStateTransactionCodes.Invalid =>
+                StateReconciliationTerminal.Invalid,
+            _ => StateReconciliationTerminal.Unavailable,
+        };
 
     private static string MapStoreFailure(OpaqueStoreFailure failure) =>
         failure switch

@@ -84,6 +84,27 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         }
     }
 
+    internal void HideObjectForNextLists(
+        OpaqueStoreObjectMetadata metadata,
+        int listCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(listCount);
+        lock (gate)
+        {
+            if (!objects.TryGetValue(
+                    metadata.Reference.ObjectId.Value,
+                    out var stored) ||
+                stored.Metadata != metadata)
+            {
+                throw new InvalidOperationException(
+                    "scripted_hidden_object_invalid");
+            }
+
+            delayedUploadedReference = metadata.Reference;
+            HideNextUploadedObjectForNextLists = listCount;
+        }
+    }
+
     internal OpaqueStoreObjectMetadata Add(
         byte[] bytes,
         long expiresAtUnixSeconds,

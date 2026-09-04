@@ -23,7 +23,9 @@ internal sealed record ArtifactStateRestoreRequest(
     ProjectChatMessage CurrentReviewContext,
     IAgentContinuationCodec ContinuationCodec,
     IAcceptedStateProductionDependencies? Dependencies = null,
-    TimeProvider? TimeProvider = null);
+    TimeProvider? TimeProvider = null,
+    IStateReconciliationDiagnosticSink?
+        StateReconciliationDiagnosticSink = null);
 
 internal sealed record AuthorizedAcceptedStateRestoreResult(
     string Code,
@@ -377,7 +379,8 @@ internal sealed class AuthorizedAcceptedStateComposer
             var locatorResult = await new LocatorRootService(
                     store,
                     keys,
-                    timeProvider)
+                    timeProvider,
+                    request.StateReconciliationDiagnosticSink)
                 .ResolveAsync(
                     access,
                     requiredPlatformExpiry,
@@ -418,7 +421,10 @@ internal sealed class AuthorizedAcceptedStateComposer
                 launch.RunAttempt,
                 logicalExpiry,
                 Reset: null);
-            var lineageService = new LineageService(store, timeProvider);
+            var lineageService = new LineageService(
+                store,
+                timeProvider,
+                request.StateReconciliationDiagnosticSink);
             LineageInterruptedTransitionRecoveryResult? recoveredTransition =
                 null;
             if (launch.Inputs.StateMode == ActionHostStateMode.Reset)
@@ -1042,6 +1048,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                     lineage,
                     store,
                     timeProvider,
+                    request.StateReconciliationDiagnosticSink,
                     stateAccess,
                     baseScope,
                     reviewed,

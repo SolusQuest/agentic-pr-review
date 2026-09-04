@@ -23,6 +23,7 @@ import {
 import {
   HostProcessTerminationUnconfirmedError,
   runHostProcess,
+  STATE_RECONCILIATION_DIAGNOSTIC_PREFIX,
   type HostProcessRunner,
 } from './launcher/host-process.js';
 import { readAndMaskActionInputs } from './launcher/inputs.js';
@@ -70,6 +71,8 @@ export interface PrivateActionWrapperSeams {
    * Host/control/artifact evidence set.
    */
   readonly trustedProofBudgetReceiptSink?: (frame: string) => void;
+  /** Receives one canonical safe diagnostic after Host and bridge quiescence. */
+  readonly trustedProofStateReconciliationDiagnosticSink?: (line: string) => void;
   readonly fatalExit: (code: 1) => void;
   readonly officialQuiescenceTimeoutMs?: number;
 }
@@ -117,6 +120,7 @@ export async function runPrivateActionWrapperWithSeams(
   let completion: ActionHostCompletionDocument | undefined;
   let artifactRestRequestBudget: ArtifactRestRequestBudget | undefined;
   let hostBudgetReceiptLines: readonly string[] = [];
+  let hostStateReconciliationDiagnosticLine: string | undefined;
   let failed = false;
   let hostTerminationUnconfirmed = false;
   const inputs = (() => {
@@ -194,6 +198,7 @@ export async function runPrivateActionWrapperWithSeams(
         ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
       });
       hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
+      hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
       completion = parseCompletionDocument(
         host.completionBytes,
         prepared.buildDiscriminator,
@@ -243,10 +248,19 @@ export async function runPrivateActionWrapperWithSeams(
     }
     try {
       if (quiet) {
-        writeTrustedProofBudgetReceiptFrame(
+        try {
+          writeTrustedProofBudgetReceiptFrame(
+            artifactRestRequestBudget,
+            hostBudgetReceiptLines,
+            seams.trustedProofBudgetReceiptSink,
+          );
+        } catch {
+          failed = true;
+        }
+        writeTrustedProofStateReconciliationDiagnostic(
           artifactRestRequestBudget,
-          hostBudgetReceiptLines,
-          seams.trustedProofBudgetReceiptSink,
+          hostStateReconciliationDiagnosticLine,
+          seams.trustedProofStateReconciliationDiagnosticSink,
         );
       }
     } catch {
@@ -358,6 +372,22 @@ function writeTrustedProofBudgetReceiptFrame(
 
 function writeTrustedProofArtifactRestBudgetToStderr(frame: string): void {
   process.stderr.write(frame);
+}
+
+function writeTrustedProofStateReconciliationDiagnostic(
+  budget: ArtifactRestRequestBudget | undefined,
+  line: string | undefined,
+  sink: ((line: string) => void) | undefined,
+): void {
+  if (!budget?.protectedRoute || line === undefined) return;
+  if (
+    !line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX) ||
+    !line.endsWith('\n') ||
+    line.indexOf('\n') !== line.length - 1
+  ) {
+    return;
+  }
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(line);
 }
 
 function required(value: string | undefined): string {

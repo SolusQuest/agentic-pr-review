@@ -17,6 +17,7 @@ export const HOST_STDERR_CAPTURE_MAXIMUM_BYTES = 8 * 1024;
 const HOST_EXECUTABLE_FD = 3;
 const GITHUB_REQUEST_BUDGET_PREFIX = 'APR_R4_E2P_GITHUB_REQUEST_BUDGET ';
 const CONTROL_REQUEST_BUDGET_PREFIX = 'APR_R4_E2P_CONTROL_REQUEST_BUDGET ';
+export const STATE_RECONCILIATION_DIAGNOSTIC_PREFIX = 'APR_R4_E2P_STATE_RECONCILIATION ';
 
 export class HostProcessTerminationUnconfirmedError extends Error {
   constructor() {
@@ -30,6 +31,8 @@ export interface HostProcessResult {
   readonly exitCode: number;
   /** Canonical, secret-free proof receipts admitted from otherwise private stderr. */
   readonly trustedProofBudgetReceiptLines: readonly string[];
+  /** One canonical, secret-free reconciliation diagnostic for a verified r4-w2 proof. */
+  readonly trustedProofStateReconciliationDiagnosticLine?: string;
 }
 
 export interface HostProcessRequest {
@@ -126,19 +129,26 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   request.signal.addEventListener('abort', forwardCancellation, { once: true });
   if (request.signal.aborted) forwardCancellation();
   const outputPromise = readSingleFrame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
-  const receiptPromise = readTrustedProofBudgetReceiptLines(
-    child.stderr!,
-    request.requestBudgetProfile,
-  );
+  const stderrPromise = readTrustedProofStderr(child.stderr!, request.requestBudgetProfile);
   try {
     child.stdin!.end(encodeFrame(request.launchBytes));
-    const [, completionBytes, trustedProofBudgetReceiptLines, closed] = await Promise.race([
-      Promise.all([finished(child.stdin!), outputPromise, receiptPromise, closePromise]),
+    const [, completionBytes, admittedStderr, closed] = await Promise.race([
+      Promise.all([finished(child.stdin!), outputPromise, stderrPromise, closePromise]),
       processErrorPromise,
       unconfirmedPromise,
     ]);
     if (closed.signal !== null || closed.code === null) fail('wrapper_host_process_failed');
-    return { completionBytes, exitCode: closed.code, trustedProofBudgetReceiptLines };
+    return {
+      completionBytes,
+      exitCode: closed.code,
+      trustedProofBudgetReceiptLines: admittedStderr.budgetReceiptLines,
+      ...(admittedStderr.stateReconciliationDiagnosticLine === undefined
+        ? {}
+        : {
+            trustedProofStateReconciliationDiagnosticLine:
+              admittedStderr.stateReconciliationDiagnosticLine,
+          }),
+    };
   } catch (error) {
     if (error instanceof HostProcessTerminationUnconfirmedError) throw error;
     if (!spawned) return fail('wrapper_host_process_failed');
@@ -158,15 +168,30 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
 
 /**
  * Drains private Host stderr without forwarding it. Only the two fixed R4
- * request-budget records are admitted, and they are parsed and reserialized so
- * arbitrary Host text can never become public workflow output.
+ * request-budget records and the bounded state-reconciliation diagnostic are
+ * admitted. Every record is parsed and reserialized so arbitrary Host text can
+ * never become public workflow output.
  */
 export async function readTrustedProofBudgetReceiptLines(
   stream: Readable,
   profile: TrustedProofRequestBudgetProfile | undefined,
   maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
 ): Promise<readonly string[]> {
-  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return [];
+  return (await readTrustedProofStderr(stream, profile, maximumBytes)).budgetReceiptLines;
+}
+
+interface TrustedProofStderr {
+  readonly budgetReceiptLines: readonly string[];
+  readonly stateReconciliationDiagnosticLine?: string;
+}
+
+export async function readTrustedProofStderr(
+  stream: Readable,
+  profile: TrustedProofRequestBudgetProfile | undefined,
+  maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
+): Promise<TrustedProofStderr> {
+  const empty: TrustedProofStderr = { budgetReceiptLines: [] };
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return empty;
   const expected = profile === undefined ? undefined : trustedProofHostReceiptProfile(profile);
   const chunks: Buffer[] = [];
   let total = 0;
@@ -177,31 +202,117 @@ export async function readTrustedProofBudgetReceiptLines(
     if (total <= maximumBytes) chunks.push(chunk);
     else overflow = true;
   }
-  if (overflow || expected === undefined) return [];
+  if (overflow || expected === undefined) return empty;
 
   let decoded: string;
   try {
     decoded = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, total));
   } catch {
-    return [];
+    return empty;
   }
 
   let github: string | undefined;
   let control: string | undefined;
+  let budgetInvalid = false;
+  let diagnostic: string | undefined;
+  let diagnosticInvalid = false;
   for (const raw of decoded.split('\n')) {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     if (line.startsWith(GITHUB_REQUEST_BUDGET_PREFIX)) {
-      if (github !== undefined) return [];
+      if (github !== undefined) {
+        budgetInvalid = true;
+        continue;
+      }
       github = canonicalGitHubRequestBudget(line, expected);
-      if (github === undefined) return [];
+      if (github === undefined) budgetInvalid = true;
     } else if (line.startsWith(CONTROL_REQUEST_BUDGET_PREFIX)) {
-      if (control !== undefined) return [];
+      if (control !== undefined) {
+        budgetInvalid = true;
+        continue;
+      }
       control = canonicalControlRequestBudget(line, expected);
-      if (control === undefined) return [];
+      if (control === undefined) budgetInvalid = true;
+    } else if (line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX)) {
+      if (diagnostic !== undefined || diagnosticInvalid) {
+        diagnostic = undefined;
+        diagnosticInvalid = true;
+        continue;
+      }
+      diagnostic = canonicalStateReconciliationDiagnostic(line);
+      if (diagnostic === undefined) diagnosticInvalid = true;
     }
   }
 
-  return github === undefined || control === undefined ? [] : [`${github}\n`, `${control}\n`];
+  return {
+    budgetReceiptLines:
+      budgetInvalid || github === undefined || control === undefined
+        ? []
+        : [`${github}\n`, `${control}\n`],
+    ...(diagnosticInvalid || diagnostic === undefined
+      ? {}
+      : { stateReconciliationDiagnosticLine: `${diagnostic}\n` }),
+  };
+}
+
+function canonicalStateReconciliationDiagnostic(line: string): string | undefined {
+  const value = parseRecord(line.slice(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX.length));
+  if (
+    value === undefined ||
+    !hasExactKeys(value, [
+      'owner',
+      'outcome',
+      'exact_readback',
+      'observations',
+      'terminal',
+      'schedule_index',
+    ]) ||
+    ![
+      'locator_root',
+      'lineage_head',
+      'lineage_intent',
+      'candidate',
+      'publication_intent',
+      'acceptance',
+      'publication_failure',
+      'abandonment',
+      'reset',
+      'expiry_transition',
+      'cleanup',
+    ].includes(value.owner as string) ||
+    !['committed', 'outcome_unknown', 'not_committed', 'reconcile_only'].includes(
+      value.outcome as string,
+    ) ||
+    !['matched', 'failed', 'not_available', 'not_applicable'].includes(
+      value.exact_readback as string,
+    ) ||
+    !boundedInteger(value.observations, 0, 32) ||
+    ![
+      'not_committed',
+      'target_absent',
+      'unavailable',
+      'conflict',
+      'authentication_failed',
+      'key_unavailable',
+      'retention_failed',
+      'cleanup_failed',
+      'cancelled',
+      'invalid',
+    ].includes(value.terminal as string) ||
+    !boundedInteger(value.schedule_index, 0, 2)
+  ) {
+    return undefined;
+  }
+  return (
+    STATE_RECONCILIATION_DIAGNOSTIC_PREFIX +
+    JSON.stringify({
+      owner: value.owner,
+      outcome: value.outcome,
+      exact_readback: value.exact_readback,
+      observations: value.observations,
+      terminal: value.terminal,
+      schedule_index: value.schedule_index,
+    })
+  );
 }
 
 function canonicalGitHubRequestBudget(
