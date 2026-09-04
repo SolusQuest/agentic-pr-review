@@ -31,17 +31,14 @@ import { verifyPreparedPayload } from './prepared-payload.js';
 const roots: string[] = [];
 const handles: FileHandle[] = [];
 const githubBudgetReceipt =
-  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":216,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0}}\n';
+  'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":180,"authenticated_rest_limit":256,"anonymous_codeload_requests":1,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":true,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":1,"host_head_source_rest":{"raw":180,"primary":180,"not_modified":0,"secondary_points":180,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0}}\n';
 const controlBudgetReceipt =
   'APR_R4_E2P_CONTROL_REQUEST_BUDGET {"consumed":9,"limit":64,"primary":9,"not_modified":0,"secondary_points":13,"mutation_count":1,"remaining_tail_required":0,"remaining_tail_reserve":1,"permission_denied":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_remaining_header":false,"measurement_only":true,"rate_limited":false}\n';
 const finalGitHubBudgetReceipt = githubBudgetReceipt
   .replace('"measurement_only":true', '"measurement_only":false')
-  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":64')
-  .replace('"remaining_tail_required":0', '"remaining_tail_required":863')
-  .replace('"remaining_tail_required":0', '"remaining_tail_required":878');
+  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":80');
 const finalControlBudgetReceipt = controlBudgetReceipt
-  .replace('"remaining_tail_required":0', '"remaining_tail_required":879')
-  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":64')
+  .replace('"remaining_tail_reserve":1', '"remaining_tail_reserve":80')
   .replace('"measurement_only":true', '"measurement_only":false');
 
 afterEach(async () => {
@@ -130,26 +127,26 @@ describe('W1 private Host framing', () => {
 
   it.each([
     finalGitHubBudgetReceipt.replace(
-      '"authenticated_rest_limit":216',
-      '"authenticated_rest_limit":217',
+      '"authenticated_rest_limit":256',
+      '"authenticated_rest_limit":257',
     ) + finalControlBudgetReceipt,
     finalGitHubBudgetReceipt + finalControlBudgetReceipt.replace('"limit":64', '"limit":63'),
     finalGitHubBudgetReceipt.replace('"measurement_only":false', '"measurement_only":true') +
       finalControlBudgetReceipt,
-    finalGitHubBudgetReceipt.replace('"remaining_tail_reserve":64', '"remaining_tail_reserve":63') +
+    finalGitHubBudgetReceipt.replace('"remaining_tail_reserve":80', '"remaining_tail_reserve":79') +
       finalControlBudgetReceipt,
     finalGitHubBudgetReceipt.replace(
-      '"remaining_tail_required":863',
-      '"remaining_tail_required":862',
+      '"remaining_tail_required":0}',
+      '"remaining_tail_required":1}',
     ) + finalControlBudgetReceipt,
     finalGitHubBudgetReceipt.replace(
-      '"remaining_tail_required":878',
-      '"remaining_tail_required":877',
+      '"remaining_tail_required":0}}',
+      '"remaining_tail_required":1}}',
     ) + finalControlBudgetReceipt,
     finalGitHubBudgetReceipt +
       finalControlBudgetReceipt.replace(
-        '"remaining_tail_required":879',
-        '"remaining_tail_required":887',
+        '"remaining_tail_required":0',
+        '"remaining_tail_required":1',
       ),
     finalGitHubBudgetReceipt +
       finalControlBudgetReceipt.replace('"measurement_only":false', '"measurement_only":true'),
@@ -164,8 +161,8 @@ describe('W1 private Host framing', () => {
     githubBudgetReceipt,
     githubBudgetReceipt + githubBudgetReceipt + controlBudgetReceipt,
     githubBudgetReceipt.replace(
-      '"authenticated_rest_limit":216',
-      '"authenticated_rest_limit":217',
+      '"authenticated_rest_limit":256',
+      '"authenticated_rest_limit":257',
     ) + controlBudgetReceipt,
     githubBudgetReceipt.replace(
       '"invalid_remaining_header":false',

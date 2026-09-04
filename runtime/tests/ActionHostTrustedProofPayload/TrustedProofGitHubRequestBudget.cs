@@ -5,7 +5,7 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 
 internal sealed class TrustedProofGitHubRequestBudget
 {
-    internal const int MaximumAuthenticatedRestRequests = 216;
+    internal const int MaximumAuthenticatedRestRequests = 256;
     internal const int MaximumAnonymousCodeloadRequests = 1;
 
     private readonly int _maximumAuthenticatedRestRequests;

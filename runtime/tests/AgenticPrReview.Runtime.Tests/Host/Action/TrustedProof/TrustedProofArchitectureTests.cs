@@ -314,9 +314,9 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("'shared_primary_bucket_exact',", source,
             StringComparison.Ordinal);
-        Assert.Contains("input.shared_primary_bucket_start !== 1000", source,
+        Assert.Contains("input.shared_primary_bucket_start > 1000", source,
             StringComparison.Ordinal);
-        Assert.Contains("input.shared_primary_bucket_end !== 111", source,
+        Assert.Contains("input.shared_primary_bucket_end < 64", source,
             StringComparison.Ordinal);
         Assert.Contains("input.shared_primary_bucket_exact !== true", source,
             StringComparison.Ordinal);
@@ -354,12 +354,12 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("validate_missing_github_stderr", source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "github.host_head_source_rest.remaining_tail_required !== 863",
+            "github.host_head_source_rest.remaining_tail_required !== 0",
             source, StringComparison.Ordinal);
         Assert.Contains(
-            "github.host_other_github_rest.remaining_tail_required !== 878",
+            "github.host_other_github_rest.remaining_tail_required !== 0",
             source, StringComparison.Ordinal);
-        Assert.Contains("control.remaining_tail_required !== 879", source,
+        Assert.Contains("control.remaining_tail_required !== 0", source,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "\"rejected_requests\":0}\\nAPR_R4_E2P_CONTROL_REQUEST_BUDGET",
@@ -651,7 +651,7 @@ public sealed class TrustedProofArchitectureTests
     }
 
     [Fact]
-    public void OperationRequestEvidenceSeparatesAnonymousRoutesAndSharesTheFreezeSource()
+    public void OperationRequestEvidenceSeparatesAnonymousRoutesAndSharesTheSafetyPolicy()
     {
         var root = FindRepositoryRoot();
         var synthetic = File.ReadAllText(Path.Join(root, "runtime", "tests",
@@ -682,7 +682,17 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("TrustedProofOperationRequestAccounting.cs", verifierProject,
             StringComparison.Ordinal);
-        Assert.Contains("TryGetFrozenTailProfile", accounting,
+        Assert.Contains("TryGetFinalSafetyProfile", accounting,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("TryGetFrozenTailProfile", accounting,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("trusted-proof-request-budget.json.golden", supervisor,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("FrozenOperationPrimaryRoleCaps", supervisor,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("FrozenFinalPrimaryRemaining", synthetic,
+            StringComparison.Ordinal);
+        Assert.Contains("receipt.PermissionDenied == 0", supervisor,
             StringComparison.Ordinal);
         Assert.DoesNotContain("FrozenRemainingTailByDomain", supervisor,
             StringComparison.Ordinal);

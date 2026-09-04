@@ -8,9 +8,9 @@ namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 #endif
 
-// The allocation is deliberately a measurement contract until the first
-// complete synthetic AOT run supplies the reviewed role maxima.  It must not
-// be mistaken for a production primary-rate-limit bound.
+// Domains label actual per-execution request evidence. Final profiles use
+// independent runaway ceilings and live remaining authority, not fixed role
+// allocations or historical measurement maxima.
 internal enum TrustedProofRequestDomain
 {
     NodeArtifactRest,
@@ -50,14 +50,18 @@ internal enum TrustedProofResponseClass
 internal static class TrustedProofOperationRequestAccounting
 {
     internal const int OperationPrimaryBudget = 1000;
-    // Measurement remains an evidence-only compatibility profile. Its prior
-    // one-request reserve is part of the emitted receipt contract and must not
-    // inherit the independently frozen final operation reserve below.
+    // Measurement is an explicitly non-final diagnostic profile.
     internal const int MeasurementPrimaryReserve = 1;
-    // The two byte-identical synthetic AOT runs consumed 889 primary requests.
-    // Keep 64 shared-token requests unallocated so a successful proof does not
-    // consume the whole 1,000-request platform bucket.
+    // Normal work leaves this safety/cleanup reserve. Cleanup alone may spend
+    // it under its separate 64-request ceiling; successful proof still leaves 64.
     internal const int OperationPrimaryReserve = 64;
+    // The three admitted stages start nine normal process-local ledgers. The
+    // sole infrastructure retry may start three more, and serial per-process
+    // dispatch permits one unpropagated Node/Host peer charge. The derived
+    // maximum is 13; round it to 16 without restoring measured role tails.
+    internal const int UncoordinatedPrimaryHeadroom = 16;
+    internal const int NormalProcessPrimaryReserve =
+        OperationPrimaryReserve + UncoordinatedPrimaryHeadroom;
     // The trusted payload attaches this secret-free semantic route label before
     // its in-process verifier handler dispatches.  The independent verifier
     // witness must consume this value rather than infer meaning from a SHA in
@@ -173,10 +177,10 @@ internal static class TrustedProofOperationRequestAccounting
 }
 
 // A remaining header is a shared-token observation, not a local transport
-// quota.  The eventual AOT freeze supplies the primary requests still needed
-// by every protected role after each domain's observation, plus an explicit
-// reserve.  The measurement profile deliberately has no tail allocations and
-// is therefore evidence-only; Framework refuses it as a final/live verdict.
+// quota. Final normal processes therefore guard the operation floor plus a
+// bounded cross-process coordination margin. Historical role tails stay zero.
+// The measurement profile has neither protection and remains evidence-only;
+// Framework refuses it as a final/live verdict.
 internal sealed class TrustedProofRemainingTailGuard(
     IReadOnlyDictionary<TrustedProofRequestDomain, int> remainingTailByDomain,
     int reserve,
@@ -558,8 +562,8 @@ internal sealed class TrustedProofRequestBudgetProfile(
     private const string ProfileEnvironment =
         "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
 
-    private const int FrozenReserve =
-        TrustedProofOperationRequestAccounting.OperationPrimaryReserve;
+    private const int SafetyReserve =
+        TrustedProofOperationRequestAccounting.NormalProcessPrimaryReserve;
 
     internal static readonly TrustedProofRequestBudgetProfile Measurement = new(
         TrustedProofRemainingTailGuard.Measurement,
@@ -595,15 +599,14 @@ internal sealed class TrustedProofRequestBudgetProfile(
         }
 
         if (requested is not ("final-bootstrap" or "final-continuation" or
-            "final-stale") || !TryGetFrozenTailProfile(requested,
+            "final-stale") || !TryGetFinalSafetyProfile(requested,
                 TrustedProofRequestBudgetLane.Host, out var host, out var reserve) ||
-            !TryGetFrozenTailProfile(requested,
+            !TryGetFinalSafetyProfile(requested,
                 TrustedProofRequestBudgetLane.ExternalControl, out var external,
                 out var externalReserve) ||
-            !TryGetFrozenTailProfile(requested,
+            !TryGetFinalSafetyProfile(requested,
                 TrustedProofRequestBudgetLane.CleanupControl, out var cleanup,
-                out var cleanupReserve) || reserve != externalReserve ||
-            reserve != cleanupReserve)
+                out var cleanupReserve))
         {
             profile = null;
             return false;
@@ -611,52 +614,31 @@ internal sealed class TrustedProofRequestBudgetProfile(
 
         profile = new TrustedProofRequestBudgetProfile(
             new TrustedProofRemainingTailGuard(host, reserve, measurementOnly: false),
-            new TrustedProofRemainingTailGuard(external, reserve, measurementOnly: false),
-            new TrustedProofRemainingTailGuard(cleanup, reserve, measurementOnly: false));
+            new TrustedProofRemainingTailGuard(external, externalReserve, measurementOnly: false),
+            new TrustedProofRemainingTailGuard(cleanup, cleanupReserve, measurementOnly: false));
         return true;
     }
 
-    internal static bool TryGetFrozenTailProfile(
+    internal static bool TryGetFinalSafetyProfile(
         string requested,
         TrustedProofRequestBudgetLane lane,
         out IReadOnlyDictionary<TrustedProofRequestDomain, int> tailByDomain,
         out int reserve)
     {
-        var values = (requested, lane) switch
-        {
-            ("final-bootstrap", TrustedProofRequestBudgetLane.Host) =>
-                (Node: 679, Head: 863, Other: 878, Control: 879),
-            ("final-bootstrap", TrustedProofRequestBudgetLane.ExternalControl or
-                TrustedProofRequestBudgetLane.CleanupControl) =>
-                (Node: 679, Head: 863, Other: 878, Control: 888),
-            ("final-continuation", TrustedProofRequestBudgetLane.Host) =>
-                (Node: 393, Head: 577, Other: 591, Control: 592),
-            ("final-continuation", TrustedProofRequestBudgetLane.ExternalControl) =>
-                (Node: 393, Head: 577, Other: 591, Control: 597),
-            ("final-continuation", TrustedProofRequestBudgetLane.CleanupControl) =>
-                (Node: 393, Head: 577, Other: 591, Control: 242),
-            ("final-stale", TrustedProofRequestBudgetLane.Host) =>
-                (Node: 26, Head: 210, Other: 224, Control: 225),
-            ("final-stale", TrustedProofRequestBudgetLane.ExternalControl or
-                TrustedProofRequestBudgetLane.CleanupControl) =>
-                (Node: 26, Head: 210, Other: 224, Control: 234),
-            _ => (Node: -1, Head: -1, Other: -1, Control: -1),
-        };
+        // The labels select proof scenarios, not measured future allocations.
+        // Current requests and compound mutations still obtain real leases.
         tailByDomain = new Dictionary<TrustedProofRequestDomain, int>
         {
-            [TrustedProofRequestDomain.NodeArtifactRest] = values.Node,
-            [TrustedProofRequestDomain.HostHeadSourceRest] = values.Head,
-            [TrustedProofRequestDomain.HostOtherGitHubRest] = values.Other,
-            [TrustedProofRequestDomain.TrustedControlRest] = values.Control,
+            [TrustedProofRequestDomain.NodeArtifactRest] = 0,
+            [TrustedProofRequestDomain.HostHeadSourceRest] = 0,
+            [TrustedProofRequestDomain.HostOtherGitHubRest] = 0,
+            [TrustedProofRequestDomain.TrustedControlRest] = 0,
         };
-        reserve = FrozenReserve;
-        return reserve >= 0 && tailByDomain.Count == 4 &&
-            new[]
-            {
-                TrustedProofRequestDomain.NodeArtifactRest,
-                TrustedProofRequestDomain.HostHeadSourceRest,
-                TrustedProofRequestDomain.HostOtherGitHubRest,
-                TrustedProofRequestDomain.TrustedControlRest,
-            }.All(tailByDomain.ContainsKey) && tailByDomain.Values.All(value => value >= 0);
+        reserve = lane == TrustedProofRequestBudgetLane.CleanupControl
+            ? 0 : SafetyReserve;
+        return requested is "final-bootstrap" or "final-continuation" or "final-stale" &&
+            lane is TrustedProofRequestBudgetLane.Host or
+                TrustedProofRequestBudgetLane.ExternalControl or
+                TrustedProofRequestBudgetLane.CleanupControl;
     }
 }

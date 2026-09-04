@@ -10,7 +10,11 @@ import {
 } from './artifact-rest-request-budget.js';
 import {
   TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+  TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
   TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+  TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
+  TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE,
+  TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM,
 } from '../launcher/request-budget-profile.js';
 
 afterEach(() => {
@@ -78,6 +82,52 @@ describe('bounded artifact archive acquisition', () => {
 });
 
 describe('trusted proof artifact REST budget', () => {
+  it('admits the historical continuation tail and a changed response with live quota', async () => {
+    let now = 0;
+    let remaining = 1_000;
+    let dispatched = 0;
+    const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile: TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+      secondaryRateLimit: {
+        now: () => now,
+        sleep: async (milliseconds) => {
+          now += milliseconds;
+        },
+      },
+    });
+    const observe = async (status: 200 | 304) =>
+      await budget.runAuthenticatedApiCall(
+        { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+        async () => {
+          dispatched += 1;
+          if (status === 200) remaining -= 1;
+          return { status, headers: { 'x-ratelimit-remaining': String(remaining) } };
+        },
+      );
+
+    for (let index = 0; index < 1_929; index += 1) await observe(304);
+    for (let index = 0; index < 136; index += 1) await observe(200);
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 2_065,
+      conditional_not_modified_requests: 1_929,
+      primary_rate_limit_requests: 136,
+      disposition: 'active',
+    });
+
+    for (let index = 0; index < 65; index += 1) await observe(304);
+    await observe(200);
+    expect(dispatched).toBe(2_131);
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: 2_131,
+      conditional_not_modified_requests: 1_994,
+      primary_rate_limit_requests: 137,
+      secondary_limit_points: 2_131,
+      disposition: 'active',
+    });
+  });
+
   it('uses the r4-w2 measurement profile with explicit 2304 raw and 256 primary caps', () => {
     expect(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS).toEqual({
       maximumTotalAuthenticatedApiRequests: 256,
@@ -92,19 +142,64 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
-  it('uses the frozen final profile with the Node tail and operation reserve', () => {
+  it.each([
+    { name: 'raw', limit: 4_096, status: 304, disposition: 'total_exhausted' },
+    { name: 'primary', limit: 256, status: 200, disposition: 'primary_exhausted' },
+  ])('enforces the rounded final $name ceiling before wire dispatch', async (testCase) => {
+    let now = 0;
+    let dispatched = 0;
+    const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'r4-w2',
+      identity: trustedProofIdentity(),
+      profile: TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
+      secondaryRateLimit: {
+        now: () => now,
+        sleep: async (milliseconds) => {
+          now += milliseconds;
+        },
+      },
+    });
+    const observe = async () =>
+      await budget.runAuthenticatedApiCall(
+        { signal: signal(), secondaryLimitPoints: 1, mutative: false },
+        async () => {
+          dispatched += 1;
+          return {
+            status: testCase.status,
+            headers: {
+              'x-ratelimit-remaining': String(testCase.status === 304 ? 1_000 : 1_000 - dispatched),
+            },
+          };
+        },
+      );
+    for (let index = 0; index < testCase.limit; index += 1) await observe();
+    expect(budget.receipt().disposition).toBe('active');
+    await expect(observe()).rejects.toThrow(
+      `trusted_proof_artifact_rest_budget_${testCase.disposition}`,
+    );
+    expect(dispatched).toBe(testCase.limit);
+    expect(budget.receipt()).toMatchObject({
+      total_authenticated_api_requests: testCase.limit,
+      disposition: testCase.disposition,
+    });
+  });
+
+  it('uses the final safety ceilings and coordination margin without a measured Node tail', () => {
     const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
       buildDiscriminator: 'r4-w2',
       identity: trustedProofIdentity(),
       profile: TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
     });
     expect(budget.receipt()).toMatchObject({
-      maximum_total_authenticated_api_requests: 2_130,
-      maximum_primary_rate_limit_requests: 136,
-      remaining_tail_required: 679,
-      remaining_tail_reserve: 64,
+      maximum_total_authenticated_api_requests: 4_096,
+      maximum_primary_rate_limit_requests: 256,
+      remaining_tail_required: 0,
+      remaining_tail_reserve: 80,
       measurement_only: false,
     });
+    expect(TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE).toBe(
+      TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE + TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM,
+    );
   });
 
   it('allows 2304 measured raw requests and rejects the 2305th before wire dispatch', async () => {

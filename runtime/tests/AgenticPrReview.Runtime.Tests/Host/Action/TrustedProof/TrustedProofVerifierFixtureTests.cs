@@ -14,11 +14,128 @@ using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using Xunit;
+using VerifierRequestAccounting =
+    AgenticPrReview.Runtime.ActionHostVerifierFixture.TrustedProofOperationRequestAccounting;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
 public sealed class TrustedProofVerifierFixtureTests
 {
+    [Theory]
+    [InlineData(224, 1000, 111, 889, true)]
+    [InlineData(225, 1000, 110, 890, true)]
+    [InlineData(223, 1000, 112, 888, true)]
+    [InlineData(136, 900, 99, 801, true)]
+    [InlineData(224, 1000, 112, 889, false)]
+    [InlineData(224, 1000, 111, 888, false)]
+    [InlineData(272, 1000, 63, 937, false)]
+    [InlineData(224, 1001, 112, 889, false)]
+    [InlineData(-1, 1000, 336, 664, false)]
+    [InlineData(int.MaxValue, 1000, 64, 936, false)]
+    public void OperationBudgetJoinsActualCountsWithoutFreezingTheirDistribution(
+        int artifactPrimary, int start, int end, int charged, bool valid)
+    {
+        Assert.Equal(valid, FrameworkSupervisor.OperationPrimaryBudgetIsValid(
+            OperationRoles(artifactPrimary), start, end, charged));
+    }
+
+    [Fact]
+    public void OperationBudgetRejectsMissingAndUnknownRoles()
+    {
+        var roles = OperationRoles(224);
+        roles.Remove("cleanup_control");
+        Assert.False(FrameworkSupervisor.OperationPrimaryBudgetIsValid(
+            roles, 1000, 119, 881));
+        roles.Add("unaccounted_control", 8);
+        Assert.False(FrameworkSupervisor.OperationPrimaryBudgetIsValid(
+            roles, 1000, 111, 889));
+    }
+
+    [Theory]
+    [InlineData(2065, 136)]
+    [InlineData(2130, 136)]
+    [InlineData(2131, 137)]
+    public void ArtifactReceiptAcceptsCountVariationButRejectsTamperingAndFailure(
+        int raw, int primary)
+    {
+        var root = CreateWitnessScenario();
+        var scenario = Path.Join(root, "dispatch-continuation");
+        Directory.CreateDirectory(scenario);
+        var payload = new string('f', 64);
+        File.WriteAllText(Path.Join(scenario, "payload-sha256"), payload);
+        File.WriteAllText(Path.Join(scenario, "run-id"), "801");
+        File.WriteAllText(Path.Join(scenario, "run-attempt"), "1");
+        try
+        {
+            var receipt = new FrameworkSupervisor.FrameworkArtifactRestRequestBudgetReceipt(
+                Kind: "apr-r4-trusted-proof-artifact-rest-budget-v2",
+                ProtectedRoute: true,
+                MaximumTotalAuthenticatedApiRequests: 4096,
+                TotalAuthenticatedApiRequests: raw,
+                MaximumPrimaryRateLimitRequests: 256,
+                PrimaryRateLimitRequests: primary,
+                ConditionalNotModifiedRequests: raw - primary,
+                SecondaryLimitPoints: raw,
+                PermissionDenied: 0,
+                RemainingTotalAuthenticatedApiRequests: 4096 - raw,
+                RemainingPrimaryRateLimitRequests: 256 - primary,
+                Disposition: "active",
+                Repository: FrameworkCanaries.Repository,
+                RepositoryId: "42",
+                WorkflowSha: FrameworkGitHubHandler.WorkflowSha,
+                ActionSourceSha: FrameworkGitHubHandler.ActionSha,
+                PayloadSha256: payload,
+                BuildDiscriminator: FrameworkCanaries.TrustedProofBuildDiscriminator,
+                RunId: "801",
+                RunAttempt: "1",
+                CapProfile: "apr-r4-artifact-rest-request-budget-v2",
+                MeasurementOnly: false,
+                RemainingTailRequired: 0,
+                RemainingTailReserve:
+                    VerifierRequestAccounting.NormalProcessPrimaryReserve);
+            bool Valid(FrameworkSupervisor.FrameworkArtifactRestRequestBudgetReceipt candidate) =>
+                FrameworkSupervisor.ArtifactRestRequestBudgetReceiptIsExact(
+                    candidate, scenario, raw, raw - primary, primary, raw, 0);
+
+            Assert.True(Valid(receipt));
+            Assert.All(new[]
+            {
+                receipt with { MaximumTotalAuthenticatedApiRequests = 8192 },
+                receipt with { MaximumPrimaryRateLimitRequests = 512 },
+                receipt with { TotalAuthenticatedApiRequests = raw + 1 },
+                receipt with { PrimaryRateLimitRequests = primary + 1 },
+                receipt with { ConditionalNotModifiedRequests = raw - primary - 1 },
+                receipt with { SecondaryLimitPoints = raw + 1 },
+                receipt with { RemainingPrimaryRateLimitRequests = 256 - primary + 1 },
+                receipt with { PermissionDenied = 1 },
+                receipt with { Disposition = "primary_exhausted" },
+                receipt with { MeasurementOnly = true },
+                receipt with { ProtectedRoute = false },
+                receipt with { RemainingTailRequired = 1 },
+                receipt with { RemainingTailReserve =
+                    VerifierRequestAccounting.NormalProcessPrimaryReserve - 1 },
+                receipt with { RunId = "802" },
+                receipt with { PayloadSha256 = new string('e', 64) },
+            }, candidate => Assert.False(Valid(candidate)));
+            File.Delete(Path.Join(scenario, "payload-sha256"));
+            Assert.False(Valid(receipt));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static Dictionary<string, int> OperationRoles(int artifactPrimary) => new()
+    {
+        ["node_artifact_rest"] = artifactPrimary,
+        ["host_head_source_rest"] = 540,
+        ["host_other_github_rest"] = 82,
+        ["embedded_control"] = 12,
+        ["external_control"] = 23,
+        ["cleanup_control"] = 8,
+    };
+
     [Fact]
     public async Task SyntheticPrimaryBucketIsSharedAcrossScenarioInstances()
     {

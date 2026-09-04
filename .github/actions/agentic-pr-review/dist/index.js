@@ -98113,7 +98113,7 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
   }
   /**
    * A completed response may reveal a lower primary allocation than our local
-   * measurement cap. Before a command starts, its known mandatory tail must
+   * runaway cap. Before a command starts, its known mandatory tail must
    * fit in that allocation as one unit; missing headers remain conservatively
    * charged by the local ledger instead of being treated as free capacity.
    */
@@ -98126,8 +98126,8 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       throw new ArtifactRestRateLimitHeadersError();
     }
     if (this.disposition !== "active") throw new ArtifactRestRequestBudgetError(this.disposition);
-    const requiredWithFinalProfileTail = Math.max(required2, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve();
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < requiredWithFinalProfileTail) {
+    const requiredWithReserve = Math.max(required2, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve();
+    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < requiredWithReserve) {
       this.disposition = "primary_exhausted";
       throw new ArtifactRestRequestBudgetError(this.disposition);
     }
@@ -101150,13 +101150,13 @@ import { TextDecoder as TextDecoder2 } from "node:util";
 // src/action-wrapper/launcher/request-budget-profile.ts
 var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
 var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
+var TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE = 64;
+var TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM = 16;
+var TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE = TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE + TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM;
 var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
   capProfile: "apr-r4-artifact-rest-request-budget-v2",
   limits: Object.freeze({
-    // Bootstrap completed at 1,096 raw requests, while continuation's
-    // frozen 2,042 state operations were still reconciling at 1,280 raw.
-    // This measurement-only window covers those bounded operations plus 262
-    // authenticated verification slots; final freezes the completed count.
+    // Retained non-final diagnostic profile; it cannot satisfy final evidence.
     maximumTotalAuthenticatedApiRequests: 2304,
     maximumPrimaryRateLimitRequests: 256
   }),
@@ -101164,21 +101164,21 @@ var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.free
   remainingTailReserve: 1,
   measurementOnly: true
 });
-function finalArtifactProfile(remainingTailRequired) {
-  return Object.freeze({
-    capProfile: "apr-r4-artifact-rest-request-budget-v2",
-    limits: Object.freeze({
-      maximumTotalAuthenticatedApiRequests: 2130,
-      maximumPrimaryRateLimitRequests: 136
-    }),
-    remainingTailRequired,
-    remainingTailReserve: 64,
-    measurementOnly: false
-  });
-}
-var TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile(679);
-var TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile(393);
-var TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile(26);
+var finalArtifactProfile = Object.freeze({
+  capProfile: "apr-r4-artifact-rest-request-budget-v2",
+  limits: Object.freeze({
+    // Rounded runaway ceilings, not measured consumption or phase allocations.
+    // Live remaining headers and mandatory command reservations still apply.
+    maximumTotalAuthenticatedApiRequests: 4096,
+    maximumPrimaryRateLimitRequests: 256
+  }),
+  remainingTailRequired: 0,
+  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
+  measurementOnly: false
+});
+var TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile;
+var TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile;
+var TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile;
 var TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE = Object.freeze({
   measurementOnly: true,
   remainingTailReserve: 1,
@@ -101186,20 +101186,13 @@ var TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE = Object.freeze({
   hostOtherGitHubRestTail: 0,
   trustedControlRestTail: 0
 });
-var finalHostReceiptProfile = (hostHeadSourceRestTail, hostOtherGitHubRestTail, trustedControlRestTail) => Object.freeze({
+var finalHostReceiptProfile = Object.freeze({
   measurementOnly: false,
-  remainingTailReserve: 64,
-  hostHeadSourceRestTail,
-  hostOtherGitHubRestTail,
-  trustedControlRestTail
+  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
+  hostHeadSourceRestTail: 0,
+  hostOtherGitHubRestTail: 0,
+  trustedControlRestTail: 0
 });
-var TRUSTED_PROOF_FINAL_BOOTSTRAP_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(863, 878, 879);
-var TRUSTED_PROOF_FINAL_CONTINUATION_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(
-  577,
-  591,
-  592
-);
-var TRUSTED_PROOF_FINAL_STALE_HOST_RECEIPT_PROFILE = finalHostReceiptProfile(210, 224, 225);
 function artifactRestRequestBudgetProfile(profile) {
   switch (profile) {
     case "measurement":
@@ -101217,11 +101210,9 @@ function trustedProofHostReceiptProfile(profile) {
     case "measurement":
       return TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE;
     case "final-bootstrap":
-      return TRUSTED_PROOF_FINAL_BOOTSTRAP_HOST_RECEIPT_PROFILE;
     case "final-continuation":
-      return TRUSTED_PROOF_FINAL_CONTINUATION_HOST_RECEIPT_PROFILE;
     case "final-stale":
-      return TRUSTED_PROOF_FINAL_STALE_HOST_RECEIPT_PROFILE;
+      return finalHostReceiptProfile;
   }
 }
 function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment = process.env) {
@@ -101412,7 +101403,7 @@ function canonicalGitHubRequestBudget(line, expected) {
     "remaining_tail_reserve",
     "host_head_source_rest",
     "host_other_github_rest"
-  ]) || !boundedInteger(value.authenticated_rest_requests, 0, 216) || value.authenticated_rest_limit !== 216 || !boundedInteger(value.anonymous_codeload_requests, 0, 1) || value.anonymous_codeload_limit !== 1 || value.rejected_requests !== 0 || value.measurement_only !== expected.measurementOnly || value.invalid_remaining_header !== false || value.terminal_rate_limited !== false || value.low_remaining_guard !== false || value.remaining_tail_reserve !== expected.remainingTailReserve || !validGitHubBudgetRole(value.host_head_source_rest, expected.hostHeadSourceRestTail) || !validGitHubBudgetRole(value.host_other_github_rest, expected.hostOtherGitHubRestTail) || value.host_head_source_rest.raw + value.host_other_github_rest.raw !== value.authenticated_rest_requests || value.host_head_source_rest.primary_rate_limited !== 0 || value.host_head_source_rest.secondary_rate_limited !== 0 || value.host_head_source_rest.combined_rate_limited !== 0 || value.host_head_source_rest.invalid_rate_headers !== 0 || value.host_other_github_rest.primary_rate_limited !== 0 || value.host_other_github_rest.secondary_rate_limited !== 0 || value.host_other_github_rest.combined_rate_limited !== 0 || value.host_other_github_rest.invalid_rate_headers !== 0) {
+  ]) || !boundedInteger(value.authenticated_rest_requests, 0, 256) || value.authenticated_rest_limit !== 256 || !boundedInteger(value.anonymous_codeload_requests, 0, 1) || value.anonymous_codeload_limit !== 1 || value.rejected_requests !== 0 || value.measurement_only !== expected.measurementOnly || value.invalid_remaining_header !== false || value.terminal_rate_limited !== false || value.low_remaining_guard !== false || value.remaining_tail_reserve !== expected.remainingTailReserve || !validGitHubBudgetRole(value.host_head_source_rest, expected.hostHeadSourceRestTail) || !validGitHubBudgetRole(value.host_other_github_rest, expected.hostOtherGitHubRestTail) || value.host_head_source_rest.raw + value.host_other_github_rest.raw !== value.authenticated_rest_requests || value.host_head_source_rest.primary_rate_limited !== 0 || value.host_head_source_rest.secondary_rate_limited !== 0 || value.host_head_source_rest.combined_rate_limited !== 0 || value.host_head_source_rest.invalid_rate_headers !== 0 || value.host_other_github_rest.primary_rate_limited !== 0 || value.host_other_github_rest.secondary_rate_limited !== 0 || value.host_other_github_rest.combined_rate_limited !== 0 || value.host_other_github_rest.invalid_rate_headers !== 0) {
     return void 0;
   }
   return GITHUB_REQUEST_BUDGET_PREFIX + JSON.stringify({
@@ -101446,7 +101437,7 @@ function validGitHubBudgetRole(value, expectedTail) {
     return false;
   }
   const role = value;
-  return boundedInteger(role.raw, 0, 216) && boundedInteger(role.primary, 0, 216) && boundedInteger(role.not_modified, 0, 216) && boundedInteger(role.secondary_points, 0, 216 * 5) && boundedInteger(role.permission, 0, 216) && boundedInteger(role.primary_rate_limited, 0, 216) && boundedInteger(role.secondary_rate_limited, 0, 216) && boundedInteger(role.combined_rate_limited, 0, 216) && boundedInteger(role.invalid_rate_headers, 0, 216) && role.remaining_tail_required === expectedTail && role.raw === role.primary + role.not_modified && role.secondary_points >= role.raw && role.secondary_points <= role.raw * 5 && (role.secondary_points - role.raw) % 4 === 0 && role.permission + role.primary_rate_limited + role.secondary_rate_limited + role.combined_rate_limited + role.invalid_rate_headers <= role.primary;
+  return boundedInteger(role.raw, 0, 256) && boundedInteger(role.primary, 0, 256) && boundedInteger(role.not_modified, 0, 256) && boundedInteger(role.secondary_points, 0, 256 * 5) && boundedInteger(role.permission, 0, 256) && boundedInteger(role.primary_rate_limited, 0, 256) && boundedInteger(role.secondary_rate_limited, 0, 256) && boundedInteger(role.combined_rate_limited, 0, 256) && boundedInteger(role.invalid_rate_headers, 0, 256) && role.remaining_tail_required === expectedTail && role.raw === role.primary + role.not_modified && role.secondary_points >= role.raw && role.secondary_points <= role.raw * 5 && (role.secondary_points - role.raw) % 4 === 0 && role.permission + role.primary_rate_limited + role.secondary_rate_limited + role.combined_rate_limited + role.invalid_rate_headers <= role.primary;
 }
 function canonicalGitHubBudgetRole(value) {
   return {
@@ -102290,4 +102281,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: a0eb3df6160d6b56a3e15b6e9fe30d395adcb4e0a21d570a0f345b70921b2cfd
+// Action source inventory sha256: 397a9d634b6379d56eb5ccafcf6c27421ddbccacf0e5812e1da29931b962dfaf
