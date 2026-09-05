@@ -367,8 +367,12 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(uploadsBeforeRecovery, fixture.Store.UploadCalls);
     }
 
-    [Fact]
-    public async Task CandidateUploadWaitsForDelayedVisibility()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task CandidateUploadWaitsForDelayedVisibility(
+        int hiddenObservations)
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
@@ -388,7 +392,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             preparedResult.Value);
         fixture.Store.HideUploadedObjectOnUploadCall =
             fixture.Store.UploadCalls + 1;
-        fixture.Store.HideNextUploadedObjectForNextLists = 2;
+        fixture.Store.HideNextUploadedObjectForNextLists = hiddenObservations;
 
         var persisted = await RestrictedStateService
             .PersistRetainedCandidateAsync(
@@ -397,9 +401,13 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
 
         Assert.True(persisted.Succeeded, persisted.Code);
-        Assert.Equal(
-            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
-            fixture.Time.ScheduledDelays);
+        TimeSpan[] expectedDelays = hiddenObservations switch
+        {
+            0 => [],
+            1 => [TimeSpan.FromSeconds(5)],
+            _ => [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+        };
+        Assert.Equal(expectedDelays, fixture.Time.ScheduledDelays);
         Assert.Empty(diagnostics.Diagnostics);
     }
 
@@ -444,6 +452,289 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(StateReconciliationTerminal.NotCommitted,
             diagnostic.Terminal);
         Assert.Equal(0, diagnostic.ScheduleIndex);
+    }
+
+    [Fact]
+    public async Task CancelledNonCommitHasDistinctDiagnosticTerminal()
+    {
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+        var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        fixture.Store.NextUploadFailure = OpaqueStoreFailure.Cancelled;
+        fixture.Store.NextUploadMutationState =
+            OpaqueStoreMutationState.NotCommitted;
+
+        var rejected = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.Equal(
+            RetainedStateTransactionCodes.OutcomeUnknown,
+            rejected.Code);
+        Assert.Empty(fixture.Time.ScheduledDelays);
+        Assert.Equal(StateReconciliationTerminal.Cancelled,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
+    }
+
+    [Fact]
+    public async Task ReturnedCandidateMetadataRejectsEquivalentPhysicalObject()
+    {
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+        var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var uploadsBefore = fixture.Store.UploadCalls;
+        fixture.Store.NextUploadMetadataTransform = physical => physical with
+        {
+            Reference = new OpaqueStoreObjectReference(
+                physical.Reference.Name,
+                new OpaqueStoreObjectId("returned-candidate")),
+        };
+
+        var rejected = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.Equal(
+            RetainedStateTransactionCodes.OutcomeUnknown,
+            rejected.Code);
+        Assert.Equal(uploadsBefore + 1, fixture.Store.UploadCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            fixture.Time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationExactReadBack.Failed,
+            diagnostic.ExactReadBack);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
+
+        var retried = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.Equal(
+            RetainedStateTransactionCodes.OutcomeUnknown,
+            retried.Code);
+        Assert.Equal(uploadsBefore + 1, fixture.Store.UploadCalls);
+        Assert.Equal(
+            [
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(10),
+            ],
+            fixture.Time.ScheduledDelays);
+        Assert.Collection(
+            diagnostics.Diagnostics,
+            first => Assert.Equal(
+                StateReconciliationOutcome.Committed,
+                first.Outcome),
+            second =>
+            {
+                Assert.Equal(
+                    StateReconciliationOutcome.ReconcileOnly,
+                    second.Outcome);
+                Assert.Equal(
+                    StateReconciliationExactReadBack.Failed,
+                    second.ExactReadBack);
+                Assert.Equal(
+                    StateReconciliationTerminal.TargetAbsent,
+                    second.Terminal);
+            });
+    }
+
+    [Fact]
+    public async Task LostCandidateUploadResponseNeverRedispatchesWhileAbsent()
+    {
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+        var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var uploadsBefore = fixture.Store.UploadCalls;
+        fixture.Store.ThrowAfterNextUpload = true;
+        fixture.Store.HideUploadedObjectOnUploadCall = uploadsBefore + 1;
+        fixture.Store.HideNextUploadedObjectForNextLists = 10;
+
+        var first = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+        var second = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.Equal(RetainedStateTransactionCodes.OutcomeUnknown, first.Code);
+        Assert.Equal(RetainedStateTransactionCodes.OutcomeUnknown, second.Code);
+        Assert.Equal(uploadsBefore + 1, fixture.Store.UploadCalls);
+        Assert.Equal(
+            [
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(10),
+            ],
+            fixture.Time.ScheduledDelays);
+        Assert.Collection(
+            diagnostics.Diagnostics,
+            initial =>
+            {
+                Assert.Equal(
+                    StateReconciliationOutcome.OutcomeUnknown,
+                    initial.Outcome);
+                Assert.Equal(
+                    StateReconciliationExactReadBack.NotAvailable,
+                    initial.ExactReadBack);
+            },
+            retry =>
+            {
+                Assert.Equal(
+                    StateReconciliationOutcome.ReconcileOnly,
+                    retry.Outcome);
+                Assert.Equal(
+                    StateReconciliationExactReadBack.NotApplicable,
+                    retry.ExactReadBack);
+            });
+        Assert.All(diagnostics.Diagnostics, diagnostic => Assert.Equal(
+            StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal));
+    }
+
+    [Fact]
+    public async Task EquivalentCandidatePhysicalDuplicateFailsAsConflict()
+    {
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+        var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var uploadsBefore = fixture.Store.UploadCalls;
+        fixture.Store.AfterUpload = (_, _) =>
+        {
+            var physical = Assert.Single(fixture.Store.Objects.Where(item =>
+                item.Reference.Name == prepared.Name));
+            _ = fixture.Store.CopyPhysicalObject(physical);
+        };
+
+        var rejected = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.Equal(RetainedStateTransactionCodes.Conflict, rejected.Code);
+        Assert.Equal(uploadsBefore + 1, fixture.Store.UploadCalls);
+        Assert.Empty(fixture.Time.ScheduledDelays);
+        Assert.Equal(StateReconciliationTerminal.Conflict,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
+    }
+
+    [Theory]
+    [InlineData((int)OpaqueStoreFailure.Incomplete,
+        (int)StateReconciliationTerminal.Incomplete)]
+    [InlineData((int)OpaqueStoreFailure.Cancelled,
+        (int)StateReconciliationTerminal.Cancelled)]
+    [InlineData((int)OpaqueStoreFailure.Conflict,
+        (int)StateReconciliationTerminal.Conflict)]
+    public async Task CandidateDiagnosticPreservesInventoryFailure(
+        int failureValue,
+        int expectedTerminalValue)
+    {
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+        var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var failure = (OpaqueStoreFailure)failureValue;
+        fixture.Store.AfterUpload = (_, _) =>
+        {
+            if (failure == OpaqueStoreFailure.Incomplete)
+            {
+                fixture.Store.ListComplete = false;
+            }
+            else
+            {
+                fixture.Store.ListFailure = failure;
+            }
+        };
+
+        var rejected = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+
+        Assert.False(rejected.Succeeded);
+        Assert.Empty(fixture.Time.ScheduledDelays);
+        Assert.Equal((StateReconciliationTerminal)expectedTerminalValue,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
     }
 
     [Theory]
@@ -881,8 +1172,11 @@ public sealed class RetainedStateTransactionEndToEndTests
             item.Reference.Name == prepared.Name);
     }
 
-    [Fact]
-    public async Task OpaquePossibleCommitReconcilesExactAttemptAcrossProcess()
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task OpaquePossibleCommitReconcilesExactAttemptAcrossProcess(
+        int hiddenLists)
     {
         var fixture = await CreateFixtureAsync();
         var run = await CompleteRunAsync(fixture);
@@ -972,7 +1266,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             recoveredWrite.SemanticRequiredExpiresAtUnixSeconds);
         var reconciledTarget = Assert.Single(resumed.Store.Objects.Where(
             item => item.Reference.Name == recoveredWrite.Name));
-        resumed.Store.HideObjectForNextLists(reconciledTarget, 3);
+        resumed.Store.HideObjectForNextLists(reconciledTarget, hiddenLists);
         var uploadsBeforeReconcile = resumed.Store.UploadCalls;
         var delaysBeforeReconcile = resumed.Time.ScheduledDelays.Count;
         var reconciled = await RestrictedStateService
@@ -986,8 +1280,11 @@ public sealed class RetainedStateTransactionEndToEndTests
             reconciled.Value);
         Assert.Equal(RetainedStateTransactionCodes.Persisted, reconciled.Code);
         Assert.Equal(uploadsBeforeReconcile, resumed.Store.UploadCalls);
+        TimeSpan[] expectedDelays = hiddenLists == 2
+            ? [TimeSpan.FromSeconds(5)]
+            : [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)];
         Assert.Equal(
-            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            expectedDelays,
             resumed.Time.ScheduledDelays[delaysBeforeReconcile..]);
         Assert.Equal(StateObjectClass.PublicationFailure, record.ObjectClass);
         resumed.Context.Dispose();

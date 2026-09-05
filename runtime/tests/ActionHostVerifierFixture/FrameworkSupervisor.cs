@@ -617,6 +617,12 @@ internal static class FrameworkSupervisor
             .ConfigureAwait(false);
         await File.WriteAllTextAsync(Path.Join(scenario, "run-attempt"), "1")
             .ConfigureAwait(false);
+        if (spec.WorkflowRun)
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(scenario, "workflow-run-event"),
+                "1").ConfigureAwait(false);
+        }
         // The receipt is bound to the exact executable bytes that this
         // scenario launches, not merely to a source identity.
         await File.WriteAllTextAsync(Path.Join(scenario, "payload-sha256"),
@@ -855,8 +861,17 @@ internal static class FrameworkSupervisor
                 File.Exists(Path.Join(
                     scenario,
                     spec.RequiredScenarioEvidence))) &&
-            (spec.Mode != "artifact-delayed-visibility" ||
-                DelayedVisibilityEvidenceIsExact(scenario));
+            (spec.Mode is not (
+                    "artifact-delayed-visibility" or
+                    "artifact-delayed-visibility-exhausted") ||
+                DelayedVisibilityEvidenceIsExact(
+                    scenario,
+                    requireDelayTrace: !spec.TrustedProofPayload));
+        var stateReconciliationDiagnosticSatisfied =
+            spec.RequiredStateReconciliationTerminal is null ||
+            StateReconciliationFrameIsExact(
+                stderr,
+                spec.RequiredStateReconciliationTerminal);
         var archiveTransportSatisfied = spec.RequiredScenarioEvidence ==
             "head-archive-served"
             ? HeadArchiveTransportEvidenceIsExact(scenario)
@@ -902,6 +917,7 @@ internal static class FrameworkSupervisor
             hostInitializationObserved &&
             noProviderSatisfied && providerCountSatisfied &&
             stickyCountSatisfied && scenarioEvidenceSatisfied &&
+            stateReconciliationDiagnosticSatisfied &&
             archiveTransportSatisfied && trustedProofRequestBudgetSatisfied &&
             artifactRestBudgetSatisfied &&
             stateOperationSatisfied && globalEvidenceSatisfied &&
@@ -936,6 +952,8 @@ internal static class FrameworkSupervisor
                     ("provider_count_satisfied", providerCountSatisfied),
                     ("sticky_count_satisfied", stickyCountSatisfied),
                     ("scenario_evidence_satisfied", scenarioEvidenceSatisfied),
+                    ("state_reconciliation_diagnostic_satisfied",
+                        stateReconciliationDiagnosticSatisfied),
                     ("archive_transport_satisfied", archiveTransportSatisfied),
                     ("trusted_proof_request_budget_satisfied",
                         trustedProofRequestBudgetSatisfied),
@@ -1150,6 +1168,30 @@ internal static class FrameworkSupervisor
             BarrierBefore: "hold"),
             root, repository, payload, bundle, node, platform)
             .ConfigureAwait(false));
+        // The three cases above are one bounded online-proof operation and
+        // retain one shared 1,000-request repository bucket. The diagnostic
+        // below is an additional local production-composition test, not a
+        // fourth online operation step, so it starts a separate synthetic
+        // rate-limit window without changing any production limit.
+        var sharedPrimaryRemaining = platform.PrimaryRemaining;
+        platform.ResetArtifacts();
+        platform.RestartIndependentPrimaryWindow();
+        cases.Add(await RunCaseAsync(new CaseSpec(
+            "state-visibility-diagnostic",
+            "artifact-delayed-visibility-exhausted",
+            "outcome_ambiguous",
+            WorkflowRun: true,
+            ExpectNoProvider: true,
+            ExpectedProviderRequests: 0,
+            ExpectedStickyMutations: 0,
+            RequiredScenarioEvidence:
+                "artifact-delayed-visibility-observed",
+            RequiredStateReconciliationTerminal: "target_absent",
+            TrustedProofPayload: true,
+            TrustedProofSourceCommit: requiredSourceExpectation.SourceCommit,
+            BarrierBefore: "hold"),
+            root, repository, payload, bundle, node, platform)
+            .ConfigureAwait(false));
         cases.Add(await RecordStaleUnauthorizedFollowOnAsync(root, repository,
             node)
             .ConfigureAwait(false));
@@ -1170,7 +1212,6 @@ internal static class FrameworkSupervisor
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceTree,
                 requiredSourceExpectation.SourceTree);
-        var sharedPrimaryRemaining = platform.PrimaryRemaining;
         var (requestBudgetValid, sharedPrimaryBucketValid) =
             await VerifyTrustedProofRequestBudgetAsync(
                 root, cases, sharedPrimaryRemaining).ConfigureAwait(false);
@@ -2029,6 +2070,7 @@ internal static class FrameworkSupervisor
         "artifact-upload-outcome-unknown" => 907,
         "artifact-delete-outcome-unknown" => 908,
         "artifact-delayed-visibility" => 931,
+        "state-visibility-diagnostic" => 932,
         "workflow-run" => 909,
         "delete-exact" => 910,
         "inline" => 911,
@@ -2058,6 +2100,7 @@ internal static class FrameworkSupervisor
         "dispatch-bootstrap" => "final-bootstrap",
         "dispatch-continuation" => "final-continuation",
         "stale-head" => "final-stale",
+        "state-visibility-diagnostic" => "final-bootstrap",
         _ => throw new InvalidOperationException(
             "trusted_proof_request_budget_phase_unfrozen"),
     };
@@ -3767,6 +3810,7 @@ internal static class FrameworkSupervisor
         "artifact-pagination-changed", "artifact-pagination-late",
         "artifact-list-duplicate", "artifact-digest-mismatch",
         "artifact-expired", "artifact-delayed-visibility",
+        "state-visibility-diagnostic",
         "artifact-upload-outcome-unknown",
         "artifact-delete-outcome-unknown", "workflow-run", "delete-exact",
         "inline", "inline-warning", "unsupported", "fork", "permission",
@@ -4896,29 +4940,87 @@ internal static class FrameworkSupervisor
             ReadInt(scenario, "head-blob-api-count") == 0;
     }
 
-    private static bool DelayedVisibilityEvidenceIsExact(string scenario)
+    private static bool DelayedVisibilityEvidenceIsExact(
+        string scenario,
+        bool requireDelayTrace)
     {
         var observationPath = Path.Join(
             scenario,
             "artifact-delayed-visibility-observed");
-        var delayPath = Path.Join(
-            scenario,
-            "state-reconciliation-delays.tsv");
-        if (!File.Exists(observationPath) || !File.Exists(delayPath))
+        if (!File.Exists(observationPath) ||
+            File.ReadAllText(observationPath) != "initial_lineage_head\t3")
         {
             return false;
         }
 
-        var observation = File.ReadAllText(observationPath).Split('\t');
-        return observation is [var id, var name, "3"] &&
-            long.TryParse(
-                id,
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var parsedId) &&
-            parsedId > 0 &&
-            !string.IsNullOrWhiteSpace(name) &&
+        if (!requireDelayTrace)
+        {
+            return true;
+        }
+
+        var delayPath = Path.Join(
+            scenario,
+            "state-reconciliation-delays.tsv");
+        return File.Exists(delayPath) &&
             File.ReadAllLines(delayPath) is ["5000", "10000"];
+    }
+
+    private static bool StateReconciliationFrameIsExact(
+        string stderr,
+        string expectedTerminal)
+    {
+        var lines = stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r'))
+            .ToArray();
+        var prefixes = new[]
+        {
+            "APR_R4_E2P_GITHUB_REQUEST_BUDGET ",
+            "APR_R4_E2P_CONTROL_REQUEST_BUDGET ",
+            "APR_R4_E2P_ARTIFACT_REST_BUDGET ",
+            "APR_R4_E2P_STATE_RECONCILIATION ",
+        };
+        var indices = prefixes.Select(prefix => lines
+                .Select((line, index) => (line, index))
+                .Where(item => item.line.StartsWith(
+                    prefix,
+                    StringComparison.Ordinal))
+                .Select(item => item.index)
+                .ToArray())
+            .ToArray();
+        if (indices.Any(values => values.Length != 1) ||
+            indices.Select(values => values[0]).ToArray() is not
+                [var github, var control, var artifact, var diagnostic] ||
+            control != github + 1 ||
+            artifact != control + 1 ||
+            diagnostic != artifact + 1)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(
+                lines[diagnostic][prefixes[3].Length..]);
+            var root = document.RootElement;
+            return HasExactProperties(
+                    root,
+                    "owner",
+                    "outcome",
+                    "exact_readback",
+                    "observations",
+                    "terminal",
+                    "schedule_index") &&
+                root.GetProperty("owner").GetString() == "lineage_head" &&
+                root.GetProperty("outcome").GetString() == "committed" &&
+                root.GetProperty("exact_readback").GetString() == "matched" &&
+                root.GetProperty("observations").GetInt32() == 3 &&
+                root.GetProperty("terminal").GetString() == expectedTerminal &&
+                root.GetProperty("schedule_index").GetInt32() == 2;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static void CaptureTrustedProofRequestBudgetReceipts(
@@ -5155,6 +5257,7 @@ internal static class FrameworkSupervisor
             "dispatch-bootstrap" => "final-bootstrap",
             "dispatch-continuation" => "final-continuation",
             "stale-head" => "final-stale",
+            "state-visibility-diagnostic" => "final-bootstrap",
             _ => throw new InvalidOperationException(
                 "trusted_proof_request_budget_phase_unfrozen"),
         };
@@ -5564,6 +5667,7 @@ internal static class FrameworkSupervisor
         string? RequiredScenarioEvidence = null,
         string? RequiredStateOperation = null,
         string? RequiredGlobalEvidence = null,
+        string? RequiredStateReconciliationTerminal = null,
         bool TrustedProofPayload = false,
         string? TrustedProofSourceCommit = null,
         string? BarrierBefore = null,

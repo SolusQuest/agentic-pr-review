@@ -223,9 +223,9 @@ public sealed class BoundedGitHubPublisherTransportTests
             if (request.Method == HttpMethod.Get)
                 return Json(HttpStatusCode.OK, "[]");
             mutationCalls++;
-            await Task.Delay(TimeSpan.FromSeconds(30), token);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
             throw new InvalidOperationException("unreachable");
-        }), TimeSpan.FromMilliseconds(5));
+        }), TimeSpan.FromSeconds(1));
         await AuthorizeAbsentAsync(transport);
 
         var result = await transport.MutateStickyCommentAsync(

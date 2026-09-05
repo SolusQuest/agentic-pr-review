@@ -254,7 +254,7 @@ export async function readTrustedProofStderr(
   };
 }
 
-function canonicalStateReconciliationDiagnostic(line: string): string | undefined {
+export function canonicalStateReconciliationDiagnostic(line: string): string | undefined {
   const value = parseRecord(line.slice(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX.length));
   if (
     value === undefined ||
@@ -290,6 +290,7 @@ function canonicalStateReconciliationDiagnostic(line: string): string | undefine
       'not_committed',
       'target_absent',
       'unavailable',
+      'incomplete',
       'conflict',
       'authentication_failed',
       'key_unavailable',

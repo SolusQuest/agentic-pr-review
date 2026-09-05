@@ -39,4 +39,27 @@ public sealed class StateReconciliationDiagnosticFormatterTests
             "\"schedule_index\":2}",
             formatted);
     }
+
+    [Fact]
+    public void PreservesIncompleteWithoutProtectedIdentifiers()
+    {
+        var formatted = StateReconciliationDiagnosticFormatter.Format(new(
+            StateReconciliationOwner.Candidate,
+            StateReconciliationOutcome.OutcomeUnknown,
+            StateReconciliationExactReadBack.Failed,
+            Observations: 1,
+            StateReconciliationTerminal.Incomplete,
+            ScheduleIndex: 0));
+
+        Assert.Contains("\"terminal\":\"incomplete\"", formatted,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("artifact", formatted,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("digest", formatted,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("key", formatted,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("path", formatted,
+            StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -42,10 +42,12 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal int HideNextUploadedObjectForNextLists { get; set; }
     internal int HideUploadedObjectOnUploadCall { get; set; }
     internal int HideFailedUploadForNextLists { get; set; }
+    internal bool CopyNextUploadedObject { get; set; }
     internal System.Action? BeforeDelete { get; set; }
     internal System.Action? BeforeUpload { get; set; }
     internal System.Action<OpaqueStoreListRequest, int>? BeforeList { get; set; }
     internal System.Action<OpaqueStoreUploadRequest, int>? AfterUpload { get; set; }
+    internal bool ThrowAfterNextUpload { get; set; }
     internal System.Action? AfterDelete { get; set; }
     internal System.Func<
         OpaqueStoreObjectMetadata,
@@ -102,6 +104,63 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
 
             delayedUploadedReference = metadata.Reference;
             HideNextUploadedObjectForNextLists = listCount;
+        }
+    }
+
+    internal void ReplacePhysicalObject(
+        OpaqueStoreObjectMetadata existing,
+        OpaqueStoreObjectMetadata replacement)
+    {
+        lock (gate)
+        {
+            if (!objects.TryGetValue(
+                    existing.Reference.ObjectId.Value,
+                    out var stored) ||
+                stored.Metadata != existing ||
+                replacement.Reference.Name != existing.Reference.Name ||
+                replacement.EncryptedObjectDigest !=
+                    existing.EncryptedObjectDigest ||
+                replacement.Size != existing.Size ||
+                objects.ContainsKey(replacement.Reference.ObjectId.Value))
+            {
+                throw new InvalidOperationException(
+                    "scripted_replacement_invalid");
+            }
+
+            objects.Remove(existing.Reference.ObjectId.Value);
+            objects.Add(
+                replacement.Reference.ObjectId.Value,
+                new StoredObject(replacement, stored.Bytes));
+        }
+    }
+
+    internal OpaqueStoreObjectMetadata CopyPhysicalObject(
+        OpaqueStoreObjectMetadata existing)
+    {
+        lock (gate)
+        {
+            if (!objects.TryGetValue(
+                    existing.Reference.ObjectId.Value,
+                    out var stored) ||
+                stored.Metadata != existing)
+            {
+                throw new InvalidOperationException(
+                    "scripted_copy_invalid");
+            }
+
+            var copy = existing with
+            {
+                Reference = new OpaqueStoreObjectReference(
+                    existing.Reference.Name,
+                    new OpaqueStoreObjectId(NextId())),
+            };
+            objects.Add(
+                copy.Reference.ObjectId.Value,
+                new StoredObject(copy, stored.Bytes.ToArray()));
+            MaximumObservedObjects = Math.Max(
+                MaximumObservedObjects,
+                objects.Count);
+            return copy;
         }
     }
 
@@ -325,6 +384,22 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                     new StoredObject(
                         metadata,
                         request.EncryptedBytes.ToArray()));
+                if (CopyNextUploadedObject)
+                {
+                    CopyNextUploadedObject = false;
+                    var copyId = NextId();
+                    var copy = metadata with
+                    {
+                        Reference = new OpaqueStoreObjectReference(
+                            metadata.Reference.Name,
+                            new OpaqueStoreObjectId(copyId)),
+                    };
+                    objects.Add(
+                        copyId,
+                        new StoredObject(
+                            copy,
+                            request.EncryptedBytes.ToArray()));
+                }
                 MaximumObservedObjects = Math.Max(
                     MaximumObservedObjects,
                     objects.Count);
@@ -370,6 +445,12 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                         ? null
                         : returnedMetadata);
             AfterUpload?.Invoke(request, UploadCalls);
+            if (ThrowAfterNextUpload)
+            {
+                ThrowAfterNextUpload = false;
+                throw new IOException("scripted upload response loss");
+            }
+
             return Task.FromResult(result);
         }
     }

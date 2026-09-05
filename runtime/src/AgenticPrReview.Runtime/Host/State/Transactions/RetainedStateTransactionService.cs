@@ -297,7 +297,8 @@ internal sealed class RetainedStateTransactionService
                             existingInventoryDigest!));
             }
 
-            if (!CanAppendCandidate(
+            if (!prepared.HasEnteredDispatch &&
+                !CanAppendCandidate(
                     before,
                     authority,
                     binding,
@@ -326,20 +327,48 @@ internal sealed class RetainedStateTransactionService
                     RetainedStateTransactionCodes.AccessDenied);
         }
 
-        var persisted = await persistence.UploadAndReconcileAsync(
-                locator,
-                locatorAccess,
-                baseScope,
-                binding.SelectedLineage.BaseScopeDigest,
-                prepared.Name,
-                envelopeBytes,
-                prepared.Header,
-                generationBytes,
-                binding.ProducingRunIdentity,
-                binding.ProducingRunAttempt,
-                prepared.Header.RequiredPlatformExpiresAtUnixSeconds,
-                cancellationToken)
-            .ConfigureAwait(false);
+        var shouldDispatch = prepared.TryBeginDispatch();
+        var persisted = shouldDispatch
+            ? await persistence.UploadAndReconcileAsync(
+                    locator,
+                    locatorAccess,
+                    baseScope,
+                    binding.SelectedLineage.BaseScopeDigest,
+                    prepared.Name,
+                    envelopeBytes,
+                    prepared.Header,
+                    generationBytes,
+                    binding.ProducingRunIdentity,
+                    binding.ProducingRunAttempt,
+                    prepared.Header.RequiredPlatformExpiresAtUnixSeconds,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : await persistence.ReconcileExistingAsync(
+                    locator,
+                    locatorAccess,
+                    baseScope,
+                    binding.SelectedLineage.BaseScopeDigest,
+                    prepared.Name,
+                    envelopeBytes,
+                    prepared.Header,
+                    generationBytes,
+                    binding.ProducingRunIdentity,
+                    binding.ProducingRunAttempt,
+                    prepared.Header.RequiredPlatformExpiresAtUnixSeconds,
+                    prepared.ReturnedMetadata)
+                .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            prepared.RememberReturnedMetadata(returnedMetadata);
+        }
+
+        if (!persisted.Succeeded &&
+            !persisted.MayHaveCommitted &&
+            shouldDispatch)
+        {
+            prepared.ResetDispatchIfDefinitelyNotCommitted();
+        }
+
         if (!persisted.Succeeded || persisted.Metadata is null ||
             persisted.InventoryDigest is null)
         {
@@ -886,8 +915,14 @@ internal sealed class RetainedStateTransactionService
                     payload,
                     attempt.Header.ProducingRunIdentity,
                     attempt.Header.ProducingRunAttempt,
-                    attempt.Header.RequiredPlatformExpiresAtUnixSeconds)
+                    attempt.Header.RequiredPlatformExpiresAtUnixSeconds,
+                    attempt.ReturnedMetadata)
                 .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            attempt.RememberReturnedMetadata(returnedMetadata);
+        }
+
         if (!persisted.Succeeded &&
             !persisted.MayHaveCommitted &&
             shouldDispatch)
@@ -2109,8 +2144,14 @@ internal sealed class RetainedStateTransactionService
                     frozenReceiptBytes,
                     attempt.Header.ProducingRunIdentity,
                     attempt.Header.ProducingRunAttempt,
-                    receiptPlatformExpiry)
+                    receiptPlatformExpiry,
+                    attempt.ReturnedMetadata)
                 .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            attempt.RememberReturnedMetadata(returnedMetadata);
+        }
+
         CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
         if (!persisted.Succeeded &&
             !persisted.MayHaveCommitted &&
@@ -5367,8 +5408,14 @@ internal sealed class RetainedStateTransactionService
                     payload,
                     attempt.Header.ProducingRunIdentity,
                     attempt.Header.ProducingRunAttempt,
-                    attempt.RequiredPlatformExpiresAtUnixSeconds)
+                    attempt.RequiredPlatformExpiresAtUnixSeconds,
+                    attempt.ReturnedMetadata)
                 .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            attempt.RememberReturnedMetadata(returnedMetadata);
+        }
+
         CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
         if (!persisted.Succeeded &&
             !persisted.MayHaveCommitted &&
@@ -5550,7 +5597,9 @@ internal sealed class RetainedStateTransactionService
             active[0].Metadata.ProducingRun.Attempt !=
                 binding.ProducingRunAttempt ||
             active[0].Metadata.ExpiresAtUnixSeconds <
-                prepared.Header.RequiredPlatformExpiresAtUnixSeconds)
+                prepared.Header.RequiredPlatformExpiresAtUnixSeconds ||
+            prepared.ReturnedMetadata is { } returnedMetadata &&
+                active[0].Metadata != returnedMetadata)
         {
             return false;
         }

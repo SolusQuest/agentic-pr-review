@@ -91,6 +91,16 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
     internal int PrimaryRemaining => primaryBucket.ReadRemaining();
 
+    internal void RestartIndependentPrimaryWindow()
+    {
+        if (InFlight != 0)
+        {
+            throw new InvalidOperationException(
+                "synthetic_primary_bucket_restart_in_flight");
+        }
+        primaryBucket.RestartIndependentWindow(SyntheticPrimaryLimit);
+    }
+
     internal int InFlight => Volatile.Read(ref inFlight);
 
     internal void BeginScenario(
@@ -356,8 +366,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             var digest = Convert.ToHexString(SHA256.HashData(archive))
                 .ToLowerInvariant();
             var id = Interlocked.Increment(ref nextId);
-            var delayInitialLineage = Mode() ==
-                "artifact-delayed-visibility";
+            var delayInitialLineage = Mode() is
+                "artifact-delayed-visibility" or
+                "artifact-delayed-visibility-exhausted";
             lock (gate)
             {
                 artifacts[id] = new Artifact(
@@ -805,7 +816,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     {
         lock (gate)
         {
-            if (activeMode != "artifact-delayed-visibility" ||
+            if (activeMode is not (
+                    "artifact-delayed-visibility" or
+                    "artifact-delayed-visibility-exhausted") ||
                 page != 1 ||
                 delayedVisibilityArtifactId is not { } targetId ||
                 !StringComparer.Ordinal.Equals(
@@ -816,8 +829,18 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
 
             delayedVisibilityObservations++;
-            if (delayedVisibilityObservations <= 2)
+            if (delayedVisibilityObservations <= 2 ||
+                activeMode == "artifact-delayed-visibility-exhausted")
             {
+                if (delayedVisibilityObservations == 3)
+                {
+                    File.WriteAllText(
+                        Path.Join(
+                            activeScenarioRoot,
+                            "artifact-delayed-visibility-observed"),
+                        "initial_lineage_head\t3");
+                }
+
                 return values.Where(value => value.Id != targetId).ToArray();
             }
 
@@ -827,10 +850,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     Path.Join(
                         activeScenarioRoot,
                         "artifact-delayed-visibility-observed"),
-                    targetId.ToString(CultureInfo.InvariantCulture) + "\t" +
-                    delayedVisibilityArtifactName + "\t" +
-                    delayedVisibilityObservations.ToString(
-                        CultureInfo.InvariantCulture));
+                    "initial_lineage_head\t3");
             }
             return values;
         }

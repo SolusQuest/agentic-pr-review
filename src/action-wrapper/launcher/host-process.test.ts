@@ -128,6 +128,21 @@ describe('W1 private Host framing', () => {
     });
   });
 
+  it('preserves the distinct incomplete reconciliation terminal', async () => {
+    const incomplete = reconciliationDiagnostic.replace(
+      '"terminal":"target_absent"',
+      '"terminal":"incomplete"',
+    );
+    const stream = new PassThrough();
+    const reading = readTrustedProofStderr(stream, 'measurement');
+    stream.end(`${githubBudgetReceipt}${controlBudgetReceipt}${incomplete}`);
+
+    await expect(reading).resolves.toEqual({
+      budgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+      stateReconciliationDiagnosticLine: incomplete,
+    });
+  });
+
   it.each([
     reconciliationDiagnostic + reconciliationDiagnostic,
     reconciliationDiagnostic.replace('"owner":"lineage_head"', '"owner":"unknown"'),

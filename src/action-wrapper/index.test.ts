@@ -164,7 +164,6 @@ describe('W1 production composition', () => {
     const presentation = recordingToolkit({ 'github-token': 'github-canary' });
     const events = presentation.events;
     const receipts: string[] = [];
-    const diagnostics: string[] = [];
     let artifactBudgetReceipt: ReturnType<ArtifactRestRequestBudget['receipt']> | undefined;
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
@@ -203,10 +202,6 @@ describe('W1 production composition', () => {
         receipts.push(frame);
         events.push('budget:frame');
       },
-      trustedProofStateReconciliationDiagnosticSink: (line) => {
-        diagnostics.push(line);
-        events.push('diagnostic:line');
-      },
       fatalExit: () => events.push('fatal'),
     });
 
@@ -237,11 +232,10 @@ describe('W1 production composition', () => {
       cap_profile: 'apr-r4-artifact-rest-request-budget-v2',
       measurement_only: true,
     });
+    expect(lines[3]).toBe(reconciliationDiagnostic.trimEnd());
+    expect(lines).toHaveLength(4);
     expect(events.indexOf('bridge:drain')).toBeLessThan(events.indexOf('budget:frame'));
     expect(events.indexOf('budget:frame')).toBeLessThan(events.indexOf('bridge:cleanup'));
-    expect(diagnostics).toEqual([reconciliationDiagnostic]);
-    expect(events.indexOf('bridge:drain')).toBeLessThan(events.indexOf('diagnostic:line'));
-    expect(events.indexOf('diagnostic:line')).toBeLessThan(events.indexOf('bridge:cleanup'));
   });
 
   it('cleans the bridge and fails closed when the protected receipt sink throws', async () => {
@@ -249,6 +243,7 @@ describe('W1 production composition', () => {
     const fixture = await wrapperFixture('r4-w2');
     const presentation = recordingToolkit({});
     const events = presentation.events;
+    let sinkInvocations = 0;
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
       preparedPayload: fixture.proof,
@@ -276,8 +271,10 @@ describe('W1 production composition', () => {
         completionBytes: validCompletion('r4-w2'),
         exitCode: 0,
         trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+        trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
       }),
       trustedProofBudgetReceiptSink: () => {
+        sinkInvocations++;
         events.push('artifact-budget:receipt-failed');
         throw new Error('receipt-sink-failure');
       },
@@ -285,6 +282,7 @@ describe('W1 production composition', () => {
     });
 
     expect(exit).toBe(1);
+    expect(sinkInvocations).toBe(1);
     expect(events.indexOf('bridge:drain')).toBeLessThan(
       events.indexOf('artifact-budget:receipt-failed'),
     );
@@ -293,6 +291,45 @@ describe('W1 production composition', () => {
     );
     expect(presentation.errors).toEqual(['The private review wrapper failed.']);
   });
+
+  it.each([
+    reconciliationDiagnostic + reconciliationDiagnostic,
+    reconciliationDiagnostic.replace('"owner":"lineage_head"', '"owner":"unknown"'),
+  ])(
+    'keeps one complete three-line frame when the optional diagnostic is invalid',
+    async (line) => {
+      vi.stubEnv('AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE', 'measurement');
+      const fixture = await wrapperFixture('r4-w2');
+      const presentation = recordingToolkit({});
+      const receipts: string[] = [];
+      const exit = await runPrivateActionWrapperWithSeams({
+        toolkit: presentation.toolkit,
+        preparedPayload: fixture.proof,
+        platform: 'linux',
+        signal: new AbortController().signal,
+        runtimeFacts: () => fixture.facts,
+        bridgeRuntime: async (input) => {
+          await input.executorFactory('/tmp/apr-w2/artifact-staging');
+          return await fakeBridge(input);
+        },
+        createArtifactExecutor: async () => ({
+          execute: async () => ({ status: 'ok' }) as never,
+        }),
+        hostProcessRunner: async () => ({
+          completionBytes: validCompletion('r4-w2'),
+          exitCode: 0,
+          trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+          trustedProofStateReconciliationDiagnosticLine: line,
+        }),
+        trustedProofBudgetReceiptSink: (frame) => receipts.push(frame),
+        fatalExit: () => undefined,
+      });
+
+      expect(exit).toBe(0);
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0]!.trimEnd().split('\n')).toHaveLength(3);
+    },
+  );
 
   it('keeps the protected receipt after a business failure once bridge work has quiesced', async () => {
     vi.stubEnv('AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE', 'measurement');
@@ -354,7 +391,6 @@ describe('W1 production composition', () => {
       'provider-api-key': 'r4-w2',
     });
     const receipts: string[] = [];
-    const diagnostics: string[] = [];
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
       preparedPayload: fixture.proof,
@@ -375,13 +411,11 @@ describe('W1 production composition', () => {
         trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
       }),
       trustedProofBudgetReceiptSink: (line) => receipts.push(line),
-      trustedProofStateReconciliationDiagnosticSink: (line) => diagnostics.push(line),
       fatalExit: () => undefined,
     });
 
     expect(exit).toBe(0);
     expect(receipts).toEqual([]);
-    expect(diagnostics).toEqual([]);
   });
 
   it.each([

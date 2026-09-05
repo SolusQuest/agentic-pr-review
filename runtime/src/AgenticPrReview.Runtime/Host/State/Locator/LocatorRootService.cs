@@ -390,7 +390,9 @@ internal sealed class LocatorRootService
                     upload,
                     StateReconciliationExactReadBack.NotApplicable);
                 failed.ReportFailure(
-                    StateReconciliationTerminal.NotCommitted);
+                    upload.Failure == OpaqueStoreFailure.Cancelled
+                        ? StateReconciliationTerminal.Cancelled
+                        : StateReconciliationTerminal.NotCommitted);
                 return LocatorRootResult.Fail(
                     MapStoreFailure(upload.Failure));
             }
@@ -463,7 +465,7 @@ internal sealed class LocatorRootService
                 {
                     visibility.ReportFailure(read.IsAbsent
                         ? StateReconciliationTerminal.TargetAbsent
-                        : Terminal(read.Code));
+                        : read.DiagnosticTerminal ?? Terminal(read.Code));
                     return LocatorRootResult.Fail(read.Code);
                 }
 
@@ -779,9 +781,11 @@ internal sealed class LocatorRootService
 
             last = current;
             if (!current.Succeeded &&
-                current.Code is LocatorCodes.Conflict or
+                (current.Code is LocatorCodes.Conflict or
                     LocatorCodes.KeyUnavailable or
-                    LocatorCodes.AuthenticationFailed)
+                    LocatorCodes.AuthenticationFailed ||
+                current.DiagnosticTerminal ==
+                    StateReconciliationTerminal.Cancelled))
             {
                 return current;
             }
@@ -797,7 +801,8 @@ internal sealed class LocatorRootService
         {
             visibility.ReportFailure(last?.IsAbsent == true
                 ? StateReconciliationTerminal.TargetAbsent
-                : StateReconciliationTerminal.Unavailable);
+                : last?.DiagnosticTerminal ??
+                    StateReconciliationTerminal.Unavailable);
         }
 
         return target is null && last is not null
@@ -816,18 +821,22 @@ internal sealed class LocatorRootService
                 cancellationToken)
             .ConfigureAwait(false);
         if (list.Failure == OpaqueStoreFailure.Incomplete ||
-            !list.Complete ||
+            list.Failure == OpaqueStoreFailure.None &&
+            (!list.Complete ||
             (!list.Objects.IsDefault &&
                 list.Objects.Length >
-                    LocatorRootFormat.MaximumPhysicalSentinels))
+                    LocatorRootFormat.MaximumPhysicalSentinels)))
         {
-            return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+            return LocatorSelectionResult.Fail(
+                LocatorCodes.Conflict,
+                StateReconciliationTerminal.Incomplete);
         }
 
         if (!list.Succeeded)
         {
             return LocatorSelectionResult.Fail(
-                MapStoreFailure(list.Failure));
+                MapStoreFailure(list.Failure),
+                DiagnosticTerminal(list.Failure));
         }
 
         if (list.Objects.Any(reference => reference.Name != SentinelName))
@@ -855,7 +864,8 @@ internal sealed class LocatorRootService
                     metadataResult.Metadata.Reference != reference)
                 {
                     return LocatorSelectionResult.Fail(
-                        MapStoreFailure(metadataResult.Failure));
+                        MapStoreFailure(metadataResult.Failure),
+                        DiagnosticTerminal(metadataResult.Failure));
                 }
 
                 metadata.Add(metadataResult.Metadata);
@@ -880,7 +890,8 @@ internal sealed class LocatorRootService
                     }
 
                     return LocatorSelectionResult.Fail(
-                        MapStoreFailure(download.Failure));
+                        MapStoreFailure(download.Failure),
+                        DiagnosticTerminal(download.Failure));
                 }
 
                 if (LocatorRootSentinelCodec.TryDecrypt(
@@ -1080,5 +1091,15 @@ internal sealed class LocatorRootService
                 OpaqueStoreFailure.Duplicate => LocatorCodes.Conflict,
             OpaqueStoreFailure.Cleanup => LocatorCodes.CleanupFailed,
             _ => LocatorCodes.Unavailable,
+        };
+
+    private static StateReconciliationTerminal? DiagnosticTerminal(
+        OpaqueStoreFailure failure) => failure switch
+        {
+            OpaqueStoreFailure.Incomplete =>
+                StateReconciliationTerminal.Incomplete,
+            OpaqueStoreFailure.Cancelled =>
+                StateReconciliationTerminal.Cancelled,
+            _ => null,
         };
 }

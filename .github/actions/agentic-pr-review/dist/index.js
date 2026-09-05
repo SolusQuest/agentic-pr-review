@@ -101444,6 +101444,7 @@ function canonicalStateReconciliationDiagnostic(line) {
     "not_committed",
     "target_absent",
     "unavailable",
+    "incomplete",
     "conflict",
     "authentication_failed",
     "key_unavailable",
@@ -102234,16 +102235,12 @@ async function runPrivateActionWrapperWithSeams(seams) {
           writeTrustedProofBudgetReceiptFrame(
             artifactRestRequestBudget,
             hostBudgetReceiptLines,
+            hostStateReconciliationDiagnosticLine,
             seams.trustedProofBudgetReceiptSink
           );
         } catch {
           failed = true;
         }
-        writeTrustedProofStateReconciliationDiagnostic(
-          artifactRestRequestBudget,
-          hostStateReconciliationDiagnosticLine,
-          seams.trustedProofStateReconciliationDiagnosticSink
-        );
       }
     } catch {
       failed = true;
@@ -102320,24 +102317,25 @@ async function createProductionArtifactExecutor(context5, tracker) {
     artifactRestRequestBudget: context5.artifactRestRequestBudget
   });
 }
-function writeTrustedProofBudgetReceiptFrame(budget, lines, sink) {
+function writeTrustedProofBudgetReceiptFrame(budget, lines, diagnosticLine, sink) {
   if (!budget?.protectedRoute) return;
   if (lines.length !== 2 || !lines[0]?.startsWith(GITHUB_REQUEST_BUDGET_PREFIX2) || !lines[0].endsWith("\n") || !lines[1]?.startsWith(CONTROL_REQUEST_BUDGET_PREFIX2) || !lines[1].endsWith("\n")) {
     throw new Error("trusted_proof_budget_receipt_frame_invalid");
   }
   const artifact = budget.sealAndCreateReceipt();
   if (!artifact) throw new Error("trusted_proof_budget_receipt_frame_invalid");
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join("") + artifact);
+  let diagnostic = "";
+  if (diagnosticLine?.endsWith("\n") && diagnosticLine.indexOf("\n") === diagnosticLine.length - 1) {
+    const canonical = canonicalStateReconciliationDiagnostic(diagnosticLine.slice(0, -1));
+    if (canonical !== void 0 && `${canonical}
+` === diagnosticLine) {
+      diagnostic = diagnosticLine;
+    }
+  }
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join("") + artifact + diagnostic);
 }
 function writeTrustedProofArtifactRestBudgetToStderr(frame) {
   process.stderr.write(frame);
-}
-function writeTrustedProofStateReconciliationDiagnostic(budget, line, sink) {
-  if (!budget?.protectedRoute || line === void 0) return;
-  if (!line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX) || !line.endsWith("\n") || line.indexOf("\n") !== line.length - 1) {
-    return;
-  }
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(line);
 }
 function required(value) {
   if (value === void 0 || value.length === 0) fail("wrapper_runtime_facts_invalid");
@@ -102374,4 +102372,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 0f5ebd0e81b84142fe18d8a53dbf8de135e0f56b85dd39bc7ccc5b8ef196a14e
+// Action source inventory sha256: 017b14ae1e5fa72925577d2de9660c38341065303563493a7fccc5949592bc34

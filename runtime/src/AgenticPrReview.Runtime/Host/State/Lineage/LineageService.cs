@@ -1281,7 +1281,8 @@ internal sealed class LineageService
             StateReconciliationOwner.LineageIntent);
         if (!written.CanReconcile || written.Header is null)
         {
-            window.ReportFailure(Terminal(written.Code));
+            window.ReportFailure(
+                written.DiagnosticTerminal ?? Terminal(written.Code));
             return IntentConvergenceResult.Fail(written.Code);
         }
 
@@ -1304,9 +1305,11 @@ internal sealed class LineageService
                 var code = candidate.Code;
                 var absent = candidate.Succeeded && candidate.Selection!.IsAbsent;
                 ClearObservation(candidate);
-                if ((!candidate.Succeeded && StringComparer.Ordinal.Equals(
-                        code,
-                        LineageCodes.Unavailable) || absent) &&
+                if ((!candidate.Succeeded &&
+                        candidate.DiagnosticTerminal is null &&
+                        StringComparer.Ordinal.Equals(
+                            code,
+                            LineageCodes.Unavailable) || absent) &&
                     await window.WaitForNextObservationAsync()
                         .ConfigureAwait(false))
                 {
@@ -1315,7 +1318,7 @@ internal sealed class LineageService
 
                 window.ReportFailure(absent
                     ? StateReconciliationTerminal.TargetAbsent
-                    : Terminal(code));
+                    : candidate.DiagnosticTerminal ?? Terminal(code));
                 return IntentConvergenceResult.Fail(absent
                     ? LineageCodes.Unavailable
                     : code);
@@ -1359,12 +1362,7 @@ internal sealed class LineageService
 
             if (written.ReturnedMetadata is not null &&
                 selectedIntent.Intent.Object.Metadata !=
-                    written.ReturnedMetadata &&
-                !(written.ExactReadBack ==
-                        StateReconciliationExactReadBack.Failed &&
-                    ReturnedMetadataIsAbsent(
-                        candidate.Snapshot!,
-                        written.ReturnedMetadata)))
+                    written.ReturnedMetadata)
             {
                 ClearObservation(candidate);
                 if (await window.WaitForNextObservationAsync()
@@ -1878,7 +1876,8 @@ internal sealed class LineageService
                 {
                     if (StringComparer.Ordinal.Equals(
                             observed.Code,
-                            LineageCodes.Unavailable))
+                            LineageCodes.Unavailable) &&
+                        observed.DiagnosticTerminal is null)
                     {
                         continue;
                     }
@@ -2365,7 +2364,7 @@ internal sealed class LineageService
                 ClearObservation(cleanupObservation);
             }
 
-            return Fail(written.Code);
+            return Fail(written.Code, written.DiagnosticTerminal);
         }
 
         var cleanupPending = false;
@@ -2394,7 +2393,8 @@ internal sealed class LineageService
                 {
                     if (StringComparer.Ordinal.Equals(
                             observed.Code,
-                            LineageCodes.Unavailable))
+                            LineageCodes.Unavailable) &&
+                        observed.DiagnosticTerminal is null)
                     {
                         if (window is not null)
                         {
@@ -2412,7 +2412,9 @@ internal sealed class LineageService
                         continue;
                     }
 
-                    return Fail(observed.Code);
+                    return Fail(
+                        observed.Code,
+                        observed.DiagnosticTerminal);
                 }
 
                 if (observed.Selection!.IsAbsent)
@@ -2467,12 +2469,7 @@ internal sealed class LineageService
                 if (written?.ReturnedMetadata is not null &&
                     selection.Head.Metadata != written.ReturnedMetadata &&
                     !selection.SafeToDelete.Contains(
-                        written.ReturnedMetadata) &&
-                    !(written.ExactReadBack ==
-                            StateReconciliationExactReadBack.Failed &&
-                        ReturnedMetadataIsAbsent(
-                            observed.Snapshot!,
-                            written.ReturnedMetadata)))
+                        written.ReturnedMetadata))
                 {
                     if (await window!.WaitForNextObservationAsync()
                         .ConfigureAwait(false))
@@ -2480,9 +2477,20 @@ internal sealed class LineageService
                         continue;
                     }
 
-                    return Fail(
-                        LineageCodes.Unavailable,
-                        StateReconciliationTerminal.TargetAbsent);
+                    // Equivalent concurrent head claims are idempotent. Once
+                    // the complete visibility window is exhausted, another
+                    // resolver may already have authenticated and pruned this
+                    // process's physical duplicate. Never extend this fallback
+                    // to multiple, unknown, or under-retained candidates.
+                    if (!CanConvergeEquivalentHeadAfterReturnedObjectAbsence(
+                            observed,
+                            selection,
+                            written.ReturnedMetadata))
+                    {
+                        return Fail(
+                            LineageCodes.Unavailable,
+                            StateReconciliationTerminal.TargetAbsent);
+                    }
                 }
 
                 if (window is not null)
@@ -2593,15 +2601,6 @@ internal sealed class LineageService
                 _ => StateReconciliationOutcome.NotCommitted,
             },
             written.ExactReadBack);
-
-    private static bool ReturnedMetadataIsAbsent(
-        ScopedStateInventorySnapshot snapshot,
-        OpaqueStoreObjectMetadata returned) =>
-        !snapshot.Authenticated
-            .Concat(snapshot.UnderRetained)
-            .Any(item => item.Metadata.Reference == returned.Reference) &&
-        !snapshot.Unknown.Any(item =>
-            item.Metadata.Reference == returned.Reference);
 
     private static StateReconciliationTerminal Terminal(string code) =>
         code switch
@@ -2842,7 +2841,10 @@ internal sealed class LineageService
             {
                 return ObservationResult.Fail(cleanupStarted
                     ? LineageCodes.CleanupFailed
-                    : read.Code);
+                    : read.Code,
+                    cleanupStarted
+                        ? StateReconciliationTerminal.CleanupFailed
+                        : read.DiagnosticTerminal);
             }
 
             var snapshot = read.Snapshot!;
@@ -3547,6 +3549,16 @@ internal sealed class LineageService
         snapshot.UnderRetained.Any(item => item.Metadata == metadata) ||
         snapshot.Unknown.Any(item => item.Metadata == metadata);
 
+    private static bool CanConvergeEquivalentHeadAfterReturnedObjectAbsence(
+        ObservationResult observed,
+        LineageHeadSelection selection,
+        OpaqueStoreObjectMetadata returnedMetadata) =>
+        observed.Snapshot is not null &&
+        !ContainsMetadata(observed.Snapshot, returnedMetadata) &&
+        observed.Snapshot.UnderRetained.IsEmpty &&
+        observed.Snapshot.Unknown.IsEmpty &&
+        selection.EquivalentPhysical.Length == 1;
+
     private static bool EvidenceEquals(
         LineageArtifactEvidence left,
         LineageArtifactEvidence right) => left == right;
@@ -3673,7 +3685,8 @@ internal sealed class LineageService
         StateControlHeaderV1? Header,
         OpaqueStoreMutationState MutationState,
         OpaqueStoreObjectMetadata? ReturnedMetadata,
-        StateReconciliationExactReadBack ExactReadBack)
+        StateReconciliationExactReadBack ExactReadBack,
+        StateReconciliationTerminal? DiagnosticTerminal)
     {
         internal bool Succeeded =>
             StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
@@ -3696,7 +3709,8 @@ internal sealed class LineageService
                 header,
                 upload.MutationState,
                 upload.ReturnedMetadata,
-                upload.ExactReadBack);
+                upload.ExactReadBack,
+                upload.DiagnosticTerminal);
 
         internal static WrittenObjectResult Fail(
             string code,
@@ -3706,7 +3720,8 @@ internal sealed class LineageService
                 header,
                 OpaqueStoreMutationState.NotCommitted,
                 null,
-                StateReconciliationExactReadBack.NotApplicable);
+                StateReconciliationExactReadBack.NotApplicable,
+                null);
     }
 
     private sealed record CleanupDebtResult(
@@ -3729,16 +3744,19 @@ internal sealed class LineageService
         private ObservationResult(
             string code,
             ScopedStateInventorySnapshot? snapshot,
-            LineageSelectionResult? selection)
+            LineageSelectionResult? selection,
+            StateReconciliationTerminal? diagnosticTerminal)
         {
             Code = code;
             Snapshot = snapshot;
             Selection = selection;
+            DiagnosticTerminal = diagnosticTerminal;
         }
 
         internal string Code { get; }
         internal ScopedStateInventorySnapshot? Snapshot { get; set; }
         internal LineageSelectionResult? Selection { get; set; }
+        internal StateReconciliationTerminal? DiagnosticTerminal { get; }
         internal bool Succeeded =>
             StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
             Snapshot is not null &&
@@ -3747,10 +3765,12 @@ internal sealed class LineageService
         internal static ObservationResult Success(
             ScopedStateInventorySnapshot snapshot,
             LineageSelectionResult selection) =>
-            new(LineageCodes.Ready, snapshot, selection);
+            new(LineageCodes.Ready, snapshot, selection, null);
 
-        internal static ObservationResult Fail(string code) =>
-            new(code, null, null);
+        internal static ObservationResult Fail(
+            string code,
+            StateReconciliationTerminal? diagnosticTerminal = null) =>
+            new(code, null, null, diagnosticTerminal);
     }
 
     private sealed record SelectedIntent(

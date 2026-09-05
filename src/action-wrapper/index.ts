@@ -21,9 +21,9 @@ import {
   validateRuntimeFacts,
 } from './launcher/contracts.js';
 import {
+  canonicalStateReconciliationDiagnostic,
   HostProcessTerminationUnconfirmedError,
   runHostProcess,
-  STATE_RECONCILIATION_DIAGNOSTIC_PREFIX,
   type HostProcessRunner,
 } from './launcher/host-process.js';
 import { readAndMaskActionInputs } from './launcher/inputs.js';
@@ -71,8 +71,6 @@ export interface PrivateActionWrapperSeams {
    * Host/control/artifact evidence set.
    */
   readonly trustedProofBudgetReceiptSink?: (frame: string) => void;
-  /** Receives one canonical safe diagnostic after Host and bridge quiescence. */
-  readonly trustedProofStateReconciliationDiagnosticSink?: (line: string) => void;
   readonly fatalExit: (code: 1) => void;
   readonly officialQuiescenceTimeoutMs?: number;
 }
@@ -252,16 +250,12 @@ export async function runPrivateActionWrapperWithSeams(
           writeTrustedProofBudgetReceiptFrame(
             artifactRestRequestBudget,
             hostBudgetReceiptLines,
+            hostStateReconciliationDiagnosticLine,
             seams.trustedProofBudgetReceiptSink,
           );
         } catch {
           failed = true;
         }
-        writeTrustedProofStateReconciliationDiagnostic(
-          artifactRestRequestBudget,
-          hostStateReconciliationDiagnosticLine,
-          seams.trustedProofStateReconciliationDiagnosticSink,
-        );
       }
     } catch {
       failed = true;
@@ -350,6 +344,7 @@ export async function createProductionArtifactExecutor(
 function writeTrustedProofBudgetReceiptFrame(
   budget: ArtifactRestRequestBudget | undefined,
   lines: readonly string[],
+  diagnosticLine: string | undefined,
   sink: ((frame: string) => void) | undefined,
 ): void {
   // The verified R4 payload discriminator is the authority for all three
@@ -367,27 +362,21 @@ function writeTrustedProofBudgetReceiptFrame(
   }
   const artifact = budget.sealAndCreateReceipt();
   if (!artifact) throw new Error('trusted_proof_budget_receipt_frame_invalid');
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join('') + artifact);
+  let diagnostic = '';
+  if (
+    diagnosticLine?.endsWith('\n') &&
+    diagnosticLine.indexOf('\n') === diagnosticLine.length - 1
+  ) {
+    const canonical = canonicalStateReconciliationDiagnostic(diagnosticLine.slice(0, -1));
+    if (canonical !== undefined && `${canonical}\n` === diagnosticLine) {
+      diagnostic = diagnosticLine;
+    }
+  }
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join('') + artifact + diagnostic);
 }
 
 function writeTrustedProofArtifactRestBudgetToStderr(frame: string): void {
   process.stderr.write(frame);
-}
-
-function writeTrustedProofStateReconciliationDiagnostic(
-  budget: ArtifactRestRequestBudget | undefined,
-  line: string | undefined,
-  sink: ((line: string) => void) | undefined,
-): void {
-  if (!budget?.protectedRoute || line === undefined) return;
-  if (
-    !line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX) ||
-    !line.endsWith('\n') ||
-    line.indexOf('\n') !== line.length - 1
-  ) {
-    return;
-  }
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(line);
 }
 
 function required(value: string | undefined): string {

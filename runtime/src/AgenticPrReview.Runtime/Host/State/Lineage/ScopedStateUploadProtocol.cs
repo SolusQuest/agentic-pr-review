@@ -6,7 +6,8 @@ internal sealed record ScopedStateUploadResult(
     string Code,
     OpaqueStoreMutationState MutationState,
     OpaqueStoreObjectMetadata? ReturnedMetadata,
-    StateReconciliationExactReadBack ExactReadBack)
+    StateReconciliationExactReadBack ExactReadBack,
+    StateReconciliationTerminal? DiagnosticTerminal)
 {
     internal OpaqueStoreObjectMetadata? Metadata => ReturnedMetadata;
 
@@ -23,15 +24,22 @@ internal sealed record ScopedStateUploadResult(
             LineageCodes.Ready,
             mutationState,
             metadata,
-            StateReconciliationExactReadBack.Matched);
+            StateReconciliationExactReadBack.Matched,
+            null);
 
     internal static ScopedStateUploadResult Fail(
         string code,
         OpaqueStoreMutationState mutationState,
         OpaqueStoreObjectMetadata? returnedMetadata = null,
         StateReconciliationExactReadBack exactReadBack =
-            StateReconciliationExactReadBack.NotAvailable) =>
-        new(code, mutationState, returnedMetadata, exactReadBack);
+            StateReconciliationExactReadBack.NotAvailable,
+        StateReconciliationTerminal? diagnosticTerminal = null) =>
+        new(
+            code,
+            mutationState,
+            returnedMetadata,
+            exactReadBack,
+            diagnosticTerminal);
 }
 
 internal sealed class ScopedStateUploadProtocol
@@ -60,7 +68,8 @@ internal sealed class ScopedStateUploadProtocol
                 LineageCodes.Invalid,
                 OpaqueStoreMutationState.NotCommitted,
                 exactReadBack:
-                    StateReconciliationExactReadBack.NotApplicable);
+                    StateReconciliationExactReadBack.NotApplicable,
+                diagnosticTerminal: StateReconciliationTerminal.Invalid);
         }
 
         var encryptedDigest = new OpaqueStoreEncryptedObjectDigest(
@@ -82,7 +91,11 @@ internal sealed class ScopedStateUploadProtocol
                 MapFailure(upload.Failure),
                 OpaqueStoreMutationState.NotCommitted,
                 exactReadBack:
-                    StateReconciliationExactReadBack.NotApplicable);
+                    StateReconciliationExactReadBack.NotApplicable,
+                diagnosticTerminal:
+                    upload.Failure == OpaqueStoreFailure.Cancelled
+                        ? StateReconciliationTerminal.Cancelled
+                        : StateReconciliationTerminal.NotCommitted);
         }
 
         var metadata = upload.Metadata;
@@ -119,7 +132,10 @@ internal sealed class ScopedStateUploadProtocol
                 LineageCodes.Unavailable,
                 upload.MutationState,
                 metadata,
-                StateReconciliationExactReadBack.Failed);
+                StateReconciliationExactReadBack.Failed,
+                readBack?.Failure == OpaqueStoreFailure.Cancelled
+                    ? StateReconciliationTerminal.Cancelled
+                    : null);
         }
 
         if (metadata.ExpiresAtUnixSeconds < requiredExpiresAtUnixSeconds)
