@@ -4,18 +4,42 @@ namespace AgenticPrReview.Runtime.Host.State.Lineage;
 
 internal sealed record ScopedStateUploadResult(
     string Code,
-    OpaqueStoreObjectMetadata? Metadata)
+    OpaqueStoreMutationState MutationState,
+    OpaqueStoreObjectMetadata? ReturnedMetadata,
+    StateReconciliationExactReadBack ExactReadBack,
+    StateReconciliationTerminal? DiagnosticTerminal)
 {
+    internal OpaqueStoreObjectMetadata? Metadata => ReturnedMetadata;
+
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
-        Metadata is not null;
+        MutationState != OpaqueStoreMutationState.NotCommitted &&
+        ReturnedMetadata is not null &&
+        ExactReadBack == StateReconciliationExactReadBack.Matched;
 
     internal static ScopedStateUploadResult Success(
-        OpaqueStoreObjectMetadata metadata) =>
-        new(LineageCodes.Ready, metadata);
+        OpaqueStoreObjectMetadata metadata,
+        OpaqueStoreMutationState mutationState) =>
+        new(
+            LineageCodes.Ready,
+            mutationState,
+            metadata,
+            StateReconciliationExactReadBack.Matched,
+            null);
 
-    internal static ScopedStateUploadResult Fail(string code) =>
-        new(code, null);
+    internal static ScopedStateUploadResult Fail(
+        string code,
+        OpaqueStoreMutationState mutationState,
+        OpaqueStoreObjectMetadata? returnedMetadata = null,
+        StateReconciliationExactReadBack exactReadBack =
+            StateReconciliationExactReadBack.NotAvailable,
+        StateReconciliationTerminal? diagnosticTerminal = null) =>
+        new(
+            code,
+            mutationState,
+            returnedMetadata,
+            exactReadBack,
+            diagnosticTerminal);
 }
 
 internal sealed class ScopedStateUploadProtocol
@@ -40,7 +64,12 @@ internal sealed class ScopedStateUploadProtocol
             !LineageValidation.IsTime(requiredExpiresAtUnixSeconds) ||
             requiredExpiresAtUnixSeconds == 0)
         {
-            return ScopedStateUploadResult.Fail(LineageCodes.Invalid);
+            return ScopedStateUploadResult.Fail(
+                LineageCodes.Invalid,
+                OpaqueStoreMutationState.NotCommitted,
+                exactReadBack:
+                    StateReconciliationExactReadBack.NotApplicable,
+                diagnosticTerminal: StateReconciliationTerminal.Invalid);
         }
 
         var encryptedDigest = new OpaqueStoreEncryptedObjectDigest(
@@ -59,7 +88,14 @@ internal sealed class ScopedStateUploadProtocol
         if (upload.MutationState == OpaqueStoreMutationState.NotCommitted)
         {
             return ScopedStateUploadResult.Fail(
-                MapFailure(upload.Failure));
+                MapFailure(upload.Failure),
+                OpaqueStoreMutationState.NotCommitted,
+                exactReadBack:
+                    StateReconciliationExactReadBack.NotApplicable,
+                diagnosticTerminal:
+                    upload.Failure == OpaqueStoreFailure.Cancelled
+                        ? StateReconciliationTerminal.Cancelled
+                        : StateReconciliationTerminal.NotCommitted);
         }
 
         var metadata = upload.Metadata;
@@ -70,7 +106,9 @@ internal sealed class ScopedStateUploadProtocol
         {
             // The adapter-returned descriptor is not request authority. Do not
             // read or delete through it; later complete enumeration reconciles.
-            return ScopedStateUploadResult.Fail(LineageCodes.Unavailable);
+            return ScopedStateUploadResult.Fail(
+                LineageCodes.Unavailable,
+                upload.MutationState);
         }
 
         OpaqueStoreReadBackResult? readBack = null;
@@ -90,7 +128,14 @@ internal sealed class ScopedStateUploadProtocol
             !readBack.Succeeded ||
             readBack.Metadata != metadata)
         {
-            return ScopedStateUploadResult.Fail(LineageCodes.Unavailable);
+            return ScopedStateUploadResult.Fail(
+                LineageCodes.Unavailable,
+                upload.MutationState,
+                metadata,
+                StateReconciliationExactReadBack.Failed,
+                readBack?.Failure == OpaqueStoreFailure.Cancelled
+                    ? StateReconciliationTerminal.Cancelled
+                    : null);
         }
 
         if (metadata.ExpiresAtUnixSeconds < requiredExpiresAtUnixSeconds)
@@ -99,10 +144,13 @@ internal sealed class ScopedStateUploadProtocol
             return ScopedStateUploadResult.Fail(
                 await DeleteAndVerifyAbsentAsync(metadata).ConfigureAwait(false)
                     ? LineageCodes.RetentionFailed
-                    : LineageCodes.CleanupFailed);
+                    : LineageCodes.CleanupFailed,
+                upload.MutationState,
+                metadata,
+                StateReconciliationExactReadBack.Matched);
         }
 
-        return ScopedStateUploadResult.Success(metadata);
+        return ScopedStateUploadResult.Success(metadata, upload.MutationState);
     }
 
     private async Task<bool> DeleteAndVerifyAbsentAsync(

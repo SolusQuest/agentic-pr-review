@@ -156,7 +156,7 @@ internal sealed class FrameworkGitHubHandler(
             return Json(HttpStatusCode.OK,
                 suffix.Contains("/" + ReadCurrentRunId() + "/",
                     StringComparison.Ordinal)
-                    ? CurrentRun(mode)
+                    ? CurrentRun()
                     : TriggerRun(mode));
         }
 
@@ -498,7 +498,7 @@ internal sealed class FrameworkGitHubHandler(
             FrameworkJson.Serialize(FrameworkJson.Array(comments)));
     }
 
-    private string CurrentRun(string mode) => FrameworkJson.Serialize(
+    private string CurrentRun() => FrameworkJson.Serialize(
         FrameworkJson.Object(
             ("id", ReadCurrentRunId()),
             ("run_attempt", ReadCurrentRunAttempt()),
@@ -507,11 +507,11 @@ internal sealed class FrameworkGitHubHandler(
             ("path", ".github/workflows/r4-trusted-proof.yml"),
             ("head_branch", "main"),
             ("head_sha", CurrentWorkflowSha()),
-            ("event", mode == "workflow-run" ||
-                IsTrustedProofPayload() && mode is
-                    "continuation-seed" or "stale"
-                    ? "workflow_run"
-                    : "workflow_dispatch"),
+            ("event", File.Exists(Path.Join(
+                scenarioRoot,
+                "workflow-run-event"))
+                ? "workflow_run"
+                : "workflow_dispatch"),
             ("conclusion", null),
             ("repository", Identity(RepositoryId)),
             ("head_repository", Identity(RepositoryId)),

@@ -8,6 +8,244 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 
 public sealed class LineageServiceLifecycleTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task NewlyUploadedInitialHeadWaitsForDelayedVisibility(
+        int hiddenObservations)
+    {
+        using var context = LineageTestData.Context();
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            HideNextUploadedObjectForNextLists = hiddenObservations,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LineageService(
+                store,
+                context.Time,
+                diagnostics)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        TimeSpan[] expectedDelays = hiddenObservations switch
+        {
+            0 => [],
+            1 => [TimeSpan.FromSeconds(5)],
+            _ => [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+        };
+        Assert.Equal(expectedDelays, context.Time.ScheduledDelays);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public async Task ReturnedHeadMayConvergeToUniqueEquivalentAfterWindow()
+    {
+        using var context = LineageTestData.Context();
+        OpaqueStoreObjectMetadata? returned = null;
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            NextUploadMetadataTransform = stored => returned = stored with
+            {
+                Reference = new OpaqueStoreObjectReference(
+                    stored.Reference.Name,
+                    new OpaqueStoreObjectId("returned-head")),
+            },
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LineageService(
+                store,
+                context.Time,
+                diagnostics)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.NotNull(returned);
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            context.Time.ScheduledDelays);
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public async Task ReturnedHeadCannotConvergeToDuplicateEquivalents()
+    {
+        using var context = LineageTestData.Context();
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            CopyNextUploadedObject = true,
+            NextUploadMetadataTransform = stored => stored with
+            {
+                Reference = new OpaqueStoreObjectReference(
+                    stored.Reference.Name,
+                    new OpaqueStoreObjectId("returned-head")),
+            },
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LineageService(
+                store,
+                context.Time,
+                diagnostics)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.Equal(LineageCodes.Unavailable, result.Code);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(2, store.Objects.Length);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            context.Time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationExactReadBack.Failed,
+            diagnostic.ExactReadBack);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
+    }
+
+    [Fact]
+    public async Task ReturnedHeadMetadataMayAppearOnFinalObservation()
+    {
+        using var context = LineageTestData.Context();
+        var headName = ResolveName(context, StateObjectClass.LineageHead);
+        OpaqueStoreObjectMetadata? stored = null;
+        OpaqueStoreObjectMetadata? returned = null;
+        var headObservations = 0;
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            NextUploadMetadataTransform = physical => returned = physical with
+            {
+                Reference = new OpaqueStoreObjectReference(
+                    physical.Reference.Name,
+                    new OpaqueStoreObjectId("returned-head")),
+            },
+        };
+        store.AfterUpload = (_, _) =>
+        {
+            stored = Assert.Single(store.Objects);
+            headObservations = 0;
+        };
+        store.BeforeList = (request, _) =>
+        {
+            if (request.Name != headName || ++headObservations != 3)
+            {
+                return;
+            }
+
+            store.ReplacePhysicalObject(stored!, returned!);
+        };
+
+        var result = await new LineageService(store, context.Time)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            context.Time.ScheduledDelays);
+    }
+
+    [Theory]
+    [InlineData((int)OpaqueStoreFailure.Incomplete,
+        (int)StateReconciliationTerminal.Incomplete)]
+    [InlineData((int)OpaqueStoreFailure.Cancelled,
+        (int)StateReconciliationTerminal.Cancelled)]
+    [InlineData((int)OpaqueStoreFailure.Conflict,
+        (int)StateReconciliationTerminal.Conflict)]
+    public async Task InitialHeadDiagnosticPreservesInventoryFailure(
+        int failureValue,
+        int expectedTerminalValue)
+    {
+        using var context = LineageTestData.Context();
+        var store = new ScriptedLocatorStore { FilterListsByName = true };
+        var failure = (OpaqueStoreFailure)failureValue;
+        store.AfterUpload = (_, _) =>
+        {
+            if (failure == OpaqueStoreFailure.Incomplete)
+            {
+                store.ListComplete = false;
+            }
+            else
+            {
+                store.ListFailure = failure;
+            }
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LineageService(
+                store,
+                context.Time,
+                diagnostics)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(context.Time.ScheduledDelays);
+        Assert.Equal((StateReconciliationTerminal)expectedTerminalValue,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
+    }
+
+    [Fact]
+    public async Task MissingUploadedInitialHeadEmitsOneBoundedDiagnostic()
+    {
+        using var context = LineageTestData.Context();
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            HideNextUploadedObjectForNextLists = 3,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LineageService(
+                store,
+                context.Time,
+                diagnostics)
+            .ResolveAsync(
+                context.Context,
+                LineageTestData.Request(context.Access),
+                CancellationToken.None);
+
+        Assert.Equal(LineageCodes.Unavailable, result.Code);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            context.Time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOwner.LineageHead, diagnostic.Owner);
+        Assert.Equal(StateReconciliationOutcome.Committed, diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.Matched,
+            diagnostic.ExactReadBack);
+        Assert.Equal(3, diagnostic.Observations);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
+        Assert.Equal(2, diagnostic.ScheduleIndex);
+    }
+
     [Fact]
     public async Task LocalStoreSupportsInitialNextProcessResetAndExpiry()
     {
@@ -272,6 +510,53 @@ public sealed class LineageServiceLifecycleTests
     }
 
     [Fact]
+    public async Task RefreshedHeadWaitsForFinalVisibilityWithoutReupload()
+    {
+        var store = new ScriptedLocatorStore { FilterListsByName = true };
+        SelectedLineageSnapshot initialSnapshot;
+        using (var initialLease = LineageTestData.Context())
+        {
+            var initial = await new LineageService(store, initialLease.Time)
+                .ResolveAsync(
+                    initialLease.Context,
+                    LineageTestData.Request(initialLease.Access),
+                    CancellationToken.None);
+            Assert.True(initial.Succeeded, initial.Code);
+            Assert.True(initial.Context!.TryGetSnapshot(
+                initialLease.Access,
+                out var selected));
+            initialSnapshot = selected!;
+            initial.Context.Dispose();
+        }
+
+        var nextKey = Convert.ToBase64String(
+            Enumerable.Repeat((byte)0xc3, 32).ToArray());
+        using var rotatedLease = LineageTestData.Context(
+            previousBase64: LocatorTestData.CurrentBase64,
+            currentBase64: nextKey);
+        var uploadsBefore = store.UploadCalls;
+        store.HideUploadedObjectOnUploadCall = uploadsBefore + 1;
+        store.HideNextUploadedObjectForNextLists = 2;
+
+        var refreshed = await new LineageService(store, rotatedLease.Time)
+            .ResolveAsync(
+                rotatedLease.Context,
+                LineageTestData.Request(rotatedLease.Access),
+                CancellationToken.None);
+
+        Assert.True(refreshed.Succeeded, refreshed.Code);
+        Assert.True(refreshed.Context!.TryGetSnapshot(
+            rotatedLease.Access,
+            out var refreshedSnapshot));
+        Assert.Equal(initialSnapshot, refreshedSnapshot);
+        refreshed.Context.Dispose();
+        Assert.Equal(uploadsBefore + 1, store.UploadCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            rotatedLease.Time.ScheduledDelays);
+    }
+
+    [Fact]
     public async Task FreshProcessCleansUnknownPreviousKeyRefreshSource()
     {
         await WithRootAsync(async root =>
@@ -510,9 +795,10 @@ public sealed class LineageServiceLifecycleTests
         await WithRootAsync(async root =>
         {
             using var lease = LineageTestData.Context();
-            var store = new LocalRestrictedStateStore(
-                root,
-                timeProvider: lease.Time);
+            var store = new ScriptedLocatorStore
+            {
+                FilterListsByName = true,
+            };
             var service = new LineageService(store, lease.Time);
             var initialized = await service.ResolveAsync(
                 lease.Context,
@@ -528,6 +814,8 @@ public sealed class LineageServiceLifecycleTests
                 lease.Access,
                 initialSnapshot!.LineageHeadIdentity,
                 new string('e', 64));
+            store.HideUploadedObjectOnUploadCall = store.UploadCalls + 1;
+            store.HideNextUploadedObjectForNextLists = 2;
             var reset = await service.ResolveAsync(
                 lease.Context,
                 LineageTestData.Request(
@@ -536,6 +824,9 @@ public sealed class LineageServiceLifecycleTests
                     LineageTestData.Reviewed('3', '4')),
                 CancellationToken.None);
             Assert.True(reset.Succeeded, reset.Code);
+            Assert.Equal(
+                [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+                lease.Time.ScheduledDelays);
             Assert.True(reset.Context!.TryGetSnapshot(
                 lease.Access,
                 out var resetSnapshot));
@@ -566,14 +857,68 @@ public sealed class LineageServiceLifecycleTests
     }
 
     [Fact]
+    public async Task ReturnedIntentMetadataCannotBeReplacedByEquivalentObject()
+    {
+        using var lease = LineageTestData.Context();
+        var store = new ScriptedLocatorStore { FilterListsByName = true };
+        var service = new LineageService(store, lease.Time);
+        var initialized = await service.ResolveAsync(
+            lease.Context,
+            LineageTestData.Request(lease.Access),
+            CancellationToken.None);
+        Assert.True(initialized.Succeeded, initialized.Code);
+        Assert.True(initialized.Context!.TryGetSnapshot(
+            lease.Access,
+            out var initialSnapshot));
+        initialized.Context.Dispose();
+        var uploadsBefore = store.UploadCalls;
+        store.NextUploadMetadataTransform = physical => physical with
+        {
+            Reference = new OpaqueStoreObjectReference(
+                physical.Reference.Name,
+                new OpaqueStoreObjectId("returned-intent")),
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var reset = await new LineageService(
+                store,
+                lease.Time,
+                diagnostics)
+            .ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(
+                    lease.Access,
+                    LineageTestData.Reset(
+                        lease.Access,
+                        initialSnapshot!.LineageHeadIdentity,
+                        new string('e', 64)),
+                    LineageTestData.Reviewed('3', '4')),
+                CancellationToken.None);
+
+        Assert.Equal(LineageCodes.Unavailable, reset.Code);
+        Assert.Equal(uploadsBefore + 1, store.UploadCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            lease.Time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOwner.LineageIntent,
+            diagnostic.Owner);
+        Assert.Equal(StateReconciliationExactReadBack.Failed,
+            diagnostic.ExactReadBack);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
+    }
+
+    [Fact]
     public async Task ExpiryUsesTheUniqueCurrentAcceptance()
     {
         await WithRootAsync(async root =>
         {
             using var lease = LineageTestData.Context();
-            var store = new LocalRestrictedStateStore(
-                root,
-                timeProvider: lease.Time);
+            var store = new ScriptedLocatorStore
+            {
+                FilterListsByName = true,
+            };
             var service = new LineageService(store, lease.Time);
             var initialized = await service.ResolveAsync(
                 lease.Context,
@@ -618,6 +963,8 @@ public sealed class LineageServiceLifecycleTests
             }
 
             lease.Time.UnixSeconds = LineageTestData.Now + 61;
+            store.HideUploadedObjectOnUploadCall = store.UploadCalls + 2;
+            store.HideNextUploadedObjectForNextLists = 2;
             var afterBoundary = await service.ResolveAsync(
                 lease.Context,
                 LineageTestData.Request(
@@ -625,6 +972,9 @@ public sealed class LineageServiceLifecycleTests
                     reviewed: LineageTestData.Reviewed('3', '4')),
                 CancellationToken.None);
             Assert.True(afterBoundary.Succeeded, afterBoundary.Code);
+            Assert.Equal(
+                [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+                lease.Time.ScheduledDelays);
             using (afterBoundary.Context)
             {
                 Assert.True(afterBoundary.Context!.TryGetSnapshot(

@@ -213,6 +213,8 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
 {
     private byte[]? canonicalGeneration;
     private byte[]? outerEnvelope;
+    private OpaqueStoreObjectMetadata? returnedMetadata;
+    private int dispatchState;
 
     private RetainedStatePreparedCandidate(
         RetainedStateTransactionAuthority authority,
@@ -244,6 +246,9 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
     internal OpaqueStoreName Name { get; }
     internal StateControlHeaderV1 Header { get; }
     internal string LogicalGenerationIdentity { get; }
+    internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
+    internal OpaqueStoreObjectMetadata? ReturnedMetadata =>
+        Volatile.Read(ref returnedMetadata);
 
     internal bool TryGetBytes(
         RetainedStateTransactionAuthority authority,
@@ -269,6 +274,23 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
 
     internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
         ReferenceEquals(authority, value) && value.IsLive;
+
+    internal bool TryBeginDispatch() =>
+        Interlocked.CompareExchange(ref dispatchState, 1, 0) == 0;
+
+    internal void ResetDispatchIfDefinitelyNotCommitted() =>
+        Interlocked.CompareExchange(ref dispatchState, 0, 1);
+
+    internal void RememberReturnedMetadata(OpaqueStoreObjectMetadata metadata)
+    {
+        if (OpaqueStoreValidation.IsValid(metadata))
+        {
+            _ = Interlocked.CompareExchange(
+                ref returnedMetadata,
+                metadata,
+                comparand: null);
+        }
+    }
 
     internal static RetainedStatePreparedCandidate Create(
         object issuer,
@@ -478,6 +500,7 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
     private byte[]? payload;
     private byte[]? envelope;
     private byte[]? recoveryPayload;
+    private OpaqueStoreObjectMetadata? returnedMetadata;
     private int dispatchState;
 
     private RetainedStateOpaqueWriteAttempt(
@@ -523,6 +546,8 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
     internal string InventoryDigest { get; }
     internal bool ReconcileOnly { get; }
     internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
+    internal OpaqueStoreObjectMetadata? ReturnedMetadata =>
+        Volatile.Read(ref returnedMetadata);
 
     internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
         ReferenceEquals(authority, value) && value.IsLive;
@@ -577,6 +602,17 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
         if (!ReconcileOnly)
         {
             Interlocked.CompareExchange(ref dispatchState, 0, 1);
+        }
+    }
+
+    internal void RememberReturnedMetadata(OpaqueStoreObjectMetadata metadata)
+    {
+        if (OpaqueStoreValidation.IsValid(metadata))
+        {
+            _ = Interlocked.CompareExchange(
+                ref returnedMetadata,
+                metadata,
+                comparand: null);
         }
     }
 
@@ -1190,6 +1226,7 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
 {
     private byte[]? receiptBytes;
     private byte[]? envelopeBytes;
+    private OpaqueStoreObjectMetadata? returnedMetadata;
     private int dispatchState;
 
     private RetainedStateAcceptanceAttempt(
@@ -1249,6 +1286,8 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
     internal StateControlHeaderV1 Header { get; }
     internal bool ReconcileOnly { get; }
     internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
+    internal OpaqueStoreObjectMetadata? ReturnedMetadata =>
+        Volatile.Read(ref returnedMetadata);
 
     internal bool TryBeginDispatch() =>
         !ReconcileOnly &&
@@ -1259,6 +1298,17 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
         if (!ReconcileOnly)
         {
             Interlocked.CompareExchange(ref dispatchState, 0, 1);
+        }
+    }
+
+    internal void RememberReturnedMetadata(OpaqueStoreObjectMetadata metadata)
+    {
+        if (OpaqueStoreValidation.IsValid(metadata))
+        {
+            _ = Interlocked.CompareExchange(
+                ref returnedMetadata,
+                metadata,
+                comparand: null);
         }
     }
 
@@ -1302,6 +1352,7 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
 {
     private byte[]? payload;
     private byte[]? envelope;
+    private OpaqueStoreObjectMetadata? returnedMetadata;
     private int dispatchState;
 
     private RetainedStatePredecessorCopyAttempt(
@@ -1334,6 +1385,8 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
     internal StateControlHeaderV1 Header { get; }
     internal bool ReconcileOnly { get; }
     internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
+    internal OpaqueStoreObjectMetadata? ReturnedMetadata =>
+        Volatile.Read(ref returnedMetadata);
 
     internal bool TryBeginDispatch() =>
         !ReconcileOnly &&
@@ -1344,6 +1397,17 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
         if (!ReconcileOnly)
         {
             Interlocked.CompareExchange(ref dispatchState, 0, 1);
+        }
+    }
+
+    internal void RememberReturnedMetadata(OpaqueStoreObjectMetadata metadata)
+    {
+        if (OpaqueStoreValidation.IsValid(metadata))
+        {
+            _ = Interlocked.CompareExchange(
+                ref returnedMetadata,
+                metadata,
+                comparand: null);
         }
     }
 

@@ -170,6 +170,37 @@ public sealed class TrustedProofVerifierFixtureTests
         }
     }
 
+    [Fact]
+    public async Task SyntheticPrimaryBucketCanStartAnIndependentWindow()
+    {
+        var root = Path.Join(Path.GetTempPath(),
+            "apr-independent-primary-" + Guid.NewGuid().ToString("N"));
+        var evidence = Path.Join(root, "evidence");
+        var scenario = Path.Join(evidence, "scenario");
+        Directory.CreateDirectory(scenario);
+        try
+        {
+            using var owner = FrameworkPrimaryRateLimitBucket.Initialize(
+                evidence, 64);
+            using var observer = FrameworkPrimaryRateLimitBucket.OpenForScenario(
+                scenario);
+            Assert.Equal(63, await observer.ObserveAsync(
+                charged: true, CancellationToken.None));
+
+            owner.RestartIndependentWindow(1000);
+
+            Assert.Equal(1000, owner.ReadRemaining());
+            Assert.Equal(999, await observer.ObserveAsync(
+                charged: true, CancellationToken.None));
+            Assert.Throws<InvalidOperationException>(() =>
+                observer.RestartIndependentWindow(1000));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("dispatch-bootstrap", 1)]
     [InlineData("dispatch-continuation", 1)]
@@ -648,7 +679,7 @@ public sealed class TrustedProofVerifierFixtureTests
     }
 
     [Fact]
-    public async Task TrustedStaleCurrentRunMirrorsWorkflowRunWithoutChangingDispatchRoutes()
+    public async Task WorkflowRunMarkerControlsCurrentRunWithoutChangingDispatchRoutes()
     {
         var root = Path.Join(
             Path.GetTempPath(),
@@ -657,6 +688,9 @@ public sealed class TrustedProofVerifierFixtureTests
         try
         {
             await PrepareProofScenarioAsync(root, "stale", 902);
+            await File.WriteAllTextAsync(
+                Path.Join(root, "workflow-run-event"),
+                "1");
             using var handler = new FrameworkGitHubHandler(
                 root,
                 new string('f', 64));
@@ -677,6 +711,7 @@ public sealed class TrustedProofVerifierFixtureTests
                 Path.Join(root, "mode"),
                 "continuation");
             await File.WriteAllTextAsync(Path.Join(root, "run-id"), "901");
+            File.Delete(Path.Join(root, "workflow-run-event"));
             Assert.Equal(
                 "workflow_dispatch",
                 await CurrentRunEventAsync(client, 901));

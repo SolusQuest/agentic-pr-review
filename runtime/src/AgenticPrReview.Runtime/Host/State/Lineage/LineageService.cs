@@ -12,15 +12,18 @@ internal sealed class LineageService
     private readonly ScopedStateInventory inventory;
     private readonly ScopedStateUploadProtocol uploads;
     private readonly TimeProvider timeProvider;
+    private readonly IStateReconciliationDiagnosticSink? diagnosticSink;
 
     internal LineageService(
         IRestrictedStateStore store,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IStateReconciliationDiagnosticSink? diagnosticSink = null)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         inventory = new ScopedStateInventory(store);
         uploads = new ScopedStateUploadProtocol(store);
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.diagnosticSink = diagnosticSink;
     }
 
     internal async Task<LineageReadOnlyObservationResult> ObserveReadOnlyAsync(
@@ -502,6 +505,7 @@ internal sealed class LineageService
                         nowForCleanup,
                         observation.RequiredPlatformExpiresAtUnixSeconds,
                         ExpectedHeadConvergenceMode.TransitionSuccessor,
+                        written: null,
                         CancellationToken.None)
                     .ConfigureAwait(false);
                 if (!converged.Succeeded)
@@ -1030,6 +1034,7 @@ internal sealed class LineageService
                 written.Header!,
                 now,
                 requiredPlatformExpiry,
+                written,
                 CancellationToken.None)
             .ConfigureAwait(false);
     }
@@ -1063,6 +1068,7 @@ internal sealed class LineageService
                     head.Header,
                     now,
                     requiredPlatformExpiry,
+                    written: null,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -1116,6 +1122,7 @@ internal sealed class LineageService
                 written.Header,
                 now,
                 requiredPlatformExpiry,
+                written,
                 CancellationToken.None)
             .ConfigureAwait(false);
     }
@@ -1220,14 +1227,7 @@ internal sealed class LineageService
                 requiredPlatformExpiry,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (written.Header is null ||
-            !written.Succeeded &&
-            (StringComparer.Ordinal.Equals(
-                    written.Code,
-                    LineageCodes.RetentionFailed) ||
-                StringComparer.Ordinal.Equals(
-                    written.Code,
-                    LineageCodes.CleanupFailed)))
+        if (written.Header is null)
         {
             return LineageResolveResult.Fail(written.Code);
         }
@@ -1238,7 +1238,7 @@ internal sealed class LineageService
                 request,
                 baseScopeDigest,
                 currentKeyId,
-                written.Header,
+                written,
                 requiredPlatformExpiry,
                 CancellationToken.None)
             .ConfigureAwait(false);
@@ -1272,11 +1272,22 @@ internal sealed class LineageService
         LineageResolveRequest request,
         string baseScopeDigest,
         string currentKeyId,
-        StateControlHeaderV1 expected,
+        WrittenObjectResult written,
         long requiredPlatformExpiry,
         CancellationToken cancellationToken)
     {
-        for (var attempt = 0; attempt < 3; attempt++)
+        var window = CreateVisibilityWindow(
+            written,
+            StateReconciliationOwner.LineageIntent);
+        if (!written.CanReconcile || written.Header is null)
+        {
+            window.ReportFailure(
+                written.DiagnosticTerminal ?? Terminal(written.Code));
+            return IntentConvergenceResult.Fail(written.Code);
+        }
+
+        var expected = written.Header;
+        while (true)
         {
             var candidate = await ReadObservationAsync(
                     context,
@@ -1288,10 +1299,29 @@ internal sealed class LineageService
                     requiredPlatformExpiry,
                     cancellationToken)
                 .ConfigureAwait(false);
+            window.RecordObservation();
             if (!candidate.Succeeded || candidate.Selection!.IsAbsent)
             {
+                var code = candidate.Code;
+                var absent = candidate.Succeeded && candidate.Selection!.IsAbsent;
                 ClearObservation(candidate);
-                continue;
+                if ((!candidate.Succeeded &&
+                        candidate.DiagnosticTerminal is null &&
+                        StringComparer.Ordinal.Equals(
+                            code,
+                            LineageCodes.Unavailable) || absent) &&
+                    await window.WaitForNextObservationAsync()
+                        .ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                window.ReportFailure(absent
+                    ? StateReconciliationTerminal.TargetAbsent
+                    : candidate.DiagnosticTerminal ?? Terminal(code));
+                return IntentConvergenceResult.Fail(absent
+                    ? LineageCodes.Unavailable
+                    : code);
             }
 
             var selectedIntent = SelectPendingIntent(
@@ -1303,13 +1333,22 @@ internal sealed class LineageService
             if (!selectedIntent.Succeeded)
             {
                 ClearObservation(candidate);
+                window.ReportFailure(Terminal(selectedIntent.Code));
                 return IntentConvergenceResult.Fail(selectedIntent.Code);
             }
 
             if (selectedIntent.Intent is null)
             {
                 ClearObservation(candidate);
-                continue;
+                if (await window.WaitForNextObservationAsync()
+                    .ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                window.ReportFailure(
+                    StateReconciliationTerminal.TargetAbsent);
+                return IntentConvergenceResult.Fail(LineageCodes.Unavailable);
             }
 
             if (!StringComparer.Ordinal.Equals(
@@ -1317,7 +1356,24 @@ internal sealed class LineageService
                     expected.ObjectIdentity))
             {
                 ClearObservation(candidate);
+                window.ReportFailure(StateReconciliationTerminal.Conflict);
                 return IntentConvergenceResult.Fail(LineageCodes.Conflict);
+            }
+
+            if (written.ReturnedMetadata is not null &&
+                selectedIntent.Intent.Object.Metadata !=
+                    written.ReturnedMetadata)
+            {
+                ClearObservation(candidate);
+                if (await window.WaitForNextObservationAsync()
+                    .ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                window.ReportFailure(
+                    StateReconciliationTerminal.TargetAbsent);
+                return IntentConvergenceResult.Fail(LineageCodes.Unavailable);
             }
 
             if (!SatisfiesExpectedPhysical(
@@ -1326,15 +1382,15 @@ internal sealed class LineageService
                     requiredPlatformExpiry))
             {
                 ClearObservation(candidate);
-                continue;
+                window.ReportFailure(
+                    StateReconciliationTerminal.RetentionFailed);
+                return IntentConvergenceResult.Fail(LineageCodes.Unavailable);
             }
 
             return IntentConvergenceResult.Success(
                 candidate,
                 selectedIntent.Intent);
         }
-
-        return IntentConvergenceResult.Fail(LineageCodes.Unavailable);
     }
 
     private async Task<LineageResolveResult> ResumeTransitionAsync(
@@ -1434,7 +1490,7 @@ internal sealed class LineageService
                     request,
                     baseScopeDigest,
                     currentKeyId,
-                    refreshed.Header,
+                    refreshed,
                     requiredPlatformExpiry,
                     CancellationToken.None)
                 .ConfigureAwait(false);
@@ -1637,6 +1693,7 @@ internal sealed class LineageService
                     now,
                     requiredPlatformExpiry,
                     ExpectedHeadConvergenceMode.TransitionSuccessor,
+                    written,
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (!result.Succeeded)
@@ -1819,7 +1876,8 @@ internal sealed class LineageService
                 {
                     if (StringComparer.Ordinal.Equals(
                             observed.Code,
-                            LineageCodes.Unavailable))
+                            LineageCodes.Unavailable) &&
+                        observed.DiagnosticTerminal is null)
                     {
                         continue;
                     }
@@ -2239,6 +2297,7 @@ internal sealed class LineageService
             StateControlHeaderV1 expected,
             long now,
             long requiredPlatformExpiry,
+            WrittenObjectResult? written,
             CancellationToken cancellationToken)
     {
         var converged = await ConvergeExpectedHeadAsync(
@@ -2250,6 +2309,7 @@ internal sealed class LineageService
                 now,
                 requiredPlatformExpiry,
                 ExpectedHeadConvergenceMode.Ordinary,
+                written,
                 cancellationToken)
             .ConfigureAwait(false);
         return converged.Succeeded
@@ -2266,13 +2326,56 @@ internal sealed class LineageService
         long now,
         long requiredPlatformExpiry,
         ExpectedHeadConvergenceMode mode,
+        WrittenObjectResult? written,
         CancellationToken cancellationToken)
     {
-        var cleanupPending = false;
-        for (var attempt = 0;
-            attempt < LineageFormat.MaximumPhysicalPerClass;
-            attempt++)
+        var window = written is null
+            ? null
+            : CreateVisibilityWindow(
+                written,
+                StateReconciliationOwner.LineageHead);
+        HeadConvergenceResult Fail(
+            string code,
+            StateReconciliationTerminal? terminal = null)
         {
+            window?.ReportFailure(terminal ?? Terminal(code));
+            return HeadConvergenceResult.Fail(code);
+        }
+
+        if (written is not null && !written.CanReconcile)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    written.Code,
+                    LineageCodes.RetentionFailed) ||
+                StringComparer.Ordinal.Equals(
+                    written.Code,
+                    LineageCodes.CleanupFailed))
+            {
+                var cleanupObservation = await ReadObservationAsync(
+                        context,
+                        request.Access,
+                        request.BaseScope,
+                        baseScopeDigest,
+                        currentKeyId,
+                        request.RequiredLogicalExpiresAtUnixSeconds,
+                        requiredPlatformExpiry,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                ClearObservation(cleanupObservation);
+            }
+
+            return Fail(written.Code, written.DiagnosticTerminal);
+        }
+
+        var cleanupPending = false;
+        var immediateAttempts = 0;
+        while (immediateAttempts < LineageFormat.MaximumPhysicalPerClass)
+        {
+            if (window is null)
+            {
+                immediateAttempts++;
+            }
+
             var observed = await ReadObservationAsync(
                     context,
                     request.Access,
@@ -2283,22 +2386,52 @@ internal sealed class LineageService
                     requiredPlatformExpiry,
                     cancellationToken)
                 .ConfigureAwait(false);
+            window?.RecordObservation();
             try
             {
                 if (!observed.Succeeded)
                 {
                     if (StringComparer.Ordinal.Equals(
                             observed.Code,
-                            LineageCodes.Unavailable))
+                            LineageCodes.Unavailable) &&
+                        observed.DiagnosticTerminal is null)
                     {
+                        if (window is not null)
+                        {
+                            if (await window.WaitForNextObservationAsync()
+                                .ConfigureAwait(false))
+                            {
+                                continue;
+                            }
+
+                            return Fail(
+                                LineageCodes.Unavailable,
+                                StateReconciliationTerminal.Unavailable);
+                        }
+
                         continue;
                     }
 
-                    return HeadConvergenceResult.Fail(observed.Code);
+                    return Fail(
+                        observed.Code,
+                        observed.DiagnosticTerminal);
                 }
 
                 if (observed.Selection!.IsAbsent)
                 {
+                    if (window is not null)
+                    {
+                        if (await window.WaitForNextObservationAsync()
+                            .ConfigureAwait(false))
+                        {
+                            continue;
+                        }
+
+                        return Fail(
+                            LineageCodes.Unavailable,
+                            StateReconciliationTerminal.TargetAbsent);
+                    }
+
                     continue;
                 }
 
@@ -2313,13 +2446,58 @@ internal sealed class LineageService
                             selectedIdentity,
                             expected.PredecessorIdentity))
                     {
+                        if (window is not null)
+                        {
+                            if (await window.WaitForNextObservationAsync()
+                                .ConfigureAwait(false))
+                            {
+                                continue;
+                            }
+
+                            return Fail(
+                                LineageCodes.Unavailable,
+                                StateReconciliationTerminal.TargetAbsent);
+                        }
+
                         continue;
                     }
 
-                    return HeadConvergenceResult.Fail(LineageCodes.Conflict);
+                    return Fail(LineageCodes.Conflict);
                 }
 
-                var selectedHead = observed.Selection.Selection.Head;
+                var selection = observed.Selection.Selection;
+                if (written?.ReturnedMetadata is not null &&
+                    selection.Head.Metadata != written.ReturnedMetadata &&
+                    !selection.SafeToDelete.Contains(
+                        written.ReturnedMetadata))
+                {
+                    if (await window!.WaitForNextObservationAsync()
+                        .ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
+                    // Equivalent concurrent head claims are idempotent. Once
+                    // the complete visibility window is exhausted, another
+                    // resolver may already have authenticated and pruned this
+                    // process's physical duplicate. Never extend this fallback
+                    // to multiple, unknown, or under-retained candidates.
+                    if (!CanConvergeEquivalentHeadAfterReturnedObjectAbsence(
+                            observed,
+                            selection,
+                            written.ReturnedMetadata))
+                    {
+                        return Fail(
+                            LineageCodes.Unavailable,
+                            StateReconciliationTerminal.TargetAbsent);
+                    }
+                }
+
+                if (window is not null)
+                {
+                    immediateAttempts++;
+                }
+                var selectedHead = selection.Head;
                 if (!StringComparer.Ordinal.Equals(
                         selectedHead.Header.KeyId,
                         expected.KeyId) ||
@@ -2335,15 +2513,13 @@ internal sealed class LineageService
                     continue;
                 }
 
-                var selection = observed.Selection.Selection;
                 if (selection.SafeToDelete.IsEmpty)
                 {
                     if (mode == ExpectedHeadConvergenceMode.Ordinary)
                     {
                         if (!observed.Snapshot!.UnderRetained.IsEmpty)
                         {
-                            return HeadConvergenceResult.Fail(
-                                LineageCodes.RetentionFailed);
+                            return Fail(LineageCodes.RetentionFailed);
                         }
 
                         if (observed.Snapshot.Unknown.Any(item =>
@@ -2351,8 +2527,7 @@ internal sealed class LineageService
                                     observed.Snapshot.Names[
                                         StateObjectClass.LineageHead]))
                         {
-                            return HeadConvergenceResult.Fail(
-                                LineageCodes.Conflict);
+                            return Fail(LineageCodes.Conflict);
                         }
 
                         var authority = EvaluateOrdinaryAuthority(
@@ -2365,13 +2540,12 @@ internal sealed class LineageService
                             now);
                         if (!authority.Succeeded)
                         {
-                            return HeadConvergenceResult.Fail(authority.Code);
+                            return Fail(authority.Code);
                         }
 
                         if (authority.RequiresTransition)
                         {
-                            return HeadConvergenceResult.Fail(
-                                LineageCodes.Unavailable);
+                            return Fail(LineageCodes.Unavailable);
                         }
                     }
 
@@ -2406,10 +2580,43 @@ internal sealed class LineageService
             }
         }
 
-        return HeadConvergenceResult.Fail(cleanupPending
+        return Fail(cleanupPending
             ? LineageCodes.CleanupFailed
             : LineageCodes.Unavailable);
     }
+
+    private PostUploadVisibilityWindow CreateVisibilityWindow(
+        WrittenObjectResult written,
+        StateReconciliationOwner owner) =>
+        new(
+            timeProvider,
+            diagnosticSink,
+            owner,
+            written.MutationState switch
+            {
+                OpaqueStoreMutationState.Committed =>
+                    StateReconciliationOutcome.Committed,
+                OpaqueStoreMutationState.OutcomeUnknown =>
+                    StateReconciliationOutcome.OutcomeUnknown,
+                _ => StateReconciliationOutcome.NotCommitted,
+            },
+            written.ExactReadBack);
+
+    private static StateReconciliationTerminal Terminal(string code) =>
+        code switch
+        {
+            LineageCodes.Conflict => StateReconciliationTerminal.Conflict,
+            LineageCodes.AuthenticationFailed =>
+                StateReconciliationTerminal.AuthenticationFailed,
+            LineageCodes.KeyUnavailable =>
+                StateReconciliationTerminal.KeyUnavailable,
+            LineageCodes.RetentionFailed =>
+                StateReconciliationTerminal.RetentionFailed,
+            LineageCodes.CleanupFailed =>
+                StateReconciliationTerminal.CleanupFailed,
+            LineageCodes.Invalid => StateReconciliationTerminal.Invalid,
+            _ => StateReconciliationTerminal.Unavailable,
+        };
 
     private async Task<LineageResolveResult> FinalizeAsync(
         LineageResolveRequest request,
@@ -2514,11 +2721,7 @@ internal sealed class LineageService
                         requiredPlatformExpiry,
                         cancellationToken)
                     .ConfigureAwait(false);
-                return uploaded.Succeeded
-                    ? WrittenObjectResult.Success(
-                        uploaded.Metadata!,
-                        header)
-                    : WrittenObjectResult.Fail(uploaded.Code, header);
+                return WrittenObjectResult.FromUpload(uploaded, header);
             }
             finally
             {
@@ -2598,11 +2801,7 @@ internal sealed class LineageService
                         requiredPlatformExpiry,
                         cancellationToken)
                     .ConfigureAwait(false);
-                return uploaded.Succeeded
-                    ? WrittenObjectResult.Success(
-                        uploaded.Metadata!,
-                        header)
-                    : WrittenObjectResult.Fail(uploaded.Code, header);
+                return WrittenObjectResult.FromUpload(uploaded, header);
             }
             finally
             {
@@ -2642,7 +2841,10 @@ internal sealed class LineageService
             {
                 return ObservationResult.Fail(cleanupStarted
                     ? LineageCodes.CleanupFailed
-                    : read.Code);
+                    : read.Code,
+                    cleanupStarted
+                        ? StateReconciliationTerminal.CleanupFailed
+                        : read.DiagnosticTerminal);
             }
 
             var snapshot = read.Snapshot!;
@@ -3347,6 +3549,16 @@ internal sealed class LineageService
         snapshot.UnderRetained.Any(item => item.Metadata == metadata) ||
         snapshot.Unknown.Any(item => item.Metadata == metadata);
 
+    private static bool CanConvergeEquivalentHeadAfterReturnedObjectAbsence(
+        ObservationResult observed,
+        LineageHeadSelection selection,
+        OpaqueStoreObjectMetadata returnedMetadata) =>
+        observed.Snapshot is not null &&
+        !ContainsMetadata(observed.Snapshot, returnedMetadata) &&
+        observed.Snapshot.UnderRetained.IsEmpty &&
+        observed.Snapshot.Unknown.IsEmpty &&
+        selection.EquivalentPhysical.Length == 1;
+
     private static bool EvidenceEquals(
         LineageArtifactEvidence left,
         LineageArtifactEvidence right) => left == right;
@@ -3470,23 +3682,46 @@ internal sealed class LineageService
 
     private sealed record WrittenObjectResult(
         string Code,
-        OpaqueStoreObjectMetadata? Metadata,
-        StateControlHeaderV1? Header)
+        StateControlHeaderV1? Header,
+        OpaqueStoreMutationState MutationState,
+        OpaqueStoreObjectMetadata? ReturnedMetadata,
+        StateReconciliationExactReadBack ExactReadBack,
+        StateReconciliationTerminal? DiagnosticTerminal)
     {
         internal bool Succeeded =>
             StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
-            Metadata is not null &&
+            MutationState != OpaqueStoreMutationState.NotCommitted &&
+            ReturnedMetadata is not null &&
+            ExactReadBack == StateReconciliationExactReadBack.Matched &&
             Header is not null;
 
-        internal static WrittenObjectResult Success(
-            OpaqueStoreObjectMetadata metadata,
+        internal bool CanReconcile =>
+            Header is not null &&
+            MutationState != OpaqueStoreMutationState.NotCommitted &&
+            (Succeeded ||
+                StringComparer.Ordinal.Equals(Code, LineageCodes.Unavailable));
+
+        internal static WrittenObjectResult FromUpload(
+            ScopedStateUploadResult upload,
             StateControlHeaderV1 header) =>
-            new(LineageCodes.Ready, metadata, header);
+            new(
+                upload.Code,
+                header,
+                upload.MutationState,
+                upload.ReturnedMetadata,
+                upload.ExactReadBack,
+                upload.DiagnosticTerminal);
 
         internal static WrittenObjectResult Fail(
             string code,
             StateControlHeaderV1? header = null) =>
-            new(code, null, header);
+            new(
+                code,
+                header,
+                OpaqueStoreMutationState.NotCommitted,
+                null,
+                StateReconciliationExactReadBack.NotApplicable,
+                null);
     }
 
     private sealed record CleanupDebtResult(
@@ -3509,16 +3744,19 @@ internal sealed class LineageService
         private ObservationResult(
             string code,
             ScopedStateInventorySnapshot? snapshot,
-            LineageSelectionResult? selection)
+            LineageSelectionResult? selection,
+            StateReconciliationTerminal? diagnosticTerminal)
         {
             Code = code;
             Snapshot = snapshot;
             Selection = selection;
+            DiagnosticTerminal = diagnosticTerminal;
         }
 
         internal string Code { get; }
         internal ScopedStateInventorySnapshot? Snapshot { get; set; }
         internal LineageSelectionResult? Selection { get; set; }
+        internal StateReconciliationTerminal? DiagnosticTerminal { get; }
         internal bool Succeeded =>
             StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
             Snapshot is not null &&
@@ -3527,10 +3765,12 @@ internal sealed class LineageService
         internal static ObservationResult Success(
             ScopedStateInventorySnapshot snapshot,
             LineageSelectionResult selection) =>
-            new(LineageCodes.Ready, snapshot, selection);
+            new(LineageCodes.Ready, snapshot, selection, null);
 
-        internal static ObservationResult Fail(string code) =>
-            new(code, null, null);
+        internal static ObservationResult Fail(
+            string code,
+            StateReconciliationTerminal? diagnosticTerminal = null) =>
+            new(code, null, null, diagnosticTerminal);
     }
 
     private sealed record SelectedIntent(
