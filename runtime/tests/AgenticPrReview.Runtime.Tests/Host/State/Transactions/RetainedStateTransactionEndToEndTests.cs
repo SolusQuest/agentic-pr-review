@@ -645,8 +645,11 @@ public sealed class RetainedStateTransactionEndToEndTests
             diagnostic.Terminal));
     }
 
-    [Fact]
-    public async Task CandidateRetryRejectsConflictWithoutRedispatch()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CandidateRetryRejectsConflictWithoutRedispatch(
+        bool conflictVisibleAfterAdmission)
     {
         var fixture = await CreateFixtureAsync();
         using var context = fixture.Context;
@@ -705,6 +708,18 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(2, fixture.Store.Objects.Count(item =>
             item.Reference.Name == firstPrepared.Name));
         var uploadsBeforeRetry = fixture.Store.UploadCalls;
+        if (conflictVisibleAfterAdmission)
+        {
+            var candidateLists = 0;
+            fixture.Store.BeforeList = (request, _) =>
+            {
+                if (request.Name == firstPrepared.Name &&
+                    ++candidateLists == 1)
+                {
+                    fixture.Store.HideExistingObjectsForNextLists = 1;
+                }
+            };
+        }
 
         var retried = await RestrictedStateService
             .PersistRetainedCandidateAsync(

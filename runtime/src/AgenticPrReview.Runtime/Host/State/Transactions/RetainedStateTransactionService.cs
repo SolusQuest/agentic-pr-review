@@ -363,7 +363,16 @@ internal sealed class RetainedStateTransactionService
                     binding.ProducingRunIdentity,
                     binding.ProducingRunAttempt,
                     prepared.Header.RequiredPlatformExpiresAtUnixSeconds,
-                    prepared.ReturnedMetadata)
+                    prepared.ReturnedMetadata,
+                    snapshot =>
+                        CanReconcileDispatchedPreparedCandidateInventory(
+                            snapshot,
+                            locatorAccess,
+                            authority,
+                            binding,
+                            trustedNow,
+                            prepared,
+                            envelopeBytes))
                 .ConfigureAwait(false);
         if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
         {
@@ -5635,6 +5644,125 @@ internal sealed class RetainedStateTransactionService
                 authority,
                 out var canonicalGeneration,
                 out _))
+        {
+            return false;
+        }
+
+        return CanReconcileDispatchedPreparedCandidateInventoryCore(
+            snapshot,
+            binding,
+            trustedNowUnixSeconds,
+            prepared,
+            immutableEnvelope,
+            canonicalGeneration);
+    }
+
+    private static bool CanReconcileDispatchedPreparedCandidateInventory(
+        ScopedStateInventorySnapshot snapshot,
+        AuthorizedLocatorAccess locatorAccess,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
+        RetainedStatePreparedCandidate prepared,
+        ReadOnlyMemory<byte> immutableEnvelope)
+    {
+        if (!prepared.TryGetBytes(
+                authority,
+                out var canonicalGeneration,
+                out _) ||
+            snapshot.UnderRetained.Any(item =>
+                item.Header.ObjectClass == StateObjectClass.LineageHead) ||
+            !snapshot.Names.TryGetValue(
+                StateObjectClass.LineageHead,
+                out var lineageName))
+        {
+            return false;
+        }
+
+        var heads = ImmutableArray.CreateBuilder<LineageHeadCandidate>();
+        foreach (var item in snapshot.Authenticated.Where(item =>
+            item.Header.ObjectClass == StateObjectClass.LineageHead))
+        {
+            if (!LineageHeadCodec.TryDecode(item.Payload, out var head) ||
+                head is null)
+            {
+                return false;
+            }
+
+            heads.Add(new LineageHeadCandidate(
+                item.Metadata,
+                item.Header,
+                head));
+        }
+
+        var unknownHeads = snapshot.Unknown.Where(item =>
+                item.Metadata.Reference.Name == lineageName)
+            .ToImmutableArray();
+        var authenticatedHeads = heads.ToImmutable();
+        var lineage = LineageHeadSelector.Select(
+            authenticatedHeads,
+            unknownHeads,
+            authenticatedHeads.Length + unknownHeads.Length,
+            prepared.Header.KeyId);
+        if (!lineage.Succeeded ||
+            lineage.Selection?.Head is not { } selectedHead ||
+            !MatchesSelected(binding.SelectedLineage, selectedHead))
+        {
+            return false;
+        }
+
+        var inventoryDigest = LineageCryptography.InventoryDigest(
+            snapshot.Authenticated
+                .Concat(snapshot.UnderRetained)
+                .Select(item => LineageHeadCodec.Evidence(item.Metadata))
+                .Concat(snapshot.Unknown.Select(item =>
+                    LineageHeadCodec.Evidence(item.Metadata)))
+                .ToImmutableArray());
+        using var observation = new LineageReadOnlyObservationContext(
+            snapshot,
+            lineage,
+            binding.SelectedLineage.BaseScopeDigest,
+            prepared.Header.KeyId,
+            inventoryDigest,
+            prepared.Header.RequiredPlatformExpiresAtUnixSeconds);
+        try
+        {
+            var accepted = new AcceptedStateSelector(
+                    new FrozenTimeProvider(trustedNowUnixSeconds))
+                .Select(
+                    observation,
+                    new LineageResolveRequest(
+                        locatorAccess,
+                        binding.BaseScope,
+                        binding.Reviewed,
+                        binding.ProducingRunIdentity,
+                        binding.ProducingRunAttempt,
+                        prepared.Header.LogicalExpiresAtUnixSeconds,
+                        Reset: null));
+            return MatchesAcceptedTail(accepted, binding) &&
+                CanReconcileDispatchedPreparedCandidateInventoryCore(
+                    snapshot,
+                    binding,
+                    trustedNowUnixSeconds,
+                    prepared,
+                    immutableEnvelope,
+                    canonicalGeneration);
+        }
+        finally
+        {
+            _ = observation.DetachSnapshot();
+        }
+    }
+
+    private static bool CanReconcileDispatchedPreparedCandidateInventoryCore(
+        ScopedStateInventorySnapshot snapshot,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
+        RetainedStatePreparedCandidate prepared,
+        ReadOnlyMemory<byte> immutableEnvelope,
+        ReadOnlyMemory<byte> canonicalGeneration)
+    {
+        if (!snapshot.Unknown.IsEmpty)
         {
             return false;
         }

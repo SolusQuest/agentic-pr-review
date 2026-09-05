@@ -444,7 +444,9 @@ internal sealed class RetainedStatePersistence
         string expectedProducingRunIdentity,
         long expectedProducingRunAttempt,
         long requiredPlatformExpiresAtUnixSeconds,
-        OpaqueStoreObjectMetadata? returnedMetadata)
+        OpaqueStoreObjectMetadata? returnedMetadata,
+        Func<ScopedStateInventorySnapshot, bool>?
+            validateAuthoritativeInventory = null)
     {
         if (context is null ||
             access is null ||
@@ -523,6 +525,16 @@ internal sealed class RetainedStatePersistence
             try
             {
                 var snapshot = read.Snapshot;
+                if (validateAuthoritativeInventory is not null &&
+                    !validateAuthoritativeInventory(snapshot))
+                {
+                    visibility.ReportFailure(
+                        StateReconciliationTerminal.Conflict);
+                    return RetainedStatePersistenceResult.Fail(
+                        RetainedStateTransactionCodes.Conflict,
+                        mayHaveCommitted: true);
+                }
+
                 if (snapshot.Unknown.Any(item =>
                     item.Metadata.Reference.Name == name))
                 {
