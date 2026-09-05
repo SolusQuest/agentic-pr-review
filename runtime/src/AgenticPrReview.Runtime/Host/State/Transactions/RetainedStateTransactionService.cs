@@ -297,13 +297,21 @@ internal sealed class RetainedStateTransactionService
                             existingInventoryDigest!));
             }
 
-            if (!prepared.HasEnteredDispatch &&
-                !CanAppendCandidate(
+            var mayPersist = prepared.HasEnteredDispatch
+                ? CanReconcileDispatchedPreparedCandidate(
                     before,
                     authority,
                     binding,
                     trustedNow,
-                    expected: null))
+                    prepared,
+                    envelopeBytes)
+                : CanAppendCandidate(
+                    before,
+                    authority,
+                    binding,
+                    trustedNow,
+                    expected: null);
+            if (!mayPersist)
             {
                 return RetainedStateTransactionResult<
                     RetainedStatePersistedCandidate>.Fail(
@@ -5607,6 +5615,84 @@ internal sealed class RetainedStateTransactionService
         metadata = active[0].Metadata;
         inventoryDigest = observedDigest;
         return true;
+    }
+
+    private static bool CanReconcileDispatchedPreparedCandidate(
+        RetainedStateObservation observation,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
+        RetainedStatePreparedCandidate prepared,
+        ReadOnlyMemory<byte> immutableEnvelope)
+    {
+        var snapshot = observation.Snapshot;
+        if (snapshot is null ||
+            observation.SelectedHead is not { } selectedHead ||
+            !MatchesSelected(binding.SelectedLineage, selectedHead) ||
+            !snapshot.Unknown.IsEmpty ||
+            !MatchesAcceptedTail(observation.AcceptedState, binding) ||
+            !prepared.TryGetBytes(
+                authority,
+                out var canonicalGeneration,
+                out _))
+        {
+            return false;
+        }
+
+        var visible = snapshot.Authenticated
+            .Concat(snapshot.UnderRetained)
+            .ToArray();
+        var activeCandidates = SelectLivePublicationCandidateFamilies(
+                visible,
+                visible,
+                binding,
+                trustedNowUnixSeconds)
+            .Where(item =>
+                StringComparer.Ordinal.Equals(
+                    item.Header.PredecessorIdentity,
+                    binding.CurrentAcceptanceReceiptIdentity))
+            .ToArray();
+        var successors = snapshot.Authenticated.Where(item =>
+                item.Header.ObjectClass == StateObjectClass.Acceptance &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.Epoch,
+                    binding.SelectedLineage.Epoch) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.SessionId,
+                    binding.SelectedLineage.SessionId) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.PredecessorIdentity,
+                    binding.CurrentAcceptanceReceiptIdentity))
+            .ToArray();
+        if (successors.Length != 0)
+        {
+            return false;
+        }
+
+        if (activeCandidates.Length == 0)
+        {
+            return snapshot.UnderRetained.IsEmpty;
+        }
+
+        if (activeCandidates.Length != 1 ||
+            snapshot.UnderRetained.Any(item => item != activeCandidates[0]))
+        {
+            return false;
+        }
+
+        var candidate = activeCandidates[0];
+        return candidate.Metadata.Reference.Name == prepared.Name &&
+            candidate.Header == prepared.Header &&
+            candidate.Payload.AsSpan().SequenceEqual(
+                canonicalGeneration.Span) &&
+            candidate.Metadata.EncryptedObjectDigest.Sha256 ==
+                OpaqueStoreHash.Sha256(immutableEnvelope.Span) &&
+            candidate.Metadata.Size == immutableEnvelope.Length &&
+            StringComparer.Ordinal.Equals(
+                candidate.Metadata.ProducingRun.Identity,
+                binding.ProducingRunIdentity) &&
+            candidate.Metadata.ProducingRun.Attempt ==
+                binding.ProducingRunAttempt;
     }
 
     private static bool MatchesAcceptedTail(

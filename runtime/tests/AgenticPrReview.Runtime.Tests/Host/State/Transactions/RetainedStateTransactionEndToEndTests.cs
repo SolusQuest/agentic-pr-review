@@ -646,6 +646,77 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
+    public async Task CandidateRetryRejectsConflictWithoutRedispatch()
+    {
+        var fixture = await CreateFixtureAsync();
+        using var context = fixture.Context;
+        var firstRun = await CompleteRunAsync(fixture, "first", "finish-first");
+        Assert.True(R4PreparedPublication.TryCreate(
+            firstRun.Outcome,
+            fixture.PublicationScope,
+            out var firstPublication));
+        var firstPreparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                firstRun.Run,
+                firstPublication!,
+                CancellationToken.None);
+        using var firstPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            firstPreparedResult.Value);
+
+        var secondRun = await CompleteRunAsync(
+            fixture,
+            "second",
+            "finish-second");
+        Assert.True(R4PreparedPublication.TryCreate(
+            secondRun.Outcome,
+            fixture.PublicationScope,
+            out var secondPublication));
+        var secondPreparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                secondRun.Run,
+                secondPublication!,
+                CancellationToken.None);
+        using var secondPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            secondPreparedResult.Value);
+
+        var uploadsBefore = fixture.Store.UploadCalls;
+        fixture.Store.NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown;
+        fixture.Store.NextUploadMutationState =
+            OpaqueStoreMutationState.OutcomeUnknown;
+        fixture.Store.PersistFailedUpload = true;
+        fixture.Store.HideUploadedObjectOnUploadCall = uploadsBefore + 1;
+        fixture.Store.HideNextUploadedObjectForNextLists = 3;
+        var first = await RestrictedStateService.PersistRetainedCandidateAsync(
+            context,
+            firstPrepared,
+            CancellationToken.None);
+        Assert.Equal(RetainedStateTransactionCodes.OutcomeUnknown, first.Code);
+
+        var firstPhysical = Assert.Single(fixture.Store.Objects.Where(item =>
+            item.Reference.Name == firstPrepared.Name));
+        fixture.Store.HideObjectForNextLists(firstPhysical, 1);
+        var second = await RestrictedStateService.PersistRetainedCandidateAsync(
+            context,
+            secondPrepared,
+            CancellationToken.None);
+        Assert.True(second.Succeeded, second.Code);
+        Assert.Equal(2, fixture.Store.Objects.Count(item =>
+            item.Reference.Name == firstPrepared.Name));
+        var uploadsBeforeRetry = fixture.Store.UploadCalls;
+
+        var retried = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                firstPrepared,
+                CancellationToken.None);
+
+        Assert.Equal(RetainedStateTransactionCodes.Conflict, retried.Code);
+        Assert.Equal(uploadsBeforeRetry, fixture.Store.UploadCalls);
+    }
+
+    [Fact]
     public async Task EquivalentCandidatePhysicalDuplicateFailsAsConflict()
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
