@@ -126,6 +126,58 @@ describe('R4 post-merge fixture refresh contract', () => {
     }
   }, 15_000);
 
+  test('resolves a candidate-based fixture through its GitHub merge checkout', () => {
+    const { checkoutHead, testedMain, normalPrior, stalePrior } = fixtureBasis();
+    const base = git(['rev-parse', `${testedMain}~1`]);
+    expect(git(['rev-parse', `${base}^{tree}`])).not.toBe(
+      git(['rev-parse', `${testedMain}^{tree}`]),
+    );
+    const materialized = materializeRefreshedFixtures({
+      repositoryRoot: root,
+      mergeSha: checkoutHead,
+      priorNormalHead: normalPrior,
+      priorStaleHead: stalePrior,
+    });
+    try {
+      const merge = commit(
+        materialized.runGit,
+        materialized.expected.normal.tree,
+        [base, materialized.expected.normal.head],
+        'test: candidate fixture merge checkout',
+      );
+
+      expect(resolveTestedMainCheckout({ runGit: materialized.runGit, head: merge })).toMatchObject(
+        {
+          testedMainHead: testedMain,
+          testedMainTree: materialized.expected.merge_tree,
+          disposition: 'synthetic-merge',
+          includeWorktree: false,
+        },
+      );
+
+      const unrelatedBase = commit(
+        materialized.runGit,
+        git(['rev-parse', `${base}^{tree}`]),
+        [git(['rev-parse', `${base}~1`])],
+        'test: unrelated fixture merge base',
+      );
+      const unrelatedMerge = commit(
+        materialized.runGit,
+        materialized.expected.normal.tree,
+        [unrelatedBase, materialized.expected.normal.head],
+        'test: candidate fixture with unrelated merge base',
+      );
+      expect(() =>
+        resolveTestedMainCheckout({
+          runGit: materialized.runGit,
+          head: unrelatedMerge,
+        }),
+      ).toThrow(/checkout-merge-base/u);
+    } finally {
+      materialized.dispose();
+    }
+  }, 15_000);
+
   test('fails closed for malformed fixture and merge topologies', () => {
     const { checkoutHead, testedMain, normalPrior, stalePrior } = fixtureBasis();
     const materialized = materializeRefreshedFixtures({
@@ -155,7 +207,7 @@ describe('R4 post-merge fixture refresh contract', () => {
       );
       expect(() =>
         resolveTestedMainCheckout({ runGit: materialized.runGit, head: wrongOrder }),
-      ).toThrow(/checkout-first-parent-delta/u);
+      ).toThrow(/checkout-topology-ambiguous/u);
 
       const extraTree = treeWith(materialized.runGit, baseTree, [
         {
@@ -173,7 +225,7 @@ describe('R4 post-merge fixture refresh contract', () => {
       );
       expect(() =>
         resolveTestedMainCheckout({ runGit: materialized.runGit, head: extraPath }),
-      ).toThrow(/checkout-first-parent-delta/u);
+      ).toThrow(/checkout-topology-ambiguous/u);
 
       const mergeMismatch = commit(
         materialized.runGit,

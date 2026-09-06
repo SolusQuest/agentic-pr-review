@@ -175,7 +175,7 @@ export async function probeUnauthorizedNoLaunch(workflowPath) {
     fetches !== 1 ||
     authorizationHeaderPresent ||
     preflight.stdout !==
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n' ||
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\nbarrier-mode=\n' ||
     !preflight.stderr.startsWith('APR_R4_E2P_PREFLIGHT_REJECTED authorization-mismatch\n') ||
     workflowRunEligible ||
     workflowDispatchEligible ||

@@ -16,6 +16,20 @@ on:
         description: Authorized fixture operation id
         required: true
         type: string
+      candidate-pr-number:
+        description: Candidate source pull request number (candidate modes only)
+        required: false
+        type: string
+      execution-mode:
+        description: Protected execution route
+        required: false
+        default: main-continuation
+        type: choice
+        options:
+          - main-continuation
+          - candidate-bootstrap
+          - candidate-continuation
+          - candidate-stale
 permissions: {}
 concurrency:
   group: agentic-pr-review-r4-${{ github.repository_id }}-pr-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr-number }}
@@ -31,6 +45,7 @@ jobs:
       operation-id: ${{ steps.authorization.outputs.operation-id }}
       authorization-manifest-digest: ${{ steps.authorization.outputs.authorization-manifest-digest }}
       request-budget-profile: ${{ steps.authorization.outputs.request-budget-profile }}
+      barrier-mode: ${{ steps.authorization.outputs.barrier-mode }}
     steps:
       - id: authorization
         env:
@@ -50,9 +65,16 @@ jobs:
           EVENT_HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
           INPUT_PR_NUMBER: ${{ inputs.pr-number }}
           INPUT_OPERATION_ID: ${{ inputs.operation-id }}
+          INPUT_CANDIDATE_PR_NUMBER: ${{ inputs.candidate-pr-number }}
+          INPUT_EXECUTION_MODE: ${{ inputs.execution-mode }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_ID: ${{ github.repository_id }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          RUN_REF: ${{ github.ref }}
+          RUN_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          ACTOR_ID: ${{ github.actor_id }}
           R4_TRUSTED_PROOF_AUTHORIZATION: ${{ vars.R4_TRUSTED_PROOF_AUTHORIZATION }}
         run: |
           node <<'APR_R4_E2P_PREFLIGHT' >> "$GITHUB_OUTPUT"
@@ -157,6 +179,13 @@ jobs:
               'EVENT_NAME',
               /^(?:workflow_run|workflow_dispatch)$/u,
             );
+            const inputMode =
+              eventName === 'workflow_dispatch'
+                ? process.env.INPUT_EXECUTION_MODE || 'main-continuation'
+                : '';
+            const candidateMatch =
+              /^candidate-(bootstrap|continuation|stale)$/u.exec(inputMode);
+            const candidatePhase = candidateMatch?.[1] ?? '';
             if (eventName === 'workflow_run') {
               const eventPullRequests = JSON.parse(
                 required('EVENT_PULL_REQUESTS_JSON', /^\[[\s\S]{0,4096}\]$/u),
@@ -174,12 +203,16 @@ jobs:
                 process.env.EVENT_HEAD_REPOSITORY_ID !== repositoryId ||
                 !Array.isArray(eventPullRequests) ||
                 eventPullRequests.length !== 1 ||
+                (process.env.INPUT_CANDIDATE_PR_NUMBER ?? '') !== '' ||
+                (process.env.INPUT_EXECUTION_MODE ?? '') !== '' ||
                 String(eventPullRequests[0]?.number) !==
                   process.env.EVENT_PR_NUMBER ||
                 eventPullRequests[0]?.head?.sha !== process.env.EVENT_HEAD_SHA
               ) {
                 fail('workflow-run-route-facts');
               }
+            } else if (inputMode !== 'main-continuation' && !candidatePhase) {
+              fail('workflow-dispatch-mode');
             }
             const prNumber = required(
               eventName === 'workflow_run'
@@ -187,36 +220,105 @@ jobs:
                 : 'INPUT_PR_NUMBER',
               positiveInteger,
             );
+            const readPullRequest = async (number) => {
+              const response = await fetch(
+                `https://api.github.com/repos/${repository}/pulls/${number}`,
+                {
+                  method: 'GET',
+                  headers: {
+                    Accept: 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                  },
+                  redirect: 'error',
+                  signal: AbortSignal.timeout(10000),
+                },
+              );
+              if (!response.ok) fail(`github-status-${response.status}`);
+              const responseBytes = new Uint8Array(await response.arrayBuffer());
+              if (responseBytes.length === 0 || responseBytes.length > 65536) {
+                fail('github-response-size');
+              }
+              const responseText = new TextDecoder('utf-8', {
+                fatal: true,
+              }).decode(responseBytes);
+              rejectDuplicateKeys(responseText);
+              return JSON.parse(responseText);
+            };
+            if (eventName === 'workflow_dispatch') {
+              const runRef = required('RUN_REF', /^refs\/heads\/[\x21-\x7e]{1,255}$/u);
+              const runSha = required('RUN_SHA', lowerHex40);
+              const workflowRef = required('WORKFLOW_REF', /^[\x21-\x7e]{1,1024}$/u);
+              if (
+                runSha !== workflowSha ||
+                workflowRef !==
+                  `${repository}/.github/workflows/r4-trusted-proof.yml@${runRef}`
+              ) {
+                fail('workflow-dispatch-source-route');
+              }
+              if (candidatePhase) {
+                const candidatePrNumber = required(
+                  'INPUT_CANDIDATE_PR_NUMBER',
+                  positiveInteger,
+                );
+                const actor = required('ACTOR', /^[A-Za-z0-9-]{1,39}$/u);
+                const actorId = required('ACTOR_ID', positiveInteger);
+                const candidatePull = await readPullRequest(candidatePrNumber);
+                if (
+                  candidatePrNumber === prNumber ||
+                  candidatePull === null ||
+                  Array.isArray(candidatePull) ||
+                  typeof candidatePull !== 'object' ||
+                  String(candidatePull.number) !== candidatePrNumber ||
+                  candidatePull.state !== 'open' ||
+                  typeof candidatePull.draft !== 'boolean' ||
+                  candidatePull.merged_at !== null ||
+                  candidatePull.user?.login !== actor ||
+                  String(candidatePull.user?.id) !== actorId ||
+                  !/^(?:MEMBER|OWNER|COLLABORATOR)$/u.test(
+                    candidatePull.author_association ?? '',
+                  ) ||
+                  candidatePull.base?.repo?.full_name !== repository ||
+                  String(candidatePull.base?.repo?.id) !== repositoryId ||
+                  candidatePull.base?.ref !== 'main' ||
+                  !lowerHex40.test(candidatePull.base?.sha ?? '') ||
+                  candidatePull.head?.repo?.full_name !== repository ||
+                  String(candidatePull.head?.repo?.id) !== repositoryId ||
+                  candidatePull.head?.sha !== workflowSha ||
+                  candidatePull.head?.ref === 'main' ||
+                  runRef !== `refs/heads/${candidatePull.head?.ref ?? ''}`
+                ) {
+                  fail('candidate-pull-request-identity');
+                }
+              } else if (
+                (process.env.INPUT_CANDIDATE_PR_NUMBER ?? '') !== '' ||
+                runRef !== 'refs/heads/main'
+              ) {
+                fail('main-dispatch-route');
+              }
+            }
             const requestBudgetProfile =
               eventName === 'workflow_run'
                 ? authorization.proof_scope === 'normal'
                   ? 'final-bootstrap'
                   : 'final-stale'
-                : authorization.proof_scope === 'normal'
-                  ? 'final-continuation'
-                  : fail('workflow-dispatch-proof-scope');
-            const response = await fetch(
-              `https://api.github.com/repos/${repository}/pulls/${prNumber}`,
-              {
-                method: 'GET',
-                headers: {
-                  Accept: 'application/vnd.github+json',
-                  'X-GitHub-Api-Version': '2022-11-28',
-                },
-                redirect: 'error',
-                signal: AbortSignal.timeout(10000),
-              },
-            );
-            if (!response.ok) fail(`github-status-${response.status}`);
-            const responseBytes = new Uint8Array(await response.arrayBuffer());
-            if (responseBytes.length === 0 || responseBytes.length > 65536) {
-              fail('github-response-size');
-            }
-            const responseText = new TextDecoder('utf-8', {
-              fatal: true,
-            }).decode(responseBytes);
-            rejectDuplicateKeys(responseText);
-            const pull = JSON.parse(responseText);
+                : candidatePhase === 'bootstrap'
+                  ? authorization.proof_scope === 'normal'
+                    ? 'final-bootstrap'
+                    : fail('candidate-proof-scope')
+                  : candidatePhase === 'stale'
+                    ? authorization.proof_scope === 'stale'
+                      ? 'final-stale'
+                      : fail('candidate-proof-scope')
+                    : authorization.proof_scope === 'normal'
+                      ? 'final-continuation'
+                      : fail('workflow-dispatch-proof-scope');
+            const barrierMode =
+              eventName === 'workflow_run' ||
+              candidatePhase === 'bootstrap' ||
+              candidatePhase === 'stale'
+                ? 'hold'
+                : 'verify-completed';
+            const pull = await readPullRequest(prNumber);
             if (
               pull === null ||
               Array.isArray(pull) ||
@@ -282,7 +384,7 @@ jobs:
             ).join('');
             if (!lowerHex64.test(digest)) fail('authorization-digest');
             process.stdout.write(
-              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\nrequest-budget-profile=${requestBudgetProfile}\n`,
+              `authorized=true\npr-number=${prNumber}\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${digest}\nrequest-budget-profile=${requestBudgetProfile}\nbarrier-mode=${barrierMode}\n`,
             );
           })().catch((error) => {
             const code =
@@ -291,7 +393,7 @@ jobs:
                 : 'preflight-failed';
             process.stderr.write(`APR_R4_E2P_PREFLIGHT_REJECTED ${code}\n`);
             process.stdout.write(
-              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n',
+              'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\nbarrier-mode=\n',
             );
           });
           APR_R4_E2P_PREFLIGHT
@@ -463,7 +565,26 @@ jobs:
           unset GITHUB_TOKEN GH_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
           unset AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY DEEPSEEK_API_KEY OPENAI_API_KEY AZURE_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GOOGLE_APPLICATION_CREDENTIALS
           bash control-root/runtime/scripts/prepare-r4-trusted-proof-payload-current.sh --source-root "$GITHUB_WORKSPACE/payload-source" --control-root "$GITHUB_WORKSPACE/control-root" --expected-source-sha "${{ github.workflow_sha }}" --output-root "$RUNNER_TEMP/r4-e2p-payload" --github-output "$GITHUB_OUTPUT"
+      - id: barrier-hold
+        if: ${{ needs.authorization-preflight.outputs.barrier-mode == 'hold' }}
+        env:
+          AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          PR_NUMBER: ${{ needs.authorization-preflight.outputs.pr-number }}
+          FIXTURE_HEAD_SHA: ${{ needs.authorization-preflight.outputs.fixture-head-sha }}
+          OPERATION_ID: ${{ needs.authorization-preflight.outputs.operation-id }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ACTION_SOURCE_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SOURCE_SHA: ${{ github.workflow_sha }}
+          PAYLOAD_SHA256: ${{ steps.prepare.outputs.prepared_payload_sha256 }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          "${{ steps.prepare.outputs.prepared_root }}/${{ steps.prepare.outputs.prepared_executable }}" barrier hold
       - id: barrier-verify-completed
+        if: ${{ needs.authorization-preflight.outputs.barrier-mode == 'verify-completed' }}
         env:
           AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: ${{ needs.authorization-preflight.outputs.request-budget-profile }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
