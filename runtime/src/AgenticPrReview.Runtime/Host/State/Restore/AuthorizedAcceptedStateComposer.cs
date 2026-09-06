@@ -369,13 +369,22 @@ internal sealed class AuthorizedAcceptedStateComposer
                     AcceptedStateCodes.OutcomeUnknown);
             }
 
-            var logicalExpiry = checked(
-                now + AcceptedStateFormat.LogicalWindowSeconds);
-            var requiredPlatformExpiry = Math.Max(
-                checked(now +
-                    StateRetentionRequirements.ScopedPlatformRequestSeconds),
-                checked(logicalExpiry +
-                    StateRetentionRequirements.SentinelDependentMarginSeconds));
+            var latestCurrentRunAcceptance = checked(
+                now + StateRetentionRequirements.PreStickyBudgetSeconds);
+            if (!RetainedStateRetention.TryAcceptance(
+                    latestCurrentRunAcceptance,
+                    out var logicalExpiry,
+                    out var receiptPlatformExpiry))
+            {
+                return AuthorizedAcceptedStateRestoreResult.Fail(
+                    AcceptedStateCodes.OutcomeUnknown);
+            }
+
+            var requiredPlatformExpiry = checked(
+                now + StateRetentionRequirements.ScopedPlatformRequestSeconds);
+            var initialRequiredPlatformExpiry = Math.Max(
+                requiredPlatformExpiry,
+                receiptPlatformExpiry);
             var locatorResult = await new LocatorRootService(
                     store,
                     keys,
@@ -384,12 +393,21 @@ internal sealed class AuthorizedAcceptedStateComposer
                 .ResolveAsync(
                     access,
                     requiredPlatformExpiry,
-                    cancellationToken)
+                    cancellationToken,
+                    initialRequiredPlatformExpiry)
                 .ConfigureAwait(false);
             if (!locatorResult.Succeeded || locatorResult.Context is null)
             {
                 return AuthorizedAcceptedStateRestoreResult.Fail(
                     MapLocatorCode(locatorResult.Code));
+            }
+
+            if (timeProvider.GetUtcNow().ToUnixTimeSeconds() >
+                latestCurrentRunAcceptance)
+            {
+                locatorResult.Context.Dispose();
+                return AuthorizedAcceptedStateRestoreResult.Fail(
+                    AcceptedStateCodes.OutcomeUnknown);
             }
 
             locator = locatorResult.Context;
@@ -441,12 +459,20 @@ internal sealed class AuthorizedAcceptedStateComposer
                         MapLineageCode(observedResult.Code));
                 }
 
+                if (timeProvider.GetUtcNow().ToUnixTimeSeconds() >
+                    latestCurrentRunAcceptance)
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        AcceptedStateCodes.OutcomeUnknown);
+                }
+
                 var reset = await ResolveResetAsync(
                         authorization,
                         lineageService,
                         locator,
                         lineageRequest,
                         observation,
+                        latestCurrentRunAcceptance,
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (!reset.Succeeded || reset.Context is null)
@@ -498,6 +524,13 @@ internal sealed class AuthorizedAcceptedStateComposer
                 {
                     return AuthorizedAcceptedStateRestoreResult.Fail(
                         MapLineageCode(observedResult.Code));
+                }
+
+                if (timeProvider.GetUtcNow().ToUnixTimeSeconds() >
+                    latestCurrentRunAcceptance)
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        AcceptedStateCodes.OutcomeUnknown);
                 }
 
                 if (expectedRecoveredHead is not null &&
@@ -569,6 +602,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                             locator,
                             lineageRequest,
                             selectorResult.InitialAbsence,
+                            latestCurrentRunAcceptance,
                             cancellationToken)
                         .ConfigureAwait(false);
                     if (!initialized.Succeeded || initialized.Context is null)
@@ -874,6 +908,7 @@ internal sealed class AuthorizedAcceptedStateComposer
         LocatorContext locator,
         LineageResolveRequest request,
         LineageReadOnlyObservationContext observation,
+        long mutationNotAfterUnixSeconds,
         CancellationToken cancellationToken)
     {
         if (observation.Selection.IsAbsent)
@@ -886,6 +921,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                         locator,
                         request,
                         initial.InitialAbsence,
+                        mutationNotAfterUnixSeconds,
                         cancellationToken)
                     .ConfigureAwait(false);
         }

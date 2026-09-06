@@ -56,6 +56,10 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private int inFlight;
     private string pendingName = "";
     private DateTimeOffset pendingExpiry;
+    private long? pendingFinalizedArtifactId;
+    private bool pendingLosesFinalizeReceipt;
+    private bool uploadOutcomeUnknownFaultConsumed;
+    private int uploadOutcomeUnknownPhysicalCommits;
     private long nextId = 1000;
     private long? delayedVisibilityArtifactId;
     private string? delayedVisibilityArtifactName;
@@ -165,6 +169,10 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             blocks.Clear();
             pendingName = "";
             pendingExpiry = default;
+            pendingFinalizedArtifactId = null;
+            pendingLosesFinalizeReceipt = false;
+            uploadOutcomeUnknownFaultConsumed = false;
+            uploadOutcomeUnknownPhysicalCommits = 0;
             delayedVisibilityArtifactId = null;
             delayedVisibilityArtifactName = null;
             delayedVisibilityObservations = 0;
@@ -322,13 +330,25 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 "/CreateArtifact", StringComparison.Ordinal))
         {
             using var document = JsonDocument.Parse(body);
-            pendingName = PropertyString(document.RootElement, "name") ?? "";
-            pendingExpiry = ParseExpiry(document.RootElement) ??
+            var requestedName = PropertyString(
+                document.RootElement,
+                "name") ?? "";
+            var requestedExpiry = ParseExpiry(document.RootElement) ??
                 DateTimeOffset.FromUnixTimeSeconds(1_900_000_000);
-            lock (gate) blocks.Clear();
+            lock (gate)
+            {
+                pendingName = requestedName;
+                pendingExpiry = requestedExpiry;
+                pendingFinalizedArtifactId = null;
+                pendingLosesFinalizeReceipt =
+                    activeMode == "artifact-upload-outcome-unknown" &&
+                    !uploadOutcomeUnknownFaultConsumed;
+                blocks.Clear();
+            }
+
+            Increment("official-create-count");
             var signed = BaseUrl + "/blob/upload?sig=" +
                 Uri.EscapeDataString(FrameworkCanaries.SignedUrl);
-            Increment("official-create-count");
             FrameworkCanaryCapture.CaptureAll(evidenceRoot,
                 "results.create-response", signed);
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
@@ -365,28 +385,48 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
             var digest = Convert.ToHexString(SHA256.HashData(archive))
                 .ToLowerInvariant();
-            var id = Interlocked.Increment(ref nextId);
             var delayInitialLineage = Mode() is
                 "artifact-delayed-visibility" or
                 "artifact-delayed-visibility-exhausted";
+            long id;
+            bool losesFinalizeReceipt;
+            bool firstFinalize;
             lock (gate)
             {
-                artifacts[id] = new Artifact(
-                    id,
-                    pendingName,
-                    archive,
-                    digest,
-                    envelopeDigest,
-                    pendingExpiry,
-                    producingRunId,
-                    producingRunAttempt);
-                artifactNames.Add(pendingName);
-                if (delayInitialLineage && artifacts.Count == 2)
+                firstFinalize = pendingFinalizedArtifactId is null;
+                if (pendingFinalizedArtifactId is { } finalizedId)
                 {
-                    delayedVisibilityArtifactId = id;
-                    delayedVisibilityArtifactName = pendingName;
-                    delayedVisibilityObservations = 0;
+                    id = finalizedId;
                 }
+                else
+                {
+                    id = Interlocked.Increment(ref nextId);
+                    artifacts[id] = new Artifact(
+                        id,
+                        pendingName,
+                        archive,
+                        digest,
+                        envelopeDigest,
+                        pendingExpiry,
+                        producingRunId,
+                        producingRunAttempt);
+                    artifactNames.Add(pendingName);
+                    pendingFinalizedArtifactId = id;
+                    if (delayInitialLineage && artifacts.Count == 2)
+                    {
+                        delayedVisibilityArtifactId = id;
+                        delayedVisibilityArtifactName = pendingName;
+                        delayedVisibilityObservations = 0;
+                    }
+
+                    if (pendingLosesFinalizeReceipt)
+                    {
+                        uploadOutcomeUnknownFaultConsumed = true;
+                        uploadOutcomeUnknownPhysicalCommits++;
+                    }
+                }
+
+                losesFinalizeReceipt = pendingLosesFinalizeReceipt;
             }
 
             if (!FrameworkCanaryCapture.ArchiveHasNoPrivateCanary(
@@ -401,11 +441,22 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
 
             Increment("official-finalize-count");
-            if (Mode() == "artifact-upload-outcome-unknown")
+            if (losesFinalizeReceipt)
             {
-                File.WriteAllText(
-                    Path.Join(evidenceRoot, "upload-outcome-unknown-committed"),
-                    id.ToString(CultureInfo.InvariantCulture));
+                if (firstFinalize)
+                {
+                    File.WriteAllText(
+                        Path.Join(
+                            evidenceRoot,
+                            "upload-outcome-unknown-committed"),
+                        id.ToString(CultureInfo.InvariantCulture));
+                    File.WriteAllText(
+                        Path.Join(
+                            evidenceRoot,
+                            "upload-outcome-unknown-physical-count"),
+                        uploadOutcomeUnknownPhysicalCommits.ToString(
+                            CultureInfo.InvariantCulture));
+                }
                 await WriteJsonAsync(context.Response,
                     HttpStatusCode.InternalServerError,
                     "{\"ok\":true}").ConfigureAwait(false);

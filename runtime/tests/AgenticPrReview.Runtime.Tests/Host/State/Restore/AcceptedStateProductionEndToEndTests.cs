@@ -48,9 +48,42 @@ public sealed class AcceptedStateProductionEndToEndTests
         var lineage = Assert.Single(store.Objects.Where(item =>
             item.Reference.Name.Value != LocatorRootFormat.StoreName));
         Assert.Equal(
-            time.UnixSeconds + StateRetentionRequirements.ScopedPlatformRequestSeconds +
+            time.UnixSeconds - elapsedSeconds +
+                StateRetentionRequirements.PreStickyBudgetSeconds +
+                StateRetentionRequirements.LogicalWindowSeconds +
+                StateRetentionRequirements.SentinelDependentMarginSeconds +
                 store.ExtraRetentionSeconds,
             lineage.ExpiresAtUnixSeconds);
+    }
+
+    [Theory]
+    [InlineData(StateRetentionRequirements.PreStickyBudgetSeconds - 1, true)]
+    [InlineData(StateRetentionRequirements.PreStickyBudgetSeconds, true)]
+    [InlineData(StateRetentionRequirements.PreStickyBudgetSeconds + 1, false)]
+    public async Task BootstrapEnforcesCutoffAfterAuthorizedAbsenceRead(
+        long elapsedSeconds,
+        bool expectedSuccess)
+    {
+        var (request, store, time) = await BootstrapClockRequestAsync();
+        var observedBoundaryReads = AdvanceDuringSecondScopedInventory(
+            store,
+            time,
+            elapsedSeconds);
+
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        using var context = result.Context;
+
+        Assert.Equal(expectedSuccess, result.Succeeded);
+        Assert.Equal(expectedSuccess, result.IsBootstrap);
+        Assert.Equal(2, observedBoundaryReads());
+        Assert.Equal(expectedSuccess ? 2 : 1, store.UploadCalls);
+        if (!expectedSuccess)
+        {
+            Assert.Equal(AcceptedStateCodes.OutcomeUnknown, result.Code);
+            Assert.Equal(LocatorRootFormat.StoreName,
+                Assert.Single(store.Objects).Reference.Name.Value);
+        }
     }
 
     [Theory]
@@ -110,6 +143,33 @@ public sealed class AcceptedStateProductionEndToEndTests
                 time.UnixSeconds += elapsedSeconds;
             }
         };
+    }
+
+    private static Func<int> AdvanceDuringSecondScopedInventory(
+        ScriptedLocatorStore store,
+        MutableLineageTimeProvider time,
+        long elapsedSeconds)
+    {
+        var initialUnixSeconds = time.UnixSeconds;
+        OpaqueStoreName? boundaryName = null;
+        var boundaryReads = 0;
+        store.BeforeList = (request, _) =>
+        {
+            if (request.Name.Value == LocatorRootFormat.StoreName)
+            {
+                return;
+            }
+
+            boundaryName ??= request.Name;
+            if (request.Name != boundaryName || ++boundaryReads != 2)
+            {
+                return;
+            }
+
+            store.BeforeList = null;
+            time.UnixSeconds = checked(initialUnixSeconds + elapsedSeconds);
+        };
+        return () => boundaryReads;
     }
 
     private static async Task<(

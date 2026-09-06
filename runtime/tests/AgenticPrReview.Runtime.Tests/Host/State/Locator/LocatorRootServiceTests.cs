@@ -438,6 +438,33 @@ public sealed class LocatorRootServiceTests
             keys).Generation);
     }
 
+    [Fact]
+    public async Task InitialDependencyCannotWeakenRequestedCoverage()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore();
+        var dependentExpiry = LocatorTestData.Now +
+            20 * 24 * 60 * 60;
+
+        var result = await Service(store, keys).ResolveAsync(
+            access,
+            dependentExpiry,
+            CancellationToken.None,
+            initialDependentExpiresAtUnixSeconds: 0);
+
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        Assert.True(StateRetentionRequirements.TryGetRequiredSentinelExpiry(
+            LocatorTestData.Now,
+            dependentExpiry,
+            out var requiredExpiry));
+        Assert.True(DecryptSingle(
+            store,
+            access,
+            keys).RequiredExpiresAtUnixSeconds >= requiredExpiry);
+    }
+
     [Theory]
     [InlineData(
         (int)OpaqueStoreFailure.Io,
@@ -468,6 +495,271 @@ public sealed class LocatorRootServiceTests
         Assert.True(result.Succeeded, result.Code);
         Assert.Single(store.Objects);
         Assert.True(store.ReadBackCalls >= 2);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task OutcomeUnknownWithoutMetadataReconcilesFromInventory(
+        int hiddenObservations)
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown,
+            NextUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown,
+            PersistFailedUpload = true,
+            OmitNextUploadMetadata = true,
+            HideNextUploadedObjectForNextLists = hiddenObservations,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                time,
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        TimeSpan[] expectedDelays = hiddenObservations switch
+        {
+            0 => [],
+            1 => [TimeSpan.FromSeconds(5)],
+            _ => [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+        };
+        Assert.Equal(expectedDelays, time.ScheduledDelays);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Single(store.Objects);
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public async Task MissingReceiptAndPermanentlyHiddenLocatorFailsBoundedly()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown,
+            NextUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown,
+            PersistFailedUpload = true,
+            OmitNextUploadMetadata = true,
+            HideNextUploadedObjectForNextLists = 3,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                time,
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, result.Code);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Single(store.Objects);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOutcome.OutcomeUnknown,
+            diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.NotAvailable,
+            diagnostic.ExactReadBack);
+        Assert.Equal(3, diagnostic.Observations);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
+        Assert.Equal(2, diagnostic.ScheduleIndex);
+    }
+
+    [Fact]
+    public async Task MissingReceiptDuplicateExactLocatorFailsWithoutCleanup()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown,
+            NextUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown,
+            PersistFailedUpload = true,
+            OmitNextUploadMetadata = true,
+            CopyNextUploadedObject = true,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Conflict, result.Code);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(2, store.Objects.Length);
+        Assert.Equal(0, store.DeleteCalls);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOutcome.OutcomeUnknown,
+            diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.NotAvailable,
+            diagnostic.ExactReadBack);
+        Assert.Equal(StateReconciliationTerminal.Conflict,
+            diagnostic.Terminal);
+    }
+
+    [Theory]
+    [InlineData(0, -3_601)]
+    [InlineData(-3_601, 0)]
+    public async Task MissingReceiptDuplicateExactLocatorRejectsMixedRetention(
+        long originalRetentionAdjustmentSeconds,
+        long copyRetentionAdjustmentSeconds)
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown,
+            NextUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown,
+            PersistFailedUpload = true,
+            OmitNextUploadMetadata = true,
+            CopyNextUploadedObject = true,
+            NextUploadRetentionAdjustmentSeconds =
+                originalRetentionAdjustmentSeconds,
+            NextUploadCopyRetentionAdjustmentSeconds =
+                copyRetentionAdjustmentSeconds,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Conflict, result.Code);
+        Assert.Null(result.Context);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(2, store.Objects.Length);
+        Assert.Equal(0, store.DeleteCalls);
+        Assert.Equal(StateReconciliationTerminal.Conflict,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
+    }
+
+    [Fact]
+    public async Task MissingReceiptSoleUnderRetainedLocatorRemainsUnavailable()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown,
+            NextUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown,
+            PersistFailedUpload = true,
+            OmitNextUploadMetadata = true,
+            NextUploadRetentionAdjustmentSeconds = -3_601,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, result.Code);
+        Assert.Null(result.Context);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Single(store.Objects);
+        Assert.Equal(0, store.DeleteCalls);
+        Assert.Equal(StateReconciliationTerminal.Unavailable,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
+    }
+
+    [Theory]
+    [InlineData(
+        (int)OpaqueStoreFailure.Io,
+        (int)StateReconciliationTerminal.Unavailable)]
+    [InlineData(
+        (int)OpaqueStoreFailure.Cancelled,
+        (int)StateReconciliationTerminal.Cancelled)]
+    public async Task MissingReceiptFinalReadBackFailureEmitsOneDiagnostic(
+        int failureValue,
+        int expectedTerminalValue)
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown,
+            NextUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown,
+            PersistFailedUpload = true,
+            OmitNextUploadMetadata = true,
+            ReadBackFailure = (OpaqueStoreFailure)failureValue,
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, result.Code);
+        Assert.Null(result.Context);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(0, store.DeleteCalls);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal((StateReconciliationTerminal)expectedTerminalValue,
+            diagnostic.Terminal);
+        Assert.Equal(StateReconciliationOutcome.OutcomeUnknown,
+            diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.NotAvailable,
+            diagnostic.ExactReadBack);
+    }
+
+    [Fact]
+    public async Task MissingReceiptFinalReadBackMismatchEmitsOneDiagnostic()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown,
+            NextUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown,
+            PersistFailedUpload = true,
+            OmitNextUploadMetadata = true,
+            NextReadBackMetadataTransform = metadata => metadata with
+            {
+                ExpiresAtUnixSeconds = checked(
+                    metadata.ExpiresAtUnixSeconds + 1),
+            },
+        };
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, result.Code);
+        Assert.Null(result.Context);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(0, store.DeleteCalls);
+        Assert.Equal(StateReconciliationTerminal.Unavailable,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
     }
 
     [Fact]
@@ -561,6 +853,59 @@ public sealed class LocatorRootServiceTests
         recovered.Context!.Dispose();
         Assert.Equal(0, store.UploadCalls);
         Assert.Single(store.Objects);
+    }
+
+    [Fact]
+    public async Task MissingReceiptHiddenSuccessorBehindVisiblePredecessorIsTargetAbsent()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore();
+        var initialized = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+        Assert.True(initialized.Succeeded, initialized.Code);
+        initialized.Context!.Dispose();
+        var sentinel = DecryptSingle(store, access, keys);
+        store.ResetCounts();
+        store.NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown;
+        store.NextUploadMutationState =
+            OpaqueStoreMutationState.OutcomeUnknown;
+        store.PersistFailedUpload = true;
+        store.OmitNextUploadMetadata = true;
+        store.HideNextUploadedObjectForNextLists = 3;
+        store.HideUploadedObjectOnUploadCall = 1;
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                time,
+                diagnostics)
+            .ResolveAsync(
+                access,
+                sentinel.RequiredExpiresAtUnixSeconds -
+                    StateRetentionRequirements.SentinelDependentMarginSeconds +
+                    1,
+                CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, result.Code);
+        Assert.Null(result.Context);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(2, store.Objects.Length);
+        Assert.Equal(0, store.DeleteCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOutcome.OutcomeUnknown,
+            diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.NotAvailable,
+            diagnostic.ExactReadBack);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
     }
 
     [Fact]

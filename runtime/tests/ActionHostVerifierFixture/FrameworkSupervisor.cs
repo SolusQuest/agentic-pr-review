@@ -151,7 +151,7 @@ internal static class FrameworkSupervisor
         platform.ResetArtifacts();
         cases.Add(await RunCaseAsync(new CaseSpec(
             "artifact-upload-outcome-unknown",
-            "artifact-upload-outcome-unknown", "outcome_ambiguous",
+            "artifact-upload-outcome-unknown", "reviewed",
             RequiredGlobalEvidence: "upload-outcome-unknown-committed",
             RequiredStateOperation: "upload\tOutcomeUnknown\t"),
             root, repository, payload, bundle, node, platform)
@@ -878,10 +878,19 @@ internal static class FrameworkSupervisor
             : true;
         var stateOperationSatisfied = spec.RequiredStateOperation is null ||
             File.Exists(Path.Join(scenario, "state-operations.tsv")) &&
-            File.ReadAllText(Path.Join(scenario, "state-operations.tsv"))
-                .Contains(spec.RequiredStateOperation, StringComparison.Ordinal);
+            StateOperationCount(
+                scenario,
+                spec.RequiredStateOperation) >= 1 &&
+            (spec.Mode != "artifact-upload-outcome-unknown" ||
+                StateOperationCount(
+                    scenario,
+                    spec.RequiredStateOperation) == 1);
         var globalEvidenceSatisfied = spec.RequiredGlobalEvidence is null ||
-            File.Exists(Path.Join(root, spec.RequiredGlobalEvidence));
+            File.Exists(Path.Join(root, spec.RequiredGlobalEvidence)) &&
+            (spec.Mode != "artifact-upload-outcome-unknown" ||
+                ReadInt(
+                    root,
+                    "upload-outcome-unknown-physical-count") == 1);
         var noUnexpectedGitHubRequest = !File.Exists(
             Path.Join(scenario, "unexpected-github-request"));
         var artifactRestRequests = ReadInt(root, "official-rest-count") -
@@ -4367,6 +4376,15 @@ internal static class FrameworkSupervisor
         return File.Exists(path) && int.TryParse(File.ReadAllText(path),
             NumberStyles.None, CultureInfo.InvariantCulture, out var value)
             ? value
+            : 0;
+    }
+
+    private static int StateOperationCount(string scenario, string expected)
+    {
+        var path = Path.Join(scenario, "state-operations.tsv");
+        return File.Exists(path)
+            ? File.ReadLines(path).Count(line =>
+                line.Contains(expected, StringComparison.Ordinal))
             : 0;
     }
 

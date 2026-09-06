@@ -175,6 +175,7 @@ internal sealed class LineageService
         LocatorContext context,
         LineageResolveRequest request,
         AcceptedStateSelector.AuthorizedInitialLineageAbsence authority,
+        long mutationNotAfterUnixSeconds,
         CancellationToken cancellationToken)
     {
         if (authority is null)
@@ -198,7 +199,9 @@ internal sealed class LineageService
 
         var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
         if (!LineageValidation.IsTime(now) ||
-            now > request.RequiredLogicalExpiresAtUnixSeconds)
+            !LineageValidation.IsTime(mutationNotAfterUnixSeconds) ||
+            now > request.RequiredLogicalExpiresAtUnixSeconds ||
+            now > mutationNotAfterUnixSeconds)
         {
             return LineageResolveResult.Fail(LineageCodes.RetentionFailed);
         }
