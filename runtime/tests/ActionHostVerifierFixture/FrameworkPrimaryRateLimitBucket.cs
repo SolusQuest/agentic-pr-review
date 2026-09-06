@@ -70,6 +70,24 @@ internal sealed class FrameworkPrimaryRateLimitBucket : IDisposable
             CancellationToken.None)
         .AsTask().GetAwaiter().GetResult();
 
+    internal void RestartIndependentWindow(int initialRemaining)
+    {
+        if (!deleteOnDispose || initialRemaining < 1)
+        {
+            throw new InvalidOperationException(
+                "synthetic_primary_bucket_restart_invalid");
+        }
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        var state = new byte[StateBytes];
+        BinaryPrimitives.WriteInt32LittleEndian(state, initialRemaining);
+        using var stream = new FileStream(path, FileMode.Open,
+            FileAccess.ReadWrite, FileShare.None);
+        stream.Position = 0;
+        stream.Write(state);
+        stream.SetLength(StateBytes);
+        stream.Flush();
+    }
+
     internal async ValueTask<int> ObserveAsync(
         bool charged,
         CancellationToken cancellationToken)

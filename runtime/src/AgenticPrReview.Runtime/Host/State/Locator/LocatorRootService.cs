@@ -13,15 +13,18 @@ internal sealed class LocatorRootService
     private readonly IRestrictedStateStore store;
     private readonly LocatorStateKeyRing keys;
     private readonly TimeProvider timeProvider;
+    private readonly IStateReconciliationDiagnosticSink? diagnosticSink;
 
     internal LocatorRootService(
         IRestrictedStateStore store,
         LocatorStateKeyRing keys,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IStateReconciliationDiagnosticSink? diagnosticSink = null)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         this.keys = keys ?? throw new ArgumentNullException(nameof(keys));
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.diagnosticSink = diagnosticSink;
     }
 
     internal async Task<LocatorRootResult> ResolveAsync(
@@ -383,12 +386,24 @@ internal sealed class LocatorRootService
                 upload.MutationState ==
                     OpaqueStoreMutationState.NotCommitted)
             {
+                var failed = CreateVisibilityWindow(
+                    upload,
+                    StateReconciliationExactReadBack.NotApplicable);
+                failed.ReportFailure(
+                    upload.Failure == OpaqueStoreFailure.Cancelled
+                        ? StateReconciliationTerminal.Cancelled
+                        : StateReconciliationTerminal.NotCommitted);
                 return LocatorRootResult.Fail(
                     MapStoreFailure(upload.Failure));
             }
 
             if (upload.Metadata is null)
             {
+                var failed = CreateVisibilityWindow(
+                    upload,
+                    StateReconciliationExactReadBack.NotAvailable);
+                failed.ReportFailure(
+                    StateReconciliationTerminal.Unavailable);
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
@@ -397,6 +412,11 @@ internal sealed class LocatorRootService
                 upload.Metadata.EncryptedObjectDigest != encryptedDigest ||
                 upload.Metadata.Size != envelope.Length)
             {
+                var failed = CreateVisibilityWindow(
+                    upload,
+                    StateReconciliationExactReadBack.NotAvailable);
+                failed.ReportFailure(
+                    StateReconciliationTerminal.Unavailable);
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
@@ -405,6 +425,11 @@ internal sealed class LocatorRootService
             {
                 await DeleteRejectedUploadAsync(upload.Metadata)
                     .ConfigureAwait(false);
+                var failed = CreateVisibilityWindow(
+                    upload,
+                    StateReconciliationExactReadBack.NotAvailable);
+                failed.ReportFailure(
+                    StateReconciliationTerminal.RetentionFailed);
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
@@ -416,19 +441,31 @@ internal sealed class LocatorRootService
             if (!uploadedReadBack.Succeeded ||
                 uploadedReadBack.Metadata != upload.Metadata)
             {
+                var failed = CreateVisibilityWindow(
+                    upload,
+                    StateReconciliationExactReadBack.Failed);
+                failed.ReportFailure(
+                    StateReconciliationTerminal.Unavailable);
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
+            var visibility = CreateVisibilityWindow(
+                upload,
+                StateReconciliationExactReadBack.Matched);
             var read = await ReadSelectionWithRetriesAsync(
                     access,
                     token,
                     target,
-                    upload.Metadata)
+                    upload.Metadata,
+                    visibility)
                 .ConfigureAwait(false);
             try
             {
                 if (!read.Succeeded || read.IsAbsent)
                 {
+                    visibility.ReportFailure(read.IsAbsent
+                        ? StateReconciliationTerminal.TargetAbsent
+                        : read.DiagnosticTerminal ?? Terminal(read.Code));
                     return LocatorRootResult.Fail(read.Code);
                 }
 
@@ -445,6 +482,8 @@ internal sealed class LocatorRootService
                         keys.CurrentKeyId) ||
                     !IsAdequatelyRetained(selection.Head, requiredExpiry))
                 {
+                    visibility.ReportFailure(
+                        StateReconciliationTerminal.Conflict);
                     return LocatorRootResult.Fail(LocatorCodes.Conflict);
                 }
 
@@ -628,12 +667,44 @@ internal sealed class LocatorRootService
             .ConfigureAwait(false);
     }
 
+    private PostUploadVisibilityWindow CreateVisibilityWindow(
+        OpaqueStoreUploadResult upload,
+        StateReconciliationExactReadBack exactReadBack) =>
+        new(
+            timeProvider,
+            diagnosticSink,
+            StateReconciliationOwner.LocatorRoot,
+            upload.MutationState switch
+            {
+                OpaqueStoreMutationState.Committed =>
+                    StateReconciliationOutcome.Committed,
+                OpaqueStoreMutationState.OutcomeUnknown =>
+                    StateReconciliationOutcome.OutcomeUnknown,
+                _ => StateReconciliationOutcome.NotCommitted,
+            },
+            exactReadBack);
+
+    private static StateReconciliationTerminal Terminal(string code) =>
+        code switch
+        {
+            LocatorCodes.Conflict => StateReconciliationTerminal.Conflict,
+            LocatorCodes.AuthenticationFailed =>
+                StateReconciliationTerminal.AuthenticationFailed,
+            LocatorCodes.KeyUnavailable =>
+                StateReconciliationTerminal.KeyUnavailable,
+            LocatorCodes.CleanupFailed =>
+                StateReconciliationTerminal.CleanupFailed,
+            LocatorCodes.Invalid => StateReconciliationTerminal.Invalid,
+            _ => StateReconciliationTerminal.Unavailable,
+        };
+
     private async Task<LocatorSelectionResult>
         ReadSelectionWithRetriesAsync(
             AuthorizedLocatorAccess access,
             CancellationToken cancellationToken,
             LocatorRootSentinel? target = null,
-            OpaqueStoreObjectMetadata? targetMetadata = null)
+            OpaqueStoreObjectMetadata? targetMetadata = null,
+            PostUploadVisibilityWindow? visibility = null)
     {
         LocatorSelectionResult? last = null;
         for (var attempt = 0; attempt < ReconciliationAttempts; attempt++)
@@ -642,6 +713,7 @@ internal sealed class LocatorRootService
                     access,
                     cancellationToken)
                 .ConfigureAwait(false);
+            visibility?.RecordObservation();
             if (current.Succeeded && !current.IsAbsent)
             {
                 if (current.RequiresCleanup)
@@ -675,6 +747,11 @@ internal sealed class LocatorRootService
                 {
                     ClearSelection(current);
                     last = null;
+                    if (visibility is not null)
+                    {
+                        _ = await visibility.WaitForNextObservationAsync()
+                            .ConfigureAwait(false);
+                    }
                     continue;
                 }
 
@@ -694,17 +771,38 @@ internal sealed class LocatorRootService
 
                 ClearSelection(current);
                 last = null;
+                if (visibility is not null)
+                {
+                    _ = await visibility.WaitForNextObservationAsync()
+                        .ConfigureAwait(false);
+                }
                 continue;
             }
 
             last = current;
             if (!current.Succeeded &&
-                current.Code is LocatorCodes.Conflict or
+                (current.Code is LocatorCodes.Conflict or
                     LocatorCodes.KeyUnavailable or
-                    LocatorCodes.AuthenticationFailed)
+                    LocatorCodes.AuthenticationFailed ||
+                current.DiagnosticTerminal ==
+                    StateReconciliationTerminal.Cancelled))
             {
                 return current;
             }
+
+            if (target is not null && visibility is not null)
+            {
+                _ = await visibility.WaitForNextObservationAsync()
+                    .ConfigureAwait(false);
+            }
+        }
+
+        if (target is not null && visibility is not null)
+        {
+            visibility.ReportFailure(last?.IsAbsent == true
+                ? StateReconciliationTerminal.TargetAbsent
+                : last?.DiagnosticTerminal ??
+                    StateReconciliationTerminal.Unavailable);
         }
 
         return target is null && last is not null
@@ -723,18 +821,22 @@ internal sealed class LocatorRootService
                 cancellationToken)
             .ConfigureAwait(false);
         if (list.Failure == OpaqueStoreFailure.Incomplete ||
-            !list.Complete ||
+            list.Failure == OpaqueStoreFailure.None &&
+            (!list.Complete ||
             (!list.Objects.IsDefault &&
                 list.Objects.Length >
-                    LocatorRootFormat.MaximumPhysicalSentinels))
+                    LocatorRootFormat.MaximumPhysicalSentinels)))
         {
-            return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+            return LocatorSelectionResult.Fail(
+                LocatorCodes.Conflict,
+                StateReconciliationTerminal.Incomplete);
         }
 
         if (!list.Succeeded)
         {
             return LocatorSelectionResult.Fail(
-                MapStoreFailure(list.Failure));
+                MapStoreFailure(list.Failure),
+                DiagnosticTerminal(list.Failure));
         }
 
         if (list.Objects.Any(reference => reference.Name != SentinelName))
@@ -762,7 +864,8 @@ internal sealed class LocatorRootService
                     metadataResult.Metadata.Reference != reference)
                 {
                     return LocatorSelectionResult.Fail(
-                        MapStoreFailure(metadataResult.Failure));
+                        MapStoreFailure(metadataResult.Failure),
+                        DiagnosticTerminal(metadataResult.Failure));
                 }
 
                 metadata.Add(metadataResult.Metadata);
@@ -787,7 +890,8 @@ internal sealed class LocatorRootService
                     }
 
                     return LocatorSelectionResult.Fail(
-                        MapStoreFailure(download.Failure));
+                        MapStoreFailure(download.Failure),
+                        DiagnosticTerminal(download.Failure));
                 }
 
                 if (LocatorRootSentinelCodec.TryDecrypt(
@@ -987,5 +1091,15 @@ internal sealed class LocatorRootService
                 OpaqueStoreFailure.Duplicate => LocatorCodes.Conflict,
             OpaqueStoreFailure.Cleanup => LocatorCodes.CleanupFailed,
             _ => LocatorCodes.Unavailable,
+        };
+
+    private static StateReconciliationTerminal? DiagnosticTerminal(
+        OpaqueStoreFailure failure) => failure switch
+        {
+            OpaqueStoreFailure.Incomplete =>
+                StateReconciliationTerminal.Incomplete,
+            OpaqueStoreFailure.Cancelled =>
+                StateReconciliationTerminal.Cancelled,
+            _ => null,
         };
 }

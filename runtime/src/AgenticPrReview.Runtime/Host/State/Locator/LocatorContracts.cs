@@ -92,7 +92,8 @@ internal sealed record LocatorSelectionResult(
     string Code,
     bool IsAbsent,
     LocatorSelection? Selection,
-    LocatorCleanupDebt? CleanupDebt)
+    LocatorCleanupDebt? CleanupDebt,
+    StateReconciliationTerminal? DiagnosticTerminal)
 {
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LocatorCodes.Ready);
@@ -101,18 +102,20 @@ internal sealed record LocatorSelectionResult(
         Succeeded && CleanupDebt is not null;
 
     internal static LocatorSelectionResult Absent() =>
-        new(LocatorCodes.Ready, IsAbsent: true, null, null);
+        new(LocatorCodes.Ready, IsAbsent: true, null, null, null);
 
     internal static LocatorSelectionResult Success(
         LocatorSelection selection) =>
-        new(LocatorCodes.Ready, IsAbsent: false, selection, null);
+        new(LocatorCodes.Ready, IsAbsent: false, selection, null, null);
 
     internal static LocatorSelectionResult Cleanup(
         LocatorCleanupDebt cleanupDebt) =>
-        new(LocatorCodes.Ready, IsAbsent: false, null, cleanupDebt);
+        new(LocatorCodes.Ready, IsAbsent: false, null, cleanupDebt, null);
 
-    internal static LocatorSelectionResult Fail(string code) =>
-        new(code, IsAbsent: false, null, null);
+    internal static LocatorSelectionResult Fail(
+        string code,
+        StateReconciliationTerminal? diagnosticTerminal = null) =>
+        new(code, IsAbsent: false, null, null, diagnosticTerminal);
 }
 
 internal sealed record LocatorRootResult(

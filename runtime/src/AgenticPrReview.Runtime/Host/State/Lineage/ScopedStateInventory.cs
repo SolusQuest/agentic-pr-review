@@ -7,7 +7,8 @@ namespace AgenticPrReview.Runtime.Host.State.Lineage;
 
 internal sealed record ScopedStateInventoryResult(
     string Code,
-    ScopedStateInventorySnapshot? Snapshot)
+    ScopedStateInventorySnapshot? Snapshot,
+    StateReconciliationTerminal? DiagnosticTerminal)
 {
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
@@ -15,10 +16,12 @@ internal sealed record ScopedStateInventoryResult(
 
     internal static ScopedStateInventoryResult Success(
         ScopedStateInventorySnapshot snapshot) =>
-        new(LineageCodes.Ready, snapshot);
+        new(LineageCodes.Ready, snapshot, null);
 
-    internal static ScopedStateInventoryResult Fail(string code) =>
-        new(code, null);
+    internal static ScopedStateInventoryResult Fail(
+        string code,
+        StateReconciliationTerminal? diagnosticTerminal = null) =>
+        new(code, null, diagnosticTerminal);
 }
 
 internal sealed class ScopedStateInventory
@@ -75,20 +78,23 @@ internal sealed class ScopedStateInventory
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (list.Failure == OpaqueStoreFailure.Incomplete ||
-                    !list.Complete ||
+                    list.Failure == OpaqueStoreFailure.None &&
+                    (!list.Complete ||
                     (!list.Objects.IsDefault &&
                         list.Objects.Length >
-                            LineageFormat.MaximumPhysicalPerClass))
+                            LineageFormat.MaximumPhysicalPerClass)))
                 {
                     return ScopedStateInventoryResult.Fail(
-                        LineageCodes.Conflict);
+                        LineageCodes.Conflict,
+                        StateReconciliationTerminal.Incomplete);
                 }
 
                 if (!list.Succeeded ||
                     list.Objects.Any(reference => reference.Name != name))
                 {
                     return ScopedStateInventoryResult.Fail(
-                        MapFailure(list.Failure));
+                        MapFailure(list.Failure),
+                        DiagnosticTerminal(list.Failure));
                 }
 
                 foreach (var reference in list.Objects.OrderBy(
@@ -104,7 +110,8 @@ internal sealed class ScopedStateInventory
                         metadata.Metadata.Reference != reference)
                     {
                         return ScopedStateInventoryResult.Fail(
-                            MapFailure(metadata.Failure));
+                            MapFailure(metadata.Failure),
+                            DiagnosticTerminal(metadata.Failure));
                     }
 
                     references.Add((objectClass, metadata.Metadata));
@@ -142,7 +149,8 @@ internal sealed class ScopedStateInventory
                     }
 
                     return ScopedStateInventoryResult.Fail(
-                        MapFailure(download.Failure));
+                        MapFailure(download.Failure),
+                        DiagnosticTerminal(download.Failure));
                 }
 
                 if (!StateControlEnvelopeV1Codec.TryDecrypt(
@@ -205,7 +213,9 @@ internal sealed class ScopedStateInventory
         }
         catch (OperationCanceledException)
         {
-            return ScopedStateInventoryResult.Fail(LineageCodes.Unavailable);
+            return ScopedStateInventoryResult.Fail(
+                LineageCodes.Unavailable,
+                StateReconciliationTerminal.Cancelled);
         }
         finally
         {
@@ -239,5 +249,15 @@ internal sealed class ScopedStateInventory
                 OpaqueStoreFailure.Duplicate => LineageCodes.Conflict,
             OpaqueStoreFailure.Cleanup => LineageCodes.CleanupFailed,
             _ => LineageCodes.Unavailable,
+        };
+
+    private static StateReconciliationTerminal? DiagnosticTerminal(
+        OpaqueStoreFailure failure) => failure switch
+        {
+            OpaqueStoreFailure.Incomplete =>
+                StateReconciliationTerminal.Incomplete,
+            OpaqueStoreFailure.Cancelled =>
+                StateReconciliationTerminal.Cancelled,
+            _ => null,
         };
 }

@@ -8,6 +8,120 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Locator;
 
 public sealed class LocatorRootServiceTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task NewlyUploadedLocatorWaitsForDelayedVisibility(
+        int hiddenObservations)
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            HideNextUploadedObjectForNextLists = hiddenObservations,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                time,
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        TimeSpan[] expectedDelays = hiddenObservations switch
+        {
+            0 => [],
+            1 => [TimeSpan.FromSeconds(5)],
+            _ => [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+        };
+        Assert.Equal(expectedDelays, time.ScheduledDelays);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public async Task MissingUploadedLocatorEmitsOneBoundedDiagnostic()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore
+        {
+            HideNextUploadedObjectForNextLists = 3,
+            HideUploadedObjectOnUploadCall = 1,
+        };
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                time,
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, result.Code);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)],
+            time.ScheduledDelays);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal(StateReconciliationOwner.LocatorRoot, diagnostic.Owner);
+        Assert.Equal(StateReconciliationOutcome.Committed, diagnostic.Outcome);
+        Assert.Equal(StateReconciliationExactReadBack.Matched,
+            diagnostic.ExactReadBack);
+        Assert.Equal(3, diagnostic.Observations);
+        Assert.Equal(StateReconciliationTerminal.TargetAbsent,
+            diagnostic.Terminal);
+        Assert.Equal(2, diagnostic.ScheduleIndex);
+    }
+
+    [Theory]
+    [InlineData((int)OpaqueStoreFailure.Incomplete,
+        (int)StateReconciliationTerminal.Incomplete)]
+    [InlineData((int)OpaqueStoreFailure.Cancelled,
+        (int)StateReconciliationTerminal.Cancelled)]
+    [InlineData((int)OpaqueStoreFailure.Conflict,
+        (int)StateReconciliationTerminal.Conflict)]
+    public async Task LocatorDiagnosticPreservesPostUploadFailure(
+        int failureValue,
+        int expectedTerminalValue)
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var failure = (OpaqueStoreFailure)failureValue;
+        var store = new ScriptedLocatorStore();
+        store.AfterUpload = (_, _) =>
+        {
+            if (failure == OpaqueStoreFailure.Incomplete)
+            {
+                store.ListComplete = false;
+            }
+            else
+            {
+                store.ListFailure = failure;
+            }
+        };
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var diagnostics = new RecordingStateReconciliationDiagnosticSink();
+
+        var result = await new LocatorRootService(
+                store,
+                keys,
+                time,
+                diagnostics)
+            .ResolveAsync(access, 0, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(time.ScheduledDelays);
+        Assert.Equal((StateReconciliationTerminal)expectedTerminalValue,
+            Assert.Single(diagnostics.Diagnostics).Terminal);
+    }
+
     [Fact]
     public async Task ConcurrentSameKeyInitializersConvergeToOneSentinel()
     {

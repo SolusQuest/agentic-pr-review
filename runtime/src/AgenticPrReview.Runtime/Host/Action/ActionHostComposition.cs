@@ -430,7 +430,9 @@ internal sealed class ActionHostCompositionDependencies
         IActionHostPostAcceptanceInlineHook? inlineHook = null,
         IActionHostTrustedWorkflowAdmission? workflowAdmission = null,
         IActionHostGitObjectTransportFactory? reviewedHeadSourceFactory = null,
-        IReviewedChangedFileSourceFactory? changedFileSourceFactory = null)
+        IReviewedChangedFileSourceFactory? changedFileSourceFactory = null,
+        IStateReconciliationDiagnosticSink?
+            stateReconciliationDiagnosticSink = null)
     {
         EventReader = eventReader ??
             throw new ArgumentNullException(nameof(eventReader));
@@ -456,6 +458,8 @@ internal sealed class ActionHostCompositionDependencies
             ActionHostV1TrustedWorkflowAdmission.Instance;
         ChangedFileSourceFactory = changedFileSourceFactory ??
             ReviewedChangedFileSourceFactory.Instance;
+        StateReconciliationDiagnosticSink =
+            stateReconciliationDiagnosticSink;
     }
 
     internal IActionHostEventReader EventReader { get; }
@@ -482,6 +486,8 @@ internal sealed class ActionHostCompositionDependencies
     internal IActionHostPostAcceptanceInlineHook? InlineHook { get; }
     internal IActionHostTrustedWorkflowAdmission WorkflowAdmission { get; }
     internal IReviewedChangedFileSourceFactory ChangedFileSourceFactory { get; }
+    internal IStateReconciliationDiagnosticSink?
+        StateReconciliationDiagnosticSink { get; }
 
     internal static ActionHostCompositionDependencies Production()
     {
@@ -743,7 +749,8 @@ internal sealed class ActionHostComposition
                             new JournaledAcceptedStateProductionDependencies(
                                 dependencies.StateDependencies,
                                 journal),
-                            dependencies.TimeProvider),
+                            dependencies.TimeProvider,
+                            dependencies.StateReconciliationDiagnosticSink),
                         cancellationToken)
                     .ConfigureAwait(false);
                 restoreOperation!.Resolve(StateOwnerResolution(restored.Code));

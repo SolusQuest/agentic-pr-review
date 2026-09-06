@@ -297,12 +297,21 @@ internal sealed class RetainedStateTransactionService
                             existingInventoryDigest!));
             }
 
-            if (!CanAppendCandidate(
+            var mayPersist = prepared.HasEnteredDispatch
+                ? CanReconcileDispatchedPreparedCandidate(
                     before,
                     authority,
                     binding,
                     trustedNow,
-                    expected: null))
+                    prepared,
+                    envelopeBytes)
+                : CanAppendCandidate(
+                    before,
+                    authority,
+                    binding,
+                    trustedNow,
+                    expected: null);
+            if (!mayPersist)
             {
                 return RetainedStateTransactionResult<
                     RetainedStatePersistedCandidate>.Fail(
@@ -326,20 +335,57 @@ internal sealed class RetainedStateTransactionService
                     RetainedStateTransactionCodes.AccessDenied);
         }
 
-        var persisted = await persistence.UploadAndReconcileAsync(
-                locator,
-                locatorAccess,
-                baseScope,
-                binding.SelectedLineage.BaseScopeDigest,
-                prepared.Name,
-                envelopeBytes,
-                prepared.Header,
-                generationBytes,
-                binding.ProducingRunIdentity,
-                binding.ProducingRunAttempt,
-                prepared.Header.RequiredPlatformExpiresAtUnixSeconds,
-                cancellationToken)
-            .ConfigureAwait(false);
+        var shouldDispatch = prepared.TryBeginDispatch();
+        var persisted = shouldDispatch
+            ? await persistence.UploadAndReconcileAsync(
+                    locator,
+                    locatorAccess,
+                    baseScope,
+                    binding.SelectedLineage.BaseScopeDigest,
+                    prepared.Name,
+                    envelopeBytes,
+                    prepared.Header,
+                    generationBytes,
+                    binding.ProducingRunIdentity,
+                    binding.ProducingRunAttempt,
+                    prepared.Header.RequiredPlatformExpiresAtUnixSeconds,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : await persistence.ReconcileExistingAsync(
+                    locator,
+                    locatorAccess,
+                    baseScope,
+                    binding.SelectedLineage.BaseScopeDigest,
+                    prepared.Name,
+                    envelopeBytes,
+                    prepared.Header,
+                    generationBytes,
+                    binding.ProducingRunIdentity,
+                    binding.ProducingRunAttempt,
+                    prepared.Header.RequiredPlatformExpiresAtUnixSeconds,
+                    prepared.ReturnedMetadata,
+                    snapshot =>
+                        CanReconcileDispatchedPreparedCandidateInventory(
+                            snapshot,
+                            locatorAccess,
+                            authority,
+                            binding,
+                            trustedNow,
+                            prepared,
+                            envelopeBytes))
+                .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            prepared.RememberReturnedMetadata(returnedMetadata);
+        }
+
+        if (!persisted.Succeeded &&
+            !persisted.MayHaveCommitted &&
+            shouldDispatch)
+        {
+            prepared.ResetDispatchIfDefinitelyNotCommitted();
+        }
+
         if (!persisted.Succeeded || persisted.Metadata is null ||
             persisted.InventoryDigest is null)
         {
@@ -886,8 +932,14 @@ internal sealed class RetainedStateTransactionService
                     payload,
                     attempt.Header.ProducingRunIdentity,
                     attempt.Header.ProducingRunAttempt,
-                    attempt.Header.RequiredPlatformExpiresAtUnixSeconds)
+                    attempt.Header.RequiredPlatformExpiresAtUnixSeconds,
+                    attempt.ReturnedMetadata)
                 .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            attempt.RememberReturnedMetadata(returnedMetadata);
+        }
+
         if (!persisted.Succeeded &&
             !persisted.MayHaveCommitted &&
             shouldDispatch)
@@ -2109,8 +2161,14 @@ internal sealed class RetainedStateTransactionService
                     frozenReceiptBytes,
                     attempt.Header.ProducingRunIdentity,
                     attempt.Header.ProducingRunAttempt,
-                    receiptPlatformExpiry)
+                    receiptPlatformExpiry,
+                    attempt.ReturnedMetadata)
                 .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            attempt.RememberReturnedMetadata(returnedMetadata);
+        }
+
         CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
         if (!persisted.Succeeded &&
             !persisted.MayHaveCommitted &&
@@ -5367,8 +5425,14 @@ internal sealed class RetainedStateTransactionService
                     payload,
                     attempt.Header.ProducingRunIdentity,
                     attempt.Header.ProducingRunAttempt,
-                    attempt.RequiredPlatformExpiresAtUnixSeconds)
+                    attempt.RequiredPlatformExpiresAtUnixSeconds,
+                    attempt.ReturnedMetadata)
                 .ConfigureAwait(false);
+        if (shouldDispatch && persisted.ReturnedMetadata is { } returnedMetadata)
+        {
+            attempt.RememberReturnedMetadata(returnedMetadata);
+        }
+
         CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
         if (!persisted.Succeeded &&
             !persisted.MayHaveCommitted &&
@@ -5550,7 +5614,9 @@ internal sealed class RetainedStateTransactionService
             active[0].Metadata.ProducingRun.Attempt !=
                 binding.ProducingRunAttempt ||
             active[0].Metadata.ExpiresAtUnixSeconds <
-                prepared.Header.RequiredPlatformExpiresAtUnixSeconds)
+                prepared.Header.RequiredPlatformExpiresAtUnixSeconds ||
+            prepared.ReturnedMetadata is { } returnedMetadata &&
+                active[0].Metadata != returnedMetadata)
         {
             return false;
         }
@@ -5558,6 +5624,203 @@ internal sealed class RetainedStateTransactionService
         metadata = active[0].Metadata;
         inventoryDigest = observedDigest;
         return true;
+    }
+
+    private static bool CanReconcileDispatchedPreparedCandidate(
+        RetainedStateObservation observation,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
+        RetainedStatePreparedCandidate prepared,
+        ReadOnlyMemory<byte> immutableEnvelope)
+    {
+        var snapshot = observation.Snapshot;
+        if (snapshot is null ||
+            observation.SelectedHead is not { } selectedHead ||
+            !MatchesSelected(binding.SelectedLineage, selectedHead) ||
+            !snapshot.Unknown.IsEmpty ||
+            !MatchesAcceptedTail(observation.AcceptedState, binding) ||
+            !prepared.TryGetBytes(
+                authority,
+                out var canonicalGeneration,
+                out _))
+        {
+            return false;
+        }
+
+        return CanReconcileDispatchedPreparedCandidateInventoryCore(
+            snapshot,
+            binding,
+            trustedNowUnixSeconds,
+            prepared,
+            immutableEnvelope,
+            canonicalGeneration);
+    }
+
+    private static bool CanReconcileDispatchedPreparedCandidateInventory(
+        ScopedStateInventorySnapshot snapshot,
+        AuthorizedLocatorAccess locatorAccess,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
+        RetainedStatePreparedCandidate prepared,
+        ReadOnlyMemory<byte> immutableEnvelope)
+    {
+        if (!prepared.TryGetBytes(
+                authority,
+                out var canonicalGeneration,
+                out _) ||
+            snapshot.UnderRetained.Any(item =>
+                item.Header.ObjectClass == StateObjectClass.LineageHead) ||
+            !snapshot.Names.TryGetValue(
+                StateObjectClass.LineageHead,
+                out var lineageName))
+        {
+            return false;
+        }
+
+        var heads = ImmutableArray.CreateBuilder<LineageHeadCandidate>();
+        foreach (var item in snapshot.Authenticated.Where(item =>
+            item.Header.ObjectClass == StateObjectClass.LineageHead))
+        {
+            if (!LineageHeadCodec.TryDecode(item.Payload, out var head) ||
+                head is null)
+            {
+                return false;
+            }
+
+            heads.Add(new LineageHeadCandidate(
+                item.Metadata,
+                item.Header,
+                head));
+        }
+
+        var unknownHeads = snapshot.Unknown.Where(item =>
+                item.Metadata.Reference.Name == lineageName)
+            .ToImmutableArray();
+        var authenticatedHeads = heads.ToImmutable();
+        var lineage = LineageHeadSelector.Select(
+            authenticatedHeads,
+            unknownHeads,
+            authenticatedHeads.Length + unknownHeads.Length,
+            prepared.Header.KeyId);
+        if (!lineage.Succeeded ||
+            lineage.Selection?.Head is not { } selectedHead ||
+            !MatchesSelected(binding.SelectedLineage, selectedHead))
+        {
+            return false;
+        }
+
+        var inventoryDigest = LineageCryptography.InventoryDigest(
+            snapshot.Authenticated
+                .Concat(snapshot.UnderRetained)
+                .Select(item => LineageHeadCodec.Evidence(item.Metadata))
+                .Concat(snapshot.Unknown.Select(item =>
+                    LineageHeadCodec.Evidence(item.Metadata)))
+                .ToImmutableArray());
+        using var observation = new LineageReadOnlyObservationContext(
+            snapshot,
+            lineage,
+            binding.SelectedLineage.BaseScopeDigest,
+            prepared.Header.KeyId,
+            inventoryDigest,
+            prepared.Header.RequiredPlatformExpiresAtUnixSeconds);
+        try
+        {
+            var accepted = new AcceptedStateSelector(
+                    new FrozenTimeProvider(trustedNowUnixSeconds))
+                .Select(
+                    observation,
+                    new LineageResolveRequest(
+                        locatorAccess,
+                        binding.BaseScope,
+                        binding.Reviewed,
+                        binding.ProducingRunIdentity,
+                        binding.ProducingRunAttempt,
+                        prepared.Header.LogicalExpiresAtUnixSeconds,
+                        Reset: null));
+            return MatchesAcceptedTail(accepted, binding) &&
+                CanReconcileDispatchedPreparedCandidateInventoryCore(
+                    snapshot,
+                    binding,
+                    trustedNowUnixSeconds,
+                    prepared,
+                    immutableEnvelope,
+                    canonicalGeneration);
+        }
+        finally
+        {
+            _ = observation.DetachSnapshot();
+        }
+    }
+
+    private static bool CanReconcileDispatchedPreparedCandidateInventoryCore(
+        ScopedStateInventorySnapshot snapshot,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
+        RetainedStatePreparedCandidate prepared,
+        ReadOnlyMemory<byte> immutableEnvelope,
+        ReadOnlyMemory<byte> canonicalGeneration)
+    {
+        if (!snapshot.Unknown.IsEmpty)
+        {
+            return false;
+        }
+
+        var visible = snapshot.Authenticated
+            .Concat(snapshot.UnderRetained)
+            .ToArray();
+        var activeCandidates = SelectLivePublicationCandidateFamilies(
+                visible,
+                visible,
+                binding,
+                trustedNowUnixSeconds)
+            .Where(item =>
+                StringComparer.Ordinal.Equals(
+                    item.Header.PredecessorIdentity,
+                    binding.CurrentAcceptanceReceiptIdentity))
+            .ToArray();
+        var successors = snapshot.Authenticated.Where(item =>
+                item.Header.ObjectClass == StateObjectClass.Acceptance &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.Epoch,
+                    binding.SelectedLineage.Epoch) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.SessionId,
+                    binding.SelectedLineage.SessionId) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.PredecessorIdentity,
+                    binding.CurrentAcceptanceReceiptIdentity))
+            .ToArray();
+        if (successors.Length != 0)
+        {
+            return false;
+        }
+
+        if (activeCandidates.Length == 0)
+        {
+            return snapshot.UnderRetained.IsEmpty;
+        }
+
+        if (activeCandidates.Length != 1 ||
+            snapshot.UnderRetained.Any(item => item != activeCandidates[0]))
+        {
+            return false;
+        }
+
+        var candidate = activeCandidates[0];
+        return candidate.Metadata.Reference.Name == prepared.Name &&
+            candidate.Header == prepared.Header &&
+            candidate.Payload.AsSpan().SequenceEqual(
+                canonicalGeneration.Span) &&
+            candidate.Metadata.EncryptedObjectDigest.Sha256 ==
+                OpaqueStoreHash.Sha256(immutableEnvelope.Span) &&
+            candidate.Metadata.Size == immutableEnvelope.Length &&
+            StringComparer.Ordinal.Equals(
+                candidate.Metadata.ProducingRun.Identity,
+                binding.ProducingRunIdentity) &&
+            candidate.Metadata.ProducingRun.Attempt ==
+                binding.ProducingRunAttempt;
     }
 
     private static bool MatchesAcceptedTail(

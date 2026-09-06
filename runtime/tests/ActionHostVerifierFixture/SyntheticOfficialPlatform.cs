@@ -57,6 +57,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private string pendingName = "";
     private DateTimeOffset pendingExpiry;
     private long nextId = 1000;
+    private long? delayedVisibilityArtifactId;
+    private string? delayedVisibilityArtifactName;
+    private int delayedVisibilityObservations;
 
     private SyntheticOfficialPlatform(string evidenceRoot, int port,
         Func<string, string, string>? workflowRenderer,
@@ -87,6 +90,16 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     internal string BaseUrl { get; }
 
     internal int PrimaryRemaining => primaryBucket.ReadRemaining();
+
+    internal void RestartIndependentPrimaryWindow()
+    {
+        if (InFlight != 0)
+        {
+            throw new InvalidOperationException(
+                "synthetic_primary_bucket_restart_in_flight");
+        }
+        primaryBucket.RestartIndependentWindow(SyntheticPrimaryLimit);
+    }
 
     internal int InFlight => Volatile.Read(ref inFlight);
 
@@ -152,6 +165,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             blocks.Clear();
             pendingName = "";
             pendingExpiry = default;
+            delayedVisibilityArtifactId = null;
+            delayedVisibilityArtifactName = null;
+            delayedVisibilityObservations = 0;
         }
     }
 
@@ -350,6 +366,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             var digest = Convert.ToHexString(SHA256.HashData(archive))
                 .ToLowerInvariant();
             var id = Interlocked.Increment(ref nextId);
+            var delayInitialLineage = Mode() is
+                "artifact-delayed-visibility" or
+                "artifact-delayed-visibility-exhausted";
             lock (gate)
             {
                 artifacts[id] = new Artifact(
@@ -362,6 +381,12 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     producingRunId,
                     producingRunAttempt);
                 artifactNames.Add(pendingName);
+                if (delayInitialLineage && artifacts.Count == 2)
+                {
+                    delayedVisibilityArtifactId = id;
+                    delayedVisibilityArtifactName = pendingName;
+                    delayedVisibilityObservations = 0;
+                }
             }
 
             if (!FrameworkCanaryCapture.ArchiveHasNoPrivateCanary(
@@ -508,6 +533,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     .OrderBy(value => value.Id)
                     .ToArray();
             }
+            values = DelayedVisibilityView(name, page, values);
 
             var mode = Mode();
             if (values.Length > 0 && mode == "artifact-list-duplicate")
@@ -782,6 +808,53 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 : artifact.Digest)),
             ("workflow_run", FrameworkJson.Object(
                 ("id", artifact.ProducingRunId))));
+
+    private Artifact[] DelayedVisibilityView(
+        string name,
+        int page,
+        Artifact[] values)
+    {
+        lock (gate)
+        {
+            if (activeMode is not (
+                    "artifact-delayed-visibility" or
+                    "artifact-delayed-visibility-exhausted") ||
+                page != 1 ||
+                delayedVisibilityArtifactId is not { } targetId ||
+                !StringComparer.Ordinal.Equals(
+                    name,
+                    delayedVisibilityArtifactName))
+            {
+                return values;
+            }
+
+            delayedVisibilityObservations++;
+            if (delayedVisibilityObservations <= 2 ||
+                activeMode == "artifact-delayed-visibility-exhausted")
+            {
+                if (delayedVisibilityObservations == 3)
+                {
+                    File.WriteAllText(
+                        Path.Join(
+                            activeScenarioRoot,
+                            "artifact-delayed-visibility-observed"),
+                        "initial_lineage_head\t3");
+                }
+
+                return values.Where(value => value.Id != targetId).ToArray();
+            }
+
+            if (delayedVisibilityObservations == 3)
+            {
+                File.WriteAllText(
+                    Path.Join(
+                        activeScenarioRoot,
+                        "artifact-delayed-visibility-observed"),
+                    "initial_lineage_head\t3");
+            }
+            return values;
+        }
+    }
 
     private static string ArtifactList(
         int totalCount,

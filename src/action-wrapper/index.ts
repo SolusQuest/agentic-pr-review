@@ -21,6 +21,7 @@ import {
   validateRuntimeFacts,
 } from './launcher/contracts.js';
 import {
+  canonicalStateReconciliationDiagnostic,
   HostProcessTerminationUnconfirmedError,
   runHostProcess,
   type HostProcessRunner,
@@ -117,6 +118,7 @@ export async function runPrivateActionWrapperWithSeams(
   let completion: ActionHostCompletionDocument | undefined;
   let artifactRestRequestBudget: ArtifactRestRequestBudget | undefined;
   let hostBudgetReceiptLines: readonly string[] = [];
+  let hostStateReconciliationDiagnosticLine: string | undefined;
   let failed = false;
   let hostTerminationUnconfirmed = false;
   const inputs = (() => {
@@ -194,6 +196,7 @@ export async function runPrivateActionWrapperWithSeams(
         ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
       });
       hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
+      hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
       completion = parseCompletionDocument(
         host.completionBytes,
         prepared.buildDiscriminator,
@@ -243,11 +246,16 @@ export async function runPrivateActionWrapperWithSeams(
     }
     try {
       if (quiet) {
-        writeTrustedProofBudgetReceiptFrame(
-          artifactRestRequestBudget,
-          hostBudgetReceiptLines,
-          seams.trustedProofBudgetReceiptSink,
-        );
+        try {
+          writeTrustedProofBudgetReceiptFrame(
+            artifactRestRequestBudget,
+            hostBudgetReceiptLines,
+            hostStateReconciliationDiagnosticLine,
+            seams.trustedProofBudgetReceiptSink,
+          );
+        } catch {
+          failed = true;
+        }
       }
     } catch {
       failed = true;
@@ -336,6 +344,7 @@ export async function createProductionArtifactExecutor(
 function writeTrustedProofBudgetReceiptFrame(
   budget: ArtifactRestRequestBudget | undefined,
   lines: readonly string[],
+  diagnosticLine: string | undefined,
   sink: ((frame: string) => void) | undefined,
 ): void {
   // The verified R4 payload discriminator is the authority for all three
@@ -353,7 +362,17 @@ function writeTrustedProofBudgetReceiptFrame(
   }
   const artifact = budget.sealAndCreateReceipt();
   if (!artifact) throw new Error('trusted_proof_budget_receipt_frame_invalid');
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join('') + artifact);
+  let diagnostic = '';
+  if (
+    diagnosticLine?.endsWith('\n') &&
+    diagnosticLine.indexOf('\n') === diagnosticLine.length - 1
+  ) {
+    const canonical = canonicalStateReconciliationDiagnostic(diagnosticLine.slice(0, -1));
+    if (canonical !== undefined && `${canonical}\n` === diagnosticLine) {
+      diagnostic = diagnosticLine;
+    }
+  }
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join('') + artifact + diagnostic);
 }
 
 function writeTrustedProofArtifactRestBudgetToStderr(frame: string): void {

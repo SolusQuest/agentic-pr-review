@@ -4,6 +4,7 @@ using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
+using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
@@ -53,6 +54,8 @@ internal static class TrustedProofPayloadComposition
             workflowAdmission: TrustedProofV2WorkflowAdmission.Instance,
             reviewedHeadSourceFactory: reviewedHeadSource,
             changedFileSourceFactory:
-                TrustedProofChangedFileSourceFactory.Instance);
+                TrustedProofChangedFileSourceFactory.Instance,
+            stateReconciliationDiagnosticSink:
+                StateReconciliationStderrSink.Instance);
     }
 }

@@ -21,6 +21,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
     private readonly AcceptedStateProductionAuthorization production;
     private readonly IRestrictedStateStore store;
     private readonly TimeProvider timeProvider;
+    private readonly IStateReconciliationDiagnosticSink? diagnosticSink;
     private readonly AuthorizedStateAccess stateAccess;
     private readonly LineageBaseScope baseScope;
     private readonly ReviewedTransitionFacts reviewed;
@@ -55,6 +56,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         SelectedLineageContext lineage,
         IRestrictedStateStore store,
         TimeProvider timeProvider,
+        IStateReconciliationDiagnosticSink? diagnosticSink,
         AuthorizedStateAccess stateAccess,
         LineageBaseScope baseScope,
         ReviewedTransitionFacts reviewed,
@@ -78,6 +80,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         this.lineage = lineage;
         this.store = store;
         this.timeProvider = timeProvider;
+        this.diagnosticSink = diagnosticSink;
         this.stateAccess = stateAccess;
         this.baseScope = baseScope;
         this.reviewed = reviewed;
@@ -132,6 +135,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         SelectedLineageContext lineage,
         IRestrictedStateStore store,
         TimeProvider timeProvider,
+        IStateReconciliationDiagnosticSink? diagnosticSink,
         AuthorizedStateAccess stateAccess,
         LineageBaseScope baseScope,
         ReviewedTransitionFacts reviewed,
@@ -207,6 +211,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 lineage,
                 store,
                 timeProvider,
+                diagnosticSink,
                 stateAccess,
                 baseScope,
                 reviewed,
@@ -862,7 +867,8 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         var resolved = await new LocatorRootService(
                 store,
                 currentKeys,
-                new FrozenTimeProvider(trustedNowUnixSeconds))
+                new FrozenTimeProvider(trustedNowUnixSeconds, timeProvider),
+                diagnosticSink)
             .ResolveAsync(
                 access,
                 dependentExpiresAtUnixSeconds,
@@ -914,7 +920,8 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
             requiredLogicalExpiresAtUnixSeconds);
         var observed = await new LineageService(
                 store,
-                new FrozenTimeProvider(trustedNowUnixSeconds))
+                new FrozenTimeProvider(trustedNowUnixSeconds, timeProvider),
+                diagnosticSink)
             .ObserveReadOnlyAsync(context, request, cancellationToken)
             .ConfigureAwait(false);
         if (!observed.Succeeded || observed.Context is null)
@@ -985,7 +992,8 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
 
         var refreshed = await new LineageService(
                 store,
-                new FrozenTimeProvider(trustedNowUnixSeconds))
+                new FrozenTimeProvider(trustedNowUnixSeconds, timeProvider),
+                diagnosticSink)
             .RefreshSelectedHeadAsync(
                 context,
                 ResolveRefreshRequest(
@@ -1008,7 +1016,11 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         out RetainedStatePersistence? persistence)
     {
         persistence = Allows(lease)
-            ? new RetainedStatePersistence(issuer, store)
+            ? new RetainedStatePersistence(
+                issuer,
+                store,
+                timeProvider,
+                diagnosticSink)
             : null;
         return persistence is not null;
     }
@@ -1515,9 +1527,22 @@ internal sealed class RetainedStateObservation : IDisposable
 internal sealed class FrozenTimeProvider : TimeProvider
 {
     private readonly DateTimeOffset value;
+    private readonly TimeProvider timerProvider;
 
-    internal FrozenTimeProvider(long unixTimeSeconds) =>
+    internal FrozenTimeProvider(
+        long unixTimeSeconds,
+        TimeProvider? timerProvider = null)
+    {
         value = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds);
+        this.timerProvider = timerProvider ?? TimeProvider.System;
+    }
 
     public override DateTimeOffset GetUtcNow() => value;
+
+    public override ITimer CreateTimer(
+        TimerCallback callback,
+        object? state,
+        TimeSpan dueTime,
+        TimeSpan period) =>
+        timerProvider.CreateTimer(callback, state, dueTime, period);
 }

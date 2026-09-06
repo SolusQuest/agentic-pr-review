@@ -292,11 +292,16 @@ emit_safe_supervisor_failure() {
   fi
   node --input-type=module - "$evidence" <<'NODE' >&2
 import fs from 'node:fs';
-const allowedCases = new Set(['dispatch-bootstrap', 'dispatch-continuation', 'stale-head']);
+const allowedCases = new Set([
+  'dispatch-bootstrap',
+  'dispatch-continuation',
+  'stale-head',
+  'state-visibility-diagnostic',
+]);
 const allowedStatuses = new Set([
   'reviewed', 'reviewed_with_inline_warnings', 'stale_head',
   'authorization_failed', 'credentials_missing', 'agent_result_invalid',
-  'provider_failed', 'null',
+  'provider_failed', 'outcome_ambiguous', 'null',
 ]);
 let value;
 try { value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')); } catch {}
@@ -440,6 +445,7 @@ const expectedCases = [
   'dispatch-bootstrap',
   'dispatch-continuation',
   'stale-head',
+  'state-visibility-diagnostic',
   'stale-unauthorized-follow-on',
 ];
 const expectedFields = [
