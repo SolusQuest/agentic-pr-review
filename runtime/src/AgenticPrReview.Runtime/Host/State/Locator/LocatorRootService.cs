@@ -850,11 +850,7 @@ internal sealed class LocatorRootService
                 ? StateReconciliationTerminal.TargetAbsent
                 : current.DiagnosticTerminal ?? Terminal(current.Code);
             if (!current.Succeeded &&
-                (current.Code is LocatorCodes.Conflict or
-                    LocatorCodes.KeyUnavailable or
-                    LocatorCodes.AuthenticationFailed ||
-                current.DiagnosticTerminal ==
-                    StateReconciliationTerminal.Cancelled))
+                !IsRetryableVisibilityFailure(current))
             {
                 return current;
             }
@@ -876,6 +872,13 @@ internal sealed class LocatorRootService
             ? last
             : LocatorSelectionResult.Fail(LocatorCodes.Unavailable);
     }
+
+    private static bool IsRetryableVisibilityFailure(
+        LocatorSelectionResult result) =>
+        result.Code == LocatorCodes.Unavailable &&
+        result.DiagnosticTerminal is null or
+            StateReconciliationTerminal.Unavailable or
+            StateReconciliationTerminal.TargetAbsent;
 
     private static ImmutableArray<OpaqueStoreObjectMetadata>
         FindObservedTargets(
@@ -950,9 +953,13 @@ internal sealed class LocatorRootService
                     metadataResult.Metadata is null ||
                     metadataResult.Metadata.Reference != reference)
                 {
+                    var failure = metadataResult.Failure ==
+                        OpaqueStoreFailure.None
+                        ? OpaqueStoreFailure.Invalid
+                        : metadataResult.Failure;
                     return LocatorSelectionResult.Fail(
-                        MapStoreFailure(metadataResult.Failure),
-                        DiagnosticTerminal(metadataResult.Failure));
+                        MapStoreFailure(failure),
+                        DiagnosticTerminal(failure));
                 }
 
                 metadata.Add(metadataResult.Metadata);
@@ -976,9 +983,13 @@ internal sealed class LocatorRootService
                         continue;
                     }
 
+                    var failure = download.Failure ==
+                        OpaqueStoreFailure.None
+                        ? OpaqueStoreFailure.Invalid
+                        : download.Failure;
                     return LocatorSelectionResult.Fail(
-                        MapStoreFailure(download.Failure),
-                        DiagnosticTerminal(download.Failure));
+                        MapStoreFailure(failure),
+                        DiagnosticTerminal(failure));
                 }
 
                 if (LocatorRootSentinelCodec.TryDecrypt(
@@ -1177,6 +1188,8 @@ internal sealed class LocatorRootService
             OpaqueStoreFailure.Conflict or
                 OpaqueStoreFailure.Duplicate => LocatorCodes.Conflict,
             OpaqueStoreFailure.Cleanup => LocatorCodes.CleanupFailed,
+            OpaqueStoreFailure.Invalid or
+                OpaqueStoreFailure.DigestMismatch => LocatorCodes.Invalid,
             _ => LocatorCodes.Unavailable,
         };
 
@@ -1187,6 +1200,9 @@ internal sealed class LocatorRootService
                 StateReconciliationTerminal.Incomplete,
             OpaqueStoreFailure.Cancelled =>
                 StateReconciliationTerminal.Cancelled,
+            OpaqueStoreFailure.Invalid or
+                OpaqueStoreFailure.DigestMismatch =>
+                StateReconciliationTerminal.Invalid,
             _ => null,
         };
 }
