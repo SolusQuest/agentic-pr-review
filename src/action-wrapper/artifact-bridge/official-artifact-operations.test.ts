@@ -1499,7 +1499,7 @@ describe('official artifact lifecycle', () => {
     const signal = new AbortController().signal;
     for (let i = 0; i < 3; i++) {
       const dir = `source${i}`;
-      await mkdir(path.join(root, dir));
+      await mkdir(path.join(root, dir), { mode: 0o700 });
       const encrypted = Buffer.from(`encrypted-record-${i}`);
       await writeFile(path.join(root, dir, 'object.bin'), encrypted);
       await writeFile(path.join(root, dir, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
