@@ -8,6 +8,8 @@ export const ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   recordsPerPage: 100,
   maximumPages: 3,
   maximumRecords: 256,
+  maximumRepositoryRecords: 1_024,
+  maximumRepositoryPages: 11,
   requestTimeoutMs: 30_000,
   logicalOperationTimeoutMs: 120_000,
   maximumActiveCorrelations: 32,

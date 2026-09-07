@@ -10,6 +10,7 @@ import {
   sha256,
 } from './contracts.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
+import { artifactFamily, physicalArtifactMember, physicalArtifactName } from './physical-name.js';
 import {
   OfficialCallError,
   OfficialCallTimeoutError,
@@ -61,7 +62,7 @@ export interface ArtifactActionsRestClient {
   invalidateArtifactListRepresentation?(input: {
     readonly owner: string;
     readonly repo: string;
-    readonly name: string;
+    readonly name?: string;
     readonly per_page: number;
     readonly page: number;
   }): void;
@@ -84,7 +85,7 @@ export interface ArtifactActionsRestClient {
     input: {
       readonly owner: string;
       readonly repo: string;
-      readonly name: string;
+      readonly name?: string;
       readonly per_page: number;
       readonly page: number;
     },
@@ -165,6 +166,7 @@ export interface OfficialArtifactOperationsContext {
 
 interface PlatformArtifact {
   readonly name: string;
+  readonly physicalName: string;
   readonly id: string;
   readonly archiveSize: number;
   readonly archiveDigest: string;
@@ -276,11 +278,10 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     let expectedTotal: number | undefined;
     const seen = new Set<string>();
     const objects: ArtifactReferenceWire[] = [];
-    for (let page = 1; page <= ARTIFACT_BRIDGE_LIMITS.maximumPages; page += 1) {
+    for (let page = 1; page <= ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages; page += 1) {
       const pageInput = {
         owner: this.context.owner,
         repo: this.context.repository,
-        name: command.name,
         per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
         page,
       } as const;
@@ -307,8 +308,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       if (
         !Number.isSafeInteger(total) ||
         total < 0 ||
-        total > ARTIFACT_BRIDGE_LIMITS.maximumRecords ||
-        total > maximum ||
+        total > ARTIFACT_BRIDGE_LIMITS.maximumRepositoryRecords ||
         (expectedTotal !== undefined && total !== expectedTotal)
       ) {
         this.rejectArtifactList(command.name, page, 'incomplete');
@@ -316,7 +316,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       expectedTotal = total;
       for (const artifact of response.data.artifacts) {
         const id = platformId(artifact.id);
-        if (artifact.name !== command.name || !id || seen.has(id)) {
+        if (typeof artifact.name !== 'string' || !id || seen.has(id)) {
           this.rejectArtifactList(
             command.name,
             page,
@@ -324,12 +324,23 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
           );
         }
         seen.add(id);
-        objects.push({ name: command.name, object_id: id });
-        if (objects.length > total || objects.length > maximum) {
+        // A prior unsuffixed logical name is not silently interpreted as absence.
+        // The one-time proof uses a clean-baseline cutover, not a migration.
+        if (
+          artifact.name === command.name ||
+          (artifact.name.startsWith(artifactFamily(command.name)) &&
+            !physicalArtifactMember(command.name, artifact.name))
+        ) {
+          this.rejectArtifactList(command.name, page, 'incomplete');
+        }
+        if (physicalArtifactMember(command.name, artifact.name)) {
+          objects.push({ name: command.name, object_id: id });
+        }
+        if (seen.size > total || objects.length > maximum) {
           this.rejectArtifactList(command.name, page, 'incomplete');
         }
       }
-      if (objects.length === total) {
+      if (seen.size === total) {
         return {
           operation: command.operation,
           correlation_id: command.correlation_id,
@@ -344,7 +355,11 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         this.rejectArtifactList(command.name, page, 'incomplete');
       }
     }
-    return this.rejectArtifactList(command.name, ARTIFACT_BRIDGE_LIMITS.maximumPages, 'incomplete');
+    return this.rejectArtifactList(
+      command.name,
+      ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages,
+      'incomplete',
+    );
   }
 
   private async metadata(
@@ -449,7 +464,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
               name: command.name,
             });
             const pending = this.artifactClient.uploadArtifact(
-              command.name,
+              physicalArtifactName(command.name, command.encrypted_object_digest),
               [envelopePath],
               operationDirectory,
               {
@@ -724,7 +739,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     const expiry = parseExpiry(artifact.expires_at);
     if (
       id !== objectId ||
-      artifact.name !== expectedName ||
+      !physicalArtifactMember(expectedName, artifact.name) ||
       !runId ||
       !archiveDigest ||
       !expiry ||
@@ -737,7 +752,8 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       throw new BridgeOperationFailure('invalid');
     }
     return {
-      name: artifact.name,
+      name: expectedName,
+      physicalName: artifact.name,
       id,
       archiveSize: artifact.size_in_bytes,
       archiveDigest,
@@ -790,6 +806,12 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         throw new BridgeOperationFailure('digest_mismatch');
       }
       envelope = await readArtifactArchive(archive, platform.archiveDigest, budget);
+      if (
+        platform.physicalName !==
+        physicalArtifactName(platform.name, envelope.encryptedObjectDigest)
+      ) {
+        throw new BridgeOperationFailure('digest_mismatch');
+      }
       if (envelope.producingRunId !== platform.producingRunId) {
         throw new BridgeOperationFailure('conflict');
       }
@@ -868,6 +890,8 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
   private assertExpectedPlatform(expected: ArtifactMetadataWire, platform: PlatformArtifact): void {
     if (
       expected.name !== platform.name ||
+      platform.physicalName !==
+        physicalArtifactName(expected.name, expected.encrypted_object_digest) ||
       expected.object_id !== platform.id ||
       expected.producing_run_id !== platform.producingRunId ||
       expected.archive_digest !== platform.archiveDigest ||
@@ -920,7 +944,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
   }
 
   private rejectArtifactList(
-    name: string,
+    _name: string,
     throughPage: number,
     failure: Extract<ArtifactBridgeFailure, 'duplicate' | 'incomplete'>,
   ): never {
@@ -928,7 +952,6 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       this.context.actions.invalidateArtifactListRepresentation?.({
         owner: this.context.owner,
         repo: this.context.repository,
-        name,
         per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
         page,
       });
@@ -1084,6 +1107,7 @@ function recordKey(platform: PlatformArtifact): string {
   return [
     platform.name,
     platform.id,
+    platform.physicalName,
     platform.archiveSize,
     platform.archiveDigest,
     platform.expiresAtUnixSeconds,
@@ -1179,7 +1203,7 @@ function mutationStateForPhase(phase: MutationPhase): ArtifactBridgeMutationStat
 function mandatoryPrimaryAllocation(command: ArtifactBridgeCommand): number | undefined {
   switch (command.operation) {
     case 'list_exact':
-      return ARTIFACT_BRIDGE_LIMITS.maximumPages;
+      return ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages;
     case 'metadata':
     case 'download':
     case 'readback_exact':

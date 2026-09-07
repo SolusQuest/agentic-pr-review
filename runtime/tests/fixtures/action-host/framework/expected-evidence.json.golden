@@ -1,6 +1,6 @@
 {
   "schema": "apr.action-host.framework-evidence.v3",
-  "source_inventory_digest": "d20c460e85a6ff7ef8ba0ca552e211fb1ab343a744c4e633c10263ac6bdc3e04",
+  "source_inventory_digest": "1ab6c3e885916fdcbf913fdc8237b09e901b545421cb05df8d7c78b75b7412db",
   "replacement_record_digest": "3eaa3a127ce1da98eb993334ec2b391ff6cecd0b1a77dcf64f4eb0306f5e3bdd",
   "base_inventory_digest": "7eacf6e0aacac15a99330e1c54050d4d259688f60ab729c9b0d6383b1f584b6d",
   "canary_table_digest": "e66aaf2ab5881094a6c7425b579c65d4fd4989b3486b0e5464105355837acd4b",
@@ -59,7 +59,7 @@
     },
     {
       "name": "artifact-pagination-late",
-      "status": "state_conflict",
+      "status": "outcome_ambiguous",
       "ExitCode": 1,
       "ProviderRequests": 0,
       "ToolSequence": 0,
@@ -439,10 +439,10 @@
   "official_bridge": {
     "twirp": 338,
     "blob": 334,
-    "rest": 13561,
-    "rest_not_modified": 12587,
-    "rest_primary": 974,
-    "rest_secondary_points": 13841,
+    "rest": 45783,
+    "rest_not_modified": 43683,
+    "rest_primary": 2100,
+    "rest_secondary_points": 46063,
     "finalize": 171,
     "signed_download": 191,
     "delete": 70
@@ -453,5 +453,5 @@
   "canary_route_coverage_digest": "0ed17cb12269bedc80a2b993db7897fd8a1308afb362c8b6fa44d0eb91acfa1a",
   "canary_negative_injection_count": 59,
   "artifact_metadata_route_probe_count": 3,
-  "normalized_exact_delete_identity_digest": "4c45c78bb10af7cb8d0c790964ff46767cd2bba7bd34c8bac481823cb5123db7"
+  "normalized_exact_delete_identity_digest": "76a700955c85bd97c0c0a44f968ca4a0bd5167de2e09e63ed7ac9a6cec351447"
 }

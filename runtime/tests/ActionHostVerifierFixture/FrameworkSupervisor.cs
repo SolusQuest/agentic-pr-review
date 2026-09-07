@@ -128,7 +128,8 @@ internal static class FrameworkSupervisor
             "artifact-pagination-changed", "state_conflict"), root,
             repository, payload, bundle, node, platform).ConfigureAwait(false));
         cases.Add(await RunCaseAsync(new CaseSpec("artifact-pagination-late",
-            "artifact-pagination-late", "state_conflict"), root,
+            "artifact-pagination-late", "outcome_ambiguous",
+            RequiredStateOperation: "list\tIo\t0"), root,
             repository, payload, bundle, node, platform).ConfigureAwait(false));
         cases.Add(await RunCaseAsync(new CaseSpec("artifact-list-duplicate",
             "artifact-list-duplicate", "state_conflict"), root,
@@ -574,6 +575,14 @@ internal static class FrameworkSupervisor
         string node,
         SyntheticOfficialPlatform platform)
     {
+        // Fault cases are separate invocations, not one online-proof operation.
+        // Retain the shared window across linked continuation/recovery cases
+        // and across the entire trusted-proof route, including its controls.
+        if (!spec.TrustedProofPayload && spec.Mode is not (
+                "continuation" or "cross-head-conflict" or "mutation-recovery"))
+        {
+            platform.RestartIndependentPrimaryWindow();
+        }
         var scenario = Path.Join(root, spec.Name);
         Directory.CreateDirectory(scenario);
         var officialRestBefore = ReadInt(root, "official-rest-count");
@@ -695,21 +704,21 @@ internal static class FrameworkSupervisor
         {
             crashGateReached = await WaitForFileAsync(
                 Path.Join(scenario, spec.CrashAfterGate),
-                TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                ProcessTimeout).ConfigureAwait(false);
             if (crashGateReached) _ = Kill(-process.Id, 9);
         }
         else if (spec.SignalAfterGate is not null && hostPid > 0)
         {
             signalGateReached = await WaitForFileAsync(
                 Path.Join(scenario, spec.SignalAfterGate),
-                TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                ProcessTimeout).ConfigureAwait(false);
             if (signalGateReached) _ = Kill(process.Id, 15);
         }
         else if (spec.CrashAfterProviderCheckpoint && hostPid > 0)
         {
             var checkpoint = await WaitForFileAsync(
                 Path.Join(scenario, "provider-checkpoint-ready"),
-                TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                ProcessTimeout).ConfigureAwait(false);
             if (checkpoint) _ = KillProcess(hostPid);
         }
         else if (spec.SignalAfterHostStart && hostPid > 0)
@@ -864,9 +873,7 @@ internal static class FrameworkSupervisor
             (spec.Mode is not (
                     "artifact-delayed-visibility" or
                     "artifact-delayed-visibility-exhausted") ||
-                DelayedVisibilityEvidenceIsExact(
-                    scenario,
-                    requireDelayTrace: !spec.TrustedProofPayload));
+                DelayedVisibilityEvidenceIsExact(scenario));
         var stateReconciliationDiagnosticSatisfied =
             spec.RequiredStateReconciliationTerminal is null ||
             StateReconciliationFrameIsExact(
@@ -939,6 +946,7 @@ internal static class FrameworkSupervisor
                     ("case", spec.Name),
                     ("expected_status", spec.ExpectedStatus),
                     ("actual_status", status),
+                    ("synthetic_primary_remaining", platform.PrimaryRemaining),
                     ("exited", exited),
                     ("exit_code", process.ExitCode),
                     ("expected_outcome", expected),
@@ -4290,9 +4298,12 @@ internal static class FrameworkSupervisor
             ("sdk", RuntimeInformation.FrameworkDescription),
             ("official_artifacts", FrameworkJson.Object(
                 ("locator", platform.ArtifactNames.Any(name =>
-                    name == "agentic-pr-review-state-root-v1")),
+                    name.StartsWith(ArtifactPhysicalFamily("agentic-pr-review-state-root-v1"),
+                        StringComparison.Ordinal))),
                 ("scoped", platform.ArtifactNames.Any(name =>
-                    name.StartsWith("apr-state-", StringComparison.Ordinal))))),
+                    name.StartsWith("apr-object-", StringComparison.Ordinal) &&
+                    !name.StartsWith(ArtifactPhysicalFamily("agentic-pr-review-state-root-v1"),
+                        StringComparison.Ordinal))))),
             ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
         await File.WriteAllTextAsync(Path.Join(root, "evidence.json"),
             FrameworkJson.SerializeIndented(evidence))
@@ -4959,8 +4970,7 @@ internal static class FrameworkSupervisor
     }
 
     private static bool DelayedVisibilityEvidenceIsExact(
-        string scenario,
-        bool requireDelayTrace)
+        string scenario)
     {
         var observationPath = Path.Join(
             scenario,
@@ -4971,10 +4981,11 @@ internal static class FrameworkSupervisor
             return false;
         }
 
-        if (!requireDelayTrace)
-        {
-            return true;
-        }
+        if (!File.Exists(Path.Join(scenario, "artifact-delayed-target-withheld"))) return false;
+        var exposed = File.Exists(Path.Join(scenario, "artifact-delayed-target-exposed"));
+        var exhausted = File.ReadAllText(Path.Join(scenario, "mode")) ==
+            "artifact-delayed-visibility-exhausted";
+        if (exposed == exhausted) return false;
 
         var delayPath = Path.Join(
             scenario,
@@ -5631,6 +5642,9 @@ internal static class FrameworkSupervisor
             RegexOptions.CultureInvariant);
         return Sha256Text(normalized);
     }
+
+    private static string ArtifactPhysicalFamily(string logicalName) =>
+        "apr-object-" + Sha256Text("apr-artifact-family\0" + logicalName) + "-";
 
     private static string Sha256Text(string value) => Convert.ToHexString(
         SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();

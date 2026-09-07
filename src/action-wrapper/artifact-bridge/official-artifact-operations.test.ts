@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArtifactActionsRestClient } from './official-artifact-operations.js';
 import { OfficialArtifactOperations } from './official-artifact-operations.js';
+import { physicalArtifactName } from './physical-name.js';
 import { createArtifactActionsRestClient } from './actions-rest-client.js';
 import { ArtifactCacheLedger } from './artifact-cache-ledger.js';
 import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
@@ -27,10 +28,112 @@ afterEach(async () => {
 });
 
 describe('repository-wide exact artifact enumeration', () => {
+  it('preflights the complete eleven-page primary allocation before listing', async () => {
+    const requestBudget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+      buildDiscriminator: 'unprotected-test',
+    });
+    const allocation = vi.spyOn(requestBudget, 'requireObservedPrimaryAllocation');
+    const list = vi.fn(async () => ({ status: 200, data: { total_count: 0, artifacts: [] } }));
+    const operations = await createOperations(
+      { listArtifactsForRepo: list },
+      undefined,
+      undefined,
+      requestBudget,
+    );
+    const result = await operations.execute(
+      {
+        operation: 'list_exact',
+        correlation_id: 'allocation',
+        name: 'opaque-state',
+        maximum_objects: '8',
+      },
+      new AbortController().signal,
+    );
+    expect(result.failure).toBe('none');
+    expect(allocation).toHaveBeenCalledExactlyOnceWith(11);
+    expect(allocation.mock.invocationCallOrder[0]).toBeLessThan(list.mock.invocationCallOrder[0]!);
+  });
+  it.each([1024, 1025])(
+    'bounds repository scan independently of the 8-record collection at %i',
+    async (total) => {
+      const pages: number[] = [];
+      const operations = await createOperations({
+        listArtifactsForRepo: async (input) => {
+          expect(input.name).toBeUndefined();
+          pages.push(input.page);
+          const start = (input.page - 1) * 100;
+          return {
+            status: 200,
+            data: {
+              total_count: total,
+              artifacts: Array.from({ length: Math.min(100, total - start) }, (_, i) => ({
+                id: start + i + 1,
+                name: physicalArtifactName(
+                  start + i === 1023 ? 'opaque-state' : 'unrelated',
+                  'b'.repeat(64),
+                ),
+                size_in_bytes: 1,
+                expired: false,
+                expires_at: '2030-01-01T00:00:00Z',
+              })),
+            },
+          };
+        },
+      });
+      const result = await operations.execute(
+        {
+          operation: 'list_exact',
+          correlation_id: 'scan',
+          name: 'opaque-state',
+          maximum_objects: '8',
+        },
+        new AbortController().signal,
+      );
+      if (total === 1024) {
+        expect(result.failure).toBe('none');
+        expect(result.objects).toEqual([{ name: 'opaque-state', object_id: '1024' }]);
+        expect(pages).toHaveLength(11);
+      } else {
+        expect(result.failure).toBe('incomplete');
+        expect(result.objects).toBeUndefined();
+        expect(pages).toEqual([1]);
+      }
+    },
+  );
+
+  it('rejects matching unsuffixed names instead of manufacturing absence', async () => {
+    const operations = await createOperations({
+      listArtifactsForRepo: async () => ({
+        status: 200,
+        data: {
+          total_count: 1,
+          artifacts: [
+            {
+              id: 1,
+              name: 'opaque-state',
+              size_in_bytes: 1,
+              expired: false,
+              expires_at: '2030-01-01T00:00:00Z',
+            },
+          ],
+        },
+      }),
+    });
+    const result = await operations.execute(
+      {
+        operation: 'list_exact',
+        correlation_id: 'unsuffixed',
+        name: 'opaque-state',
+        maximum_objects: '8',
+      },
+      new AbortController().signal,
+    );
+    expect(result.failure).toBe('incomplete');
+  });
   it('returns all 256 exact records over three complete pages', async () => {
     const artifacts = Array.from({ length: 256 }, (_, index) => ({
       id: index + 1,
-      name: 'opaque-state',
+      name: physicalArtifactName('opaque-state', 'b'.repeat(64)),
       size_in_bytes: 1,
       expired: false,
       expires_at: '2030-01-01T00:00:00Z',
@@ -80,7 +183,7 @@ describe('repository-wide exact artifact enumeration', () => {
               total_count: 256,
               artifacts: Array.from({ length: count }, (_, index) => ({
                 id: start + index + 1,
-                name: 'opaque-state',
+                name: physicalArtifactName('opaque-state', 'b'.repeat(64)),
                 size_in_bytes: 1,
                 expired: false,
                 expires_at: '2030-01-01T00:00:00Z',
@@ -107,13 +210,23 @@ describe('repository-wide exact artifact enumeration', () => {
     expect(elapsed).toBe(87_000);
   });
 
-  it('returns incomplete with no partial authority at 257 records', async () => {
+  it.each([8, 9, 256, 257])('retains the caller collection limit at %i records', async (total) => {
+    const maximum = total < 10 ? 8 : 256;
     const operations = await createOperations({
-      listArtifactsForRepo: async () => ({
+      listArtifactsForRepo: async ({ page }) => ({
         status: 200,
         data: {
-          total_count: 257,
-          artifacts: [],
+          total_count: total,
+          artifacts: Array.from(
+            { length: Math.min(100, total - (page - 1) * 100) },
+            (_, index) => ({
+              id: (page - 1) * 100 + index + 1,
+              name: physicalArtifactName('opaque-state', 'b'.repeat(64)),
+              size_in_bytes: 1,
+              expired: false,
+              expires_at: '2030-01-01T00:00:00Z',
+            }),
+          ),
         },
       }),
     });
@@ -122,10 +235,15 @@ describe('repository-wide exact artifact enumeration', () => {
         operation: 'list_exact',
         correlation_id: 'list-257',
         name: 'opaque-state',
-        maximum_objects: '256',
+        maximum_objects: String(maximum),
       },
       new AbortController().signal,
     );
+    if (total === maximum) {
+      expect(result.failure).toBe('none');
+      expect(result.objects).toHaveLength(total);
+      return;
+    }
     expect(result).toEqual({
       operation: 'list_exact',
       correlation_id: 'list-257',
@@ -181,7 +299,7 @@ describe('repository-wide exact artifact enumeration', () => {
             total_count: caseName === 'changing total' && page === 2 ? 199 : 200,
             artifacts: Array.from({ length: 100 }, (_, index) => ({
               id: page === 1 ? index + 1 : 101 + index,
-              name: 'opaque-state',
+              name: physicalArtifactName('opaque-state', 'b'.repeat(64)),
               size_in_bytes: 1,
               expired: false,
               expires_at: '2030-01-01T00:00:00Z',
@@ -213,14 +331,14 @@ describe('repository-wide exact artifact enumeration', () => {
           artifacts: [
             {
               id: 1,
-              name: 'opaque-state',
+              name: physicalArtifactName('opaque-state', 'b'.repeat(64)),
               size_in_bytes: 1,
               expired: false,
               expires_at: '2030-01-01T00:00:00Z',
             },
             {
               id: 1,
-              name: 'opaque-state',
+              name: physicalArtifactName('opaque-state', 'b'.repeat(64)),
               size_in_bytes: 1,
               expired: false,
               expires_at: '2030-01-01T00:00:00Z',
@@ -314,7 +432,10 @@ describe('artifact-specific producing attempt authority', () => {
           status: 200,
           data: {
             id: input.artifact_id,
-            name: 'opaque-state',
+            name: physicalArtifactName(
+              'opaque-state',
+              digestBytes(Buffer.from(`ciphertext-${input.artifact_id === 41 ? '1' : '2'}`)),
+            ),
             size_in_bytes: archive.length,
             expired: false,
             expires_at: '2030-01-01T00:00:00Z',
@@ -408,7 +529,7 @@ describe('verified envelope ownership', () => {
           status: 200,
           data: {
             id: 42,
-            name: 'opaque-state',
+            name: physicalArtifactName('opaque-state', digestBytes(encrypted)),
             size_in_bytes: archive.length,
             expired: false,
             expires_at: '2030-01-01T00:00:00Z',
@@ -527,6 +648,7 @@ describe('post-dispatch upload mutation truthfulness', () => {
     ['missing producing run metadata', 'run', 'invalid'],
     ['invalid downloaded ZIP', 'zip', 'invalid'],
     ['raw archive digest mismatch', 'digest', 'digest_mismatch'],
+    ['physical envelope suffix mismatch', 'physical-digest', 'digest_mismatch'],
     ['run-attempt authority failure', 'attempt', 'conflict'],
   ] as const)(
     'keeps a concrete created artifact committed after %s',
@@ -571,7 +693,10 @@ describe('post-dispatch upload mutation truthfulness', () => {
           status: 200,
           data: {
             id: 42,
-            name: 'opaque-state',
+            name: physicalArtifactName(
+              'opaque-state',
+              failureCase === 'physical-digest' ? 'f'.repeat(64) : digestBytes(encrypted),
+            ),
             size_in_bytes: downloadedArchive.length,
             expired: false,
             expires_at: failureCase === 'expiry' ? 'not-a-date' : '2030-01-01T00:00:00Z',
@@ -897,7 +1022,7 @@ describe('precise conditional-representation invalidation', () => {
             total_count: page === 1 ? 101 : 102,
             artifacts: Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
               id: (page - 1) * 100 + index + 1,
-              name: 'opaque-state',
+              name: physicalArtifactName('opaque-state', 'b'.repeat(64)),
               size_in_bytes: 1,
               expired: false,
               expires_at: '2030-01-01T00:00:00Z',
@@ -919,8 +1044,8 @@ describe('precise conditional-representation invalidation', () => {
 
     expect(result).toMatchObject({ failure: 'incomplete', complete: false });
     expect(invalidations).toEqual([
-      { owner: 'owner', repo: 'repository', name: 'opaque-state', per_page: 100, page: 1 },
-      { owner: 'owner', repo: 'repository', name: 'opaque-state', per_page: 100, page: 2 },
+      { owner: 'owner', repo: 'repository', per_page: 100, page: 1 },
+      { owner: 'owner', repo: 'repository', per_page: 100, page: 2 },
     ]);
   });
 
@@ -1290,6 +1415,163 @@ describe('delete dispatch marker', () => {
 });
 
 describe('official artifact lifecycle', () => {
+  it('keeps immutable siblings through upload, fresh-process discovery and exact deletion', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'apr-collection-test-'));
+    roots.push(root);
+    const records = new Map<number, { name: string; archive: Buffer }>();
+    let nextId = 1;
+    let loseReceipt = false;
+    const unsupported = async (): Promise<never> => {
+      throw new Error('unexpected call');
+    };
+    const artifactClient: ArtifactClient = {
+      uploadArtifact: async (name, files) => {
+        if ([...records.values()].some((record) => record.name === name))
+          throw new Error('same run name conflict');
+        const archive = createTestZip([
+          { name: ARTIFACT_ENVELOPE_ENTRY, data: await readFile(files[0]!) },
+        ]);
+        const id = nextId++;
+        records.set(id, { name, archive });
+        if (loseReceipt) throw new Error('synthetic lost Finalize response');
+        return { id, size: archive.length, digest: digestBytes(archive) };
+      },
+      downloadArtifact: unsupported,
+      listArtifacts: unsupported,
+      getArtifact: unsupported,
+      deleteArtifact: unsupported,
+    };
+    const actions: ArtifactActionsRestClient = {
+      listArtifactsForRepo: async (input) => {
+        expect(input.name).toBeUndefined();
+        return {
+          status: 200,
+          data: {
+            total_count: records.size,
+            artifacts: [...records.entries()].map(([id, r]) => ({
+              id,
+              name: r.name,
+              size_in_bytes: r.archive.length,
+              expired: false,
+              expires_at: '2030-01-01T00:00:00Z',
+            })),
+          },
+        };
+      },
+      getArtifact: async ({ artifact_id }) => {
+        const record = records.get(artifact_id);
+        if (!record) throw Object.assign(new Error('absent'), { status: 404 });
+        return {
+          status: 200,
+          data: {
+            id: artifact_id,
+            name: record.name,
+            size_in_bytes: record.archive.length,
+            expired: false,
+            expires_at: '2030-01-01T00:00:00Z',
+            digest: `sha256:${digestBytes(record.archive)}`,
+            workflow_run: { id: 7001 },
+          },
+        };
+      },
+      downloadArtifactArchive: async ({ artifact_id }) => ({
+        status: 200,
+        data: records.get(artifact_id)!.archive,
+      }),
+      getWorkflowRunAttempt: async () => ({ status: 200, data: { id: 7001, run_attempt: 2 } }),
+      deleteArtifact: async ({ artifact_id }, _signal, _deadline, dispatched) => {
+        dispatched?.();
+        records.delete(artifact_id);
+        return { status: 204 };
+      },
+    };
+    const staging = await ArtifactBridgeStaging.create(root);
+    const context = {
+      owner: 'owner',
+      repository: 'repository',
+      currentRunId: '7001',
+      currentRunAttempt: '2',
+      artifactClient,
+      actions,
+      staging,
+    };
+    const writer = new OfficialArtifactOperations(context);
+    const signal = new AbortController().signal;
+    for (let i = 0; i < 3; i++) {
+      const dir = `source${i}`;
+      await mkdir(path.join(root, dir));
+      const encrypted = Buffer.from(`encrypted-record-${i}`);
+      await writeFile(path.join(root, dir, 'object.bin'), encrypted);
+      await writeFile(path.join(root, dir, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
+      loseReceipt = i === 1;
+      const result = await writer.execute(
+        {
+          operation: 'upload_immutable',
+          correlation_id: `upload-${i}`,
+          name: i === 2 ? 'other' : 'logical',
+          source_relative_path: `${dir}/object.bin`,
+          encrypted_object_digest: digestBytes(encrypted),
+          minimum_expires_at_unix_seconds: '1',
+        },
+        signal,
+      );
+      expect(result.failure).toBe(i === 1 ? 'outcome_unknown' : 'none');
+    }
+    expect(new Set([...records.values()].map((r) => r.name)).size).toBe(3);
+    // A new adapter has no process-local name registry or upload receipt.
+    const reader = new OfficialArtifactOperations(context);
+    const list = await reader.execute(
+      { operation: 'list_exact', correlation_id: 'list', name: 'logical', maximum_objects: '8' },
+      signal,
+    );
+    expect(list.objects?.map((r) => r.object_id)).toEqual(['1', '2']);
+    for (const object of list.objects!) {
+      const observed = await reader.execute(
+        { operation: 'metadata', correlation_id: `get-${object.object_id}`, ...object },
+        signal,
+      );
+      expect(observed.failure).toBe('none');
+      expect(observed.metadata?.name).toBe('logical');
+      expect(
+        (
+          await reader.execute(
+            {
+              operation: 'readback_exact',
+              correlation_id: `read-${object.object_id}`,
+              expected: observed.metadata!,
+            },
+            signal,
+          )
+        ).failure,
+      ).toBe('none');
+      if (object.object_id === '1') {
+        expect(
+          (
+            await reader.execute(
+              { operation: 'delete_exact', correlation_id: 'delete', expected: observed.metadata! },
+              signal,
+            )
+          ).failure,
+        ).toBe('none');
+      }
+    }
+    expect([...records.keys()]).toEqual([2, 3]);
+    expect(
+      (
+        await reader.execute(
+          {
+            operation: 'list_exact',
+            correlation_id: 'after',
+            name: 'logical',
+            maximum_objects: '8',
+          },
+          signal,
+        )
+      ).objects,
+    ).toEqual([{ name: 'logical', object_id: '2' }]);
+    await writer.dispose();
+    await reader.dispose();
+  });
   it('uses UTC time for expiry while the monotonic clock remains deadline-only', async () => {
     const expected = metadataFixture();
     const invalidations: Array<Record<string, unknown>> = [];
@@ -1640,7 +1922,7 @@ function integratedArtifactFixture(input: {
     archive,
     platform: {
       id: input.id,
-      name: input.name,
+      name: physicalArtifactName(input.name, digestBytes(encrypted)),
       size_in_bytes: archive.length,
       expired: false,
       expires_at: new Date(input.expiresAtUnixSeconds * 1_000).toISOString(),
@@ -1739,6 +2021,7 @@ async function createOperations(
   overrides: Partial<ArtifactActionsRestClient>,
   now?: () => number,
   utcNow?: () => number,
+  artifactRestRequestBudget?: ArtifactRestRequestBudget,
 ): Promise<OfficialArtifactOperations> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'apr-official-test-'));
   roots.push(root);
@@ -1771,6 +2054,7 @@ async function createOperations(
     staging,
     monotonicNow: now,
     utcNow,
+    artifactRestRequestBudget,
   });
 }
 
@@ -1790,7 +2074,7 @@ function metadataFixture() {
 function platformRecord(expected: ReturnType<typeof metadataFixture>) {
   return {
     id: Number(expected.object_id),
-    name: expected.name,
+    name: physicalArtifactName(expected.name, expected.encrypted_object_digest),
     size_in_bytes: 1,
     expired: false,
     expires_at: new Date(Number(expected.expires_at_unix_seconds) * 1000).toISOString(),

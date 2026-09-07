@@ -227,6 +227,20 @@ internal static class TrustedProofVerifierHost
     private sealed class VerifierTimeProvider(string scenarioRoot) : TimeProvider
     {
         private long advanced;
+        private readonly object delayGate = new();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state,
+            TimeSpan dueTime, TimeSpan period)
+        {
+            if (dueTime == TimeSpan.FromSeconds(5) || dueTime == TimeSpan.FromSeconds(10))
+            {
+                lock (delayGate)
+                    File.AppendAllText(Path.Join(scenarioRoot, "state-reconciliation-delays.tsv"),
+                        ((long)dueTime.TotalMilliseconds).ToString(
+                            global::System.Globalization.CultureInfo.InvariantCulture) + "\n");
+            }
+            return TimeProvider.System.CreateTimer(callback, state, dueTime, period);
+        }
 
         public override DateTimeOffset GetUtcNow() =>
             DateTimeOffset.FromUnixTimeSeconds(

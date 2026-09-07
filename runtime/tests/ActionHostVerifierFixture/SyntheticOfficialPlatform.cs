@@ -64,6 +64,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private long? delayedVisibilityArtifactId;
     private string? delayedVisibilityArtifactName;
     private int delayedVisibilityObservations;
+    private bool hideDelayedVisibilityForTraversal;
 
     private SyntheticOfficialPlatform(string evidenceRoot, int port,
         Func<string, string, string>? workflowRenderer,
@@ -335,6 +336,25 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 "name") ?? "";
             var requestedExpiry = ParseExpiry(document.RootElement) ??
                 DateTimeOffset.FromUnixTimeSeconds(1_900_000_000);
+            bool duplicateName;
+            lock (gate)
+            {
+                var runIdPath = Path.Join(activeScenarioRoot, "run-id");
+                var currentRunId = File.Exists(runIdPath)
+                    ? long.Parse(File.ReadAllText(runIdPath),
+                        CultureInfo.InvariantCulture)
+                    : 900;
+                duplicateName = artifacts.Values.Any(artifact =>
+                    artifact.Name == requestedName &&
+                    artifact.ProducingRunId == currentRunId);
+            }
+            if (duplicateName)
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.Conflict,
+                    "{\"code\":\"already_exists\",\"msg\":\"an artifact with this name already exists on the workflow run\"}")
+                    .ConfigureAwait(false);
+                return;
+            }
             lock (gate)
             {
                 pendingName = requestedName;
@@ -412,7 +432,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                         producingRunAttempt);
                     artifactNames.Add(pendingName);
                     pendingFinalizedArtifactId = id;
-                    if (delayInitialLineage && artifacts.Count == 2)
+                    if (delayInitialLineage && artifacts.Values.Count(artifact =>
+                            artifact.ProducingRunId == producingRunId) == 2)
                     {
                         delayedVisibilityArtifactId = id;
                         delayedVisibilityArtifactName = pendingName;
@@ -580,7 +601,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             lock (gate)
             {
                 values = artifacts.Values
-                    .Where(value => value.Name == name)
+                    .Where(value => name.Length == 0 || value.Name == name)
                     .OrderBy(value => value.Id)
                     .ToArray();
             }
@@ -628,13 +649,22 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 return null;
             }
 
-            var selected = values.Skip((page - 1) * 100).Take(100)
+            // Real repository discovery includes CI artifacts unrelated to state.
+            // Keep the observed pre-release population in the production route.
+            var inventory = values
                 .Select(value => MetadataDocument(value,
                     overrideDigest: mode == "artifact-digest-mismatch",
                     overrideExpiry: mode == "artifact-expired"))
+                .Concat(name.Length == 0
+                    ? Enumerable.Range(0, 565).Select(index => FrameworkJson.Object(
+                        ("id", 50_000 + index), ("name", "ci-fixture-" + index),
+                        ("size_in_bytes", 1), ("expired", false),
+                        ("expires_at", "2030-01-01T00:00:00Z")))
+                    : Enumerable.Empty<JsonObject>())
                 .ToArray();
+            var selected = inventory.Skip((page - 1) * 100).Take(100).ToArray();
             await WriteEtaggedJsonAsync(context, HttpStatusCode.OK,
-                ArtifactList(values.Length, selected)).ConfigureAwait(false);
+                ArtifactList(inventory.Length, selected)).ConfigureAwait(false);
             return null;
         }
 
@@ -870,40 +900,44 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             if (activeMode is not (
                     "artifact-delayed-visibility" or
                     "artifact-delayed-visibility-exhausted") ||
-                page != 1 ||
                 delayedVisibilityArtifactId is not { } targetId ||
-                !StringComparer.Ordinal.Equals(
+                (name.Length != 0 && !StringComparer.Ordinal.Equals(
                     name,
-                    delayedVisibilityArtifactName))
+                    delayedVisibilityArtifactName)))
             {
                 return values;
             }
 
-            delayedVisibilityObservations++;
-            if (delayedVisibilityObservations <= 2 ||
-                activeMode == "artifact-delayed-visibility-exhausted")
+            if (page == 1)
             {
-                if (delayedVisibilityObservations == 3)
-                {
-                    File.WriteAllText(
-                        Path.Join(
-                            activeScenarioRoot,
-                            "artifact-delayed-visibility-observed"),
-                        "initial_lineage_head\t3");
-                }
-
-                return values.Where(value => value.Id != targetId).ToArray();
+                // Count actual Runtime reconciliation delays, not broad list
+                // requests for other classes or pages of the same traversal.
+                var delays = Path.Join(activeScenarioRoot,
+                    "state-reconciliation-delays.tsv");
+                delayedVisibilityObservations = 1 + (File.Exists(delays)
+                    ? File.ReadLines(delays).Count() : 0);
+                hideDelayedVisibilityForTraversal = delayedVisibilityObservations <= 2 ||
+                    activeMode == "artifact-delayed-visibility-exhausted";
             }
-
-            if (delayedVisibilityObservations == 3)
+            if (hideDelayedVisibilityForTraversal)
             {
+                File.WriteAllText(Path.Join(activeScenarioRoot,
+                    "artifact-delayed-target-withheld"), "initial_lineage_head");
+            }
+            if (delayedVisibilityObservations >= 3)
+            {
+                if (!hideDelayedVisibilityForTraversal)
+                    File.WriteAllText(Path.Join(activeScenarioRoot,
+                        "artifact-delayed-target-exposed"), "initial_lineage_head");
                 File.WriteAllText(
                     Path.Join(
                         activeScenarioRoot,
                         "artifact-delayed-visibility-observed"),
                     "initial_lineage_head\t3");
             }
-            return values;
+            return hideDelayedVisibilityForTraversal
+                ? values.Where(value => value.Id != targetId).ToArray()
+                : values;
         }
     }
 

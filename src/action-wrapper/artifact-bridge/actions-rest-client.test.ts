@@ -1063,6 +1063,30 @@ describe('trusted proof artifact REST budget', () => {
     });
   });
 
+  it('revalidates broad pages with 304 and evicts them on any family mutation', async () => {
+    const listArtifactsForRepo = vi.fn(async (input: { headers?: Record<string, string> }) => ({
+      status: input.headers ? 304 : 200,
+      headers: { etag: '"broad"' },
+      data: { total_count: 0, artifacts: [] },
+    }));
+    const client = createArtifactActionsRestClient(
+      octokitWithArtifactMethods({ listArtifactsForRepo }),
+      trustedProofBudget({ total: 16, primary: 16 }),
+    );
+    const broad = { owner: 'owner', repo: 'repo', per_page: 100, page: 1 };
+    await client.listArtifactsForRepo(broad, signal());
+    await client.listArtifactsForRepo(broad, signal());
+    expect(listArtifactsForRepo.mock.calls[1]?.[0].headers).toEqual({ 'if-none-match': '"broad"' });
+    client.invalidateArtifactMutation?.({
+      owner: 'owner',
+      repo: 'repo',
+      name: 'any-logical-family',
+    });
+    await client.listArtifactsForRepo(broad, signal());
+    expect(listArtifactsForRepo.mock.calls[2]?.[0].headers).toBeUndefined();
+    expect(listArtifactsForRepo.mock.calls.every(([input]) => !('name' in input))).toBe(true);
+  });
+
   it('evicts each semantically rejected representation by its exact cache identity', async () => {
     const listArtifactsForRepo = vi.fn(async (_request: { headers?: Record<string, string> }) => ({
       status: 200,
