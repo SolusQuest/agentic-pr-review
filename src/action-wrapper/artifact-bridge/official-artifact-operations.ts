@@ -295,7 +295,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         budget,
       );
       budget.throwIfExpired();
-      if (response.status !== 200 || !responseFits(response.data)) {
+      if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
         this.rejectArtifactList(command.name, page, 'incomplete');
       }
       if (
@@ -315,6 +315,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       }
       expectedTotal = total;
       for (const artifact of response.data.artifacts) {
+        if (artifact === null) this.rejectArtifactList(command.name, page, 'incomplete');
         const id = platformId(artifact.id);
         if (typeof artifact.name !== 'string' || !id || seen.has(id)) {
           this.rejectArtifactList(
@@ -728,7 +729,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure('not_found');
     }
-    if (response.status !== 200 || !responseFits(response.data)) {
+    if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure('invalid');
     }

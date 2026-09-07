@@ -28,6 +28,32 @@ afterEach(async () => {
 });
 
 describe('repository-wide exact artifact enumeration', () => {
+  it.each([null, { total_count: 1, artifacts: [null] }])(
+    'rejects null collection observations as incomplete, not retryable io',
+    async (data) => {
+      const invalidateArtifactListRepresentation = vi.fn();
+      const operations = await createOperations({
+        listArtifactsForRepo: async () => ({ status: 200, data: data as never }),
+        invalidateArtifactListRepresentation,
+      });
+      try {
+        const result = await operations.execute(
+          {
+            operation: 'list_exact',
+            correlation_id: 'null-platform-observation',
+            name: 'opaque-state',
+            maximum_objects: '8',
+          },
+          new AbortController().signal,
+        );
+        expect(result).toMatchObject({ failure: 'incomplete', complete: false });
+        expect(result.objects).toBeUndefined();
+        expect(invalidateArtifactListRepresentation).toHaveBeenCalledOnce();
+      } finally {
+        await operations.dispose();
+      }
+    },
+  );
   it('preflights the complete eleven-page primary allocation before listing', async () => {
     const requestBudget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
       buildDiscriminator: 'unprotected-test',
@@ -1893,6 +1919,113 @@ describe('official artifact lifecycle', () => {
     ).rejects.toThrow('artifact_lifecycle_coordinator_stopped');
   });
 });
+
+describe.each(['metadata', 'download', 'readback_exact', 'delete_exact'] as const)(
+  'foreign platform name in %s',
+  (operation) => {
+    it.each([
+      ...[
+        { label: 'missing', name: undefined },
+        { label: 'null', name: null },
+        { label: 'number', name: 42 },
+        { label: 'object', name: {} },
+        { label: 'array', name: [] },
+        { label: 'boolean', name: false },
+      ].map((value) => ({ ...value, nullDescriptor: false })),
+      { label: 'null descriptor', name: undefined, nullDescriptor: true },
+    ])(
+      'terminates a $label name before a later valid observation',
+      async ({ name, nullDescriptor }) => {
+        const target = integratedArtifactFixture({
+          id: 42,
+          name: 'target-state',
+          runId: 7001,
+          runAttempt: 2,
+          expiresAtUnixSeconds: 1_893_456_000,
+        });
+        const malformed: Record<string, unknown> = { ...target.platform, name };
+        if (name === undefined) delete malformed.name;
+        let observations = 0;
+        const getArtifact = vi.fn(async (_input: IntegratedGetArtifactInput) => ({
+          status: 200,
+          headers: { etag: '"descriptor"' },
+          data: ++observations === 1 ? (nullDescriptor ? null : malformed) : target.platform,
+        }));
+        const downloadArtifact = vi.fn(async () => ({
+          status: 302,
+          headers: { location: 'https://blob.invalid/42' },
+        }));
+        const deleteArtifact = vi.fn(async () => ({ status: 204, data: undefined }));
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(
+            async () =>
+              new Response(new Uint8Array(target.archive), {
+                status: 200,
+                headers: { 'content-length': String(target.archive.length) },
+              }),
+          ),
+        );
+        const operations = await createIntegratedOperations(
+          {
+            getArtifact,
+            downloadArtifact,
+            deleteArtifact,
+            getWorkflowRunAttempt: async () => ({
+              status: 200,
+              data: { id: target.runId, run_attempt: target.runAttempt },
+            }),
+          },
+          () => Date.parse('2029-01-01T00:00:00Z'),
+        );
+        try {
+          const signal = new AbortController().signal;
+          const common = { correlation_id: 'malformed-platform-name', expected: target.metadata };
+          const command =
+            operation === 'metadata'
+              ? {
+                  operation,
+                  correlation_id: common.correlation_id,
+                  name: target.name,
+                  object_id: '42',
+                }
+              : operation === 'download'
+                ? {
+                    operation,
+                    ...common,
+                    destination_relative_path: 'destination/object.bin',
+                    maximum_bytes: '1024',
+                  }
+                : { operation, ...common };
+          const rejected = await operations.execute(command, signal);
+          expect(rejected.failure).toBe('invalid');
+          expect(rejected.metadata).toBeUndefined();
+          if (operation === 'delete_exact') expect(rejected.mutation_state).toBe('not_committed');
+          expect(getArtifact).toHaveBeenCalledTimes(1);
+          expect(downloadArtifact).not.toHaveBeenCalled();
+          expect(deleteArtifact).not.toHaveBeenCalled();
+
+          // A distinct operation can observe valid data; the malformed operation
+          // must already have ended as invalid, not io eligible for Runtime retry.
+          const later = await executeMetadata(
+            operations,
+            target,
+            'independent-valid-observation',
+            signal,
+          );
+          expect(later.failure).toBe('none');
+          expect(later.metadata).toEqual(target.metadata);
+          expect(getArtifact).toHaveBeenCalledTimes(2);
+          expect(getArtifact.mock.calls[1]?.[0].headers).toBeUndefined();
+          expect(downloadArtifact).toHaveBeenCalledTimes(1);
+          expect(deleteArtifact).not.toHaveBeenCalled();
+        } finally {
+          await operations.dispose();
+        }
+      },
+    );
+  },
+);
 
 interface IntegratedGetArtifactInput {
   readonly artifact_id: number;

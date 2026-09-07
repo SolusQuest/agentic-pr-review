@@ -10,8 +10,9 @@ export function physicalArtifactName(logicalName: string, encryptedDigest: strin
   return artifactFamily(logicalName) + encryptedDigest;
 }
 
-export function physicalArtifactMember(logicalName: string, physicalName: string): boolean {
+export function physicalArtifactMember(logicalName: string, physicalName: unknown): boolean {
   return (
+    typeof physicalName === 'string' &&
     physicalName.startsWith(artifactFamily(logicalName)) &&
     /^[0-9a-f]{64}$/u.test(physicalName.slice(artifactFamily(logicalName).length))
   );

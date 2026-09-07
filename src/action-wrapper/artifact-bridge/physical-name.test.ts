@@ -25,4 +25,7 @@ describe('private physical artifact namespace', () => {
     }
     expect(() => physicalArtifactName('logical', 'not-a-digest')).toThrow();
   });
+  it.each([undefined, null, 42, {}, [], false])('rejects a foreign non-string name %j', (name) => {
+    expect(physicalArtifactMember('logical', name)).toBe(false);
+  });
 });

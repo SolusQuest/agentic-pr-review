@@ -99339,7 +99339,7 @@ function physicalArtifactName(logicalName, encryptedDigest) {
   return artifactFamily(logicalName) + encryptedDigest;
 }
 function physicalArtifactMember(logicalName, physicalName) {
-  return physicalName.startsWith(artifactFamily(logicalName)) && /^[0-9a-f]{64}$/u.test(physicalName.slice(artifactFamily(logicalName).length));
+  return typeof physicalName === "string" && physicalName.startsWith(artifactFamily(logicalName)) && /^[0-9a-f]{64}$/u.test(physicalName.slice(artifactFamily(logicalName).length));
 }
 
 // src/action-wrapper/artifact-bridge/official-output.ts
@@ -100046,7 +100046,7 @@ var OfficialArtifactOperations = class {
         budget
       );
       budget.throwIfExpired();
-      if (response.status !== 200 || !responseFits(response.data)) {
+      if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
         this.rejectArtifactList(command.name, page, "incomplete");
       }
       if (!Array.isArray(response.data.artifacts) || response.data.artifacts.length > ARTIFACT_BRIDGE_LIMITS.recordsPerPage) {
@@ -100058,6 +100058,7 @@ var OfficialArtifactOperations = class {
       }
       expectedTotal = total;
       for (const artifact of response.data.artifacts) {
+        if (artifact === null) this.rejectArtifactList(command.name, page, "incomplete");
         const id = platformId(artifact.id);
         if (typeof artifact.name !== "string" || !id || seen.has(id)) {
           this.rejectArtifactList(
@@ -100393,7 +100394,7 @@ var OfficialArtifactOperations = class {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("not_found");
     }
-    if (response.status !== 200 || !responseFits(response.data)) {
+    if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("invalid");
     }
@@ -102401,4 +102402,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: d306eff5a09b7850bf6e0ac4e471d9bc262945c9ef75b3414742e71e2108754f
+// Action source inventory sha256: 71e8b8bb497ea5e0cc3bae305f5695ee05d2024442d0f2227ae8ab36c34d0f61
