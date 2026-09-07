@@ -574,8 +574,15 @@ internal sealed class ConcurrentInitializationLocatorStore
 {
     private readonly Barrier listBarrier = new(2);
     private readonly Barrier uploadBarrier = new(2);
+    private readonly Barrier cleanupBarrier = new(2);
+    private readonly TaskCompletionSource duplicateDeleted = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
     private int initialLists;
     private int initialUploads;
+    private int initialDeletes;
+
+    internal bool SynchronizeCleanup { get; init; }
+    internal bool DelayDuplicateUploadReceipt { get; init; }
 
     internal ScriptedLocatorStore Inner { get; } = new();
 
@@ -618,6 +625,15 @@ internal sealed class ConcurrentInitializationLocatorStore
                 cancellationToken));
         }
 
+        // The scripted store allocates ascending IDs; equal-retention roots
+        // retain object-0000 and prune object-0001.
+        if (DelayDuplicateUploadReceipt &&
+            result.Metadata!.Reference.ObjectId.Value == "object-0001")
+        {
+            await duplicateDeleted.Task.WaitAsync(
+                TimeSpan.FromSeconds(10), cancellationToken);
+        }
+
         return result;
     }
 
@@ -626,14 +642,30 @@ internal sealed class ConcurrentInitializationLocatorStore
         CancellationToken cancellationToken) =>
         Inner.ReadBackExactAsync(request, cancellationToken);
 
-    public Task<OpaqueStoreDeleteResult> DeleteExactAsync(
+    public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
         OpaqueStoreDeleteRequest request,
-        CancellationToken cancellationToken) =>
-        Inner.DeleteExactAsync(request, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        if (SynchronizeCleanup &&
+            Interlocked.Increment(ref initialDeletes) <= 2)
+        {
+            Assert.True(cleanupBarrier.SignalAndWait(
+                TimeSpan.FromSeconds(10), cancellationToken));
+        }
+
+        var result = await Inner.DeleteExactAsync(request, cancellationToken);
+        if (request.Expected.Reference.ObjectId.Value == "object-0001")
+        {
+            duplicateDeleted.TrySetResult();
+        }
+
+        return result;
+    }
 
     public void Dispose()
     {
         listBarrier.Dispose();
         uploadBarrier.Dispose();
+        cleanupBarrier.Dispose();
     }
 }

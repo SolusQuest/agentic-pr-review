@@ -123,11 +123,14 @@ public sealed class LocatorRootServiceTests
     }
 
     [Fact]
-    public async Task ConcurrentSameKeyInitializersConvergeToOneSentinel()
+    public async Task ConcurrentSameKeyInitializersObservedBeforeCleanupBothSucceed()
     {
         using var access = LocatorTestData.Access();
         using var keys = LocatorTestData.KeyRing(access);
-        using var store = new ConcurrentInitializationLocatorStore();
+        using var store = new ConcurrentInitializationLocatorStore
+        {
+            SynchronizeCleanup = true,
+        };
         var firstService = new LocatorRootService(
             store,
             keys,
@@ -151,6 +154,45 @@ public sealed class LocatorRootServiceTests
             Assert.True(result.Succeeded, result.Code));
         Assert.Single(store.Inner.Objects);
         Assert.Equal(2, store.Inner.UploadCalls);
+        foreach (var result in results)
+        {
+            result.Context?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentSameKeyInitializerPrunedBeforeReadBackFailsClosedAndRetryConverges()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        using var store = new ConcurrentInitializationLocatorStore
+        {
+            DelayDuplicateUploadReceipt = true,
+        };
+        var service = new LocatorRootService(
+            store, keys, new FrozenLocatorTimeProvider(LocatorTestData.Now));
+        var first = Task.Run(() => service.ResolveAsync(
+            access, 0, CancellationToken.None));
+        var second = Task.Run(() => service.ResolveAsync(
+            access, 0, CancellationToken.None));
+        var results = await Task.WhenAll(first, second);
+
+        var succeeded = Assert.Single(results, result => result.Succeeded);
+        var failed = Assert.Single(results, result => !result.Succeeded);
+        using var context = succeeded.Context;
+        Assert.Equal(LocatorCodes.Unavailable, failed.Code);
+        Assert.Null(failed.Context);
+        var survivor = Assert.Single(store.Inner.Objects);
+        var uploads = store.Inner.UploadCalls;
+        var deletes = store.Inner.DeleteCalls;
+
+        var retried = await service.ResolveAsync(access, 0, CancellationToken.None);
+        using var retryContext = retried.Context;
+        Assert.True(retried.Succeeded, retried.Code);
+        Assert.Equal(survivor, Assert.Single(store.Inner.Objects));
+        Assert.Equal(2, uploads);
+        Assert.Equal(uploads, store.Inner.UploadCalls);
+        Assert.Equal(deletes, store.Inner.DeleteCalls);
     }
 
     [Fact]
