@@ -650,18 +650,19 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
 
             // Real repository discovery includes CI artifacts unrelated to state.
-            // Exercise this population throughout trusted proof, the linked normal
-            // route, and delayed visibility; unrelated fault cases need not repeat it.
+            // Trusted proof exercises two-page discovery within production budgets.
+            // The generic linked/visibility routes retain the larger stress population.
             var includeBackgroundInventory = workflowRenderer is not null ||
                 mode is "continuation-seed" or "continuation" or
                     "artifact-delayed-visibility" or
                     "artifact-delayed-visibility-exhausted";
+            var backgroundInventoryCount = workflowRenderer is not null ? 101 : 565;
             var inventory = values
                 .Select(value => MetadataDocument(value,
                     overrideDigest: mode == "artifact-digest-mismatch",
                     overrideExpiry: mode == "artifact-expired"))
                 .Concat(name.Length == 0 && includeBackgroundInventory
-                    ? Enumerable.Range(0, 565).Select(index => FrameworkJson.Object(
+                    ? Enumerable.Range(0, backgroundInventoryCount).Select(index => FrameworkJson.Object(
                         ("id", 50_000 + index), ("name", "ci-fixture-" + index),
                         ("size_in_bytes", 1), ("expired", false),
                         ("expires_at", "2030-01-01T00:00:00Z")))
