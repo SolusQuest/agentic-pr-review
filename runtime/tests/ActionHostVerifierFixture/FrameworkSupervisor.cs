@@ -736,7 +736,12 @@ internal static class FrameworkSupervisor
             if (hostInitializationObserved) _ = KillProcess(hostPid);
         }
 
-        var exited = await WaitForExitAsync(process, ProcessTimeout)
+        // The protected route paces even conditional reads at 600 points/minute.
+        // Its existing 4,096-request ceiling can legitimately exceed five minutes
+        // with a populated multi-page inventory; keep production limits intact.
+        var exited = await WaitForExitAsync(process, spec.TrustedProofPayload
+                ? TimeSpan.FromMinutes(15)
+                : ProcessTimeout)
             .ConfigureAwait(false);
         if (!exited)
         {
