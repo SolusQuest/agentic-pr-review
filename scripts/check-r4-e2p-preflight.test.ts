@@ -305,7 +305,9 @@ describe('R4 E2P v2 exact inline preflight', () => {
     draft: true,
     merged_at: null,
     user: { login: 'maintainer', id: 7 },
-    author_association: 'OWNER',
+    // GitHub reports this field relative to the caller. The same PR is MEMBER
+    // to an authenticated maintainer but CONTRIBUTOR to this tokenless preflight.
+    author_association: 'CONTRIBUTOR',
     base: {
       ref: 'main',
       sha: 'c'.repeat(40),
@@ -408,7 +410,6 @@ describe('R4 E2P v2 exact inline preflight', () => {
       { head: { ...candidatePull().head, repo: { id: 43, full_name: 'fork/repo' } } },
     ],
     ['wrong actor', {}, { user: { login: 'other', id: 8 } }],
-    ['untrusted association', {}, { author_association: 'NONE' }],
   ])(
     'rejects candidate source drift: %s',
     async (_name, environmentOverrides, candidateOverrides) => {
@@ -438,6 +439,33 @@ describe('R4 E2P v2 exact inline preflight', () => {
       expect(result.stdout).not.toContain('authorized=true');
     },
   );
+
+  it('does not treat caller-relative author association as candidate authority', async () => {
+    const fetchImpl = vi.fn(async (url: string) =>
+      response(
+        url.endsWith('/pulls/234') ? candidatePull({ author_association: 'NONE' }) : v2Pull(),
+      ),
+    );
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: {
+        ...v2Environment,
+        EVENT_NAME: 'workflow_dispatch',
+        EVENT_PR_NUMBER: '',
+        EVENT_HEAD_SHA: '',
+        INPUT_PR_NUMBER: '147',
+        INPUT_OPERATION_ID: operationId,
+        INPUT_CANDIDATE_PR_NUMBER: '234',
+        INPUT_EXECUTION_MODE: 'candidate-bootstrap',
+        RUN_REF: 'refs/heads/codex/issue-181-metadata-recovery',
+        WORKFLOW_REF: `${values.repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/codex/issue-181-metadata-recovery`,
+      },
+      fetchImpl,
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('authorized=true\n');
+  });
 
   it('selects the stale suffix only from an authenticated stale workflow-run manifest', async () => {
     const staleValues = { ...v2Values, proofScope: 'stale' };

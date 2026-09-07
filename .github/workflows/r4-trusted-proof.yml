@@ -274,9 +274,6 @@ jobs:
                   candidatePull.merged_at !== null ||
                   candidatePull.user?.login !== actor ||
                   String(candidatePull.user?.id) !== actorId ||
-                  !/^(?:MEMBER|OWNER|COLLABORATOR)$/u.test(
-                    candidatePull.author_association ?? '',
-                  ) ||
                   candidatePull.base?.repo?.full_name !== repository ||
                   String(candidatePull.base?.repo?.id) !== repositoryId ||
                   candidatePull.base?.ref !== 'main' ||
