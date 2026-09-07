@@ -1368,10 +1368,11 @@ public sealed class TrustedProofVerifierFixtureTests
                 await entry.WriteAsync(Encoding.UTF8.GetBytes(
                     "{\"producing_run_id\":\"900\",\"producing_run_attempt\":\"1\"}"));
             }
+            using var blockContent = new ByteArrayContent(archiveBytes.ToArray());
             using var block = await client.PutAsync(platform.BaseUrl +
                 "/blob/upload?comp=block&blockid=one&sig=" +
                 Uri.EscapeDataString(FrameworkCanaries.SignedUrl),
-                new ByteArrayContent(archiveBytes.ToArray()));
+                blockContent);
             Assert.Equal(HttpStatusCode.Created, block.StatusCode);
             using var finalized = await Command("FinalizeArtifact", "same-logical-name");
             Assert.Equal(HttpStatusCode.OK, finalized.StatusCode);
