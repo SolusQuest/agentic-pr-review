@@ -650,12 +650,17 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
 
             // Real repository discovery includes CI artifacts unrelated to state.
-            // Keep the observed pre-release population in the production route.
+            // Exercise this population throughout trusted proof, the linked normal
+            // route, and delayed visibility; unrelated fault cases need not repeat it.
+            var includeBackgroundInventory = workflowRenderer is not null ||
+                mode is "continuation-seed" or "continuation" or
+                    "artifact-delayed-visibility" or
+                    "artifact-delayed-visibility-exhausted";
             var inventory = values
                 .Select(value => MetadataDocument(value,
                     overrideDigest: mode == "artifact-digest-mismatch",
                     overrideExpiry: mode == "artifact-expired"))
-                .Concat(name.Length == 0
+                .Concat(name.Length == 0 && includeBackgroundInventory
                     ? Enumerable.Range(0, 565).Select(index => FrameworkJson.Object(
                         ("id", 50_000 + index), ("name", "ci-fixture-" + index),
                         ("size_in_bytes", 1), ("expired", false),
