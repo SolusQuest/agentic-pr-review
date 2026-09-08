@@ -146,6 +146,120 @@ public sealed class R5EvaluationScorerTests
     }
 
     [Fact]
+    public async Task CompletedAssertionFailuresRetainExecutionStatusAndCannotBeRescued()
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync();
+        var subject = fixture.Admit()!;
+        var noTool = await EvaluationSelfTest.CreateAsync(findingCount: 0, includeTool: false);
+        var wrongScope = EvaluationCase.Admit(fixture.Case.Input with
+        { ReviewedIdentity = fixture.Case.Input.ReviewedIdentity with { HeadSha = new string('9', 40) } })!;
+        var wrongObservation = EvaluationCase.Admit(fixture.Case.Input with
+        { RequiredObservations = [new(AgentToolRegistry.ReadFileName, new string('e', 64))] })!;
+        foreach (var (testCase, completed, expected) in new[]
+        {
+            (noTool.Case, noTool.Admit()!, EvaluationCode.RequiredToolMissing),
+            (wrongScope, subject, EvaluationCode.WrongSnapshot),
+            (wrongObservation, subject, EvaluationCode.RequiredObservationMissing),
+        })
+        {
+            var annotation = EvaluationSelfTest.Annotation(testCase, completed);
+            var result = EvaluationScorer.Evaluate(testCase, completed, annotation);
+            Assert.Equal(expected, result.Code);
+            Assert.Equal(EvaluationStatus.Completed, result.ExecutionStatus);
+            Assert.Equal(AssertionStatus.Failed, result.EvidenceStatus);
+            Assert.Equal(AssertionStatus.NotEvaluated, result.ScenarioStatus);
+            Assert.Equal(EvaluationFailureSource.None, result.FailureSource);
+            Assert.Equal(EvaluationFailureKind.None, result.FailureKind);
+            Assert.Equal(ModelObservationStatus.NotEvaluated, result.ModelStatus);
+            Assert.Equal(completed.ExecutionSha256, result.ExecutionSha256);
+            Assert.Equal(completed.Attempt.AttemptSha256, result.AttemptSha256);
+        }
+        var stale = EvaluationSelfTest.Annotation(fixture.Case, subject) with { ExecutionSha256 = new string('d', 64) };
+        var invalidAnnotation = EvaluationScorer.Evaluate(fixture.Case, subject, stale);
+        Assert.Equal(EvaluationStatus.Completed, invalidAnnotation.ExecutionStatus);
+        Assert.Equal(EvaluationFailureSource.Evaluator, invalidAnnotation.FailureSource);
+        Assert.Equal(AssertionStatus.Passed, invalidAnnotation.EvidenceStatus);
+        Assert.Equal(ModelObservationStatus.NotEvaluated, invalidAnnotation.ModelStatus);
+    }
+
+    [Fact]
+    public async Task ConfigurationCohortIgnoresCaseHistoryAndSourceButBindsActualSettings()
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync();
+        var baseline = fixture.Admit()!;
+        var changedRequest = (await EvaluationSelfTest.CreateAsync(reviewContext: "Different request only")).Admit()!;
+        Assert.Equal(baseline.ConfigurationSha256, changedRequest.ConfigurationSha256);
+        Assert.NotEqual(baseline.ExecutionSha256, changedRequest.ExecutionSha256);
+        var otherCase = await EvaluationSelfTest.CreateAsync(reviewContext: "A different authored case " + EvaluationSelfTest.Canary,
+            reviewedIdentity: EvaluationSelfTest.Identity with { RepositoryId = "another/repository", ReviewTarget = 242 },
+            buildId: "other-build");
+        var otherSubject = otherCase.Admit()!;
+        Assert.Equal(baseline.ConfigurationSha256, otherSubject.ConfigurationSha256);
+        Assert.NotEqual(fixture.Case.Sha256, otherCase.Case.Sha256);
+        Assert.NotEqual(baseline.ExecutionSha256, otherSubject.ExecutionSha256);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(fixture.Input.TrustedRequest,
+            new string('a', 64), out var restored));
+        Assert.Equal(baseline.ConfigurationSha256,
+            EvaluationAttempt.ConfigurationIdentity(restored!.StablePlan, fixture.Run));
+        foreach (var changed in new[]
+        {
+            await EvaluationSelfTest.CreateAsync(policy: "Changed trusted policy"),
+            await EvaluationSelfTest.CreateAsync(provider: "another-provider"),
+            await EvaluationSelfTest.CreateAsync(model: "another-model"),
+            await EvaluationSelfTest.CreateAsync(adapter: "another-adapter"),
+            await EvaluationSelfTest.CreateAsync(mode: "live"),
+        }) Assert.NotEqual(baseline.ConfigurationSha256, changed.Admit()!.ConfigurationSha256);
+        var plan = fixture.Input.Run.StablePlan;
+        foreach (var changed in new[] { plan with { ToolsetSha256 = new string('a', 64) },
+            plan with { LimitsSha256 = new string('b', 64) } })
+            Assert.NotEqual(baseline.ConfigurationSha256, EvaluationAttempt.ConfigurationIdentity(changed, fixture.Run));
+        Assert.NotEqual(baseline.ConfigurationSha256, EvaluationAttempt.Admit(fixture.Input.TrustedRequest,
+            fixture.Run with { ProviderConfigurationSha256 = new string('f', 64) })!.ConfigurationSha256);
+        // Provider/model IDs allow UTF-8, so delimiter-containing tuples must stay distinct.
+        Assert.NotEqual(EvaluationAttempt.Admit(fixture.Input.TrustedRequest with { ProviderId = "a\0b", ModelId = "c" }, fixture.Run)!.ConfigurationSha256,
+            EvaluationAttempt.Admit(fixture.Input.TrustedRequest with { ProviderId = "a", ModelId = "b\0c" }, fixture.Run)!.ConfigurationSha256);
+    }
+
+    [Fact]
+    public async Task KnownFailuresKeepAttemptConfigurationSourceAndModeBeforeCompletion()
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync(providerFailure: EvaluationSelfTest.Canary);
+        Assert.False(fixture.Input.Outcome.Succeeded);
+        var failure = EvaluationFailure.FromAgentOutcome(fixture.Input.Outcome);
+        var baseline = EvaluationScorer.Failure(fixture.Case, failure, fixture.Attempt);
+        Assert.Equal(fixture.Run.SourceCommit, baseline.SourceCommit);
+        Assert.Equal(fixture.Run.SourceTree, baseline.SourceTree);
+        Assert.Equal(fixture.Run.SourceClean, baseline.SourceClean);
+        Assert.Equal(fixture.Run.Mode, baseline.Mode);
+        Assert.Equal(fixture.Attempt.ConfigurationSha256, baseline.ConfigurationSha256);
+        Assert.Equal(fixture.Attempt.AttemptSha256, baseline.AttemptSha256);
+        Assert.Null(baseline.ExecutionSha256);
+        Assert.Equal(ModelObservationStatus.NotEvaluated, baseline.ModelStatus);
+        foreach (var run in new[] { fixture.Run with { RunId = "retry" }, fixture.Run with { Mode = "live" },
+            fixture.Run with { ProviderConfigurationSha256 = new string('d', 64) },
+            fixture.Run with { SourceCommit = new string('a', 40) }, fixture.Run with { SourceTree = new string('b', 40) },
+            fixture.Run with { SourceClean = !fixture.Run.SourceClean } })
+        {
+            var attempt = EvaluationAttempt.Admit(fixture.Input.TrustedRequest, run)!;
+            var result = EvaluationScorer.Failure(fixture.Case, failure, attempt);
+            Assert.NotEqual(baseline.AttemptSha256, result.AttemptSha256);
+            Assert.Equal(attempt.ConfigurationSha256, result.ConfigurationSha256);
+            Assert.Equal(run.Mode, result.Mode);
+            Assert.Equal(run.SourceCommit, result.SourceCommit);
+            Assert.Null(result.ExecutionSha256);
+        }
+        var detached = EvaluationScorer.Failure(fixture.Case, EvaluationFailure.Invalid);
+        Assert.Null(detached.AttemptSha256);
+        Assert.Null(detached.ConfigurationSha256);
+        Assert.Null(detached.SourceCommit);
+        Assert.Null(EvaluationAttempt.Admit(null, fixture.Run));
+        Assert.Null(EvaluationAttempt.Admit(fixture.Input.TrustedRequest, fixture.Run with { Mode = "unknown" }));
+        Assert.Null(EvaluationAttempt.Admit(fixture.Input.TrustedRequest with { TrustedPolicyBytes = [0xff] }, fixture.Run));
+        Assert.Equal("evaluation_attempt", fixture.Attempt.ToString());
+        Assert.DoesNotContain(EvaluationSelfTest.Canary, Encoding.UTF8.GetString(EvaluationJson.Write(baseline)));
+    }
+
+    [Fact]
     public async Task NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses()
     {
         var fixture = await EvaluationSelfTest.CreateAsync();
@@ -164,7 +278,9 @@ public sealed class R5EvaluationScorerTests
         };
         foreach (var (failure, source, kind) in failures)
         {
-            var result = EvaluationScorer.Failure(fixture.Case, failure);
+            var result = EvaluationScorer.Failure(fixture.Case, failure, fixture.Attempt);
+            Assert.Equal(fixture.Attempt.AttemptSha256, result.AttemptSha256);
+            Assert.Equal(fixture.Attempt.ConfigurationSha256, result.ConfigurationSha256);
             Assert.Equal(source, result.FailureSource);
             Assert.Equal(kind, result.FailureKind);
             Assert.Equal(ModelObservationStatus.NotEvaluated, result.ModelStatus);

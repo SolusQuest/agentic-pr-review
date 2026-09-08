@@ -8,7 +8,8 @@ using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
-internal sealed record SyntheticEvaluation(EvaluationCase Case, EvaluationRunInput Run, AgentSessionBuildInput Input)
+internal sealed record SyntheticEvaluation(EvaluationCase Case, EvaluationRunInput Run, AgentSessionBuildInput Input,
+    EvaluationAttempt Attempt)
 {
     internal EvaluationSubject? Admit() => EvaluationSubject.Admit(Input, Run);
     public override string ToString() => "synthetic_evaluation";
@@ -24,21 +25,27 @@ internal static class EvaluationSelfTest
     internal static async Task<SyntheticEvaluation> CreateAsync(
         int findingCount = 1, bool includeTool = true, string prose = "Synthetic candidate", string mode = "deterministic",
         bool ungrounded = false, string? providerFailure = null, string? toolFailure = null,
-        Func<string, ImmutableArray<AgentFinding>>? findingFactory = null, string buildId = "r5-synthetic")
+        Func<string, ImmutableArray<AgentFinding>>? findingFactory = null, string buildId = "r5-synthetic",
+        string reviewContext = "Inspect the synthetic input.", string policy = "Review synthetic inputs using bounded tools.",
+        string model = "synthetic-model", string provider = "synthetic-provider", string adapter = "synthetic-adapter",
+        EvaluationReviewedIdentity? reviewedIdentity = null)
     {
-        var execution = ReadExecution();
+        var identity = reviewedIdentity ?? Identity;
+        var execution = ReadExecution(identity);
         var observation = execution.Observation!.ObservationId;
         var defect = new ExpectedDefect("defect-a", "high", observation, SourcePath, 1, 1);
-        var spec = new EvaluationCaseInput("synthetic-scorer", Hash("authored-r5-scorer-corpus"), Identity,
+        var spec = new EvaluationCaseInput("synthetic-scorer", Hash("authored-r5-scorer-corpus"), identity,
             [defect], [new(AgentToolRegistry.ReadFileName, observation)], []);
         var testCase = EvaluationCase.Admit(spec)!;
-        var trusted = new AgentSessionTrustedRequest(Identity.RepositoryId, Identity.ReviewTarget,
-            "r5@synthetic", Encoding.UTF8.GetBytes("Review synthetic inputs using bounded tools."),
-            buildId, "synthetic-provider", "synthetic-model", "synthetic-adapter");
+        var trusted = new AgentSessionTrustedRequest(identity.RepositoryId, identity.ReviewTarget,
+            "r5@synthetic", Encoding.UTF8.GetBytes(policy), buildId, provider, model, adapter);
         if (!AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable))
             throw new InvalidOperationException("r5_self_test_setup_failed");
-        var run = new AgentRunRequest(Identity.Runtime, stable!.StablePlan, "synthetic-session",
-            [.. stable.ControlMessages, new("user", [new ProjectTextContent("Inspect the synthetic input.")])]);
+        var run = new AgentRunRequest(identity.Runtime, stable!.StablePlan, "synthetic-session",
+            [.. stable.ControlMessages, new("user", [new ProjectTextContent(reviewContext)])]);
+        var descriptor = new EvaluationRunInput("self-test-run", mode, EvaluationSource.Commit,
+            EvaluationSource.Tree, EvaluationSource.Clean, Hash("synthetic-provider-settings"));
+        var attempt = EvaluationAttempt.Admit(trusted, descriptor)!;
         var findings = findingFactory?.Invoke(observation) ?? Enumerable.Range(0, findingCount).Select(i => new AgentFinding("high",
             prose + " " + i, Canary + " " + prose,
             [new AgentEvidence(ungrounded ? new string('f', 64) : observation, SourcePath, 1, 1)])).ToImmutableArray();
@@ -51,9 +58,7 @@ internal static class EvaluationSelfTest
             new SyntheticTools(execution, toolFailure)).RunAsync(run, CancellationToken.None);
         var input = new AgentSessionBuildInput(run, outcome, trusted, run.InitialMessages.Length - 1,
             SyntheticCodec.Instance, null, AgentSessionHeadTransition.SameHead);
-        var descriptor = new EvaluationRunInput("self-test-run", mode, EvaluationSource.Commit,
-            EvaluationSource.Tree, EvaluationSource.Clean, Hash("synthetic-provider-settings"));
-        return new(testCase, descriptor, input);
+        return new(testCase, descriptor, input, attempt);
     }
 
     internal static EvaluationAdjudication Annotation(EvaluationCase testCase, EvaluationSubject subject,
@@ -74,7 +79,8 @@ internal static class EvaluationSelfTest
         if (subject is null) return (false, []);
         Check(EvaluationScorer.Evaluate(valid.Case, subject, Annotation(valid.Case, subject, new FindingAdjudication(0, "confirmed", "defect-a"))), EvaluationCode.Scored);
         var bad = await CreateAsync(ungrounded: true);
-        Check(EvaluationScorer.Evaluate(bad.Case, bad.Admit()), EvaluationCode.SubjectInvalid);
+        Check(EvaluationScorer.Failure(bad.Case, EvaluationFailure.FromAgentOutcome(bad.Input.Outcome),
+            bad.Attempt, EvaluationCode.SubjectInvalid), EvaluationCode.SubjectInvalid);
         var wrongSnapshot = EvaluationCase.Admit(valid.Case.Input with
         { ReviewedIdentity = Identity with { HeadSha = new string('3', 40) } })!;
         Check(EvaluationScorer.Evaluate(wrongSnapshot, subject), EvaluationCode.WrongSnapshot);
@@ -106,7 +112,7 @@ internal static class EvaluationSelfTest
             EvaluationFailure.Unknown,
         })
         {
-            var result = EvaluationScorer.Failure(valid.Case, failure);
+            var result = EvaluationScorer.Failure(valid.Case, failure, valid.Attempt);
             Check(result, EvaluationCode.ExecutionFailed);
             passed &= result.ModelStatus == ModelObservationStatus.NotEvaluated;
         }
@@ -115,14 +121,14 @@ internal static class EvaluationSelfTest
 
     internal static string Hash(string value) => AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(value));
 
-    private static AgentToolExecution ReadExecution()
+    private static AgentToolExecution ReadExecution(EvaluationReviewedIdentity identity)
     {
-        var value = new ReadFileResult("ok", Identity.Runtime, SourcePath, Hash(Canary), 1, 2, 1, 2,
+        var value = new ReadFileResult("ok", identity.Runtime, SourcePath, Hash(Canary), 1, 2, 1, 2,
             [new(1, "return value!.Trim(); // " + Canary), new(2, "return other!.Trim();")], false, null, null);
         var observation = AgentCanonical.HashDomain(AgentCanonical.ReadObservationDomain,
             ReadFileResultWriter.Write(value, includeObservationId: false));
         var bytes = ReadFileResultWriter.Write(value with { ObservationId = observation });
-        return new(true, null, Encoding.UTF8.GetString(bytes), bytes, new(observation, Identity.Runtime,
+        return new(true, null, Encoding.UTF8.GetString(bytes), bytes, new(observation, identity.Runtime,
             ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(SourcePath, [1, 2])));
     }
 
