@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
+  </ItemGroup>
+  <Target Name="RecordEvaluationSource" BeforeTargets="CoreCompile">
+    <Exec Command="git rev-parse HEAD" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="EvaluationSourceCommit" />
+    </Exec>
+    <Exec Command="git rev-parse &quot;HEAD^{tree}&quot;" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="EvaluationSourceTree" />
+    </Exec>
+    <Exec Command="git status --porcelain --untracked-files=normal" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" ItemName="EvaluationSourceChanges" />
+    </Exec>
+    <PropertyGroup>
+      <EvaluationSourceClean Condition="'@(EvaluationSourceChanges->Count())' == '0'">true</EvaluationSourceClean>
+      <EvaluationSourceClean Condition="'@(EvaluationSourceChanges->Count())' != '0'">false</EvaluationSourceClean>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)EvaluationSource.g.cs" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation%3B internal static class EvaluationSource { internal const string Commit = &quot;$(EvaluationSourceCommit)&quot;%3B internal const string Tree = &quot;$(EvaluationSourceTree)&quot;%3B internal const bool Clean = $(EvaluationSourceClean)%3B }" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)EvaluationSource.g.cs" />
+    </ItemGroup>
+  </Target>
+</Project>
