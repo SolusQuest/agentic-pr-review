@@ -72,11 +72,17 @@ internal static class EvaluationSelfTest
         void Check(EvaluationOutcome outcome, EvaluationCode expected)
         {
             results.Add(outcome);
-            passed &= outcome.Code == expected && !Encoding.UTF8.GetString(EvaluationJson.Write(outcome)).Contains(Canary, StringComparison.Ordinal);
+            var bytes = EvaluationJson.Write(outcome);
+            passed &= outcome.Code == expected && EvaluationJson.ReadOutcome(bytes) == outcome &&
+                !Encoding.UTF8.GetString(bytes).Contains(Canary, StringComparison.Ordinal);
         }
         var valid = await CreateAsync();
         var subject = valid.Admit();
         if (subject is null) return (false, []);
+        passed &= EvaluationJson.ReadCase(EvaluationJson.Write(valid.Case.Input))?.Sha256 == valid.Case.Sha256 &&
+            EvaluationJson.ReadRun(EvaluationJson.Write(valid.Run)) == valid.Run &&
+            EvaluationJson.ReadAdjudication(EvaluationJson.Write(Annotation(valid.Case, subject,
+                new FindingAdjudication(0, "confirmed", "defect-a")))) is { Findings.Length: 1 };
         Check(EvaluationScorer.Evaluate(valid.Case, subject, Annotation(valid.Case, subject, new FindingAdjudication(0, "confirmed", "defect-a"))), EvaluationCode.Scored);
         var bad = await CreateAsync(ungrounded: true);
         Check(EvaluationScorer.Failure(bad.Case, EvaluationFailure.FromAgentOutcome(bad.Input.Outcome),
@@ -96,6 +102,16 @@ internal static class EvaluationSelfTest
         Check(EvaluationScorer.Evaluate(noTool.Case, noTool.Admit()), EvaluationCode.RequiredToolMissing);
         var duplicates = await CreateAsync(findingCount: 2);
         Check(EvaluationScorer.Evaluate(duplicates.Case, duplicates.Admit()), EvaluationCode.DuplicateObservation);
+        foreach (var (testCase, completed) in new[] { (duplicateCredit, subject), (prohibited, subject), (duplicates.Case, duplicates.Admit()!) })
+        {
+            var baseline = EvaluationScorer.Evaluate(testCase, completed);
+            var stale = Annotation(testCase, completed) with { ExecutionSha256 = new string('0', 64) };
+            var rejected = EvaluationScorer.Evaluate(testCase, completed, stale);
+            Check(rejected, EvaluationCode.AdjudicationInvalid);
+            passed &= rejected.ScenarioStatus == AssertionStatus.Failed && rejected.StructuralMatches == baseline.StructuralMatches &&
+                rejected.StructurallyMissingDefects == baseline.StructurallyMissingDefects &&
+                rejected.DuplicateObservations == baseline.DuplicateObservations && rejected.ProhibitedObservations == baseline.ProhibitedObservations;
+        }
         var changed = await CreateAsync(prose: "Changed prose", mode: "live");
         var changedSubject = changed.Admit()!;
         var unadjudicated = EvaluationScorer.Evaluate(changed.Case, changedSubject);
@@ -116,7 +132,7 @@ internal static class EvaluationSelfTest
             Check(result, EvaluationCode.ExecutionFailed);
             passed &= result.ModelStatus == ModelObservationStatus.NotEvaluated;
         }
-        return (passed && results.Count == 16, results.ToImmutable());
+        return (passed && results.Count == 19, results.ToImmutable());
     }
 
     internal static string Hash(string value) => AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(value));

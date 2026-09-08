@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
@@ -14,15 +15,34 @@ internal enum ModelObservationStatus { Adjudicated, Unadjudicated, NotEvaluated 
 
 // Public-safe per-case projection only. No terminal, source, tool-result or exception text.
 internal sealed record EvaluationOutcome(
-    string CaseId, string CorpusSha256, string CaseSha256,
-    string? ConfigurationSha256, string? AttemptSha256, string? ExecutionSha256,
-    string? SourceCommit, string? SourceTree, bool? SourceClean, string? Mode,
-    EvaluationStatus ExecutionStatus, AssertionStatus EvidenceStatus, AssertionStatus ScenarioStatus,
-    ModelObservationStatus ModelStatus, EvaluationCode Code,
-    EvaluationFailureSource FailureSource, EvaluationFailureKind FailureKind,
-    int FindingCount, int ToolObservationCount, int ExpectedDefects, int StructuralMatches,
-    int StructurallyMissingDefects, int DuplicateObservations, int ProhibitedObservations,
-    int AdjudicatedTrue, int AdjudicatedFalse, int AdjudicatedDefects, int UnadjudicatedFindings)
+    [property: JsonRequired] string CaseId,
+    [property: JsonRequired] string CorpusSha256,
+    [property: JsonRequired] string CaseSha256,
+    [property: JsonRequired] string? ConfigurationSha256,
+    [property: JsonRequired] string? AttemptSha256,
+    [property: JsonRequired] string? ExecutionSha256,
+    [property: JsonRequired] string? SourceCommit,
+    [property: JsonRequired] string? SourceTree,
+    [property: JsonRequired] bool? SourceClean,
+    [property: JsonRequired] string? Mode,
+    [property: JsonRequired] EvaluationStatus ExecutionStatus,
+    [property: JsonRequired] AssertionStatus EvidenceStatus,
+    [property: JsonRequired] AssertionStatus ScenarioStatus,
+    [property: JsonRequired] ModelObservationStatus ModelStatus,
+    [property: JsonRequired] EvaluationCode Code,
+    [property: JsonRequired] EvaluationFailureSource FailureSource,
+    [property: JsonRequired] EvaluationFailureKind FailureKind,
+    [property: JsonRequired] int FindingCount,
+    [property: JsonRequired] int ToolObservationCount,
+    [property: JsonRequired] int ExpectedDefects,
+    [property: JsonRequired] int StructuralMatches,
+    [property: JsonRequired] int StructurallyMissingDefects,
+    [property: JsonRequired] int DuplicateObservations,
+    [property: JsonRequired] int ProhibitedObservations,
+    [property: JsonRequired] int AdjudicatedTrue,
+    [property: JsonRequired] int AdjudicatedFalse,
+    [property: JsonRequired] int AdjudicatedDefects,
+    [property: JsonRequired] int UnadjudicatedFindings)
 {
     public override string ToString() => "evaluation_outcome";
 }
@@ -72,6 +92,23 @@ internal static class EvaluationScorer
         var scenarioCode = prohibited > 0 ? EvaluationCode.ProhibitedFinding :
             duplicates > 0 ? EvaluationCode.DuplicateObservation :
             missing > 0 ? EvaluationCode.ExpectedFindingMissing : EvaluationCode.Scored;
+        var structural = new EvaluationOutcome(spec.Id, spec.CorpusSha256, testCase.Sha256,
+            subject.ConfigurationSha256, subject.Attempt.AttemptSha256, subject.ExecutionSha256,
+            subject.Run.SourceCommit, subject.Run.SourceTree, subject.Run.SourceClean, subject.Run.Mode,
+            EvaluationStatus.Completed, AssertionStatus.Passed,
+            scenarioCode == EvaluationCode.Scored ? AssertionStatus.Passed : AssertionStatus.Failed,
+            subject.Findings.Length == 0 ? ModelObservationStatus.Adjudicated : ModelObservationStatus.Unadjudicated,
+            scenarioCode, EvaluationFailureSource.None, EvaluationFailureKind.None,
+            subject.Findings.Length, subject.Observations.Length, defects.Length, matches, missing, duplicates, prohibited,
+            0, 0, 0, subject.Findings.Length);
+        EvaluationOutcome InvalidAdjudication() => structural with
+        {
+            Code = EvaluationCode.AdjudicationInvalid,
+            FailureSource = EvaluationFailureSource.Evaluator,
+            FailureKind = EvaluationFailureKind.InvalidInput,
+            ModelStatus = ModelObservationStatus.NotEvaluated,
+            UnadjudicatedFindings = 0,
+        };
 
         var trueCount = 0;
         var falseCount = 0;
@@ -82,32 +119,31 @@ internal static class EvaluationScorer
                 adjudication.CaseSha256 != testCase.Sha256 ||
                 adjudication.ConfigurationSha256 != subject.ConfigurationSha256 ||
                 adjudication.ExecutionSha256 != subject.ExecutionSha256)
-                return CompletedRejection(testCase, subject, EvaluationCode.AdjudicationInvalid);
+                return InvalidAdjudication();
             foreach (var annotation in adjudication.Findings)
             {
                 if (annotation.FindingOrdinal >= subject.Findings.Length)
-                    return CompletedRejection(testCase, subject, EvaluationCode.AdjudicationInvalid);
+                    return InvalidAdjudication();
                 if (annotation.DefectId is not null)
                 {
                     var defect = defects.FirstOrDefault(d => d.Id == annotation.DefectId);
                     if (defect is null || !defect.Matches(subject.Findings[annotation.FindingOrdinal]) ||
                         !credited.Add(annotation.DefectId))
-                        return CompletedRejection(testCase, subject, EvaluationCode.AdjudicationInvalid);
+                        return InvalidAdjudication();
                 }
                 if (annotation.Verdict == "confirmed") trueCount++;
                 else falseCount++;
             }
         }
         var pending = subject.Findings.Length - trueCount - falseCount;
-        // A failed required assertion cannot be rescued by an otherwise valid annotation.
-        var scenarioPassed = scenarioCode == EvaluationCode.Scored;
-        return new(spec.Id, spec.CorpusSha256, testCase.Sha256, subject.ConfigurationSha256, subject.Attempt.AttemptSha256, subject.ExecutionSha256,
-            subject.Run.SourceCommit, subject.Run.SourceTree, subject.Run.SourceClean, subject.Run.Mode,
-            EvaluationStatus.Completed, AssertionStatus.Passed, scenarioPassed ? AssertionStatus.Passed : AssertionStatus.Failed,
-            pending == 0 ? ModelObservationStatus.Adjudicated : ModelObservationStatus.Unadjudicated,
-            scenarioCode, EvaluationFailureSource.None, EvaluationFailureKind.None,
-            subject.Findings.Length, subject.Observations.Length, defects.Length, matches, missing, duplicates, prohibited,
-            trueCount, falseCount, credited.Count, pending);
+        return structural with
+        {
+            ModelStatus = pending == 0 ? ModelObservationStatus.Adjudicated : ModelObservationStatus.Unadjudicated,
+            AdjudicatedTrue = trueCount,
+            AdjudicatedFalse = falseCount,
+            AdjudicatedDefects = credited.Count,
+            UnadjudicatedFindings = pending,
+        };
     }
 
     internal static EvaluationOutcome Failure(EvaluationCase testCase, EvaluationFailure failure,
@@ -125,10 +161,10 @@ internal static class EvaluationScorer
         {
             // Evaluation assertions never rewrite the completed execution's actual status.
             ExecutionStatus = EvaluationStatus.Completed,
-            FailureSource = code == EvaluationCode.AdjudicationInvalid ? EvaluationFailureSource.Evaluator : EvaluationFailureSource.None,
-            FailureKind = code == EvaluationCode.AdjudicationInvalid ? EvaluationFailureKind.InvalidInput : EvaluationFailureKind.None,
+            FailureSource = EvaluationFailureSource.None,
+            FailureKind = EvaluationFailureKind.None,
             ExecutionSha256 = subject.ExecutionSha256,
-            EvidenceStatus = code == EvaluationCode.AdjudicationInvalid ? AssertionStatus.Passed : AssertionStatus.Failed,
+            EvidenceStatus = AssertionStatus.Failed,
             FindingCount = subject.Findings.Length,
             ToolObservationCount = subject.Observations.Length,
         };

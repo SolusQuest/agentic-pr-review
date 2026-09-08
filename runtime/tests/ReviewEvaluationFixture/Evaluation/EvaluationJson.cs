@@ -37,6 +37,26 @@ internal static class EvaluationJson
     internal static EvaluationAdjudication? ReadAdjudication(ReadOnlySpan<byte> input) =>
         Read(input, EvaluationJsonContext.Default.EvaluationAdjudication) is { Valid: true } annotation ? annotation : null;
 
+    internal static EvaluationOutcome? ReadOutcome(ReadOnlySpan<byte> input)
+    {
+        var outcome = Read(input, EvaluationJsonContext.Default.EvaluationOutcome);
+        if (outcome is null || !EvaluationOutcomeAdmission.Valid(outcome)) return null;
+        // Source-generated enum metadata also accepts numeric enum values; reports use exact named codes only.
+        using var document = JsonDocument.Parse(input.ToArray(), new JsonDocumentOptions { MaxDepth = EvaluationLimits.Depth });
+        foreach (var (name, expected) in new[]
+        {
+            ("execution_status", outcome.ExecutionStatus.ToString()), ("evidence_status", outcome.EvidenceStatus.ToString()),
+            ("scenario_status", outcome.ScenarioStatus.ToString()), ("model_status", outcome.ModelStatus.ToString()),
+            ("code", outcome.Code.ToString()), ("failure_source", outcome.FailureSource.ToString()),
+            ("failure_kind", outcome.FailureKind.ToString()),
+        })
+        {
+            var value = document.RootElement.GetProperty(name);
+            if (value.ValueKind != JsonValueKind.String || value.GetString() != expected) return null;
+        }
+        return outcome;
+    }
+
     private static T? Read<T>(ReadOnlySpan<byte> input, JsonTypeInfo<T> type) where T : class
     {
         if (input.Length is < 1 or > EvaluationLimits.InputBytes) return null;

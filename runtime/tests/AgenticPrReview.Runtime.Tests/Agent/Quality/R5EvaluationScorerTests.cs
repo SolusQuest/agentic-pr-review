@@ -16,7 +16,7 @@ public sealed class R5EvaluationScorerTests
     {
         var result = await EvaluationSelfTest.RunAsync();
         Assert.True(result.Passed);
-        Assert.Equal(16, result.Outcomes.Length);
+        Assert.Equal(19, result.Outcomes.Length);
         Assert.Contains(result.Outcomes, o => o.Code == EvaluationCode.Scored);
         foreach (var code in new[] { EvaluationCode.SubjectInvalid, EvaluationCode.WrongSnapshot,
             EvaluationCode.RequiredObservationMissing, EvaluationCode.ExpectedFindingMissing,
@@ -257,6 +257,112 @@ public sealed class R5EvaluationScorerTests
         Assert.Null(EvaluationAttempt.Admit(fixture.Input.TrustedRequest with { TrustedPolicyBytes = [0xff] }, fixture.Run));
         Assert.Equal("evaluation_attempt", fixture.Attempt.ToString());
         Assert.DoesNotContain(EvaluationSelfTest.Canary, Encoding.UTF8.GetString(EvaluationJson.Write(baseline)));
+    }
+
+    [Fact]
+    public async Task InvalidSidecarsPreserveEveryEstablishedStructuralFailureAndDiscardPartialCredit()
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync();
+        var subject = fixture.Admit()!;
+        var spec = fixture.Case.Input;
+        var missing = EvaluationCase.Admit(spec with { Defects = [spec.Defects[0], spec.Defects[0] with { Id = "defect-b" }] })!;
+        var prohibited = EvaluationCase.Admit(spec with { ProhibitedFindings = [new(EvaluationSelfTest.SourcePath, 1, 1)] })!;
+        var duplicate = await EvaluationSelfTest.CreateAsync(findingCount: 2);
+        foreach (var (testCase, completed) in new[] { (missing, subject), (prohibited, subject), (duplicate.Case, duplicate.Admit()!) })
+        {
+            var baseline = EvaluationScorer.Evaluate(testCase, completed);
+            Assert.Equal(AssertionStatus.Failed, baseline.ScenarioStatus);
+            var annotation = EvaluationSelfTest.Annotation(testCase, completed);
+            foreach (var invalid in new[]
+            {
+                annotation with { ExecutionSha256 = new string('f', 64) },
+                annotation with { Findings = [new(0, "confirmed", null), new(0, "rejected", null)] },
+                annotation with { Findings = [new(0, "confirmed", "unknown")] },
+                annotation with { Findings = [new(0, "confirmed", null), new(1, "confirmed", "unknown")] },
+            })
+            {
+                var result = EvaluationScorer.Evaluate(testCase, completed, invalid);
+                Assert.Equal(EvaluationCode.AdjudicationInvalid, result.Code);
+                Assert.Equal(AssertionStatus.Failed, result.ScenarioStatus);
+                Assert.Equal(baseline.ExecutionStatus, result.ExecutionStatus);
+                Assert.Equal(baseline.EvidenceStatus, result.EvidenceStatus);
+                Assert.Equal(baseline.StructuralMatches, result.StructuralMatches);
+                Assert.Equal(baseline.StructurallyMissingDefects, result.StructurallyMissingDefects);
+                Assert.Equal(baseline.DuplicateObservations, result.DuplicateObservations);
+                Assert.Equal(baseline.ProhibitedObservations, result.ProhibitedObservations);
+                Assert.Equal(baseline.AttemptSha256, result.AttemptSha256);
+                Assert.Equal(baseline.ExecutionSha256, result.ExecutionSha256);
+                Assert.Equal(ModelObservationStatus.NotEvaluated, result.ModelStatus);
+                Assert.Equal(0, result.AdjudicatedTrue + result.AdjudicatedFalse + result.AdjudicatedDefects + result.UnadjudicatedFindings);
+                Assert.Equal(result, EvaluationJson.ReadOutcome(EvaluationJson.Write(result)));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task OutcomeReaderRejectsMalformedIncompleteAndContradictoryReports()
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync();
+        var result = EvaluationScorer.Evaluate(fixture.Case, fixture.Admit());
+        var bytes = EvaluationJson.Write(result);
+        var json = Encoding.UTF8.GetString(bytes);
+        Assert.Equal(result, EvaluationJson.ReadOutcome(bytes));
+        using var document = JsonDocument.Parse(bytes);
+        // Every output field, including explicit nulls and zero counters, must be present.
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            var missing = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+            missing.Remove(property.Name);
+            Assert.Null(EvaluationJson.ReadOutcome(Encoding.UTF8.GetBytes(missing.ToJsonString())));
+        }
+        foreach (var invalidJson in new[]
+        {
+            json.Insert(1, "\"unknown\":true,"), json.Insert(1, "\"case_id\":\"duplicate\","),
+            json.Replace("\"code\":\"Scored\"", "\"code\":0", StringComparison.Ordinal),
+            json.Replace("\"code\":\"Scored\"", "\"code\":\"0\"", StringComparison.Ordinal),
+            json.Replace("\"code\":\"Scored\"", "\"code\":\"scored\"", StringComparison.Ordinal),
+            json.Replace("\"finding_count\":1", "\"finding_count\":\"1\"", StringComparison.Ordinal),
+            "null", "[]", "{", new string('[', EvaluationLimits.Depth + 1) + "0" + new string(']', EvaluationLimits.Depth + 1),
+        }) Assert.Null(EvaluationJson.ReadOutcome(Encoding.UTF8.GetBytes(invalidJson)));
+        Assert.Null(EvaluationJson.ReadOutcome([0xff]));
+        var maxBytes = new byte[EvaluationLimits.InputBytes];
+        bytes.CopyTo(maxBytes, 0);
+        Array.Fill(maxBytes, (byte)' ', bytes.Length, maxBytes.Length - bytes.Length);
+        Assert.Equal(result, EvaluationJson.ReadOutcome(maxBytes));
+        Assert.Null(EvaluationJson.ReadOutcome([.. maxBytes, (byte)' ']));
+        var maximum = result with { FindingCount = AgentLimits.Findings, ToolObservationCount = AgentLimits.ToolCalls,
+            ExpectedDefects = EvaluationLimits.Defects, StructuralMatches = EvaluationLimits.Defects,
+            UnadjudicatedFindings = AgentLimits.Findings };
+        Assert.Equal(maximum, EvaluationJson.ReadOutcome(EvaluationJson.Write(maximum)));
+        Assert.Null(EvaluationJson.ReadOutcome(EvaluationJson.Write(maximum with
+        { FindingCount = AgentLimits.Findings + 1, UnadjudicatedFindings = AgentLimits.Findings + 1 })));
+        Assert.Null(EvaluationJson.ReadOutcome(EvaluationJson.Write(maximum with { ToolObservationCount = AgentLimits.ToolCalls + 1 })));
+        Assert.Null(EvaluationJson.ReadOutcome(EvaluationJson.Write(maximum with
+        { ExpectedDefects = EvaluationLimits.Defects + 1, StructurallyMissingDefects = 1,
+            ScenarioStatus = AssertionStatus.Failed, Code = EvaluationCode.ExpectedFindingMissing })));
+        foreach (var invalid in new[]
+        {
+            result with { CaseId = "../private" }, result with { CorpusSha256 = "invalid" },
+            result with { ConfigurationSha256 = null }, result with { AttemptSha256 = null },
+            result with { SourceCommit = new string('g', 40) }, result with { SourceClean = null },
+            result with { Mode = "unknown" }, result with { ExecutionStatus = (EvaluationStatus)99 },
+            result with { FindingCount = -1 }, result with { FindingCount = AgentLimits.Findings + 1 },
+            result with { ToolObservationCount = AgentLimits.ToolCalls + 1 }, result with { ExpectedDefects = AgentLimits.Findings + 1 },
+            result with { StructuralMatches = 2 }, result with { StructurallyMissingDefects = 1 },
+            result with { DuplicateObservations = 1 }, result with { ProhibitedObservations = 2 },
+            result with { AdjudicatedTrue = 1 }, result with { AdjudicatedFalse = 1 },
+            result with { AdjudicatedDefects = 1 }, result with { UnadjudicatedFindings = 0 },
+            result with { FailureSource = EvaluationFailureSource.Evaluator, FailureKind = EvaluationFailureKind.InvalidInput },
+            result with { EvidenceStatus = AssertionStatus.Failed }, result with { ScenarioStatus = AssertionStatus.Failed },
+            result with { ModelStatus = ModelObservationStatus.NotEvaluated },
+        }) Assert.Null(EvaluationJson.ReadOutcome(EvaluationJson.Write(invalid)));
+        var detached = EvaluationScorer.Failure(fixture.Case, EvaluationFailure.Invalid);
+        Assert.Equal(detached, EvaluationJson.ReadOutcome(EvaluationJson.Write(detached)));
+        Assert.Null(EvaluationJson.ReadOutcome(EvaluationJson.Write(detached with { SourceTree = new string('a', 40) })));
+        Assert.Null(EvaluationJson.ReadOutcome(EvaluationJson.Write(detached with { ExecutionStatus = EvaluationStatus.Completed })));
+        Assert.Null(EvaluationJson.ReadOutcome(EvaluationJson.Write(detached with { AdjudicatedTrue = 1 })));
+        var vectors = await EvaluationSelfTest.RunAsync();
+        Assert.All(vectors.Outcomes, outcome => Assert.Equal(outcome, EvaluationJson.ReadOutcome(EvaluationJson.Write(outcome))));
     }
 
     [Fact]
