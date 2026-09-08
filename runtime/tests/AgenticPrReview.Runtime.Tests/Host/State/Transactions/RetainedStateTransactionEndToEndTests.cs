@@ -3600,6 +3600,9 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var fixture = await CreateFixtureAsync();
         using var context = fixture.Context;
+        var initiallyProvisionedNames = fixture.Store.Objects
+            .Select(item => item.Reference.Name)
+            .ToHashSet();
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
@@ -3643,6 +3646,9 @@ public sealed class RetainedStateTransactionEndToEndTests
                 prepared.Publication.BodySha256,
                 prepared.Publication.ReviewedHeadSha,
                 out var sticky));
+        var acceptanceUploadNames = new List<OpaqueStoreName>();
+        fixture.Store.AfterUpload = (request, _) =>
+            acceptanceUploadNames.Add(request.Name);
 
         var preparationResult = await RestrictedStateService
             .PrepareRetainedStateAcceptanceAsync(
@@ -3660,6 +3666,9 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.True(
             handoff.MinimumSemanticExpiresAtUnixSeconds >
                 prepared.Header.LogicalExpiresAtUnixSeconds);
+        Assert.DoesNotContain(
+            acceptanceUploadNames,
+            initiallyProvisionedNames.Contains);
     }
 
     [Theory]

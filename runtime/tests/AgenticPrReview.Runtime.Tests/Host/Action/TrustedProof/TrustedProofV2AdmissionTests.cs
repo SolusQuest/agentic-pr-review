@@ -182,6 +182,75 @@ public sealed class TrustedProofV2AdmissionTests
             rejectedByV1.Failure);
     }
 
+    [Fact]
+    public async Task V2AdmitsOnlyTheExplicitCandidateDispatchRun()
+    {
+        const string candidateBranch = "codex/issue-181-metadata-recovery";
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch,
+            candidateSourcePullRequestNumber: 234,
+            candidateExecutionPhase: ActionHostCandidateExecutionPhase.Bootstrap,
+            workflowBranch: candidateBranch);
+        SetV2Workflow(scenario);
+
+        var accepted = await CreateV2Authorizer(scenario).AuthorizeAsync(
+            CreateCurrentHeadLaunch(scenario),
+            CancellationToken.None);
+
+        Assert.NotNull(accepted.Invocation);
+        Assert.Equal(ActionHostAuthorizationFailure.None, accepted.Failure);
+
+        var rejectedByDefault = await scenario.CreateAuthorizer().AuthorizeAsync(
+            CreateCurrentHeadLaunch(scenario),
+            CancellationToken.None);
+        Assert.Null(rejectedByDefault.Invocation);
+        Assert.Equal(
+            ActionHostAuthorizationFailure.CurrentRunMismatch,
+            rejectedByDefault.Failure);
+
+        scenario.Transport.CurrentRun = scenario.Transport.CurrentRun with
+        {
+            HeadBranch = "other-candidate",
+        };
+        var wrongBranch = await CreateV2Authorizer(scenario).AuthorizeAsync(
+            CreateCurrentHeadLaunch(scenario),
+            CancellationToken.None);
+        Assert.Null(wrongBranch.Invocation);
+        Assert.Equal(
+            ActionHostAuthorizationFailure.CurrentRunMismatch,
+            wrongBranch.Failure);
+    }
+
+    [Theory]
+    [InlineData(null, "bootstrap")]
+    [InlineData(147L, "continuation")]
+    public async Task V2RejectsIncompleteCandidateDispatchAuthority(
+        long? candidateSourcePullRequestNumber,
+        string candidatePhase)
+    {
+        var candidateExecutionPhase = candidatePhase switch
+        {
+            "bootstrap" => ActionHostCandidateExecutionPhase.Bootstrap,
+            "continuation" => ActionHostCandidateExecutionPhase.Continuation,
+            _ => throw new ArgumentOutOfRangeException(nameof(candidatePhase)),
+        };
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch,
+            candidateSourcePullRequestNumber: candidateSourcePullRequestNumber,
+            candidateExecutionPhase: candidateExecutionPhase,
+            workflowBranch: "codex/issue-181-metadata-recovery");
+        SetV2Workflow(scenario);
+
+        var rejected = await CreateV2Authorizer(scenario).AuthorizeAsync(
+            CreateCurrentHeadLaunch(scenario),
+            CancellationToken.None);
+
+        Assert.Null(rejected.Invocation);
+        Assert.Equal(
+            ActionHostAuthorizationFailure.RouteInputInvalid,
+            rejected.Failure);
+    }
+
     private static ActionHostAuthorizer CreateV2Authorizer(
         ActionHostAuthorizationScenario scenario) => new(
         scenario.EventReader,

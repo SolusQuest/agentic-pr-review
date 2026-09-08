@@ -55,6 +55,39 @@ internal sealed class TrustedProofV2WorkflowAdmission :
         return true;
     }
 
+    public bool TryAdmitCurrentRun(
+        ActionHostGitHubRepositoryFact repository,
+        ActionHostEventFact eventFact,
+        ActionHostGitHubWorkflowRunFact run,
+        ActionHostLaunchContract launch)
+    {
+        var candidate = eventFact.CandidateExecutionPhase is not null;
+        var expectedBranch = candidate
+            ? run.HeadBranch
+            : repository.DefaultBranch;
+        var expectedWorkflowRef =
+            $"{repository.FullName}/{launch.WorkflowPath}@" +
+            $"refs/heads/{expectedBranch}";
+        return candidate
+            ? eventFact.Route == ActionHostAuthorizationRoute.WorkflowDispatch &&
+                eventFact.CandidateSourcePullRequestNumber is > 0 &&
+                eventFact.CandidateSourcePullRequestNumber !=
+                    eventFact.DispatchPullRequestNumber &&
+                !StringComparer.Ordinal.Equals(
+                    run.HeadBranch,
+                    repository.DefaultBranch) &&
+                StringComparer.Ordinal.Equals(
+                    launch.WorkflowRef,
+                    expectedWorkflowRef)
+            : eventFact.CandidateSourcePullRequestNumber is null &&
+                StringComparer.Ordinal.Equals(
+                    run.HeadBranch,
+                    repository.DefaultBranch) &&
+                StringComparer.Ordinal.Equals(
+                    launch.WorkflowRef,
+                    expectedWorkflowRef);
+    }
+
     public bool TryAdmitPullRequest(
         ActionHostGitHubRepositoryFact repository,
         ActionHostGitHubPullRequestFact pullRequest,

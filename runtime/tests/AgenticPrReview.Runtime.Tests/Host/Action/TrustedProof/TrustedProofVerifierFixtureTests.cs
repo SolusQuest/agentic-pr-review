@@ -1333,6 +1333,66 @@ public sealed class TrustedProofVerifierFixtureTests
         }
     }
 
+    [Fact]
+    public async Task SyntheticArtifactsRejectSameRunDuplicateButPermitIndependentRun()
+    {
+        var root = CreateWitnessScenario();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "900");
+            await using var platform = SyntheticOfficialPlatform.Start(root);
+            using var client = new HttpClient();
+            async Task<HttpResponseMessage> Command(string operation, string name)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post,
+                    platform.BaseUrl +
+                    "/twirp/github.actions.results.api.v1.ArtifactService/" + operation);
+                request.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Bearer", FrameworkSupervisor.RuntimeToken);
+                request.Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    workflowRunBackendId = FrameworkCanaries.RunBackendId,
+                    workflowJobRunBackendId = FrameworkCanaries.JobBackendId,
+                    name,
+                }), Encoding.UTF8, "application/json");
+                return await client.SendAsync(request);
+            }
+
+            using var created = await Command("CreateArtifact", "same-logical-name");
+            Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+            using var archiveBytes = new MemoryStream();
+            using (var archive = new ZipArchive(archiveBytes, ZipArchiveMode.Create,
+                       leaveOpen: true))
+            {
+                await using var entry = archive.CreateEntry("artifact-envelope.json").Open();
+                await entry.WriteAsync(Encoding.UTF8.GetBytes(
+                    "{\"producing_run_id\":\"900\",\"producing_run_attempt\":\"1\"}"));
+            }
+            using var blockContent = new ByteArrayContent(archiveBytes.ToArray());
+            using var block = await client.PutAsync(platform.BaseUrl +
+                "/blob/upload?comp=block&blockid=one&sig=" +
+                Uri.EscapeDataString(FrameworkCanaries.SignedUrl),
+                blockContent);
+            Assert.Equal(HttpStatusCode.Created, block.StatusCode);
+            using var finalized = await Command("FinalizeArtifact", "same-logical-name");
+            Assert.Equal(HttpStatusCode.OK, finalized.StatusCode);
+            using var repeatedFinalize = await Command("FinalizeArtifact", "same-logical-name");
+            Assert.Equal(HttpStatusCode.OK, repeatedFinalize.StatusCode);
+            Assert.Single(platform.ArtifactNames);
+            using var duplicate = await Command("CreateArtifact", "same-logical-name");
+            Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+            using var otherName = await Command("CreateArtifact", "other-logical-name");
+            Assert.Equal(HttpStatusCode.OK, otherName.StatusCode);
+            await File.WriteAllTextAsync(Path.Join(root, "run-id"), "901");
+            using var independentRun = await Command("CreateArtifact", "same-logical-name");
+            Assert.Equal(HttpStatusCode.OK, independentRun.StatusCode);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CreateWitnessScenario()
     {
         var root = Path.Join(Path.GetTempPath(),

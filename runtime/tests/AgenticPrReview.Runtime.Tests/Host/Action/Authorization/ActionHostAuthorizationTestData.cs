@@ -62,7 +62,10 @@ internal sealed class ActionHostAuthorizationScenario
             ActionHostCancellationState.Active,
         string tokenValue = "github-token-canary-value",
         long pullRequestId = PullRequestId,
-        long pullRequestNumber = PullRequestNumber)
+        long pullRequestNumber = PullRequestNumber,
+        long? candidateSourcePullRequestNumber = null,
+        ActionHostCandidateExecutionPhase? candidateExecutionPhase = null,
+        string? workflowBranch = null)
     {
         var repository = new ActionHostGitHubRepositoryFact(
             RepositoryId,
@@ -103,7 +106,7 @@ internal sealed class ActionHostAuthorizationScenario
             72,
             "R4 trusted proof",
             ActionHostAuthorizationPolicy.PrivilegedWorkflowPath,
-            DefaultBranch,
+            workflowBranch ?? DefaultBranch,
             WorkflowSha,
             route == ActionHostAuthorizationRoute.WorkflowRun
                 ? "workflow_run"
@@ -133,7 +136,11 @@ internal sealed class ActionHostAuthorizationScenario
             workflowBytes);
         var eventBytes = route == ActionHostAuthorizationRoute.WorkflowRun
             ? WorkflowRunEventJson(trigger)
-            : WorkflowDispatchEventJson(actor, pullRequestNumber);
+            : WorkflowDispatchEventJson(
+                actor,
+                pullRequestNumber,
+                candidateSourcePullRequestNumber,
+                candidateExecutionPhase);
         var launch = CreateLaunch(
             eventBytes,
             route,
@@ -143,7 +150,8 @@ internal sealed class ActionHostAuthorizationScenario
                 ActionHostAuthorizationRoute.WorkflowDispatch
                     ? pullRequestNumber
                     : null,
-            tokenValue: tokenValue);
+            tokenValue: tokenValue,
+            workflowBranch: workflowBranch);
         var transport = new FakeGitHubTransport
         {
             Repository = repository,
@@ -171,7 +179,8 @@ internal sealed class ActionHostAuthorizationScenario
         ActionHostCancellationState cancellation =
             ActionHostCancellationState.Active,
         long? pullRequestNumber = null,
-        string tokenValue = "github-token-canary-value")
+        string tokenValue = "github-token-canary-value",
+        string? workflowBranch = null)
     {
         ActionHostGitHubToken? token = null;
         if (includeToken)
@@ -204,7 +213,7 @@ internal sealed class ActionHostAuthorizationScenario
             ActionHostAuthorizationPolicy.PrivilegedWorkflowPath,
             RepositoryName + "/" +
                 ActionHostAuthorizationPolicy.PrivilegedWorkflowPath +
-                "@refs/heads/main",
+                $"@refs/heads/{workflowBranch ?? DefaultBranch}",
             WorkflowSha,
             ActionSha,
             PayloadSha,
@@ -220,9 +229,29 @@ internal sealed class ActionHostAuthorizationScenario
 
     private static byte[] WorkflowDispatchEventJson(
         ActionHostGitHubActorFact actor,
-        long pullRequestNumber) => Encoding.UTF8.GetBytes($$"""
+        long pullRequestNumber,
+        long? candidateSourcePullRequestNumber,
+        ActionHostCandidateExecutionPhase? candidateExecutionPhase)
+    {
+        var candidate = candidateExecutionPhase switch
         {
-          "inputs": { "pr-number": "{{pullRequestNumber}}" },
+            ActionHostCandidateExecutionPhase.Bootstrap => "candidate-bootstrap",
+            ActionHostCandidateExecutionPhase.Continuation => "candidate-continuation",
+            ActionHostCandidateExecutionPhase.Stale => "candidate-stale",
+            _ => null,
+        };
+        var candidateFields = candidate is null
+            ? string.Empty
+            : $$"""
+            ,
+            "candidate-pr-number": "{{candidateSourcePullRequestNumber}}",
+            "execution-mode": "{{candidate}}"
+            """;
+        return Encoding.UTF8.GetBytes($$"""
+        {
+          "inputs": {
+            "pr-number": "{{pullRequestNumber}}"{{candidateFields}}
+          },
           "repository": {
             "id": {{RepositoryId}},
             "full_name": "{{RepositoryName}}"
@@ -230,6 +259,7 @@ internal sealed class ActionHostAuthorizationScenario
           "sender": { "id": {{actor.Id}}, "login": "{{actor.Login}}" }
         }
         """);
+    }
 
     private static byte[] WorkflowRunEventJson(
         ActionHostGitHubWorkflowRunFact run)

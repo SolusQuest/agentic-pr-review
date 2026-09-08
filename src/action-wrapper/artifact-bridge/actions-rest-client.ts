@@ -228,12 +228,14 @@ class ConditionalGetCache {
     readonly artifact_id?: number;
   }): void {
     const listPrefix = ['list', input.owner, input.repo, input.name].join('\u0000') + '\u0000';
+    const broadListPrefix = ['list', input.owner, input.repo, ''].join('\u0000') + '\u0000';
     const artifactKey =
       input.artifact_id === undefined
         ? undefined
         : ['artifact', input.owner, input.repo, input.artifact_id].join('\u0000');
     for (const key of this.entries.keys()) {
-      if (key.startsWith(listPrefix) || key === artifactKey) this.deleteEntry(key);
+      if (key.startsWith(listPrefix) || key.startsWith(broadListPrefix) || key === artifactKey)
+        this.deleteEntry(key);
     }
   }
 
@@ -322,7 +324,7 @@ function validEtag(value: string | undefined): value is string {
 function listCacheKey(input: {
   readonly owner: string;
   readonly repo: string;
-  readonly name: string;
+  readonly name?: string;
   readonly per_page: number;
   readonly page: number;
 }): string {

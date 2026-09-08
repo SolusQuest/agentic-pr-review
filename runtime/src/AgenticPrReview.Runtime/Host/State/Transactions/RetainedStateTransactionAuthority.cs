@@ -864,6 +864,14 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
             return RetainedStateTransactionCodes.AccessDenied;
         }
 
+        var current = Volatile.Read(ref locator);
+        if (current is not null && current.CoversDependentExpiry(
+                access,
+                dependentExpiresAtUnixSeconds))
+        {
+            return RetainedStateTransactionCodes.Ready;
+        }
+
         var resolved = await new LocatorRootService(
                 store,
                 currentKeys,

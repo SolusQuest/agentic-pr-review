@@ -10,6 +10,12 @@ internal sealed class ActionHostWorkflowDispatchInputsDocument
 {
     [JsonPropertyName("pr-number")]
     public string? PullRequestNumber { get; set; }
+
+    [JsonPropertyName("candidate-pr-number")]
+    public string? CandidatePullRequestNumber { get; set; }
+
+    [JsonPropertyName("execution-mode")]
+    public string? ExecutionMode { get; set; }
 }
 
 internal sealed class ActionHostEventDocument
@@ -165,23 +171,25 @@ internal static class ActionHostEventParser
                     sender!,
                     document.Action,
                     workflowRun,
+                    null,
+                    null,
                     null);
                 return true;
             }
 
             if (document.Inputs is not null)
             {
-                long? pullRequestNumber = null;
-                if (document.Inputs.PullRequestNumber is { } rawNumber)
+                if (!ActionHostContractValidation.TryParsePositiveInt64(
+                        document.Inputs.PullRequestNumber,
+                        out var pullRequestNumber) ||
+                    !TryOptionalPositiveInt64(
+                        document.Inputs.CandidatePullRequestNumber,
+                        out var candidatePullRequestNumber) ||
+                    !TryCandidatePhase(
+                        document.Inputs.ExecutionMode,
+                        out var candidatePhase))
                 {
-                    if (!ActionHostContractValidation.TryParsePositiveInt64(
-                            rawNumber,
-                            out var parsedNumber))
-                    {
-                        return false;
-                    }
-
-                    pullRequestNumber = parsedNumber;
+                    return false;
                 }
 
                 fact = new(
@@ -190,7 +198,9 @@ internal static class ActionHostEventParser
                     sender!,
                     document.Action,
                     null,
-                    pullRequestNumber);
+                    pullRequestNumber,
+                    candidatePullRequestNumber,
+                    candidatePhase);
                 return true;
             }
 
@@ -203,6 +213,44 @@ internal static class ActionHostEventParser
         {
             return false;
         }
+    }
+
+    private static bool TryOptionalPositiveInt64(
+        string? raw,
+        out long? value)
+    {
+        value = null;
+        if (string.IsNullOrEmpty(raw))
+        {
+            return true;
+        }
+
+        if (!ActionHostContractValidation.TryParsePositiveInt64(
+                raw,
+                out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
+    }
+
+    private static bool TryCandidatePhase(
+        string? executionMode,
+        out ActionHostCandidateExecutionPhase? phase)
+    {
+        phase = executionMode switch
+        {
+            null or "" or "main-continuation" => null,
+            "candidate-bootstrap" => ActionHostCandidateExecutionPhase.Bootstrap,
+            "candidate-continuation" =>
+                ActionHostCandidateExecutionPhase.Continuation,
+            "candidate-stale" => ActionHostCandidateExecutionPhase.Stale,
+            _ => (ActionHostCandidateExecutionPhase?)null,
+        };
+        return executionMode is null or "" or "main-continuation" ||
+            phase is not null;
     }
 
     private static bool TryMap(

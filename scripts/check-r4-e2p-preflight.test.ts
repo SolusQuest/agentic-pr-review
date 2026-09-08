@@ -271,6 +271,13 @@ describe('R4 E2P v2 exact inline preflight', () => {
   };
   const v2Environment = {
     ...environment,
+    INPUT_CANDIDATE_PR_NUMBER: '',
+    INPUT_EXECUTION_MODE: '',
+    WORKFLOW_REF: `${values.repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/main`,
+    RUN_REF: 'refs/heads/main',
+    RUN_SHA: values.workflowSha,
+    ACTOR: 'maintainer',
+    ACTOR_ID: '7',
     R4_TRUSTED_PROOF_AUTHORIZATION: authorizationManifestV2(v2Values),
   };
   const v2Authorization = (overrides: Partial<typeof v2Values> = {}) =>
@@ -289,6 +296,27 @@ describe('R4 E2P v2 exact inline preflight', () => {
       repo: { id: 42, full_name: v2Values.repository },
       sha: fixtureHeadSha,
       ref: `r4-trusted-proof/${operationId}`,
+    },
+    ...overrides,
+  });
+  const candidatePull = (overrides: Record<string, unknown> = {}) => ({
+    number: 234,
+    state: 'open',
+    draft: true,
+    merged_at: null,
+    user: { login: 'maintainer', id: 7 },
+    // GitHub reports this field relative to the caller. The same PR is MEMBER
+    // to an authenticated maintainer but CONTRIBUTOR to this tokenless preflight.
+    author_association: 'CONTRIBUTOR',
+    base: {
+      ref: 'main',
+      sha: 'c'.repeat(40),
+      repo: { id: 42, full_name: v2Values.repository },
+    },
+    head: {
+      repo: { id: 42, full_name: v2Values.repository },
+      sha: values.workflowSha,
+      ref: 'codex/issue-181-metadata-recovery',
     },
     ...overrides,
   });
@@ -317,7 +345,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
 
       expect(result.stderr).toBe('');
       expect(result.stdout).toBe(
-        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(v2Values)}\nrequest-budget-profile=${route === 'workflow_run' ? 'final-bootstrap' : 'final-continuation'}\n`,
+        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(v2Values)}\nrequest-budget-profile=${route === 'workflow_run' ? 'final-bootstrap' : 'final-continuation'}\nbarrier-mode=${route === 'workflow_run' ? 'hold' : 'verify-completed'}\n`,
       );
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(fetchImpl.mock.calls[0][1]).toMatchObject({
@@ -329,6 +357,115 @@ describe('R4 E2P v2 exact inline preflight', () => {
       );
     },
   );
+
+  it.each([
+    ['candidate-bootstrap', 'normal', 'final-bootstrap', 'hold'],
+    ['candidate-continuation', 'normal', 'final-continuation', 'verify-completed'],
+    ['candidate-stale', 'stale', 'final-stale', 'hold'],
+  ])(
+    'binds %s to the exact candidate source and fixture',
+    async (executionMode, proofScope, requestBudgetProfile, barrierMode) => {
+      const candidateValues = { ...v2Values, proofScope };
+      const fetchImpl = vi.fn(async (url: string) =>
+        response(url.endsWith('/pulls/234') ? candidatePull() : v2Pull()),
+      );
+      const result = await runExtractedPreflight({
+        source: v2Source,
+        environment: {
+          ...v2Environment,
+          EVENT_NAME: 'workflow_dispatch',
+          EVENT_PR_NUMBER: '',
+          EVENT_HEAD_SHA: '',
+          INPUT_PR_NUMBER: '147',
+          INPUT_OPERATION_ID: operationId,
+          INPUT_CANDIDATE_PR_NUMBER: '234',
+          INPUT_EXECUTION_MODE: executionMode,
+          RUN_REF: 'refs/heads/codex/issue-181-metadata-recovery',
+          WORKFLOW_REF: `${values.repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/codex/issue-181-metadata-recovery`,
+          R4_TRUSTED_PROOF_AUTHORIZATION: authorizationManifestV2(candidateValues),
+        },
+        fetchImpl,
+      });
+
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toBe(
+        `authorized=true\npr-number=147\nfixture-head-sha=${fixtureHeadSha}\noperation-id=${operationId}\nauthorization-manifest-digest=${authorizationDigestV2(candidateValues)}\nrequest-budget-profile=${requestBudgetProfile}\nbarrier-mode=${barrierMode}\n`,
+      );
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+        'https://api.github.com/repos/SolusQuest/agentic-pr-review/pulls/234',
+        'https://api.github.com/repos/SolusQuest/agentic-pr-review/pulls/147',
+      ]);
+    },
+  );
+
+  it.each([
+    ['missing candidate number', { INPUT_CANDIDATE_PR_NUMBER: '' }, {}],
+    ['source equals fixture', { INPUT_CANDIDATE_PR_NUMBER: '147' }, {}],
+    ['wrong run ref', { RUN_REF: 'refs/heads/other' }, {}],
+    ['wrong source head', {}, { head: { ...candidatePull().head, sha: '0'.repeat(40) } }],
+    [
+      'fork source',
+      {},
+      { head: { ...candidatePull().head, repo: { id: 43, full_name: 'fork/repo' } } },
+    ],
+    ['wrong actor', {}, { user: { login: 'other', id: 8 } }],
+  ])(
+    'rejects candidate source drift: %s',
+    async (_name, environmentOverrides, candidateOverrides) => {
+      const fetchImpl = vi.fn(async (url: string) =>
+        response(url.endsWith('/pulls/234') ? candidatePull(candidateOverrides) : v2Pull()),
+      );
+      const result = await runExtractedPreflight({
+        source: v2Source,
+        environment: {
+          ...v2Environment,
+          EVENT_NAME: 'workflow_dispatch',
+          EVENT_PR_NUMBER: '',
+          EVENT_HEAD_SHA: '',
+          INPUT_PR_NUMBER: '147',
+          INPUT_OPERATION_ID: operationId,
+          INPUT_CANDIDATE_PR_NUMBER: '234',
+          INPUT_EXECUTION_MODE: 'candidate-bootstrap',
+          RUN_REF: 'refs/heads/codex/issue-181-metadata-recovery',
+          WORKFLOW_REF: `${values.repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/codex/issue-181-metadata-recovery`,
+          ...environmentOverrides,
+        },
+        fetchImpl,
+      });
+
+      expect(result.stdout.startsWith('authorized=false\n')).toBe(true);
+      expect(result.stderr).toMatch(/^APR_R4_E2P_PREFLIGHT_REJECTED /u);
+      expect(result.stdout).not.toContain('authorized=true');
+    },
+  );
+
+  it('does not treat caller-relative author association as candidate authority', async () => {
+    const fetchImpl = vi.fn(async (url: string) =>
+      response(
+        url.endsWith('/pulls/234') ? candidatePull({ author_association: 'NONE' }) : v2Pull(),
+      ),
+    );
+    const result = await runExtractedPreflight({
+      source: v2Source,
+      environment: {
+        ...v2Environment,
+        EVENT_NAME: 'workflow_dispatch',
+        EVENT_PR_NUMBER: '',
+        EVENT_HEAD_SHA: '',
+        INPUT_PR_NUMBER: '147',
+        INPUT_OPERATION_ID: operationId,
+        INPUT_CANDIDATE_PR_NUMBER: '234',
+        INPUT_EXECUTION_MODE: 'candidate-bootstrap',
+        RUN_REF: 'refs/heads/codex/issue-181-metadata-recovery',
+        WORKFLOW_REF: `${values.repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/codex/issue-181-metadata-recovery`,
+      },
+      fetchImpl,
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('authorized=true\n');
+  });
 
   it('selects the stale suffix only from an authenticated stale workflow-run manifest', async () => {
     const staleValues = { ...v2Values, proofScope: 'stale' };
@@ -400,7 +537,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
 
     expect(result.stdout).toBe(
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n',
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\nbarrier-mode=\n',
     );
     expect(result.stdout).not.toContain('authorized=true');
     expect(result.stderr).toMatch(/^APR_R4_E2P_PREFLIGHT_REJECTED /u);
@@ -477,7 +614,7 @@ describe('R4 E2P v2 exact inline preflight', () => {
     });
 
     expect(result.stdout).toBe(
-      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\n',
+      'authorized=false\npr-number=\nfixture-head-sha=\noperation-id=\nauthorization-manifest-digest=\nrequest-budget-profile=\nbarrier-mode=\n',
     );
   });
 

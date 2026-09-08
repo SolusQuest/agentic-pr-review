@@ -35,6 +35,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal int DeleteFailuresRemaining { get; set; }
     internal bool RemoveOnDeleteFailure { get; set; }
     internal long ExtraRetentionSeconds { get; set; } = 3_600;
+    internal long NextUploadRetentionAdjustmentSeconds { get; set; }
+    internal long NextUploadCopyRetentionAdjustmentSeconds { get; set; }
     internal string ProducingRunIdentity { get; set; } = "scripted";
     internal long? ProducingRunAttempt { get; set; }
     internal int HideExistingObjectsForNextLists { get; set; }
@@ -53,6 +55,11 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         OpaqueStoreObjectMetadata,
         OpaqueStoreObjectMetadata>? NextUploadMetadataTransform
     { get; set; }
+    internal System.Func<
+        OpaqueStoreObjectMetadata,
+        OpaqueStoreObjectMetadata>? NextReadBackMetadataTransform
+    { get; set; }
+    internal bool OmitNextUploadMetadata { get; set; }
     internal int ListCalls { get; private set; }
     internal int MetadataCalls { get; private set; }
     internal int DownloadCalls { get; private set; }
@@ -364,7 +371,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                 request.EncryptedObjectDigest,
                 checked(
                     request.MinimumExpiresAtUnixSeconds +
-                    ExtraRetentionSeconds),
+                    ExtraRetentionSeconds +
+                    NextUploadRetentionAdjustmentSeconds),
                 request.EncryptedBytes.Length);
             var scheduled = UploadCalls == FailUploadOnUploadCall ||
                 FailNextUploadForName == request.Name;
@@ -393,6 +401,10 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                         Reference = new OpaqueStoreObjectReference(
                             metadata.Reference.Name,
                             new OpaqueStoreObjectId(copyId)),
+                        ExpiresAtUnixSeconds = checked(
+                            request.MinimumExpiresAtUnixSeconds +
+                            ExtraRetentionSeconds +
+                            NextUploadCopyRetentionAdjustmentSeconds),
                     };
                     objects.Add(
                         copyId,
@@ -421,6 +433,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
             NextUploadMutationState =
                 OpaqueStoreMutationState.NotCommitted;
             PersistFailedUpload = false;
+            NextUploadRetentionAdjustmentSeconds = 0;
+            NextUploadCopyRetentionAdjustmentSeconds = 0;
             if (scheduled)
             {
                 FailUploadOnUploadCall = 0;
@@ -430,8 +444,10 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                 ScheduledUploadMutationState =
                     OpaqueStoreMutationState.NotCommitted;
             }
-            var returnedMetadata = NextUploadMetadataTransform?.Invoke(
-                metadata) ?? metadata;
+            var returnedMetadata = OmitNextUploadMetadata
+                ? null
+                : NextUploadMetadataTransform?.Invoke(metadata) ?? metadata;
+            OmitNextUploadMetadata = false;
             NextUploadMetadataTransform = null;
             var result = failure == OpaqueStoreFailure.None
                 ? new OpaqueStoreUploadResult(
@@ -469,15 +485,20 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                     OpaqueStoreReadBackResult.Fail(ReadBackFailure));
             }
 
-            return Task.FromResult(objects.TryGetValue(
+            if (!objects.TryGetValue(
                     request.Expected.Reference.ObjectId.Value,
-                    out var stored) &&
-                stored.Metadata == request.Expected
-                ? new OpaqueStoreReadBackResult(
-                    OpaqueStoreFailure.None,
-                    stored.Metadata)
-                : OpaqueStoreReadBackResult.Fail(
+                    out var stored) ||
+                stored.Metadata != request.Expected)
+            {
+                return Task.FromResult(OpaqueStoreReadBackResult.Fail(
                     OpaqueStoreFailure.NotFound));
+            }
+
+            var transform = NextReadBackMetadataTransform;
+            NextReadBackMetadataTransform = null;
+            return Task.FromResult(new OpaqueStoreReadBackResult(
+                OpaqueStoreFailure.None,
+                transform?.Invoke(stored.Metadata) ?? stored.Metadata));
         }
     }
 
@@ -553,8 +574,15 @@ internal sealed class ConcurrentInitializationLocatorStore
 {
     private readonly Barrier listBarrier = new(2);
     private readonly Barrier uploadBarrier = new(2);
+    private readonly Barrier cleanupBarrier = new(2);
+    private readonly TaskCompletionSource duplicateDeleted = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
     private int initialLists;
     private int initialUploads;
+    private int initialDeletes;
+
+    internal bool SynchronizeCleanup { get; init; }
+    internal bool DelayDuplicateUploadReceipt { get; init; }
 
     internal ScriptedLocatorStore Inner { get; } = new();
 
@@ -597,6 +625,15 @@ internal sealed class ConcurrentInitializationLocatorStore
                 cancellationToken));
         }
 
+        // The scripted store allocates ascending IDs; equal-retention roots
+        // retain object-0000 and prune object-0001.
+        if (DelayDuplicateUploadReceipt &&
+            result.Metadata!.Reference.ObjectId.Value == "object-0001")
+        {
+            await duplicateDeleted.Task.WaitAsync(
+                TimeSpan.FromSeconds(10), cancellationToken);
+        }
+
         return result;
     }
 
@@ -605,14 +642,30 @@ internal sealed class ConcurrentInitializationLocatorStore
         CancellationToken cancellationToken) =>
         Inner.ReadBackExactAsync(request, cancellationToken);
 
-    public Task<OpaqueStoreDeleteResult> DeleteExactAsync(
+    public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
         OpaqueStoreDeleteRequest request,
-        CancellationToken cancellationToken) =>
-        Inner.DeleteExactAsync(request, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        if (SynchronizeCleanup &&
+            Interlocked.Increment(ref initialDeletes) <= 2)
+        {
+            Assert.True(cleanupBarrier.SignalAndWait(
+                TimeSpan.FromSeconds(10), cancellationToken));
+        }
+
+        var result = await Inner.DeleteExactAsync(request, cancellationToken);
+        if (request.Expected.Reference.ObjectId.Value == "object-0001")
+        {
+            duplicateDeleted.TrySetResult();
+        }
+
+        return result;
+    }
 
     public void Dispose()
     {
         listBarrier.Dispose();
         uploadBarrier.Dispose();
+        cleanupBarrier.Dispose();
     }
 }

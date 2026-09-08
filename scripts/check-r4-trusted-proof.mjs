@@ -25,8 +25,8 @@ const actionSourceSha = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
 const payloadSourceSha = 'edc594c29a8a6b5fdacfab48643bf221277af200';
 const payloadSourceTree = '8bf475a02a4f7307cdce2bbc29dd2bc6c6cf9089';
 const payloadSha256 = 'b6405d21987a549540b071215f215cf15339729cb3905ad3294c88bc2edf8c0e';
-const templateSha256 = '4393580ffa7d35e768e6fa2548142dd460635540045fa1d5d1d0802ccc165619';
-const renderedWorkflowSha256 = '4393580ffa7d35e768e6fa2548142dd460635540045fa1d5d1d0802ccc165619';
+const templateSha256 = '5ac6907972cd96e5b5f2d3c660aaa349dd5a5486c598bf0887eab44010efa0b8';
+const renderedWorkflowSha256 = '5ac6907972cd96e5b5f2d3c660aaa349dd5a5486c598bf0887eab44010efa0b8';
 const sealedReceiptTemplateSha256 =
   '46ff02fc0e107bdff5d4d4fbe185d8a4f97b8cb8059b99485a285c8d11a45768';
 const sealedRenderedWorkflowSha256 =
@@ -780,7 +780,7 @@ function validateRepositorySecretRoutes(workflowsRoot) {
   }
   const expected = [
     `r3-live-proof.yml\0\${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}`,
-    ...Array.from({ length: 4 }, () => `r4-trusted-proof.yml\0\${{ secrets.GITHUB_TOKEN }}`),
+    ...Array.from({ length: 5 }, () => `r4-trusted-proof.yml\0\${{ secrets.GITHUB_TOKEN }}`),
     ...Array.from(
       { length: 2 },
       () => `r4-trusted-proof.yml\0\${{ secrets.AGENTIC_PR_REVIEW_TRUSTED_PROOF_PROVIDER_CANARY }}`,

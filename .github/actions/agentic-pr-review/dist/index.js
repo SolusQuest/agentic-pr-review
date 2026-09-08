@@ -97582,6 +97582,8 @@ var ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   recordsPerPage: 100,
   maximumPages: 3,
   maximumRecords: 256,
+  maximumRepositoryRecords: 1024,
+  maximumRepositoryPages: 11,
   requestTimeoutMs: 3e4,
   logicalOperationTimeoutMs: 12e4,
   maximumActiveCorrelations: 32,
@@ -97763,9 +97765,11 @@ var ConditionalGetCache = class {
   }
   deleteArtifactMutation(input) {
     const listPrefix = ["list", input.owner, input.repo, input.name].join("\0") + "\0";
+    const broadListPrefix = ["list", input.owner, input.repo, ""].join("\0") + "\0";
     const artifactKey = input.artifact_id === void 0 ? void 0 : ["artifact", input.owner, input.repo, input.artifact_id].join("\0");
     for (const key of this.entries.keys()) {
-      if (key.startsWith(listPrefix) || key === artifactKey) this.deleteEntry(key);
+      if (key.startsWith(listPrefix) || key.startsWith(broadListPrefix) || key === artifactKey)
+        this.deleteEntry(key);
     }
   }
   dispose() {
@@ -99325,6 +99329,19 @@ function innerController(outerSignal) {
   };
 }
 
+// src/action-wrapper/artifact-bridge/physical-name.ts
+import { createHash as createHash3 } from "node:crypto";
+function artifactFamily(logicalName) {
+  return `apr-object-${createHash3("sha256").update("apr-artifact-family\0").update(logicalName).digest("hex")}-`;
+}
+function physicalArtifactName(logicalName, encryptedDigest) {
+  if (!/^[0-9a-f]{64}$/u.test(encryptedDigest)) throw new Error("artifact_digest_invalid");
+  return artifactFamily(logicalName) + encryptedDigest;
+}
+function physicalArtifactMember(logicalName, physicalName) {
+  return typeof physicalName === "string" && physicalName.startsWith(artifactFamily(logicalName)) && /^[0-9a-f]{64}$/u.test(physicalName.slice(artifactFamily(logicalName).length));
+}
+
 // src/action-wrapper/artifact-bridge/official-output.ts
 var OfficialCallTimeoutError = class extends Error {
   constructor(settled) {
@@ -99682,7 +99699,7 @@ async function openStagedFile(filePath, flags) {
 }
 
 // src/action-wrapper/artifact-bridge/transport-envelope.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 import { createInflateRaw } from "node:zlib";
 var ArtifactTransportEnvelopeError = class extends Error {
   constructor() {
@@ -99732,7 +99749,7 @@ async function readArtifactArchive(archive, expectedArchiveDigest, budget) {
   return decodeEnvelope(envelopeBytes, budget);
 }
 function digestBytes(bytes) {
-  return createHash3("sha256").update(bytes).digest("hex");
+  return createHash4("sha256").update(bytes).digest("hex");
 }
 async function extractOneBoundedEntry(archive, budget) {
   budget.throwIfExpired();
@@ -100013,11 +100030,10 @@ var OfficialArtifactOperations = class {
     let expectedTotal;
     const seen = /* @__PURE__ */ new Set();
     const objects = [];
-    for (let page = 1; page <= ARTIFACT_BRIDGE_LIMITS.maximumPages; page += 1) {
+    for (let page = 1; page <= ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages; page += 1) {
       const pageInput = {
         owner: this.context.owner,
         repo: this.context.repository,
-        name: command.name,
         per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
         page
       };
@@ -100030,20 +100046,21 @@ var OfficialArtifactOperations = class {
         budget
       );
       budget.throwIfExpired();
-      if (response.status !== 200 || !responseFits(response.data)) {
+      if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
         this.rejectArtifactList(command.name, page, "incomplete");
       }
       if (!Array.isArray(response.data.artifacts) || response.data.artifacts.length > ARTIFACT_BRIDGE_LIMITS.recordsPerPage) {
         this.rejectArtifactList(command.name, page, "incomplete");
       }
       const total = response.data.total_count;
-      if (!Number.isSafeInteger(total) || total < 0 || total > ARTIFACT_BRIDGE_LIMITS.maximumRecords || total > maximum || expectedTotal !== void 0 && total !== expectedTotal) {
+      if (!Number.isSafeInteger(total) || total < 0 || total > ARTIFACT_BRIDGE_LIMITS.maximumRepositoryRecords || expectedTotal !== void 0 && total !== expectedTotal) {
         this.rejectArtifactList(command.name, page, "incomplete");
       }
       expectedTotal = total;
       for (const artifact of response.data.artifacts) {
+        if (artifact === null) this.rejectArtifactList(command.name, page, "incomplete");
         const id = platformId(artifact.id);
-        if (artifact.name !== command.name || !id || seen.has(id)) {
+        if (typeof artifact.name !== "string" || !id || seen.has(id)) {
           this.rejectArtifactList(
             command.name,
             page,
@@ -100051,12 +100068,17 @@ var OfficialArtifactOperations = class {
           );
         }
         seen.add(id);
-        objects.push({ name: command.name, object_id: id });
-        if (objects.length > total || objects.length > maximum) {
+        if (artifact.name === command.name || artifact.name.startsWith(artifactFamily(command.name)) && !physicalArtifactMember(command.name, artifact.name)) {
+          this.rejectArtifactList(command.name, page, "incomplete");
+        }
+        if (physicalArtifactMember(command.name, artifact.name)) {
+          objects.push({ name: command.name, object_id: id });
+        }
+        if (seen.size > total || objects.length > maximum) {
           this.rejectArtifactList(command.name, page, "incomplete");
         }
       }
-      if (objects.length === total) {
+      if (seen.size === total) {
         return {
           operation: command.operation,
           correlation_id: command.correlation_id,
@@ -100071,7 +100093,11 @@ var OfficialArtifactOperations = class {
         this.rejectArtifactList(command.name, page, "incomplete");
       }
     }
-    return this.rejectArtifactList(command.name, ARTIFACT_BRIDGE_LIMITS.maximumPages, "incomplete");
+    return this.rejectArtifactList(
+      command.name,
+      ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages,
+      "incomplete"
+    );
   }
   async metadata(command, budget) {
     const platform2 = await this.loadPlatformArtifact(command.name, command.object_id, budget);
@@ -100153,7 +100179,7 @@ var OfficialArtifactOperations = class {
             name: command.name
           });
           const pending = this.artifactClient.uploadArtifact(
-            command.name,
+            physicalArtifactName(command.name, command.encrypted_object_digest),
             [envelopePath],
             operationDirectory,
             {
@@ -100368,7 +100394,7 @@ var OfficialArtifactOperations = class {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("not_found");
     }
-    if (response.status !== 200 || !responseFits(response.data)) {
+    if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("invalid");
     }
@@ -100377,12 +100403,13 @@ var OfficialArtifactOperations = class {
     const runId = platformId(artifact.workflow_run?.id ?? void 0);
     const archiveDigest = parseRestArtifactDigest(artifact.digest);
     const expiry = parseExpiry(artifact.expires_at);
-    if (id !== objectId || artifact.name !== expectedName || !runId || !archiveDigest || !expiry || typeof artifact.expired !== "boolean" || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 1 || artifact.size_in_bytes > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
+    if (id !== objectId || !physicalArtifactMember(expectedName, artifact.name) || !runId || !archiveDigest || !expiry || typeof artifact.expired !== "boolean" || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 1 || artifact.size_in_bytes > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure("invalid");
     }
     return {
-      name: artifact.name,
+      name: expectedName,
+      physicalName: artifact.name,
       id,
       archiveSize: artifact.size_in_bytes,
       archiveDigest,
@@ -100419,6 +100446,9 @@ var OfficialArtifactOperations = class {
         throw new BridgeOperationFailure("digest_mismatch");
       }
       envelope = await readArtifactArchive(archive, platform2.archiveDigest, budget);
+      if (platform2.physicalName !== physicalArtifactName(platform2.name, envelope.encryptedObjectDigest)) {
+        throw new BridgeOperationFailure("digest_mismatch");
+      }
       if (envelope.producingRunId !== platform2.producingRunId) {
         throw new BridgeOperationFailure("conflict");
       }
@@ -100476,7 +100506,7 @@ var OfficialArtifactOperations = class {
     }
   }
   assertExpectedPlatform(expected, platform2) {
-    if (expected.name !== platform2.name || expected.object_id !== platform2.id || expected.producing_run_id !== platform2.producingRunId || expected.archive_digest !== platform2.archiveDigest || expected.expires_at_unix_seconds !== platform2.expiresAtUnixSeconds) {
+    if (expected.name !== platform2.name || platform2.physicalName !== physicalArtifactName(expected.name, expected.encrypted_object_digest) || expected.object_id !== platform2.id || expected.producing_run_id !== platform2.producingRunId || expected.archive_digest !== platform2.archiveDigest || expected.expires_at_unix_seconds !== platform2.expiresAtUnixSeconds) {
       this.invalidatePlatformRepresentation(platform2.name, platform2.id);
       throw new BridgeOperationFailure("conflict");
     }
@@ -100507,12 +100537,11 @@ var OfficialArtifactOperations = class {
       secondaryPoints
     });
   }
-  rejectArtifactList(name, throughPage, failure) {
+  rejectArtifactList(_name, throughPage, failure) {
     for (let page = 1; page <= throughPage; page += 1) {
       this.context.actions.invalidateArtifactListRepresentation?.({
         owner: this.context.owner,
         repo: this.context.repository,
-        name,
         per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
         page
       });
@@ -100638,6 +100667,7 @@ function recordKey(platform2) {
   return [
     platform2.name,
     platform2.id,
+    platform2.physicalName,
     platform2.archiveSize,
     platform2.archiveDigest,
     platform2.expiresAtUnixSeconds,
@@ -100705,7 +100735,7 @@ function mutationStateForPhase(phase) {
 function mandatoryPrimaryAllocation(command) {
   switch (command.operation) {
     case "list_exact":
-      return ARTIFACT_BRIDGE_LIMITS.maximumPages;
+      return ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages;
     case "metadata":
     case "download":
     case "readback_exact":
@@ -101762,7 +101792,7 @@ async function within(promise, timeoutMs) {
 }
 
 // src/action-wrapper/launcher/prepared-payload.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 import { lstat as lstat3, open as open3, realpath as realpath4 } from "node:fs/promises";
 import path6 from "node:path";
 async function verifyPreparedPayload(proof) {
@@ -101837,7 +101867,7 @@ async function digestEventJson(eventJsonPath) {
   }
 }
 async function digestHandle(handle) {
-  const hash = createHash4("sha256");
+  const hash = createHash5("sha256");
   const stream4 = handle.createReadStream({ autoClose: false, start: 0 });
   for await (const chunk of stream4) hash.update(chunk);
   return hash.digest("hex");
@@ -102372,4 +102402,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 017b14ae1e5fa72925577d2de9660c38341065303563493a7fccc5949592bc34
+// Action source inventory sha256: 71e8b8bb497ea5e0cc3bae305f5695ee05d2024442d0f2227ae8ab36c34d0f61

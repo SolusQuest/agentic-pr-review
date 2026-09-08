@@ -9,6 +9,13 @@ internal enum ActionHostAuthorizationRoute
     WorkflowDispatch,
 }
 
+internal enum ActionHostCandidateExecutionPhase
+{
+    Bootstrap = 1,
+    Continuation,
+    Stale,
+}
+
 internal enum ActionHostAuthorizationFailure
 {
     None = 0,
@@ -114,7 +121,9 @@ internal sealed record ActionHostEventFact(
     ActionHostGitHubActorFact Sender,
     string? Action,
     ActionHostGitHubWorkflowRunFact? WorkflowRun,
-    long? DispatchPullRequestNumber);
+    long? DispatchPullRequestNumber,
+    long? CandidateSourcePullRequestNumber,
+    ActionHostCandidateExecutionPhase? CandidateExecutionPhase);
 
 internal interface IActionHostEventReader
 {

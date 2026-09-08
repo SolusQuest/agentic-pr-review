@@ -213,40 +213,58 @@ export function resolveTestedMainCheckout({ runGit, head }) {
   }
 
   if (checkoutParents.length !== 2) fail('checkout-parent-shape');
-  const testedMainHead = objectId(checkoutParents[0], 'checkout-first-parent');
-  const testedMainTree = objectId(
-    text(runGit, ['rev-parse', `${testedMainHead}^{tree}`]),
+  const firstParent = objectId(checkoutParents[0], 'checkout-first-parent');
+  const firstTree = objectId(
+    text(runGit, ['rev-parse', `${firstParent}^{tree}`]),
     'checkout-first-parent-tree',
   );
-  if (
-    text(runGit, ['ls-tree', testedMainTree, '--', REFRESH_CONTRACT.canaryPath]) !== '' ||
-    !exactCanaryDelta(runGit, testedMainHead, checkoutHead)
-  ) {
-    fail('checkout-first-parent-delta');
-  }
-
   const secondParent = objectId(checkoutParents[1], 'checkout-second-parent');
   const secondTree = objectId(
     text(runGit, ['rev-parse', `${secondParent}^{tree}`]),
     'checkout-second-parent-tree',
   );
+  if (hasFixtureCommitIntent(runGit, checkoutHead)) {
+    if (
+      text(runGit, ['ls-tree', firstTree, '--', REFRESH_CONTRACT.canaryPath]) !== '' ||
+      !exactCanaryDelta(runGit, firstParent, checkoutHead)
+    ) {
+      fail('checkout-first-parent-delta');
+    }
+    return Object.freeze({
+      testedMainHead: firstParent,
+      testedMainTree: firstTree,
+      disposition: 'fixture-head',
+      includeWorktree: false,
+    });
+  }
+
   const secondParents = parents(runGit, secondParent);
+  if (secondParents.length !== 2 || !hasFixtureCommitIntent(runGit, secondParent)) {
+    fail('checkout-topology-ambiguous');
+  }
+  const testedMainHead = objectId(secondParents[0], 'fixture-source-parent');
+  const testedMainTree = objectId(
+    text(runGit, ['rev-parse', `${testedMainHead}^{tree}`]),
+    'fixture-source-tree',
+  );
   const secondIsCurrentFixture =
-    secondParents.length === 2 &&
-    secondParents[0] === testedMainHead &&
+    text(runGit, ['ls-tree', testedMainTree, '--', REFRESH_CONTRACT.canaryPath]) === '' &&
     exactCanaryEntry(runGit, secondTree) &&
     exactCanaryDelta(runGit, testedMainHead, secondParent);
-  if (secondIsCurrentFixture && checkoutTree !== secondTree) {
+  if (!secondIsCurrentFixture || checkoutTree !== secondTree) {
     fail('checkout-merge-tree');
   }
-  if (!secondIsCurrentFixture && checkoutTree === secondTree) {
-    fail('checkout-topology-ambiguous');
+  if (
+    text(runGit, ['ls-tree', firstTree, '--', REFRESH_CONTRACT.canaryPath]) !== '' ||
+    text(runGit, ['merge-base', firstParent, testedMainHead]) !== firstParent
+  ) {
+    fail('checkout-merge-base');
   }
 
   return Object.freeze({
     testedMainHead,
     testedMainTree,
-    disposition: secondIsCurrentFixture ? 'synthetic-merge' : 'fixture-head',
+    disposition: 'synthetic-merge',
     includeWorktree: false,
   });
 }

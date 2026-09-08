@@ -11,6 +11,12 @@ internal interface IActionHostTrustedWorkflowAdmission
         ActionHostLaunchContract launch,
         out ActionHostTrustedWorkflowEvidence? evidence);
 
+    bool TryAdmitCurrentRun(
+        ActionHostGitHubRepositoryFact repository,
+        ActionHostEventFact eventFact,
+        ActionHostGitHubWorkflowRunFact run,
+        ActionHostLaunchContract launch);
+
     bool TryAdmitPullRequest(
         ActionHostGitHubRepositoryFact repository,
         ActionHostGitHubPullRequestFact pullRequest,
@@ -37,6 +43,25 @@ internal sealed class ActionHostV1TrustedWorkflowAdmission :
             launch.ActionSourceSha,
             launch.PayloadSha256,
             out evidence);
+
+    public bool TryAdmitCurrentRun(
+        ActionHostGitHubRepositoryFact repository,
+        ActionHostEventFact eventFact,
+        ActionHostGitHubWorkflowRunFact run,
+        ActionHostLaunchContract launch)
+    {
+        var expectedWorkflowRef =
+            $"{repository.FullName}/{launch.WorkflowPath}@" +
+            $"refs/heads/{repository.DefaultBranch}";
+        return eventFact.CandidateSourcePullRequestNumber is null &&
+            eventFact.CandidateExecutionPhase is null &&
+            StringComparer.Ordinal.Equals(
+                run.HeadBranch,
+                repository.DefaultBranch) &&
+            StringComparer.Ordinal.Equals(
+                launch.WorkflowRef,
+                expectedWorkflowRef);
+    }
 
     public bool TryAdmitPullRequest(
         ActionHostGitHubRepositoryFact repository,

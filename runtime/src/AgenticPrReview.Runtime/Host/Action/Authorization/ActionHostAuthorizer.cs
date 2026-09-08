@@ -339,11 +339,17 @@ internal sealed class ActionHostAuthorizer
             eventFact.DispatchPullRequestNumber is > 0 &&
             launch.Inputs.PullRequestNumber ==
                 eventFact.DispatchPullRequestNumber &&
-            launch.Inputs.StateMode is
-                ActionHostStateMode.Auto or ActionHostStateMode.Reset;
+            (launch.Inputs.StateMode is
+                ActionHostStateMode.Auto or ActionHostStateMode.Reset) &&
+            (eventFact.CandidateExecutionPhase is null
+                ? eventFact.CandidateSourcePullRequestNumber is null
+                : launch.Inputs.StateMode == ActionHostStateMode.Auto &&
+                    eventFact.CandidateSourcePullRequestNumber is > 0 &&
+                    eventFact.CandidateSourcePullRequestNumber !=
+                        eventFact.DispatchPullRequestNumber);
     }
 
-    private static bool ValidateCurrentRun(
+    private bool ValidateCurrentRun(
         ActionHostLaunchContract launch,
         ActionHostEventFact eventFact,
         ActionHostGitHubRepositoryFact repository,
@@ -356,9 +362,6 @@ internal sealed class ActionHostAuthorizer
                 "workflow_dispatch",
             _ => string.Empty,
         };
-        var expectedWorkflowRef =
-            $"{repository.FullName}/{launch.WorkflowPath}@" +
-            $"refs/heads/{repository.DefaultBranch}";
         return run.Id == launch.RunId &&
             run.Attempt == launch.RunAttempt &&
             SameRepository(repository.Id, repository.FullName, run.Repository) &&
@@ -367,9 +370,6 @@ internal sealed class ActionHostAuthorizer
                 repository.FullName,
                 run.HeadRepository) &&
             StringComparer.Ordinal.Equals(run.Event, expectedEvent) &&
-            StringComparer.Ordinal.Equals(
-                run.HeadBranch,
-                repository.DefaultBranch) &&
             StringComparer.Ordinal.Equals(run.HeadSha, launch.WorkflowSha) &&
             StringComparer.Ordinal.Equals(
                 run.Path,
@@ -377,9 +377,11 @@ internal sealed class ActionHostAuthorizer
             StringComparer.Ordinal.Equals(
                 launch.WorkflowPath,
                 ActionHostAuthorizationPolicy.PrivilegedWorkflowPath) &&
-            StringComparer.Ordinal.Equals(
-                launch.WorkflowRef,
-                expectedWorkflowRef);
+            _workflowAdmission.TryAdmitCurrentRun(
+                repository,
+                eventFact,
+                run,
+                launch);
     }
 
     private static async Task<WorkflowRunSelection>

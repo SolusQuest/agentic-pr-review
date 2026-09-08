@@ -19,6 +19,35 @@ public sealed class ActionHostEventJsonTests
         Assert.Equal(ActionHostAuthorizationRoute.WorkflowDispatch,
             fact!.Route);
         Assert.Equal(147, fact.DispatchPullRequestNumber);
+        Assert.Null(fact.CandidateSourcePullRequestNumber);
+        Assert.Null(fact.CandidateExecutionPhase);
+    }
+
+    [Fact]
+    public void CandidateWorkflowDispatchParsesExactSourceAndPhase()
+    {
+        var bytes = Encoding.UTF8.GetBytes("""
+            {
+              "inputs": {
+                "pr-number": "147",
+                "candidate-pr-number": "234",
+                "execution-mode": "candidate-stale"
+              },
+              "repository": { "id": 42, "full_name": "owner/repo" },
+              "sender": { "id": 7, "login": "maintainer" }
+            }
+            """);
+
+        Assert.True(ActionHostEventParser.TryParse(
+            bytes,
+            out var fact,
+            out var unsupported));
+        Assert.False(unsupported);
+        Assert.Equal(147, fact!.DispatchPullRequestNumber);
+        Assert.Equal(234, fact.CandidateSourcePullRequestNumber);
+        Assert.Equal(
+            ActionHostCandidateExecutionPhase.Stale,
+            fact.CandidateExecutionPhase);
     }
 
     public static TheoryData<string> InvalidDispatchPullRequestNumbers => new()
@@ -39,6 +68,32 @@ public sealed class ActionHostEventJsonTests
     {
         Assert.False(ActionHostEventParser.TryParse(
             DispatchEvent(jsonValue),
+            out _,
+            out _));
+    }
+
+    [Theory]
+    [InlineData("candidate-unknown", "234")]
+    [InlineData("candidate-bootstrap", "0")]
+    [InlineData("candidate-continuation", "+234")]
+    public void CandidateWorkflowDispatchRejectsMalformedRouteInputs(
+        string executionMode,
+        string candidatePullRequestNumber)
+    {
+        var bytes = Encoding.UTF8.GetBytes($$"""
+            {
+              "inputs": {
+                "pr-number": "147",
+                "candidate-pr-number": "{{candidatePullRequestNumber}}",
+                "execution-mode": "{{executionMode}}"
+              },
+              "repository": { "id": 42, "full_name": "owner/repo" },
+              "sender": { "id": 7, "login": "maintainer" }
+            }
+            """);
+
+        Assert.False(ActionHostEventParser.TryParse(
+            bytes,
             out _,
             out _));
     }
