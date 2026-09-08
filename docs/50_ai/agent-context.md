@@ -27,6 +27,8 @@ R1 is complete: the legacy mixed Action, TypeScript coordinator, and Claude Code
 
 `README.md` and current-position documents describe the live repository boundary. Older contracts that mention deleted surfaces are historical or migration evidence unless the R1 handoff assigns them a retained current consumer; they do not by themselves describe current implementation behavior. Historical roadmap files do not override the R0-R7 sequence.
 
+R4 is complete. [#181's final result](https://github.com/SolusQuest/agentic-pr-review/issues/181#issuecomment-5582276140) records the completed main validation, independent GitHub proof, stale rejection, and cleanup. The R4 milestone and issue graph are closed; do not restart their implementation, obsolete evidence ceremony, or consumed protected operations. R5 is the next roadmap planning gate, while supported downstream Action distribution and public-default promotion remain R7 work.
+
 ## Default Validation
 
 For code and docs changes:

@@ -13,6 +13,8 @@ provide a stable public API.
 
 ## Development Head Status
 
+R4 is complete. The [final #181 result](https://github.com/SolusQuest/agentic-pr-review/issues/181#issuecomment-5582276140) records local and CI validation, independent GitHub bootstrap/continuation runs, stale-publication rejection, and cleanup on merged main `7cfe05716e2f56aabc99cf78857cdc19453018ed`. This is a one-time pre-release integration proof, not a supported release or certification of future commits.
+
 The current development head contains the nested R4 Action metadata and generated Node 24 wrapper only for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: there is no release payload selection, automatic download, root Action alias, or stable output surface. R7 owns release assets, checksums, automatic payload resolution, and promotion of a supported public default. See [`r4-actionhost-wrapper-plan.md`](docs/20_architecture/r4-actionhost-wrapper-plan.md).
 
 Do not reference `main` or another moving development-head commit as an Action.
@@ -61,8 +63,8 @@ roadmap phase explicitly introduces it.
 - R2 proves the minimal C# Agent loop, `read_file`, `search_text`,
   `finish_review`, secure session restore, and the AI-abstraction decision.
 - R3 completed the trusted no-publish live-provider route and initial six-tool read-only profile.
-- R4 introduces the replacement thin Node wrapper, C# `ActionHost`, public
-  Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
+- R4 completed the replacement thin Node wrapper, C# `ActionHost`, nested
+  prepared-payload Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
 - R7 owns release assets, checksums, exact automatic payload selection, and the
   public default.
 

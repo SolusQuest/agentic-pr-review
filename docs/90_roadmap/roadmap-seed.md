@@ -102,7 +102,7 @@ The current implementation on `main` includes:
 - framework-dependent and Linux x64 Native AOT product validation;
 - a closed TypeScript migration record: R4-W3 through W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families after mapped C# evidence or reviewed-obsolete dispositions passed. No current TypeScript state reader, publisher, business protocol adapter, or compatibility route remains. Direct-runtime schemas and fixtures remain C#-owned, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
-R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path now exist for repository-controlled prepared-payload proof. W13 closes the migration inventory; exact-tree E1/E2 evidence, the maintainer-authorized trusted proof, supported release payload delivery, and the public default remain at their named later gates.
+R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. R4 is complete with the final [#181 result](https://github.com/SolusQuest/agentic-pr-review/issues/181#issuecomment-5582276140) on main `7cfe05716e2f56aabc99cf78857cdc19453018ed`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path are proven for repository-controlled prepared-payload use. W13 migration closure, E1/E2/E2P integration, and the authorized independent-run proof are complete. Supported release payload delivery and the public default remain R7 gates.
 
 ## Historical Milestones
 
@@ -126,7 +126,7 @@ The following is a completed transition record, not current execution instructio
 - issue #54 is closed as `not planned`;
 - M4 is closed with no open issues;
 - R1, R2, and R3 are closed with no open issues;
-- R4 is open; its docs gate and implementation leaves through W15 are merged, and W13 owns the final migration-cutover audit before E2.
+- At that snapshot R4 was open, with its docs gate and implementation leaves through W15 merged. R4 subsequently completed W13, E1/E2/E2P, and #181; the milestone and all 43 assigned issues are closed as of 2026-09-08.
 
 The earlier plan to create R1/R2 immediately and defer R3-R7 refinement was executed through R3. It no longer instructs agents to create, close, or defer those completed milestones. R6 may reuse ideas or tests from #54 or PR #74 only after real resumed Agent traffic exists and a new issue proves they fit the actual thinking, tool, session, telemetry, and cost model. Existing implementation effort is not a reason to merge an obsolete ordering or contract dependency.
 
@@ -334,7 +334,11 @@ Exit criteria:
 
 Goal: converge on one C# business implementation and remove cross-language duplication.
 
-Planning status: milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10) and refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138) own the activated design contract in [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md). The implementation graph has reached W13 migration closure; [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md) controls the exact-tree E1 handoff to E2.
+Implementation status: complete; milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10), refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138), all implementation leaves, and workstream trackers #141-#145 are closed. The activated design remains [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md); [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md) retains the completed migration and E1/E2 evidence boundaries.
+
+The [final #181 result](https://github.com/SolusQuest/agentic-pr-review/issues/181#issuecomment-5582276140) records fresh main validation: Node 763/763 and Runtime 2,739/2,739 tests, distribution and framework/Native AOT/trusted-payload routes, and green main CI/Runtime CI/CodeQL. Two independent GitHub runs prove bootstrap and prior-SESSION continuation; the separate stale scenario proves `stale_head / not_committed`, and the advanced-head follow-on is rejected before protected work. Its red stale-run conclusion is expected negative evidence. All operation-owned resources were cleaned and the protected environment returned to baseline. PR #232's completed bounded local DeepSeek diagnostic remains the real-provider evidence; the hosted proof uses the deterministic provider and makes no live-DeepSeek claim.
+
+This closes the approved one-time pre-release integration gate, not release certification. No new evidence-only PR, reproducible native-binary equality, paid call, or repetition on future documentation commits is required. R5 is the next planning gate; release assets, automatic payload resolution, and supported public-default promotion remain R7 work.
 
 In scope:
 

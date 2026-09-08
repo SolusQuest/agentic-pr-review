@@ -60,17 +60,19 @@ The current implementation contains:
 - a protected, default-branch, no-publication live-provider proof at the final R3 commit;
 - a closed TypeScript migration record: W3-W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families only after their C# replacements or reviewed-obsolete dispositions were checked. No current TypeScript state reader, publisher, protocol adapter, compatibility surface, or canonicalizer remains. The direct-runtime schemas and C# models remain live independently of the ActionHost replacements, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
-R3 is complete. R4 has restored the bounded wrapper and its official artifact bridge over an explicitly prepared payload, completed the TypeScript business/state/publisher/protocol cutover, and closed the migration inventory in [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md). The development head is still not a supported downstream Action. The exact merged W13 tree must pass the E1 main-push handoff before E2, while the maintainer-authorized trusted two-run proof, release payload delivery, and public default remain owned by their later gates.
+R3 and R4 are complete. R4 restored the bounded wrapper and its official artifact bridge over an explicitly prepared payload, completed the TypeScript business/state/publisher/protocol cutover, and closed the migration inventory in [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md). E1/E2/E2P and the final authorized GitHub proof are complete; [#181's final result](https://github.com/SolusQuest/agentic-pr-review/issues/181#issuecomment-5582276140) records fresh local/CI validation, independent bootstrap/continuation, stale rejection, and cleanup on merged main `7cfe05716e2f56aabc99cf78857cdc19453018ed`. The development head is still not a supported downstream Action: release payload delivery and public default promotion remain R7 work.
 
-The selected next direction is R4:
+The completed R4 boundary is:
 
 - keep the completed R3 Agent, tools, SESSION, grounding, DeepSeek continuation, and capability boundaries as the product core;
-- add trusted GitHub event/configuration authorization and exact-SHA snapshot materialization in C# ActionHost;
-- add downstream-repository-owned encrypted artifact state behind the internal asynchronous state-store seam;
-- move deterministic sticky/inline publication and transaction recovery into C# Host code;
-- integrate the thin Node Action wrapper and private artifact bridge with the remaining trusted Host proof work;
-- delete retained TypeScript business families only through named replacement gates;
+- trusted GitHub event/configuration authorization and exact-SHA snapshot materialization in C# ActionHost;
+- downstream-repository-owned encrypted artifact state behind the internal asynchronous state-store seam;
+- deterministic sticky/inline publication and transaction recovery in C# Host code;
+- the thin Node Action wrapper and private artifact bridge integrated with the completed trusted Host proof;
+- TypeScript business families deleted through named replacement gates;
 - keep downstream release/payload delivery and broad cost graduation in their later milestones.
+
+The next roadmap planning gate is R5 quality evaluation, replay, and session growth. R4 closure does not activate a new implementation graph or require another paid provider call; refinement must use the completed runtime and actual evaluation needs.
 
 A separate Agent process is deferred until fault, resource, extension, or trust evidence justifies the additional protocol and distribution surface.
 
