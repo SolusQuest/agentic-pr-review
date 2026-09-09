@@ -246,6 +246,39 @@ public sealed class R5QualityCorpusTests
         finally { Console.SetOut(priorOut); Console.SetError(priorError); }
     }
 
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(true, 13)]
+    [InlineData(false, 0)]
+    [InlineData(false, 18)]
+    public async Task CommandOutputFailuresReturnOnlySafeInfrastructureDiagnostic(bool quality, int successfulLines)
+    {
+        var priorOut = Console.Out;
+        var priorError = Console.Error;
+        using var stdout = new FailingWriter(successfulLines);
+        using var stderr = new StringWriter();
+        try
+        {
+            Console.SetOut(stdout); Console.SetError(stderr);
+            var arguments = quality ? new[] { "quality", "--corpus", CheckedRoot } : ["evaluate", "--fixture", "self-test"];
+            Assert.Equal(1, await FixtureProgram.Main(arguments));
+            Assert.Equal("r5_evaluation_infrastructure_failed" + Environment.NewLine, stderr.ToString());
+            Assert.Equal(successfulLines, stdout.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
+            Assert.DoesNotContain("APR242_OUTPUT_FAILURE_CANARY", stdout.ToString() + stderr, StringComparison.Ordinal);
+        }
+        finally { Console.SetOut(priorOut); Console.SetError(priorError); }
+    }
+
+    private sealed class FailingWriter(int successfulLines) : StringWriter
+    {
+        private int _written;
+        public override void WriteLine(string? value)
+        {
+            if (_written++ == successfulLines) throw new IOException("APR242_OUTPUT_FAILURE_CANARY");
+            base.WriteLine(value);
+        }
+    }
+
     private sealed class Corpus : IDisposable
     {
         internal string Root { get; } = Path.Combine(Path.GetTempPath(), "apr-r5-q2-" + Guid.NewGuid().ToString("N"));
