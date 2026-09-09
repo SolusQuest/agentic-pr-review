@@ -37,6 +37,7 @@ internal static class ReplayRunner
         string? root = null, corpus = null;
         var cleanup = "not_created";
         var code = "infrastructure_failed";
+        var childReaped = true;
         var steps = ImmutableArray.CreateBuilder<ReplayStep>();
         var observations = ImmutableArray.CreateBuilder<ReplayObservation>();
         try
@@ -116,6 +117,7 @@ internal static class ReplayRunner
             }
         }
         catch (ReplayRejected) { code = "input_invalid"; }
+        catch (ReplayProcessUnreaped) { childReaped = false; code = "process_failed"; }
         catch (OperationCanceledException) { code = "cancelled"; }
         catch { code = "infrastructure_failed"; }
         finally
@@ -125,7 +127,7 @@ internal static class ReplayRunner
             {
                 try { options.BeforeCleanup?.Invoke(root); }
                 catch { code = "infrastructure_failed"; }
-                try { cleanup = options.Cleanup(root) ? "cleaned" : "cleanup_failed"; }
+                try { cleanup = childReaped && options.Cleanup(root) ? "cleaned" : "cleanup_failed"; }
                 catch { cleanup = "cleanup_failed"; }
                 if (cleanup != "cleaned") code = "cleanup_failed";
             }

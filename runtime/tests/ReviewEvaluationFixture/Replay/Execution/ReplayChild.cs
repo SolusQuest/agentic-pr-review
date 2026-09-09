@@ -61,7 +61,7 @@ internal static class ReplayChild
                 EvaluationSource.Clean, Environment.ProcessId, startup, code, receipt,
                 evaluation is null ? [] : EvaluationJson.Write(evaluation),
                 artifact is null ? null : ReplayProjection.Logical(artifact, fixtureRun!.CreateTrustedRequest(ReplayState.Build)),
-                transport is null ? null : ReplayProjection.Provider(transport.Requests), transport?.Consumed ?? 0, tools,
+                transport is null ? null : ReplayProjection.Provider(transport.Requests), transport?.Requests.Count ?? 0, tools,
                 artifact?.Plaintext, transport?.Requests.ToImmutableArray() ?? [], environmentKeys, environmentBytes);
 
         // Captured bundle is re-admitted in every fresh process; only this run supplies model/tool inputs.

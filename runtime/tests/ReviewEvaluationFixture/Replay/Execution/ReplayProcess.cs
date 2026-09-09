@@ -9,6 +9,7 @@ using System.Text.Json;
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 internal sealed record ReplayProcessResult(string Code, ReplayChildReply? Reply);
+internal sealed class ReplayProcessUnreaped : Exception;
 
 internal static class ReplayProcess
 {
@@ -100,7 +101,9 @@ internal static class ReplayProcess
         var captureFailed = 0;
         try
         {
-            process = Process.Start(StartInfo(input.Root));
+            var start = StartInfo(input.Root);
+            if (input.Fault == ReplayFault.StartFailure) start.FileName = Path.Combine(input.Root, "missing-test-executable");
+            process = Process.Start(start);
             if (process is null) return new("process_failed", null);
             async Task<byte[]> Capture(Stream stream, int limit)
             {
@@ -136,10 +139,15 @@ internal static class ReplayProcess
             {
                 try
                 {
-                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    if (!process.HasExited)
+                    {
+                        try { process.Kill(entireProcessTree: true); }
+                        catch (Exception) when (process.HasExited) { /* Exit raced termination. */ }
+                    }
                     using var reap = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                     await process.WaitForExitAsync(reap.Token);
                 }
+                catch { throw new ReplayProcessUnreaped(); }
                 finally { process.Dispose(); }
             }
             if (output is not null) { try { await output; } catch { /* Bounded capture is discarded, never logged. */ } }

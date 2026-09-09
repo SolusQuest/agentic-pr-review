@@ -33,6 +33,14 @@ public sealed class R5CompletedReplayTests
             Assert.Equal("prepared", reply.Code);
             Assert.NotNull(reply.Prepared);
             Assert.True(ReplayCoverage.Verify(fixture, 0, reply));
+            Assert.True(ReplayRunner.AdmitIdentity(input, reply));
+            foreach (var stale in new[]
+            {
+                reply with { Operation = Guid.NewGuid().ToString("N") }, reply with { Corpus = new string('f', 64) },
+                reply with { Session = Guid.NewGuid().ToString("N") }, reply with { Phase = 1 },
+                reply with { Commit = new string('f', 40) }, reply with { Tree = new string('f', 40) },
+                reply with { SourceClean = !reply.SourceClean }, reply with { ProcessId = 0 }, reply with { Startup = "invalid" },
+            }) Assert.False(ReplayRunner.AdmitIdentity(input, stale));
             using var state = new ReplayState(fixture.Runs[0], input.Session, root, input.Key);
             var inventory = await state.Service.EnumerateAsync(state.Access, CancellationToken.None);
             Assert.Equal(StateAction.Enumerated, inventory.Result.Action);
@@ -93,6 +101,7 @@ public sealed class R5CompletedReplayTests
     [InlineData("WrongScope", "state_failed")]
     [InlineData("WrongHead", "state_failed")]
     [InlineData("NonCompleted", "state_failed")]
+    [InlineData("StartFailure", "process_failed")]
     [InlineData("AfterPrepareCrash", "process_failed")]
     [InlineData("AfterPrepareHang", "process_timeout")]
     [InlineData("AfterPrepareOverflow", "process_failed")]
@@ -123,6 +132,8 @@ public sealed class R5CompletedReplayTests
         Assert.Null(result.Steps[1].Generation);
         Assert.All(result.Observations.Skip(1), observation => Assert.Null(observation.EnvelopeSha256));
         if (fault is "WrongScope" or "WrongHead") Assert.Equal(0, result.Steps[1].ModelCalls);
+        if (fault == "Provider") Assert.Equal(1, result.Steps[1].ModelCalls);
+        if (fault == "Incomplete") Assert.Equal(2, result.Steps[1].ModelCalls);
     }
 
     [Theory]

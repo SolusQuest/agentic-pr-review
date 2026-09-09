@@ -8,7 +8,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
-internal enum ReplayFault { None, Provider, Cancelled, Incomplete, MalformedTerminal, WrongScope, WrongHead, NonCompleted, AfterPrepareCrash, AfterPrepareHang, AfterPrepareOverflow, PartialReply, WrongReply, MissingHistory, ChangedContinuation, MissingContinuation, WrongContinuationPosition }
+internal enum ReplayFault { None, Provider, Cancelled, Incomplete, MalformedTerminal, WrongScope, WrongHead, NonCompleted, StartFailure, AfterPrepareCrash, AfterPrepareHang, AfterPrepareOverflow, PartialReply, WrongReply, MissingHistory, ChangedContinuation, MissingContinuation, WrongContinuationPosition }
 internal sealed record ReplayChildInput(string Operation, string Root, string Corpus, int Phase, string Session,
     byte[] Key, AcceptedLineage? Predecessor, ReplayFault Fault);
 
