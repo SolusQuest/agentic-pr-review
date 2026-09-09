@@ -132,8 +132,20 @@ internal static class ReplayChild
         var outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, fixtureRun.CreateFileAccess(snapshot))).RunAsync(request, runCancellation.Token);
         var tools = outcome.Events.OfType<AgentToolResultEvent>().Count();
         if (!outcome.Succeeded)
-            return Reply(outcome.Diagnostic?.Code == AgentFailureCodes.Cancelled ? "cancelled" : transport.FailureCode ?? "agent_failed",
-                evaluation: EvaluationScorer.Failure(fixtureRun.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt), transport: transport, tools: tools);
+        {
+            var failure = EvaluationFailure.FromAgentOutcome(outcome);
+            var failureCode = outcome.Diagnostic?.Code == AgentFailureCodes.Cancelled ? "cancelled" : transport.FailureCode ??
+                (failure.Source switch
+                {
+                    EvaluationFailureSource.Provider => "provider_failed",
+                    EvaluationFailureSource.Agent => "agent_failed",
+                    EvaluationFailureSource.Tool => "tool_failed",
+                    EvaluationFailureSource.HostState => "state_failed",
+                    EvaluationFailureSource.Evaluator => "infrastructure_failed",
+                    _ => "unknown_failed",
+                });
+            return Reply(failureCode, evaluation: EvaluationScorer.Failure(fixtureRun.Expected, failure, attempt), transport: transport, tools: tools);
+        }
         var buildInput = new AgentSessionBuildInput(request, outcome, state.Trusted, request.InitialMessages.Length - 1,
             DeepSeekReasoningContinuationCodec.Instance, predecessor, transition);
         var built = AgentSessionBuilder.Build(buildInput);

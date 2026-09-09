@@ -21,6 +21,15 @@ internal static class ReplayCoverage
             !fixture.Runs.Select(run => run.Input.CaseId).SequenceEqual(Cases) ||
             reply.Requests.Length != 2 || reply.ModelCalls != 2 || reply.ToolCalls != (phase == 0 ? 2 : 1) ||
             reply.Plaintext is null || !AgentSessionCodec.TryParse(reply.Plaintext, out var artifact, out _) || artifact is null) return false;
+        if (phase > 0)
+        {
+            // Equal output and available history do not prove that the response used that history.
+            var terminals = fixture.Runs[phase].Script.Turns.SelectMany(turn => turn.ToolCalls)
+                .Where(call => call.Name == "finish_review").ToArray();
+            if (terminals.Length != 1) return false;
+            using var terminal = JsonDocument.Parse(terminals[0].ArgumentsJson);
+            if (terminal.RootElement.GetProperty("summary").GetString() != "$history:seed_read:1") return false;
+        }
         for (var index = 0; index < fixture.Runs.Length; index++)
         {
             var input = fixture.Runs[index];

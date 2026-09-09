@@ -153,7 +153,7 @@ internal static class ReplayRunner
             reply.EnvironmentKeys.IsDefault || reply.EnvironmentBytes is null || reply.EnvironmentBytes.Length > ReplayWire.InputLimit || reply.Evaluation is null ||
             !reply.EnvironmentKeys.Order(StringComparer.Ordinal).SequenceEqual(ReplayProcess.EnvironmentNames.Order(StringComparer.Ordinal)) ||
             reply.ModelCalls is < 0 or > 64 || reply.ToolCalls is < 0 or > 256 ||
-            reply.Code is not ("prepared" or "input_invalid" or "infrastructure_failed" or "state_failed" or "session_failed" or "agent_failed" or "provider_failed" or "script_exhausted" or "history_failed" or "cancelled" or "assertion_failed")) return false;
+            reply.Code is not ("prepared" or "input_invalid" or "infrastructure_failed" or "state_failed" or "session_failed" or "agent_failed" or "tool_failed" or "unknown_failed" or "provider_failed" or "script_exhausted" or "history_failed" or "cancelled" or "assertion_failed")) return false;
         if (reply.Evaluation.Length != 0)
         {
             quality = EvaluationJson.ReadOutcome(reply.Evaluation);

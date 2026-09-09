@@ -109,8 +109,9 @@ public sealed class R5CompletedReplayTests
     [InlineData("WrongReply", "result_invalid")]
     [InlineData("MissingHistory", "history_failed")]
     [InlineData("ChangedContinuation", "session_failed")]
-    [InlineData("MissingContinuation", "agent_failed")]
-    [InlineData("WrongContinuationPosition", "agent_failed")]
+    // Q1 leaves response-admission provenance unknown; the replay report must not invent Agent attribution.
+    [InlineData("MissingContinuation", "unknown_failed")]
+    [InlineData("WrongContinuationPosition", "unknown_failed")]
     public async Task FailedPhaseNeverAdvancesAcceptedPredecessor(string fault, string expected)
     {
         string? privateRoot = null;
@@ -158,6 +159,55 @@ public sealed class R5CompletedReplayTests
         Assert.Equal("assertion_failed", result.Code);
         Assert.Equal("cleaned", result.Cleanup);
         Assert.DoesNotContain(result.Steps, step => step.Accepted);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task LiteralAnswerCannotReplaceHistoryDerivationWithValidPredecessor(int phase)
+    {
+        using var bundle = new MutableBundle();
+        bundle.Edit($"script-{phase}.json", text => text.Replace("$history:seed_read:1",
+            "Restored fact: " + ReplayCoverage.Fact, StringComparison.Ordinal));
+        Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture);
+        var result = await ReplayRunner.RunAsync(bundle.Root);
+        Assert.Equal("assertion_failed", result.Code);
+        Assert.Equal("cleaned", result.Cleanup);
+        Assert.Equal(phase + 1, result.Steps.Length);
+        Assert.All(result.Steps.Take(phase), step => Assert.True(step.Accepted));
+        Assert.False(result.Steps[phase].Accepted);
+        Assert.True(result.Steps[phase].PredecessorPreserved);
+        Assert.Null(result.Steps[phase].Generation);
+        Assert.Null(result.Steps[phase].QualityCode);
+    }
+
+    [Theory]
+    [InlineData(1, false, "tool_failed")]
+    [InlineData(2, false, "tool_failed")]
+    [InlineData(1, true, "agent_failed")]
+    public async Task RealToolRejectionRetainsFailureSourceAndPredecessor(int phase, bool invalidArguments, string expected)
+    {
+        using var bundle = new MutableBundle();
+        bundle.EditJson($"script-{phase}.json", script =>
+        {
+            var call = script["turns"]![0]!["tool_calls"]![0]!;
+            var arguments = JsonNode.Parse(call["arguments_json"]!.GetValue<string>())!;
+            if (invalidArguments) arguments["start_line"] = 0;
+            else arguments["path"] = "src/missing.txt";
+            call["arguments_json"] = arguments.ToJsonString();
+        });
+        Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture);
+        var result = await ReplayRunner.RunAsync(bundle.Root);
+        Assert.Equal(expected, result.Code);
+        Assert.Equal("cleaned", result.Cleanup);
+        Assert.Equal(phase + 1, result.Steps.Length);
+        Assert.All(result.Steps.Take(phase), step => Assert.True(step.Accepted));
+        var failed = result.Steps[phase];
+        Assert.Equal(expected, failed.Code);
+        Assert.False(failed.Accepted);
+        Assert.True(failed.PredecessorPreserved);
+        Assert.Null(failed.Generation);
+        Assert.Null(failed.QualityCode);
     }
 
     [Fact]
