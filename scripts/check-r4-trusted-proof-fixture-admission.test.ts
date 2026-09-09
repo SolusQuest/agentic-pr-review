@@ -228,12 +228,14 @@ describe('R4 prospective fixture admission', () => {
           .digest('hex'),
       },
       metrics: {
-        admitted_head_source_authenticated_rest_requests: 180,
         admitted_head_source_blob_rest_requests: 0,
         admitted_head_source_anonymous_codeload_requests: 1,
         admitted_head_source_archive_credential_forwarded: false,
       },
     });
+    expect(receipt.prospective.metrics.admitted_head_source_authenticated_rest_requests).toBe(
+      receipt.prospective.metrics.tree_objects_including_root + 2,
+    );
     expect(receipt.prospective).not.toHaveProperty('merge_sha');
     expect(receipt.prospective).not.toHaveProperty('fixture_head');
     expect(receipt.prospective.metrics.maximum_blob_bytes).toBeLessThanOrEqual(8 * 1024 * 1024);
@@ -241,6 +243,43 @@ describe('R4 prospective fixture admission', () => {
       16 * 1024 * 1024,
     );
   }, 30_000);
+
+  test('admits new prospective directories without changing frozen historical request counts', () => {
+    const baseHead = '7cfe05716e2f56aabc99cf78857cdc19453018ed';
+    const baseline = admitProspectiveFixture({ repositoryRoot: root, baseHead });
+    let inserted = false;
+    const extended = admitProspectiveFixture({
+      repositoryRoot: root,
+      baseHead,
+      interceptMaterializedGit: (runMaterializedGit, args, input) => {
+        const result = runMaterializedGit(args, input);
+        if (args[0] === 'read-tree' && !inserted) {
+          inserted = true;
+          const blob = runMaterializedGit(
+            ['hash-object', '-w', '--stdin'],
+            Buffer.from('synthetic prospective directory growth\n', 'utf8'),
+          )
+            .toString('utf8')
+            .trim();
+          runMaterializedGit([
+            'update-index',
+            '--add',
+            '--cacheinfo',
+            `100644,${blob},prospective-growth-probe/nested/file.txt`,
+          ]);
+        }
+        return result;
+      },
+    });
+    expect(baseline.metrics.admitted_head_source_authenticated_rest_requests).toBe(180);
+    expect(extended.metrics.tree_objects_including_root).toBe(
+      baseline.metrics.tree_objects_including_root + 2,
+    );
+    expect(extended.metrics.admitted_head_source_authenticated_rest_requests).toBe(182);
+    expect(extended.metrics.admitted_head_source_anonymous_codeload_requests).toBe(1);
+    expect(extended.metrics.admitted_head_source_blob_rest_requests).toBe(0);
+    expect(extended.metrics.admitted_head_source_archive_credential_forwarded).toBe(false);
+  });
 
   test('fails closed when the frozen canary is already in the base tree', () => {
     const frozen = materializeFrozenFixtures({ repositoryRoot: root });

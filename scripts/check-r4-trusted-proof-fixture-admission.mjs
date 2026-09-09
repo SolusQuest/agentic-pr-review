@@ -19,7 +19,6 @@ export const PROSPECTIVE_FIXTURE_CONTRACT = Object.freeze({
   canaryPath: 'proof/apr178-path-canary.txt',
   canaryMode: '100644',
   canaryBytes: Buffer.from('APR178_TOOL_DATA_CANARY\n', 'utf8'),
-  authenticatedRestRequests: 180,
 });
 
 // These commits used to be retained only by short-lived proof branches.  The
@@ -881,7 +880,7 @@ export function admitProspectiveFixture({
     });
     if (
       metrics.admitted_head_source_authenticated_rest_requests !==
-        PROSPECTIVE_FIXTURE_CONTRACT.authenticatedRestRequests ||
+        metrics.tree_objects_including_root + 2 ||
       metrics.admitted_head_source_anonymous_codeload_requests !== 1 ||
       metrics.admitted_head_source_blob_rest_requests !== 0 ||
       metrics.admitted_head_source_archive_credential_forwarded !== false
