@@ -269,6 +269,65 @@ public sealed class R5QualityCorpusTests
         finally { Console.SetOut(priorOut); Console.SetError(priorError); }
     }
 
+    [Theory]
+    [InlineData("wrong-evidence", "all")]
+    [InlineData("pathless-proposal", "all")]
+    [InlineData("wrong-evidence", "read-arguments")]
+    [InlineData("pathless-proposal", "read-arguments")]
+    [InlineData("wrong-evidence", "duplicate-read")]
+    [InlineData("pathless-proposal", "duplicate-read")]
+    public async Task MalformedTerminalMustFollowTheRequiredActualObservations(string caseId, string mutation)
+    {
+        using var corpus = new Corpus();
+        corpus.ChangeScript(caseId, script => script with { Turns = script.Turns.Select(turn => turn with
+        { ToolCalls = turn.ToolCalls.Select(call => call.Name != "finish_review" &&
+            (mutation == "all" || call.ArgumentsJson.Contains("src/Lookup.cs", StringComparison.Ordinal)) ? call with
+            { Name = "read_file", ArgumentsJson = QualityCoverage.Read(mutation == "duplicate-read" ? "src/Caller.cs" : "docs/notes.txt").Arguments } : call).ToImmutableArray() }).ToImmutableArray() });
+        var result = await QualityRunner.RunAsync(corpus.Root);
+        var actual = result.Executions.Single(item => item.Spec.Id == caseId);
+        Assert.Equal(AgentFailureCodes.TerminalInvalid, actual.AgentOutcome.Diagnostic!.Code);
+        Assert.Equal(actual.Spec.Operations.Length + 1, actual.AgentOutcome.Diagnostic.ToolCalls);
+        Assert.Equal(actual.Input.Script.Turns.Length, actual.ConsumedTurns);
+        Assert.Equal(EvaluationCode.ExecutionFailed, actual.Outcome.Code);
+        Assert.Null(actual.Subject);
+        var row = result.Summary.Cases.Single(item => item.CaseId == caseId);
+        Assert.True(row.AuditPassed);
+        Assert.False(row.Verified);
+        Assert.Equal(1, result.ExitCode);
+    }
+
+    [Theory]
+    [InlineData("IoFailure", "infrastructure_failed", 1)]
+    [InlineData("Cancelled", "infrastructure_failed", 1)]
+    [InlineData("InvalidManifest", "input_invalid", 2)]
+    [InlineData("UnsafeEntry", "input_invalid", 2)]
+    [InlineData("ContentMismatch", "input_invalid", 2)]
+    [InlineData("InvalidContent", "input_invalid", 2)]
+    [InlineData("InvalidReference", "input_invalid", 2)]
+    public async Task AdmissionFailureCategoryIsPreserved(string admissionCode, string expectedCode, int exitCode)
+    {
+        var result = await QualityRunner.RunAsync(new ReplayAdmissionResult(Enum.Parse<ReplayAdmissionCode>(admissionCode), null));
+        Assert.Equal(exitCode, result.ExitCode);
+        Assert.Equal(expectedCode, result.Summary.Code);
+        Assert.Equal("deterministic", result.Summary.Mode);
+        Assert.Null(result.Summary.CorpusSha256);
+        Assert.Empty(result.Executions);
+        Assert.Empty(result.Summary.Cases);
+        Assert.Equal(0, result.Summary.ExecutedCases);
+        Assert.Equal(0, result.Summary.VerifiedCases);
+    }
+
+    [Fact]
+    public async Task CancelledRealAdmissionIsNotMalformedCorpus()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Assert.Equal(ReplayAdmissionCode.Cancelled, ReplayAdmission.Load(Path.Combine(CheckedRoot, "bundle"), cancellation.Token).Code);
+        var result = await QualityRunner.RunAsync(CheckedRoot, cancellation.Token);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("infrastructure_failed", result.Summary.Code);
+    }
+
     private sealed class FailingWriter(int successfulLines) : StringWriter
     {
         private int _written;

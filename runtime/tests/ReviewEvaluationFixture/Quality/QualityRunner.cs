@@ -41,7 +41,19 @@ internal static class QualityRunner
     {
         try
         {
-            var admission = ReplayAdmission.Load(Path.Combine(root, "bundle"), cancellationToken);
+            return await RunAsync(ReplayAdmission.Load(Path.Combine(root, "bundle"), cancellationToken), cancellationToken);
+        }
+        catch
+        {
+            return InfrastructureFailure();
+        }
+    }
+
+    internal static async Task<QualityResult> RunAsync(ReplayAdmissionResult admission, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (admission.Code is ReplayAdmissionCode.IoFailure or ReplayAdmissionCode.Cancelled) return InfrastructureFailure();
             if (admission.Fixture is not { } fixture || !InventoryMatches(fixture)) return Invalid();
             var audits = new List<QualityAuditResult>();
             for (var index = 0; index < QualityCoverage.Cases.Length; index++)
@@ -69,9 +81,12 @@ internal static class QualityRunner
         }
         catch
         {
-            return new(new("deterministic", "infrastructure_failed", null, QualityCoverage.Cases.Length, 0, 0, []), []);
+            return InfrastructureFailure();
         }
     }
+
+    private static QualityResult InfrastructureFailure() =>
+        new(new("deterministic", "infrastructure_failed", null, QualityCoverage.Cases.Length, 0, 0, []), []);
 
     private static QualityResult Invalid(string? corpus = null) =>
         new(new("deterministic", "input_invalid", corpus, QualityCoverage.Cases.Length, 0, 0, []), []);
@@ -130,6 +145,9 @@ internal static class QualityRunner
             execution.AgentOutcome.Diagnostic?.Code != spec.AgentFailure) return false;
         if (spec.AgentFailure is not null)
             return !execution.AgentOutcome.Succeeded && execution.Subject is null &&
+                // These events come from the real loop after tool-result admission, even without a completed SESSION.
+                execution.AgentOutcome.Events.OfType<AgentToolResultEvent>()
+                    .Select(tool => new RequiredObservation(tool.Name, tool.ObservationId)).SequenceEqual(audit.Observations) &&
                 execution.AgentOutcome.Diagnostic!.ModelCalls == execution.ConsumedTurns &&
                 execution.AgentOutcome.Diagnostic.ToolCalls == spec.Operations.Length + 1 &&
                 result.ExecutionStatus == EvaluationStatus.Failed && result.FailureSource == EvaluationFailureSource.Agent &&
