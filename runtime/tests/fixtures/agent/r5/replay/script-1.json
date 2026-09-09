@@ -1,0 +1,24 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "current_1",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/current.txt\",\"start_line\":1,\"line_count\":1}"
+        }
+      ],
+      "reasoning_content": " same reasoning "
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "finish_1",
+          "name": "finish_review",
+          "arguments_json": "{\"summary\":\"$history:seed_read:1\",\"findings\":[]}"
+        }
+      ],
+      "reasoning_content": " same finish "
+    }
+  ]
+}

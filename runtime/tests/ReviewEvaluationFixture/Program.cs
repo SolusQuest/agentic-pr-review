@@ -1,6 +1,7 @@
 using System.Text;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture;
 
@@ -10,6 +11,13 @@ internal static class Program
     {
         try
         {
+            if (args.SequenceEqual(["replay-child"])) return await ReplayChild.MainAsync();
+            if (args.Length == 3 && args[0] == "replay" && args[1] == "--bundle")
+            {
+                var replay = await ReplayRunner.RunAsync(args[2]);
+                Console.WriteLine(Encoding.UTF8.GetString(ReplayWire.Write(replay)));
+                return replay.ExitCode;
+            }
             if (args.Length == 3 && args[0] == "quality" && args[1] == "--corpus")
             {
                 var quality = await QualityRunner.RunAsync(args[2]);

@@ -1,0 +1,1 @@
+Review the immutable synthetic snapshot. Use only registered read-only tools.
