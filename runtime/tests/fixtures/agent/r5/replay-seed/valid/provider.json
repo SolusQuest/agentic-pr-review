@@ -1,0 +1,24 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "read0",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/Counter.cs\",\"start_line\":1,\"line_count\":1}"
+        }
+      ],
+      "reasoning_content": "Authored synthetic tool request."
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "finish0",
+          "name": "finish_review",
+          "arguments_json": "{\"summary\":\"Synthetic safe control.\",\"findings\":[]}"
+        }
+      ],
+      "reasoning_content": "Authored synthetic completion."
+    }
+  ]
+}

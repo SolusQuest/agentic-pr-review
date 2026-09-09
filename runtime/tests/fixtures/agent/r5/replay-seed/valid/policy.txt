@@ -1,0 +1,1 @@
+Review the supplied synthetic snapshot using read-only tools.

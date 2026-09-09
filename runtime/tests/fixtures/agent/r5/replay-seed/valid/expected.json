@@ -1,0 +1,12 @@
+{
+  "expected_code": "Scored",
+  "defects": [],
+  "required_observations": [],
+  "prohibited_findings": [
+    {
+      "path": "src/Counter.cs",
+      "start_line": 1,
+      "end_line": 1
+    }
+  ]
+}
