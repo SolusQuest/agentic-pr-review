@@ -1,0 +1,14 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "finish",
+          "name": "finish_review",
+          "arguments_json": "{\u0022summary\u0022:\u0022Authored deterministic review. APR242_TERMINAL_CANARY\u0022,\u0022findings\u0022:[]}"
+        }
+      ],
+      "reasoning_content": ""
+    }
+  ]
+}

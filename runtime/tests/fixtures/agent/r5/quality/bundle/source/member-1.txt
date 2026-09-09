@@ -1,0 +1,2 @@
+# Logging policy
+Never log an upload access token, including during failure handling.

@@ -1,0 +1,1029 @@
+{
+  "format": "apr.r5.synthetic-replay.v1",
+  "source_kind": "authored-synthetic",
+  "configuration": {
+    "workflow_identity": "r5@quality",
+    "provider_id": "synthetic-provider",
+    "model_id": "synthetic-model",
+    "adapter_id": "synthetic-adapter"
+  },
+  "files": [
+    {
+      "path": "cases/cs-defect/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/cs-defect/expected.json",
+      "role": "assertions",
+      "length": 873,
+      "sha256": "e9296360bc1baf23a1fe1dc7d531d8bde77141c08880daeed0214232bcce0a5e"
+    },
+    {
+      "path": "cases/cs-defect/provider.json",
+      "role": "script",
+      "length": 1653,
+      "sha256": "5d63384c0d10dbbae9348b065d7501215c90743e8ffbdc0b2658fb94dbf2324e"
+    },
+    {
+      "path": "cases/cs-safe/context.txt",
+      "role": "context",
+      "length": 90,
+      "sha256": "697820d62e976faff000f193072849706bc105350465218d5d0e56917a7d2696"
+    },
+    {
+      "path": "cases/cs-safe/expected.json",
+      "role": "assertions",
+      "length": 436,
+      "sha256": "f818b04e8ae6ec6aca2857cc552d0dae4b6c1760f2e94c3727a897ef9bec4f98"
+    },
+    {
+      "path": "cases/cs-safe/provider.json",
+      "role": "script",
+      "length": 873,
+      "sha256": "75084d42e298081335a3d4acafcf8b7de2dfe1998af1649a4c0b8ab196352bb1"
+    },
+    {
+      "path": "cases/duplicate-proposal/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/duplicate-proposal/expected.json",
+      "role": "assertions",
+      "length": 887,
+      "sha256": "7487e6a4ae6d54445dd497172f03f9d94fc3a55cadece77baf56e11451c2613b"
+    },
+    {
+      "path": "cases/duplicate-proposal/provider.json",
+      "role": "script",
+      "length": 2103,
+      "sha256": "f69098fc078a3d82d03741908d1aa18fd4e11c5c8875ee904078b8b02ca5f33a"
+    },
+    {
+      "path": "cases/irrelevant-tool/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/irrelevant-tool/expected.json",
+      "role": "assertions",
+      "length": 893,
+      "sha256": "5c76f3287fd1617c46a4f6e0a5d0414b55dcf5bc7fc7811acdec2365b69356f7"
+    },
+    {
+      "path": "cases/irrelevant-tool/provider.json",
+      "role": "script",
+      "length": 1233,
+      "sha256": "9a8cde35d7dd3487f828fba6619a60f7d535201cce1136cc3a66ec7b77d384d7"
+    },
+    {
+      "path": "cases/no-required-tool/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/no-required-tool/expected.json",
+      "role": "assertions",
+      "length": 886,
+      "sha256": "1987e7d35a572e8fafc6ee5ae5294406d9dcd1d64a9b6301650b56cfd95d2068"
+    },
+    {
+      "path": "cases/no-required-tool/provider.json",
+      "role": "script",
+      "length": 317,
+      "sha256": "592607e96d89a9570ce9584a0504c6a6a4044fbb8f069aff1eb2e5556aed996d"
+    },
+    {
+      "path": "cases/pathless-proposal/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/pathless-proposal/expected.json",
+      "role": "assertions",
+      "length": 882,
+      "sha256": "fcb30254968e62afc3244fd49e0156f0d79a0ed2b679acf919cf3e7aabd47736"
+    },
+    {
+      "path": "cases/pathless-proposal/provider.json",
+      "role": "script",
+      "length": 1648,
+      "sha256": "ea0d2932e2b1d3926fc5d6e9eada7e3fe32c3129996bad5cdbb2565e128c9501"
+    },
+    {
+      "path": "cases/repository-rule/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "2be03b6c99201f6e62cf6ab9c70abf9090e977a88bd1168d9e59a80d6c6deabe"
+    },
+    {
+      "path": "cases/repository-rule/expected.json",
+      "role": "assertions",
+      "length": 867,
+      "sha256": "74715367acd899ed38408d6737640cdc44e6b023a7b8e84c51c2f25cf0e13a32"
+    },
+    {
+      "path": "cases/repository-rule/provider.json",
+      "role": "script",
+      "length": 1780,
+      "sha256": "753aa9e9adbed3c01718f05374954e7e9d076a758011a1202fd87692fc1dd1ab"
+    },
+    {
+      "path": "cases/safe-invention/context.txt",
+      "role": "context",
+      "length": 90,
+      "sha256": "697820d62e976faff000f193072849706bc105350465218d5d0e56917a7d2696"
+    },
+    {
+      "path": "cases/safe-invention/expected.json",
+      "role": "assertions",
+      "length": 447,
+      "sha256": "249b6894211c8cf44bb542a2075c218413763909f261d0c5d160cc56bea16d7c"
+    },
+    {
+      "path": "cases/safe-invention/provider.json",
+      "role": "script",
+      "length": 1278,
+      "sha256": "75f6e3ffe4b9ae54ac094ee250903a737dae45e66f5f9bf8fc81d0debe58a4c9"
+    },
+    {
+      "path": "cases/sticky-only/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "9ee6664adf0fafd787603787119e535248fb66fb2fece9c92b4a04ed9fa5e996"
+    },
+    {
+      "path": "cases/sticky-only/expected.json",
+      "role": "assertions",
+      "length": 602,
+      "sha256": "8dc0047b6dea2804953f09db81abdb94f095499c79e572aa1000e7b933c7756b"
+    },
+    {
+      "path": "cases/sticky-only/provider.json",
+      "role": "script",
+      "length": 1292,
+      "sha256": "c0c3f7a7820dd0935860639b56d0b046693d5a590128bc43d29e9f8668ac8709"
+    },
+    {
+      "path": "cases/ts-defect/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "b0d6a8fbb0d417926f060dfd040a79ad4f9bae8621ca7e40ab112877857f9aaf"
+    },
+    {
+      "path": "cases/ts-defect/expected.json",
+      "role": "assertions",
+      "length": 735,
+      "sha256": "7691cfecbb3c25e69382eb63c46e917b0e574165230ac211f25b927edc5235d7"
+    },
+    {
+      "path": "cases/ts-defect/provider.json",
+      "role": "script",
+      "length": 1542,
+      "sha256": "6d76b6d95ec331b13310dea2f4b8cbf88c3427bac7197ece579b60ab9963c7eb"
+    },
+    {
+      "path": "cases/ts-safe/context.txt",
+      "role": "context",
+      "length": 91,
+      "sha256": "77d2ab65906d54bc68c0ac0311aedabd1b39cdf7ec041924795990aa21e2dbb2"
+    },
+    {
+      "path": "cases/ts-safe/expected.json",
+      "role": "assertions",
+      "length": 437,
+      "sha256": "d50753d269e7e9a699e5bff87b134e79c2e46ae0aaad1d56b61dd6c4d7137aef"
+    },
+    {
+      "path": "cases/ts-safe/provider.json",
+      "role": "script",
+      "length": 874,
+      "sha256": "41a1cc0d5f75e38d5d4348138d83a9b825686ce29f4c2e60b298d1a2ee05bd6c"
+    },
+    {
+      "path": "cases/wrong-evidence/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/wrong-evidence/expected.json",
+      "role": "assertions",
+      "length": 882,
+      "sha256": "fcb30254968e62afc3244fd49e0156f0d79a0ed2b679acf919cf3e7aabd47736"
+    },
+    {
+      "path": "cases/wrong-evidence/provider.json",
+      "role": "script",
+      "length": 1658,
+      "sha256": "2d8099dbcbc94f801de8010a8344bf416ea2afe4a1bca50f4374ecf85f803174"
+    },
+    {
+      "path": "cases/wrong-location/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/wrong-location/expected.json",
+      "role": "assertions",
+      "length": 889,
+      "sha256": "4ad12821907fac4f98731e09e2f3ca0ad66c4f5220acd0f8f6bc2b15ee244f9c"
+    },
+    {
+      "path": "cases/wrong-location/provider.json",
+      "role": "script",
+      "length": 1658,
+      "sha256": "739b10ca6bb7bad30dfd265d5d36d6bbfcb5f77f18e96dda9e78302c468f72d8"
+    },
+    {
+      "path": "diff.json",
+      "role": "diff",
+      "length": 4648,
+      "sha256": "af9c9826d7cc97712969ef238491ee58c1219951e5ca107275398f670c017eb1"
+    },
+    {
+      "path": "policy.txt",
+      "role": "policy",
+      "length": 118,
+      "sha256": "6b4f8217c9eba803a804c4433898fdc36c2107c83b064780d79384f4e6f9294f"
+    },
+    {
+      "path": "source/member-0.txt",
+      "role": "repository",
+      "length": 55,
+      "sha256": "e31330e707dd07b2b6c0e0873cdb5abfb51abf40993fa9f228670463bdc0eaf3"
+    },
+    {
+      "path": "source/member-1.txt",
+      "role": "repository",
+      "length": 86,
+      "sha256": "c063f656c4029f01fddae24e985d2ec3299485f77e01e9ce55a23bf1aaa7b1ab"
+    },
+    {
+      "path": "source/member-2.txt",
+      "role": "repository",
+      "length": 102,
+      "sha256": "d49d129e266f23daec0c5333d5b2c4e2d5444841bec57d0308f9b74f4decd33e"
+    },
+    {
+      "path": "source/member-3.txt",
+      "role": "repository",
+      "length": 83,
+      "sha256": "2cb3819a609411247da766c97a3e1f4cce5c1d9ffc62dc35c4d8d1c0a5eaee4f"
+    },
+    {
+      "path": "source/member-4.txt",
+      "role": "repository",
+      "length": 123,
+      "sha256": "59dbb38cdadc0820a84c90603be117ac8811ac700929433017984b2b921ff70c"
+    },
+    {
+      "path": "source/member-5.txt",
+      "role": "repository",
+      "length": 148,
+      "sha256": "e056822d1aa87503530b51d7be99e6ac0191b64de85b5479fd02d8d20c99842f"
+    },
+    {
+      "path": "source/member-6.txt",
+      "role": "repository",
+      "length": 84,
+      "sha256": "abe06c6eed2cef01e3ab03ed8eda75e57503fc8919752bd46aea3b24da27ac09"
+    },
+    {
+      "path": "source/member-7.txt",
+      "role": "repository",
+      "length": 118,
+      "sha256": "3b8e652f6f25343266309b40d3c07d2c0776a818757b61fc1f0132e603c330f3"
+    },
+    {
+      "path": "source/member-8.txt",
+      "role": "repository",
+      "length": 84,
+      "sha256": "1013f908ac399af77f5cde7839740c651584078b40f09dae3e90b515a2eeb362"
+    }
+  ],
+  "runs": [
+    {
+      "id": "cs-defect",
+      "case_id": "cs-defect",
+      "transition": "initial",
+      "previous_run_id": null,
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/cs-defect/context.txt",
+      "script": "cases/cs-defect/provider.json",
+      "assertions": "cases/cs-defect/expected.json"
+    },
+    {
+      "id": "cs-safe",
+      "case_id": "cs-safe",
+      "transition": "same_head",
+      "previous_run_id": "cs-defect",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/cs-safe/context.txt",
+      "script": "cases/cs-safe/provider.json",
+      "assertions": "cases/cs-safe/expected.json"
+    },
+    {
+      "id": "ts-defect",
+      "case_id": "ts-defect",
+      "transition": "same_head",
+      "previous_run_id": "cs-safe",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/ts-defect/context.txt",
+      "script": "cases/ts-defect/provider.json",
+      "assertions": "cases/ts-defect/expected.json"
+    },
+    {
+      "id": "ts-safe",
+      "case_id": "ts-safe",
+      "transition": "same_head",
+      "previous_run_id": "ts-defect",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/ts-safe/context.txt",
+      "script": "cases/ts-safe/provider.json",
+      "assertions": "cases/ts-safe/expected.json"
+    },
+    {
+      "id": "repository-rule",
+      "case_id": "repository-rule",
+      "transition": "same_head",
+      "previous_run_id": "ts-safe",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/repository-rule/context.txt",
+      "script": "cases/repository-rule/provider.json",
+      "assertions": "cases/repository-rule/expected.json"
+    },
+    {
+      "id": "sticky-only",
+      "case_id": "sticky-only",
+      "transition": "same_head",
+      "previous_run_id": "repository-rule",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/sticky-only/context.txt",
+      "script": "cases/sticky-only/provider.json",
+      "assertions": "cases/sticky-only/expected.json"
+    },
+    {
+      "id": "no-required-tool",
+      "case_id": "no-required-tool",
+      "transition": "same_head",
+      "previous_run_id": "sticky-only",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/no-required-tool/context.txt",
+      "script": "cases/no-required-tool/provider.json",
+      "assertions": "cases/no-required-tool/expected.json"
+    },
+    {
+      "id": "irrelevant-tool",
+      "case_id": "irrelevant-tool",
+      "transition": "same_head",
+      "previous_run_id": "no-required-tool",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/irrelevant-tool/context.txt",
+      "script": "cases/irrelevant-tool/provider.json",
+      "assertions": "cases/irrelevant-tool/expected.json"
+    },
+    {
+      "id": "wrong-evidence",
+      "case_id": "wrong-evidence",
+      "transition": "same_head",
+      "previous_run_id": "irrelevant-tool",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/wrong-evidence/context.txt",
+      "script": "cases/wrong-evidence/provider.json",
+      "assertions": "cases/wrong-evidence/expected.json"
+    },
+    {
+      "id": "wrong-location",
+      "case_id": "wrong-location",
+      "transition": "same_head",
+      "previous_run_id": "wrong-evidence",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/wrong-location/context.txt",
+      "script": "cases/wrong-location/provider.json",
+      "assertions": "cases/wrong-location/expected.json"
+    },
+    {
+      "id": "safe-invention",
+      "case_id": "safe-invention",
+      "transition": "same_head",
+      "previous_run_id": "wrong-location",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/safe-invention/context.txt",
+      "script": "cases/safe-invention/provider.json",
+      "assertions": "cases/safe-invention/expected.json"
+    },
+    {
+      "id": "duplicate-proposal",
+      "case_id": "duplicate-proposal",
+      "transition": "same_head",
+      "previous_run_id": "safe-invention",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/duplicate-proposal/context.txt",
+      "script": "cases/duplicate-proposal/provider.json",
+      "assertions": "cases/duplicate-proposal/expected.json"
+    },
+    {
+      "id": "pathless-proposal",
+      "case_id": "pathless-proposal",
+      "transition": "same_head",
+      "previous_run_id": "duplicate-proposal",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/pathless-proposal/context.txt",
+      "script": "cases/pathless-proposal/provider.json",
+      "assertions": "cases/pathless-proposal/expected.json"
+    }
+  ]
+}
