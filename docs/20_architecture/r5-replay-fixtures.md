@@ -33,7 +33,9 @@ Scripts validate bounded representation, not successful Agent behavior. Unknown 
 
 ## Bounds and validation
 
-Windows and Linux x64 are supported. Other platforms fail admission. The caller chooses a local directory root; remote/UNC roots and URL roots reject. The reader pins every ancestor and declared directory, refuses reparse points and symlinks, checks regular-file type and single-link count before reading, and uses nonblocking file opens. Linux operations use pinned descriptor paths; Windows holds read handles without delete sharing and supports long local paths. A final directory identity/inventory and manifest-byte check precedes publication.
+Windows and Linux x64 are supported with caller-provided bundles staged on a local filesystem. Other platforms fail admission. Root checks reject URL/UNC syntax on both platforms and drives reported as network drives on Windows. Linux does not inspect mount origin: NFS, CIFS or other remote transports can appear under ordinary paths and are not guaranteed to reject. Local staging is a caller precondition, not a mount-origin authorization guarantee; network-filesystem identity, mutation and IO-liveness behavior are outside this reader's supported validation boundary.
+
+The reader pins every ancestor and declared directory, refuses reparse points and symlinks, checks regular-file type and single-link count before reading, and uses nonblocking file opens. Linux operations use pinned descriptor paths; Windows holds read handles without delete sharing and supports long local paths. A final directory identity/inventory and manifest-byte check precedes publication.
 
 | Boundary                           | Maximum                                                             |
 | ---------------------------------- | ------------------------------------------------------------------- |

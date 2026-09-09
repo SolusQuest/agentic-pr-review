@@ -73,7 +73,7 @@ internal static class ReplayAdmission
             !ReplayLimits.Text(configuration.ModelId, 128) || !ReplayLimits.Text(configuration.AdapterId, 128) ||
             manifest.Files.IsDefault || manifest.Files.Length is < 1 or > ReplayLimits.Files ||
             manifest.Runs.IsDefault || manifest.Runs.Length is < 1 or > ReplayLimits.Runs) return false;
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ReplayLimits.ManifestName };
         var directories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         long aggregate = 0;
         string? previousPath = null;
@@ -81,18 +81,11 @@ internal static class ReplayAdmission
         {
             if (file is null || !ReplayLimits.Path(file.Path) || file.Path.Equals(ReplayLimits.ManifestName, StringComparison.OrdinalIgnoreCase) ||
                 !ReplayLimits.Role(file.Role) || file.Length is < 0 or > ReplayLimits.FileBytes || !EvaluationLimits.Hash(file.Sha256) ||
-                !paths.Add(file.Path) || previousPath is not null && StringComparer.Ordinal.Compare(previousPath, file.Path) >= 0) return false;
+                !AddFilePath(file.Path, paths, directories) || previousPath is not null && StringComparer.Ordinal.Compare(previousPath, file.Path) >= 0) return false;
             aggregate += file.Length;
             previousPath = file.Path;
-            for (var index = file.Path.IndexOf('/'); index >= 0; index = file.Path.IndexOf('/', index + 1))
-            {
-                var directory = file.Path[..index];
-                if (directories.TryGetValue(directory, out var spelling) && spelling != directory) return false;
-                directories[directory] = directory;
-            }
         }
-        if (aggregate > ReplayLimits.TotalBytes || directories.Keys.Any(paths.Contains) ||
-            directories.ContainsKey(ReplayLimits.ManifestName)) return false;
+        if (aggregate > ReplayLimits.TotalBytes) return false;
         var runIds = new HashSet<string>(StringComparer.Ordinal);
         var caseIds = new HashSet<string>(StringComparer.Ordinal);
         ReplayRun? previous = null;
@@ -110,10 +103,26 @@ internal static class ReplayAdmission
                 !(run.Transition == "same_head" && run.ReviewedIdentity == previous.ReviewedIdentity ||
                     run.Transition == "verified_ahead" && run.ReviewedIdentity.HeadSha != previous.ReviewedIdentity.HeadSha)) return false;
             var tracked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var trackedDirectories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in run.Repository)
-                if (entry is null || !ReplayLimits.Path(entry.Path) || !ReplayLimits.Path(entry.File) || !tracked.Add(entry.Path)) return false;
+                if (entry is null || !ReplayLimits.Path(entry.Path) || !ReplayLimits.Path(entry.File) ||
+                    !AddFilePath(entry.Path, tracked, trackedDirectories)) return false;
             if (!new[] { run.Diff, run.Policy, run.Context, run.Script, run.Assertions }.All(ReplayLimits.Path)) return false;
             previous = run;
+        }
+        return true;
+    }
+
+    // A file cannot also be an implied directory. Apply the same portable tree rule
+    // to physical bundle members and each independent logical reviewed-head tree.
+    private static bool AddFilePath(string path, HashSet<string> files, Dictionary<string, string> directories)
+    {
+        if (!files.Add(path) || directories.ContainsKey(path)) return false;
+        for (var index = path.IndexOf('/'); index >= 0; index = path.IndexOf('/', index + 1))
+        {
+            var directory = path[..index];
+            if (files.Contains(directory) || directories.TryGetValue(directory, out var spelling) && spelling != directory) return false;
+            directories[directory] = directory;
         }
         return true;
     }

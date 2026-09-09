@@ -523,6 +523,44 @@ public sealed class R5ReplayAdmissionTests
     [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
     private static extern int MkFifo(string path, uint mode);
 
+    [Theory]
+    [InlineData("a", "a/b")]
+    [InlineData("a", "a/b/c")]
+    [InlineData("a/b", "a/b/c")]
+    [InlineData("A", "a/b")]
+    [InlineData("a/B", "a/b/c")]
+    [InlineData("a/b", "A/c")]
+    [InlineData("a/b/c", "a/B/d")]
+    public void LogicalRepositoryRejectsFileDirectoryAndDirectorySpellingCollisions(string first, string second)
+    {
+        foreach (var paths in new[] { new[] { first, second }, new[] { second, first } })
+        {
+            using var bundle = new Bundle();
+            bundle.Manifest(document =>
+            {
+                var repository = document["runs"]![0]!["repository"]!.AsArray();
+                foreach (var path in paths) repository.Add(new JsonObject { ["path"] = path, ["file"] = "source.txt" });
+            });
+            var result = ReplayAdmission.Load(bundle.Root);
+            Assert.Equal(ReplayAdmissionCode.InvalidManifest, result.Code);
+            Assert.Null(result.Fixture);
+        }
+    }
+
+    [Fact]
+    public void LogicalRepositoryAllowsSharedDirectoriesAndSimilarFilePrefixes()
+    {
+        using var bundle = new Bundle();
+        bundle.Manifest(document =>
+        {
+            var repository = document["runs"]![0]!["repository"]!.AsArray();
+            foreach (var path in new[] { "a/b", "a/c", "ab", "abc", "a/bc/d" })
+                repository.Add(new JsonObject { ["path"] = path, ["file"] = "source.txt" });
+        });
+        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(bundle.Root).Fixture);
+        Assert.Equal(6, fixture.Runs[0].CreateSnapshot(Path.GetTempPath()).OrderedTrackedFiles.Length);
+    }
+
     private static void Reject(string root)
     {
         var result = ReplayAdmission.Load(root);
