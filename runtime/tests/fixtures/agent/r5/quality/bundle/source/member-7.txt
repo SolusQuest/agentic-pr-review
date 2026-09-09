@@ -1,0 +1,2 @@
+// APR242_SOURCE_CANARY: synthetic configuration
+export const config = { timeoutMs: 0 }; // zero disables the timeout

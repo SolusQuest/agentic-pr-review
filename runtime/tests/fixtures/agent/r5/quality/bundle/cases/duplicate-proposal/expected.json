@@ -1,0 +1,32 @@
+{
+  "expected_code": "DuplicateObservation",
+  "defects": [
+    {
+      "id": "defect",
+      "severity": "high",
+      "observation_id": "94240cc8335357e0928586830894019d9ef7d8135d14226d6ea98d84a31f4d64",
+      "path": "src/Caller.cs",
+      "start_line": 3,
+      "end_line": 3
+    }
+  ],
+  "required_observations": [
+    {
+      "tool": "list_changed_files",
+      "observation_id": "3485d7d2f3925d88b50c275c53b4ea14e84cb9810a71c7ab2d9738fdbb4b64a0"
+    },
+    {
+      "tool": "read_diff",
+      "observation_id": "4797dae36d119c52b67af2234a3fec533cd4406e0db80bb87e59baff0dac4f18"
+    },
+    {
+      "tool": "read_file",
+      "observation_id": "94240cc8335357e0928586830894019d9ef7d8135d14226d6ea98d84a31f4d64"
+    },
+    {
+      "tool": "read_file",
+      "observation_id": "04fddd91ea4cd00585ee98878c4f176481c56e409f54236a432e58c0c0a806e4"
+    }
+  ],
+  "prohibited_findings": []
+}

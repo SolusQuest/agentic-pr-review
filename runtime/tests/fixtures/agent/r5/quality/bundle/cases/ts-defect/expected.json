@@ -1,0 +1,28 @@
+{
+  "expected_code": "Scored",
+  "defects": [
+    {
+      "id": "defect",
+      "severity": "high",
+      "observation_id": "a00eb54e9e2b7d66e9f79d5fa662f991170710dd6b9b20af2148279ef5ab5551",
+      "path": "src/client.ts",
+      "start_line": 2,
+      "end_line": 2
+    }
+  ],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": "2f9ccf418383e471d8c7e03ee0d433c9a5c748207e0657343d03d1640ff856db"
+    },
+    {
+      "tool": "search_text",
+      "observation_id": "c4de9e08fcd793b913e896fb903bbcdc9c55efc1b150d50b9b1038e246dd9448"
+    },
+    {
+      "tool": "read_file",
+      "observation_id": "a00eb54e9e2b7d66e9f79d5fa662f991170710dd6b9b20af2148279ef5ab5551"
+    }
+  ],
+  "prohibited_findings": []
+}

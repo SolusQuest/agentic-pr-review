@@ -1,0 +1,5 @@
+public static class Upload
+{
+    public static void Failed(string accessToken) => Log(accessToken);
+    private static void Log(string value) { }
+}

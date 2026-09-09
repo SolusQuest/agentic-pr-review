@@ -1,0 +1,4 @@
+public static class Lookup
+{
+    public static string? Find(string key) => null;
+}

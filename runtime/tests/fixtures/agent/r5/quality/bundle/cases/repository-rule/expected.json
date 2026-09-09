@@ -1,0 +1,32 @@
+{
+  "expected_code": "Scored",
+  "defects": [
+    {
+      "id": "defect",
+      "severity": "high",
+      "observation_id": "397591e454157a453c6ca6c8b3aeab22e76ddff445d0703e4122d68fb8075104",
+      "path": "src/Upload.cs",
+      "start_line": 3,
+      "end_line": 3
+    }
+  ],
+  "required_observations": [
+    {
+      "tool": "list_files",
+      "observation_id": "0e3b27d0f5e7a044fb9c29f079e2020c1d1f29f17328bbe6ea9aac17d76767d0"
+    },
+    {
+      "tool": "read_file",
+      "observation_id": "67e22d27df81034ab3f153ead64606a058c72d7d568f2c7bb5b7e3e8c9367c45"
+    },
+    {
+      "tool": "search_text",
+      "observation_id": "34f599e3855ab2a42cd69aa0c3f95656360c93d8f51260cb4deff387c940eb74"
+    },
+    {
+      "tool": "read_file",
+      "observation_id": "397591e454157a453c6ca6c8b3aeab22e76ddff445d0703e4122d68fb8075104"
+    }
+  ],
+  "prohibited_findings": []
+}

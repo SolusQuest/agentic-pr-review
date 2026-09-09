@@ -1,0 +1,186 @@
+{
+  "changes": [
+    {
+      "path": "src/Caller.cs",
+      "previous_path": null,
+      "status": "added",
+      "source_truncated": false,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 4,
+          "lines": [
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 1,
+              "text": "public static class Caller"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 2,
+              "text": "{"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 3,
+              "text": "    public static string Label(string key) => Lookup.Find(key).Trim();"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 4,
+              "text": "}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/SafeCaller.cs",
+      "previous_path": null,
+      "status": "added",
+      "source_truncated": false,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 4,
+          "lines": [
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 1,
+              "text": "public static class SafeCaller"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 2,
+              "text": "{"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 3,
+              "text": "    public static string Label(string key) => Lookup.Find(key)?.Trim() ?? string.Empty;"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 4,
+              "text": "}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/client.ts",
+      "previous_path": null,
+      "status": "added",
+      "source_truncated": false,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 2,
+          "lines": [
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 1,
+              "text": "import { config } from './config';"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 2,
+              "text": "export const timeout = config.timeoutMs || 3000;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/safe-client.ts",
+      "previous_path": null,
+      "status": "added",
+      "source_truncated": false,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 2,
+          "lines": [
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 1,
+              "text": "import { config } from './config';"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 2,
+              "text": "export const timeout = config.timeoutMs ?? 3000;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/Upload.cs",
+      "previous_path": null,
+      "status": "added",
+      "source_truncated": false,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 5,
+          "lines": [
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 1,
+              "text": "public static class Upload"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 2,
+              "text": "{"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 3,
+              "text": "    public static void Failed(string accessToken) => Log(accessToken);"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 4,
+              "text": "    private static void Log(string value) { }"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

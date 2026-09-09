@@ -1,0 +1,15 @@
+{
+  "expected_code": "Scored",
+  "defects": [],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": "a250f06f8bf54c243c21658608bde98b03b5fd623a3d538167458f304227d492"
+    },
+    {
+      "tool": "read_file",
+      "observation_id": "04fddd91ea4cd00585ee98878c4f176481c56e409f54236a432e58c0c0a806e4"
+    }
+  ],
+  "prohibited_findings": [{ "path": "src/SafeCaller.cs", "start_line": 3, "end_line": 3 }]
+}

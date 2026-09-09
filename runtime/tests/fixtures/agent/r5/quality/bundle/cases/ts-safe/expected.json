@@ -1,0 +1,15 @@
+{
+  "expected_code": "Scored",
+  "defects": [],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": "2f9ccf418383e471d8c7e03ee0d433c9a5c748207e0657343d03d1640ff856db"
+    },
+    {
+      "tool": "read_file",
+      "observation_id": "0aece83cf8bd5b900cc912d2c983eaf3f4f344fc2507ae0aed73f9e4c06a3d49"
+    }
+  ],
+  "prohibited_findings": [{ "path": "src/safe-client.ts", "start_line": 2, "end_line": 2 }]
+}
