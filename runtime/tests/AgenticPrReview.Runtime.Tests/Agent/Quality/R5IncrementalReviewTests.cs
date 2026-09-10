@@ -90,6 +90,17 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
         [Theory]
         [InlineData(1)]
         [InlineData(2)]
+        public async Task SameHeadRecoveryRequiresOneSuccessfulFreshDiscovery(int failedDiscovery)
+        {
+            var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Bundle).Fixture);
+            var first = await Host.Action.ActionHostCompositionTests.RunIncrementalAsync(fixture, failedDiscovery: failedDiscovery);
+            var second = await Host.Action.ActionHostCompositionTests.RunIncrementalAsync(fixture, failedDiscovery: failedDiscovery);
+            Assert.Equal(first, second);
+        }
+
+        [Theory]
+        [InlineData(1)]
+        [InlineData(2)]
         public async Task CompletedIncrementalReviewCannotPublishOrAcceptAfterHeadAdvances(int barrier)
         {
             var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Bundle).Fixture);
@@ -297,7 +308,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
     // Reuse the existing private composition scaffolding without exporting or bypassing production authority.
     public sealed partial class ActionHostCompositionTests
     {
-        internal static async Task<string[]> RunIncrementalAsync(AdmittedReplayFixture fixture, int staleBarrier = 0, bool copiedComment = false)
+        internal static async Task<string[]> RunIncrementalAsync(AdmittedReplayFixture fixture, int staleBarrier = 0, bool copiedComment = false, int failedDiscovery = 0)
         {
             Assert.True(IncrementalCoverage.VerifyFixture(fixture));
             var remote = new IncrementalRemote();
@@ -306,7 +317,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             var store = FullPathStore(first.Launch);
             var normalized = new List<string>();
             string? session = null;
-            for (var phase = 0; phase < (staleBarrier != 0 ? 1 : copiedComment ? 2 : 3); phase++)
+            for (var phase = 0; phase < (staleBarrier != 0 ? 1 : copiedComment || failedDiscovery != 0 ? 2 : 3); phase++)
             {
                 var scenario = phase == 0 ? first : TrustedV2Scenario(12430 + phase, 1, new string('a', 64));
                 var identity = fixture.Runs[phase].Input.ReviewedIdentity.Runtime;
@@ -322,6 +333,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 {
                     setupUploads = store.UploadCalls;
                     if (copiedComment && phase == 1) remote.CopyStickyToAnotherIdentity();
+                    if (failedDiscovery != 0 && phase == 1) remote.FailedDiscovery = failedDiscovery;
                 });
                 var headChanges = 0;
                 github.CurrentPullRequestFact = _ =>
@@ -351,6 +363,17 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 if (phase == 0) { session = provider.Request.SessionId; Assert.Null(provider.Request.Continuation); }
                 else { Assert.Equal(session, provider.Request.SessionId); Assert.NotNull(provider.Request.Continuation); }
                 var records = ReadAcceptedStateRecords(store, scenario.Launch, time);
+                if (failedDiscovery == 1 && phase == 1)
+                {
+                    Assert.Equal(1, remote.PrewriteDiscoveries);
+                    Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
+                    Assert.Equal(ActionHostStateDisposition.Conflict, completion.Summary.StateDisposition);
+                    Assert.Empty(records.Acceptances.Where(item => item.Header.ProducingRunIdentity == store.ProducingRunIdentity));
+                    Assert.Single(remote.StickyWrites);
+                    Assert.Equal(3, remote.InlineComments.Count);
+                    normalized.Add("first-discovery-failed:no-new-publication-or-acceptance");
+                    continue;
+                }
                 if (copiedComment && phase == 1)
                 {
                     Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
@@ -373,6 +396,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                     continue;
                 }
                 Assert.True(completion.Status == ActionHostStatus.Reviewed, $"phase={phase};status={completion.Status};sticky={remote.StickyWrites.Count}");
+                if (failedDiscovery == 2 && phase == 1) Assert.Equal(1, remote.PrewriteDiscoveries);
                 Assert.Equal(ActionHostStateDisposition.Accepted, completion.Summary.StateDisposition);
                 Assert.Single(records.Acceptances.Where(item => item.Header.ProducingRunIdentity == store.ProducingRunIdentity));
                 Assert.Equal(phase + 1, remote.StickyWrites.Count);
@@ -456,21 +480,29 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             internal List<BoundedGitHubReviewComment> InlineComments { get; } = [];
             internal int InlineCreates { get; private set; }
             internal List<InlineCandidateMap> Maps { get; } = [];
+            internal int FailedDiscovery { get; set; }
+            internal int PrewriteDiscoveries { get; private set; }
             internal void CopyStickyToAnotherIdentity() => Sticky = Sticky! with { Id = 8, ApiUrl = Api + "/issues/comments/8", HtmlUrl = Html + "#issuecomment-8" };
             public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token, AuthorizedStickyPublicationRequest request)
             {
                 if (Sticky is not null) Assert.Equal(R4StickyMarker.Inspect(Sticky.Body).Identity!.ScopeSha256, request.Rendered.Identity.ScopeSha256);
                 return new StickyTransport(this, request);
             }
-            public IStickyGitHubReadbackTransport CreateReadback(ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request) => new StickyTransport(this, null);
+            public IStickyGitHubReadbackTransport CreateReadback(ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request)
+            {
+                var fail = FailedDiscovery != 0 && StickyWrites.Count == 1 && ++PrewriteDiscoveries == FailedDiscovery;
+                return new StickyTransport(this, null, fail);
+            }
             public IInlineGitHubPublisherTransport Create(AuthorizedInlinePublicationRequest request)
             { InlineCreates++; Maps.Add(request.CandidateMap); return new InlineTransport(this, request); }
 
-            private sealed class StickyTransport(IncrementalRemote owner, AuthorizedStickyPublicationRequest? request) : IStickyGitHubPublisherTransport, IStickyGitHubReadbackTransport
+            private sealed class StickyTransport(IncrementalRemote owner, AuthorizedStickyPublicationRequest? request, bool failDiscovery = false) : IStickyGitHubPublisherTransport, IStickyGitHubReadbackTransport
             {
                 public bool IsWithinOverallDeadline => true;
                 public Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>> ListIssueCommentsAsync(int page, CancellationToken token) =>
-                    Task.FromResult(BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>.Success(new(owner.Sticky is null ? [] : [owner.Sticky], null, null)));
+                    Task.FromResult(failDiscovery
+                        ? BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>.Failed(BoundedGitHubHttpOutcome.KnownNotSent, BoundedGitHubPublisherReason.TransportFailure)
+                        : BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>.Success(new(owner.Sticky is null ? [] : [owner.Sticky], null, null)));
                 public Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>> GetIssueCommentAsync(long commentId, CancellationToken token)
                 {
                     Assert.Equal(owner.Sticky!.Id, commentId);

@@ -174,7 +174,7 @@ internal sealed class PublicationRecoveryService
         if (marker == PublicationMarkerObservation.Exact &&
             observation.Intent is null && observation.RetryIntent is null &&
             await IsPreviousAcceptedTargetAsync(token, authorization, scope, observation,
-                cancellationToken).ConfigureAwait(false))
+                cancellationToken, discovered.Receipt).ConfigureAwait(false))
         {
             marker = PublicationMarkerObservation.PreviousAcceptedTarget;
         }
@@ -1196,7 +1196,8 @@ internal sealed class PublicationRecoveryService
         ActionHostAuthorizer.AuthorizedInvocation authorization,
         R4PublicationScopeV1 scope,
         PublicationRecoveryObservation observation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StickyCommentPublisher.StickyPublicationReceipt? freshReceipt = null)
     {
         var inventory = observation.Inventory;
         if (observation.Candidate is null ||
@@ -1219,16 +1220,25 @@ internal sealed class PublicationRecoveryService
             return false;
         }
 
+        // Exact discovery already verified this observation. Only a stale target needs
+        // another discovery against the predecessor's rendered body and durable receipt.
+        if (freshReceipt is not null)
+        {
+            return PublicationReceiptMatcher.IsFreshObservationOf(
+                durableReceipt,
+                freshReceipt);
+        }
+
         var discovered = await publisher.DiscoverAsync(
                 token,
                 request,
                 cancellationToken)
             .ConfigureAwait(false);
         return discovered.Kind == StickyDiscoveryKind.ExactTarget &&
-            discovered.Receipt is { } freshReceipt &&
+            discovered.Receipt is { } predecessorObservation &&
             PublicationReceiptMatcher.IsFreshObservationOf(
                 durableReceipt,
-                freshReceipt);
+                predecessorObservation);
     }
 
     private static PublicationRecoveryEvaluation Evaluation(
