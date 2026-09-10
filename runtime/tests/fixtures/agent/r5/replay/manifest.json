@@ -1,0 +1,157 @@
+{
+  "format": "apr.r5.synthetic-replay.v1",
+  "source_kind": "authored-synthetic",
+  "configuration": {
+    "workflow_identity": "r5@replay",
+    "provider_id": "deepseek",
+    "model_id": "deepseek-v4-flash",
+    "adapter_id": "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502"
+  },
+  "files": [
+    {
+      "path": "context-0.txt",
+      "role": "context",
+      "length": 39,
+      "sha256": "d50cc41a6f4f91f046590218c7ded1843eb1d693ce964baae2a9c99d57d2b2d6"
+    },
+    {
+      "path": "context-1.txt",
+      "role": "context",
+      "length": 77,
+      "sha256": "0f2d471319c19a625c9310af1eb913d589703c35406ae6a919771f24f7eae7e6"
+    },
+    {
+      "path": "context-2.txt",
+      "role": "context",
+      "length": 77,
+      "sha256": "0f2d471319c19a625c9310af1eb913d589703c35406ae6a919771f24f7eae7e6"
+    },
+    {
+      "path": "current.txt",
+      "role": "repository",
+      "length": 41,
+      "sha256": "fc027940b0826cb52d9f605449ac38ce2e7513a158f78aa3f8b42dc132d4d8a5"
+    },
+    {
+      "path": "diff.json",
+      "role": "diff",
+      "length": 18,
+      "sha256": "fa7b87f8656953ec82420f66726466890c71e22c56c85dfe70217d2050561765"
+    },
+    {
+      "path": "expected.json",
+      "role": "assertions",
+      "length": 109,
+      "sha256": "4729b0c97d69e2e925fc4d5cf8db6dbb2fe9dac5fc89a5fbda0e460d8c3057b4"
+    },
+    {
+      "path": "fact.txt",
+      "role": "repository",
+      "length": 25,
+      "sha256": "39df74d99fd24fb8c2b2f137af7d42dabb5ef4a76188ee0dd91cab70a4c88707"
+    },
+    {
+      "path": "policy.txt",
+      "role": "policy",
+      "length": 78,
+      "sha256": "a875675c8c2f3a568a6f50b53c9451047be61b7fddfdac1c3055430b8765d9b8"
+    },
+    {
+      "path": "script-0.json",
+      "role": "script",
+      "length": 712,
+      "sha256": "0fb7f4bfe38481eb7bcb6d04933d335e847645202e57b1ad6f1d0d5c6fae6e4f"
+    },
+    {
+      "path": "script-1.json",
+      "role": "script",
+      "length": 540,
+      "sha256": "40ca1e85d5af51a796640e157658445811861fb4f2a75b86dd75b5e03cd99f28"
+    },
+    {
+      "path": "script-2.json",
+      "role": "script",
+      "length": 542,
+      "sha256": "16f15f41584d8c6b1b4d6666cef269dabf260b22b275e237d619ce611b8e8682"
+    }
+  ],
+  "runs": [
+    {
+      "id": "replay-seed",
+      "case_id": "replay-seed",
+      "transition": "initial",
+      "previous_run_id": null,
+      "reviewed_identity": {
+        "repository_id": "246",
+        "review_target": 246,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "src/current.txt",
+          "file": "current.txt"
+        },
+        {
+          "path": "src/fact.txt",
+          "file": "fact.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "context-0.txt",
+      "script": "script-0.json",
+      "assertions": "expected.json"
+    },
+    {
+      "id": "replay-same",
+      "case_id": "replay-same",
+      "transition": "same_head",
+      "previous_run_id": "replay-seed",
+      "reviewed_identity": {
+        "repository_id": "246",
+        "review_target": 246,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "src/current.txt",
+          "file": "current.txt"
+        },
+        {
+          "path": "src/fact.txt",
+          "file": "fact.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "context-1.txt",
+      "script": "script-1.json",
+      "assertions": "expected.json"
+    },
+    {
+      "id": "replay-ahead",
+      "case_id": "replay-ahead",
+      "transition": "verified_ahead",
+      "previous_run_id": "replay-same",
+      "reviewed_identity": {
+        "repository_id": "246",
+        "review_target": 246,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "3333333333333333333333333333333333333333"
+      },
+      "repository": [
+        {
+          "path": "src/current.txt",
+          "file": "current.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "context-2.txt",
+      "script": "script-2.json",
+      "assertions": "expected.json"
+    }
+  ]
+}
