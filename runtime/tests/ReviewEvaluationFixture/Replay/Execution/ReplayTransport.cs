@@ -4,6 +4,7 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality.Incremental;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
@@ -43,6 +44,7 @@ internal sealed class ReplayTransport(ReplayScript script, ReplayFault fault) : 
                     if (fault == ReplayFault.MalformedTerminal) arguments = "{}";
                     else
                     {
+                        arguments = IncrementalArguments.Expand(arguments, body.RootElement);
                         using var terminal = JsonDocument.Parse(arguments);
                         var summary = terminal.RootElement.GetProperty("summary").GetString()!;
                         if (summary.StartsWith("$history:", StringComparison.Ordinal))

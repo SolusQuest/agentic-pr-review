@@ -1,0 +1,24 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "current_2",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"file.txt\",\"start_line\":1,\"line_count\":20}"
+        }
+      ],
+      "reasoning_content": " incremental 2 read \nα "
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "finish_2",
+          "name": "finish_review",
+          "arguments_json": "{\"summary\":\"Incremental review complete.\",\"findings\":[{\"severity\":\"high\",\"title\":\"continuing\",\"message\":\"Synthetic continuing defect.\",\"evidence\":[{\"observation_id\":\"$current:current_2\",\"path\":\"file.txt\",\"start_line\":4,\"end_line\":4}]},{\"severity\":\"high\",\"title\":\"new\",\"message\":\"Synthetic new defect.\",\"evidence\":[{\"observation_id\":\"$current:current_2\",\"path\":\"file.txt\",\"start_line\":5,\"end_line\":5}]}]}"
+        }
+      ],
+      "reasoning_content": " incremental 2 finish "
+    }
+  ]
+}

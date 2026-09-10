@@ -26,7 +26,7 @@ using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action;
 
-public sealed class ActionHostCompositionTests
+public sealed partial class ActionHostCompositionTests
 {
     [Theory]
     [InlineData(true, false)]
@@ -1722,11 +1722,11 @@ public sealed class ActionHostCompositionTests
         private static readonly string ConfigBlob = new('4', 40);
         private static readonly string InstructionsBlob = new('5', 40);
         private static readonly string ReviewedRoot = new('6', 40);
-        private const string FileBlob =
-            "acff1efca38bb0f23c265ddb8aa37f337eb8e89d";
+        private readonly string FileBlob;
         private static readonly string BaseRoot = new('8', 40);
-        private static readonly byte[] FileBytes =
-            Encoding.UTF8.GetBytes("changed line\n");
+        private readonly byte[] FileBytes;
+        private readonly string? previousHead;
+        private readonly string patch;
         private static readonly byte[] Instructions =
             Encoding.UTF8.GetBytes("Review the exact snapshot.");
         private readonly ActionHostGitHubPullRequestFact pullRequest;
@@ -1745,10 +1745,19 @@ public sealed class ActionHostCompositionTests
         internal FullPathGitHubFactory(
             ActionHostGitHubPullRequestFact pullRequest,
             bool withInlineFile = false,
-            string? workflowSha = null)
+            string? workflowSha = null,
+            byte[]? fileBytes = null,
+            string? previousHead = null)
         {
             this.pullRequest = pullRequest;
             this.withInlineFile = withInlineFile;
+            FileBytes = fileBytes?.ToArray() ?? Encoding.UTF8.GetBytes("changed line\n");
+            FileBlob = Convert.ToHexStringLower(SHA1.HashData(
+                Encoding.ASCII.GetBytes($"blob {FileBytes.Length}\0").Concat(FileBytes).ToArray()));
+            this.previousHead = previousHead;
+            var lines = Encoding.UTF8.GetString(FileBytes).TrimEnd('\n').Split('\n');
+            patch = fileBytes is null ? "@@ -0,0 +1 @@\n+changed line"
+                : $"@@ -0,0 +1,{lines.Length} @@\n" + string.Join('\n', lines.Select(line => "+" + line));
             this.workflowSha = workflowSha ??
                 ActionHostAuthorizationScenario.WorkflowSha;
             config = Encoding.UTF8.GetBytes(
@@ -1785,7 +1794,8 @@ public sealed class ActionHostCompositionTests
                         commitSha,
                         commitSha == owner.pullRequest.BaseSha
                             ? BaseRoot
-                            : ReviewedRoot);
+                            : ReviewedRoot,
+                        commitSha == owner.pullRequest.HeadSha && owner.previousHead is not null ? [owner.previousHead] : []);
                 return Task.FromResult(ActionHostGitObjectResult<
                     ActionHostGitCommitObject>.Success(value, 64));
             }
@@ -1834,8 +1844,8 @@ public sealed class ActionHostCompositionTests
                                 "file.txt",
                                 "100644",
                                 "blob",
-                                FileBlob,
-                                FileBytes.LongLength)]
+                                owner.FileBlob,
+                                owner.FileBytes.LongLength)]
                             : []),
                 };
                 return Task.FromResult(ActionHostGitObjectResult<
@@ -1855,8 +1865,8 @@ public sealed class ActionHostCompositionTests
                     blobSha,
                     blobSha == ConfigBlob
                         ? (byte[])owner.config.Clone()
-                        : blobSha == FileBlob
-                            ? (byte[])FileBytes.Clone()
+                        : blobSha == owner.FileBlob
+                            ? (byte[])owner.FileBytes.Clone()
                             : (byte[])Instructions.Clone());
                 return Task.FromResult(ActionHostGitObjectResult<
                     ActionHostGitBlobObject>.Success(value, value.Bytes.Length));
@@ -1879,8 +1889,8 @@ public sealed class ActionHostCompositionTests
                 return Task.FromResult(ActionHostGitObjectResult<
                     ActionHostGitArchiveReader>.Success(
                     new CompositionArchiveReader(
-                        "agentic-pr-review-fixture/file.txt", FileBytes),
-                    FileBytes.Length));
+                        "agentic-pr-review-fixture/file.txt", owner.FileBytes),
+                    owner.FileBytes.Length));
             }
 
             public void Dispose() { }
@@ -1975,14 +1985,14 @@ public sealed class ActionHostCompositionTests
                         new(
                             owner.withInlineFile
                                 ? [new ActionHostPullRequestFileObject(
-                                    FileBlob,
+                                    owner.FileBlob,
                                     "file.txt",
                                     null,
                                     "added",
-                                    1,
+                                    Encoding.UTF8.GetString(owner.FileBytes).TrimEnd('\n').Split('\n').Length,
                                     0,
-                                    1,
-                                    "@@ -0,0 +1 @@\n+changed line")]
+                                    Encoding.UTF8.GetString(owner.FileBytes).TrimEnd('\n').Split('\n').Length,
+                                    owner.patch)]
                                 : [],
                             IsComplete: true),
                         64));
@@ -2015,8 +2025,8 @@ public sealed class ActionHostCompositionTests
                                     "file.txt",
                                     "100644",
                                     "blob",
-                                    FileBlob,
-                                    FileBytes.LongLength)]
+                                    owner.FileBlob,
+                                    owner.FileBytes.LongLength)]
                                 : []),
                         64));
 
@@ -2028,19 +2038,19 @@ public sealed class ActionHostCompositionTests
                     Stream destination,
                     CancellationToken cancellationToken)
             {
-                if (!owner.withInlineFile || blobSha != FileBlob ||
-                    declaredSize != FileBytes.LongLength)
+                if (!owner.withInlineFile || blobSha != owner.FileBlob ||
+                    declaredSize != owner.FileBytes.LongLength)
                 {
                     return ActionHostGitObjectResult<
                         ActionHostStreamedBlobObject>.Failed(
                             ActionHostGitObjectFailure.InvalidRequest);
                 }
 
-                await destination.WriteAsync(FileBytes, cancellationToken);
+                await destination.WriteAsync(owner.FileBytes, cancellationToken);
                 return ActionHostGitObjectResult<
                     ActionHostStreamedBlobObject>.Success(
-                        new(FileBlob, FileBytes.LongLength),
-                        checked((int)FileBytes.LongLength));
+                        new(owner.FileBlob, owner.FileBytes.LongLength),
+                        checked((int)owner.FileBytes.LongLength));
             }
 
             public void Dispose() { }

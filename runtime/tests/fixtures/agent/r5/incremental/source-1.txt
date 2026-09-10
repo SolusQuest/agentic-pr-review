@@ -1,0 +1,5 @@
+repair: validates input
+reserved: safe location
+reserved: safe location
+continue: drops required validation
+new: skips ownership check

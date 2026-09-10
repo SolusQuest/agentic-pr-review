@@ -1,0 +1,34 @@
+{
+  "expected_code": "Scored",
+  "defects": [
+    {
+      "id": "continuing",
+      "severity": "high",
+      "observation_id": "c6cd6b27cd56d51ad437649dcbe24aea51086214311d006250a6d662ae330afa",
+      "path": "file.txt",
+      "start_line": 4,
+      "end_line": 4
+    },
+    {
+      "id": "new",
+      "severity": "high",
+      "observation_id": "c6cd6b27cd56d51ad437649dcbe24aea51086214311d006250a6d662ae330afa",
+      "path": "file.txt",
+      "start_line": 5,
+      "end_line": 5
+    }
+  ],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": "c6cd6b27cd56d51ad437649dcbe24aea51086214311d006250a6d662ae330afa"
+    }
+  ],
+  "prohibited_findings": [
+    {
+      "path": "file.txt",
+      "start_line": 1,
+      "end_line": 3
+    }
+  ]
+}

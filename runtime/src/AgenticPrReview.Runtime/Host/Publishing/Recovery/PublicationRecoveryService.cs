@@ -169,7 +169,16 @@ internal sealed class PublicationRecoveryService
         };
         StickyCommentPublisher.StickyPublicationReceipt?
             exactReadbackReceipt = null;
+        // A new completed run can render exactly the predecessor's sticky body. Before this
+        // candidate has an intent, that durable predecessor receipt is not this attempt's write.
         if (marker == PublicationMarkerObservation.Exact &&
+            observation.Intent is null && observation.RetryIntent is null &&
+            await IsPreviousAcceptedTargetAsync(token, authorization, scope, observation,
+                cancellationToken).ConfigureAwait(false))
+        {
+            marker = PublicationMarkerObservation.PreviousAcceptedTarget;
+        }
+        else if (marker == PublicationMarkerObservation.Exact &&
             (discovered.Receipt is null ||
                 !TryResolveExactReadbackReceipt(
                     observation,

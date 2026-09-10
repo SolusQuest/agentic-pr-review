@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality.Incremental;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
@@ -16,7 +17,7 @@ internal sealed class ReplayOptions
     internal ReplayFault Fault { get; init; }
     internal int FaultPhase { get; init; } = 1;
     internal TimeSpan PhaseTimeout { get; init; } = TimeSpan.FromSeconds(60);
-    internal Func<AdmittedReplayFixture, int, ReplayChildReply, bool> Verify { get; init; } = ReplayCoverage.Verify;
+    internal Func<AdmittedReplayFixture, int, ReplayChildReply, bool>? Verify { get; init; }
     internal Action<string>? BeforeCleanup { get; init; }
     internal Action<ReplayChildInput, AdmittedReplayRun, ReplayChildReply>? ObserveReply { get; init; }
     internal Func<string, bool> Cleanup { get; init; } = ReplayProcess.Cleanup;
@@ -24,6 +25,10 @@ internal sealed class ReplayOptions
 
 internal static class ReplayRunner
 {
+    private static bool VerifyScenario(AdmittedReplayFixture fixture, int phase, ReplayChildReply reply) =>
+        IncrementalCoverage.IsSequence(fixture) ? IncrementalCoverage.Verify(fixture, phase, reply) :
+        fixture.Runs.Select(run => run.Input.Id).SequenceEqual(ReplayCoverage.Cases) && ReplayCoverage.Verify(fixture, phase, reply);
+
     internal static async Task<ReplayReport> RunAsync(string bundle, ReplayOptions? options = null, CancellationToken token = default)
     {
         options ??= new();
@@ -86,7 +91,7 @@ internal static class ReplayRunner
                         if (!replyAdmitted) { quality = null; phaseCode = "result_invalid"; }
                         else if (ContainsForbidden(reply, canaries)) phaseCode = "canary_failed";
                         else if (reply.Code != "prepared") phaseCode = reply.Code;
-                        else if (!options.Verify(fixture, index, reply)) phaseCode = "assertion_failed";
+                        else if (!(options.Verify ?? VerifyScenario)(fixture, index, reply)) phaseCode = "assertion_failed";
                         else
                         {
                             token.ThrowIfCancellationRequested();
