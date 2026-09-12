@@ -8,15 +8,18 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
-internal enum ReplayFault { None, Provider, Cancelled, Incomplete, MalformedTerminal, WrongScope, WrongHead, NonCompleted, StartFailure, AfterPrepareCrash, AfterPrepareHang, AfterPrepareOverflow, PartialReply, WrongReply, MissingHistory, ChangedContinuation, MissingContinuation, WrongContinuationPosition }
+internal enum ReplayFault { None, Provider, Cancelled, Incomplete, MalformedTerminal, WrongScope, WrongHead, NonCompleted, StartFailure, AfterPrepareCrash, AfterPrepareHang, AfterPrepareOverflow, PartialReply, WrongReply, MissingHistory, ChangedContinuation, MissingContinuation, WrongContinuationPosition, GrowthModelBudget }
 internal sealed record ReplayChildInput(string Operation, string Root, string Corpus, int Phase, string Session,
-    byte[] Key, AcceptedLineage? Predecessor, ReplayFault Fault);
+    byte[] Key, AcceptedLineage? Predecessor, ReplayFault Fault, string? GrowthProfile = null,
+    Growth.Profiles.GrowthSchedule? GrowthSchedule = null);
 
 // This is private IPC, never the public result. Sensitive evidence exists only in bounded pipes/memory.
 internal sealed record ReplayChildReply(string Operation, string Corpus, int Phase, string Session, string Commit,
     string Tree, bool SourceClean, int ProcessId, string Startup, string Code, PreparedStateReceipt? Prepared,
     byte[] Evaluation, string? LogicalSha256, string? ProviderSha256, int ModelCalls, int ToolCalls,
-    byte[]? Plaintext, ImmutableArray<byte[]> Requests, ImmutableArray<string> EnvironmentKeys, byte[] EnvironmentBytes);
+    byte[]? Plaintext, ImmutableArray<byte[]> Requests, ImmutableArray<string> EnvironmentKeys, byte[] EnvironmentBytes,
+    string? GrowthProfile = null, string? ObservedStage = null, string? ObservedCode = null,
+    Growth.Profiles.GrowthChatCounts? GrowthCounts = null, Growth.Profiles.GrowthSchedule? GrowthSchedule = null);
 
 internal sealed record ReplayStep(string CaseId, string CaseSha256, string ConfigurationSha256, string SnapshotSha256,
     string Transition, string Code, bool Accepted, long? Generation, string? LogicalSha256, string? ProviderSha256,

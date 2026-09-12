@@ -147,6 +147,7 @@ internal static class ReplayRunner
 
     internal static bool AdmitIdentity(ReplayChildInput input, ReplayChildReply reply) =>
         reply.Operation == input.Operation && reply.Corpus == input.Corpus && reply.Phase == input.Phase && reply.Session == input.Session &&
+        reply.GrowthProfile == input.GrowthProfile && reply.GrowthSchedule == input.GrowthSchedule &&
         reply.Commit == EvaluationSource.Commit && reply.Tree == EvaluationSource.Tree && reply.SourceClean == EvaluationSource.Clean &&
         reply.ProcessId > 0 && Guid.TryParseExact(reply.Startup, "N", out _);
 
@@ -166,6 +167,7 @@ internal static class ReplayRunner
                 quality.CorpusSha256 != input.Corpus || quality.ConfigurationSha256 != run.ConfigurationSha256 ||
                 quality.SourceCommit != reply.Commit || quality.SourceTree != reply.Tree || quality.SourceClean != reply.SourceClean || quality.Mode != "deterministic") return false;
         }
+        if (!Growth.Profiles.GrowthProfiles.Diagnostic(reply, quality)) return false;
         if (reply.Code != "prepared") return reply.Prepared is null;
         if (reply.Prepared is not { } receipt || receipt.Generation != input.Phase || !EvaluationLimits.Hash(receipt.EnvelopeSha256) ||
             reply.Plaintext is not { Length: > 0 and <= 1048576 } || quality is not { ExecutionStatus: EvaluationStatus.Completed } ||

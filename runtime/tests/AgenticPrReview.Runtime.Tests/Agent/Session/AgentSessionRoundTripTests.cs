@@ -12,7 +12,7 @@ using AgenticPrReview.Runtime.Canonical;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Session;
 
-public sealed class AgentSessionRoundTripTests
+public sealed partial class AgentSessionRoundTripTests
 {
     private const string FinishJson =
         "{\"summary\":\"complete\",\"findings\":[]}";
