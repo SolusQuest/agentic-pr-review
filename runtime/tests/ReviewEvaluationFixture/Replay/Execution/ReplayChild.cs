@@ -10,6 +10,7 @@ using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
@@ -39,7 +40,10 @@ internal static class ReplayChild
 
     private static bool Valid(ReplayChildInput input) =>
         Guid.TryParseExact(input.Operation, "N", out _) && Guid.TryParseExact(input.Session, "N", out _) &&
-        EvaluationLimits.Hash(input.Corpus) && input.Phase is >= 0 and < ReplayLimits.Runs &&
+        EvaluationLimits.Hash(input.Corpus) && (input.GrowthProfile is null
+            ? input.GrowthSchedule is null && input.Phase is >= 0 and < ReplayLimits.Runs && input.Fault != ReplayFault.GrowthModelBudget
+            : GrowthProfiles.ValidPhase(input.GrowthProfile, input.Phase) && input.GrowthSchedule is { Valid: true } schedule &&
+                input.Phase < schedule.AttemptLimit && input.Fault == schedule.At(input.Phase)) &&
         input.Key is { Length: 32 } && Enum.IsDefined(input.Fault) &&
         input.Root is { Length: > 0 and <= 4096 } && Path.IsPathFullyQualified(input.Root) &&
         Path.GetFileName(input.Root).StartsWith("apr-r5-replay-", StringComparison.Ordinal) &&
@@ -55,22 +59,40 @@ internal static class ReplayChild
         var environmentBytes = Encoding.UTF8.GetBytes(string.Join('\n', environment.Select(entry => entry.Key + "=" + entry.Value)));
         var startup = Guid.NewGuid().ToString("N");
         AdmittedReplayRun? fixtureRun = null;
+        GrowthChatMeasurement? growthChat = null;
         ReplayChildReply Reply(string code, PreparedStateReceipt? receipt = null, EvaluationOutcome? evaluation = null,
-            AgentSessionArtifact? artifact = null, ReplayTransport? transport = null, int tools = 0) => new(
+            AgentSessionArtifact? artifact = null, ReplayTransport? transport = null, int tools = 0,
+            string? stage = null, string? observed = null) => new(
                 input.Operation, input.Corpus, input.Phase, input.Session, EvaluationSource.Commit, EvaluationSource.Tree,
                 EvaluationSource.Clean, Environment.ProcessId, startup, code, receipt,
                 evaluation is null ? [] : EvaluationJson.Write(evaluation),
                 artifact is null ? null : ReplayProjection.Logical(artifact, fixtureRun!.CreateTrustedRequest(ReplayState.Build)),
-                transport is null ? null : ReplayProjection.Provider(transport.Requests), transport?.Requests.Count ?? 0, tools,
-                artifact?.Plaintext, transport?.Requests.ToImmutableArray() ?? [], environmentKeys, environmentBytes);
+                transport is null ? null : ReplayProjection.Provider(transport.Requests), growthChat?.Counts.Calls ?? transport?.Requests.Count ?? 0, tools,
+                artifact?.Plaintext, transport?.Requests.ToImmutableArray() ?? [], environmentKeys, environmentBytes,
+                input.GrowthProfile, input.GrowthProfile is null ? null : stage,
+                input.GrowthProfile is null ? null : observed,
+                growthChat?.Counts is { Calls: > 0 } measured ? measured : null, input.GrowthSchedule);
 
         // Captured bundle is re-admitted in every fresh process; only this run supplies model/tool inputs.
         var loaded = ReplayAdmission.Load(Path.Combine(input.Root, "bundle"), token);
         if (loaded.Code is ReplayAdmissionCode.IoFailure or ReplayAdmissionCode.Cancelled) return Reply("infrastructure_failed");
-        if (loaded.Fixture is not { } fixture || fixture.CorpusSha256 != input.Corpus || input.Phase >= fixture.Runs.Length)
+        if (loaded.Fixture is not { } fixture)
             return Reply("input_invalid");
-        fixtureRun = fixture.Runs[input.Phase];
-        var priorRun = input.Phase == 0 ? null : fixture.Runs[input.Phase - 1];
+        AdmittedReplayRun? priorRun;
+        if (input.GrowthProfile is { } profile)
+        {
+            if (!GrowthProfiles.Matches(fixture) || input.GrowthSchedule is not { Valid: true } schedule ||
+                GrowthProfiles.Corpus(fixture, schedule) != input.Corpus || input.Phase >= schedule.AttemptLimit ||
+                input.Fault != schedule.At(input.Phase) || !GrowthProfiles.ValidPhase(profile, input.Phase)) return Reply("input_invalid");
+            fixtureRun = GrowthProfiles.Run(fixture, profile, input.Phase, input.Fault, schedule);
+            priorRun = input.Phase == 0 ? null : GrowthProfiles.Run(fixture, profile, input.Phase - 1, schedule.At(input.Phase - 1), schedule);
+        }
+        else
+        {
+            if (fixture.CorpusSha256 != input.Corpus || input.Phase >= fixture.Runs.Length) return Reply("input_invalid");
+            fixtureRun = fixture.Runs[input.Phase];
+            priorRun = input.Phase == 0 ? null : fixture.Runs[input.Phase - 1];
+        }
         using var state = new ReplayState(fixtureRun, input.Session, input.Root, input.Key);
         var identity = fixtureRun.Input.ReviewedIdentity.Runtime;
         var transition = ReplayState.Transition(fixtureRun, priorRun);
@@ -90,14 +112,16 @@ internal static class ReplayChild
         AgentSessionPredecessor? predecessor = null;
         if (input.Phase == 0)
         {
-            if (restored.Result.Action != StateAction.Bootstrap ||
-                !AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable)) return Reply("state_failed");
+            if (restored.Result.Action != StateAction.Bootstrap)
+                return Reply("state_failed", stage: "restore", observed: restored.Result.Code);
+            if (!AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable)) return Reply("input_invalid");
             request = new(identity, stable!.StablePlan, input.Session,
                 [.. stable.ControlMessages, new("user", [new ProjectTextContent(fixtureRun.InitialContext)])]);
         }
         else
         {
-            if (restored.Result.Action != StateAction.Restored || restored.Session?.Value is not { } admitted) return Reply("state_failed");
+            if (restored.Result.Action != StateAction.Restored || restored.Session?.Value is not { } admitted)
+                return Reply("state_failed", stage: "restore", observed: restored.Result.Code);
             request = admitted.RunRequest;
             predecessor = new(admitted.Artifact.Plaintext, input.Predecessor!.SessionSha256, input.Predecessor.EnvelopeSha256,
                 input.Predecessor.Generation, producer.BaseSha, producer.HeadSha, input.Predecessor.ExpectedPredecessorEnvelopeSha256);
@@ -127,9 +151,11 @@ internal static class ReplayChild
         var snapshot = fixtureRun.CreateSnapshot(Path.Combine(input.Root, "reviewed"));
         var client = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId,
             state.Trusted.AdapterId, input.Session), transport);
+        if (input.GrowthProfile is not null) growthChat = new(client);
         using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
         if (input.Fault == ReplayFault.Cancelled) await runCancellation.CancelAsync();
-        var outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, fixtureRun.CreateFileAccess(snapshot))).RunAsync(request, runCancellation.Token);
+        var outcome = await new AgentLoop(growthChat is null ? client : growthChat,
+            new SnapshotToolExecutor(snapshot, fixtureRun.CreateFileAccess(snapshot))).RunAsync(request, runCancellation.Token);
         var tools = outcome.Events.OfType<AgentToolResultEvent>().Count();
         if (!outcome.Succeeded)
         {
@@ -144,14 +170,16 @@ internal static class ReplayChild
                     EvaluationFailureSource.Evaluator => "infrastructure_failed",
                     _ => "unknown_failed",
                 });
-            return Reply(failureCode, evaluation: EvaluationScorer.Failure(fixtureRun.Expected, failure, attempt), transport: transport, tools: tools);
+            return Reply(failureCode, evaluation: EvaluationScorer.Failure(fixtureRun.Expected, failure, attempt), transport: transport, tools: tools,
+                stage: "agent", observed: outcome.Diagnostic?.Code);
         }
         var buildInput = new AgentSessionBuildInput(request, outcome, state.Trusted, request.InitialMessages.Length - 1,
             DeepSeekReasoningContinuationCodec.Instance, predecessor, transition);
         var built = AgentSessionBuilder.Build(buildInput);
         if (!built.Succeeded || built.Artifact is null)
             return Reply("session_failed", evaluation: EvaluationScorer.Failure(fixtureRun.Expected,
-                EvaluationFailure.FromSessionBuild(built), attempt), transport: transport, tools: tools);
+                EvaluationFailure.FromSessionBuild(built), attempt), transport: transport, tools: tools,
+                stage: "build", observed: built.FailureCode);
         var scored = EvaluationScorer.Evaluate(fixtureRun.Expected, EvaluationSubject.Admit(buildInput, descriptor));
         if (transport.Consumed != fixtureRun.Script.Turns.Length || transport.Failed || scored.Code != fixtureRun.ExpectedCode)
             return Reply("assertion_failed", evaluation: scored, artifact: built.Artifact, transport: transport, tools: tools);
@@ -168,6 +196,6 @@ internal static class ReplayChild
             transition, fixtureRun.InitialContext);
         var prepared = await state.Service.PrepareAsync(state.Access, new(input.Predecessor, candidate, prepareContext), token);
         return Reply(prepared.Result.Action == StateAction.Prepared ? "prepared" : "state_failed", prepared.Receipt,
-            scored, built.Artifact, transport, tools);
+            scored, built.Artifact, transport, tools, "prepare", prepared.Result.Code);
     }
 }

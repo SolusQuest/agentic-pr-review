@@ -6,3 +6,4 @@ runtime/scripts/*.sh text eol=lf
 runtime/tests/fixtures/action-host/trusted-proof/** text eol=lf
 runtime/tests/fixtures/agent/r5/replay/** -text
 runtime/tests/fixtures/agent/r5/incremental/** -text
+runtime/tests/fixtures/agent/r5/growth/** -text

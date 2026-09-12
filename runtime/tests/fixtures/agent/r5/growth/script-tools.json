@@ -1,0 +1,59 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "read0",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        },
+        {
+          "id": "read1",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        },
+        {
+          "id": "read2",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        },
+        {
+          "id": "read3",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        },
+        {
+          "id": "read4",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        },
+        {
+          "id": "read5",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        },
+        {
+          "id": "read6",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        },
+        {
+          "id": "read7",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/source.txt\",\"start_line\":1,\"line_count\":1}"
+        }
+      ],
+      "reasoning_content": "read"
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "finish",
+          "name": "finish_review",
+          "arguments_json": "{\"summary\":\"Synthetic complete.\",\"findings\":[]}"
+        }
+      ],
+      "reasoning_content": "finish"
+    }
+  ]
+}
