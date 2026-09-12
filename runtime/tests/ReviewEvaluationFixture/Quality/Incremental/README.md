@@ -1,0 +1,22 @@
+# R5 incremental review
+
+The `incremental` bundle is an authored synthetic three-revision history: initial review, same-head continuation, and verified-ahead continuation. The first review contains repaired, continuing, and subsequently deleted defects. The ahead revision repairs one defect, removes the obsolete evidence, moves the continuing defect, and adds a new defect. Its base is the fixed effective base used by the existing independent-run Host proof admission.
+
+The ordinary replay command selects this compiled oracle from the admitted ordered case identities. Directory names do not select verification. R1 captures and admits the bundle; R2 executes fresh children, restores actual SESSION/STATE, runs the Agent and DeepSeek codecs over a deterministic in-memory transport, admits completed results, verifies Q3 assertions, and accepts each successful generation. The oracle independently pins source, diff, configuration, observations, complete allowed findings, and continuation. `Scored` alone does not reject every unadjudicated extra finding, so Q3 also accounts for the entire actual finding set.
+
+`$current:CALL_ID` in authored evidence references resolves one real tool response after the current user context. Historical and ambiguous matches cannot supply current evidence. Expected observation identities are independently checked against real tools; they are not regenerated from candidate findings. No placeholder creates tool observations or changes production validation.
+
+```bash
+dotnet run --project runtime/tests/ReviewEvaluationFixture/AgenticPrReview.Runtime.ReviewEvaluationFixture.csproj -c Release -- replay --bundle runtime/tests/fixtures/agent/r5/incremental
+dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj -c Release --filter FullyQualifiedName~R5IncrementalReviewTests
+```
+
+These commands provide complementary evidence. The replay report proves synthetic replay-state acceptance. The focused tests run the same authored revision scripts through real `ActionHostComposition`, actual snapshot tools, restored Host requests, state acceptance, sticky publishing, and coordinator-authorized inline publishing. Fake GitHub transports retain only actual dispatched writes and serve them to discovery/readback. They do not perform live GitHub or provider calls. The Host's state authority and the replay runner's state authority remain separate.
+
+Within a fresh Host world, the sticky comment retains its identity and is updated across reviews. Identical same-head findings retain their inline keys and suppress duplicate inline writes; ahead-head/current observations produce new keys at the new locations. Historical inline comments remain historical. Two fresh supervisors and two fresh Host worlds compare normalized engineering results without erasing head, observation, fingerprint, key, or write differences.
+
+The negative tests pass R1 admission before testing wrong-head evidence, obsolete locations, repaired findings, exact and structural duplicates, extra unadjudicated findings, and missing/changed continuation. Mutating scripts and expected findings together cannot weaken the compiled coverage contract. Head changes injected after review at either pre-publication barrier produce no product write or accepted receipt for that run. A comment copied to a different identity cannot substitute for the durable predecessor receipt.
+
+The same-head history exposed a production recovery defect: an identical predecessor sticky body was classified as the current candidate's completed publication before that candidate had an intent. The coordinator then failed because there was no current attempt to associate with the readback. `PublicationRecoveryService` now recognizes the exact durable predecessor target before intent creation, using the existing authenticated receipt and fresh observation matcher, and follows the existing intent/publication path. Existing post-intent recovery behavior and publication identities remain unchanged.
+
+Raw synthetic source, requests, continuation, SESSION and comment bodies are private assertion inputs. The normal replay report retains the existing bounded code/count/hash projection. The full Runtime tests, retained framework/AOT Host proof, and ordinary repository checks remain required; this command alone does not claim every production Host assertion or live model quality.

@@ -1,0 +1,3 @@
+repair: accepts unchecked input
+continue: drops required validation
+delete: leaks obsolete value

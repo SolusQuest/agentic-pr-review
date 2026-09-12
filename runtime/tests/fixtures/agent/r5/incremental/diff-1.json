@@ -1,0 +1,50 @@
+{
+  "changes": [
+    {
+      "path": "file.txt",
+      "previous_path": null,
+      "status": "added",
+      "source_truncated": false,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 5,
+          "lines": [
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 1,
+              "text": "repair: validates input"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 2,
+              "text": "reserved: safe location"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 3,
+              "text": "reserved: safe location"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 4,
+              "text": "continue: drops required validation"
+            },
+            {
+              "kind": "addition",
+              "old_line": null,
+              "new_line": 5,
+              "text": "new: skips ownership check"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

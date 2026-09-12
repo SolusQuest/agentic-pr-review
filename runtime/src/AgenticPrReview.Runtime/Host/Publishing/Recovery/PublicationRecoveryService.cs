@@ -169,7 +169,16 @@ internal sealed class PublicationRecoveryService
         };
         StickyCommentPublisher.StickyPublicationReceipt?
             exactReadbackReceipt = null;
+        // A new completed run can render exactly the predecessor's sticky body. Before this
+        // candidate has an intent, that durable predecessor receipt is not this attempt's write.
         if (marker == PublicationMarkerObservation.Exact &&
+            observation.Intent is null && observation.RetryIntent is null &&
+            await IsPreviousAcceptedTargetAsync(token, authorization, scope, observation,
+                cancellationToken, discovered.Receipt).ConfigureAwait(false))
+        {
+            marker = PublicationMarkerObservation.PreviousAcceptedTarget;
+        }
+        else if (marker == PublicationMarkerObservation.Exact &&
             (discovered.Receipt is null ||
                 !TryResolveExactReadbackReceipt(
                     observation,
@@ -1187,7 +1196,8 @@ internal sealed class PublicationRecoveryService
         ActionHostAuthorizer.AuthorizedInvocation authorization,
         R4PublicationScopeV1 scope,
         PublicationRecoveryObservation observation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StickyCommentPublisher.StickyPublicationReceipt? freshReceipt = null)
     {
         var inventory = observation.Inventory;
         if (observation.Candidate is null ||
@@ -1210,16 +1220,25 @@ internal sealed class PublicationRecoveryService
             return false;
         }
 
+        // Exact discovery already verified this observation. Only a stale target needs
+        // another discovery against the predecessor's rendered body and durable receipt.
+        if (freshReceipt is not null)
+        {
+            return PublicationReceiptMatcher.IsFreshObservationOf(
+                durableReceipt,
+                freshReceipt);
+        }
+
         var discovered = await publisher.DiscoverAsync(
                 token,
                 request,
                 cancellationToken)
             .ConfigureAwait(false);
         return discovered.Kind == StickyDiscoveryKind.ExactTarget &&
-            discovered.Receipt is { } freshReceipt &&
+            discovered.Receipt is { } predecessorObservation &&
             PublicationReceiptMatcher.IsFreshObservationOf(
                 durableReceipt,
-                freshReceipt);
+                predecessorObservation);
     }
 
     private static PublicationRecoveryEvaluation Evaluation(

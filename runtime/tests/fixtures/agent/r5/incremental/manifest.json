@@ -1,0 +1,167 @@
+{
+  "format": "apr.r5.synthetic-replay.v1",
+  "source_kind": "authored-synthetic",
+  "configuration": {
+    "workflow_identity": "r5@incremental",
+    "provider_id": "deepseek",
+    "model_id": "deepseek-v4-flash",
+    "adapter_id": "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502"
+  },
+  "files": [
+    {
+      "path": "context-0.txt",
+      "role": "context",
+      "length": 71,
+      "sha256": "e2c4edc405d5cf0056e730301cf9bf67bd71a74b49ee0420948fcc86570c1b7d"
+    },
+    {
+      "path": "context-1.txt",
+      "role": "context",
+      "length": 71,
+      "sha256": "7444e6e50de4e0e380ac7e24ab80e6f4d3ec0a08c805cc8115766b1c4471d6af"
+    },
+    {
+      "path": "context-2.txt",
+      "role": "context",
+      "length": 71,
+      "sha256": "f88b4b3b6b96f9dd28986c2e639f3d2ee9765193a26043ad0b31e2e87a1935b8"
+    },
+    {
+      "path": "diff-0.json",
+      "role": "diff",
+      "length": 870,
+      "sha256": "78ec4b54cf56ed58236c3ff9aca824ec6964996805c3f0ebd6a649538b7361bc"
+    },
+    {
+      "path": "diff-1.json",
+      "role": "diff",
+      "length": 1204,
+      "sha256": "c509c40fa9f99937117fd6d04ab7568e8c69151f9e537870efba42f851e64c9c"
+    },
+    {
+      "path": "expected-0.json",
+      "role": "assertions",
+      "length": 917,
+      "sha256": "803b79e33095b0c4e9d0d5ec2942bd3d6eaf49f29de2d35f70eebd0ad2873592"
+    },
+    {
+      "path": "expected-1.json",
+      "role": "assertions",
+      "length": 917,
+      "sha256": "803b79e33095b0c4e9d0d5ec2942bd3d6eaf49f29de2d35f70eebd0ad2873592"
+    },
+    {
+      "path": "expected-2.json",
+      "role": "assertions",
+      "length": 773,
+      "sha256": "3400cc101adb8a8492cde7b8976d22c5748856594a47534838e464e76111f00f"
+    },
+    {
+      "path": "policy.txt",
+      "role": "policy",
+      "length": 76,
+      "sha256": "a72a4d41fd44b71526e0a1b4491a280708eb848669f72bd9dc0dce2249104269"
+    },
+    {
+      "path": "script-0.json",
+      "role": "script",
+      "length": 1170,
+      "sha256": "4fab5d88d4394a73d8fd924a7deef16d6ec24351bd6a29ac461593a9efe8ddf4"
+    },
+    {
+      "path": "script-1.json",
+      "role": "script",
+      "length": 1170,
+      "sha256": "c6f87e78a93c5838360601da5a48296ac2b323d7ba7569bce4f3b80c3d290b01"
+    },
+    {
+      "path": "script-2.json",
+      "role": "script",
+      "length": 959,
+      "sha256": "55dea025edc772918f2b97751edee7e458e0f234d9b4db6ee9a249a2199426ec"
+    },
+    {
+      "path": "source-0.txt",
+      "role": "repository",
+      "length": 97,
+      "sha256": "ab30e02dba31fa3cdc5e0f066bbfbc7e0a87e080a325d44f830e41c0d42eca53"
+    },
+    {
+      "path": "source-1.txt",
+      "role": "repository",
+      "length": 135,
+      "sha256": "cbc2c85c02ee4ae94d023633bb0d613a1f65edd3a9cd785caf32356c4fe2ce6b"
+    }
+  ],
+  "runs": [
+    {
+      "id": "incremental-seed",
+      "case_id": "incremental-seed",
+      "transition": "initial",
+      "previous_run_id": null,
+      "reviewed_identity": {
+        "repository_id": "42",
+        "review_target": 147,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "repository": [
+        {
+          "path": "file.txt",
+          "file": "source-0.txt"
+        }
+      ],
+      "diff": "diff-0.json",
+      "policy": "policy.txt",
+      "context": "context-0.txt",
+      "script": "script-0.json",
+      "assertions": "expected-0.json"
+    },
+    {
+      "id": "incremental-same",
+      "case_id": "incremental-same",
+      "transition": "same_head",
+      "previous_run_id": "incremental-seed",
+      "reviewed_identity": {
+        "repository_id": "42",
+        "review_target": 147,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "repository": [
+        {
+          "path": "file.txt",
+          "file": "source-0.txt"
+        }
+      ],
+      "diff": "diff-0.json",
+      "policy": "policy.txt",
+      "context": "context-1.txt",
+      "script": "script-1.json",
+      "assertions": "expected-1.json"
+    },
+    {
+      "id": "incremental-ahead",
+      "case_id": "incremental-ahead",
+      "transition": "verified_ahead",
+      "previous_run_id": "incremental-same",
+      "reviewed_identity": {
+        "repository_id": "42",
+        "review_target": 147,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "cccccccccccccccccccccccccccccccccccccccc"
+      },
+      "repository": [
+        {
+          "path": "file.txt",
+          "file": "source-1.txt"
+        }
+      ],
+      "diff": "diff-1.json",
+      "policy": "policy.txt",
+      "context": "context-2.txt",
+      "script": "script-2.json",
+      "assertions": "expected-2.json"
+    }
+  ]
+}
