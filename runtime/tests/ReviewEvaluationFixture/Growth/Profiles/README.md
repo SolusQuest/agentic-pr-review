@@ -29,6 +29,8 @@ Each profile embeds an ordinary Q4 report admitted through the existing Q1/Q4 re
 
 The generated corpus binds the R1 seed corpus, compiled profile specification, attempt ceiling and test-control schedule. The source and configuration identities also remain present in Q1 outcomes. No raw provider, continuation, source, plaintext SESSION, exception or environment values are public output. Null or empty private byte-array representations both mean no SESSION bytes; nonempty failed candidates are rejected.
 
+Zero-call Agent cancellation retains its actual diagnostic and known zero execution counts, with no project request measurement. The reader correlates Agent/build failures with failed Q1 execution, while allowing completed SESSION outcomes followed by prepare/accept/readback failure. An unconfirmed child termination retains the confirmed profile prefix and an indeterminate failed attempt; it performs neither state readback nor workspace cleanup and reports `cleanup_failed`. A throwing cleanup operation also reports `cleanup_failed`. The typed supervisor-failure test covers this report handling without claiming to induce an operating-system reaping failure. Git attributes preserve the content-addressed fixture bytes even in conversion-enabled checkouts.
+
 ## Boundary evidence and limits of reachability
 
 The `R5Growth*` tests in the partial `AgentSessionRoundTripTests` class exercise below/exact/above count, record-byte, plaintext-byte, continuation-item/aggregate, cumulative record and reconstructed request/message bounds. They reuse real writers, validators and builders. Their names and assertions distinguish root grammar, serialization and request admission from accepted history.

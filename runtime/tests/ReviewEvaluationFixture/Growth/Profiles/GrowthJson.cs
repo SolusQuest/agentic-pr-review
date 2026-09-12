@@ -75,11 +75,13 @@ internal static class GrowthJson
                     row.ProviderRequestBytes > (long)(row.ProviderRequests ?? 0) * AgentLimits.RequestBytes ||
                     (row.ProviderRequests is { } requests && (requests == 0 ? row.LastProviderRequestBytes is not null || row.ProviderRequestBytes != 0 :
                         row.LastProviderRequestBytes is not (> 0 and <= AgentLimits.RequestBytes) || row.LastProviderRequestBytes > row.ProviderRequestBytes)) ||
-                    !Code(row.Stage, row.Code)) return false;
+                    !Code(row.Stage, row.Code) || !OutcomeMatches(row.Stage, outcome)) return false;
+                if (row.Code == "process_unreaped" && (report.Cleanup != "cleanup_failed" || row.PredecessorPreserved || row.ModelCalls is not null)) return false;
                 if (row.ModelCalls is null ? row.ToolCalls is not null || row.ProviderRequests is not null || row.ProviderRequestBytes is not null ||
                     row.LastProviderRequestBytes is not null || row.Project is not null || row.Stage != "executor" :
                     row.ToolCalls is null || row.ProviderRequests is null || row.ProviderRequestBytes is null) return false;
-                if (row.Project is { } project && (project.Calls < row.ProviderRequests || project.Calls > AgentLimits.ModelCalls ||
+                if (row.Project is null && row.ModelCalls is not null && (row.ModelCalls != 0 || row.ToolCalls != 0 || row.ProviderRequests != 0)) return false;
+                if (row.Project is { } project && (project.Calls < 1 || project.Calls != row.ModelCalls || project.Calls < row.ProviderRequests || project.Calls > AgentLimits.ModelCalls ||
                     project.LastProjectRequestBytes is < 1 or > AgentLimits.RequestBytes || project.LastMessages is < 1 or > AgentLimits.Messages ||
                     project.LastResponseMessages < project.LastMessages || project.LastResponseMessages > project.LastMessages + 1 + AgentLimits.ToolCallsPerResponse ||
                     project.LastContinuationBeforeBytes < 0 ||
@@ -116,6 +118,18 @@ internal static class GrowthJson
         EvaluationLimits.Hash(state.SessionSha256) && EvaluationLimits.Hash(state.EnvelopeSha256) && EvaluationLimits.Hash(state.LogicalSha256) &&
         state.PredecessorEnvelopeSha256 == previous?.EnvelopeSha256;
 
+    private static bool OutcomeMatches(string stage, EvaluationOutcome outcome) => stage switch
+    {
+        "agent" => outcome.ExecutionStatus == EvaluationStatus.Failed,
+        "build" => outcome.ExecutionStatus == EvaluationStatus.Failed &&
+            outcome.FailureSource == EvaluationFailureSource.HostState && outcome.FailureKind == EvaluationFailureKind.StateAdmission,
+        "restore" => outcome.ExecutionStatus == EvaluationStatus.Failed,
+        "prepare" or "accept" or "readback" => outcome.ExecutionStatus == EvaluationStatus.Completed,
+        // Some admitted executor assertions can follow a completed SESSION; unknown replies use Invalid.
+        "executor" => true,
+        _ => false,
+    };
+
     private static bool Code(string stage, string code) => stage switch
     {
         "agent" => GrowthProfiles.AgentCode(code),
@@ -123,7 +137,7 @@ internal static class GrowthJson
         "restore" or "prepare" or "accept" => GrowthProfiles.StateCode(code),
         "readback" => code == "accepted_readback_failed",
         "executor" => code is "result_invalid" or "input_invalid" or "infrastructure_failed" or "assertion_failed" or "state_failed" or
-            "session_failed" or "process_failed" or "process_timeout" or "process_start_failed" or "cancelled" or "output_limit" or "reply_invalid",
+            "session_failed" or "process_failed" or "process_unreaped" or "process_timeout" or "process_start_failed" or "cancelled" or "output_limit" or "reply_invalid",
         _ => false,
     };
 }

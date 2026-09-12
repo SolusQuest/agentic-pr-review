@@ -20,6 +20,7 @@ internal sealed class GrowthOptions
     internal Func<ReplayChildInput, ReplayChildReply, ReplayChildReply>? TransformReply { get; init; }
     internal Action<ReplayChildInput, ReplayChildReply>? ObserveReply { get; init; }
     internal Func<string, bool> Cleanup { get; init; } = ReplayProcess.Cleanup;
+    internal Func<ReplayChildInput, TimeSpan, CancellationToken, Task<ReplayProcessResult>> RunProcess { get; init; } = ReplayProcess.RunAsync;
 }
 
 internal static class GrowthRunner
@@ -65,13 +66,16 @@ internal static class GrowthRunner
                         throw new ReplayRejected(ReplayAdmissionCode.ContentMismatch);
                     seedCorpus = fixture.CorpusSha256;
                     corpus = GrowthProfiles.Corpus(fixture, schedule);
-                    profiles.Add(await ProfileAsync(fixture, profile, root, key, options, deadline.Token));
+                    var result = await ProfileAsync(fixture, profile, root, key, options, deadline.Token);
+                    reaped = result.Reaped;
+                    profiles.Add(result.Report);
                 }
                 catch (ReplayProcessUnreaped) { reaped = false; throw; }
                 finally
                 {
                     CryptographicOperations.ZeroMemory(key);
-                    if (!reaped || !options.Cleanup(root)) cleanup = "cleanup_failed";
+                    try { if (!reaped || !options.Cleanup(root)) cleanup = "cleanup_failed"; }
+                    catch { cleanup = "cleanup_failed"; }
                 }
                 if (cleanup != "cleaned") break;
             }
@@ -88,7 +92,7 @@ internal static class GrowthRunner
             profiles.Count == 0 ? null : GrowthJson.Normalize(profiles.ToImmutable()));
     }
 
-    private static async Task<GrowthProfileReport> ProfileAsync(AdmittedReplayFixture fixture, string profile,
+    private static async Task<(GrowthProfileReport Report, bool Reaped)> ProfileAsync(AdmittedReplayFixture fixture, string profile,
         string root, byte[] key, GrowthOptions options, CancellationToken token)
     {
         var rows = ImmutableArray.CreateBuilder<GrowthRow>();
@@ -100,6 +104,7 @@ internal static class GrowthRunner
         AcceptedLineage? lineage = null;
         AdmittedReplayRun? previous = null;
         var startups = new HashSet<string>();
+        var reaped = true;
         var terminalStage = "schedule";
         var terminalCode = "attempt_limit";
         for (var phase = 0; phase < options.AttemptLimit; phase++)
@@ -122,7 +127,7 @@ internal static class GrowthRunner
             var input = new ReplayChildInput(operation, root, corpus, phase, session, key, lineage, fault, profile, schedule);
             try
             {
-                var process = await ReplayProcess.RunAsync(input, TimeSpan.FromSeconds(60), token);
+                var process = await options.RunProcess(input, TimeSpan.FromSeconds(60), token);
                 var reply = process.Reply;
                 if (reply is not null) reply = options.TransformReply?.Invoke(input, reply) ?? reply;
                 EvaluationOutcome? evaluation = null;
@@ -179,13 +184,15 @@ internal static class GrowthRunner
                     admitted && !reply!.Requests.IsEmpty ? reply.Requests[^1].Length : null, admitted ? reply!.GrowthCounts : null));
                 if (!accepted) { terminalStage = stage; terminalCode = resultCode; break; }
             }
-            catch (Exception error) when (error is not ReplayProcessUnreaped)
+            catch (Exception error)
             {
                 // The attempted child must not disappear when a later accept/readback/cancellation fails.
+                reaped = error is not ReplayProcessUnreaped;
                 var preserved = false;
                 try
                 {
-                    if (before is not null && previous is not null && lineage is not null)
+                    // Never inspect a store that an unconfirmed child might still be changing.
+                    if (reaped && before is not null && previous is not null && lineage is not null)
                     {
                         var restored = await ReadAsync(previous, lineage, root, session, key, CancellationToken.None);
                         preserved = restored is not null && restored.Value.Measurement == before.Value.Measurement &&
@@ -194,7 +201,7 @@ internal static class GrowthRunner
                 }
                 catch { /* preservation remains unverified */ }
                 terminalStage = "executor";
-                terminalCode = error is OperationCanceledException ? "cancelled" : "infrastructure_failed";
+                terminalCode = !reaped ? "process_unreaped" : error is OperationCanceledException ? "cancelled" : "infrastructure_failed";
                 evaluations.Add(EvaluationJson.Write(EvaluationScorer.Failure(run.Expected, EvaluationFailure.Invalid, attempt)));
                 rows.Add(new(phase, run.Input.CaseId, attempt.AttemptSha256, run.Input.Transition,
                     terminalStage, terminalCode, "harness_failure", false, before?.Measurement, null, preserved,
@@ -206,9 +213,9 @@ internal static class GrowthRunner
         var report = EvaluationReport.Create(evaluations.ToImmutable());
         if (!report.Succeeded) throw new InvalidOperationException("growth_report_invalid");
         var final = rows[^1];
-        return new(profile, options.AttemptLimit, terminalStage, terminalCode,
+        return (new(profile, options.AttemptLimit, terminalStage, terminalCode,
             !final.Accepted && final.Classification is "append_limit" or "run_budget" or "continuation_limit" or "message_limit",
-            rows.ToImmutable(), report.Value!.Document);
+            rows.ToImmutable(), report.Value!.Document), reaped);
     }
 
     internal static string Classify(string stage, string code, GrowthChatCounts? counts) => (stage, code) switch

@@ -70,7 +70,8 @@ internal static class ReplayChild
                 transport is null ? null : ReplayProjection.Provider(transport.Requests), growthChat?.Counts.Calls ?? transport?.Requests.Count ?? 0, tools,
                 artifact?.Plaintext, transport?.Requests.ToImmutableArray() ?? [], environmentKeys, environmentBytes,
                 input.GrowthProfile, input.GrowthProfile is null ? null : stage,
-                input.GrowthProfile is null ? null : observed, growthChat?.Counts, input.GrowthSchedule);
+                input.GrowthProfile is null ? null : observed,
+                growthChat?.Counts is { Calls: > 0 } measured ? measured : null, input.GrowthSchedule);
 
         // Captured bundle is re-admitted in every fresh process; only this run supplies model/tool inputs.
         var loaded = ReplayAdmission.Load(Path.Combine(input.Root, "bundle"), token);

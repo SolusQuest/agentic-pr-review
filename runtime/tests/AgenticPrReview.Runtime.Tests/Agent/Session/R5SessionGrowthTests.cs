@@ -256,6 +256,101 @@ public sealed class R5SessionGrowthTests
         Assert.NotNull(GrowthJson.Read(bytes));
         Assert.DoesNotContain("private-test-exception-not-output", System.Text.Encoding.UTF8.GetString(bytes));
     }
+
+    [Theory]
+    [InlineData(0)] [InlineData(1)]
+    public async Task ZeroCallCancellationRetainsActualAgentDiagnostic(int phase)
+    {
+        var report = await GrowthRunner.RunAsync(Bundle, new() { Profile = "short", Fault = ReplayFault.Cancelled, FaultPhase = phase });
+        var profile = Assert.Single(report.Profiles);
+        Assert.Equal(phase + 1, profile.Rows.Length);
+        var row = profile.Rows[^1];
+        Assert.Equal("agent", row.Stage);
+        Assert.Equal(AgentFailureCodes.Cancelled, row.Code);
+        Assert.False(row.Accepted);
+        Assert.True(row.PredecessorPreserved);
+        Assert.Equal(0, row.ModelCalls);
+        Assert.Equal(0, row.ToolCalls);
+        Assert.Equal(0, row.ProviderRequests);
+        Assert.Equal(0, row.ProviderRequestBytes);
+        Assert.Null(row.LastProviderRequestBytes);
+        Assert.Null(row.Project);
+        Assert.Equal(EvaluationStatus.Failed, profile.Evaluation.Outcomes.Single(o => o.CaseId == row.CaseId).ExecutionStatus);
+        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+    }
+
+    [Theory]
+    [InlineData("build", AgentSessionCodes.ConstructionLimit, "append_limit")]
+    [InlineData("agent", AgentFailureCodes.ModelLimit, "run_budget")]
+    public async Task RehashedFailureCannotKeepCompletedQ1Outcome(string stage, string code, string classification)
+    {
+        var report = await GrowthRunner.RunAsync(Bundle, new() { Profile = "short", AttemptLimit = 1 });
+        var profile = Assert.Single(report.Profiles);
+        var row = Assert.Single(profile.Rows) with { Accepted = false, State = null, Stage = stage, Code = code, Classification = classification };
+        var profiles = ImmutableArray.Create(profile with { Rows = [row], TerminalStage = stage, TerminalCode = code, LimitObserved = true });
+        var changed = report with { Code = "verified", Profiles = profiles, NormalizedSha256 = GrowthJson.Normalize(profiles) };
+        Assert.Null(GrowthJson.Read(GrowthJson.Write(changed)));
+    }
+
+    [Fact]
+    public async Task UnreapedDispositionRetainsPrefixWithoutReadbackOrCleanup()
+    {
+        string? retained = null;
+        var cleanupCalled = false;
+        try
+        {
+            var report = await GrowthRunner.RunAsync(Bundle, new()
+            {
+                Profile = "short", AttemptLimit = 2,
+                RunProcess = (input, timeout, token) =>
+                {
+                    retained = input.Root;
+                    // Typed supervisor-failure witness; no live OS process is left running by this test.
+                    return input.Phase == 0 ? ReplayProcess.RunAsync(input, timeout, token) : throw new ReplayProcessUnreaped();
+                },
+                Cleanup = root => { cleanupCalled = true; return ReplayProcess.Cleanup(root); },
+            });
+            var profile = Assert.Single(report.Profiles);
+            Assert.Equal(2, profile.Rows.Length);
+            Assert.True(profile.Rows[0].Accepted);
+            var failed = profile.Rows[1];
+            Assert.False(failed.Accepted);
+            Assert.False(failed.PredecessorPreserved);
+            Assert.Equal(profile.Rows[0].State, failed.Before);
+            Assert.Null(failed.State);
+            Assert.Null(failed.ProviderRequestBytes);
+            Assert.Equal("process_unreaped", failed.Code);
+            Assert.Equal("cleanup_failed", report.Cleanup);
+            Assert.False(cleanupCalled);
+            Assert.True(Directory.Exists(retained));
+            Assert.Equal(2, profile.Evaluation.Outcomes.Length);
+            Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+            Assert.Null(GrowthJson.Read(GrowthJson.Write(report with { Code = "observation_incomplete", Cleanup = "cleaned" })));
+        }
+        finally { if (retained is not null) Assert.True(ReplayProcess.Cleanup(retained)); }
+    }
+
+    [Fact]
+    public async Task ThrowingCleanupCannotClaimArtifactsWereRemoved()
+    {
+        string? retained = null;
+        try
+        {
+            var report = await GrowthRunner.RunAsync(Bundle, new()
+            {
+                Profile = "short", AttemptLimit = 1,
+                Cleanup = root => { retained = root; throw new IOException("synthetic-cleanup-failure"); },
+            });
+            Assert.Equal("cleanup_failed", report.Cleanup);
+            Assert.Equal("cleanup_failed", report.Code);
+            Assert.True(Assert.Single(Assert.Single(report.Profiles).Rows).Accepted);
+            Assert.True(Directory.Exists(retained));
+            var bytes = GrowthJson.Write(report);
+            Assert.NotNull(GrowthJson.Read(bytes));
+            Assert.DoesNotContain("synthetic-cleanup-failure", System.Text.Encoding.UTF8.GetString(bytes));
+        }
+        finally { if (retained is not null) Assert.True(ReplayProcess.Cleanup(retained)); }
+    }
 }
 
 public sealed partial class AgentSessionRoundTripTests

@@ -84,7 +84,8 @@ internal static class GrowthProfiles
     {
         if (reply.GrowthProfile is null) return reply.ObservedCode is null && reply.ObservedStage is null && reply.GrowthCounts is null && reply.GrowthSchedule is null;
         if (!Names.Contains(reply.GrowthProfile)) return false;
-        if (reply.GrowthCounts is { } counts && (counts.Calls != reply.ModelCalls || counts.Calls < reply.Requests.Length ||
+        if (reply.GrowthCounts is null && (reply.ModelCalls != 0 || reply.ToolCalls != 0 || !reply.Requests.IsEmpty)) return false;
+        if (reply.GrowthCounts is { } counts && (counts.Calls < 1 || counts.Calls != reply.ModelCalls || counts.Calls < reply.Requests.Length ||
             counts.Calls > AgentLimits.ModelCalls || counts.LastProjectRequestBytes is < 1 or > AgentLimits.RequestBytes ||
             counts.LastMessages is < 1 or > AgentLimits.Messages || counts.LastResponseMessages < counts.LastMessages ||
             counts.LastResponseMessages > counts.LastMessages + 1 + AgentLimits.ToolCallsPerResponse ||
