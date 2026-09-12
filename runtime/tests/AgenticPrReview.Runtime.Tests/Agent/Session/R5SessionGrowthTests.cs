@@ -126,6 +126,10 @@ public sealed class R5SessionGrowthTests
         Assert.True(last.PredecessorPreserved);
         Assert.NotEqual("append_limit", last.Classification);
         Assert.Equal("observation_incomplete", report.Code);
+        Assert.Equal("accept", last.Stage);
+        Assert.Equal(EvaluationStatus.Completed, report.Profiles[0].Evaluation.Outcomes.Single(o => o.CaseId == last.CaseId).ExecutionStatus);
+        Assert.Equal(2, report.Profiles[0].Evaluation.Summary.Execution.Completed);
+        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
     }
 
     [Fact]
@@ -282,13 +286,15 @@ public sealed class R5SessionGrowthTests
     [Theory]
     [InlineData("build", AgentSessionCodes.ConstructionLimit, "append_limit")]
     [InlineData("agent", AgentFailureCodes.ModelLimit, "run_budget")]
+    [InlineData("executor", "result_invalid", "harness_failure")]
     public async Task RehashedFailureCannotKeepCompletedQ1Outcome(string stage, string code, string classification)
     {
         var report = await GrowthRunner.RunAsync(Bundle, new() { Profile = "short", AttemptLimit = 1 });
         var profile = Assert.Single(report.Profiles);
         var row = Assert.Single(profile.Rows) with { Accepted = false, State = null, Stage = stage, Code = code, Classification = classification };
-        var profiles = ImmutableArray.Create(profile with { Rows = [row], TerminalStage = stage, TerminalCode = code, LimitObserved = true });
-        var changed = report with { Code = "verified", Profiles = profiles, NormalizedSha256 = GrowthJson.Normalize(profiles) };
+        var limit = classification != "harness_failure";
+        var profiles = ImmutableArray.Create(profile with { Rows = [row], TerminalStage = stage, TerminalCode = code, LimitObserved = limit });
+        var changed = report with { Code = limit ? "verified" : "observation_incomplete", Profiles = profiles, NormalizedSha256 = GrowthJson.Normalize(profiles) };
         Assert.Null(GrowthJson.Read(GrowthJson.Write(changed)));
     }
 
@@ -350,6 +356,73 @@ public sealed class R5SessionGrowthTests
             Assert.DoesNotContain("synthetic-cleanup-failure", System.Text.Encoding.UTF8.GetString(bytes));
         }
         finally { if (retained is not null) Assert.True(ReplayProcess.Cleanup(retained)); }
+    }
+
+    [Theory]
+    [InlineData("diagnostic")] [InlineData("provider_digest")] [InlineData("startup")]
+    public async Task RejectedRepliesCannotContributeQ1Quality(string mutation)
+    {
+        string? startup = null;
+        var report = await GrowthRunner.RunAsync(Bundle, new()
+        {
+            Profile = "short", AttemptLimit = 2,
+            TransformReply = (input, reply) =>
+            {
+                if (input.Phase == 0) { startup = reply.Startup; return reply; }
+                return mutation switch
+                {
+                    "diagnostic" => reply with { ObservedStage = "build", ObservedCode = AgentSessionCodes.ConstructionLimit },
+                    "provider_digest" => reply with { ProviderSha256 = new string('f', 64) },
+                    _ => reply with { Startup = startup! },
+                };
+            },
+        });
+        var profile = Assert.Single(report.Profiles);
+        var last = profile.Rows[^1];
+        Assert.Equal("result_invalid", last.Code);
+        Assert.False(last.Accepted);
+        Assert.True(last.PredecessorPreserved);
+        var outcome = profile.Evaluation.Outcomes.Single(o => o.CaseId == last.CaseId);
+        Assert.Equal(EvaluationStatus.Invalid, outcome.ExecutionStatus);
+        Assert.Equal(EvaluationFailureSource.Evaluator, outcome.FailureSource);
+        Assert.Null(outcome.ExecutionSha256);
+        Assert.Equal(AssertionStatus.NotEvaluated, outcome.EvidenceStatus);
+        Assert.Equal(AssertionStatus.NotEvaluated, outcome.ScenarioStatus);
+        Assert.Equal(ModelObservationStatus.NotEvaluated, outcome.ModelStatus);
+        Assert.Equal(1, profile.Evaluation.Summary.Execution.Completed);
+        Assert.Equal(1, profile.Evaluation.Summary.Execution.Invalid);
+        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+    }
+
+    [Theory]
+    [InlineData(1, "cancelled")] [InlineData(2, "cancelled")]
+    [InlineData(1, "io")] [InlineData(2, "io")]
+    [InlineData(1, "content")] [InlineData(2, "content")]
+    public async Task TypedAdmissionResultsRetainOperationalAttribution(int call, string failure)
+    {
+        var calls = 0;
+        var cleanupCalled = false;
+        var report = await GrowthRunner.RunAsync(Bundle, new()
+        {
+            Profile = "short", AttemptLimit = 1,
+            AdmitBundle = (path, token) =>
+            {
+                if (++calls != call) return ReplayAdmission.Load(path, token);
+                if (failure == "cancelled")
+                {
+                    var cancelled = ReplayAdmission.Load(path, new CancellationToken(true));
+                    Assert.Equal(ReplayAdmissionCode.Cancelled, cancelled.Code);
+                    return cancelled;
+                }
+                return new(failure == "io" ? ReplayAdmissionCode.IoFailure : ReplayAdmissionCode.ContentMismatch, null);
+            },
+            Cleanup = root => { cleanupCalled = true; return ReplayProcess.Cleanup(root); },
+        });
+        Assert.Equal(failure switch { "cancelled" => "cancelled", "io" => "infrastructure_failed", _ => "input_invalid" }, report.Code);
+        Assert.Equal(call == 2, cleanupCalled);
+        Assert.Equal("cleaned", report.Cleanup);
+        Assert.Empty(report.Profiles);
+        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
     }
 }
 

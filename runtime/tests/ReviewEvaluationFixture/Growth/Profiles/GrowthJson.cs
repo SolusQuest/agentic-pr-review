@@ -76,6 +76,7 @@ internal static class GrowthJson
                     (row.ProviderRequests is { } requests && (requests == 0 ? row.LastProviderRequestBytes is not null || row.ProviderRequestBytes != 0 :
                         row.LastProviderRequestBytes is not (> 0 and <= AgentLimits.RequestBytes) || row.LastProviderRequestBytes > row.ProviderRequestBytes)) ||
                     !Code(row.Stage, row.Code) || !OutcomeMatches(row.Stage, outcome)) return false;
+                if (row.Code == "result_invalid" && (outcome.ExecutionStatus != EvaluationStatus.Invalid || outcome.FailureSource != EvaluationFailureSource.Evaluator)) return false;
                 if (row.Code == "process_unreaped" && (report.Cleanup != "cleanup_failed" || row.PredecessorPreserved || row.ModelCalls is not null)) return false;
                 if (row.ModelCalls is null ? row.ToolCalls is not null || row.ProviderRequests is not null || row.ProviderRequestBytes is not null ||
                     row.LastProviderRequestBytes is not null || row.Project is not null || row.Stage != "executor" :

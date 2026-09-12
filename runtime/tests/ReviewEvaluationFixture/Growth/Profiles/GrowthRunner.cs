@@ -21,6 +21,7 @@ internal sealed class GrowthOptions
     internal Action<ReplayChildInput, ReplayChildReply>? ObserveReply { get; init; }
     internal Func<string, bool> Cleanup { get; init; } = ReplayProcess.Cleanup;
     internal Func<ReplayChildInput, TimeSpan, CancellationToken, Task<ReplayProcessResult>> RunProcess { get; init; } = ReplayProcess.RunAsync;
+    internal Func<string, CancellationToken, ReplayAdmissionResult> AdmitBundle { get; init; } = ReplayAdmission.Load;
 }
 
 internal static class GrowthRunner
@@ -42,7 +43,7 @@ internal static class GrowthRunner
                 options.Profile is not null && !GrowthProfiles.Names.Contains(options.Profile)) return Report();
             // Capture once before any profile runs. Every child re-admits its private copy.
             var captured = ReplayDirectory.Capture(bundle, deadline.Token);
-            var admitted = ReplayAdmission.Load(bundle, deadline.Token);
+            var admitted = LoadBundle(options, bundle, deadline.Token);
             if (admitted.Fixture is not { } original || !GrowthProfiles.Matches(original)) return Report();
             var selected = options.Profile is null ? GrowthProfiles.Names : [options.Profile];
             foreach (var profile in selected)
@@ -61,7 +62,7 @@ internal static class GrowthRunner
                         File.WriteAllBytes(target, member.Value.ToArray());
                     }
                     File.WriteAllBytes(Path.Combine(privateBundle, ReplayLimits.ManifestName), ReplayJson.Write(captured.Manifest));
-                    var loaded = ReplayAdmission.Load(privateBundle, deadline.Token);
+                    var loaded = LoadBundle(options, privateBundle, deadline.Token);
                     if (loaded.Fixture is not { } fixture || !GrowthProfiles.Matches(fixture) || fixture.CorpusSha256 != original.CorpusSha256)
                         throw new ReplayRejected(ReplayAdmissionCode.ContentMismatch);
                     seedCorpus = fixture.CorpusSha256;
@@ -90,6 +91,14 @@ internal static class GrowthRunner
         GrowthReport Report() => new(cleanup == "cleaned" ? code : "cleanup_failed", cleanup, corpus, seedCorpus, schedule.Valid ? schedule : GrowthSchedule.Default,
             EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean, profiles.ToImmutable(),
             profiles.Count == 0 ? null : GrowthJson.Normalize(profiles.ToImmutable()));
+    }
+
+    private static ReplayAdmissionResult LoadBundle(GrowthOptions options, string bundle, CancellationToken token)
+    {
+        var result = options.AdmitBundle(bundle, token);
+        if (result.Code == ReplayAdmissionCode.Cancelled) throw new OperationCanceledException(token);
+        if (result.Code == ReplayAdmissionCode.IoFailure) throw new IOException();
+        return result;
     }
 
     private static async Task<(GrowthProfileReport Report, bool Reaped)> ProfileAsync(AdmittedReplayFixture fixture, string profile,
@@ -132,6 +141,7 @@ internal static class GrowthRunner
                 if (reply is not null) reply = options.TransformReply?.Invoke(input, reply) ?? reply;
                 EvaluationOutcome? evaluation = null;
                 var admitted = reply is not null && ReplayRunner.AdmitReply(input, run, reply, out evaluation) && startups.Add(reply.Startup);
+                if (!admitted) evaluation = null;
                 var stage = admitted ? reply!.ObservedStage ?? "executor" : "executor";
                 var resultCode = admitted ? reply!.ObservedCode ?? reply.Code : reply is null ? process.Code : "result_invalid";
                 var accepted = false;
