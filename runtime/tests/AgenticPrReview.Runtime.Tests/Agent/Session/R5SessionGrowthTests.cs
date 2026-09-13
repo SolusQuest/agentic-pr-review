@@ -19,6 +19,25 @@ public sealed class R5SessionGrowthTests
 {
     private static string Bundle => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "growth");
 
+    [Theory]
+    [InlineData("short", 0)]
+    [InlineData("tools", 8)]
+    [InlineData("continuation", 1)]
+    [InlineData("updates", 1)]
+    public async Task GrowthReportNamesToolResultsAsObservations(string profile, int expected)
+    {
+        var report = await GrowthRunner.RunAsync(Bundle, new() { Profile = profile, AttemptLimit = 1 });
+        Assert.True(Assert.Single(Assert.Single(report.Profiles).Rows).Accepted);
+        using var json = JsonDocument.Parse(GrowthJson.Write(report));
+        var row = json.RootElement.GetProperty("profiles")[0].GetProperty("rows")[0];
+        Assert.False(row.TryGetProperty("tool_calls", out _));
+        Assert.Equal(expected, row.GetProperty("tool_observations").GetInt32());
+        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        var oldName = System.Text.Encoding.UTF8.GetString(GrowthJson.Write(report))
+            .Replace("\"tool_observations\":", "\"tool_calls\":", StringComparison.Ordinal);
+        Assert.Null(GrowthJson.Read(System.Text.Encoding.UTF8.GetBytes(oldName)));
+    }
+
     [Fact]
     public void PrivateReplyPreservesAbsenceOfSessionBytes()
     {
@@ -274,7 +293,7 @@ public sealed class R5SessionGrowthTests
         Assert.False(row.Accepted);
         Assert.True(row.PredecessorPreserved);
         Assert.Equal(0, row.ModelCalls);
-        Assert.Equal(0, row.ToolCalls);
+        Assert.Equal(0, row.ToolObservations);
         Assert.Equal(0, row.ProviderRequests);
         Assert.Equal(0, row.ProviderRequestBytes);
         Assert.Null(row.LastProviderRequestBytes);

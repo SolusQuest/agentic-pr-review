@@ -10,9 +10,10 @@ internal sealed record GrowthState(long Generation, int CompletedRuns, int Recor
 
 // Scope samples are taken after acceptance, when there is no staging candidate.
 // Before is an independently restored last accepted sample; State is null on a rejected attempt.
+// ToolObservations counts result events; terminal finish_review emits no result event.
 internal sealed record GrowthRow(int Attempt, string CaseId, string AttemptSha256, string Transition,
     string Stage, string Code, string Classification, bool Accepted, GrowthState? Before, GrowthState? State,
-    bool PredecessorPreserved, int? ModelCalls, int? ToolCalls, int? ProviderRequests, long? ProviderRequestBytes,
+    bool PredecessorPreserved, int? ModelCalls, int? ToolObservations, int? ProviderRequests, long? ProviderRequestBytes,
     int? LastProviderRequestBytes, GrowthChatCounts? Project);
 
 internal sealed record GrowthProfileReport(string Profile, int AttemptLimit, string TerminalStage, string TerminalCode,
