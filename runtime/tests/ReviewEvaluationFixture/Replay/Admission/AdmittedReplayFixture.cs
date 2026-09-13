@@ -65,6 +65,17 @@ internal sealed class AdmittedReplayRun
         return new ReplayMemoryFiles(snapshot, repository);
     }
 
+    // Only derived synthetic inputs are changed. Completion still belongs to the R2 executor.
+    internal AdmittedReplayRun Derive(ReplayRun input, ReplayScript script, string corpus)
+    {
+        var expected = EvaluationCase.Admit(Expected.Input with
+        { Id = input.CaseId, CorpusSha256 = corpus, ReviewedIdentity = input.ReviewedIdentity })
+            ?? throw new ReplayRejected(ReplayAdmissionCode.InvalidContent);
+        var rebound = diffs.Select(source => new ReviewedDiffSource(input.ReviewedIdentity.Runtime,
+            source.Path, source.PreviousPath, source.Status, source.SourceTruncated, source.Hunks)).ToImmutableArray();
+        return new(input, configuration, repository, rebound, policy, InitialContext, script, expected, ExpectedCode);
+    }
+
     public override string ToString() => "admitted_replay_run";
 }
 

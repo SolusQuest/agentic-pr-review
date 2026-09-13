@@ -1,0 +1,160 @@
+{
+  "format": "apr.r5.synthetic-replay.v1",
+  "source_kind": "authored-synthetic",
+  "configuration": {
+    "workflow_identity": "r5@growth",
+    "provider_id": "deepseek",
+    "model_id": "deepseek-v4-flash",
+    "adapter_id": "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502"
+  },
+  "files": [
+    {
+      "path": "context.txt",
+      "role": "context",
+      "length": 7,
+      "sha256": "740acc7e0a4844f406ba365dc4d638c51277f8259c5da13797c4d6ed527861dd"
+    },
+    {
+      "path": "diff.json",
+      "role": "diff",
+      "length": 20,
+      "sha256": "7104436211d3e256d0fd8216269af13723b1a2c1314bb924f069ae7f84c61f0d"
+    },
+    {
+      "path": "expected.json",
+      "role": "assertions",
+      "length": 109,
+      "sha256": "4729b0c97d69e2e925fc4d5cf8db6dbb2fe9dac5fc89a5fbda0e460d8c3057b4"
+    },
+    {
+      "path": "policy.txt",
+      "role": "policy",
+      "length": 76,
+      "sha256": "fad8f7a714f659807d4a54c1e953b537b4532480ed08b865e99f71c85cbecd5b"
+    },
+    {
+      "path": "script-continuation.json",
+      "role": "script",
+      "length": 40543,
+      "sha256": "ad375092eec135524ae3443b286cd3cc91ee33072606ff387789b11ca2e969f6"
+    },
+    {
+      "path": "script-short.json",
+      "role": "script",
+      "length": 265,
+      "sha256": "1889daabdd2f3ba26540d3e5b8539b9e825e7fb81073586343be32956b3da159"
+    },
+    {
+      "path": "script-tools.json",
+      "role": "script",
+      "length": 1710,
+      "sha256": "a29cc75348d511fb4ec68d8aed95b2a50b7a0d49ad3d9901547542258af9d76a"
+    },
+    {
+      "path": "script-updates.json",
+      "role": "script",
+      "length": 513,
+      "sha256": "20e92f75c5fc5527eea77266af468045c468e083a584a8c857c19c09d0422832"
+    },
+    {
+      "path": "source.txt",
+      "role": "repository",
+      "length": 26,
+      "sha256": "a05cc328d61d4be610eabc59cf988b7bc6b0004cc37bf1f5545dfaec915b5991"
+    }
+  ],
+  "runs": [
+    {
+      "id": "growth-short",
+      "case_id": "growth-short",
+      "transition": "initial",
+      "previous_run_id": null,
+      "reviewed_identity": {
+        "repository_id": "247",
+        "review_target": 247,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "src/source.txt",
+          "file": "source.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "context.txt",
+      "script": "script-short.json",
+      "assertions": "expected.json"
+    },
+    {
+      "id": "growth-tools",
+      "case_id": "growth-tools",
+      "transition": "same_head",
+      "previous_run_id": "growth-short",
+      "reviewed_identity": {
+        "repository_id": "247",
+        "review_target": 247,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "src/source.txt",
+          "file": "source.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "context.txt",
+      "script": "script-tools.json",
+      "assertions": "expected.json"
+    },
+    {
+      "id": "growth-continuation",
+      "case_id": "growth-continuation",
+      "transition": "same_head",
+      "previous_run_id": "growth-tools",
+      "reviewed_identity": {
+        "repository_id": "247",
+        "review_target": 247,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "src/source.txt",
+          "file": "source.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "context.txt",
+      "script": "script-continuation.json",
+      "assertions": "expected.json"
+    },
+    {
+      "id": "growth-updates",
+      "case_id": "growth-updates",
+      "transition": "same_head",
+      "previous_run_id": "growth-continuation",
+      "reviewed_identity": {
+        "repository_id": "247",
+        "review_target": 247,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "src/source.txt",
+          "file": "source.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "context.txt",
+      "script": "script-updates.json",
+      "assertions": "expected.json"
+    }
+  ]
+}

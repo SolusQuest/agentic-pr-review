@@ -1,0 +1,14 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "finish",
+          "name": "finish_review",
+          "arguments_json": "{\"summary\":\"Synthetic complete.\",\"findings\":[]}"
+        }
+      ],
+      "reasoning_content": "finish"
+    }
+  ]
+}
