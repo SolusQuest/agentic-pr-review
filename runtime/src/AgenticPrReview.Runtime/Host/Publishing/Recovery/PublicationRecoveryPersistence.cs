@@ -14,11 +14,15 @@ internal static class PublicationRecoveryPersistence
     internal static async Task<RetainedStateTransactionResult<
         PublicationIntentPersistenceResult>> PersistIntentAndAuthorizeAsync(
         AuthorizedAcceptedStateRestoreContext context,
-        PublicationRecoveryObservation observation,
+        PublicationRecoveryEvaluation evaluation,
         CancellationToken cancellationToken)
     {
+        var observation = evaluation?.Observation;
+        var targetExpectation = evaluation?.TargetExpectation;
         if (context is null ||
             observation is null ||
+            targetExpectation is null ||
+            !targetExpectation.Matches(observation, PublicationStickyWriteTransition.InitialIntent) ||
             !observation.IsLive ||
             observation.Candidate is not { } observedCandidate ||
             observation.Intent is not null ||
@@ -174,11 +178,18 @@ internal static class PublicationRecoveryPersistence
             return IntentFailure();
         }
 
-        var stickyAuthorization = PublicationRecoveryInventoryFactory
-            .CreateStickyWriteAuthorization(
+        if (!PublicationRecoveryInventoryFactory
+            .TryCreateStickyWriteAuthorization(
                 freshObservation,
+                observation,
+                targetExpectation,
                 intent.RecordIdentity,
-                PublicationStickyWriteTransition.InitialIntent);
+                PublicationStickyWriteTransition.InitialIntent,
+                out var stickyAuthorization) || stickyAuthorization is null)
+        {
+            freshObservation.Dispose();
+            return IntentFailure();
+        }
         return RetainedStateTransactionResult<
             PublicationIntentPersistenceResult>.Success(
                 RetainedStateTransactionCodes.Ready,
@@ -247,12 +258,16 @@ internal static class PublicationRecoveryPersistence
         PublicationRetryIntentPersistenceResult>>
         PersistRetryIntentAndAuthorizeAsync(
         AuthorizedAcceptedStateRestoreContext context,
-        PublicationRecoveryObservation observation,
+        PublicationRecoveryEvaluation evaluation,
         PublicationRetryTransitionAuthorization authorization,
         CancellationToken cancellationToken)
     {
+        var observation = evaluation?.Observation;
+        var targetExpectation = evaluation?.TargetExpectation;
         if (context is null ||
             observation is null ||
+            targetExpectation is null ||
+            !targetExpectation.Matches(observation, PublicationStickyWriteTransition.RetryIntent) ||
             authorization is null ||
             !observation.IsLive ||
             observation.Candidate is not { } observedCandidate ||
@@ -425,11 +440,18 @@ internal static class PublicationRecoveryPersistence
             return RetryIntentFailure();
         }
 
-        var stickyAuthorization = PublicationRecoveryInventoryFactory
-            .CreateStickyWriteAuthorization(
+        if (!PublicationRecoveryInventoryFactory
+            .TryCreateStickyWriteAuthorization(
                 freshObservation,
+                observation,
+                targetExpectation,
                 retryIntent.RecordIdentity,
-                PublicationStickyWriteTransition.RetryIntent);
+                PublicationStickyWriteTransition.RetryIntent,
+                out var stickyAuthorization) || stickyAuthorization is null)
+        {
+            freshObservation.Dispose();
+            return RetryIntentFailure();
+        }
         return RetainedStateTransactionResult<
             PublicationRetryIntentPersistenceResult>.Success(
                 RetainedStateTransactionCodes.Ready,

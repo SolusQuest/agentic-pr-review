@@ -15,6 +15,7 @@ namespace AgenticPrReview.Runtime.Host.Publishing.Recovery;
 internal sealed class PublicationRecoveryService
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private static readonly object TargetExpectationIssuer = new();
     private readonly StickyCommentPublisher publisher;
 
     internal PublicationRecoveryService(StickyCommentPublisher publisher) =>
@@ -90,9 +91,9 @@ internal sealed class PublicationRecoveryService
             !observation.CurrentAcceptanceMatchesReviewedExecution)
         {
             return Evaluation(
-                PublicationRecoveryClassifier.Classify(
+                ApplyResetExpiry(observation, PublicationRecoveryClassifier.Classify(
                     observation,
-                    PublicationMarkerObservation.Absent),
+                    PublicationMarkerObservation.Absent)),
                 null,
                 StickyDiscoveryKind.Absent,
                 StickyPublicationReason.None,
@@ -159,6 +160,7 @@ internal sealed class PublicationRecoveryService
             .ConfigureAwait(false);
         var marker = discovered.Kind switch
         {
+            StickyDiscoveryKind.Absent when inventory.ResetPublicationTarget is not null => PublicationMarkerObservation.Ambiguous,
             StickyDiscoveryKind.Absent => PublicationMarkerObservation.Absent,
             StickyDiscoveryKind.ExactTarget
                 when discovered.Receipt is not null =>
@@ -198,9 +200,9 @@ internal sealed class PublicationRecoveryService
         {
             marker = PublicationMarkerObservation.PreviousAcceptedTarget;
         }
-        var classified = PublicationRecoveryClassifier.Classify(
+        var classified = ApplyResetExpiry(observation, PublicationRecoveryClassifier.Classify(
             observation,
-            marker);
+            marker));
         PublicationStickyWriteAuthorization? stickyAuthorization = null;
         PublicationRetryTransitionAuthorization? retryAuthorization = null;
         PublicationMarkerAbsenceEvidence? absenceEvidence = null;
@@ -229,6 +231,7 @@ internal sealed class PublicationRecoveryService
                     discovered.Kind,
                     discovered.Reason);
         }
+        var targetExpectation = CreateTargetExpectation(observation, classified, marker);
         return Evaluation(
             classified,
             marker == PublicationMarkerObservation.Exact
@@ -239,7 +242,8 @@ internal sealed class PublicationRecoveryService
             observation,
             stickyAuthorization,
             retryAuthorization,
-            absenceEvidence);
+            absenceEvidence,
+            targetExpectation);
     }
 
     internal async Task<RetainedStateCleanupResult>
@@ -1200,24 +1204,24 @@ internal sealed class PublicationRecoveryService
         StickyCommentPublisher.StickyPublicationReceipt? freshReceipt = null)
     {
         var inventory = observation.Inventory;
-        if (observation.Candidate is null ||
-            !observation.CandidateMatchesCurrentHead ||
-            observation.StickyReadback is not null ||
-            observation.Recovery is not null ||
-            inventory?.CurrentAcceptedPublication is not { } accepted ||
-            inventory.CurrentAcceptancePublicationReceipt is not
-            { } durableReceipt ||
-            !TryRestoreRendered(accepted, out var rendered) ||
-            rendered is null ||
-            !AuthorizedStickyReadbackRequest.TryCreateRecovery(
-                authorization,
-                scope,
-                rendered,
-                durableReceipt,
-                out var request) ||
-            request is null)
-        {
+        if (observation.Candidate is null || !observation.CandidateMatchesCurrentHead ||
+            observation.StickyReadback is not null || observation.Recovery is not null || inventory is null)
             return false;
+        StickyCommentPublisher.StickyPublicationReceipt? durableReceipt;
+        AuthorizedStickyReadbackRequest? request;
+        if (inventory.CurrentAcceptedPublication is { } accepted)
+        {
+            durableReceipt = inventory.CurrentAcceptancePublicationReceipt;
+            if (durableReceipt is null || !TryRestoreRendered(accepted, out var rendered) || rendered is null ||
+                !AuthorizedStickyReadbackRequest.TryCreateRecovery(authorization, scope, rendered, durableReceipt, out request) ||
+                request is null) return false;
+        }
+        else
+        {
+            if (inventory.ResetPublicationTarget is not { } target || !target.TryReceipt(out durableReceipt) ||
+                durableReceipt is null ||
+                !AuthorizedStickyReadbackRequest.TryCreateResetRecovery(authorization, scope, inventory, out request) ||
+                request is null) return false;
         }
 
         // Exact discovery already verified this observation. Only a stale target needs
@@ -1241,6 +1245,15 @@ internal sealed class PublicationRecoveryService
                 predecessorObservation);
     }
 
+    private static PublicationRecoveryDecision ApplyResetExpiry(
+        PublicationRecoveryObservation observation, PublicationRecoveryDecision decision) =>
+        observation.Inventory?.ResetPublicationTarget is { } target &&
+        target.ExpiresAtUnixSeconds <= observation.Inventory.ObservedAtUnixSeconds &&
+        decision.Action is PublicationRecoveryAction.NoPendingWork or
+            PublicationRecoveryAction.ResumeBeforeIntent or PublicationRecoveryAction.ResumeKnownNotWritten
+            ? PublicationRecoveryClassifier.Classify(null, PublicationMarkerObservation.Incomplete)
+            : decision;
+
     private static PublicationRecoveryEvaluation Evaluation(
         PublicationRecoveryDecision decision,
         StickyCommentPublisher.StickyPublicationReceipt? receipt,
@@ -1249,7 +1262,8 @@ internal sealed class PublicationRecoveryService
         PublicationRecoveryObservation? observation,
         PublicationStickyWriteAuthorization? stickyAuthorization = null,
         PublicationRetryTransitionAuthorization? retryAuthorization = null,
-        PublicationMarkerAbsenceEvidence? absenceEvidence = null) =>
+        PublicationMarkerAbsenceEvidence? absenceEvidence = null,
+        TargetExpectation? targetExpectation = null) =>
         new(
             decision,
             receipt,
@@ -1258,7 +1272,80 @@ internal sealed class PublicationRecoveryService
             observation,
             stickyAuthorization,
             retryAuthorization,
-            absenceEvidence);
+            absenceEvidence,
+            targetExpectation);
+
+    // Preserve the actual P5 discovery. A historical receipt alone proves neither
+    // present target nor absence, and this evidence cannot itself authorize a write.
+    private static TargetExpectation? CreateTargetExpectation(
+        PublicationRecoveryObservation observation,
+        PublicationRecoveryDecision decision,
+        PublicationMarkerObservation marker)
+    {
+        var transition = decision.Action switch
+        {
+            PublicationRecoveryAction.ResumeBeforeIntent => PublicationStickyWriteTransition.InitialIntent,
+            PublicationRecoveryAction.ResumeKnownNotWritten => PublicationStickyWriteTransition.RetryIntent,
+            _ => (PublicationStickyWriteTransition?)null,
+        };
+        if (transition is null || !observation.IsLive || observation.Candidate is null)
+            return null;
+
+        var target = observation.Inventory?.ResetPublicationTarget;
+        StickyCommentPublisher.StickyPublicationReceipt? previous = null;
+        if (marker == PublicationMarkerObservation.PreviousAcceptedTarget)
+        {
+            previous = observation.Inventory?.CurrentAcceptancePublicationReceipt;
+            if (target is not null && !target.TryReceipt(out previous)) return null;
+            if (previous is null) return null;
+        }
+        else if (marker != PublicationMarkerObservation.Absent || target is not null)
+        {
+            return null;
+        }
+
+        return new TargetExpectation(TargetExpectationIssuer, observation, transition.Value,
+            previous, target?.ExpiresAtUnixSeconds);
+    }
+
+    internal sealed class TargetExpectation : IDisposable
+    {
+        private readonly PublicationRecoveryObservation source;
+        private readonly PublicationStickyWriteTransition transition;
+        private int usable = 1;
+
+        internal TargetExpectation(object issuer, PublicationRecoveryObservation source,
+            PublicationStickyWriteTransition transition,
+            StickyCommentPublisher.StickyPublicationReceipt? previousTarget,
+            long? previousTargetExpiresAtUnixSeconds)
+        {
+            if (!ReferenceEquals(issuer, TargetExpectationIssuer))
+                throw new ArgumentException("A classified target observation is required.", nameof(issuer));
+            this.source = source;
+            this.transition = transition;
+            PreviousTarget = previousTarget;
+            PreviousTargetExpiresAtUnixSeconds = previousTargetExpiresAtUnixSeconds;
+        }
+
+        internal StickyCommentPublisher.StickyPublicationReceipt? PreviousTarget { get; }
+        internal long? PreviousTargetExpiresAtUnixSeconds { get; }
+
+        internal bool Matches(PublicationRecoveryObservation? observation,
+            PublicationStickyWriteTransition expectedTransition) =>
+            Volatile.Read(ref usable) == 1 && ReferenceEquals(source, observation) &&
+            source.IsLive && source.CandidateObjectIdentity is not null && transition == expectedTransition;
+
+        internal bool TryConsume(PublicationRecoveryObservation observation,
+            PublicationRecoveryObservation fresh, PublicationStickyWriteTransition expectedTransition) =>
+            Matches(observation, expectedTransition) && fresh.IsLive &&
+            source.CandidateObjectIdentity == fresh.CandidateObjectIdentity &&
+            source.Inventory?.ResetPublicationTarget == fresh.Inventory?.ResetPublicationTarget &&
+            (PreviousTargetExpiresAtUnixSeconds is not { } expiry || expiry > fresh.ObservedAtUnixSeconds) &&
+            Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+        public void Dispose() => Interlocked.Exchange(ref usable, 0);
+        public override string ToString() => "[PRIVATE]";
+    }
 
     private static RetainedStateCleanupResult CleanupFailure(string code) =>
         new(null, Completed: false, code);

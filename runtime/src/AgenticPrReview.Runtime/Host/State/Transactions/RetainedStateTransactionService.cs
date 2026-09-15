@@ -3208,6 +3208,12 @@ internal sealed class RetainedStateTransactionService
                     inventoryDigest);
             }
 
+            var resetTarget = current is null ? observed.SelectedHead?.Head.ResetPublicationTarget : null;
+            if (resetTarget is not null &&
+                (!resetTarget.Matches(binding.Publication) ||
+                    resetTarget.SourceEpoch == binding.SelectedLineage.Epoch))
+                return RetainedStateTransactionResult<RetainedStatePublicationRecoveryInventory>.Fail(
+                    RetainedStateTransactionCodes.Conflict);
             var value =
                 RetainedStatePublicationRecoveryInventory.Create(
                     issuer,
@@ -3221,7 +3227,8 @@ internal sealed class RetainedStateTransactionService
                     anchorEvidence,
                     cleanupRecords.ToImmutable(),
                     inventoryDigest,
-                    trustedNow);
+                    trustedNow,
+                    resetTarget);
             candidate = null;
             records = default;
             return RetainedStateTransactionResult<
@@ -6857,6 +6864,22 @@ internal sealed class RetainedStateTransactionService
         }
 
         return (RetainedStateTransactionCodes.Ready, true);
+    }
+
+    internal static bool ResetSourceCleanupIsAccepted(
+        AuthenticatedStateObject item,
+        AcceptedStateSelection? selection)
+    {
+        if (selection is null) return false;
+        var accepted = new[] { selection.Current, selection.ImmediatePredecessor }
+            .OfType<SelectedAcceptedGeneration>();
+        if (RetainedStateCleanupRecordCodec.TryDecode(item.Payload, out var cleanup) && cleanup is not null)
+            return CleanupRecordMatchesPhysical(cleanup, item) && accepted.Any(value =>
+                value.ReceiptPhysical.Header.ObjectIdentity == cleanup.TerminalAcceptanceIdentity);
+        return RetainedStateOpaqueWriteAnchorCodec.TryDecode(item.Payload, out var anchor) && anchor is not null &&
+            item.Header.PredecessorIdentity == anchor.CandidateObjectIdentity &&
+            item.Header.LogicalExpiresAtUnixSeconds == anchor.SemanticRequiredExpiresAtUnixSeconds &&
+            accepted.Any(value => value.OriginalCandidateObjectIdentity == anchor.CandidateObjectIdentity);
     }
 
     private static bool CleanupRecordMatchesPhysical(

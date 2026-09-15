@@ -1143,6 +1143,14 @@ internal sealed class LineageService
         long? expiryBoundaryUnixSeconds,
         CancellationToken cancellationToken)
     {
+        if (kind == LineageTransitionIntentKind.Reset &&
+            request.Reset?.SourceInventoryDigest is { } sourceDigest &&
+            !StringComparer.Ordinal.Equals(sourceDigest,
+                LineageCryptography.InventoryDigest(observed.Snapshot!.Authenticated
+                    .Concat(observed.Snapshot.UnderRetained)
+                    .Select(item => LineageHeadCodec.Evidence(item.Metadata))
+                    .Concat(observed.Snapshot.Unknown.Select(item => LineageHeadCodec.Evidence(item.Metadata))))))
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
         var objectClass = LineageTransitionIntentCodec.ObjectClass(kind);
         var active = observed.Selection!.Selection!.Head;
         if (observed.Snapshot!.Unknown.Any(item =>
@@ -1177,7 +1185,8 @@ internal sealed class LineageService
                 : null,
             kind == LineageTransitionIntentKind.Reset
                 ? request.ProducingRunAttempt
-                : null);
+                : null,
+            kind == LineageTransitionIntentKind.Reset ? request.Reset?.PublicationTarget : null);
         if (!TryBuildSuccessor(
                 context,
                 request,
@@ -1215,7 +1224,13 @@ internal sealed class LineageService
         if (!StringComparer.Ordinal.Equals(
                 active.Header.ObjectIdentity,
                 intent.PriorHeadIdentity) ||
-            ResolveTargets(observed.Snapshot!, intent.Targets) is null)
+            ResolveTargets(observed.Snapshot!, intent.Targets) is null ||
+            !StringComparer.Ordinal.Equals(intent.InventorySha256,
+                LineageCryptography.InventoryDigest(observed.Snapshot!.Authenticated
+                    .Concat(observed.Snapshot.UnderRetained)
+                    .Where(item => item.Header.ObjectClass != StateObjectClass.LineageHead &&
+                        item.Header.Epoch == active.Header.Epoch)
+                    .Select(item => LineageHeadCodec.Evidence(item.Metadata)))))
         {
             return LineageResolveResult.Fail(LineageCodes.Conflict);
         }
@@ -1838,7 +1853,8 @@ internal sealed class LineageService
             ResetAuthorityRunIdentity:
                 intent.ResetAuthorityRunIdentity,
             ResetAuthorityRunAttempt:
-                intent.ResetAuthorityRunAttempt);
+                intent.ResetAuthorityRunAttempt,
+            ResetPublicationTarget: intent.ResetPublicationTarget);
         if (!LineageHeadCodec.TryEncode(successor, out var encoded))
         {
             return false;
@@ -3348,11 +3364,6 @@ internal sealed class LineageService
             .Select(group => group[0].Header.PredecessorIdentity)
             .OfType<string>())
         {
-            if (!groups.ContainsKey(predecessor))
-            {
-                return ExpiredAcceptanceResult.Fail(LineageCodes.Conflict);
-            }
-
             referenced.Add(predecessor);
         }
 
@@ -3368,21 +3379,34 @@ internal sealed class LineageService
         var visited = ImmutableHashSet.CreateBuilder<string>(
             StringComparer.Ordinal);
         var cursor = leaves[0][0];
-        while (cursor.Header.PredecessorIdentity is not null)
+        while (true)
         {
-            if (!visited.Add(cursor.Header.ObjectIdentity) ||
-                !groups.TryGetValue(
-                    cursor.Header.PredecessorIdentity,
-                    out var predecessor))
+            if (!visited.Add(cursor.Header.ObjectIdentity))
             {
                 return ExpiredAcceptanceResult.Fail(LineageCodes.Conflict);
+            }
+
+            if (cursor.Header.PredecessorIdentity is not { } predecessorIdentity)
+            {
+                break;
+            }
+
+            if (!groups.TryGetValue(predecessorIdentity, out var predecessor))
+            {
+                // Cleanup retains the current receipt and its immediate predecessor.
+                // An older ancestor may have been pruned, but the immediate may not.
+                if (visited.Count == 1)
+                {
+                    return ExpiredAcceptanceResult.Fail(LineageCodes.Conflict);
+                }
+
+                break;
             }
 
             cursor = predecessor[0];
         }
 
-        if (!visited.Add(cursor.Header.ObjectIdentity) ||
-            visited.Count != groups.Count)
+        if (visited.Count != groups.Count)
         {
             return ExpiredAcceptanceResult.Fail(LineageCodes.Conflict);
         }

@@ -13,6 +13,8 @@ internal static class Program
     {
         try
         {
+            if (args.SequenceEqual(["reset", "--fixture", "self-test"]))
+                return await Growth.Reset.ResetOwnerProbe.RunAsync();
             if (args.SequenceEqual(["replay-child"])) return await ReplayChild.MainAsync();
             if (args.Length == 3 && args[0] == "replay" && args[1] == "--bundle")
             {

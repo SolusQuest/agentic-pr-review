@@ -4,12 +4,16 @@ using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
-using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 
 internal sealed class ActionHostAuthorizationScenario
 {
+    private static void Require(bool condition)
+    {
+        if (!condition) throw new InvalidOperationException("synthetic_host_authorization_invalid");
+    }
+
     internal const long RepositoryId = 42;
     internal const string RepositoryName = "SolusQuest/agentic-pr-review";
     internal const string DefaultBranch = "main";
@@ -185,12 +189,12 @@ internal sealed class ActionHostAuthorizationScenario
         ActionHostGitHubToken? token = null;
         if (includeToken)
         {
-            Assert.True(ActionHostGitHubToken.TryCreate(
+            Require(ActionHostGitHubToken.TryCreate(
                 tokenValue,
                 out token));
         }
 
-        Assert.True(ActionHostInputs.TryCreate(
+        Require(ActionHostInputs.TryCreate(
             token,
             null,
             null,
@@ -202,7 +206,7 @@ internal sealed class ActionHostAuthorizationScenario
                     : null),
             ActionHostStateMode.Auto,
             out var inputs));
-        Assert.True(ActionHostLaunchContract.TryCreate(
+        Require(ActionHostLaunchContract.TryCreate(
             inputs,
             "C:/runner/event.json",
             Convert.ToHexString(SHA256.HashData(eventBytes)).ToLowerInvariant(),
@@ -387,10 +391,12 @@ internal sealed class FakeGitHubTransport :
     internal required ActionHostGitHubWorkflowSourceFact Source { get; set; }
     internal required ActionHostGitHubPullRequestFact PullRequest { get; set; }
     internal required IReadOnlyList<ActionHostGitHubPullRequestPageFact>
-        AssociatedPages { get; set; }
+        AssociatedPages
+    { get; set; }
     internal required ActionHostGitHubPermissionFact Permission { get; set; }
     internal Dictionary<string, ActionHostGitHubPermissionFact>
-        PermissionsByLogin { get; } = new(StringComparer.Ordinal);
+        PermissionsByLogin
+    { get; } = new(StringComparer.Ordinal);
     internal ActionHostGitHubFailure Failure { get; set; }
     internal TimeSpan Delay { get; set; }
     internal List<string> Calls { get; } = [];

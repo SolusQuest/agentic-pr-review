@@ -210,7 +210,8 @@ internal sealed record LineageHeadV1(
     ImmutableArray<LineageArtifactEvidence> Superseded,
     ImmutableArray<LineageArtifactEvidence> CompletedCleanup,
     string? ResetAuthorityRunIdentity = null,
-    long? ResetAuthorityRunAttempt = null);
+    long? ResetAuthorityRunAttempt = null,
+    ResetPublicationTargetV1? ResetPublicationTarget = null);
 
 internal sealed record LineageHeadCandidate(
     OpaqueStoreObjectMetadata Metadata,
@@ -264,7 +265,8 @@ internal sealed record LineageTransitionIntentV1(
     string InventorySha256,
     ImmutableArray<LineageArtifactEvidence> Targets,
     string? ResetAuthorityRunIdentity = null,
-    long? ResetAuthorityRunAttempt = null);
+    long? ResetAuthorityRunAttempt = null,
+    ResetPublicationTargetV1? ResetPublicationTarget = null);
 
 internal sealed record ScopedStateInventorySnapshot(
     ImmutableDictionary<StateObjectClass, OpaqueStoreName> Names,

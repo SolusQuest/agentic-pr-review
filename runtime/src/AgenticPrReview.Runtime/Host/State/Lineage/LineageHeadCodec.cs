@@ -42,6 +42,7 @@ internal static class LineageHeadCodec
         WriteEvidence(writer, head.PhysicalSuperseded);
         WriteEvidence(writer, head.Superseded);
         WriteEvidence(writer, head.CompletedCleanup);
+        ResetPublicationTargetCodec.Write(writer, head.ResetPublicationTarget);
         payload = writer.ToArray();
         if (payload.Length > LineageFormat.MaximumPayloadBytes)
         {
@@ -118,6 +119,7 @@ internal static class LineageHeadCodec
             !TryReadEvidence(ref reader, out var physicalSuperseded) ||
             !TryReadEvidence(ref reader, out var superseded) ||
             !TryReadEvidence(ref reader, out var completedCleanup) ||
+            !ResetPublicationTargetCodec.TryRead(ref reader, out var resetTarget) ||
             !reader.IsComplete)
         {
             return false;
@@ -136,7 +138,8 @@ internal static class LineageHeadCodec
             superseded,
             completedCleanup,
             resetAuthorityRunIdentity,
-            resetAuthorityRunAttempt);
+            resetAuthorityRunAttempt,
+            resetTarget);
         if (!IsValid(candidate))
         {
             return false;
@@ -209,6 +212,9 @@ internal static class LineageHeadCodec
     {
         if (head is null ||
             !Enum.IsDefined(head.Transition) ||
+            (head.ResetPublicationTarget is not null &&
+                (head.Transition != LineageTransitionKind.Reset ||
+                    !ResetPublicationTargetV1.IsValid(head.ResetPublicationTarget))) ||
             !LineageValidation.IsValid(head.Reviewed) ||
             !LineageValidation.IsOptionalSha256(head.PreviousEpoch) ||
             !LineageValidation.IsOptionalSha256(head.PreviousHeadIdentity) ||
@@ -311,6 +317,7 @@ internal static class LineageHeadCodec
             writer.WriteInt64(head.ExpiryBoundaryUnixSeconds.Value);
         }
 
+        ResetPublicationTargetCodec.Write(writer, head.ResetPublicationTarget);
         identity = writer.ToArray();
         return true;
     }

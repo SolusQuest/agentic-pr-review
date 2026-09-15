@@ -464,7 +464,8 @@ internal sealed class ActionHostCompositionDependencies
 
     internal IActionHostEventReader EventReader { get; }
     internal IActionHostGitHubAuthorizationTransportFactory
-        AuthorizationFactory { get; }
+        AuthorizationFactory
+    { get; }
     internal IActionHostGitObjectTransportFactory GitObjectFactory { get; }
     // The reviewed-tree traversal is the one capability that acquires the
     // frozen head graph.  Production shares the ordinary factory, while a
@@ -487,7 +488,8 @@ internal sealed class ActionHostCompositionDependencies
     internal IActionHostTrustedWorkflowAdmission WorkflowAdmission { get; }
     internal IReviewedChangedFileSourceFactory ChangedFileSourceFactory { get; }
     internal IStateReconciliationDiagnosticSink?
-        StateReconciliationDiagnosticSink { get; }
+        StateReconciliationDiagnosticSink
+    { get; }
 
     internal static ActionHostCompositionDependencies Production()
     {
@@ -778,7 +780,7 @@ internal sealed class ActionHostComposition
                     new StickyCommentPublisher(
                         new JournaledStickyPublisherTransportFactory(
                             dependencies.PublisherFactory,
-                            journal)),
+                            journal), dependencies.TimeProvider),
                     dependencies.SnapshotFactory,
                     dependencies.ProviderFactory,
                     journal,

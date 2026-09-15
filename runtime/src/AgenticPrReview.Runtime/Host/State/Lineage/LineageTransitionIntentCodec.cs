@@ -54,6 +54,7 @@ internal static class LineageTransitionIntentCodec
         writer.WriteString(intent.InventorySha256);
         LineageHeadCodec.WriteEvidence(writer, intent.Targets);
 
+        ResetPublicationTargetCodec.Write(writer, intent.ResetPublicationTarget);
         payload = writer.ToArray();
         return payload.Length <= LineageFormat.MaximumPayloadBytes;
     }
@@ -126,6 +127,7 @@ internal static class LineageTransitionIntentCodec
             !reader.TryReadString(64, out var headSha) ||
             !reader.TryReadString(64, out var inventorySha256) ||
             !LineageHeadCodec.TryReadEvidence(ref reader, out var targets) ||
+            !ResetPublicationTargetCodec.TryRead(ref reader, out var resetTarget) ||
             !reader.IsComplete)
         {
             return false;
@@ -141,7 +143,8 @@ internal static class LineageTransitionIntentCodec
             inventorySha256,
             targets,
             resetAuthorityRunIdentity,
-            resetAuthorityRunAttempt);
+            resetAuthorityRunAttempt,
+            resetTarget);
         if (!IsValid(candidate))
         {
             return false;
@@ -154,6 +157,9 @@ internal static class LineageTransitionIntentCodec
     internal static bool IsValid(LineageTransitionIntentV1? intent) =>
         intent is not null &&
         Enum.IsDefined(intent.Kind) &&
+        (intent.ResetPublicationTarget is null ||
+            intent.Kind == LineageTransitionIntentKind.Reset &&
+            ResetPublicationTargetV1.IsValid(intent.ResetPublicationTarget)) &&
         LineageValidation.IsSha256(intent.PriorHeadIdentity) &&
         LineageValidation.IsSha256(intent.PriorEpoch) &&
         LineageValidation.IsSha256(intent.TransitionEvidenceIdentity) &&

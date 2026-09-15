@@ -359,29 +359,10 @@ internal static class PublicationRecoveryInventoryFactory
         }
     }
 
-    internal static PublicationStickyWriteAuthorization
-        CreateStickyWriteAuthorization(
-        PublicationRecoveryObservation observation,
-        string evidenceRecordIdentity,
-        PublicationStickyWriteTransition transition)
-    {
-        if (!TryCreateStickyWriteAuthorization(
-                observation,
-                evidenceRecordIdentity,
-                transition,
-                out var authorization) ||
-            authorization is null)
-        {
-            throw new ArgumentException(
-                "A live exact recovery observation is required.",
-                nameof(observation));
-        }
-
-        return authorization;
-    }
-
     internal static bool TryCreateStickyWriteAuthorization(
         PublicationRecoveryObservation? observation,
+        PublicationRecoveryObservation sourceObservation,
+        PublicationRecoveryService.TargetExpectation targetExpectation,
         string evidenceRecordIdentity,
         PublicationStickyWriteTransition transition,
         out PublicationStickyWriteAuthorization? authorization)
@@ -391,7 +372,9 @@ internal static class PublicationRecoveryInventoryFactory
             !observation.IsLive ||
             observation.CandidateObjectIdentity is not { } candidate ||
             !LineageValidation.IsSha256(evidenceRecordIdentity) ||
-            !CanAuthorizeSticky(observation, evidenceRecordIdentity, transition))
+            !CanAuthorizeSticky(observation, evidenceRecordIdentity, transition) ||
+            targetExpectation is null ||
+            !targetExpectation.TryConsume(sourceObservation, observation, transition))
         {
             return false;
         }
@@ -401,7 +384,9 @@ internal static class PublicationRecoveryInventoryFactory
             candidate,
             observation.InventoryDigest,
             evidenceRecordIdentity,
-            transition);
+            transition,
+            targetExpectation.PreviousTarget,
+            targetExpectation.PreviousTargetExpiresAtUnixSeconds);
         return true;
     }
 
@@ -1091,82 +1076,7 @@ internal static class PublicationRecoveryInventoryFactory
 
         try
         {
-            object? value = null;
-            var matches = 0;
-            if (record.ObjectClass == StateObjectClass.PublicationIntent)
-            {
-                if (PublicationIntentV1Codec.TryDecode(
-                        payload.AsSpan(),
-                        out var intent) &&
-                    intent is not null)
-                {
-                    value = intent;
-                    matches++;
-                }
-                if (PublicationRetryIntentV1Codec.TryDecode(
-                        payload.AsSpan(),
-                        out var retryIntent) &&
-                    retryIntent is not null)
-                {
-                    value = retryIntent;
-                    matches++;
-                }
-                if (StickyReadbackRecordV1Codec.TryDecode(
-                        payload.AsSpan(),
-                        out var readback) &&
-                    readback is not null)
-                {
-                    value = readback;
-                    matches++;
-                }
-                if (RecoveryRecordV1Codec.TryDecode(
-                        payload.AsSpan(),
-                        out var recovery,
-                        out _,
-                        out _) &&
-                    recovery is not null)
-                {
-                    value = recovery;
-                    matches++;
-                }
-            }
-            else if (record.ObjectClass ==
-                StateObjectClass.PublicationFailure)
-            {
-                if (PublicationFailureV1Codec.TryDecode(
-                        payload.AsSpan(),
-                        out var failure) &&
-                    failure is not null)
-                {
-                    value = failure;
-                    matches++;
-                }
-                if (PublicationRetryFailureV1Codec.TryDecode(
-                        payload.AsSpan(),
-                        out var retryFailure) &&
-                    retryFailure is not null)
-                {
-                    value = retryFailure;
-                    matches++;
-                }
-            }
-            else if (record.ObjectClass == StateObjectClass.Abandonment &&
-                AbandonmentV1Codec.TryDecode(
-                    payload.AsSpan(),
-                    out var abandonment) &&
-                abandonment is not null)
-            {
-                value = abandonment;
-                matches++;
-            }
-
-            if (matches != 1 || value is null)
-            {
-                return false;
-            }
-
-            decoded = new DecodedRecord(value, record.Metadata);
-            return true;
+            return TryDecodePayload(record.ObjectClass, record.Metadata, payload.AsSpan(), out decoded);
         }
         finally
         {
@@ -1176,6 +1086,117 @@ internal static class PublicationRecoveryInventoryFactory
                 CryptographicOperations.ZeroMemory(array);
             }
         }
+    }
+
+    internal static bool ResetSourceRecordsAreAccepted(
+        IEnumerable<AuthenticatedStateObject> active,
+        AcceptedStateSelection? selection)
+    {
+        var accepted = new[] { selection?.Current, selection?.ImmediatePredecessor }
+            .OfType<SelectedAcceptedGeneration>()
+            .ToDictionary(value => value.OriginalCandidateObjectIdentity, StringComparer.Ordinal);
+        var sets = accepted.Keys.ToDictionary(key => key, _ => new ParsedRecordSet(), StringComparer.Ordinal);
+        foreach (var item in active)
+        {
+            if (item.Header.ObjectClass is StateObjectClass.LineageHead or StateObjectClass.Candidate or StateObjectClass.Acceptance)
+                continue;
+            if (item.Header.ObjectClass == StateObjectClass.Cleanup &&
+                RetainedStateTransactionService.ResetSourceCleanupIsAccepted(item, selection)) continue;
+            // Only authenticated cleanup for accepted work is terminal. Unaccepted work must settle through P5.
+            if (item.Header.ObjectClass is not (StateObjectClass.PublicationIntent or StateObjectClass.PublicationFailure or StateObjectClass.Abandonment) ||
+                item.Header.PredecessorIdentity is not { } parent ||
+                !accepted.TryGetValue(parent, out var owner) ||
+                !AcceptedStatePublicationPayloadCodec.TryDecode(owner.Generation.PublicationPayloadBytes.AsSpan(), out var publication) ||
+                publication is null ||
+                !TryDecodePayload(item.Header.ObjectClass, item.Metadata, item.Payload, out var decoded) ||
+                decoded is null || !decoded.Matches(publication) || !sets[parent].TryAdd(decoded)) return false;
+        }
+        return sets.Values.All(value => ValidAttemptGraph(value, allowTerminalCleanupSubgraph: true));
+    }
+
+    private static bool TryDecodePayload(
+        StateObjectClass objectClass,
+        OpaqueStoreObjectMetadata metadata,
+        ReadOnlySpan<byte> payload,
+        out DecodedRecord? decoded)
+    {
+        decoded = null;
+        object? value = null;
+        var matches = 0;
+        if (objectClass == StateObjectClass.PublicationIntent)
+        {
+            if (PublicationIntentV1Codec.TryDecode(
+                    payload,
+                    out var intent) &&
+                intent is not null)
+            {
+                value = intent;
+                matches++;
+            }
+            if (PublicationRetryIntentV1Codec.TryDecode(
+                    payload,
+                    out var retryIntent) &&
+                retryIntent is not null)
+            {
+                value = retryIntent;
+                matches++;
+            }
+            if (StickyReadbackRecordV1Codec.TryDecode(
+                    payload,
+                    out var readback) &&
+                readback is not null)
+            {
+                value = readback;
+                matches++;
+            }
+            if (RecoveryRecordV1Codec.TryDecode(
+                    payload,
+                    out var recovery,
+                    out _,
+                    out _) &&
+                recovery is not null)
+            {
+                value = recovery;
+                matches++;
+            }
+        }
+        else if (objectClass ==
+            StateObjectClass.PublicationFailure)
+        {
+            if (PublicationFailureV1Codec.TryDecode(
+                    payload,
+                    out var failure) &&
+                failure is not null)
+            {
+                value = failure;
+                matches++;
+            }
+            if (PublicationRetryFailureV1Codec.TryDecode(
+                    payload,
+                    out var retryFailure) &&
+                retryFailure is not null)
+            {
+                value = retryFailure;
+                matches++;
+            }
+        }
+        else if (objectClass == StateObjectClass.Abandonment &&
+            AbandonmentV1Codec.TryDecode(
+                payload,
+                out var abandonment) &&
+            abandonment is not null)
+        {
+            value = abandonment;
+            matches++;
+        }
+
+        if (matches != 1 || value is null)
+        {
+            return false;
+        }
+
+        decoded = new DecodedRecord(value, metadata);
+        return true;
     }
 
     private sealed record DecodedRecord(

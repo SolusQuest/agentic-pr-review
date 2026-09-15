@@ -39,10 +39,14 @@ internal sealed class AuthorizedLineageReset
         string producingRunIdentity,
         long producingRunAttempt,
         string requestIdentity,
-        string priorHeadIdentity)
+        string priorHeadIdentity,
+        string sourceInventoryDigest,
+        ResetPublicationTargetV1? target)
     {
         if (authorization is null ||
             access is null ||
+            !LineageValidation.IsSha256(sourceInventoryDigest) ||
+            (target is not null && !ResetPublicationTargetV1.IsValid(target)) ||
             !LineageValidation.IsValid(scope) ||
             !LineageValidation.IsSha256(baseScopeDigest) ||
             !LineageValidation.IsText(
@@ -72,9 +76,15 @@ internal sealed class AuthorizedLineageReset
             producingRunIdentity,
             producingRunAttempt,
             requestIdentity,
-            priorHeadIdentity);
+            priorHeadIdentity)
+        {
+            SourceInventoryDigest = sourceInventoryDigest,
+            PublicationTarget = target,
+        };
     }
 
+    internal string? SourceInventoryDigest { get; private init; }
+    internal ResetPublicationTargetV1? PublicationTarget { get; private init; }
     internal string BaseScopeDigest { get; }
     internal string RepositoryId { get; }
     internal long PullRequestNumber { get; }

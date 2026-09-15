@@ -8,6 +8,59 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 public sealed class LineageContractAndCodecTests
 {
     [Fact]
+    public void ResetTargetIsSemanticAndHasOneCompleteBoundedEncoding()
+    {
+        var target = new ResetPublicationTargetV1(
+            2,
+            42, 147, 7, "https://github.com/SolusQuest/agentic-pr-review/pull/147#issuecomment-7",
+            new('a', 64), new('b', 64), new('c', 40), new('d', 64), new('e', 64), LineageTestData.LogicalExpiry);
+        var evidence = new LineageArtifactEvidence("apr-state-name", "object-1", "run", 1,
+            new('a', 64), new('b', 64), LineageTestData.SentinelExpiry, 128);
+        var head = new LineageHeadV1(LineageTransitionKind.Reset, 1, LineageTestData.Reviewed(),
+            new('1', 64), new('2', 64), new('3', 64), null, [evidence], [], [], [], "reset-run", 1);
+        Assert.True(LineageHeadCodec.TryEncode(head, out var absent));
+        Assert.True(LineageHeadCodec.TryDecode(absent, out var original));
+        Assert.Null(original!.ResetPublicationTarget);
+        var carrying = head with { ResetPublicationTarget = target };
+        Assert.True(LineageHeadCodec.TryEncode(carrying, out var bytes));
+        Assert.True(LineageHeadCodec.TryDecode(bytes, out var restored));
+        Assert.Equal(target, restored!.ResetPublicationTarget);
+        Assert.False(LineageHeadCodec.Equivalent(head, carrying));
+        foreach (var changed in new[]
+        {
+            target with { BodySha256 = new('f', 64) },
+            target with { SourceAcceptanceIdentity = new('f', 64) },
+            target with { SourceEpoch = new('f', 64) },
+            target with { ExpiresAtUnixSeconds = target.ExpiresAtUnixSeconds + 1 },
+            target with { CommentId = 8, CommentUrl = target.CommentUrl.Replace("-7", "-8") },
+        }) Assert.False(LineageHeadCodec.Equivalent(carrying, carrying with { ResetPublicationTarget = changed }));
+        Assert.True(LineageHeadCodec.Equivalent(carrying,
+            carrying with { PhysicalSuperseded = [evidence with { ObjectId = "object-2" }] }));
+        for (var length = absent.Length + 1; length < bytes.Length; length++)
+            Assert.False(LineageHeadCodec.TryDecode(bytes.AsSpan(0, length), out _));
+        Assert.False(LineageHeadCodec.TryDecode([.. bytes, 0], out _));
+        Assert.False(LineageHeadCodec.TryDecode([.. absent, 0], out _));
+        Assert.False(LineageHeadCodec.TryEncode(carrying with
+        { ResetPublicationTarget = target with { CommentUrl = new('x', 513) } }, out _));
+        Assert.False(LineageHeadCodec.TryEncode(carrying with { Transition = LineageTransitionKind.Initial }, out _));
+
+        var intent = new LineageTransitionIntentV1(LineageTransitionIntentKind.Reset,
+            new('1', 64), new('2', 64), new('3', 64), null, LineageTestData.Reviewed(),
+            LineageCryptography.InventoryDigest([evidence]), [evidence], "reset-run", 1, target);
+        Assert.True(LineageTransitionIntentCodec.TryEncode(intent, out var intentBytes));
+        Assert.True(LineageTransitionIntentCodec.TryDecode(StateObjectClass.Reset, intentBytes, out var restoredIntent));
+        Assert.Equal(target, restoredIntent!.ResetPublicationTarget);
+        Assert.False(LineageTransitionIntentCodec.TryDecode(StateObjectClass.Reset, [.. intentBytes, 0], out _));
+        Assert.False(LineageTransitionIntentCodec.TryEncode(intent with
+        {
+            Kind = LineageTransitionIntentKind.Expiry,
+            ExpiryBoundaryUnixSeconds = LineageTestData.Now,
+            ResetAuthorityRunIdentity = null,
+            ResetAuthorityRunAttempt = null
+        }, out _));
+    }
+
+    [Fact]
     public void ObjectClassRegistryIsClosedAndExact()
     {
         Assert.Equal(

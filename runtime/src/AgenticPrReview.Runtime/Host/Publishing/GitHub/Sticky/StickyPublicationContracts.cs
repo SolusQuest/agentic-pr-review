@@ -3,6 +3,8 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
+using AgenticPrReview.Runtime.Host.State.Transactions;
+using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 
@@ -11,12 +13,19 @@ internal sealed class AuthorizedStickyPublicationRequest
     private AuthorizedStickyPublicationRequest(
         ActionHostAuthorizer.AuthorizedInvocation authorization,
         R4PublicationScopeV1 scope,
-        R4RenderedStickyComment rendered) =>
-        (Authorization, Scope, Rendered) = (authorization, scope, rendered);
+        R4RenderedStickyComment rendered,
+        bool pinPreviousTarget = false,
+        StickyCommentPublisher.StickyPublicationReceipt? previousTarget = null,
+        long? previousTargetExpiresAtUnixSeconds = null) =>
+        (Authorization, Scope, Rendered, PinPreviousTarget, PreviousTarget, PreviousTargetExpiresAtUnixSeconds) =
+        (authorization, scope, rendered, pinPreviousTarget, previousTarget, previousTargetExpiresAtUnixSeconds);
 
     internal ActionHostAuthorizer.AuthorizedInvocation Authorization { get; }
     internal R4PublicationScopeV1 Scope { get; }
     internal R4RenderedStickyComment Rendered { get; }
+    internal bool PinPreviousTarget { get; }
+    internal StickyCommentPublisher.StickyPublicationReceipt? PreviousTarget { get; }
+    internal long? PreviousTargetExpiresAtUnixSeconds { get; }
 
     internal static bool TryCreate(
         ActionHostAuthorizer.AuthorizedInvocation? authorization,
@@ -131,7 +140,8 @@ internal sealed class AuthorizedStickyPublicationRequest
                 return false;
             }
 
-            request = new(authorization, scope, rendered);
+            request = new(authorization, scope, rendered, true,
+                stickyAuthorization.PreviousTarget, stickyAuthorization.PreviousTargetExpiresAtUnixSeconds);
             return true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException
@@ -144,6 +154,25 @@ internal sealed class AuthorizedStickyPublicationRequest
 
 internal sealed class AuthorizedStickyReadbackRequest
 {
+    internal static bool TryCreateResetRecovery(
+        ActionHostAuthorizer.AuthorizedInvocation? authorization,
+        R4PublicationScopeV1? scope,
+        RetainedStatePublicationRecoveryInventory? inventory,
+        out AuthorizedStickyReadbackRequest? request)
+    {
+        request = null;
+        if (authorization is null || scope is null || inventory is not { IsLive: true } ||
+            inventory.CurrentAcceptance is not null || inventory.ResetPublicationTarget is not { } target ||
+            !IsBound(authorization, scope) || !target.TryReceipt(out var receipt) || receipt is null ||
+            receipt.RepositoryId != authorization.PullRequest.RepositoryId ||
+            receipt.PullRequestNumber != authorization.PullRequest.Number ||
+            receipt.ScopeSha256 != R4PublicationIdentityV1.ComputeScopeSha256(scope)) return false;
+        // Read-only historical reconciliation does not renew an expired write permission.
+        request = new(authorization, scope, new(receipt.ScopeSha256, receipt.BodySha256, receipt.HeadSha),
+            null, receipt.CommentId);
+        return true;
+    }
+
     private AuthorizedStickyReadbackRequest(
         ActionHostAuthorizer.AuthorizedInvocation authorization,
         R4PublicationScopeV1 scope,
