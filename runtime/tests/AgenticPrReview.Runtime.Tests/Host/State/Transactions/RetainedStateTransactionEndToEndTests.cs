@@ -3678,7 +3678,23 @@ public sealed class RetainedStateTransactionEndToEndTests
         int operationValue)
     {
         var operation = (StickyPublicationOperation)operationValue;
-        var fixture = await CreateFixtureAsync();
+        var fixture = await CreateFixtureAsync(route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        BoundedGitHubIssueComment? previousComment = null;
+        if (operation == StickyPublicationOperation.Update)
+        {
+            var previous = await AcceptGenerationAsync(fixture, commentId: 905);
+            Assert.True(PublicationRecoveryService.TryRestoreRendered(previous.Publication, out var previousRendered));
+            previousComment = StickyPublicationTestData.Comment(905, previousRendered!.Comment);
+            fixture.Context.Dispose();
+            fixture = await RestoreFixtureAsync(fixture, newWorkflowRun: true, reviewedHeadSha: new string('f', 40));
+            using var historical = await new PublicationRecoveryService(new StickyCommentPublisher(new FakePublisherTransportFactory()))
+                .ClassifyBeforeProviderAsync(fixture.Launch.Inputs.GitHubToken!, fixture.Invocation,
+                    fixture.PublicationScope, fixture.Context, CancellationToken.None);
+            Assert.Equal(PublicationRecoveryAction.CleanupSupersededRecovery, historical.Decision.Action);
+            var cleanup = await PublicationRecoveryService.CleanupHistoricalRecoveryRecordsAsync(
+                fixture.Invocation, fixture.Context, historical, CancellationToken.None);
+            Assert.True(cleanup.Completed, cleanup.Code);
+        }
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
@@ -3700,8 +3716,9 @@ public sealed class RetainedStateTransactionEndToEndTests
         var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
             persistedResult.Value);
 
-        var beforeFactory = new FakePublisherTransportFactory();
-        beforeFactory.Transport.Enqueue();
+        var beforeFactory = previousComment is null ? new FakePublisherTransportFactory() : ExactReadbackFactory(previousComment);
+        if (previousComment is null) beforeFactory.Transport.Enqueue();
+        else beforeFactory.Transport.Enqueue(previousComment);
         using var before = await new PublicationRecoveryService(
                 new StickyCommentPublisher(beforeFactory))
             .ClassifyBeforeProviderAsync(
@@ -3718,6 +3735,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 fixture.Context,
                 before.Observation!,
                 CancellationToken.None);
+        Assert.True(intentResult.Succeeded, intentResult.Code);
         using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
             intentResult.Value);
         Assert.True(PublicationRecoveryService.TryRestoreRendered(
@@ -3744,7 +3762,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         }
         else
         {
-            writeFactory.Transport.Enqueue(exactComment);
+            writeFactory.Transport.Enqueue(previousComment!);
         }
 
         writeFactory.Transport.Mutation = BoundedGitHubHttpResult<
@@ -3795,7 +3813,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             readbackRequest!);
 
         fixture.Context.Dispose();
-        fixture = await RestoreFixtureAsync(fixture);
+        fixture = await RestoreFixtureAsync(fixture, reviewedHeadSha: fixture.Invocation.PullRequest.HeadSha,
+            ancestryPreviousHeadSha: previousComment is null ? null : new string('e', 40));
         var readbackFactory = ExactReadbackFactory(exactComment);
         using (var readback = await new PublicationRecoveryService(
                 new StickyCommentPublisher(readbackFactory))
@@ -3853,7 +3872,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         }
 
         fixture.Context.Dispose();
-        fixture = await RestoreFixtureAsync(fixture);
+        fixture = await RestoreFixtureAsync(fixture, reviewedHeadSha: fixture.Invocation.PullRequest.HeadSha,
+            ancestryPreviousHeadSha: previousComment is null ? null : new string('e', 40));
         using var processC = fixture.Context;
         var committedFactory = ExactReadbackFactory(exactComment);
         using var committed = await new PublicationRecoveryService(

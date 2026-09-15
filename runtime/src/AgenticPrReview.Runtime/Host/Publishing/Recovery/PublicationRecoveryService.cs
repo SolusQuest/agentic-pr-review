@@ -90,9 +90,9 @@ internal sealed class PublicationRecoveryService
             !observation.CurrentAcceptanceMatchesReviewedExecution)
         {
             return Evaluation(
-                PublicationRecoveryClassifier.Classify(
+                ApplyResetExpiry(observation, PublicationRecoveryClassifier.Classify(
                     observation,
-                    PublicationMarkerObservation.Absent),
+                    PublicationMarkerObservation.Absent)),
                 null,
                 StickyDiscoveryKind.Absent,
                 StickyPublicationReason.None,
@@ -159,6 +159,7 @@ internal sealed class PublicationRecoveryService
             .ConfigureAwait(false);
         var marker = discovered.Kind switch
         {
+            StickyDiscoveryKind.Absent when inventory.ResetPublicationTarget is not null => PublicationMarkerObservation.Ambiguous,
             StickyDiscoveryKind.Absent => PublicationMarkerObservation.Absent,
             StickyDiscoveryKind.ExactTarget
                 when discovered.Receipt is not null =>
@@ -198,9 +199,9 @@ internal sealed class PublicationRecoveryService
         {
             marker = PublicationMarkerObservation.PreviousAcceptedTarget;
         }
-        var classified = PublicationRecoveryClassifier.Classify(
+        var classified = ApplyResetExpiry(observation, PublicationRecoveryClassifier.Classify(
             observation,
-            marker);
+            marker));
         PublicationStickyWriteAuthorization? stickyAuthorization = null;
         PublicationRetryTransitionAuthorization? retryAuthorization = null;
         PublicationMarkerAbsenceEvidence? absenceEvidence = null;
@@ -1200,24 +1201,24 @@ internal sealed class PublicationRecoveryService
         StickyCommentPublisher.StickyPublicationReceipt? freshReceipt = null)
     {
         var inventory = observation.Inventory;
-        if (observation.Candidate is null ||
-            !observation.CandidateMatchesCurrentHead ||
-            observation.StickyReadback is not null ||
-            observation.Recovery is not null ||
-            inventory?.CurrentAcceptedPublication is not { } accepted ||
-            inventory.CurrentAcceptancePublicationReceipt is not
-            { } durableReceipt ||
-            !TryRestoreRendered(accepted, out var rendered) ||
-            rendered is null ||
-            !AuthorizedStickyReadbackRequest.TryCreateRecovery(
-                authorization,
-                scope,
-                rendered,
-                durableReceipt,
-                out var request) ||
-            request is null)
-        {
+        if (observation.Candidate is null || !observation.CandidateMatchesCurrentHead ||
+            observation.StickyReadback is not null || observation.Recovery is not null || inventory is null)
             return false;
+        StickyCommentPublisher.StickyPublicationReceipt? durableReceipt;
+        AuthorizedStickyReadbackRequest? request;
+        if (inventory.CurrentAcceptedPublication is { } accepted)
+        {
+            durableReceipt = inventory.CurrentAcceptancePublicationReceipt;
+            if (durableReceipt is null || !TryRestoreRendered(accepted, out var rendered) || rendered is null ||
+                !AuthorizedStickyReadbackRequest.TryCreateRecovery(authorization, scope, rendered, durableReceipt, out request) ||
+                request is null) return false;
+        }
+        else
+        {
+            if (inventory.ResetPublicationTarget is not { } target || !target.TryReceipt(out durableReceipt) ||
+                durableReceipt is null ||
+                !AuthorizedStickyReadbackRequest.TryCreateResetRecovery(authorization, scope, inventory, out request) ||
+                request is null) return false;
         }
 
         // Exact discovery already verified this observation. Only a stale target needs
@@ -1240,6 +1241,15 @@ internal sealed class PublicationRecoveryService
                 durableReceipt,
                 predecessorObservation);
     }
+
+    private static PublicationRecoveryDecision ApplyResetExpiry(
+        PublicationRecoveryObservation observation, PublicationRecoveryDecision decision) =>
+        observation.Inventory?.ResetPublicationTarget is { } target &&
+        target.ExpiresAtUnixSeconds <= observation.Inventory.ObservedAtUnixSeconds &&
+        decision.Action is PublicationRecoveryAction.NoPendingWork or
+            PublicationRecoveryAction.ResumeBeforeIntent or PublicationRecoveryAction.ResumeKnownNotWritten
+            ? PublicationRecoveryClassifier.Classify(null, PublicationMarkerObservation.Incomplete)
+            : decision;
 
     private static PublicationRecoveryEvaluation Evaluation(
         PublicationRecoveryDecision decision,

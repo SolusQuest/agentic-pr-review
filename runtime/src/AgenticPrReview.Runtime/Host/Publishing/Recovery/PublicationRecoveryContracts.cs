@@ -419,7 +419,9 @@ internal sealed class PublicationStickyWriteAuthorization : IDisposable
         string candidateObjectIdentity,
         string inventoryDigest,
         string evidenceRecordIdentity,
-        PublicationStickyWriteTransition transition)
+        PublicationStickyWriteTransition transition,
+        StickyCommentPublisher.StickyPublicationReceipt? previousTarget,
+        long? previousTargetExpiresAtUnixSeconds)
     {
         PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
         this.issuer = issuer;
@@ -427,8 +429,12 @@ internal sealed class PublicationStickyWriteAuthorization : IDisposable
         InventoryDigest = inventoryDigest;
         EvidenceRecordIdentity = evidenceRecordIdentity;
         Transition = transition;
+        PreviousTarget = previousTarget;
+        PreviousTargetExpiresAtUnixSeconds = previousTargetExpiresAtUnixSeconds;
     }
 
+    internal StickyCommentPublisher.StickyPublicationReceipt? PreviousTarget { get; }
+    internal long? PreviousTargetExpiresAtUnixSeconds { get; }
     internal string CandidateObjectIdentity { get; }
     internal string InventoryDigest { get; }
     internal string EvidenceRecordIdentity { get; }

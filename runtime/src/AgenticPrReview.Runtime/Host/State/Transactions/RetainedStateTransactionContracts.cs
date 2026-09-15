@@ -1785,9 +1785,11 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
         ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
             cleanupRecords,
         string inventoryDigest,
-        long observedAtUnixSeconds)
+        long observedAtUnixSeconds,
+        ResetPublicationTargetV1? resetPublicationTarget = null)
     {
         this.authority = authority;
+        ResetPublicationTarget = resetPublicationTarget;
         this.candidate = candidate;
         this.records = records;
         CurrentAcceptance = currentAcceptance;
@@ -1808,16 +1810,21 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
     internal ImmutableArray<RetainedStateOpaqueRecord> Records => records;
     internal VerifiedRetainedStateAcceptance? CurrentAcceptance { get; }
     internal StickyCommentPublisher.StickyPublicationReceipt?
-        CurrentAcceptancePublicationReceipt { get; }
+        CurrentAcceptancePublicationReceipt
+    { get; }
     internal string? CurrentAcceptanceCandidateObjectIdentity { get; }
     internal ValidatedPublicationPayloadV1? CurrentAcceptedPublication
     {
         get;
     }
     internal ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
-        Anchors { get; }
+        Anchors
+    { get; }
     internal ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
-        CleanupRecords { get; }
+        CleanupRecords
+    { get; }
+    internal ResetPublicationTargetV1? ResetPublicationTarget { get; }
+    internal bool IsLive => IsIssuedBy(authority);
     internal string InventoryDigest { get; }
     internal long ObservedAtUnixSeconds { get; }
 
@@ -1841,7 +1848,8 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
         ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
             cleanupRecords,
         string inventoryDigest,
-        long observedAtUnixSeconds)
+        long observedAtUnixSeconds,
+        ResetPublicationTargetV1? resetPublicationTarget = null)
     {
         RetainedStateCapabilityIssuer.Require(issuer);
         return new(
@@ -1855,7 +1863,8 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
             anchors,
             cleanupRecords,
             inventoryDigest,
-            observedAtUnixSeconds);
+            observedAtUnixSeconds,
+            resetPublicationTarget);
     }
 
     public void Dispose()

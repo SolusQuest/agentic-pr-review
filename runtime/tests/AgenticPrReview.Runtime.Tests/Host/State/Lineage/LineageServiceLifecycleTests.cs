@@ -9,6 +9,42 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 public sealed class LineageServiceLifecycleTests
 {
     [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public async Task RefreshAcceptsPrunedOlderReceiptButRequiresImmediateAndUniqueUnexpiredTail(
+        bool retainImmediate, bool extraTerminal, bool expired)
+    {
+        using var lease = LineageTestData.Context();
+        var store = new ScriptedLocatorStore { FilterListsByName = true };
+        var service = new LineageService(store, lease.Time);
+        var request = LineageTestData.Request(lease.Access);
+        var initial = await service.ResolveAsync(lease.Context, request, CancellationToken.None);
+        Assert.True(initial.Succeeded, initial.Code);
+        using var selected = initial.Context!;
+        Assert.True(selected.TryGetSnapshot(lease.Access, out var snapshot));
+        var expiry = expired ? LineageTestData.Now - 1 : LineageTestData.Now + 7 * 24 * 60 * 60;
+        var predecessor = new string('a', 64);
+        if (retainImmediate)
+        {
+            var immediate = await UploadAcceptanceAsync(store, lease, snapshot!, predecessor, expiry, 1);
+            predecessor = immediate.ObjectIdentity;
+        }
+        await UploadAcceptanceAsync(store, lease, snapshot!, predecessor, expiry, 2);
+        if (extraTerminal) await UploadAcceptanceAsync(store, lease, snapshot!, null, expiry, 3);
+        var refreshed = await service.RefreshSelectedHeadAsync(lease.Context, request, selected, CancellationToken.None);
+        using var result = refreshed.Context;
+        Assert.Equal(retainImmediate && !extraTerminal && !expired, refreshed.Succeeded);
+        if (refreshed.Succeeded)
+        {
+            Assert.True(result!.TryGetSnapshot(lease.Access, out var after));
+            Assert.Equal(snapshot!.Epoch, after!.Epoch);
+            Assert.Equal(snapshot.SessionId, after.SessionId);
+        }
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]

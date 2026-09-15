@@ -445,6 +445,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                 request.StateReconciliationDiagnosticSink);
             LineageInterruptedTransitionRecoveryResult? recoveredTransition =
                 null;
+            SelectedLineageSnapshot? expectedRecoveredHead = null;
             if (launch.Inputs.StateMode == ActionHostStateMode.Reset)
             {
                 var observedResult = await lineageService.ObserveReadOnlyAsync(
@@ -472,6 +473,8 @@ internal sealed class AuthorizedAcceptedStateComposer
                         locator,
                         lineageRequest,
                         observation,
+                        publicationBinding,
+                        timeProvider,
                         latestCurrentRunAcceptance,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -481,35 +484,24 @@ internal sealed class AuthorizedAcceptedStateComposer
                         MapLineageCode(reset.Code));
                 }
 
-                selectedLineage = reset.Context;
-                if (!TryTransfer(
-                    authorization,
-                    request,
-                    store,
-                    timeProvider,
-                    access,
-                    keys,
-                    locator,
-                    selectedLineage,
-                    baseScope,
-                    reviewed,
-                    publicationBinding,
-                    runIdentity,
-                    accepted: null,
-                    acceptedSelection: null,
-                    observation.InventoryDigest,
-                    out var context) ||
-                    context is null)
+                using (var resetLineage = reset.Context)
                 {
-                    return AuthorizedAcceptedStateRestoreResult.Fail(
-                        AcceptedStateCodes.AccessDenied);
+                    if (!resetLineage.TryGetSnapshot(
+                            access,
+                            out expectedRecoveredHead) ||
+                        expectedRecoveredHead is null)
+                    {
+                        return AuthorizedAcceptedStateRestoreResult.Fail(
+                            AcceptedStateCodes.Conflict);
+                    }
                 }
 
-                ownershipTransferred = true;
-                return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
+                // Re-observe the resolved epoch. A completed reset retry may already have
+                // accepted state; it must use the same selection and restore path as auto.
+                observation.Dispose();
+                observation = null;
             }
 
-            SelectedLineageSnapshot? expectedRecoveredHead = null;
             for (var recoveryAttempt = 0;
                 recoveryAttempt <= LineageFormat.MaximumScopedObjects;
                 recoveryAttempt++)
@@ -908,12 +900,14 @@ internal sealed class AuthorizedAcceptedStateComposer
         LocatorContext locator,
         LineageResolveRequest request,
         LineageReadOnlyObservationContext observation,
+        AcceptedStatePublicationBinding publicationBinding,
+        TimeProvider timeProvider,
         long mutationNotAfterUnixSeconds,
         CancellationToken cancellationToken)
     {
         if (observation.Selection.IsAbsent)
         {
-            var initial = new AcceptedStateSelector(TimeProvider.System)
+            var initial = new AcceptedStateSelector(timeProvider)
                 .Select(observation, request);
             return initial.InitialAbsence is null
                 ? LineageResolveResult.Fail(LineageCodes.Conflict)
@@ -935,11 +929,55 @@ internal sealed class AuthorizedAcceptedStateComposer
             return LineageResolveResult.Fail(LineageCodes.Conflict);
         }
 
+        // Bind a retry to the authenticated predecessor of its completed reset,
+        // rather than authorizing another transition from the new head.
+        var completed = selected.Head.Transition == LineageTransitionKind.Reset &&
+            StringComparer.Ordinal.Equals(
+                selected.Head.ResetAuthorityRunIdentity,
+                request.ProducingRunIdentity) &&
+            selected.Head.ResetAuthorityRunAttempt == request.ProducingRunAttempt;
+        var priorHeadIdentity = completed
+            ? selected.Head.PreviousHeadIdentity
+            : selected.Header.ObjectIdentity;
         var requestIdentity = Hash(
             "apr.reset-authority.s5",
             request.ProducingRunIdentity,
             request.ProducingRunAttempt.ToString(CultureInfo.InvariantCulture),
-            selected.Header.ObjectIdentity);
+            priorHeadIdentity!);
+        if (completed &&
+            !StringComparer.Ordinal.Equals(
+                selected.Head.TransitionEvidenceIdentity,
+                requestIdentity))
+        {
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
+        }
+        ResetPublicationTargetV1? target;
+        var pending = observation.Snapshot!.Authenticated.Concat(observation.Snapshot.UnderRetained)
+            .Where(item => item.Header.ObjectClass == StateObjectClass.Reset &&
+                item.Header.Epoch == selected.Header.Epoch && item.Header.SessionId == selected.Header.SessionId)
+            .ToArray();
+        if (completed) target = selected.Head.ResetPublicationTarget;
+        else if (pending.Length > 0)
+        {
+            if (pending.Select(item => item.Header.ObjectIdentity).Distinct(StringComparer.Ordinal).Count() != 1 ||
+                !LineageTransitionIntentCodec.TryDecode(StateObjectClass.Reset, pending[0].Payload, out var intent) ||
+                intent is null || intent.PriorHeadIdentity != priorHeadIdentity ||
+                intent.TransitionEvidenceIdentity != requestIdentity ||
+                intent.ResetAuthorityRunIdentity != request.ProducingRunIdentity ||
+                intent.ResetAuthorityRunAttempt != request.ProducingRunAttempt)
+                return LineageResolveResult.Fail(LineageCodes.Conflict);
+            target = intent.ResetPublicationTarget;
+        }
+        else
+        {
+            var policy = authorization.Policy;
+            if (!ResetPublicationCapture.TryCapture(observation, request,
+                    new AcceptedStatePolicyBinding(policy.PolicySha256, policy.ConfigSha256,
+                        policy.InstructionsSha256, policy.PayloadSha256,
+                        policy.PayloadContinuityMode, policy.BuildDiscriminator),
+                    publicationBinding, timeProvider, out target))
+                return LineageResolveResult.Fail(LineageCodes.Conflict);
+        }
         var reset = AuthorizedLineageReset.Issue(
             authorization,
             request.Access,
@@ -948,7 +986,9 @@ internal sealed class AuthorizedAcceptedStateComposer
             request.ProducingRunIdentity,
             request.ProducingRunAttempt,
             requestIdentity,
-            selected.Header.ObjectIdentity);
+            priorHeadIdentity!,
+            observation.InventoryDigest,
+            target);
         if (reset is null)
         {
             return LineageResolveResult.Fail(LineageCodes.AccessDenied);

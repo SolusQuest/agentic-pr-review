@@ -7,10 +7,14 @@ namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 internal sealed class StickyCommentPublisher
 {
     private readonly IStickyGitHubPublisherTransportFactory _factory;
+    private readonly TimeProvider timeProvider;
 
     internal StickyCommentPublisher(
-        IStickyGitHubPublisherTransportFactory factory) =>
+        IStickyGitHubPublisherTransportFactory factory, TimeProvider? timeProvider = null)
+    {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        this.timeProvider = timeProvider ?? TimeProvider.System;
+    }
 
     internal async Task<StickyPublicationResult> PublishAsync(
         ActionHostGitHubToken token,
@@ -34,7 +38,11 @@ internal sealed class StickyCommentPublisher
         using (transport)
         {
             var expectation = Expectation(request);
-            var discovery = await DiscoverCoreAsync(transport, expectation,
+            var previous = request.PreviousTarget;
+            var discoveryExpectation = request.PinPreviousTarget && previous is not null
+                ? new TargetExpectation(new(previous.ScopeSha256, previous.BodySha256, previous.HeadSha), null, previous.CommentId)
+                : expectation;
+            var discovery = await DiscoverCoreAsync(transport, discoveryExpectation,
                 cancellationToken);
             if (discovery.Kind == StickyDiscoveryKind.Cancelled)
                 return Failure(
@@ -57,6 +65,15 @@ internal sealed class StickyCommentPublisher
             if (!transport.IsWithinOverallDeadline)
                 return Failure(BoundedGitHubPublisherOutcome.KnownNotWritten,
                     StickyPublicationReason.Deadline);
+
+            if (request.PinPreviousTarget &&
+                (previous is null ? discovery.Kind != StickyDiscoveryKind.Absent :
+                    discovery.Kind != StickyDiscoveryKind.ExactTarget ||
+                    discovery.CommentId != previous.CommentId || discovery.CommentUrl != previous.CommentUrl) ||
+                request.PreviousTargetExpiresAtUnixSeconds is { } expiry &&
+                    timeProvider.GetUtcNow().ToUnixTimeSeconds() >= expiry)
+                return Failure(BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+                    StickyPublicationReason.TargetConflict);
 
             var operation = discovery.Kind == StickyDiscoveryKind.Absent
                 ? StickyPublicationOperation.Create
@@ -272,7 +289,7 @@ internal sealed class StickyCommentPublisher
         var discovery = await DiscoverCoreAsync(transport, expectation,
             CancellationToken.None);
         if (discovery is not
-                { Kind: StickyDiscoveryKind.ExactTarget, CommentId: long id } ||
+            { Kind: StickyDiscoveryKind.ExactTarget, CommentId: long id } ||
             expectedId is not null && id != expectedId)
             return null;
         var read = await transport.GetIssueCommentAsync(id,

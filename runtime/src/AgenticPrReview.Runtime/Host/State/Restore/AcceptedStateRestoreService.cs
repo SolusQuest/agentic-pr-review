@@ -317,7 +317,7 @@ internal sealed class AcceptedStateRestoreService
             generation.BuildDiscriminator,
             expected.BuildDiscriminator);
 
-    private static bool MatchesPublication(
+    internal static bool MatchesPublication(
         SelectedAcceptedGeneration selected,
         AcceptedStatePolicyBinding policy,
         AcceptedStatePublicationBinding expected)

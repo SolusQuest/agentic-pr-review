@@ -10,6 +10,7 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\SharedHostPorts\*.cs" Link="SharedHostPorts\%(Filename)%(Extension)" />
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
   </ItemGroup>
   <Target Name="RecordEvaluationSource" BeforeTargets="CoreCompile">
