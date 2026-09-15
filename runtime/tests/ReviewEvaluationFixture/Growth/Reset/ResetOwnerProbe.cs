@@ -62,6 +62,29 @@ internal static class ResetOwnerProbe
             Require(rejected.Completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted &&
                 rejected.Provider.Creates == 1 && copied.Remote.Writes == 1);
             passed.Add("post_match_target_substitution_rejected");
+
+            foreach (var (retryWrite, appeared) in new[] { (false, false), (false, true), (true, false), (true, true) })
+            {
+                var absent = new ResetProbeWorld();
+                var predecessor = await absent.RunAsync(1);
+                Require(predecessor.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted);
+                var oldId = absent.Remote.Sticky!.Id;
+                absent.Remote.RemoveTarget();
+                absent.Remote.AppearBeforeCreate = appeared && !retryWrite;
+                absent.Remote.KnownNotSentOnce = retryWrite;
+                absent.Remote.AppearOnRetry = appeared && retryWrite;
+                var successor = await absent.RunAsync(2);
+                Require(successor.Provider.Creates == 1 &&
+                    successor.Provider.Request?.SessionId == predecessor.Provider.Request!.SessionId &&
+                    successor.Provider.Request!.Continuation is not null);
+                Require(appeared
+                    ? successor.Completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted &&
+                        absent.Remote.MutationAttempts == (retryWrite ? 2 : 1)
+                    : successor.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted &&
+                        absent.Remote.MutationAttempts == (retryWrite ? 3 : 2) && absent.Remote.Sticky!.Id != oldId);
+                passed.Add((retryWrite ? "retry_" : "initial_") +
+                    (appeared ? "ordinary_absence_late_target_rejected" : "ordinary_absence_recreation_accepted"));
+            }
         }
         catch
         {
@@ -177,6 +200,8 @@ internal sealed class ResetProbeRemote : IStickyGitHubPublisherTransportFactory
     internal int Writes { get; private set; }
     internal int MutationAttempts { get; private set; }
     internal bool UnknownWithoutWrite { get; set; }
+    internal bool KnownNotSentOnce { get; set; }
+    internal bool AppearOnRetry { get; set; }
     internal bool IncompleteDiscovery { get; set; }
     internal bool AppearBeforeCreate { get; set; }
     internal BoundedGitHubIssueComment? Duplicate { get; private set; }
@@ -212,11 +237,18 @@ internal sealed class ResetProbeRemote : IStickyGitHubPublisherTransportFactory
         {
             ResetOwnerProbe.Require(request is not null);
             owner.MutationAttempts++;
+            if (owner.KnownNotSentOnce)
+            {
+                owner.KnownNotSentOnce = false;
+                owner.AppearBeforeCreate = owner.AppearOnRetry;
+                return Task.FromResult(BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Failed(
+                    BoundedGitHubHttpOutcome.KnownNotSent, BoundedGitHubPublisherReason.Deadline));
+            }
             if (owner.UnknownWithoutWrite)
                 return Task.FromResult(BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Failed(
                     BoundedGitHubHttpOutcome.OutcomeUnknown, BoundedGitHubPublisherReason.TransportFailure));
             owner.Writes++;
-            var id = owner.Sticky?.Id ?? 7;
+            var id = owner.Sticky?.Id ?? (6 + owner.Writes);
             owner.Sticky = new(id, Api + id, Html + id, request!.Rendered.Comment);
             owner.AfterWrite?.Invoke();
             return Task.FromResult(BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(owner.Sticky));

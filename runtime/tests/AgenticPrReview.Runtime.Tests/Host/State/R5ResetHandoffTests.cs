@@ -10,6 +10,14 @@ namespace AgenticPrReview.Runtime.Tests.Host.State
     public sealed class R5ResetHandoffTests
     {
         [Theory]
+        [InlineData(false, false)]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        [InlineData(true, true)]
+        public Task OrdinaryAbsenceWithAcceptedPredecessor(bool appeared, bool retry) =>
+            Action.ActionHostCompositionTests.VerifyOrdinaryAbsenceWithAcceptedPredecessorAsync(appeared, retry);
+
+        [Theory]
         [InlineData("intent", false)]
         [InlineData("intent", true)]
         [InlineData("successor", true)]
@@ -84,6 +92,41 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
 {
     public sealed partial class ActionHostCompositionTests
     {
+        internal static async Task VerifyOrdinaryAbsenceWithAcceptedPredecessorAsync(bool appeared, bool retry)
+        {
+            var world = new ResetProbeWorld();
+            var initial = await world.RunAsync(1);
+            Assert.Equal(ActionHostStateDisposition.Accepted, initial.Completion.Summary.StateDisposition);
+            var before = ResetHead(world, initial.Launch);
+            var oldReceipt = Assert.Single(ReadAcceptedStateRecords(world.Store, initial.Launch, world.Time).Acceptances);
+            world.Remote.RemoveTarget();
+            world.Remote.AppearBeforeCreate = appeared && !retry;
+            world.Remote.KnownNotSentOnce = retry;
+            world.Remote.AppearOnRetry = appeared && retry;
+            var next = await world.RunAsync(2);
+            Assert.Equal(1, next.Provider.Creates);
+            var after = ResetHead(world, next.Launch);
+            Assert.Equal(before.Header.Epoch, after.Header.Epoch);
+            Assert.Equal(before.Header.SessionId, after.Header.SessionId);
+            Assert.Null(after.Head.ResetPublicationTarget);
+            var records = ReadAcceptedStateRecords(world.Store, next.Launch, world.Time);
+            if (appeared)
+            {
+                Assert.NotEqual(ActionHostStateDisposition.Accepted, next.Completion.Summary.StateDisposition);
+                Assert.Equal(retry ? 2 : 1, world.Remote.MutationAttempts);
+                Assert.Equal(oldReceipt.Header.ObjectIdentity, Assert.Single(records.Acceptances).Header.ObjectIdentity);
+            }
+            else
+            {
+                Assert.Equal(ActionHostStateDisposition.Accepted, next.Completion.Summary.StateDisposition);
+                Assert.Equal(retry ? 3 : 2, world.Remote.MutationAttempts);
+                var accepted = records.Acceptances.Single(value => value.Receipt.PreviousAcceptanceReceiptIdentity == oldReceipt.Header.ObjectIdentity);
+                Assert.Equal(AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky.StickyPublicationOperation.Create, accepted.Receipt.PublicationOperation);
+                Assert.NotEqual(oldReceipt.Receipt.CommentId, accepted.Receipt.CommentId);
+                Assert.Equal(1, records.Generations.First(value => value.Header.ObjectIdentity == accepted.Receipt.OriginalCandidateObjectIdentity).Generation.Generation);
+            }
+        }
+
         internal static async Task VerifyResetUploadCutAsync(string boundary, bool committed)
         {
             var calibration = new ResetProbeWorld();

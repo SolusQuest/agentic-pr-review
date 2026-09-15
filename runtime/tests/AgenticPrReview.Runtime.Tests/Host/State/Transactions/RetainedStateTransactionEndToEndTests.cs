@@ -3733,7 +3733,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var intentResult = await PublicationRecoveryPersistence
             .PersistIntentAndAuthorizeAsync(
                 fixture.Context,
-                before.Observation!,
+                before,
                 CancellationToken.None);
         Assert.True(intentResult.Succeeded, intentResult.Code);
         using var intent = Assert.IsType<PublicationIntentPersistenceResult>(

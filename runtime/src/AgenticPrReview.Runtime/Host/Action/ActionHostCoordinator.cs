@@ -491,7 +491,7 @@ internal sealed class ActionHostCoordinator
                     var intentResult = await PublicationRecoveryPersistence
                         .PersistIntentAndAuthorizeAsync(
                             state,
-                            observation,
+                            evaluation,
                             cancellingBeforeIntent
                                 ? CancellationToken.None
                                 : cancellationToken)
@@ -669,7 +669,7 @@ internal sealed class ActionHostCoordinator
                     var retryResult = await PublicationRecoveryPersistence
                         .PersistRetryIntentAndAuthorizeAsync(
                             state,
-                            observation,
+                            evaluation,
                             evaluation.RetryTransitionAuthorization,
                             cancellingBeforeRetry
                                 ? CancellationToken.None

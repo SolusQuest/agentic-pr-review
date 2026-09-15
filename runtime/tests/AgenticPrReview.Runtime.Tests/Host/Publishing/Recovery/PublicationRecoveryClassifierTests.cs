@@ -20,6 +20,53 @@ namespace AgenticPrReview.Runtime.Tests.Host.Publishing.Recovery;
 public sealed class PublicationRecoveryClassifierTests
 {
     [Fact]
+    public async Task IntentRequiresItsOwnClassifiedTargetEvidence()
+    {
+        var fixture = await RetainedStateTransactionEndToEndTests.CreateFixtureAsync();
+        using var context = fixture.Context;
+        var (prepared, _) = await PersistCandidateAsync(fixture);
+        using var preparedLifetime = prepared;
+        var absent = new FakePublisherTransportFactory();
+        absent.Transport.Enqueue();
+        absent.Transport.Enqueue();
+        var service = new PublicationRecoveryService(new StickyCommentPublisher(absent));
+        using var first = await service.ClassifyBeforeProviderAsync(fixture.Launch.Inputs.GitHubToken!,
+            fixture.Invocation, fixture.PublicationScope, context, CancellationToken.None);
+        using var second = await service.ClassifyBeforeProviderAsync(fixture.Launch.Inputs.GitHubToken!,
+            fixture.Invocation, fixture.PublicationScope, context, CancellationToken.None);
+        Assert.Equal(PublicationRecoveryAction.ResumeBeforeIntent, first.Decision.Action);
+        Assert.Equal(first.Observation!.InventoryDigest, second.Observation!.InventoryDigest);
+        Assert.Throws<ArgumentException>(() => new PublicationRecoveryService.TargetExpectation(
+            new object(), first.Observation, PublicationStickyWriteTransition.InitialIntent, null, null));
+
+        var uploads = fixture.Store.UploadCalls;
+        var deletes = fixture.Store.DeleteCalls;
+        var missing = await PublicationRecoveryPersistence.PersistIntentAndAuthorizeAsync(
+            context, first with { TargetExpectation = null }, CancellationToken.None);
+        Assert.False(missing.Succeeded);
+        var substituted = await PublicationRecoveryPersistence.PersistIntentAndAuthorizeAsync(
+            context, first with { TargetExpectation = second.TargetExpectation }, CancellationToken.None);
+        Assert.False(substituted.Succeeded);
+        Assert.Equal(uploads, fixture.Store.UploadCalls);
+        Assert.Equal(deletes, fixture.Store.DeleteCalls);
+
+        var valid = await PublicationRecoveryPersistence.PersistIntentAndAuthorizeAsync(
+            context, first, CancellationToken.None);
+        using var intent = Assert.IsType<PublicationIntentPersistenceResult>(valid.Value);
+        Assert.Null(intent.StickyWriteAuthorization.PreviousTarget);
+        Assert.False(PublicationRecoveryInventoryFactory.TryCreateStickyWriteAuthorization(
+            intent.Observation, first.Observation, first.TargetExpectation!, intent.Intent.RecordIdentity,
+            PublicationStickyWriteTransition.InitialIntent, out _));
+        uploads = fixture.Store.UploadCalls;
+        deletes = fixture.Store.DeleteCalls;
+        var reused = await PublicationRecoveryPersistence.PersistIntentAndAuthorizeAsync(
+            context, first, CancellationToken.None);
+        Assert.False(reused.Succeeded);
+        Assert.Equal(uploads, fixture.Store.UploadCalls);
+        Assert.Equal(deletes, fixture.Store.DeleteCalls);
+    }
+
+    [Fact]
     public async Task D10MatrixMapsRealS6AndP2EvidenceToClosedActions()
     {
         Assert.Equal(PublicationRecoveryAction.NoPendingWork,
@@ -173,7 +220,7 @@ public sealed class PublicationRecoveryClassifierTests
         var intentResult = await PublicationRecoveryPersistence
             .PersistIntentAndAuthorizeAsync(
                 context,
-                before.Observation!,
+                before,
                 CancellationToken.None);
         using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
             intentResult.Value);
@@ -274,7 +321,7 @@ public sealed class PublicationRecoveryClassifierTests
         var retryIntentResult = await PublicationRecoveryPersistence
             .PersistRetryIntentAndAuthorizeAsync(
                 context,
-                retryDispatchEvaluation.Observation!,
+                retryDispatchEvaluation,
                 retryDispatchEvaluation.RetryTransitionAuthorization!,
                 CancellationToken.None);
         using var retryIntent = Assert.IsType<
@@ -800,7 +847,7 @@ public sealed class PublicationRecoveryClassifierTests
         var intentResult = await PublicationRecoveryPersistence
             .PersistIntentAndAuthorizeAsync(
                 processB,
-                successor.Observation,
+                successor,
                 CancellationToken.None);
         Assert.True(intentResult.Succeeded, intentResult.Code);
         using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
@@ -1888,7 +1935,7 @@ public sealed class PublicationRecoveryClassifierTests
             var intentResult = await PublicationRecoveryPersistence
                 .PersistIntentAndAuthorizeAsync(
                     fixture.Context,
-                    before.Observation!,
+                    before,
                     CancellationToken.None);
             using var intent = Assert.IsType<
                 PublicationIntentPersistenceResult>(intentResult.Value);
@@ -2101,7 +2148,7 @@ public sealed class PublicationRecoveryClassifierTests
         var intentResult = await PublicationRecoveryPersistence
             .PersistIntentAndAuthorizeAsync(
                 fixture.Context,
-                beforeObservation,
+                before,
                 CancellationToken.None);
         Assert.True(intentResult.Succeeded, intentResult.Code);
         using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
@@ -2182,7 +2229,7 @@ public sealed class PublicationRecoveryClassifierTests
         var intentResult = await PublicationRecoveryPersistence
             .PersistIntentAndAuthorizeAsync(
                 fixture.Context,
-                before.Observation!,
+                before,
                 CancellationToken.None);
         Assert.True(intentResult.Succeeded, intentResult.Code);
         using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
@@ -2433,7 +2480,7 @@ public sealed class PublicationRecoveryClassifierTests
             var persistedIntentResult = await PublicationRecoveryPersistence
                 .PersistIntentAndAuthorizeAsync(
                     context,
-                    before.Observation!,
+                    before,
                     CancellationToken.None);
             using var persistedIntent = Assert.IsType<
                 PublicationIntentPersistenceResult>(
@@ -2506,7 +2553,7 @@ public sealed class PublicationRecoveryClassifierTests
             var persistedIntentResult = await PublicationRecoveryPersistence
                 .PersistIntentAndAuthorizeAsync(
                     context,
-                    before.Observation!,
+                    before,
                     CancellationToken.None);
             using var persistedIntent = Assert.IsType<
                 PublicationIntentPersistenceResult>(

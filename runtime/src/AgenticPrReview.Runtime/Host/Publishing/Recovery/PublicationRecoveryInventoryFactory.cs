@@ -359,29 +359,10 @@ internal static class PublicationRecoveryInventoryFactory
         }
     }
 
-    internal static PublicationStickyWriteAuthorization
-        CreateStickyWriteAuthorization(
-        PublicationRecoveryObservation observation,
-        string evidenceRecordIdentity,
-        PublicationStickyWriteTransition transition)
-    {
-        if (!TryCreateStickyWriteAuthorization(
-                observation,
-                evidenceRecordIdentity,
-                transition,
-                out var authorization) ||
-            authorization is null)
-        {
-            throw new ArgumentException(
-                "A live exact recovery observation is required.",
-                nameof(observation));
-        }
-
-        return authorization;
-    }
-
     internal static bool TryCreateStickyWriteAuthorization(
         PublicationRecoveryObservation? observation,
+        PublicationRecoveryObservation sourceObservation,
+        PublicationRecoveryService.TargetExpectation targetExpectation,
         string evidenceRecordIdentity,
         PublicationStickyWriteTransition transition,
         out PublicationStickyWriteAuthorization? authorization)
@@ -391,23 +372,21 @@ internal static class PublicationRecoveryInventoryFactory
             !observation.IsLive ||
             observation.CandidateObjectIdentity is not { } candidate ||
             !LineageValidation.IsSha256(evidenceRecordIdentity) ||
-            !CanAuthorizeSticky(observation, evidenceRecordIdentity, transition))
+            !CanAuthorizeSticky(observation, evidenceRecordIdentity, transition) ||
+            targetExpectation is null ||
+            !targetExpectation.TryConsume(sourceObservation, observation, transition))
         {
             return false;
         }
 
-        var previous = observation.Inventory?.CurrentAcceptancePublicationReceipt;
-        var target = observation.Inventory?.ResetPublicationTarget;
-        if (target is not null && (target.ExpiresAtUnixSeconds <= observation.Inventory!.ObservedAtUnixSeconds ||
-                !target.TryReceipt(out previous) || previous is null)) return false;
         authorization = new PublicationStickyWriteAuthorization(
             CapabilityIssuer,
             candidate,
             observation.InventoryDigest,
             evidenceRecordIdentity,
             transition,
-            previous,
-            target?.ExpiresAtUnixSeconds);
+            targetExpectation.PreviousTarget,
+            targetExpectation.PreviousTargetExpiresAtUnixSeconds);
         return true;
     }
 

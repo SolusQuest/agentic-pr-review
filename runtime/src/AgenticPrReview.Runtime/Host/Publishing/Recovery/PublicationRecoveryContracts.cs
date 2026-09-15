@@ -302,7 +302,8 @@ internal sealed record PublicationRecoveryEvaluation(
     PublicationRecoveryObservation? Observation,
     PublicationStickyWriteAuthorization? StickyWriteAuthorization = null,
     PublicationRetryTransitionAuthorization? RetryTransitionAuthorization = null,
-    PublicationMarkerAbsenceEvidence? MarkerAbsenceEvidence = null) :
+    PublicationMarkerAbsenceEvidence? MarkerAbsenceEvidence = null,
+    PublicationRecoveryService.TargetExpectation? TargetExpectation = null) :
     IDisposable
 {
     public void Dispose()
@@ -310,6 +311,7 @@ internal sealed record PublicationRecoveryEvaluation(
         StickyWriteAuthorization?.Dispose();
         RetryTransitionAuthorization?.Dispose();
         MarkerAbsenceEvidence?.Dispose();
+        TargetExpectation?.Dispose();
         Observation?.Dispose();
     }
 }
