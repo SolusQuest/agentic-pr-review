@@ -1,6 +1,7 @@
 using System.Text;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
@@ -13,6 +14,17 @@ internal static class Program
     {
         try
         {
+            if (args.SequenceEqual(["live-local", "--dry-run", "--fixture", "self-test"]))
+                return await LiveSelfTest.RunAsync();
+            if (args is ["live-local", "--dry-run", "--plan", { } dryPlan])
+                return await LiveRunner.InvokeAsync(dryPlan, execute: false);
+            if (args is ["live-local", "--execute", "--plan", { } livePlan])
+                return await LiveRunner.InvokeAsync(livePlan, execute: true);
+            if (args.Length > 0 && args[0] == "live-local")
+            {
+                Console.Error.WriteLine("r5_evaluation_input_invalid");
+                return 2;
+            }
             if (args.SequenceEqual(["reset", "--fixture", "self-test"]))
                 return await Growth.Reset.ResetOwnerProbe.RunAsync();
             if (args.SequenceEqual(["replay-child"])) return await ReplayChild.MainAsync();
