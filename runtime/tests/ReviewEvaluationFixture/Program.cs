@@ -6,6 +6,7 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality;
@@ -188,28 +189,19 @@ internal static class R5CaseVerifier
             if (forbid.Length > 0 && bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(forbid)) >= 0)
                 return Reject(scenario, "rejected_canary");
         }
-        var line = LastJsonLine(bytes);
-        JsonObject? report = null;
-        try { report = line is null ? null : JsonNode.Parse(line) as JsonObject; }
-        catch { }
-        if (report is null)
-            return Reject(scenario, "rejected_report_invalid");
+        var lines = Encoding.UTF8.GetString(bytes)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0) return Reject(scenario, "rejected_report_invalid");
         // Independent binding: the declared corpus directory is re-admitted and
         // its digest must equal the identity the report claims to have run.
+        string? corpusSha = null;
         if (corpus is not null)
         {
-            string? corpusSha = null;
-            try
-            {
-                var admitted = ReplayAdmission.Load(corpus);
-                corpusSha = admitted.Fixture?.CorpusSha256;
-            }
+            try { corpusSha = ReplayAdmission.Load(corpus).Fixture?.CorpusSha256; }
             catch { }
-            var field = scenario == "growth" ? "seed_corpus_sha256" : "corpus_sha256";
-            if (corpusSha is null || report[field]?.GetValue<string>() != corpusSha)
-                return Reject(scenario, "rejected_corpus_mismatch");
+            if (corpusSha is null) return Reject(scenario, "rejected_corpus_mismatch");
         }
-        var (parity, reason) = Extract(scenario, report);
+        var (parity, reason) = Extract(scenario, lines, corpusSha);
         if (parity is null) return Reject(scenario, reason ?? "rejected_case_mismatch");
         return (0, new JsonObject
         {
@@ -222,136 +214,173 @@ internal static class R5CaseVerifier
 
     private static bool CorpusRequired(string scenario) => scenario is not "reset-owner" and not "live-self-test";
 
-    private static string? LastJsonLine(byte[] bytes)
+    private static bool Hash(string? value) =>
+        value is not null && value.Length == 64 && value.All(Uri.IsHexDigit);
+
+    private static bool GitSha(string? value) =>
+        value is not null && value.Length == 40 && value.All(Uri.IsHexDigit);
+
+    // The report's source identity must equal the executing artifact's own
+    // compiled EvaluationSource — a report produced by a different artifact
+    // (or a drifted/dirty tree) is not gate evidence for this build.
+    private static bool SourceBinds(string? commit, string? tree, bool? clean) =>
+        GitSha(commit) && GitSha(tree) && clean is not null &&
+        commit == EvaluationSource.Commit && tree == EvaluationSource.Tree &&
+        clean == EvaluationSource.Clean;
+
+    private static T? Read<T>(string json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> info)
+        where T : class
     {
-        var text = Encoding.UTF8.GetString(bytes).Trim();
-        var index = text.LastIndexOf('\n');
-        return index < 0 ? text : text[(index + 1)..].Trim();
+        try { return JsonSerializer.Deserialize(json, info); }
+        catch { return null; }
     }
 
-    private static (JsonObject? Parity, string? Reason) Extract(string scenario, JsonObject report)
+    private static JsonObject SourceParity() => new()
+    {
+        ["source_commit"] = EvaluationSource.Commit,
+        ["source_tree"] = EvaluationSource.Tree,
+        ["source_clean"] = EvaluationSource.Clean,
+    };
+
+    private static (JsonObject? Parity, string? Reason) Extract(
+        string scenario, string[] lines, string? corpusSha)
     {
         switch (scenario)
         {
-            case "quality": return ExtractQuality(report);
-            case "replay": return ExtractReplay(report, ReplayCases);
-            case "incremental": return ExtractReplay(report, IncrementalCases);
-            case "growth": return ExtractGrowth(report);
-            case "reset-owner": return ExtractResetOwner(report);
-            case "live-self-test": return ExtractLiveSelfTest(report);
-            case "live-plan": return ExtractLivePlan(report);
+            case "quality": return ExtractQuality(lines, corpusSha);
+            case "replay": return ExtractReplay(lines[^1], ReplayCases, corpusSha);
+            case "incremental": return ExtractReplay(lines[^1], IncrementalCases, corpusSha);
+            case "growth": return ExtractGrowth(lines[^1], corpusSha);
+            case "reset-owner": return ExtractResetOwner(lines[^1]);
+            case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
+            case "live-plan": return ExtractLivePlan(lines[^1], corpusSha);
             default: return (null, "input_invalid");
         }
     }
 
-    private static bool Codes(JsonObject report, params string[] accepted)
+    private static (JsonObject?, string?) ExtractQuality(string[] lines, string? corpusSha)
     {
-        var code = report["code"]?.GetValue<string>();
-        return code is not null && accepted.Contains(code);
-    }
-
-    private static string[]? OrderedCases(JsonNode? node, string member)
-    {
-        if (node is not JsonArray rows) return null;
-        var ids = new List<string>(rows.Count);
-        foreach (var row in rows)
-        {
-            if (row?[member]?.GetValue<string>() is not { } id) return null;
-            ids.Add(id);
-        }
-        return ids.ToArray();
-    }
-
-    private static bool ExactSet(string[]? executed, string[] declared) =>
-        executed is not null && executed.Length == declared.Length &&
-        executed.SequenceEqual(declared) && executed.Distinct().Count() == executed.Length;
-
-    private static (JsonObject?, string?) ExtractQuality(JsonObject report)
-    {
-        if (!Codes(report, "verified")) return (null, "rejected_code");
-        var cases = report["cases"];
-        var ids = OrderedCases(cases, "case_id");
-        if (!ExactSet(ids, QualityCases))
-            return (null, ids is null || ids.Length == 0 ? "rejected_empty" : "rejected_case_mismatch");
-        if (report["expected_cases"]?.GetValue<int>() != QualityCases.Length ||
-            report["executed_cases"]?.GetValue<int>() != QualityCases.Length ||
-            report["verified_cases"]?.GetValue<int>() != QualityCases.Length)
+        var summary = Read(lines[^1], QualityJsonContext.Default.QualitySummary);
+        if (summary is null) return (null, "rejected_report_invalid");
+        if (summary.Code != "verified") return (null, "rejected_code");
+        if (summary.Cases.Length == 0 || lines.Length == 1) return (null, "rejected_empty");
+        if (summary.Mode != "deterministic" || summary.CorpusSha256 != corpusSha)
+            return (null, "rejected_corpus_mismatch");
+        if (summary.ExpectedCases != QualityCases.Length ||
+            summary.ExecutedCases != QualityCases.Length ||
+            summary.VerifiedCases != QualityCases.Length ||
+            summary.Cases.Length != QualityCases.Length)
             return (null, "rejected_case_mismatch");
-        var rows = new JsonArray();
-        foreach (var row in cases!.AsArray())
+        // The preceding Q1 outcome rows carry the per-case source and
+        // configuration identities; they are admitted through the closed
+        // outcome reader, must cover the declared set exactly and share one
+        // configuration, one source identity and deterministic mode.
+        if (lines.Length - 1 != QualityCases.Length) return (null, "rejected_case_mismatch");
+        string? configuration = null;
+        for (var i = 0; i < QualityCases.Length; i++)
         {
-            if (row!["verified"]?.GetValue<bool>() != true) return (null, "rejected_code");
-            rows.Add((JsonNode)new JsonObject
+            var outcome = EvaluationJson.ReadOutcome(Encoding.UTF8.GetBytes(lines[i]));
+            if (outcome is null) return (null, "rejected_report_invalid");
+            if (outcome.CaseId != QualityCases[i] || outcome.CorpusSha256 != corpusSha ||
+                !Hash(outcome.CaseSha256))
+                return (null, "rejected_case_mismatch");
+            if (!Hash(outcome.ConfigurationSha256)) return (null, "rejected_configuration");
+            configuration ??= outcome.ConfigurationSha256;
+            if (outcome.ConfigurationSha256 != configuration ||
+                !SourceBinds(outcome.SourceCommit, outcome.SourceTree, outcome.SourceClean) ||
+                outcome.Mode != "deterministic")
+                return (null, "rejected_configuration");
+            var row = summary.Cases[i];
+            if (row.CaseId != QualityCases[i]) return (null, "rejected_case_mismatch");
+            if (!row.Verified) return (null, "rejected_code");
+        }
+        var cases = new JsonArray();
+        foreach (var row in summary.Cases)
+        {
+            cases.Add((JsonNode)new JsonObject
             {
-                ["case_id"] = row!["case_id"]!.GetValue<string>(),
-                ["expected_code"] = row["expected_code"]?.GetValue<string>(),
-                ["actual_code"] = row["actual_code"]?.GetValue<string>(),
+                ["case_id"] = row.CaseId,
+                ["expected_code"] = row.ExpectedCode.ToString(),
+                ["actual_code"] = row.ActualCode.ToString(),
                 ["verified"] = true,
             });
         }
-        return (new JsonObject
-        {
-            ["corpus_sha256"] = report["corpus_sha256"]?.GetValue<string>(),
-            ["expected_cases"] = QualityCases.Length,
-            ["executed_cases"] = QualityCases.Length,
-            ["verified_cases"] = QualityCases.Length,
-            ["cases"] = rows,
-        }, null);
+        var parity = SourceParity();
+        parity["corpus_sha256"] = corpusSha;
+        parity["configuration_sha256"] = configuration;
+        parity["mode"] = "deterministic";
+        parity["expected_cases"] = QualityCases.Length;
+        parity["executed_cases"] = QualityCases.Length;
+        parity["verified_cases"] = QualityCases.Length;
+        parity["cases"] = cases;
+        return (parity, null);
     }
 
-    private static (JsonObject?, string?) ExtractReplay(JsonObject report, string[] declared)
+    private static (JsonObject?, string?) ExtractReplay(string line, string[] declared, string? corpusSha)
     {
-        if (!Codes(report, "verified")) return (null, "rejected_code");
-        if (report["cleanup"]?.GetValue<string>() != "cleaned") return (null, "rejected_cleanup");
-        var steps = report["steps"];
-        var ids = OrderedCases(steps, "case_id");
-        if (!ExactSet(ids, declared))
-            return (null, ids is null || ids.Length == 0 ? "rejected_empty" : "rejected_case_mismatch");
-        var rows = new JsonArray();
-        foreach (var step in steps!.AsArray())
+        var report = Read(line, ReplayExecutionJson.Default.ReplayReport);
+        if (report is null) return (null, "rejected_report_invalid");
+        if (report.Code != "verified") return (null, "rejected_code");
+        if (report.Cleanup != "cleaned") return (null, "rejected_cleanup");
+        if (report.CorpusSha256 != corpusSha) return (null, "rejected_corpus_mismatch");
+        if (!Hash(report.NormalizedSha256)) return (null, "rejected_report_invalid");
+        if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
+            return (null, "rejected_source");
+        if (report.Steps.Length != declared.Length)
+            return (null, report.Steps.Length == 0 ? "rejected_empty" : "rejected_case_mismatch");
+        var steps = new JsonArray();
+        for (var i = 0; i < declared.Length; i++)
         {
-            if (step!["accepted"]?.GetValue<bool>() != true) return (null, "rejected_code");
-            rows.Add((JsonNode)new JsonObject
+            var step = report.Steps[i];
+            if (step.CaseId != declared[i] || !step.Accepted) return (null, "rejected_case_mismatch");
+            steps.Add((JsonNode)new JsonObject
             {
-                ["case_id"] = step["case_id"]!.GetValue<string>(),
-                ["transition"] = step["transition"]?.GetValue<string>(),
-                ["code"] = step["code"]?.GetValue<string>(),
+                ["case_id"] = step.CaseId,
+                ["transition"] = step.Transition,
+                ["code"] = step.Code,
                 ["accepted"] = true,
-                ["predecessor_preserved"] = step["predecessor_preserved"]?.GetValue<bool>(),
-                ["quality_code"] = step["quality_code"]?.GetValue<string>(),
-                ["evidence_status"] = step["evidence_status"]?.GetValue<string>(),
+                ["predecessor_preserved"] = step.PredecessorPreserved,
+                ["quality_code"] = step.QualityCode,
+                ["evidence_status"] = step.EvidenceStatus,
             });
         }
-        return (new JsonObject
-        {
-            ["corpus_sha256"] = report["corpus_sha256"]?.GetValue<string>(),
-            ["normalized_sha256"] = report["normalized_sha256"]?.GetValue<string>(),
-            ["steps"] = rows,
-        }, null);
+        var parity = SourceParity();
+        parity["corpus_sha256"] = corpusSha;
+        parity["normalized_sha256"] = report.NormalizedSha256;
+        parity["steps"] = steps;
+        return (parity, null);
     }
 
-    private static (JsonObject?, string?) ExtractGrowth(JsonObject report)
+    private static (JsonObject?, string?) ExtractGrowth(string line, string? corpusSha)
     {
-        if (!Codes(report, "verified")) return (null, "rejected_code");
-        if (report["cleanup"]?.GetValue<string>() != "cleaned") return (null, "rejected_cleanup");
-        if (report["profiles"] is not JsonArray profiles || profiles.Count != GrowthOracle.Length)
-            return (null, "rejected_case_mismatch");
+        // The closed producer reader re-derives the corpus and normalized
+        // digests and relinks every row, state sample and evaluation outcome;
+        // V1 then applies its independent declarations on the admitted value.
+        var report = GrowthJson.Read(Encoding.UTF8.GetBytes(line));
+        if (report is null) return (null, "rejected_report_invalid");
+        if (report.Code != "verified") return (null, "rejected_code");
+        if (report.Cleanup != "cleaned") return (null, "rejected_cleanup");
+        if (report.SeedCorpusSha256 != corpusSha || !Hash(report.CorpusSha256) ||
+            !Hash(report.NormalizedSha256))
+            return (null, "rejected_corpus_mismatch");
+        if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
+            return (null, "rejected_source");
+        if (report.Profiles.Length != GrowthOracle.Length) return (null, "rejected_case_mismatch");
         var parity = new JsonArray();
         for (var i = 0; i < GrowthOracle.Length; i++)
         {
             var oracle = GrowthOracle[i];
-            var profile = profiles[i]!;
-            if (profile["profile"]?.GetValue<string>() != oracle.Profile)
-                return (null, "rejected_case_mismatch");
-            if (profile["limit_observed"]?.GetValue<bool>() != true) return (null, "rejected_terminal");
-            var rows = profile["rows"] as JsonArray;
-            if (rows is null || rows.Count != oracle.Rows) return (null, "rejected_case_mismatch");
-            var terminal = rows[^1]!;
-            if (profile["terminal_stage"]?.GetValue<string>() != oracle.Stage ||
-                profile["terminal_code"]?.GetValue<string>() != oracle.Code ||
-                terminal["classification"]?.GetValue<string>() != oracle.Classification ||
-                terminal["code"]?.GetValue<string>() != oracle.Code ||
-                terminal["accepted"]?.GetValue<bool>() != false)
+            var profile = report.Profiles[i];
+            if (profile.Profile != oracle.Profile) return (null, "rejected_case_mismatch");
+            if (!profile.LimitObserved) return (null, "rejected_terminal");
+            var rows = profile.Rows;
+            if (rows.Length != oracle.Rows) return (null, "rejected_case_mismatch");
+            for (var r = 0; r < rows.Length - 1; r++)
+                if (!rows[r].Accepted) return (null, "rejected_terminal");
+            var terminal = rows[^1];
+            if (profile.TerminalStage != oracle.Stage || profile.TerminalCode != oracle.Code ||
+                terminal.Classification != oracle.Classification || terminal.Code != oracle.Code ||
+                terminal.Accepted)
                 return (null, "rejected_terminal");
             parity.Add((JsonNode)new JsonObject
             {
@@ -362,64 +391,70 @@ internal static class R5CaseVerifier
                 ["terminal_classification"] = oracle.Classification,
             });
         }
-        return (new JsonObject
-        {
-            ["seed_corpus_sha256"] = report["seed_corpus_sha256"]?.GetValue<string>(),
-            ["corpus_sha256"] = report["corpus_sha256"]?.GetValue<string>(),
-            ["normalized_sha256"] = report["normalized_sha256"]?.GetValue<string>(),
-            ["profiles"] = parity,
-        }, null);
+        var result = SourceParity();
+        result["seed_corpus_sha256"] = corpusSha;
+        result["corpus_sha256"] = report.CorpusSha256;
+        result["normalized_sha256"] = report.NormalizedSha256;
+        result["profiles"] = parity;
+        return (result, null);
     }
 
-    private static (JsonObject?, string?) ExtractResetOwner(JsonObject report)
+    private static (JsonObject?, string?) ExtractResetOwner(string line)
     {
-        if (!Codes(report, "r5_reset_owner_passed")) return (null, "rejected_code");
-        if (report["passedCases"] is not JsonArray passed) return (null, "rejected_empty");
-        var ids = passed.Select(n => n!.GetValue<string>()).ToArray();
-        if (!ExactSet(ids, ResetOwnerCases)) return (null, "rejected_case_mismatch");
-        return (new JsonObject
-        {
-            ["topology"] = report["topology"]?.GetValue<string>(),
-            ["passed_cases"] = new JsonArray(ids.Select(id => (JsonNode)id).ToArray()),
-        }, null);
-    }
-
-    private static (JsonObject?, string?) ExtractLiveSelfTest(JsonObject report)
-    {
-        if (!Codes(report, "r5_live_self_test_passed")) return (null, "rejected_code");
-        if (report["cleanup"]?.GetValue<string>() != "cleaned") return (null, "rejected_cleanup");
-        if (report["passedCases"] is not JsonArray passed) return (null, "rejected_empty");
-        var ids = passed.Select(n => n!.GetValue<string>()).ToArray();
-        if (!ExactSet(ids, LiveSelfTestCases)) return (null, "rejected_case_mismatch");
-        return (new JsonObject
-        {
-            ["source_commit"] = report["sourceCommit"]?.GetValue<string>(),
-            ["source_tree"] = report["sourceTree"]?.GetValue<string>(),
-            ["passed_cases"] = new JsonArray(ids.Select(id => (JsonNode)id).ToArray()),
-        }, null);
-    }
-
-    private static (JsonObject?, string?) ExtractLivePlan(JsonObject report)
-    {
-        if (report["stop_reason"]?.GetValue<string>() != "complete")
-            return (null, "rejected_code");
-        if (report["execution_kind"]?.GetValue<string>() != "loopback" ||
-            report["actual_provider_calls"]?.GetValue<int>() != 0 ||
-            report["scheduled"]?.GetValue<int>() != QualityCases.Length ||
-            report["attempted"]?.GetValue<int>() != QualityCases.Length ||
-            report["unattempted"]?.GetValue<int>() != 0 ||
-            report["invalid"]?.GetValue<int>() != 0)
+        var report = Read(line, ResetOwnerProbeJson.Default.ResetOwnerProbeReport);
+        if (report is null) return (null, "rejected_report_invalid");
+        if (report.Code != "r5_reset_owner_passed") return (null, "rejected_code");
+        if (report.Topology != "production_host_synthetic_ports")
+            return (null, "rejected_topology");
+        if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
+            return (null, "rejected_source");
+        if (report.PassedCases.Length == 0) return (null, "rejected_empty");
+        if (report.PassedCases.Distinct().Count() != report.PassedCases.Length ||
+            !report.PassedCases.SequenceEqual(ResetOwnerCases))
             return (null, "rejected_case_mismatch");
-        return (new JsonObject
-        {
-            ["plan_sha256"] = report["plan_sha256"]?.GetValue<string>(),
-            ["corpus_sha256"] = report["corpus_sha256"]?.GetValue<string>(),
-            ["execution_kind"] = "loopback",
-            ["scheduled"] = QualityCases.Length,
-            ["attempted"] = QualityCases.Length,
-            ["completed"] = report["completed"]?.GetValue<int>(),
-            ["stop_reason"] = "complete",
-        }, null);
+        var parity = SourceParity();
+        parity["topology"] = report.Topology;
+        parity["passed_cases"] = new JsonArray(report.PassedCases.Select(id => (JsonNode)id).ToArray());
+        return (parity, null);
+    }
+
+    private static (JsonObject?, string?) ExtractLiveSelfTest(string line)
+    {
+        var report = Read(line, LiveSelfTestJson.Default.LiveSelfTestReport);
+        if (report is null) return (null, "rejected_report_invalid");
+        if (report.Code != "r5_live_self_test_passed") return (null, "rejected_code");
+        if (report.Cleanup != "cleaned") return (null, "rejected_cleanup");
+        if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
+            return (null, "rejected_source");
+        if (!report.PassedCases.SequenceEqual(LiveSelfTestCases))
+            return (null, report.PassedCases.Length == 0 ? "rejected_empty" : "rejected_case_mismatch");
+        var parity = SourceParity();
+        parity["passed_cases"] = new JsonArray(report.PassedCases.Select(id => (JsonNode)id).ToArray());
+        return (parity, null);
+    }
+
+    private static (JsonObject?, string?) ExtractLivePlan(string line, string? corpusSha)
+    {
+        var report = Read(line, LiveJsonContext.Default.LiveRunSummary);
+        if (report is null) return (null, "rejected_report_invalid");
+        if (report.StopReason != "complete") return (null, "rejected_code");
+        if (report.ExecutionKind != "loopback" || report.ActualProviderCalls != 0 ||
+            report.Scheduled != QualityCases.Length || report.Attempted != QualityCases.Length ||
+            report.Unattempted != 0 || report.Invalid != 0)
+            return (null, "rejected_case_mismatch");
+        if (!Hash(report.PlanSha256) || report.CorpusSha256 != corpusSha)
+            return (null, "rejected_corpus_mismatch");
+        if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
+            return (null, "rejected_source");
+        var parity = SourceParity();
+        parity["plan_sha256"] = report.PlanSha256;
+        parity["corpus_sha256"] = corpusSha;
+        parity["execution_kind"] = "loopback";
+        parity["scheduled"] = QualityCases.Length;
+        parity["attempted"] = QualityCases.Length;
+        parity["completed"] = report.Completed;
+        parity["stop_reason"] = "complete";
+        return (parity, null);
     }
 
     // Constrained private-root deletion: only a gate-created marked temp root
@@ -434,8 +469,16 @@ internal static class R5CaseVerifier
             return Reject("cleanup", "rejected_cleanup_root");
         try
         {
-            if (File.GetAttributes(full).HasFlag(FileAttributes.ReparsePoint))
-                return Reject("cleanup", "rejected_cleanup_root");
+            // Every component from the temp root down must be a real directory;
+            // a symlinked ancestor would make the lexical containment check
+            // meaningless.
+            for (var node = new DirectoryInfo(full); node is not null &&
+                node.FullName.Length >= temp.TrimEnd(Path.DirectorySeparatorChar).Length;
+                node = node.Parent)
+            {
+                if (File.GetAttributes(node.FullName).HasFlag(FileAttributes.ReparsePoint))
+                    return Reject("cleanup", "rejected_cleanup_root");
+            }
         }
         catch { return Reject("cleanup", "rejected_cleanup_root"); }
         if (!File.Exists(Path.Combine(full, TempRootMarker)))

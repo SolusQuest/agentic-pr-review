@@ -41,6 +41,9 @@ _cleanup() {
   for root in "${_roots[@]}"; do
     if [[ -n "${root:-}" && -d "${root}" ]]; then
       rm -rf -- "${root}" || true
+      if [[ -d "${root}" ]]; then
+        printf 'APR_R5_EVAL_CLEANUP_RETAINED %s\n' "${root}" >&2
+      fi
     fi
   done
 }
