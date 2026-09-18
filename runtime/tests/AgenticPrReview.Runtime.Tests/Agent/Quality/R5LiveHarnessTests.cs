@@ -347,6 +347,9 @@ public sealed class R5LiveHarnessTests
         Assert.Equal(1, transports.Sum(t => t.Requests.Count));
         Assert.True(result.Summary.ReservedInputTokens == 60);
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.BudgetRefused);
+        // The refused send never reached the provider: no usage existed to be
+        // unknown, so it must not inflate usage_unknown_calls.
+        Assert.Equal(0, result.Summary.UsageUnknownCalls);
     }
 
     [Fact]
@@ -432,6 +435,7 @@ public sealed class R5LiveHarnessTests
         // evaluation: exactly one provider request escaped.
         Assert.Equal(1, transports.Sum(t => t.Requests.Count));
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.ViolationRefused);
+        Assert.Equal(0, result.Summary.UsageUnknownCalls);
     }
 
     [Fact]

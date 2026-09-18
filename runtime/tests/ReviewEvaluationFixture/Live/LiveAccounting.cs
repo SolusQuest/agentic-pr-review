@@ -21,6 +21,7 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     private int _cancelled;
     private int _backendExceptions;
     private int _normalizationExceptions;
+    private int _refusalsAttributed;
 
     internal long Sends { get; private set; }
     internal long ReservedInputTokens { get; private set; }
@@ -112,6 +113,20 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     }
 
     internal void RecordUsageUnknown() => UsageUnknownCalls++;
+
+    // Sends are strictly sequential, so a refusal counter increment always
+    // precedes the backend exception it produces. Pairing them prevents a
+    // local gate refusal — where no provider usage ever existed — from
+    // inflating usage_unknown_calls.
+    internal bool TryAttributeRefusal()
+    {
+        if (_budgetRefused + _violationRefused > _refusalsAttributed)
+        {
+            _refusalsAttributed++;
+            return true;
+        }
+        return false;
+    }
 
     internal void RecordChatException(Exception error)
     {

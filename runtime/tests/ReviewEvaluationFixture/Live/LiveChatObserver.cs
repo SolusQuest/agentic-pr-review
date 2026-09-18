@@ -19,8 +19,9 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            // The call's reservation stands; its usage can no longer be known.
-            accounting.RecordUsageUnknown();
+            // A local gate refusal produced no provider usage at all; only a
+            // call that was actually sent can have unobservable usage.
+            if (!accounting.TryAttributeRefusal()) accounting.RecordUsageUnknown();
             accounting.RecordChatException(error);
             throw;
         }
