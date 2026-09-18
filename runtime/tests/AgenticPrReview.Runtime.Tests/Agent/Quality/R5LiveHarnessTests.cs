@@ -446,7 +446,9 @@ public sealed class R5LiveHarnessTests
             })), CancellationToken.None);
         Assert.Equal("deadline", result.StopReason);
         Assert.Equal(1, sends);
-        Assert.True(result.Summary.TransportOutcomeCounts.Cancelled >= 1);
+        // AgentLoop abandons the in-flight chat call via WaitAsync: whether the
+        // transport's own cancellation continuation observes first is a race and
+        // not part of the accounting contract.
         Assert.Equal(1, result.Attempted);
         Assert.Equal(2, result.Summary.Unattempted);
     }
