@@ -90,6 +90,11 @@ One outer deadline is created from `max_seconds`, linked through every `AgentLoo
 
 `--execute` reads `AGENTIC_REVIEW_DEEPSEEK_API_KEY` once after full admission, clears the variable immediately, validates it via `DeepSeekCredential`, and hands it to the existing `DeepSeekTransport` boundary. The R3 state-key variable is never touched. The credential never enters a child environment (the harness is a library invocation, not `dotnet run` inside itself), a snapshot, SESSION, a log line or a report. Missing or malformed credentials reject before any transport is constructed. Default tests and `pull_request`/`push` CI never read a credential.
 
+The authorized invocation sequence keeps the provider key out of every child environment:
+
+1. **Build and dry-run keyless.** `dotnet build -c Release` (or `dotnet run --dry-run`) must run without the variable set — `dotnet`/`MSBuild` spawn compiler and tooling children that would inherit it.
+2. **Execute the built binary directly.** Invoke the published `AgenticPrReview.Runtime.ReviewEvaluationFixture` binary with `--execute --plan <plan.json>` and the variable set on that one process. Never run `dotnet run ... --execute` with the credential present: every `dotnet` child of that invocation would carry the key before the harness could clear it.
+
 ## Output
 
 stdout carries, per attempted evaluation, one Q1 outcome row; then the Q4 `EvaluationReport` JSON; then one `LiveRunSummary` line containing `plan_sha256`, corpus/source identity, schedule and attempt accounting, simulated vs actual call counts, reserved vs known token counters, `usage_unknown_calls`, `accounting_violation`, transport outcome classes, `reserved_spend_micro_usd` vs ceiling, `stop_reason` and `cleanup`. Outcome rows carry `mode` `deterministic` (loopback) or `live` (execute) and distinct attempt identities per repeat.

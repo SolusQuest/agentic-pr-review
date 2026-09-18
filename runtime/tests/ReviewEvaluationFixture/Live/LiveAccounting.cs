@@ -17,6 +17,7 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     private int _providerTimeout;
     private int _transportFailure;
     private int _budgetRefused;
+    private int _violationRefused;
     private int _cancelled;
     private int _backendExceptions;
     private int _normalizationExceptions;
@@ -37,18 +38,27 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     internal LiveTransportOutcomeCounts Outcomes => new(
         _requestRejected, _responseTooLarge, _http4xx, _http429, _http5xx,
         _connectTimeout, _providerTimeout, _transportFailure, _budgetRefused,
-        _cancelled, _backendExceptions, _normalizationExceptions);
+        _violationRefused, _cancelled, _backendExceptions, _normalizationExceptions);
 
     // Gate evaluated before a send is attempted. Returns false when any
     // authorized reservation bound would be exceeded; the send must not occur.
+    // A falsified reservation basis also refuses: accounting_violation must
+    // halt further sends inside the same evaluation, not just stop the loop.
+    // Subtraction form is overflow-safe because reserved <= total always holds.
     internal bool TryReserve()
     {
+        if (AccountingViolation)
+        {
+            _violationRefused++;
+            return false;
+        }
         var perCall = bounds.PerCall;
         if (Sends + 1 > bounds.MaxModelCalls ||
-            ReservedInputTokens + perCall.MaxInputTokens > bounds.MaxInputTokens ||
-            ReservedOutputTokens + perCall.MaxOutputTokens > bounds.MaxOutputTokens ||
-            ReservedCombinedTokens + perCall.MaxInputTokens + perCall.MaxOutputTokens > bounds.MaxCombinedTokens ||
-            ReservedSpendMicroUsd + perCall.MaxChargeMicroUsd > bounds.SpendCeilingMicroUsd)
+            perCall.MaxInputTokens > bounds.MaxInputTokens - ReservedInputTokens ||
+            perCall.MaxOutputTokens > bounds.MaxOutputTokens - ReservedOutputTokens ||
+            perCall.MaxInputTokens + perCall.MaxOutputTokens >
+                bounds.MaxCombinedTokens - ReservedCombinedTokens ||
+            perCall.MaxChargeMicroUsd > bounds.SpendCeilingMicroUsd - ReservedSpendMicroUsd)
         {
             _budgetRefused++;
             return false;
@@ -66,7 +76,6 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
         switch (result.Outcome)
         {
             case DeepSeekTransportOutcome.RequestRejected: _requestRejected++; break;
-            case DeepSeekTransportOutcome.ResponseTooLarge: _responseTooLarge++; break;
             case DeepSeekTransportOutcome.HttpFailure:
                 if (result.StatusClass == DeepSeekHttpStatusClass.TooManyRequests) _http429++;
                 else if (result.StatusClass == DeepSeekHttpStatusClass.Other5xx) _http5xx++;
@@ -74,6 +83,14 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
                 break;
             case DeepSeekTransportOutcome.ConnectTimeout: _connectTimeout++; break;
             case DeepSeekTransportOutcome.ProviderTimeout: _providerTimeout++; break;
+            case DeepSeekTransportOutcome.Success: break;
+            case DeepSeekTransportOutcome.ResponseTooLarge:
+                _responseTooLarge++;
+                // The provider body was discarded before usage could be parsed:
+                // the permanent reservation stands, and the call is honestly
+                // counted as usage-unknown rather than known zero usage.
+                UsageUnknownCalls++;
+                break;
             default: _transportFailure++; break;
         }
     }

@@ -78,6 +78,7 @@ internal sealed record LiveTransportOutcomeCounts(
     int ProviderTimeout,
     int TransportFailure,
     int BudgetRefused,
+    int ViolationRefused,
     int Cancelled,
     int BackendExceptions,
     int NormalizationExceptions);
@@ -145,7 +146,8 @@ internal sealed class LivePlan(
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
-    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 12)]
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 12,
+    AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(LivePlanInput))]
 [JsonSerializable(typeof(LivePlanDigestInput))]
 [JsonSerializable(typeof(LiveRunSummary))]

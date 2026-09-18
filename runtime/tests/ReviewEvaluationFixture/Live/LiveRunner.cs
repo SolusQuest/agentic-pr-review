@@ -159,9 +159,9 @@ internal static class LiveRunner
             rows.Add(EvaluationJson.Write(outcome));
             outcomes.Add(outcome);
             if (stopReason != "complete") break;
+            if (accounting.AccountingViolation) { stopReason = "accounting_violation"; break; }
             if (accounting.BudgetRefused) { stopReason = "bound_stop"; break; }
             if (accounting.RateLimited) { stopReason = "rate_limited"; break; }
-            if (accounting.AccountingViolation) { stopReason = "accounting_violation"; break; }
             if (deadline.IsCancellationRequested)
             {
                 stopReason = token.IsCancellationRequested ? "caller_cancelled" : "deadline";

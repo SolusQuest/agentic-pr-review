@@ -286,6 +286,7 @@ public sealed class R5LiveHarnessTests
         Assert.All(result.Outcomes, outcome => Assert.Equal("deterministic", outcome.Mode));
         Assert.Equal(result.Attempted, result.Completed + result.Failed + result.Invalid);
         Assert.True(result.Summary.SimulatedAdapterCalls >= 3);
+        Assert.Equal(0, result.Summary.TransportOutcomeCounts.TransportFailure);
         Assert.Equal(0, result.Summary.ActualProviderCalls);
         Assert.Equal(3, transports.Count);
         Assert.All(transports, transport => Assert.True(transport.Requests.Count >= 1));
@@ -417,10 +418,84 @@ public sealed class R5LiveHarnessTests
             document["bounds"]!["per_call"]!["max_input_tokens"] = 2;
             document["bounds"]!["max_combined_tokens"] = 12294;
         });
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(), CancellationToken.None);
+        var transports = new List<ReplayTransport>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        {
+            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            transports.Add(transport);
+            return transport;
+        }), CancellationToken.None);
         Assert.Equal("accounting_violation", result.StopReason);
         Assert.True(result.Summary.AccountingViolation);
         Assert.True(result.Summary.KnownInputTokens >= 3);
+        // The falsified reservation basis refuses the next send inside the same
+        // evaluation: exactly one provider request escaped.
+        Assert.Equal(1, transports.Sum(t => t.Requests.Count));
+        Assert.Equal(1, result.Summary.TransportOutcomeCounts.ViolationRefused);
+    }
+
+    [Fact]
+    public async Task SpendReservationArithmeticCannotWrapPastTheCeiling()
+    {
+        // near-long.MaxValue ceiling + per-call charge: addition would overflow
+        // negative on the second reservation, so the gate must compare by
+        // subtraction instead.
+        using var plan = new PlanFile(document =>
+        {
+            document["bounds"]!["spend_ceiling_micro_usd"] = long.MaxValue;
+            document["bounds"]!["per_call"]!["max_charge_micro_usd"] = long.MaxValue;
+        });
+        var transports = new List<ReplayTransport>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        {
+            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            transports.Add(transport);
+            return transport;
+        }), CancellationToken.None);
+        Assert.Equal("bound_stop", result.StopReason);
+        Assert.Equal(1, transports.Sum(t => t.Requests.Count));
+        Assert.Equal(long.MaxValue, result.Summary.ReservedSpendMicroUsd);
+        Assert.Equal(1, result.Summary.TransportOutcomeCounts.BudgetRefused);
+    }
+
+    [Fact]
+    public async Task ResponseTooLargeCountsAsUsageUnknown()
+    {
+        using var plan = new PlanFile();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        {
+            var inner = new ReplayTransport(run.Script, ReplayFault.None);
+            var calls = 0;
+            return (IDeepSeekTransport)new FakeTransport((body, token) =>
+                ++calls == 1
+                    ? Task.FromResult(DeepSeekTransportResult.ResponseTooLarge())
+                    : inner.SendAsync(body, token));
+        }), CancellationToken.None);
+        Assert.Equal(1, result.Summary.TransportOutcomeCounts.ResponseTooLarge);
+        Assert.True(result.Summary.UsageUnknownCalls >= 1);
+    }
+
+    [Fact]
+    public void DuplicatePlanFieldsRejectAsMalformed()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "r5-live-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "plan.json");
+        var document = BasePlan().ToJsonString();
+        // A duplicated authorization field must reject, not silently last-win.
+        File.WriteAllText(path, document.Replace(
+            "\"spend_ceiling_micro_usd\":100000",
+            "\"spend_ceiling_micro_usd\":1,\"spend_ceiling_micro_usd\":100000"));
+        var thrown = Assert.Throws<LivePlanRejected>(() =>
+            LivePlanAdmission.Load(path, execute: false, CancellationToken.None));
+        Assert.Equal(LiveAdmissionCode.InvalidPlan, thrown.Code);
+        File.WriteAllText(path, document.Replace(
+            "\"max_charge_micro_usd\":1000",
+            "\"max_charge_micro_usd\":1,\"max_charge_micro_usd\":1000"));
+        thrown = Assert.Throws<LivePlanRejected>(() =>
+            LivePlanAdmission.Load(path, execute: false, CancellationToken.None));
+        Assert.Equal(LiveAdmissionCode.InvalidPlan, thrown.Code);
+        Directory.Delete(root, true);
     }
 
     [Fact]
@@ -446,9 +521,10 @@ public sealed class R5LiveHarnessTests
             })), CancellationToken.None);
         Assert.Equal("deadline", result.StopReason);
         Assert.Equal(1, sends);
-        // AgentLoop abandons the in-flight chat call via WaitAsync: whether the
-        // transport's own cancellation continuation observes first is a race and
-        // not part of the accounting contract.
+        // The token-registration path records the cancellation when the token
+        // fires, deterministically before the abandoned continuation races the
+        // summary publication.
+        Assert.Equal(1, result.Summary.TransportOutcomeCounts.Cancelled);
         Assert.Equal(1, result.Attempted);
         Assert.Equal(2, result.Summary.Unattempted);
     }
