@@ -29,7 +29,7 @@ internal static class LivePlanAdmission
             input = JsonSerializer.Deserialize(File.ReadAllBytes(path), LiveJsonContext.Default.LivePlanInput);
         }
         catch (LivePlanRejected) { throw; }
-        catch (OperationCanceledException) { throw new LivePlanRejected(LiveAdmissionCode.Cancelled); }
+        catch (OperationCanceledException) { throw; }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             throw new LivePlanRejected(LiveAdmissionCode.IoFailure);

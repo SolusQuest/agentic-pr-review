@@ -252,7 +252,6 @@ internal static class LiveRunner
         LiveAdmissionCode.UnsupportedConfiguration => "configuration_unsupported",
         LiveAdmissionCode.Unpriceable => "spend_unpriceable",
         LiveAdmissionCode.SecretInvalid => "secret_invalid",
-        LiveAdmissionCode.Cancelled => "cancelled",
         _ => "input_invalid",
     };
 }

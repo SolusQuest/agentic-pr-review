@@ -242,6 +242,16 @@ public sealed class R5LiveHarnessTests
     }
 
     [Fact]
+    public async Task CancelledTokenPropagatesAsCancellationNotAdmissionRejection()
+    {
+        using var plan = new PlanFile();
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            LiveRunner.RunAsync(plan.Path, false, Options(), cancel.Token));
+    }
+
+    [Fact]
     public async Task CorpusMismatchAndUnknownCaseRejectAsInvalidCorpus()
     {
         using var wrongSha = new PlanFile(document => document["corpus"]!["sha256"] = new string('0', 64));

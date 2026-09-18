@@ -123,7 +123,6 @@ internal enum LiveAdmissionCode
     Unpriceable,
     SecretInvalid,
     IoFailure,
-    Cancelled,
 }
 
 internal sealed class LivePlanRejected(LiveAdmissionCode code) : Exception(code.ToString())
