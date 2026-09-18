@@ -11,6 +11,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Reporting;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture;
 
@@ -253,7 +254,7 @@ internal static class R5CaseVerifier
             case "growth": return ExtractGrowth(lines[^1], corpusSha);
             case "reset-owner": return ExtractResetOwner(lines[^1]);
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
-            case "live-plan": return ExtractLivePlan(lines[^1], corpusSha);
+            case "live-plan": return ExtractLivePlan(lines, corpusSha);
             default: return (null, "input_invalid");
         }
     }
@@ -263,6 +264,7 @@ internal static class R5CaseVerifier
         var summary = Read(lines[^1], QualityJsonContext.Default.QualitySummary);
         if (summary is null) return (null, "rejected_report_invalid");
         if (summary.Code != "verified") return (null, "rejected_code");
+        if (summary.Cases.IsDefault) return (null, "rejected_report_invalid");
         if (summary.Cases.Length == 0 || lines.Length == 1) return (null, "rejected_empty");
         if (summary.Mode != "deterministic" || summary.CorpusSha256 != corpusSha)
             return (null, "rejected_corpus_mismatch");
@@ -292,6 +294,7 @@ internal static class R5CaseVerifier
                 return (null, "rejected_configuration");
             var row = summary.Cases[i];
             if (row.CaseId != QualityCases[i]) return (null, "rejected_case_mismatch");
+            if (outcome.Code != row.ActualCode) return (null, "rejected_code");
             if (!row.Verified) return (null, "rejected_code");
         }
         var cases = new JsonArray();
@@ -326,8 +329,13 @@ internal static class R5CaseVerifier
         if (!Hash(report.NormalizedSha256)) return (null, "rejected_report_invalid");
         if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
             return (null, "rejected_source");
+        if (report.Steps.IsDefault) return (null, "rejected_report_invalid");
         if (report.Steps.Length != declared.Length)
             return (null, report.Steps.Length == 0 ? "rejected_empty" : "rejected_case_mismatch");
+        // The semantic receipt must be the producer-defined digest of these
+        // steps, not merely a well-formed hash.
+        if (report.NormalizedSha256 != ReplayProjection.Steps(report.Steps))
+            return (null, "rejected_report_invalid");
         var steps = new JsonArray();
         for (var i = 0; i < declared.Length; i++)
         {
@@ -403,6 +411,8 @@ internal static class R5CaseVerifier
     {
         var report = Read(line, ResetOwnerProbeJson.Default.ResetOwnerProbeReport);
         if (report is null) return (null, "rejected_report_invalid");
+        if (report.Schema != "r5-reset-owner-v1" || report.PassedCases is null)
+            return (null, "rejected_report_invalid");
         if (report.Code != "r5_reset_owner_passed") return (null, "rejected_code");
         if (report.Topology != "production_host_synthetic_ports")
             return (null, "rejected_topology");
@@ -422,6 +432,8 @@ internal static class R5CaseVerifier
     {
         var report = Read(line, LiveSelfTestJson.Default.LiveSelfTestReport);
         if (report is null) return (null, "rejected_report_invalid");
+        if (report.Schema != "r5-live-self-test-v1" || report.PassedCases is null)
+            return (null, "rejected_report_invalid");
         if (report.Code != "r5_live_self_test_passed") return (null, "rejected_code");
         if (report.Cleanup != "cleaned") return (null, "rejected_cleanup");
         if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
@@ -433,11 +445,51 @@ internal static class R5CaseVerifier
         return (parity, null);
     }
 
-    private static (JsonObject?, string?) ExtractLivePlan(string line, string? corpusSha)
+    private static (JsonObject?, string?) ExtractLivePlan(string[] lines, string? corpusSha)
     {
-        var report = Read(line, LiveJsonContext.Default.LiveRunSummary);
+        // The complete live output shape is Q1 outcome rows, one Q4 evaluation
+        // report and the run summary. A bare summary is incomplete evidence:
+        // the exact executed case population is proven by the Q1 rows and
+        // correlated with the admitted Q4 document.
+        if (lines.Length != QualityCases.Length + 2)
+            return (null, "rejected_case_mismatch");
+        var outcomes = new EvaluationOutcome[QualityCases.Length];
+        var attempts = new HashSet<string>(StringComparer.Ordinal);
+        string? configuration = null;
+        for (var i = 0; i < QualityCases.Length; i++)
+        {
+            var outcome = EvaluationJson.ReadOutcome(Encoding.UTF8.GetBytes(lines[i]));
+            if (outcome is null) return (null, "rejected_report_invalid");
+            if (outcome.CaseId != QualityCases[i] || outcome.CorpusSha256 != corpusSha ||
+                !Hash(outcome.CaseSha256))
+                return (null, "rejected_case_mismatch");
+            if (!Hash(outcome.ConfigurationSha256) || outcome.AttemptSha256 is null ||
+                !attempts.Add(outcome.AttemptSha256))
+                return (null, "rejected_case_mismatch");
+            configuration ??= outcome.ConfigurationSha256;
+            if (outcome.ConfigurationSha256 != configuration ||
+                !SourceBinds(outcome.SourceCommit, outcome.SourceTree, outcome.SourceClean) ||
+                outcome.Mode != "deterministic")
+                return (null, "rejected_configuration");
+            outcomes[i] = outcome;
+        }
+        var evaluation = EvaluationReportJson.Read(Encoding.UTF8.GetBytes(lines[QualityCases.Length]));
+        if (!evaluation.Succeeded || evaluation.Value!.Document.Outcomes.Length != QualityCases.Length)
+            return (null, "rejected_report_invalid");
+        var byCase = outcomes.ToDictionary(o => o.CaseId, StringComparer.Ordinal);
+        foreach (var row in evaluation.Value!.Document.Outcomes)
+        {
+            if (!byCase.TryGetValue(row.CaseId, out var q1) ||
+                row.Code != q1.Code || row.AttemptSha256 != q1.AttemptSha256)
+                return (null, "rejected_case_mismatch");
+        }
+        var report = Read(lines[^1], LiveJsonContext.Default.LiveRunSummary);
         if (report is null) return (null, "rejected_report_invalid");
+        if (report.Format != "r5-live-local-v1") return (null, "rejected_report_invalid");
         if (report.StopReason != "complete") return (null, "rejected_code");
+        if (report.Scheduled != report.Attempted + report.Unattempted ||
+            report.Attempted != report.Completed + report.Failed + report.Invalid)
+            return (null, "rejected_report_invalid");
         if (report.ExecutionKind != "loopback" || report.ActualProviderCalls != 0 ||
             report.Scheduled != QualityCases.Length || report.Attempted != QualityCases.Length ||
             report.Unattempted != 0 || report.Invalid != 0)
@@ -449,11 +501,14 @@ internal static class R5CaseVerifier
         var parity = SourceParity();
         parity["plan_sha256"] = report.PlanSha256;
         parity["corpus_sha256"] = corpusSha;
+        parity["configuration_sha256"] = configuration;
+        parity["mode"] = "deterministic";
         parity["execution_kind"] = "loopback";
         parity["scheduled"] = QualityCases.Length;
         parity["attempted"] = QualityCases.Length;
         parity["completed"] = report.Completed;
         parity["stop_reason"] = "complete";
+        parity["cases"] = new JsonArray(QualityCases.Select(id => (JsonNode)id).ToArray());
         return (parity, null);
     }
 

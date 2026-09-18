@@ -67,8 +67,8 @@ public sealed class R5VerifierCoverageTests
     private static string Hex(char c) => new(c, 64);
 
     private static EvaluationOutcome OutcomeRow(string caseId, string corpusSha, EvaluationCode code = EvaluationCode.Scored,
-        string? configuration = null, string? sourceCommit = null) => new(
-        caseId, corpusSha, Hex('9'), configuration ?? Hex('7'), Hex('4'), Hex('5'),
+        string? configuration = null, string? sourceCommit = null, string? attemptSha = null) => new(
+        caseId, corpusSha, Hex('9'), configuration ?? Hex('7'), attemptSha ?? Hex('4'), Hex('5'),
         sourceCommit ?? EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean,
         "deterministic", EvaluationStatus.Completed, AssertionStatus.Passed, AssertionStatus.Passed,
         ModelObservationStatus.Adjudicated, code, EvaluationFailureSource.None,
@@ -109,11 +109,14 @@ public sealed class R5VerifierCoverageTests
 
     private static string ReplayReport(IEnumerable<string> ids, string corpusDir = "replay",
         string code = "verified", string cleanup = "cleaned", string? normalized = null,
-        string? sourceCommit = null, IEnumerable<ReplayStep>? steps = null) =>
-        JsonSerializer.Serialize(new ReplayReport("deterministic", code, cleanup, CorpusSha(corpusDir),
+        string? sourceCommit = null, IEnumerable<ReplayStep>? steps = null)
+    {
+        var stepArray = (steps ?? ids.Select(id => Step(id))).ToImmutableArray();
+        return JsonSerializer.Serialize(new ReplayReport("deterministic", code, cleanup, CorpusSha(corpusDir),
             sourceCommit ?? EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean,
-            "completed", [..(steps ?? ids.Select(id => Step(id)))],
-            [], normalized ?? Hex('c')), ReplayExecutionJson.Default.ReplayReport);
+            "completed", stepArray,
+            [], normalized ?? ReplayProjection.Steps(stepArray)), ReplayExecutionJson.Default.ReplayReport);
+    }
 
     private static readonly Lazy<Task<GrowthReport>> RealGrowth = new(async () =>
         await GrowthRunner.RunAsync(Corpus("growth")));
@@ -135,15 +138,31 @@ public sealed class R5VerifierCoverageTests
             EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean,
             [..(names ?? LiveSelfTestIds)]), LiveSelfTestJson.Default.LiveSelfTestReport);
 
-    private static string LivePlanSummary(int scheduled = 13, int attempted = 13, int unattempted = 0,
+    private static string LivePlanSummaryLine(LiveRunSummary summary) =>
+        JsonSerializer.Serialize(summary, LiveJsonContext.Default.LiveRunSummary);
+
+    private static LiveRunSummary PlanSummary(int scheduled = 13, int attempted = 13, int unattempted = 0,
         int providerCalls = 0, string stop = "complete", string kind = "loopback", int invalid = 0,
-        string? sourceCommit = null) =>
-        JsonSerializer.Serialize(new LiveRunSummary("r5-live-local-v1", kind, Hex('f'),
+        int? completed = null, int? failed = null, string? sourceCommit = null) =>
+        new("r5-live-local-v1", kind, Hex('f'),
             CorpusSha("quality", "bundle"), sourceCommit ?? EvaluationSource.Commit,
-            EvaluationSource.Tree, EvaluationSource.Clean, scheduled, attempted, attempted, 0,
-            invalid, unattempted, attempted * 4, providerCalls, 0, 0, 0, 0, 0, 0, 0, false,
+            EvaluationSource.Tree, EvaluationSource.Clean, scheduled, attempted,
+            completed ?? attempted, failed ?? 0, invalid, unattempted, attempted * 4, providerCalls,
+            0, 0, 0, 0, 0, 0, 0, false,
             new LiveTransportOutcomeCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            0, 104000, stop, "cleaned"), LiveJsonContext.Default.LiveRunSummary);
+            0, 104000, stop, "none");
+
+    private static string LivePlanOutput(LiveRunSummary? summary = null,
+        IEnumerable<EvaluationOutcome>? outcomes = null)
+    {
+        var corpusSha = CorpusSha("quality", "bundle");
+        var rows = (outcomes ?? QualityIds.Select((id, i) =>
+            OutcomeRow(id, corpusSha, attemptSha: new string('4', 62) + i.ToString("x2")))).ToArray();
+        var doc = EvalDoc(rows);
+        return string.Join('\n', rows.Select(OutcomeLine)
+            .Append(JsonSerializer.Serialize(doc, EvaluationReportJsonContext.Default.EvaluationReportDocument))
+            .Append(LivePlanSummaryLine(summary ?? PlanSummary())));
+    }
 
     private static (int Code, JsonObject Verdict) Verify(string scenario, string report,
         string? corpus = null, string forbid = CorpusCanary)
@@ -208,6 +227,17 @@ public sealed class R5VerifierCoverageTests
     {
         var rows = QualityIds.Select((id, i) => QualityCase(id, verified: i != 3));
         var (code, verdict) = Verify("quality", QualityReport(rows),
+            corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_code", verdict["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void QualityOutcomeDivergingFromSummaryCodeIsRejected()
+    {
+        var cases = QualityIds.Select((id, i) =>
+            QualityCase(id, actual: i == 0 ? EvaluationCode.ExecutionFailed : null));
+        var (code, verdict) = Verify("quality", QualityReport(cases),
             corpus: Corpus("quality", "bundle"));
         Assert.Equal(1, code);
         Assert.Equal("rejected_code", verdict["reason"]?.GetValue<string>());
@@ -288,6 +318,15 @@ public sealed class R5VerifierCoverageTests
         var bad = Verify("replay", ReplayReport(ReplayIds.Take(2)), corpus: Corpus("replay"));
         Assert.Equal(1, bad.Code);
         Assert.Equal("rejected_case_mismatch", bad.Verdict["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void ReplayReportWithStaleNormalizedDigestIsRejected()
+    {
+        var (code, verdict) = Verify("replay", ReplayReport(ReplayIds, normalized: Hex('1')),
+            corpus: Corpus("replay"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
     }
 
     [Fact]
@@ -436,27 +475,52 @@ public sealed class R5VerifierCoverageTests
     [Fact]
     public void LivePlanSummaryIsVerified()
     {
-        var (code, verdict) = Verify("live-plan", LivePlanSummary(), corpus: Corpus("quality", "bundle"));
+        var (code, verdict) = Verify("live-plan", LivePlanOutput(), corpus: Corpus("quality", "bundle"));
         Assert.Equal(0, code);
-        Assert.Equal("loopback", verdict["parity"]!["execution_kind"]?.GetValue<string>());
-        Assert.Equal(EvaluationSource.Commit, verdict["parity"]!["source_commit"]?.GetValue<string>());
+        var parity = verdict["parity"]!;
+        Assert.Equal("loopback", parity["execution_kind"]?.GetValue<string>());
+        Assert.Equal(EvaluationSource.Commit, parity["source_commit"]?.GetValue<string>());
+        Assert.Equal(13, parity["cases"]!.AsArray().Count);
+        Assert.NotNull(parity["configuration_sha256"]?.GetValue<string>());
     }
 
     [Fact]
     public void LivePlanSummaryWithProviderCallsOrIncompleteScheduleIsRejected()
     {
-        var (code, _) = Verify("live-plan", LivePlanSummary(providerCalls: 1),
+        var (code, _) = Verify("live-plan", LivePlanOutput(PlanSummary(providerCalls: 1)),
             corpus: Corpus("quality", "bundle"));
         Assert.Equal(1, code);
 
-        var (code2, _) = Verify("live-plan", LivePlanSummary(attempted: 12, unattempted: 1),
+        var (code2, _) = Verify("live-plan",
+            LivePlanOutput(PlanSummary(attempted: 12, unattempted: 1)),
             corpus: Corpus("quality", "bundle"));
         Assert.Equal(1, code2);
 
-        var (code3, verdict3) = Verify("live-plan", LivePlanSummary(stop: "bound_stop"),
+        var (code3, verdict3) = Verify("live-plan",
+            LivePlanOutput(PlanSummary(stop: "bound_stop")),
             corpus: Corpus("quality", "bundle"));
         Assert.Equal(1, code3);
         Assert.Equal("rejected_code", verdict3["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void LivePlanBareSummaryIsRejected()
+    {
+        // A summary alone cannot prove the executed case population.
+        var (code, verdict) = Verify("live-plan", LivePlanSummaryLine(PlanSummary()),
+            corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_case_mismatch", verdict["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void LivePlanSummaryWithBrokenAccountingIsRejected()
+    {
+        var (code, verdict) = Verify("live-plan",
+            LivePlanOutput(PlanSummary(attempted: 12, unattempted: 1, completed: 13)),
+            corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
     }
 
     [Fact]
@@ -548,16 +612,18 @@ public sealed class R5VerifierCoverageTests
         if (OperatingSystem.IsWindows()) return;
         var real = Path.Combine(Path.GetTempPath(), "r5v1-real-" + Guid.NewGuid().ToString("N"));
         var link = Path.Combine(Path.GetTempPath(), "r5v1-link-" + Guid.NewGuid().ToString("N"));
+        var marked = Path.Combine(real, "marked");
         var nested = Path.Combine(link, "marked");
-        Directory.CreateDirectory(real);
+        Directory.CreateDirectory(marked);
         try
         {
-            File.WriteAllText(Path.Combine(real, ".r5-v1-temp-root"), "");
+            File.WriteAllText(Path.Combine(marked, ".r5-v1-temp-root"), "");
+            File.WriteAllText(Path.Combine(marked, "report.json"), "{}");
             Directory.CreateSymbolicLink(link, real);
             var (code, verdict) = R5CaseVerifier.Run(["verify-cases", "--cleanup", nested]);
             Assert.Equal(1, code);
             Assert.Equal("rejected_cleanup_root", verdict["reason"]?.GetValue<string>());
-            Assert.True(Directory.Exists(real));
+            Assert.True(Directory.Exists(marked));
         }
         finally
         {
