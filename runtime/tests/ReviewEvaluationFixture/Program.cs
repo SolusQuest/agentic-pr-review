@@ -236,6 +236,26 @@ internal static class R5CaseVerifier
         catch { return null; }
     }
 
+    // Contexts that do not enable RespectRequiredConstructorParameters treat
+    // constructor parameters as optional: a missing member silently becomes
+    // its default, which can be indistinguishable from a legitimate zero
+    // value (e.g. actual_provider_calls). Admission therefore also requires
+    // the raw object to equal its complete producer projection — the same
+    // rebuild/DeepEquals pattern the report readers use.
+    private static T? ReadComplete<T>(string json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> info)
+        where T : class
+    {
+        try
+        {
+            var value = JsonSerializer.Deserialize(json, info);
+            if (value is null) return null;
+            var raw = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 24 });
+            var projected = JsonSerializer.SerializeToElement(value, info);
+            return JsonElement.DeepEquals(raw.RootElement, projected) ? value : null;
+        }
+        catch { return null; }
+    }
+
     private static JsonObject SourceParity() => new()
     {
         ["source_commit"] = EvaluationSource.Commit,
@@ -261,7 +281,7 @@ internal static class R5CaseVerifier
 
     private static (JsonObject?, string?) ExtractQuality(string[] lines, string? corpusSha)
     {
-        var summary = Read(lines[^1], QualityJsonContext.Default.QualitySummary);
+        var summary = ReadComplete(lines[^1], QualityJsonContext.Default.QualitySummary);
         if (summary is null) return (null, "rejected_report_invalid");
         if (summary.Code != "verified") return (null, "rejected_code");
         if (summary.Cases.IsDefault) return (null, "rejected_report_invalid");
@@ -409,7 +429,7 @@ internal static class R5CaseVerifier
 
     private static (JsonObject?, string?) ExtractResetOwner(string line)
     {
-        var report = Read(line, ResetOwnerProbeJson.Default.ResetOwnerProbeReport);
+        var report = ReadComplete(line, ResetOwnerProbeJson.Default.ResetOwnerProbeReport);
         if (report is null) return (null, "rejected_report_invalid");
         if (report.Schema != "r5-reset-owner-v1" || report.PassedCases is null)
             return (null, "rejected_report_invalid");
@@ -430,7 +450,7 @@ internal static class R5CaseVerifier
 
     private static (JsonObject?, string?) ExtractLiveSelfTest(string line)
     {
-        var report = Read(line, LiveSelfTestJson.Default.LiveSelfTestReport);
+        var report = ReadComplete(line, LiveSelfTestJson.Default.LiveSelfTestReport);
         if (report is null) return (null, "rejected_report_invalid");
         if (report.Schema != "r5-live-self-test-v1" || report.PassedCases is null)
             return (null, "rejected_report_invalid");
@@ -483,7 +503,7 @@ internal static class R5CaseVerifier
                 row.Code != q1.Code || row.AttemptSha256 != q1.AttemptSha256)
                 return (null, "rejected_case_mismatch");
         }
-        var report = Read(lines[^1], LiveJsonContext.Default.LiveRunSummary);
+        var report = ReadComplete(lines[^1], LiveJsonContext.Default.LiveRunSummary);
         if (report is null) return (null, "rejected_report_invalid");
         if (report.Format != "r5-live-local-v1") return (null, "rejected_report_invalid");
         if (report.StopReason != "complete") return (null, "rejected_code");

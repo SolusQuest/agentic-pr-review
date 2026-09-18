@@ -233,6 +233,25 @@ public sealed class R5VerifierCoverageTests
     }
 
     [Fact]
+    public void QualityCaseMissingActualCodeMemberIsRejected()
+    {
+        // Scored is enum value zero; without complete-projection admission a
+        // missing actual_code member would silently deserialize back to it.
+        var report = (JsonObject)JsonNode.Parse(
+            QualityReport(QualityIds.Select(id => QualityCase(id))).Split('\n')[^1])!;
+        var cases = (JsonArray)report["cases"]!;
+        var first = (JsonObject)cases[0]!;
+        first.Remove("actual_code");
+        var corpusSha = CorpusSha("quality", "bundle");
+        var outcomes = QualityIds.Select(id => OutcomeRow(id, corpusSha));
+        var mutated = string.Join('\n',
+            outcomes.Select(OutcomeLine).Append(report.ToJsonString()));
+        var (code, verdict) = Verify("quality", mutated, corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
     public void QualityOutcomeDivergingFromSummaryCodeIsRejected()
     {
         var cases = QualityIds.Select((id, i) =>
@@ -501,6 +520,19 @@ public sealed class R5VerifierCoverageTests
             corpus: Corpus("quality", "bundle"));
         Assert.Equal(1, code3);
         Assert.Equal("rejected_code", verdict3["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void LivePlanSummaryMissingActualProviderCallsIsRejected()
+    {
+        // Zero is the expected value; the member must still be present.
+        var summary = (JsonObject)JsonNode.Parse(LivePlanSummaryLine(PlanSummary()))!;
+        summary.Remove("actual_provider_calls");
+        var mutated = string.Join('\n',
+            LivePlanOutput().Split('\n').Take(QualityIds.Length + 1).Append(summary.ToJsonString()));
+        var (code, verdict) = Verify("live-plan", mutated, corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
     }
 
     [Fact]
