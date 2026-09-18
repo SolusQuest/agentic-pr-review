@@ -66,6 +66,58 @@ public sealed class R5VerifierCoverageTests
 
     private static string Hex(char c) => new(c, 64);
 
+    private static IReadOnlyDictionary<string, EvaluationCode> Expected(params string[] parts) =>
+        Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus(parts)).Fixture)
+            .Runs.ToDictionary(run => run.Input.Id, run => run.ExpectedCode);
+
+    // An admission-valid outcome for each expected code class. The negative
+    // shapes mirror the corpus scripts: evidence failures, scenario-code
+    // violations and executor-level failures carry their own status/count
+    // combinations, otherwise ReadOutcome admission rejects the row.
+    private static EvaluationOutcome OutcomeFor(string caseId, string corpusSha, EvaluationCode code,
+        string? configuration = null, string? sourceCommit = null, string? attemptSha = null)
+    {
+        var clean = EvaluationSource.Clean;
+        var commit = sourceCommit ?? EvaluationSource.Commit;
+        var tree = EvaluationSource.Tree;
+        var cfg = configuration ?? Hex('7');
+        var attempt = attemptSha ?? Hex('4');
+        const ModelObservationStatus A = ModelObservationStatus.Adjudicated;
+        const ModelObservationStatus N = ModelObservationStatus.NotEvaluated;
+        const AssertionStatus P = AssertionStatus.Passed;
+        const AssertionStatus F = AssertionStatus.Failed;
+        const AssertionStatus NE = AssertionStatus.NotEvaluated;
+        const EvaluationStatus C = EvaluationStatus.Completed;
+        const EvaluationStatus X = EvaluationStatus.Failed;
+        const EvaluationFailureSource No = EvaluationFailureSource.None;
+        const EvaluationFailureKind Nk = EvaluationFailureKind.None;
+        return code switch
+        {
+            EvaluationCode.ExecutionFailed or EvaluationCode.SubjectInvalid =>
+                new(caseId, corpusSha, Hex('9'), cfg, attempt, null, commit, tree, clean,
+                    "deterministic", X, NE, NE, N, code, EvaluationFailureSource.Agent,
+                    EvaluationFailureKind.MalformedOutput, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            EvaluationCode.RequiredToolMissing or EvaluationCode.WrongSnapshot =>
+                new(caseId, corpusSha, Hex('9'), cfg, attempt, Hex('5'), commit, tree, clean,
+                    "deterministic", C, F, NE, N, code, No, Nk, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            EvaluationCode.RequiredObservationMissing =>
+                new(caseId, corpusSha, Hex('9'), cfg, attempt, Hex('5'), commit, tree, clean,
+                    "deterministic", C, F, NE, N, code, No, Nk, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            EvaluationCode.ExpectedFindingMissing =>
+                new(caseId, corpusSha, Hex('9'), cfg, attempt, Hex('5'), commit, tree, clean,
+                    "deterministic", C, P, F, A, code, No, Nk, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0),
+            EvaluationCode.ProhibitedFinding =>
+                new(caseId, corpusSha, Hex('9'), cfg, attempt, Hex('5'), commit, tree, clean,
+                    "deterministic", C, P, F, A, code, No, Nk, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0),
+            EvaluationCode.DuplicateObservation =>
+                new(caseId, corpusSha, Hex('9'), cfg, attempt, Hex('5'), commit, tree, clean,
+                    "deterministic", C, P, F, A, code, No, Nk, 2, 0, 1, 1, 0, 1, 0, 2, 0, 0, 0),
+            _ => new(caseId, corpusSha, Hex('9'), cfg, attempt, Hex('5'), commit, tree, clean,
+                "deterministic", C, P, P, A, EvaluationCode.Scored, No, Nk, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0),
+        };
+    }
+
     private static EvaluationOutcome OutcomeRow(string caseId, string corpusSha, EvaluationCode code = EvaluationCode.Scored,
         string? configuration = null, string? sourceCommit = null, string? attemptSha = null) => new(
         caseId, corpusSha, Hex('9'), configuration ?? Hex('7'), attemptSha ?? Hex('4'), Hex('5'),
@@ -83,18 +135,20 @@ public sealed class R5VerifierCoverageTests
         return Assert.IsType<EvaluationReport>(EvaluationReport.Create(rows).Value).Document;
     }
 
-    private static QualityCaseResult QualityCase(string id, EvaluationCode expected = EvaluationCode.Scored,
+    private static QualityCaseResult QualityCase(string id, EvaluationCode? expected = null,
         EvaluationCode? actual = null, bool verified = true) => new(
-        id, "generated", null, expected, actual ?? expected, null, true, true, verified);
+        id, "generated", null, expected ?? Expected("quality", "bundle")[id],
+        actual ?? expected ?? Expected("quality", "bundle")[id], null, true, true, verified);
 
-    private static string QualityReport(IEnumerable<QualityCaseResult> cases,
+    private static string QualityReport(IEnumerable<QualityCaseResult>? cases = null,
         IEnumerable<EvaluationOutcome>? outcomes = null, string code = "verified",
         int? expected = null, int? executed = null, int? verified = null)
     {
         var corpusSha = CorpusSha("quality", "bundle");
-        var caseList = cases.ToArray();
+        var expectedMap = Expected("quality", "bundle");
+        var caseList = (cases ?? QualityIds.Select(id => QualityCase(id, expectedMap[id]))).ToArray();
         var outcomeList = outcomes?.ToArray() ??
-            QualityIds.Select(id => OutcomeRow(id, corpusSha)).ToArray();
+            QualityIds.Select(id => OutcomeFor(id, corpusSha, expectedMap[id])).ToArray();
         var summary = new QualitySummary("deterministic", code, corpusSha,
             expected ?? caseList.Length, executed ?? caseList.Length, verified ?? caseList.Length,
             [..caseList]);
@@ -103,15 +157,16 @@ public sealed class R5VerifierCoverageTests
         return string.Join('\n', lines);
     }
 
-    private static ReplayStep Step(string id, bool accepted = true, bool predecessor = true) => new(
+    private static ReplayStep Step(string id, string corpusDir = "replay", bool accepted = true,
+        bool predecessor = true) => new(
         id, Hex('9'), Hex('7'), Hex('8'), "initial", "completed", accepted, 1, Hex('3'), Hex('2'),
-        1, 1, "Scored", "Passed", "Passed", predecessor);
+        1, 1, Expected(corpusDir)[id].ToString(), "Passed", "Passed", predecessor);
 
     private static string ReplayReport(IEnumerable<string> ids, string corpusDir = "replay",
         string code = "verified", string cleanup = "cleaned", string? normalized = null,
         string? sourceCommit = null, IEnumerable<ReplayStep>? steps = null)
     {
-        var stepArray = (steps ?? ids.Select(id => Step(id))).ToImmutableArray();
+        var stepArray = (steps ?? ids.Select(id => Step(id, corpusDir))).ToImmutableArray();
         return JsonSerializer.Serialize(new ReplayReport("deterministic", code, cleanup, CorpusSha(corpusDir),
             sourceCommit ?? EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean,
             "completed", stepArray,
@@ -156,8 +211,10 @@ public sealed class R5VerifierCoverageTests
         IEnumerable<EvaluationOutcome>? outcomes = null)
     {
         var corpusSha = CorpusSha("quality", "bundle");
+        var expected = Expected("quality", "bundle");
         var rows = (outcomes ?? QualityIds.Select((id, i) =>
-            OutcomeRow(id, corpusSha, attemptSha: new string('4', 62) + i.ToString("x2")))).ToArray();
+            OutcomeFor(id, corpusSha, expected[id],
+                attemptSha: new string('4', 62) + i.ToString("x2")))).ToArray();
         var doc = EvalDoc(rows);
         return string.Join('\n', rows.Select(OutcomeLine)
             .Append(JsonSerializer.Serialize(doc, EvaluationReportJsonContext.Default.EvaluationReportDocument))
@@ -178,9 +235,9 @@ public sealed class R5VerifierCoverageTests
     public void QualityReportWithDeclaredCasesIsVerified()
     {
         var (code, verdict) = Verify("quality",
-            QualityReport(QualityIds.Select(id => QualityCase(id))),
+            QualityReport(),
             corpus: Corpus("quality", "bundle"));
-        Assert.Equal(0, code);
+        Assert.True(code == 0, verdict.ToJsonString());
         Assert.Equal("verified", verdict["code"]?.GetValue<string>());
         var parity = verdict["parity"]!;
         Assert.Equal(13, parity["cases"]!.AsArray().Count);
@@ -193,7 +250,8 @@ public sealed class R5VerifierCoverageTests
     {
         var corpusSha = CorpusSha("quality", "bundle");
         var cases = QualityIds.Skip(1).Select(id => QualityCase(id));
-        var outcomes = QualityIds.Skip(1).Select(id => OutcomeRow(id, corpusSha));
+        var expectedMap = Expected("quality", "bundle");
+        var outcomes = QualityIds.Skip(1).Select(id => OutcomeFor(id, corpusSha, expectedMap[id]));
         var (code, verdict) = Verify("quality",
             QualityReport(cases, outcomes, expected: 13, executed: 12, verified: 12),
             corpus: Corpus("quality", "bundle"));
@@ -243,7 +301,8 @@ public sealed class R5VerifierCoverageTests
         var first = (JsonObject)cases[0]!;
         first.Remove("actual_code");
         var corpusSha = CorpusSha("quality", "bundle");
-        var outcomes = QualityIds.Select(id => OutcomeRow(id, corpusSha));
+        var expectedMap = Expected("quality", "bundle");
+        var outcomes = QualityIds.Select(id => OutcomeFor(id, corpusSha, expectedMap[id]));
         var mutated = string.Join('\n',
             outcomes.Select(OutcomeLine).Append(report.ToJsonString()));
         var (code, verdict) = Verify("quality", mutated, corpus: Corpus("quality", "bundle"));
@@ -263,11 +322,24 @@ public sealed class R5VerifierCoverageTests
     }
 
     [Fact]
+    public void QualityOutcomeWithWrongExpectedCodeIsRejected()
+    {
+        var corpusSha = CorpusSha("quality", "bundle");
+        var expectedMap = Expected("quality", "bundle");
+        var outcomes = QualityIds.Select((id, i) => OutcomeFor(id, corpusSha,
+            i == 0 ? EvaluationCode.ProhibitedFinding : expectedMap[id]));
+        var (code, verdict) = Verify("quality",
+            QualityReport(outcomes: outcomes), corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_code", verdict["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
     public void QualityOutcomeWithDivergentConfigurationIsRejected()
     {
         var corpusSha = CorpusSha("quality", "bundle");
         var outcomes = QualityIds.Select((id, i) =>
-            OutcomeRow(id, corpusSha, configuration: i == 0 ? Hex('a') : null));
+            OutcomeFor(id, corpusSha, Expected("quality", "bundle")[id], configuration: i == 0 ? Hex('a') : null));
         var (code, verdict) = Verify("quality",
             QualityReport(QualityIds.Select(id => QualityCase(id)), outcomes),
             corpus: Corpus("quality", "bundle"));
@@ -280,7 +352,7 @@ public sealed class R5VerifierCoverageTests
     {
         var corpusSha = CorpusSha("quality", "bundle");
         var outcomes = QualityIds.Select((id, i) =>
-            OutcomeRow(id, corpusSha, sourceCommit: i == 0 ? new string('b', 40) : null));
+            OutcomeFor(id, corpusSha, Expected("quality", "bundle")[id], sourceCommit: i == 0 ? new string('b', 40) : null));
         var (code, verdict) = Verify("quality",
             QualityReport(QualityIds.Select(id => QualityCase(id)), outcomes),
             corpus: Corpus("quality", "bundle"));
@@ -533,6 +605,21 @@ public sealed class R5VerifierCoverageTests
         var (code, verdict) = Verify("live-plan", mutated, corpus: Corpus("quality", "bundle"));
         Assert.Equal(1, code);
         Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void LivePlanOutcomeWithWrongExpectedCodeIsRejected()
+    {
+        // Accounting still balances; the per-case oracle catches the drift.
+        var corpusSha = CorpusSha("quality", "bundle");
+        var expectedMap = Expected("quality", "bundle");
+        var outcomes = QualityIds.Select((id, i) => OutcomeFor(id, corpusSha,
+            i == 0 ? EvaluationCode.ProhibitedFinding : expectedMap[id],
+            attemptSha: new string('4', 62) + i.ToString("x2")));
+        var (code, verdict) = Verify("live-plan", LivePlanOutput(outcomes: outcomes),
+            corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_code", verdict["reason"]?.GetValue<string>());
     }
 
     [Fact]

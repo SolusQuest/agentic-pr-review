@@ -108,6 +108,11 @@ jobs:
       - name: Exact-head distribution checks
         run: npm run dist:check
 
+      - name: Verify the worktree is still the exact selected head
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
+
       - name: R5 deterministic evaluation gate in framework and Linux x64 Native AOT
         run: bash runtime/scripts/verify-r5-evaluation.sh all
 

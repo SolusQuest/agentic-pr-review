@@ -196,13 +196,21 @@ internal static class R5CaseVerifier
         // Independent binding: the declared corpus directory is re-admitted and
         // its digest must equal the identity the report claims to have run.
         string? corpusSha = null;
+        // The same admission supplies the per-case expected outcome codes.
+        IReadOnlyDictionary<string, EvaluationCode>? expected = null;
         if (corpus is not null)
         {
-            try { corpusSha = ReplayAdmission.Load(corpus).Fixture?.CorpusSha256; }
+            try
+            {
+                var fixture = ReplayAdmission.Load(corpus).Fixture;
+                corpusSha = fixture?.CorpusSha256;
+                if (fixture is not null)
+                    expected = fixture.Runs.ToDictionary(run => run.Input.Id, run => run.ExpectedCode);
+            }
             catch { }
             if (corpusSha is null) return Reject(scenario, "rejected_corpus_mismatch");
         }
-        var (parity, reason) = Extract(scenario, lines, corpusSha);
+        var (parity, reason) = Extract(scenario, lines, corpusSha, expected);
         if (parity is null) return Reject(scenario, reason ?? "rejected_case_mismatch");
         return (0, new JsonObject
         {
@@ -264,22 +272,24 @@ internal static class R5CaseVerifier
     };
 
     private static (JsonObject? Parity, string? Reason) Extract(
-        string scenario, string[] lines, string? corpusSha)
+        string scenario, string[] lines, string? corpusSha,
+        IReadOnlyDictionary<string, EvaluationCode>? expected)
     {
         switch (scenario)
         {
-            case "quality": return ExtractQuality(lines, corpusSha);
-            case "replay": return ExtractReplay(lines[^1], ReplayCases, corpusSha);
-            case "incremental": return ExtractReplay(lines[^1], IncrementalCases, corpusSha);
+            case "quality": return ExtractQuality(lines, corpusSha, expected);
+            case "replay": return ExtractReplay(lines[^1], ReplayCases, corpusSha, expected);
+            case "incremental": return ExtractReplay(lines[^1], IncrementalCases, corpusSha, expected);
             case "growth": return ExtractGrowth(lines[^1], corpusSha);
             case "reset-owner": return ExtractResetOwner(lines[^1]);
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
-            case "live-plan": return ExtractLivePlan(lines, corpusSha);
+            case "live-plan": return ExtractLivePlan(lines, corpusSha, expected);
             default: return (null, "input_invalid");
         }
     }
 
-    private static (JsonObject?, string?) ExtractQuality(string[] lines, string? corpusSha)
+    private static (JsonObject?, string?) ExtractQuality(string[] lines, string? corpusSha,
+        IReadOnlyDictionary<string, EvaluationCode>? expected)
     {
         var summary = ReadComplete(lines[^1], QualityJsonContext.Default.QualitySummary);
         if (summary is null) return (null, "rejected_report_invalid");
@@ -315,6 +325,9 @@ internal static class R5CaseVerifier
             var row = summary.Cases[i];
             if (row.CaseId != QualityCases[i]) return (null, "rejected_case_mismatch");
             if (outcome.Code != row.ActualCode) return (null, "rejected_code");
+            if (expected is not null && (!expected.TryGetValue(row.CaseId, out var want) ||
+                outcome.Code != want || row.ExpectedCode != want))
+                return (null, "rejected_code");
             if (!row.Verified) return (null, "rejected_code");
         }
         var cases = new JsonArray();
@@ -339,7 +352,8 @@ internal static class R5CaseVerifier
         return (parity, null);
     }
 
-    private static (JsonObject?, string?) ExtractReplay(string line, string[] declared, string? corpusSha)
+    private static (JsonObject?, string?) ExtractReplay(string line, string[] declared, string? corpusSha,
+        IReadOnlyDictionary<string, EvaluationCode>? expected)
     {
         var report = Read(line, ReplayExecutionJson.Default.ReplayReport);
         if (report is null) return (null, "rejected_report_invalid");
@@ -360,7 +374,11 @@ internal static class R5CaseVerifier
         for (var i = 0; i < declared.Length; i++)
         {
             var step = report.Steps[i];
-            if (step.CaseId != declared[i] || !step.Accepted) return (null, "rejected_case_mismatch");
+            if (step.CaseId != declared[i] || !step.Accepted || !step.PredecessorPreserved)
+                return (null, "rejected_case_mismatch");
+            if (expected is not null && (!expected.TryGetValue(step.CaseId, out var want) ||
+                step.QualityCode != want.ToString()))
+                return (null, "rejected_code");
             steps.Add((JsonNode)new JsonObject
             {
                 ["case_id"] = step.CaseId,
@@ -465,7 +483,8 @@ internal static class R5CaseVerifier
         return (parity, null);
     }
 
-    private static (JsonObject?, string?) ExtractLivePlan(string[] lines, string? corpusSha)
+    private static (JsonObject?, string?) ExtractLivePlan(string[] lines, string? corpusSha,
+        IReadOnlyDictionary<string, EvaluationCode>? expected)
     {
         // The complete live output shape is Q1 outcome rows, one Q4 evaluation
         // report and the run summary. A bare summary is incomplete evidence:
@@ -483,6 +502,9 @@ internal static class R5CaseVerifier
             if (outcome.CaseId != QualityCases[i] || outcome.CorpusSha256 != corpusSha ||
                 !Hash(outcome.CaseSha256))
                 return (null, "rejected_case_mismatch");
+            if (expected is not null && (!expected.TryGetValue(outcome.CaseId, out var want) ||
+                outcome.Code != want))
+                return (null, "rejected_code");
             if (!Hash(outcome.ConfigurationSha256) || outcome.AttemptSha256 is null ||
                 !attempts.Add(outcome.AttemptSha256))
                 return (null, "rejected_case_mismatch");
