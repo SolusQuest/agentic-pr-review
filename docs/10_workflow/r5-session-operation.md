@@ -19,13 +19,14 @@ Real workloads differ; treat these as measured synthetic points, not guarantees.
 
 Normal capacity exhaustion is a **rejected append**, not corrupted state:
 
-- The Agent or SESSION builder returns `session_construction_limit` or `agent_response_invalid` when the next reconstructed request or continuation would cross a configured bound.
+- The validated construction path returns `session_construction_limit` when the appended session cannot be proven to leave room for a minimal next request. The measured harness also classifies `agent_response_invalid` as `message_limit` or `continuation_limit`, but only when its counters prove the proposed request crossed that bound. Those measured classifications are the capacity signal.
+- **Raw `agent_response_invalid` alone is not capacity evidence.** The same production code covers malformed or null provider responses, invalid message/tool structure, duplicate tool-call IDs, and admission or canonicalization failures. Without accompanying diagnostics or counts that establish the over-limit condition, treat it as an Agent/provider/input failure to investigate — do not reset on the code alone.
 - The candidate is `NotCommitted`; the accepted predecessor remains the current session and continues to read back intact. Nothing is silently truncated, compacted, summarized, or reset.
 - The measured matrix kept `predecessor_preserved` true on every rejection.
 
 Distinguish this from other rejection families before acting:
 
-- **Invalid or tampered state** — `session_*` validation/transition rejection codes (for example `session_transition_rejected`, continuation or canonicalization defects) mean the artifact failed admission. That is an integrity signal to investigate, not a capacity signal; do not respond by resetting.
+- **Invalid or tampered state** — admission/integrity rejection codes other than the capacity signal (for example `session_transition_rejected`, continuation-codec or canonicalization defects) mean the artifact failed admission. That is an integrity signal to investigate, not a capacity signal; do not respond by resetting.
 - **Unauthorized reset denial** — a reset that lacks the Host-authorized capability, the bound workflow run/attempt, or the selected lineage fails before any mutation. Denial is the intended outcome, not a stuck session.
 - **Ordinary Agent/provider failures** (for example `agent_chat_failed`) leave state `NotCommitted` and can be retried through normal continuation; they do not by themselves justify a reset.
 

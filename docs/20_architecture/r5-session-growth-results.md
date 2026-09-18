@@ -14,6 +14,25 @@ Issue [#249](https://github.com/SolusQuest/agentic-pr-review/issues/249) records
 | R1 seed corpus  | `7db3bb53f2a9453556307b2d11d00be106253c004cd29a7c5796b790b763f333`                                                                                                                |
 | Growth schedule | `attempt_limit` 65 (`AgentSessionFormat.MaximumCompletedRuns + 1`), no injected fault                                                                                             |
 
+Configuration identities emitted by the executed evidence:
+
+| Identity                                                                                            | Value                                                              |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| S1 growth configuration (`configuration_sha256`, shared by all four profiles, `deterministic` mode) | `f8781a29c69fc94871b077cd56016c0f4143f3e7a66144aef32c805003a3dc72` |
+| S2 policy digest (`policySha256`, all phases)                                                       | `30bf76478209c12ff7efb54955b57233070006afdfabe3cbcb2abc6ddca97557` |
+| S2 limits digest (`limitsSha256`, all phases)                                                       | `587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6` |
+| S2 toolset digest (`toolsetSha256`, all phases)                                                     | `66ba6ceb1ddd5c2aef95e613bef43b4675c986d4756c05bf350a09badb9c535c` |
+
+Each lifecycle phase carried a distinct adapted script digest (`scriptSha256`); the seed corpus digest alone does not identify the adapted workload:
+
+| Phase | Adapted script digest                                              | Phase     | Adapted script digest                                              |
+| ----- | ------------------------------------------------------------------ | --------- | ------------------------------------------------------------------ |
+| 0     | `fbeb6ebd184ec55f4db239e0530033329ee977bab9fcffba613f8be600e56da1` | 5         | `acaa3949a50a3d5c35d3c4ecb7a93099d4519b2e88885832abadf06e6ff20cfa` |
+| 1     | `0419694dca94848dbf5c33eba7df63887d2c26d80d4f8b4264d604ea2c60af24` | 6         | `74058ad7c98475aff72dd3ac626df2efda4b0a0a5ad83e3f9db9ab13de068b8e` |
+| 2     | `6c71a432a760a96657295716dfcf4b497548ec38dfba17a9bdf4f29d3278fc10` | 7 (reset) | `ecd3cd1adace143ded1e2b859ce0a9adb340531b43896e24000c4465071598de` |
+| 3     | `c1b96eac95deaa801f11b9d268f92f09e16ef92a29ac7323ec95761d39490256` | 8         | `dbbda72a9ce9500167af6b0f0e971514c2440b480de97aa3c369977276fb6291` |
+| 4     | `5c8784cebdf38db052d78f64a357330bb8375ddb9af10e1a56d358cada1bf9d5` |           |                                                                    |
+
 Commands executed from the repository root, each with exit status 0:
 
 ```sh
@@ -77,7 +96,7 @@ The `r5-reset-capacity-v1` report (`r5_reset_capacity_passed`, `framework_produc
 
 The `r5-reset-owner-v1` probe (`r5_reset_owner_passed`, `production_host_synthetic_ports`) passed all eight owner cases covering historical-target carry, completed-reset reentry, successor continuation, final target-substitution rejection, and ordinary absence recreation with late-appearance rejection for both initial writes and known-not-written retries.
 
-Observed failure classes stay distinct in both evidence sets: capacity outcomes (`session_construction_limit` at the build stage, `agent_response_invalid` classified `message_limit`/`continuation_limit` at the agent stage), non-capacity Agent failure (`agent_chat_failed`), state-acceptance outcomes (`state_accepted` vs `NotCommitted`), and evaluator attribution where the embedded Q4 report keeps an expected capacity rejection as a failed or unevaluated outcome — `host_state` attribution for the construction rejection and `unknown` for the agent-stage rejections — instead of folding it into model-quality counts. A failure without an admitted reply reports null execution counts, not a fabricated zero.
+Observed failure classes stay distinct in both evidence sets: capacity outcomes (`session_construction_limit` at the build stage, `agent_response_invalid` classified `message_limit`/`continuation_limit` at the agent stage), non-capacity Agent failure (`agent_chat_failed`), state-acceptance outcomes (`state_accepted` vs `NotCommitted`), and evaluator attribution where the embedded Q4 report keeps an expected capacity rejection as a failed or unevaluated outcome — `host_state` attribution for the construction rejection and `unknown` for the agent-stage rejections — instead of folding it into model-quality counts. A failure without an admitted reply reports null execution counts, not a fabricated zero. The raw `agent_response_invalid` code is not capacity-specific on its own: the harness only names an observed over-limit quantity because its measured message/continuation counters prove the bound was crossed; the same production code also covers malformed provider responses, invalid message/tool structure, duplicate tool-call IDs, and admission or canonicalization failures.
 
 ## Unapproved observations
 
