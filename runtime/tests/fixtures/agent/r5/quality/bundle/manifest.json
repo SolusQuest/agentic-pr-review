@@ -18,7 +18,7 @@
       "path": "cases/cs-defect/expected.json",
       "role": "assertions",
       "length": 873,
-      "sha256": "e9296360bc1baf23a1fe1dc7d531d8bde77141c08880daeed0214232bcce0a5e"
+      "sha256": "67c772b7ab52504b639c8b55bc215bdf7733842e81cc6e7a25f9db4a61f3885a"
     },
     {
       "path": "cases/cs-defect/provider.json",
@@ -54,7 +54,7 @@
       "path": "cases/duplicate-proposal/expected.json",
       "role": "assertions",
       "length": 887,
-      "sha256": "7487e6a4ae6d54445dd497172f03f9d94fc3a55cadece77baf56e11451c2613b"
+      "sha256": "f5caf2f840ee7f2001a56b113b7202563e16c77533637d0fdda657f755b0b46f"
     },
     {
       "path": "cases/duplicate-proposal/provider.json",
@@ -72,7 +72,7 @@
       "path": "cases/irrelevant-tool/expected.json",
       "role": "assertions",
       "length": 893,
-      "sha256": "5c76f3287fd1617c46a4f6e0a5d0414b55dcf5bc7fc7811acdec2365b69356f7"
+      "sha256": "531e36a8d8f36def139002577764ab2da623c097709a8b6c65daee9515e5c8a9"
     },
     {
       "path": "cases/irrelevant-tool/provider.json",
@@ -90,7 +90,7 @@
       "path": "cases/no-required-tool/expected.json",
       "role": "assertions",
       "length": 886,
-      "sha256": "1987e7d35a572e8fafc6ee5ae5294406d9dcd1d64a9b6301650b56cfd95d2068"
+      "sha256": "ccf370d7c2bb546963f9a377bb48cad3fa4ce059a16217455548cb2806f4457b"
     },
     {
       "path": "cases/no-required-tool/provider.json",
@@ -108,7 +108,7 @@
       "path": "cases/pathless-proposal/expected.json",
       "role": "assertions",
       "length": 882,
-      "sha256": "fcb30254968e62afc3244fd49e0156f0d79a0ed2b679acf919cf3e7aabd47736"
+      "sha256": "a475adb551afc10ae8fc679aaea1793554be1663d119afaf02dffba5d7ec9ac6"
     },
     {
       "path": "cases/pathless-proposal/provider.json",
@@ -126,13 +126,13 @@
       "path": "cases/repository-rule/expected.json",
       "role": "assertions",
       "length": 867,
-      "sha256": "74715367acd899ed38408d6737640cdc44e6b023a7b8e84c51c2f25cf0e13a32"
+      "sha256": "4f3f4f1abfc6a7f581bd538b592c6a9bca5982ebc8be2b98ca53ab4a2a38b1b4"
     },
     {
       "path": "cases/repository-rule/provider.json",
       "role": "script",
       "length": 1780,
-      "sha256": "753aa9e9adbed3c01718f05374954e7e9d076a758011a1202fd87692fc1dd1ab"
+      "sha256": "2d058c834feac760f9ec6155b2c18f3fce174a0ab209a7a5b11dbd9ffff302b0"
     },
     {
       "path": "cases/safe-invention/context.txt",
@@ -216,7 +216,7 @@
       "path": "cases/wrong-evidence/expected.json",
       "role": "assertions",
       "length": 882,
-      "sha256": "fcb30254968e62afc3244fd49e0156f0d79a0ed2b679acf919cf3e7aabd47736"
+      "sha256": "a475adb551afc10ae8fc679aaea1793554be1663d119afaf02dffba5d7ec9ac6"
     },
     {
       "path": "cases/wrong-evidence/provider.json",
@@ -234,7 +234,7 @@
       "path": "cases/wrong-location/expected.json",
       "role": "assertions",
       "length": 889,
-      "sha256": "4ad12821907fac4f98731e09e2f3ca0ad66c4f5220acd0f8f6bc2b15ee244f9c"
+      "sha256": "b4ea8243f60a12a0c04cb1a6453c97ba49f054ac6d20d25d4b094bd393ec2ab2"
     },
     {
       "path": "cases/wrong-location/provider.json",
@@ -245,8 +245,8 @@
     {
       "path": "diff.json",
       "role": "diff",
-      "length": 4648,
-      "sha256": "af9c9826d7cc97712969ef238491ee58c1219951e5ca107275398f670c017eb1"
+      "length": 4686,
+      "sha256": "044a42c0c50ee8c15054e16f7e442c5e073a06a36ef949514788ab897724817b"
     },
     {
       "path": "policy.txt",
@@ -287,8 +287,8 @@
     {
       "path": "source/member-5.txt",
       "role": "repository",
-      "length": 148,
-      "sha256": "e056822d1aa87503530b51d7be99e6ac0191b64de85b5479fd02d8d20c99842f"
+      "length": 186,
+      "sha256": "4f10e4667fe4b566ec81fe2e315faa7fc17743df5ba62e3cbb3e8d9ba7878d40"
     },
     {
       "path": "source/member-6.txt",

@@ -114,6 +114,7 @@ internal static class LiveRunner
         var rows = ImmutableArray.CreateBuilder<ReadOnlyMemory<byte>>();
         var outcomes = ImmutableArray.CreateBuilder<EvaluationOutcome>();
         var subjects = new List<LiveAdjudicationCase>();
+        var diagnostics = new List<LiveAgentDiagnostic>();
         var completed = 0;
         var failed = 0;
         var invalid = 0;
@@ -146,7 +147,7 @@ internal static class LiveRunner
                 try
                 {
                     outcome = await AttemptAsync(run, trusted, stable!, descriptor, attempt, runId,
-                        execute, credential, options, accounting, subjects, index, deadline.Token);
+                        execute, credential, options, accounting, subjects, diagnostics, index, deadline.Token);
                     switch (outcome.ExecutionStatus)
                     {
                         case EvaluationStatus.Completed: completed++; break;
@@ -156,6 +157,7 @@ internal static class LiveRunner
                 }
                 catch (OperationCanceledException)
                 {
+                    diagnostics.Add(LiveAgentDiagnostic.Capture(index, null));
                     stopReason = token.IsCancellationRequested ? "caller_cancelled" : "deadline";
                     outcome = EvaluationScorer.Failure(run.Expected, EvaluationFailure.Unknown, attempt);
                     failed++;
@@ -198,6 +200,7 @@ internal static class LiveRunner
             accounting.ReservedInputTokens, accounting.ReservedOutputTokens, accounting.ReservedCombinedTokens,
             accounting.UsageUnknownCalls, accounting.AccountingViolation, accounting.Outcomes,
             accounting.ReservedSpendMicroUsd, plan.Bounds.SpendCeilingMicroUsd, stopReason, adjudication.Cleanup,
+            diagnostics.ToImmutableArray(),
             adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases);
         foreach (var row in rows) write(Encoding.UTF8.GetString(row.Span));
         write(Encoding.UTF8.GetString(reportBytes.Value));
@@ -233,7 +236,7 @@ internal static class LiveRunner
         AgentSessionMaterializedStableRequest stable, EvaluationRunInput descriptor,
         EvaluationAttempt attempt, string runId, bool execute,
         DeepSeekCredential? credential, LiveOptions options, LiveAccounting accounting,
-        List<LiveAdjudicationCase> subjects, int index,
+        List<LiveAdjudicationCase> subjects, List<LiveAgentDiagnostic> diagnostics, int index,
         CancellationToken token)
     {
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable.StablePlan, runId,
@@ -250,7 +253,10 @@ internal static class LiveRunner
         var outcome = await new AgentLoop(observed, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)))
             .RunAsync(request, token);
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)
+        {
+            diagnostics.Add(LiveAgentDiagnostic.Capture(index, outcome.Diagnostic));
             return EvaluationScorer.Failure(run.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
+        }
         var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,
             DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead);
         var subject = EvaluationSubject.Admit(build, descriptor);

@@ -40,27 +40,43 @@ internal sealed record EvaluationReviewedIdentity(
 internal sealed record ExpectedDefect(
     [property: JsonRequired] string Id,
     [property: JsonRequired] string Severity,
-    [property: JsonRequired] string ObservationId,
+    [property: JsonRequired] string? ObservationId,
     [property: JsonRequired] string Path,
     [property: JsonRequired] int StartLine,
     [property: JsonRequired] int EndLine)
 {
     internal bool Valid => EvaluationLimits.Id(Id) && EvaluationLimits.Severity(Severity) &&
-        EvaluationLimits.Hash(ObservationId) && EvaluationLimits.Path(Path) &&
+        (ObservationId is null || EvaluationLimits.Hash(ObservationId)) && EvaluationLimits.Path(Path) &&
         StartLine > 0 && EndLine >= StartLine && (long)EndLine - StartLine < AgentLimits.ReadFileLines;
     internal bool Matches(AgentFinding finding) => finding.Severity == Severity &&
-        finding.Evidence.Any(e => e.ObservationId == ObservationId && e.Path == Path &&
+        finding.Evidence.Any(e => (ObservationId is null || e.ObservationId == ObservationId) && e.Path == Path &&
             e.StartLine == StartLine && e.EndLine == EndLine);
     public override string ToString() => "evaluation_expected_defect";
 }
 
+// One admitted observation must cover every line; requested ranges and unions of
+// incomplete observations do not establish coverage.
+internal sealed record ObservationCoverage(
+    [property: JsonRequired] string Path,
+    [property: JsonRequired] int StartLine,
+    [property: JsonRequired] int EndLine)
+{
+    internal bool Valid => EvaluationLimits.Path(Path) && StartLine > 0 && EndLine >= StartLine &&
+        (long)EndLine - StartLine < AgentLimits.ReadFileLines;
+}
+
 internal sealed record RequiredObservation(
     [property: JsonRequired] string Tool,
-    [property: JsonRequired] string ObservationId)
+    [property: JsonRequired] string? ObservationId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ObservationCoverage? Coverage = null)
 {
-    internal bool Valid => Tool is AgentToolRegistry.ReadFileName or AgentToolRegistry.ReadDiffName or
-        AgentToolRegistry.ListFilesName or AgentToolRegistry.ListChangedFilesName or AgentToolRegistry.SearchTextName &&
-        EvaluationLimits.Hash(ObservationId);
+    internal bool Valid => (Tool is AgentToolRegistry.ReadFileName or AgentToolRegistry.ReadDiffName or
+        AgentToolRegistry.ListFilesName or AgentToolRegistry.ListChangedFilesName or AgentToolRegistry.SearchTextName) &&
+        (ObservationId is null ? Coverage is { Valid: true } : Coverage is null && EvaluationLimits.Hash(ObservationId));
+    internal bool Matches(string tool, AgentObservation observation) => Tool == tool &&
+        (Coverage is { } coverage
+            ? observation.Grounds(new(observation.ObservationId, coverage.Path, coverage.StartLine, coverage.EndLine))
+            : ObservationId == observation.ObservationId);
     public override string ToString() => "evaluation_required_observation";
 }
 

@@ -57,6 +57,7 @@ shrinks or renames coverage cannot pass silently. Per scenario it requires:
 - `live-plan` — summary `execution_kind=loopback`, `stop_reason=complete`,
   `actual_provider_calls=0`, `scheduled=attempted=13`, `unattempted=0`,
   `invalid=0`, with `plan_sha256`/`corpus_sha256` retained for parity.
+- `live-coverage` — the same complete Q1/Q4/summary validation for the separately authored five-case population (`cs-defect`, `cs-safe`, `ts-defect`, `ts-safe`, `repository-rule`), exercising returned-line coverage in both framework and Native AOT. The original thirteen-case population remains independently required. Both live scenarios retain safe Agent diagnostics in parity.
 
 For corpus scenarios `--corpus` re-admits the declared bundle directory and
 requires its digest to equal the report's `corpus_sha256`

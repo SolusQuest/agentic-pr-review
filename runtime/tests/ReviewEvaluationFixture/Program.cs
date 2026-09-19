@@ -107,6 +107,9 @@ internal static class R5CaseVerifier
         "pathless-proposal",
     ];
 
+    private static readonly string[] LiveCoverageCases =
+        ["cs-defect", "cs-safe", "ts-defect", "ts-safe", "repository-rule"];
+
     private static readonly string[] IncrementalCases =
         ["incremental-seed", "incremental-same", "incremental-ahead"];
 
@@ -287,7 +290,8 @@ internal static class R5CaseVerifier
             case "growth": return ExtractGrowth(lines[^1], corpusSha);
             case "reset-owner": return ExtractResetOwner(lines[^1]);
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
-            case "live-plan": return ExtractLivePlan(lines, corpusSha, expected);
+            case "live-plan": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
+            case "live-coverage": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             default: return (null, "input_invalid");
         }
     }
@@ -488,22 +492,22 @@ internal static class R5CaseVerifier
     }
 
     private static (JsonObject?, string?) ExtractLivePlan(string[] lines, string? corpusSha,
-        IReadOnlyDictionary<string, EvaluationCode>? expected)
+        IReadOnlyDictionary<string, EvaluationCode>? expected, string[] declared)
     {
         // The complete live output shape is Q1 outcome rows, one Q4 evaluation
         // report and the run summary. A bare summary is incomplete evidence:
         // the exact executed case population is proven by the Q1 rows and
         // correlated with the admitted Q4 document.
-        if (lines.Length != QualityCases.Length + 2)
+        if (lines.Length != declared.Length + 2)
             return (null, "rejected_case_mismatch");
-        var outcomes = new EvaluationOutcome[QualityCases.Length];
+        var outcomes = new EvaluationOutcome[declared.Length];
         var attempts = new HashSet<string>(StringComparer.Ordinal);
         string? configuration = null;
-        for (var i = 0; i < QualityCases.Length; i++)
+        for (var i = 0; i < declared.Length; i++)
         {
             var outcome = EvaluationJson.ReadOutcome(Encoding.UTF8.GetBytes(lines[i]));
             if (outcome is null) return (null, "rejected_report_invalid");
-            if (outcome.CaseId != QualityCases[i] || outcome.CorpusSha256 != corpusSha ||
+            if (outcome.CaseId != declared[i] || outcome.CorpusSha256 != corpusSha ||
                 !Hash(outcome.CaseSha256))
                 return (null, "rejected_case_mismatch");
             if (expected is not null && (!expected.TryGetValue(outcome.CaseId, out var want) ||
@@ -519,8 +523,8 @@ internal static class R5CaseVerifier
                 return (null, "rejected_configuration");
             outcomes[i] = outcome;
         }
-        var evaluation = EvaluationReportJson.Read(Encoding.UTF8.GetBytes(lines[QualityCases.Length]));
-        if (!evaluation.Succeeded || evaluation.Value!.Document.Outcomes.Length != QualityCases.Length)
+        var evaluation = EvaluationReportJson.Read(Encoding.UTF8.GetBytes(lines[declared.Length]));
+        if (!evaluation.Succeeded || evaluation.Value!.Document.Outcomes.Length != declared.Length)
             return (null, "rejected_report_invalid");
         var byCase = outcomes.ToDictionary(o => o.CaseId, StringComparer.Ordinal);
         foreach (var row in evaluation.Value!.Document.Outcomes)
@@ -537,24 +541,32 @@ internal static class R5CaseVerifier
             report.Attempted != report.Completed + report.Failed + report.Invalid)
             return (null, "rejected_report_invalid");
         if (report.ExecutionKind != "loopback" || report.ActualProviderCalls != 0 ||
-            report.Scheduled != QualityCases.Length || report.Attempted != QualityCases.Length ||
+            report.Scheduled != declared.Length || report.Attempted != declared.Length ||
             report.Unattempted != 0 || report.Invalid != 0)
             return (null, "rejected_case_mismatch");
         if (!Hash(report.PlanSha256) || report.CorpusSha256 != corpusSha)
             return (null, "rejected_corpus_mismatch");
         if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
             return (null, "rejected_source");
+        if (report.AgentDiagnostics.IsDefault || report.AgentDiagnostics.Any(d => d is null ||
+            d.ScheduleIndex < 0 || d.ScheduleIndex >= report.Attempted ||
+            outcomes[d.ScheduleIndex].ExecutionStatus == EvaluationStatus.Completed ||
+            d != LiveAgentDiagnostic.Capture(d.ScheduleIndex, d.ModelCalls is { } model && d.ToolCalls is { } tool
+                ? new AgentDiagnostic(d.Code, model, tool) : null)) ||
+            report.AgentDiagnostics.Select(d => d.ScheduleIndex).Distinct().Count() != report.AgentDiagnostics.Length)
+            return (null, "rejected_report_invalid");
         var parity = SourceParity();
         parity["plan_sha256"] = report.PlanSha256;
         parity["corpus_sha256"] = corpusSha;
         parity["configuration_sha256"] = configuration;
         parity["mode"] = "deterministic";
         parity["execution_kind"] = "loopback";
-        parity["scheduled"] = QualityCases.Length;
-        parity["attempted"] = QualityCases.Length;
+        parity["scheduled"] = declared.Length;
+        parity["attempted"] = declared.Length;
         parity["completed"] = report.Completed;
         parity["stop_reason"] = "complete";
-        parity["cases"] = new JsonArray(QualityCases.Select(id => (JsonNode)id).ToArray());
+        parity["agent_diagnostics"] = JsonNode.Parse(JsonSerializer.Serialize(report, LiveJsonContext.Default.LiveRunSummary))!["agent_diagnostics"]!.DeepClone();
+        parity["cases"] = new JsonArray(declared.Select(id => (JsonNode)id).ToArray());
         return (parity, null);
     }
 
@@ -653,6 +665,10 @@ internal static class R5CaseVerifier
         {
             var admitted = ReplayAdmission.Load(corpus);
             if (admitted.Fixture is not { } fixture) return Reject("r5-plan", "rejected_corpus");
+            var declared = fixture.Runs.Select(r => r.Input.CaseId).SequenceEqual(LiveCoverageCases)
+                ? LiveCoverageCases : QualityCases;
+            if (!fixture.Runs.Select(r => r.Input.CaseId).SequenceEqual(declared))
+                return Reject("r5-plan", "rejected_case_mismatch");
             var plan = new JsonObject
             {
                 ["format"] = LiveLimits.PlanFormat,
@@ -674,17 +690,17 @@ internal static class R5CaseVerifier
                     ["adapter_id"] = DeepSeekAdapterContext.Adapter,
                     ["configuration_sha256"] = LivePlanAdmission.ProviderConfigurationSha256(),
                 },
-                ["schedule"] = new JsonArray(QualityCases
+                ["schedule"] = new JsonArray(declared
                     .Select(id => (JsonNode)new JsonObject { ["case_id"] = id, ["repeats"] = 1 }).ToArray()),
                 ["bounds"] = new JsonObject
                 {
-                    ["max_evaluations"] = QualityCases.Length,
-                    ["max_model_calls"] = QualityCases.Length * AgentLimits.ModelCalls,
-                    ["max_input_tokens"] = QualityCases.Length * AgentLimits.ModelCalls * 8192L,
-                    ["max_output_tokens"] = QualityCases.Length * AgentLimits.ModelCalls * 512L,
-                    ["max_combined_tokens"] = QualityCases.Length * AgentLimits.ModelCalls * 8704L,
+                    ["max_evaluations"] = declared.Length,
+                    ["max_model_calls"] = declared.Length * AgentLimits.ModelCalls,
+                    ["max_input_tokens"] = declared.Length * AgentLimits.ModelCalls * 8192L,
+                    ["max_output_tokens"] = declared.Length * AgentLimits.ModelCalls * 512L,
+                    ["max_combined_tokens"] = declared.Length * AgentLimits.ModelCalls * 8704L,
                     ["max_seconds"] = 600,
-                    ["spend_ceiling_micro_usd"] = QualityCases.Length * AgentLimits.ModelCalls * 1000L,
+                    ["spend_ceiling_micro_usd"] = declared.Length * AgentLimits.ModelCalls * 1000L,
                     ["per_call"] = new JsonObject
                     {
                         ["max_input_tokens"] = 8192,

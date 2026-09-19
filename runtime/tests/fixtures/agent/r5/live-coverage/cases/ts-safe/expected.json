@@ -1,0 +1,31 @@
+{
+  "expected_code": "Scored",
+  "defects": [],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "src/safe-client.ts",
+        "start_line": 2,
+        "end_line": 2
+      }
+    },
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "src/config.ts",
+        "start_line": 2,
+        "end_line": 2
+      }
+    }
+  ],
+  "prohibited_findings": [
+    {
+      "path": "src/safe-client.ts",
+      "start_line": 2,
+      "end_line": 2
+    }
+  ]
+}

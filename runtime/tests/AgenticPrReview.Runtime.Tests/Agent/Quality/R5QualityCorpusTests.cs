@@ -23,9 +23,9 @@ public sealed class R5QualityCorpusTests
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(13, result.Summary.ExecutedCases);
         Assert.Equal(13, result.Summary.VerifiedCases);
-        Assert.Equal("05b669903439aea13818e507b48c0c3742a979672d124f7d68113c63dfdf4e38", result.Summary.CorpusSha256);
+        Assert.Equal("8c33b8669e6ff85c43fa7dd267d48c2d94c80912b2ee3f407ce1f92e00b3b9f0", result.Summary.CorpusSha256);
         Assert.Equal("c8714bfdcd2474a7beaf13495b2250a361f8fda1b504a98ed17854e84bf07311", result.Executions[0].Outcome.ConfigurationSha256);
-        Assert.Equal("946632f4a0373e5dabc7ef06594dd823d51cb5ca21e350d4eb08f7590f5d185f", result.Executions[0].Outcome.CaseSha256);
+        Assert.Equal("00e26ee9a729f0ca5fba89cbe420804e3158d20f2157b39b10273785a74892fa", result.Executions[0].Outcome.CaseSha256);
         Assert.Equal(QualityCoverage.Cases.Select(spec => spec.Id), result.Executions.Select(item => item.Spec.Id));
         Assert.All(result.Summary.Cases, row => Assert.True(row.Verified, row.CaseId));
         Assert.Equal("deterministic", result.Summary.Mode);
@@ -116,11 +116,24 @@ public sealed class R5QualityCorpusTests
     [InlineData("src/Lookup.cs", "=> null;", "=> string.Empty;")]
     [InlineData("src/config.ts", "timeoutMs: 0", "timeoutMs: 5000")]
     [InlineData("rules/review.md", "Never log", "Always log")]
+    [InlineData("src/Upload.cs", "=> System.Console.Error.WriteLine(value);", "{ }")]
+    [InlineData("src/Upload.cs", "WriteLine(value)", "WriteLine(\"upload failed\")")]
     public async Task ChangedDecisiveSourceWithValidHashesFailsTheIndependentOracle(string path, string before, string after)
     {
         using var corpus = new Corpus();
         var member = corpus.Manifest.Runs[0].Repository.Single(item => item.Path == path).File;
         corpus.Replace(member, Encoding.UTF8.GetBytes(File.ReadAllText(corpus.Member(member)).Replace(before, after, StringComparison.Ordinal)));
+        if (path == "src/Upload.cs")
+        {
+            // Keep the authored diff coherent so the independent semantic oracle,
+            // rather than source/diff admission, must reject the harmless mutation.
+            var diffMember = corpus.Manifest.Runs[0].Diff;
+            var diff = ReplayJson.Read(File.ReadAllBytes(corpus.Member(diffMember)), ReplayJsonContext.Default.ReplayDiffDocument)!;
+            diff = diff with { Changes = diff.Changes.Select(change => change.Path != path ? change : change with
+            { Hunks = change.Hunks.Select(hunk => hunk with { Lines = hunk.Lines.Select(line => line with
+                { Text = line.Text.Replace(before, after, StringComparison.Ordinal) }).ToImmutableArray() }).ToImmutableArray() }).ToImmutableArray() };
+            corpus.Replace(diffMember, JsonSerializer.SerializeToUtf8Bytes(diff, ReplayJsonContext.Default.ReplayDiffDocument));
+        }
         var admitted = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(corpus.Bundle).Fixture);
         var index = path.EndsWith("Lookup.cs", StringComparison.Ordinal) ? 0 : path.EndsWith("config.ts", StringComparison.Ordinal) ? 2 : 4;
         Assert.False((await QualityAudit.ObserveAsync(admitted.Runs[index], QualityCoverage.Cases[index])).FactsMatch);

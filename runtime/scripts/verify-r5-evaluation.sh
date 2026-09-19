@@ -69,6 +69,7 @@ _require_inputs() {
   _require_file project "${PROJECT}"
   _require_file test-project "${TEST_PROJECT}"
   _require_file quality-corpus "${FIXTURES}/quality/bundle/manifest.json"
+  _require_file live-coverage-corpus "${FIXTURES}/live-coverage/manifest.json"
   _require_file replay-corpus "${FIXTURES}/replay/manifest.json"
   _require_file incremental-corpus "${FIXTURES}/incremental/manifest.json"
   _require_file growth-corpus "${FIXTURES}/growth/manifest.json"
@@ -148,6 +149,11 @@ _run_scenarios() {
       >"${EVIDENCE}/${mode}/live.plan.out" ||
     _fail "APR_R5_EVAL_PLAN_FAILED ${mode}"
   _scenario "${mode}" live-plan live-local --dry-run --plan "${plan}"
+  local coverage_plan="${EVIDENCE}/${mode}/coverage.plan.json"
+  "${RUNNER[@]}" r5-plan --corpus "${FIXTURES}/live-coverage" --out "${coverage_plan}" \
+      >"${EVIDENCE}/${mode}/coverage.plan.out" ||
+    _fail "APR_R5_EVAL_COVERAGE_PLAN_FAILED ${mode}"
+  _scenario "${mode}" live-coverage live-local --dry-run --plan "${coverage_plan}"
   printf 'r5_eval_gate mode=%s artifact_sha256=%s\n' "${mode}" "${ARTIFACT_SHA}"
 }
 
@@ -179,7 +185,7 @@ run_aot() {
 
 run_parity() {
   local name
-  for name in quality replay incremental growth reset-owner live-self-test live-plan; do
+  for name in quality replay incremental growth reset-owner live-self-test live-plan live-coverage; do
     "${RUNNER[@]}" verify-cases --parity \
         "${EVIDENCE}/framework/${name}.verdict.json" \
         "${EVIDENCE}/aot/${name}.verdict.json" ||

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
@@ -10,6 +12,61 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R5LiveHarnessTests
 {
+    [Theory]
+    [InlineData("sequence", AgentFailureCodes.TerminalSequenceInvalid)]
+    [InlineData("arguments", AgentFailureCodes.ToolArgumentsInvalid)]
+    [InlineData("unknown", AgentFailureCodes.UnknownTool)]
+    [InlineData("grounding", AgentFailureCodes.TerminalInvalid)]
+    public async Task FailedAttemptsRetainOnlyTypedDiagnosticsWithoutRetry(string fault, string code)
+    {
+        using var plan = new PlanFile(document =>
+            document["schedule"]![0]!["repeats"] = 2);
+        var calls = fault switch
+        {
+            "sequence" => new ReplayToolCall[]
+            {
+                new("finish", "finish_review", "{\"summary\":\"" + Canary + "\",\"findings\":[]}"),
+                new("read", "read_file", "{\"path\":\"src/Caller.cs\",\"start_line\":1,\"line_count\":20}"),
+            },
+            "arguments" => [new("read", "read_file", "{\"path\":\"" + Canary + "\",\"start_line\":0}")],
+            "unknown" => [new("unknown", Canary, "{}")],
+            _ => [new("finish", "finish_review", "{\"summary\":\"" + Canary + "\",\"findings\":[{\"severity\":\"high\",\"title\":\"Test\",\"message\":\"" + Canary + "\",\"evidence\":[{\"observation_id\":\"" + new string('a', 64) + "\",\"path\":\"src/Caller.cs\",\"start_line\":3,\"end_line\":3}]}]}")],
+        };
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, _ =>
+            new ReplayTransport(new([new([.. calls], Canary)]), ReplayFault.None)), CancellationToken.None);
+        Assert.Equal(2, result.Failed);
+        Assert.Equal(2, result.Summary.SimulatedAdapterCalls);
+        Assert.Equal(0, result.Summary.ActualProviderCalls);
+        Assert.Equal(new[] { 0, 1 }, result.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex));
+        Assert.All(result.Summary.AgentDiagnostics, d =>
+        {
+            Assert.Equal(code, d.Code);
+            Assert.Equal(1, d.ModelCalls);
+            Assert.InRange(d.ToolCalls!.Value, 0, AgentLimits.ToolCalls);
+        });
+        Assert.DoesNotContain(Canary, string.Join('\n', lines));
+        var summary = JsonSerializer.Deserialize(lines[^1], LiveJsonContext.Default.LiveRunSummary)!;
+        Assert.Equal(result.Summary.AgentDiagnostics.ToArray(), summary.AgentDiagnostics.ToArray());
+    }
+
+    [Fact]
+    public void DiagnosticProjectionRejectsUnknownTextAndInvalidCounts()
+    {
+        var unknown = LiveAgentDiagnostic.Capture(0, new(Canary, 1, 2));
+        Assert.Equal("unknown", unknown.Code);
+        Assert.Equal(1, unknown.ModelCalls);
+        foreach (var diagnostic in new AgentDiagnostic?[]
+        {
+            null, new(AgentFailureCodes.TerminalInvalid, -1, 0),
+            new(AgentFailureCodes.TerminalInvalid, 1, AgentLimits.ToolCalls + 1),
+        })
+        {
+            var safe = LiveAgentDiagnostic.Capture(1, diagnostic);
+            Assert.Equal(new LiveAgentDiagnostic(1, "unknown", null, null), safe);
+        }
+    }
+
     private sealed class ReviewInput(StringWriter prompts, string action, string? staleField = null, bool empty = false) : TextReader
     {
         private string? command;
@@ -553,6 +610,7 @@ public sealed class R5LiveHarnessTests
         Assert.Equal("rate_limited", result.StopReason);
         Assert.Equal(1, sends);
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.Http429);
+        Assert.Equal(0, Assert.Single(result.Summary.AgentDiagnostics).ScheduleIndex);
         Assert.Equal(1, result.Attempted);
         Assert.Equal(2, result.Summary.Unattempted);
         Assert.Equal(EvaluationStatus.Failed, result.Outcomes[0].ExecutionStatus);
@@ -703,6 +761,7 @@ public sealed class R5LiveHarnessTests
         Assert.Equal("caller_cancelled", result.StopReason);
         Assert.True(sends <= 2);
         Assert.True(result.Summary.Unattempted >= 1);
+        Assert.Equal(Enumerable.Range(0, result.Attempted), result.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex));
     }
 
     [Fact]
@@ -723,6 +782,7 @@ public sealed class R5LiveHarnessTests
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.BackendExceptions);
         Assert.Equal(1, result.Summary.UsageUnknownCalls);
         Assert.Equal("complete", result.StopReason);
+        Assert.Equal(AgentFailureCodes.ChatFailed, Assert.Single(result.Summary.AgentDiagnostics).Code);
     }
 
     [Fact]

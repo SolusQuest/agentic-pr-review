@@ -1,0 +1,9 @@
+# R5 live evidence coverage corpus
+
+The `live-coverage/` directory contains an authored five-case population that reuses the corrected quality corpus's synthetic reviewed source, diff, policy, case context and deterministic provider scripts. It has its own manifest and corpus digest. This documentation remains outside the admitted directory and its exact member inventory.
+
+The cases are `cs-defect`, `cs-safe`, `ts-defect`, `ts-safe` and `repository-rule`. Each requires `read_file` to return the decisive target and contextual facts. The logging case requires both the credential call and real `Console.Error.WriteLine(value)` sink, plus the repository rule. Listing, searching and diff inspection remain available discovery operations; this population measures returned source coverage rather than conformance to one discovery sequence. The thirteen-case quality bundle retains its exact scripted-operation requirements.
+
+Each coverage selector must be satisfied by one admitted observation containing every required line. Different read windows are allowed; requested-but-unreturned lines, gaps, unrelated paths or tools are insufficient. Explicit null defect observation IDs select exact severity/path/line matching against already authenticated findings. Locations alone do not certify candidate prose. Scoring and annotation admission use the same predicate, and annotations remain bound to corpus, case, configuration and actual execution.
+
+The `r5-plan` command creates a credential-free dry-run plan for this population. The R5 gate executes the plan with real tools and synthetic provider turns in framework and Native AOT modes, retaining the separate thirteen-case gate. Paid execution needs a finite authorized plan with independently appropriate ceilings. Scripts and expectations are never sent to the provider. Source identity records the build used for each run; this corpus does not freeze an implementation commit or retrospectively rescore #252.

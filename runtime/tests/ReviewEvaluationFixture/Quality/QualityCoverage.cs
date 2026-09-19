@@ -32,7 +32,8 @@ internal static class QualityCoverage
         new("src/client.ts", 2, "export const timeout = config.timeoutMs || 3000;")];
     private static readonly ImmutableArray<QualityFact> RuleFacts =
     [new("rules/review.md", 2, "Never log an upload access token, including during failure handling."),
-        new("src/Upload.cs", 3, "    public static void Failed(string accessToken) => Log(accessToken);")];
+        new("src/Upload.cs", 3, "    public static void Failed(string accessToken) => Log(accessToken);"),
+        new("src/Upload.cs", 4, "    private static void Log(string value) => System.Console.Error.WriteLine(value);")];
 
     internal static ImmutableArray<QualityCaseSpec> Cases { get; } =
     [

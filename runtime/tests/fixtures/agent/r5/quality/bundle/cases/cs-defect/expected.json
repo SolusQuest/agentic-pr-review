@@ -13,7 +13,7 @@
   "required_observations": [
     {
       "tool": "list_changed_files",
-      "observation_id": "3485d7d2f3925d88b50c275c53b4ea14e84cb9810a71c7ab2d9738fdbb4b64a0"
+      "observation_id": "ad3c16c5514cb0d0430b19a99c629ae284aee39a68c9eb09a37fdd2460288e2c"
     },
     {
       "tool": "read_diff",

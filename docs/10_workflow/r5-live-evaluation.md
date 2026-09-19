@@ -4,6 +4,10 @@
 
 ## Commands
 
+The separate [five-case live coverage corpus](../../runtime/tests/fixtures/agent/r5/live-coverage.md) uses authored returned-line requirements instead of exact discovery-script hashes. It includes the corrected credential logging example. The original thirteen-case deterministic corpus retains its exact requirements. Both populations are checked by the framework/Native AOT gate before paid validation.
+
+Live summaries include `agent_diagnostics` for attempts that return a typed Agent rejection or whose cancellation prevents an outcome. Each row binds a zero-based schedule index to an exact allowlisted code and bounded Agent model/tool counts. Missing or invalid diagnostics use `unknown` and nullable counts; arbitrary strings never enter the projection. No rows are created for unattempted cases. Agent counts are separate from actual transport sends, reservations and known/unknown usage. A rejection code identifies a boundary, not necessarily its root cause; it cannot reconstruct discarded responses or turn failed attempts into quality evidence. The Q1/Q4 schemas and denominators remain unchanged.
+
 ```text
 live-local --dry-run --fixture self-test
 live-local --dry-run --plan <plan.json>

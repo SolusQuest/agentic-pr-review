@@ -4,7 +4,7 @@
     {
       "id": "defect",
       "severity": "high",
-      "observation_id": "397591e454157a453c6ca6c8b3aeab22e76ddff445d0703e4122d68fb8075104",
+      "observation_id": "daff2c70e1a4552840e8dafb09cdd7e5194c41ebeefe105a40c02ddf0642802b",
       "path": "src/Upload.cs",
       "start_line": 3,
       "end_line": 3
@@ -21,11 +21,11 @@
     },
     {
       "tool": "search_text",
-      "observation_id": "34f599e3855ab2a42cd69aa0c3f95656360c93d8f51260cb4deff387c940eb74"
+      "observation_id": "8d7c6f2c39fa9f7f948bdba331e4665e905c3b48094734044bf11143e6a6debe"
     },
     {
       "tool": "read_file",
-      "observation_id": "397591e454157a453c6ca6c8b3aeab22e76ddff445d0703e4122d68fb8075104"
+      "observation_id": "daff2c70e1a4552840e8dafb09cdd7e5194c41ebeefe105a40c02ddf0642802b"
     }
   ],
   "prohibited_findings": []

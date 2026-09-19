@@ -1,0 +1,31 @@
+{
+  "expected_code": "Scored",
+  "defects": [],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "src/SafeCaller.cs",
+        "start_line": 3,
+        "end_line": 3
+      }
+    },
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "src/Lookup.cs",
+        "start_line": 3,
+        "end_line": 3
+      }
+    }
+  ],
+  "prohibited_findings": [
+    {
+      "path": "src/SafeCaller.cs",
+      "start_line": 3,
+      "end_line": 3
+    }
+  ]
+}

@@ -1,0 +1,445 @@
+{
+  "format": "apr.r5.synthetic-replay.v1",
+  "source_kind": "authored-synthetic",
+  "configuration": {
+    "workflow_identity": "r5@live-coverage",
+    "provider_id": "synthetic-provider",
+    "model_id": "synthetic-model",
+    "adapter_id": "synthetic-adapter"
+  },
+  "files": [
+    {
+      "path": "cases/cs-defect/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "105a5c3d191e0d4bad913810754c1362126c24037c6007859096c4daf2187af8"
+    },
+    {
+      "path": "cases/cs-defect/expected.json",
+      "role": "assertions",
+      "length": 634,
+      "sha256": "6964dbb615370626bc4cc97fabd948563fd4342a19566555c9fee768f996d680"
+    },
+    {
+      "path": "cases/cs-defect/provider.json",
+      "role": "script",
+      "length": 1653,
+      "sha256": "5d63384c0d10dbbae9348b065d7501215c90743e8ffbdc0b2658fb94dbf2324e"
+    },
+    {
+      "path": "cases/cs-safe/context.txt",
+      "role": "context",
+      "length": 90,
+      "sha256": "697820d62e976faff000f193072849706bc105350465218d5d0e56917a7d2696"
+    },
+    {
+      "path": "cases/cs-safe/expected.json",
+      "role": "assertions",
+      "length": 564,
+      "sha256": "b5d4ea5d43a2f7c3fcc4ce473e966f752cb24d8b9a1dd4a3ad60104a94c5706c"
+    },
+    {
+      "path": "cases/cs-safe/provider.json",
+      "role": "script",
+      "length": 873,
+      "sha256": "75084d42e298081335a3d4acafcf8b7de2dfe1998af1649a4c0b8ab196352bb1"
+    },
+    {
+      "path": "cases/repository-rule/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "2be03b6c99201f6e62cf6ab9c70abf9090e977a88bd1168d9e59a80d6c6deabe"
+    },
+    {
+      "path": "cases/repository-rule/expected.json",
+      "role": "assertions",
+      "length": 636,
+      "sha256": "edd3c9cd955f6ff0b4d2bee95bc2137fdef23df4abc59e39f291f257e040619e"
+    },
+    {
+      "path": "cases/repository-rule/provider.json",
+      "role": "script",
+      "length": 1780,
+      "sha256": "2d058c834feac760f9ec6155b2c18f3fce174a0ab209a7a5b11dbd9ffff302b0"
+    },
+    {
+      "path": "cases/ts-defect/context.txt",
+      "role": "context",
+      "length": 86,
+      "sha256": "b0d6a8fbb0d417926f060dfd040a79ad4f9bae8621ca7e40ab112877857f9aaf"
+    },
+    {
+      "path": "cases/ts-defect/expected.json",
+      "role": "assertions",
+      "length": 634,
+      "sha256": "62240f6cd375b7a8f367ee0a684841395597a06c80bf1a312b3f1d2d63c6a210"
+    },
+    {
+      "path": "cases/ts-defect/provider.json",
+      "role": "script",
+      "length": 1542,
+      "sha256": "6d76b6d95ec331b13310dea2f4b8cbf88c3427bac7197ece579b60ab9963c7eb"
+    },
+    {
+      "path": "cases/ts-safe/context.txt",
+      "role": "context",
+      "length": 91,
+      "sha256": "77d2ab65906d54bc68c0ac0311aedabd1b39cdf7ec041924795990aa21e2dbb2"
+    },
+    {
+      "path": "cases/ts-safe/expected.json",
+      "role": "assertions",
+      "length": 566,
+      "sha256": "5f8385d03a8789e60733af4d787606b65c29512ff5c7d860c3c018e831ed91a2"
+    },
+    {
+      "path": "cases/ts-safe/provider.json",
+      "role": "script",
+      "length": 874,
+      "sha256": "41a1cc0d5f75e38d5d4348138d83a9b825686ce29f4c2e60b298d1a2ee05bd6c"
+    },
+    {
+      "path": "diff.json",
+      "role": "diff",
+      "length": 4686,
+      "sha256": "044a42c0c50ee8c15054e16f7e442c5e073a06a36ef949514788ab897724817b"
+    },
+    {
+      "path": "policy.txt",
+      "role": "policy",
+      "length": 118,
+      "sha256": "6b4f8217c9eba803a804c4433898fdc36c2107c83b064780d79384f4e6f9294f"
+    },
+    {
+      "path": "source/member-0.txt",
+      "role": "repository",
+      "length": 55,
+      "sha256": "e31330e707dd07b2b6c0e0873cdb5abfb51abf40993fa9f228670463bdc0eaf3"
+    },
+    {
+      "path": "source/member-1.txt",
+      "role": "repository",
+      "length": 86,
+      "sha256": "c063f656c4029f01fddae24e985d2ec3299485f77e01e9ce55a23bf1aaa7b1ab"
+    },
+    {
+      "path": "source/member-2.txt",
+      "role": "repository",
+      "length": 102,
+      "sha256": "d49d129e266f23daec0c5333d5b2c4e2d5444841bec57d0308f9b74f4decd33e"
+    },
+    {
+      "path": "source/member-3.txt",
+      "role": "repository",
+      "length": 83,
+      "sha256": "2cb3819a609411247da766c97a3e1f4cce5c1d9ffc62dc35c4d8d1c0a5eaee4f"
+    },
+    {
+      "path": "source/member-4.txt",
+      "role": "repository",
+      "length": 123,
+      "sha256": "59dbb38cdadc0820a84c90603be117ac8811ac700929433017984b2b921ff70c"
+    },
+    {
+      "path": "source/member-5.txt",
+      "role": "repository",
+      "length": 186,
+      "sha256": "4f10e4667fe4b566ec81fe2e315faa7fc17743df5ba62e3cbb3e8d9ba7878d40"
+    },
+    {
+      "path": "source/member-6.txt",
+      "role": "repository",
+      "length": 84,
+      "sha256": "abe06c6eed2cef01e3ab03ed8eda75e57503fc8919752bd46aea3b24da27ac09"
+    },
+    {
+      "path": "source/member-7.txt",
+      "role": "repository",
+      "length": 118,
+      "sha256": "3b8e652f6f25343266309b40d3c07d2c0776a818757b61fc1f0132e603c330f3"
+    },
+    {
+      "path": "source/member-8.txt",
+      "role": "repository",
+      "length": 84,
+      "sha256": "1013f908ac399af77f5cde7839740c651584078b40f09dae3e90b515a2eeb362"
+    }
+  ],
+  "runs": [
+    {
+      "id": "cs-defect",
+      "case_id": "cs-defect",
+      "transition": "initial",
+      "previous_run_id": null,
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/cs-defect/context.txt",
+      "script": "cases/cs-defect/provider.json",
+      "assertions": "cases/cs-defect/expected.json"
+    },
+    {
+      "id": "cs-safe",
+      "case_id": "cs-safe",
+      "transition": "same_head",
+      "previous_run_id": "cs-defect",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/cs-safe/context.txt",
+      "script": "cases/cs-safe/provider.json",
+      "assertions": "cases/cs-safe/expected.json"
+    },
+    {
+      "id": "ts-defect",
+      "case_id": "ts-defect",
+      "transition": "same_head",
+      "previous_run_id": "cs-safe",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/ts-defect/context.txt",
+      "script": "cases/ts-defect/provider.json",
+      "assertions": "cases/ts-defect/expected.json"
+    },
+    {
+      "id": "ts-safe",
+      "case_id": "ts-safe",
+      "transition": "same_head",
+      "previous_run_id": "ts-defect",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/ts-safe/context.txt",
+      "script": "cases/ts-safe/provider.json",
+      "assertions": "cases/ts-safe/expected.json"
+    },
+    {
+      "id": "repository-rule",
+      "case_id": "repository-rule",
+      "transition": "same_head",
+      "previous_run_id": "ts-safe",
+      "reviewed_identity": {
+        "repository_id": "242",
+        "review_target": 242,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "repository": [
+        {
+          "path": "docs/notes.txt",
+          "file": "source/member-0.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/member-1.txt"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/member-2.txt"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/member-3.txt"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/member-4.txt"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/member-5.txt"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/member-6.txt"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/member-7.txt"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/member-8.txt"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/repository-rule/context.txt",
+      "script": "cases/repository-rule/provider.json",
+      "assertions": "cases/repository-rule/expected.json"
+    }
+  ]
+}

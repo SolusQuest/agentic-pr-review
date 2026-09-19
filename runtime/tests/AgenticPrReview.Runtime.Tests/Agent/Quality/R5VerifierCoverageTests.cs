@@ -205,7 +205,7 @@ public sealed class R5VerifierCoverageTests
             completed ?? attempted, failed ?? 0, invalid, unattempted, attempted * 4, providerCalls,
             0, 0, 0, 0, 0, 0, 0, false,
             new LiveTransportOutcomeCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            0, 104000, stop, "none");
+            0, 104000, stop, "none", []);
 
     private static string LivePlanOutput(LiveRunSummary? summary = null,
         IEnumerable<EvaluationOutcome>? outcomes = null)
@@ -573,6 +573,30 @@ public sealed class R5VerifierCoverageTests
         Assert.Equal(EvaluationSource.Commit, parity["source_commit"]?.GetValue<string>());
         Assert.Equal(13, parity["cases"]!.AsArray().Count);
         Assert.NotNull(parity["configuration_sha256"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task LiveCoverageGateExecutesItsDeclaredFiveCasesAndRejectsMissingRowsAndDiagnostics()
+    {
+        var plan = WriteTemp("{}");
+        try
+        {
+            Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus("live-coverage"), plan).Item1);
+            var lines = new List<string>();
+            var result = await LiveRunner.RunAsync(plan, false, new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
+            Assert.Equal(5, result.Completed);
+            Assert.All(result.Outcomes, row => Assert.Equal(EvaluationCode.Scored, row.Code));
+            Assert.Empty(result.Summary.AgentDiagnostics);
+            Assert.Equal(0, Verify("live-coverage", string.Join('\n', lines), corpus: Corpus("live-coverage")).Item1);
+            Assert.NotEqual(0, Verify("live-coverage", string.Join('\n', lines.Skip(1)), corpus: Corpus("live-coverage")).Item1);
+            var missing = JsonNode.Parse(lines[^1])!.AsObject();
+            missing.Remove("agent_diagnostics");
+            lines[^1] = missing.ToJsonString();
+            Assert.NotEqual(0, Verify("live-coverage", string.Join('\n', lines), corpus: Corpus("live-coverage")).Item1);
+            lines[^1] = LivePlanSummaryLine(result.Summary with { AgentDiagnostics = [new(0, "unknown", null, null)] });
+            Assert.NotEqual(0, Verify("live-coverage", string.Join('\n', lines), corpus: Corpus("live-coverage")).Item1);
+        }
+        finally { File.Delete(plan); }
     }
 
     [Fact]
