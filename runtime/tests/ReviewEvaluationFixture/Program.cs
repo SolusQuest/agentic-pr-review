@@ -27,6 +27,10 @@ internal static class Program
                 return await LiveRunner.InvokeAsync(dryPlan, execute: false);
             if (args is ["live-local", "--execute", "--plan", { } livePlan])
                 return await LiveRunner.InvokeAsync(livePlan, execute: true);
+            if (args is ["live-local", "--dry-run", "--plan", { } reviewDryPlan, "--adjudicate"])
+                return await LiveRunner.InvokeAsync(reviewDryPlan, execute: false, adjudicate: true);
+            if (args is ["live-local", "--execute", "--plan", { } reviewPlan, "--adjudicate"])
+                return await LiveRunner.InvokeAsync(reviewPlan, execute: true, adjudicate: true);
             if (args.Length > 0 && args[0] == "live-local")
             {
                 Console.Error.WriteLine("r5_evaluation_input_invalid");

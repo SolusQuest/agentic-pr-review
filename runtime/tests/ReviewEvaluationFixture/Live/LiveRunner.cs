@@ -34,6 +34,7 @@ internal sealed class LiveOptions
     internal Func<AdmittedReplayRun, IDeepSeekTransport> DryRunTransport { get; init; } =
         run => new ReplayTransport(run.Script, ReplayFault.None);
     internal Action<string>? WriteLine { get; init; }
+    internal LiveAdjudicator? Adjudicator { get; init; }
 }
 
 // Serial bounded scheduler over the admitted plan. Each expanded evaluation is
@@ -43,7 +44,7 @@ internal static class LiveRunner
 {
     private const string BuildId = "r5-live-local";
 
-    internal static async Task<int> InvokeAsync(string planPath, bool execute)
+    internal static async Task<int> InvokeAsync(string planPath, bool execute, bool adjudicate = false)
     {
         using var commandCancel = new CancellationTokenSource();
         ConsoleCancelEventHandler? handler = null;
@@ -55,8 +56,11 @@ internal static class LiveRunner
                 commandCancel.Cancel();
             };
             Console.CancelKeyPress += handler;
-            var result = await RunAsync(planPath, execute, null, commandCancel.Token);
-            return result.StopReason == "complete" ? 0 : 1;
+            var result = await RunAsync(planPath, execute, adjudicate
+                ? new LiveOptions { Adjudicator = new LiveAdjudicator(Console.In, Console.Error) } : null,
+                commandCancel.Token);
+            return result.StopReason == "complete" &&
+                result.Summary.AdjudicationStatus is "not_requested" or "adjudicated" ? 0 : 1;
         }
         catch (LivePlanRejected rejection)
         {
@@ -109,6 +113,7 @@ internal static class LiveRunner
         var accounting = new LiveAccounting(plan.Bounds);
         var rows = ImmutableArray.CreateBuilder<ReadOnlyMemory<byte>>();
         var outcomes = ImmutableArray.CreateBuilder<EvaluationOutcome>();
+        var subjects = new List<LiveAdjudicationCase>();
         var completed = 0;
         var failed = 0;
         var invalid = 0;
@@ -141,7 +146,7 @@ internal static class LiveRunner
                 try
                 {
                     outcome = await AttemptAsync(run, trusted, stable!, descriptor, attempt, runId,
-                        execute, credential, options, accounting, deadline.Token);
+                        execute, credential, options, accounting, subjects, index, deadline.Token);
                     switch (outcome.ExecutionStatus)
                     {
                         case EvaluationStatus.Completed: completed++; break;
@@ -169,6 +174,14 @@ internal static class LiveRunner
             }
         }
 
+        // Provider execution has ended. Keep only admitted subjects, never SESSION
+        // or provider bytes, while a maintainer reviews the private projections.
+        credential = null;
+        var adjudication = options.Adjudicator is { } reviewer
+            ? await reviewer.ReviewAsync(subjects, outcomes, token)
+            : new LiveAdjudicationStatus("not_requested", "none", 0);
+        rows.Clear();
+        foreach (var outcome in outcomes) rows.Add(EvaluationJson.Write(outcome));
         var report = EvaluationReport.Create(rows.ToImmutable());
         if (!report.Succeeded || report.Value is null)
             throw new InvalidOperationException("live_report_invalid");
@@ -184,7 +197,8 @@ internal static class LiveRunner
             accounting.KnownInputTokens, accounting.KnownOutputTokens, accounting.KnownCombinedTokens,
             accounting.ReservedInputTokens, accounting.ReservedOutputTokens, accounting.ReservedCombinedTokens,
             accounting.UsageUnknownCalls, accounting.AccountingViolation, accounting.Outcomes,
-            accounting.ReservedSpendMicroUsd, plan.Bounds.SpendCeilingMicroUsd, stopReason, "none");
+            accounting.ReservedSpendMicroUsd, plan.Bounds.SpendCeilingMicroUsd, stopReason, adjudication.Cleanup,
+            adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases);
         foreach (var row in rows) write(Encoding.UTF8.GetString(row.Span));
         write(Encoding.UTF8.GetString(reportBytes.Value));
         write(JsonSerializer.Serialize(summary, LiveJsonContext.Default.LiveRunSummary));
@@ -219,6 +233,7 @@ internal static class LiveRunner
         AgentSessionMaterializedStableRequest stable, EvaluationRunInput descriptor,
         EvaluationAttempt attempt, string runId, bool execute,
         DeepSeekCredential? credential, LiveOptions options, LiveAccounting accounting,
+        List<LiveAdjudicationCase> subjects, int index,
         CancellationToken token)
     {
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable.StablePlan, runId,
@@ -239,6 +254,8 @@ internal static class LiveRunner
         var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,
             DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead);
         var subject = EvaluationSubject.Admit(build, descriptor);
+        if (subject is not null && options.Adjudicator is not null)
+            subjects.Add(new(index, run, subject));
         return subject is not null
             ? EvaluationScorer.Evaluate(run.Expected, subject)
             : EvaluationScorer.Failure(run.Expected, EvaluationFailure.Unknown, attempt);
