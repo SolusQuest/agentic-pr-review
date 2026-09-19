@@ -272,6 +272,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
                 typeof(MinimalChatContinuation),
                 typeof(MinimalChatContinuationItem),
                 typeof(MinimalChatUsage),
+                typeof(ProjectProviderUsage),
                 typeof(MinimalChatResponse),
                 typeof(IAgentContinuationCodec),
                 typeof(IAgentContinuationStructurePolicy),

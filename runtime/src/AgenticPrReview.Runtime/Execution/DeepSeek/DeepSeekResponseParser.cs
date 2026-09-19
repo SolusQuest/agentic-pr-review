@@ -64,12 +64,14 @@ internal sealed class DeepSeekParsedToolResponse
         ImmutableArray<DeepSeekParsedToolCall> calls,
         string reasoning,
         DeepSeekParsedUsage usage,
-        int capturedBytes)
+        int capturedBytes,
+        string responseModel)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(reasoning);
         ArgumentNullException.ThrowIfNull(usage);
-        if (calls.IsDefaultOrEmpty ||
+        if (responseModel is not (DeepSeekRequestWriter.Model or "deepseek-flash") ||
+            calls.IsDefaultOrEmpty ||
             calls.Length > AgentLimits.ToolCallsPerResponse ||
             calls.Any(call => call is null) ||
             !AgentValueDomains.IsUtf8(
@@ -92,6 +94,7 @@ internal sealed class DeepSeekParsedToolResponse
         Reasoning = reasoning;
         Usage = usage;
         CapturedBytes = capturedBytes;
+        ResponseModel = responseModel;
     }
 
     internal string Content { get; }
@@ -99,6 +102,7 @@ internal sealed class DeepSeekParsedToolResponse
     internal string Reasoning { get; }
     internal DeepSeekParsedUsage Usage { get; }
     internal int CapturedBytes { get; }
+    internal string ResponseModel { get; }
 
     public override string ToString() =>
         $"deepseek_tool_response(call_count={Calls.Length}," +
@@ -140,9 +144,13 @@ internal sealed class DeepSeekParsedToolCall
 
 internal sealed class DeepSeekParsedUsage
 {
-    internal DeepSeekParsedUsage(long inputTokens, long outputTokens)
+    internal DeepSeekParsedUsage(long inputTokens, long outputTokens,
+        long cacheReadInputTokens, long uncachedInputTokens)
     {
-        if (inputTokens < 0 || outputTokens < 0)
+        if (inputTokens < 0 || outputTokens < 0 ||
+            cacheReadInputTokens < 0 || uncachedInputTokens < 0 ||
+            cacheReadInputTokens > inputTokens ||
+            uncachedInputTokens != inputTokens - cacheReadInputTokens)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(inputTokens),
@@ -151,10 +159,14 @@ internal sealed class DeepSeekParsedUsage
 
         InputTokens = inputTokens;
         OutputTokens = outputTokens;
+        CacheReadInputTokens = cacheReadInputTokens;
+        UncachedInputTokens = uncachedInputTokens;
     }
 
     internal long InputTokens { get; }
     internal long OutputTokens { get; }
+    internal long CacheReadInputTokens { get; }
+    internal long UncachedInputTokens { get; }
 
     public override string ToString() => "deepseek_usage";
 }
@@ -302,7 +314,8 @@ internal static class DeepSeekResponseParser
                     calls,
                     reasoning!,
                     usage!,
-                    capturedBytes));
+                    capturedBytes,
+                    root.GetProperty("model").GetString()!));
         }
 
         return TryReadExactString(choice, "finish_reason", "stop") &&
@@ -507,7 +520,8 @@ internal static class DeepSeekResponseParser
             return false;
         }
 
-        usage = new DeepSeekParsedUsage(promptTokens, completionTokens);
+        usage = new DeepSeekParsedUsage(promptTokens, completionTokens,
+            cacheHitTokens, cacheMissTokens);
         return true;
     }
 

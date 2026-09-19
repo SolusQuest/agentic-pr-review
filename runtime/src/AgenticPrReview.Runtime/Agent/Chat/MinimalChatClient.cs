@@ -27,7 +27,8 @@ internal sealed class MinimalChatClient(
                     ? null
                     : new ProjectChatUsage(
                         response.Usage.InputTokens,
-                        response.Usage.OutputTokens),
+                        response.Usage.OutputTokens,
+                        response.Usage.ProviderUsage),
                 response.CapturedResponseBodyBytes,
                 response.Continuation is null
                     ? null
@@ -286,7 +287,8 @@ internal sealed record MinimalChatContinuationItem(
 
 internal sealed record MinimalChatUsage(
     long InputTokens,
-    long OutputTokens);
+    long OutputTokens,
+    ProjectProviderUsage? ProviderUsage = null);
 
 internal sealed record MinimalChatResponse(
     MinimalChatMessage Message,

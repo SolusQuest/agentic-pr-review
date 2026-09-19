@@ -60,6 +60,9 @@ public sealed class DeepSeekResponseParserTests
         Assert.Equal(Encoding.UTF8.GetByteCount(json), response.CapturedBytes);
         Assert.Equal(7, response.Usage.InputTokens);
         Assert.Equal(5, response.Usage.OutputTokens);
+        Assert.Equal(2, response.Usage.CacheReadInputTokens);
+        Assert.Equal(5, response.Usage.UncachedInputTokens);
+        Assert.Equal("deepseek-v4-flash", response.ResponseModel);
         Assert.Equal(
             ["call_same", "call_other", "call_same"],
             response.Calls.Select(call => call.Id));
