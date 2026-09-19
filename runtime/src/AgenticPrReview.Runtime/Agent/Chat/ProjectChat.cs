@@ -84,7 +84,19 @@ internal sealed record ProjectToolResultContent(
 
 internal sealed record ProjectChatUsage(
     long InputTokens,
-    long OutputTokens);
+    long OutputTokens,
+    ProjectProviderUsage? ProviderUsage = null);
+
+// Optional observation only; never part of Agent admission or SESSION.
+internal sealed record ProjectProviderUsage(
+    string ProviderId,
+    string RequestedModel,
+    string ResponseModel,
+    long CacheReadInputTokens,
+    long UncachedInputTokens)
+{
+    public override string ToString() => "project_provider_usage";
+}
 
 internal sealed record ProjectChatResponse(
     ProjectChatMessage Message,

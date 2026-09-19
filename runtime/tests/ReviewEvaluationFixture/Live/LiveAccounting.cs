@@ -22,6 +22,13 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     private int _backendExceptions;
     private int _normalizationExceptions;
     private int _refusalsAttributed;
+    private int _cacheMeasured;
+    private int _cacheUnavailable;
+    private long _cacheReadInput;
+    private long _uncachedInput;
+    private bool _cacheOverflow;
+    private bool _responseV4Flash;
+    private bool _responseFlash;
 
     internal long Sends { get; private set; }
     internal long ReservedInputTokens { get; private set; }
@@ -35,6 +42,28 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     internal bool AccountingViolation { get; private set; }
     internal bool BudgetRefused => _budgetRefused > 0;
     internal bool RateLimited => _http429 > 0;
+
+    internal LiveCacheUsageSummary CacheUsage
+    {
+        get
+        {
+            // Unknown total usage and missing cache partition are independent.
+            // Sends also covers abandoned/cancelled calls without claiming a
+            // per-send journal (the next leaf owns exact reconciliation).
+            var incomplete = _cacheUnavailable > 0 || UsageUnknownCalls > 0 ||
+                Sends > _cacheMeasured;
+            return new(DeepSeekAdapterContext.Provider,
+                _cacheOverflow || _cacheMeasured == 0 ? "unavailable" :
+                    incomplete ? "partial" : "measured",
+                _cacheMeasured, _cacheUnavailable,
+                _cacheOverflow || _cacheMeasured == 0 ? null : _cacheReadInput,
+                _cacheOverflow || _cacheMeasured == 0 ? null : _uncachedInput,
+                "not_applicable", DeepSeekRequestWriter.Model,
+                [.. (_responseV4Flash ? new[] { DeepSeekRequestWriter.Model } : []),
+                 .. (_responseFlash ? new[] { "deepseek-flash" } : [])],
+                "unavailable");
+        }
+    }
 
     internal LiveTransportOutcomeCounts Outcomes => new(
         _requestRejected, _responseTooLarge, _http4xx, _http429, _http5xx,
@@ -110,6 +139,40 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
         KnownInputTokens += usage.InputTokens;
         KnownOutputTokens += usage.OutputTokens;
         KnownCombinedTokens += usage.InputTokens + usage.OutputTokens;
+        RecordCacheUsage(usage);
+    }
+
+    private void RecordCacheUsage(ProjectChatUsage usage)
+    {
+        var observed = usage.ProviderUsage;
+        // Fail closed for the optional projection only. Synthetic backends
+        // need not provide it, and invalid optional data cannot reject a run.
+        if (observed is null ||
+            observed.ProviderId != DeepSeekAdapterContext.Provider ||
+            observed.RequestedModel != DeepSeekRequestWriter.Model ||
+            observed.ResponseModel is not (DeepSeekRequestWriter.Model or "deepseek-flash") ||
+            observed.CacheReadInputTokens < 0 || observed.UncachedInputTokens < 0 ||
+            observed.CacheReadInputTokens > usage.InputTokens ||
+            observed.UncachedInputTokens != usage.InputTokens - observed.CacheReadInputTokens)
+        {
+            _cacheUnavailable++;
+            return;
+        }
+        _cacheMeasured++;
+        _responseV4Flash |= observed.ResponseModel == DeepSeekRequestWriter.Model;
+        _responseFlash |= observed.ResponseModel == "deepseek-flash";
+        if (_cacheOverflow) return;
+        try
+        {
+            var hit = checked(_cacheReadInput + observed.CacheReadInputTokens);
+            var miss = checked(_uncachedInput + observed.UncachedInputTokens);
+            _cacheReadInput = hit;
+            _uncachedInput = miss;
+        }
+        catch (OverflowException)
+        {
+            _cacheOverflow = true;
+        }
     }
 
     internal void RecordUsageUnknown() => UsageUnknownCalls++;

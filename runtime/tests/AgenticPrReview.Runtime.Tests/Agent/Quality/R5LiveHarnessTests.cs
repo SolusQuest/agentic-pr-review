@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text;
 using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
@@ -12,6 +14,155 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R5LiveHarnessTests
 {
+    [Theory]
+    [InlineData(2, 5, 3)]
+    [InlineData(0, 7, 3)]
+    [InlineData(0, 0, 0)]
+    public async Task CachePartitionReachesSafeSummaryWithBothValidatedModelIdentities(
+        long hit, long miss, long output)
+    {
+        using var plan = new PlanFile();
+        var lines = new List<string>();
+        var count = 0;
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        {
+            var replay = new ReplayTransport(run.Script, ReplayFault.None);
+            return new FakeTransport(async (request, token) =>
+            {
+                using var sent = JsonDocument.Parse(request);
+                Assert.Equal("deepseek-v4-flash", sent.RootElement.GetProperty("model").GetString());
+                var original = await replay.SendAsync(request, token);
+                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
+                body["model"] = ++count % 2 == 0 ? "deepseek-flash" : "deepseek-v4-flash";
+                body["id"] = Canary;
+                body["system_fingerprint"] = Canary;
+                body["usage"] = new JsonObject
+                {
+                    ["prompt_tokens"] = hit + miss, ["completion_tokens"] = output,
+                    ["total_tokens"] = hit + miss + output,
+                    ["prompt_cache_hit_tokens"] = hit, ["prompt_cache_miss_tokens"] = miss,
+                    ["prompt_tokens_details"] = new JsonObject { ["cached_tokens"] = 999 },
+                    ["completion_tokens_details"] = new JsonObject { ["reasoning_tokens"] = 999 },
+                };
+                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+            });
+        }), CancellationToken.None);
+
+        Assert.Equal(1, result.Completed);
+        Assert.True(count >= 2);
+        Assert.Equal(count * (hit + miss), result.Summary.KnownInputTokens);
+        Assert.Equal(count * output, result.Summary.KnownOutputTokens);
+        Assert.Equal(count * (hit + miss + output), result.Summary.KnownCombinedTokens);
+        Assert.Equal(0, result.Summary.UsageUnknownCalls);
+        var cache = Assert.IsType<LiveCacheUsageSummary>(result.Summary.CacheUsage);
+        Assert.Equal("measured", cache.Status);
+        Assert.Equal(count, cache.MeasuredCalls);
+        Assert.Equal(0, cache.KnownUsageWithoutCacheCalls);
+        Assert.Equal(count * hit, cache.CacheReadInputTokens);
+        Assert.Equal(count * miss, cache.UncachedInputTokens);
+        Assert.Equal("deepseek", cache.ProviderId);
+        Assert.Equal("deepseek-v4-flash", cache.RequestedModel);
+        Assert.Equal(new[] { "deepseek-v4-flash", "deepseek-flash" }, cache.ResponseModels);
+        Assert.Equal("not_applicable", cache.CacheWriteBillingStatus);
+        Assert.Equal("unavailable", cache.BackendSnapshotStatus);
+        Assert.DoesNotContain(Canary, string.Join('\n', lines));
+        var restored = JsonSerializer.Deserialize(lines[^1], LiveJsonContext.Default.LiveRunSummary)!;
+        Assert.Equal(JsonSerializer.Serialize(cache, LiveJsonContext.Default.LiveCacheUsageSummary),
+            JsonSerializer.Serialize(restored.CacheUsage, LiveJsonContext.Default.LiveCacheUsageSummary));
+    }
+
+    [Fact]
+    public async Task MissingOptionalCacheNeverMakesKnownTotalUsageUnknown()
+    {
+        var accounting = CacheAccounting();
+        var client = new LiveChatObserver(new MinimalChatClient(new NoCacheBackend()), accounting);
+        await client.GetResponseAsync(new([], [], null), CancellationToken.None);
+        Assert.Equal(10, accounting.KnownInputTokens);
+        Assert.Equal(2, accounting.KnownOutputTokens);
+        Assert.Equal(12, accounting.KnownCombinedTokens);
+        Assert.Equal(0, accounting.UsageUnknownCalls);
+        Assert.Equal("unavailable", accounting.CacheUsage.Status);
+        Assert.Null(accounting.CacheUsage.CacheReadInputTokens);
+        Assert.Null(accounting.CacheUsage.UncachedInputTokens);
+        Assert.Equal(1, accounting.CacheUsage.KnownUsageWithoutCacheCalls);
+        Assert.Empty(accounting.CacheUsage.ResponseModels);
+        AssertCacheRoundTrip(accounting.CacheUsage);
+
+        accounting.RecordUsage(new(7, 3, new("deepseek", "deepseek-v4-flash", "deepseek-flash", 0, 7)));
+        Assert.Equal("partial", accounting.CacheUsage.Status);
+        Assert.Equal(0, accounting.CacheUsage.CacheReadInputTokens);
+        Assert.Equal(7, accounting.CacheUsage.UncachedInputTokens);
+        Assert.Equal(17, accounting.KnownInputTokens);
+        Assert.Equal(0, accounting.UsageUnknownCalls);
+        AssertCacheRoundTrip(accounting.CacheUsage);
+    }
+
+    [Fact]
+    public void CacheAvailabilityNeverFabricatesZeroAndDropsUntrustedOptionalFields()
+    {
+        var accounting = CacheAccounting();
+        Assert.Equal("unavailable", accounting.CacheUsage.Status);
+        Assert.Null(accounting.CacheUsage.CacheReadInputTokens);
+        AssertCacheRoundTrip(accounting.CacheUsage);
+        foreach (var observation in new ProjectProviderUsage[]
+        {
+            new(Canary, "deepseek-v4-flash", "deepseek-flash", 2, 5),
+            new("deepseek", Canary, "deepseek-flash", 2, 5),
+            new("deepseek", "deepseek-v4-flash", Canary, 2, 5),
+            new("deepseek", "deepseek-v4-flash", "deepseek-flash", -1, 8),
+            new("deepseek", "deepseek-v4-flash", "deepseek-flash", 2, 6),
+            new("deepseek", "deepseek-v4-flash", "deepseek-flash", long.MaxValue, 1),
+        }) accounting.RecordUsage(new(7, 3, observation));
+        Assert.Equal(42, accounting.KnownInputTokens);
+        Assert.Equal(0, accounting.UsageUnknownCalls);
+        Assert.Equal("unavailable", accounting.CacheUsage.Status);
+        Assert.Equal(6, accounting.CacheUsage.KnownUsageWithoutCacheCalls);
+        Assert.DoesNotContain(Canary, AssertCacheRoundTrip(accounting.CacheUsage));
+        Assert.False(accounting.AccountingViolation);
+    }
+
+    [Fact]
+    public void CacheSubtotalRemainsPartialAfterUnknownUsageAndOverflowIsUnavailable()
+    {
+        var accounting = CacheAccounting();
+        accounting.RecordUsage(new(7, 3, new("deepseek", "deepseek-v4-flash", "deepseek-flash", 2, 5)));
+        accounting.RecordUsageUnknown();
+        Assert.Equal("partial", accounting.CacheUsage.Status);
+        Assert.Equal(2, accounting.CacheUsage.CacheReadInputTokens);
+        Assert.Equal(0, accounting.CacheUsage.KnownUsageWithoutCacheCalls);
+        Assert.Equal(1, accounting.UsageUnknownCalls);
+        AssertCacheRoundTrip(accounting.CacheUsage);
+
+        var overflow = CacheAccounting();
+        for (var i = 0; i < 2; i++)
+            overflow.RecordUsage(new(long.MaxValue, 0,
+                new("deepseek", "deepseek-v4-flash", "deepseek-flash", long.MaxValue, 0)));
+        Assert.Equal("unavailable", overflow.CacheUsage.Status);
+        Assert.Null(overflow.CacheUsage.CacheReadInputTokens);
+        Assert.Null(overflow.CacheUsage.UncachedInputTokens);
+        AssertCacheRoundTrip(overflow.CacheUsage);
+    }
+
+    private static LiveAccounting CacheAccounting() => new(
+        new(4, 8, 262144, 32768, 294912, 120, 100000, new(65536, 4096, 1000)));
+
+    private static string AssertCacheRoundTrip(LiveCacheUsageSummary cache)
+    {
+        var json = JsonSerializer.Serialize(cache, LiveJsonContext.Default.LiveCacheUsageSummary);
+        var restored = JsonSerializer.Deserialize(json, LiveJsonContext.Default.LiveCacheUsageSummary);
+        Assert.Equal(json, JsonSerializer.Serialize(restored, LiveJsonContext.Default.LiveCacheUsageSummary));
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal("not_applicable", document.RootElement.GetProperty("cache_write_billing_status").GetString());
+        Assert.False(document.RootElement.TryGetProperty("cache_write_tokens", out _));
+        return json;
+    }
+
+    private sealed class NoCacheBackend : IMinimalChatBackend
+    {
+        public Task<MinimalChatResponse> GetResponseAsync(MinimalChatRequest request, CancellationToken token) =>
+            Task.FromResult(new MinimalChatResponse(new("assistant", []), new(10, 2)));
+    }
+
     [Theory]
     [InlineData("sequence", AgentFailureCodes.TerminalSequenceInvalid)]
     [InlineData("arguments", AgentFailureCodes.ToolArgumentsInvalid)]
