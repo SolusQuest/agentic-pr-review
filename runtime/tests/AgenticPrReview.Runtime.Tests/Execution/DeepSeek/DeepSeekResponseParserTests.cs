@@ -9,6 +9,18 @@ namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 public sealed class DeepSeekResponseParserTests
 {
     [Fact]
+    public void AcceptsDocumentedFlashResponseAliasWithoutBroadeningModelAdmission()
+    {
+        var original = Response();
+        AssertSuccess(original);
+        AssertSuccess(original.Replace("deepseek-v4-flash", "deepseek-flash", StringComparison.Ordinal));
+        foreach (var unsupported in new[] { "deepseek-v4-pro", "deepseek-chat", "deepseek-flash-other", "DEEPSEEK-FLASH", " deepseek-flash" })
+            AssertInvalid(original.Replace("deepseek-v4-flash", unsupported, StringComparison.Ordinal));
+        // Alias admission must not bypass validation of usage or tool messages.
+        AssertInvalid(Response(usage: "{}").Replace("deepseek-v4-flash", "deepseek-flash", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ParsesOrderedCallsWithoutStealingAgentAdmission()
     {
         const string noncanonical = "{ \"path\" : \"src/a.cs\" }";

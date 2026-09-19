@@ -10,7 +10,7 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R5LiveHarnessTests
 {
-    private sealed class ReviewInput(StringWriter prompts, string action) : TextReader
+    private sealed class ReviewInput(StringWriter prompts, string action, string? staleField = null, bool empty = false) : TextReader
     {
         private string? command;
         private int position;
@@ -32,6 +32,8 @@ public sealed class R5LiveHarnessTests
                 });
                 if (action == "stale") annotation["execution_sha256"] = new string('0', 64);
                 if (action == "duplicate") annotation["findings"]!.AsArray().Add(annotation["findings"]![0]!.DeepClone());
+                if (empty) annotation["findings"] = new JsonArray();
+                if (staleField is not null) annotation[staleField] = new string('0', 64);
                 File.WriteAllText(path, action == "malformed" ? "{" : annotation.ToJsonString());
                 command = action == "skip" ? "skip\n" : action == "eof" ? "" : action == "ai" ? "ai-adjudicated\n" : "human-confirmed\n";
             }
@@ -89,6 +91,37 @@ public sealed class R5LiveHarnessTests
             await Task.Delay(System.Threading.Timeout.Infinite, cancellationToken);
             return 0;
         }
+    }
+
+    [Theory]
+    [InlineData("corpus_sha256")]
+    [InlineData("case_sha256")]
+    [InlineData("configuration_sha256")]
+    [InlineData("execution_sha256")]
+    [InlineData(null)]
+    public async Task EvidenceFailureCannotBypassAnnotationAdmission(string? staleField)
+    {
+        using var plan = new PlanFile(document =>
+        {
+            AdjudicationPlan(document);
+            document["schedule"] = new JsonArray(new JsonObject { ["case_id"] = "no-required-tool", ["repeats"] = 1 });
+        });
+        using var prompts = new StringWriter();
+        // Null field tests an out-of-range ordinal against an empty completed review.
+        using var input = new ReviewInput(prompts, "ai", staleField, empty: staleField is not null);
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { }, Adjudicator = new LiveAdjudicator(input, prompts),
+        }, CancellationToken.None);
+        Assert.Equal("input_invalid", result.Summary.AdjudicationStatus);
+        Assert.Equal(0, result.Summary.AiAdjudicatedCases);
+        Assert.Equal(0, result.Summary.HumanConfirmedCases);
+        Assert.Equal("cleaned", result.Summary.Cleanup);
+        Assert.False(Directory.Exists(input.Root));
+        var row = Assert.Single(result.Outcomes);
+        Assert.Equal(EvaluationStatus.Completed, row.ExecutionStatus);
+        Assert.Equal(EvaluationCode.RequiredToolMissing, row.Code);
+        Assert.Equal(ModelObservationStatus.NotEvaluated, row.ModelStatus);
     }
 
     [Fact]

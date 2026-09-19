@@ -61,7 +61,8 @@ internal sealed class LiveAdjudicator(TextReader input, TextWriter prompts)
                 using (var stream = new FileStream(annotationPath, FileMode.Open, FileAccess.Read, FileShare.Read))
                     length = await stream.ReadAtLeastAsync(bytes, bytes.Length, false, deadline.Token);
                 var supplied = EvaluationJson.ReadAdjudication(bytes.AsSpan(0, length));
-                if (supplied is null) { status = "input_invalid"; break; }
+                if (supplied is null || !EvaluationScorer.IsValidAdjudication(item.Run.Expected, item.Subject, supplied))
+                { status = "input_invalid"; break; }
                 var scored = EvaluationScorer.Evaluate(item.Run.Expected, item.Subject, supplied);
                 // Invalid/stale annotations do not replace the original outcome.
                 if (scored.Code == EvaluationCode.AdjudicationInvalid)
