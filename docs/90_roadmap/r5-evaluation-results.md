@@ -78,3 +78,51 @@ The local Windows operator wrapper initially detached the evaluator's console wh
 Validation included 235 affected DeepSeek/scorer/live-harness tests on Windows, keyless selected-case dry-run, Linux framework/Native AOT R5 proof and corrected-head Native AOT verification. The TypeScript suite passed all 764 tests in a serial Linux rerun after local concurrent runs timed out; formatting/typecheck passed, and corrected-head GitHub `check`, integration, R5 gate and both CodeQL analyses passed. Required full-runtime CI and final PR review are tracked on [PR #264](https://github.com/SolusQuest/agentic-pr-review/pull/264); this report does not substitute an earlier source's checks for final-head validation.
 
 This small synthetic, single-sample-per-case schedule cannot support general model rankings, real-repository performance, economics, cache benefits or release readiness. Delegated AI judgment has no independent human audit. R6 owns economics and R7 owns release decisions.
+
+## Issue #265 follow-up — separate population, 2026-09-19
+
+[PR #266](https://github.com/SolusQuest/agentic-pr-review/pull/266) repairs the three engineering gaps tracked together in [#265](https://github.com/SolusQuest/agentic-pr-review/issues/265): authored live returned-line coverage instead of deterministic read-window hashes, a real credential logging sink with a counterfactual oracle, and safe per-attempt Agent rejection diagnostics. Local tests establish those repairs. **The new live observation remains inconclusive for model quality:** one of five executions completed, four rejected tool arguments, and the completed subject did not satisfy the authored coverage requirements. There are still no quality-eligible cases. The original #252 results above are unchanged; revised expectations and source prevent interpreting these populations as a clean model-only comparison.
+
+### Authorization and executed input
+
+The maintainer authorized this follow-up, paid calls, correction-PR-head execution and delegated AI adjudication. Before key access, the current source passed focused C# regressions, the full R5 framework/Native AOT gate with eight scenario parity checks and cleanup, `npm run check` (764 tests), `npm run dist:check`, and a five-case keyless dry run (20 simulated sends). An additional 130 report/replay-consumer tests passed. Execution used explicitly piped standard streams and a scrubbed credential-only child environment; no console recovery was needed.
+
+The primary plan retained the five-case order and per-invocation/token/time ceilings described above: one attempt each, at most 40 calls, 600 seconds and USD 4 conservative reservation. A separate USD 5 follow-up campaign ceiling included diagnostic capacity. After local investigation, one explicitly bounded diagnostic used `cs-safe`, at most one send, 60 seconds, 32,768 input tokens, 4,096 output tokens and USD 0.10. Neither invocation retried automatically. The request model and adapter remained unchanged. Refreshed [official USD pricing](https://api-docs.deepseek.com/quick_start/pricing/) listed peak Flash rates of USD 0.30/M uncached input and USD 1.20/M output; the per-call token ceiling implies at most USD 0.0147456 at those rates, below the USD 0.10 reservation. These are conservative bounds, not measured bills.
+
+| Executed identity          | Value                                                              |
+| -------------------------- | ------------------------------------------------------------------ |
+| Clean source commit        | `be7638294b4dddd9d50dc0fe60039491a0e86b26`                         |
+| Source tree                | `3b4bcd59cfec6c27a1936781786450a235e69a45`                         |
+| Five-case live corpus      | `4ae5758695591a5036b0fc5a825cc8dabf4a4196bbe5da6d433eb73f51a222d4` |
+| Primary plan               | `db5257b8f966fef9c04fe480a9c8c875f64b60bd6452ce7f3cd41b4064ad2816` |
+| One-call diagnostic plan   | `541c8f171e8f3829646c1793e9406c92914100f29626f2f76d6e4f481ad2c166` |
+| Live outcome configuration | `cfb58f964fde79ff40dd7d83485379109b835f06bafe1c4ca151b2d46b851991` |
+| Framework evaluator DLL    | `5583e54234364cd40d768eff6958bb56ce01921499dd0dd7bb45ae6d9b971ea2` |
+
+These are execution provenance, not a candidate-source freeze. The diagnostic used a temporary locally tested observer around the same production transport and live scheduler. It forwarded request/response bytes unchanged, emitted only allowlisted tool names, fixed argument-shape labels and existing bounded summaries, and retained no raw response. It is diagnostic evidence, not another completed benchmark sample. Later test/documentation edits do not justify another paid run.
+
+### Attempts, diagnostics and adjudication
+
+| Primary case / schedule index | Result                                                | Agent model / tool calls when failed |
+| ----------------------------- | ----------------------------------------------------- | ------------------------------------ |
+| `cs-defect` / 0               | Completed; `RequiredObservationMissing`; two findings | Not a failed attempt                 |
+| `cs-safe` / 1                 | Failed; `agent_tool_arguments_invalid`                | 1 / 0                                |
+| `ts-defect` / 2               | Failed; `agent_tool_arguments_invalid`                | 1 / 0                                |
+| `ts-safe` / 3                 | Failed; `agent_tool_arguments_invalid`                | 2 / 2                                |
+| `repository-rule` / 4         | Failed; `agent_tool_arguments_invalid`                | 3 / 6                                |
+
+The completed execution was `92eee758b69c944ecb420caa7c148e46dd2e9b68bac2556425fd52f45cd12d1d`. Its null-dereference finding was substantively correct, but cited the caller through a diff observation with lines 1–4 rather than the authored `read_file` coverage and exact defect line 3. The unrelated timeout finding was rejected under this case's focused scope. Bound AI annotations covered both findings, with no expected-defect credit. They did not override the coverage failure: Q4 retained all five cases as `NotEvaluated`, zero eligible cases, null incomplete precision/recall, and zero semantic credit. `ai_adjudicated_cases=1`, `human_confirmed_cases=0`; the summary's `pending` status reflects ineligible scoring, not unfinished review. The private packet was cleaned and its directory independently checked absent.
+
+The four typed diagnostics establish the tool-argument admission boundary, not the precise invalid field or whether each rejection was caused by model noncompliance or a project defect. Local checks confirmed valid omitted optional arguments are accepted and explicit nulls, empty paths and invalid line bounds are rejected. The one-call diagnostic returned accepted `list_changed_files` and `read_file` arguments, so it did **not** reproduce the rejection. Its next send was mechanically refused by the one-call cap, yielding `bound_stop` and `agent_chat_failed` with Agent counts 2/2 but only one actual provider send. This demonstrates why Agent counts and transport accounting must remain separate. No additional project-owned production defect was established; the exact causes of the earlier four rejections remain unresolved. Expectations and parsers were not relaxed to obtain a successful run.
+
+### Complete follow-up accounting and disposition
+
+| Invocation            | Scheduled / attempted | Completed / failed / invalid / unattempted | Provider calls | Known input / output tokens | Unknown-usage calls | Reserved USD |
+| --------------------- | --------------------- | ------------------------------------------ | -------------- | --------------------------- | ------------------- | ------------ |
+| Primary five-case run | 5 / 5                 | 1 / 4 / 0 / 0                              | 11             | 22,107 / 2,992              | 0                   | 1.10         |
+| One-call diagnostic   | 1 / 1                 | 0 / 1 / 0 / 0                              | 1              | 969 / 69                    | 0                   | 0.10         |
+| Follow-up campaign    | 6 / 6                 | 1 / 5 / 0 / 0                              | 12             | 23,076 / 3,061              | 0                   | 1.20         |
+
+The primary run reserved 360,448 input, 45,056 output and 405,504 combined tokens; the diagnostic reserved 32,768 input, 4,096 output and 36,864 combined tokens. Known combined usage was 26,137. Neither invocation reported an accounting violation. The primary run had no transport/backend/normalization failures and stopped `complete`; only the diagnostic's deliberate next-send refusal incremented its budget-refused/backend-exception counters. Together with the separately preserved #252 campaign, all work has used 35 provider calls and USD 3.50 conservative reservation, with 75,371 known input tokens, 8,050 known output tokens and the original five unknown-usage calls still visible. No diagnostic row is silently added to or removed from the primary quality population.
+
+The three evaluator/corpus/observability repairs are supported by deterministic regression evidence, including alternate valid read windows, invalid grounding/annotations, coherent harmless logging mutations, repeated and cancelled attempts, fixed-code diagnostics and new Native AOT execution. This closes the confirmed implementation gaps without claiming a usable quality baseline. Future model-quality work still needs a separately authored bounded investigation of tool-argument failures and coverage/scoping behavior. Remaining failure observations must stay visible; this report imposes no success-rate target and does not authorize milestone closure, release or merge.

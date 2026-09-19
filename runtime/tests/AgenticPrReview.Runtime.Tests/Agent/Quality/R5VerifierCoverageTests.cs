@@ -202,10 +202,10 @@ public sealed class R5VerifierCoverageTests
         new("r5-live-local-v1", kind, Hex('f'),
             CorpusSha("quality", "bundle"), sourceCommit ?? EvaluationSource.Commit,
             EvaluationSource.Tree, EvaluationSource.Clean, scheduled, attempted,
-            completed ?? attempted, failed ?? 0, invalid, unattempted, attempted * 4, providerCalls,
+            completed ?? attempted - 2, failed ?? 2, invalid, unattempted, attempted * 4, providerCalls,
             0, 0, 0, 0, 0, 0, 0, false,
             new LiveTransportOutcomeCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            0, 104000, stop, "none");
+            0, 104000, stop, "none", [new(8, "unknown", null, null), new(12, "unknown", null, null)]);
 
     private static string LivePlanOutput(LiveRunSummary? summary = null,
         IEnumerable<EvaluationOutcome>? outcomes = null)
@@ -573,6 +573,82 @@ public sealed class R5VerifierCoverageTests
         Assert.Equal(EvaluationSource.Commit, parity["source_commit"]?.GetValue<string>());
         Assert.Equal(13, parity["cases"]!.AsArray().Count);
         Assert.NotNull(parity["configuration_sha256"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task LivePlanDiagnosticsMustCoverEveryFailedAttemptExactlyOnce()
+    {
+        var plan = WriteTemp("{}");
+        try
+        {
+            Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus("quality", "bundle"), plan).Item1);
+            var lines = new List<string>();
+            var run = await LiveRunner.RunAsync(plan, false, new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
+            Assert.Equal(new[] { "wrong-evidence", "pathless-proposal" },
+                run.Outcomes.Where(o => o.ExecutionStatus == EvaluationStatus.Failed).Select(o => o.CaseId));
+            Assert.Equal(new[] { 8, 12 }, run.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex));
+            Assert.Equal(0, Verify("live-plan", string.Join('\n', lines), corpus: Corpus("quality", "bundle")).Code);
+            lines[^1] = LivePlanSummaryLine(run.Summary with
+            { Completed = 13, Failed = 0, AgentDiagnostics = [] });
+            Assert.Equal(1, Verify("live-plan", string.Join('\n', lines), corpus: Corpus("quality", "bundle")).Code);
+            foreach (var diagnostics in new ImmutableArray<LiveAgentDiagnostic>[]
+            {
+                [], [run.Summary.AgentDiagnostics[0]], [run.Summary.AgentDiagnostics[1]],
+                [run.Summary.AgentDiagnostics[0], run.Summary.AgentDiagnostics[0]],
+                [run.Summary.AgentDiagnostics[0], run.Summary.AgentDiagnostics[1] with { ScheduleIndex = 0 }],
+                [run.Summary.AgentDiagnostics[0], run.Summary.AgentDiagnostics[1] with { ScheduleIndex = 13 }],
+            })
+            {
+                lines[^1] = LivePlanSummaryLine(run.Summary with { AgentDiagnostics = diagnostics });
+                var (code, verdict) = Verify("live-plan", string.Join('\n', lines), corpus: Corpus("quality", "bundle"));
+                Assert.Equal(1, code);
+                Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+            }
+            // Coverage is a set: a different serialization order is not missing evidence.
+            lines[^1] = LivePlanSummaryLine(run.Summary with
+            { AgentDiagnostics = run.Summary.AgentDiagnostics.Reverse().ToImmutableArray() });
+            Assert.Equal(0, Verify("live-plan", string.Join('\n', lines), corpus: Corpus("quality", "bundle")).Code);
+        }
+        finally { File.Delete(plan); }
+    }
+
+    [Fact]
+    public void LivePlanUnknownFailureStillRequiresAnExplicitDiagnostic()
+    {
+        var corpusSha = CorpusSha("quality", "bundle");
+        var expected = Expected("quality", "bundle");
+        var rows = QualityIds.Select((id, i) => OutcomeFor(id, corpusSha, expected[id],
+            attemptSha: new string('4', 62) + i.ToString("x2"))).ToArray();
+        rows[8] = rows[8] with { FailureSource = EvaluationFailureSource.Unknown, FailureKind = EvaluationFailureKind.Unknown };
+        Assert.Equal(0, Verify("live-plan", LivePlanOutput(outcomes: rows), corpus: Corpus("quality", "bundle")).Code);
+        var missing = PlanSummary() with { AgentDiagnostics = [new(12, "unknown", null, null)] };
+        var (code, verdict) = Verify("live-plan", LivePlanOutput(missing, rows), corpus: Corpus("quality", "bundle"));
+        Assert.Equal(1, code);
+        Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task LiveCoverageGateExecutesItsDeclaredFiveCasesAndRejectsMissingRowsAndDiagnostics()
+    {
+        var plan = WriteTemp("{}");
+        try
+        {
+            Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus("live-coverage"), plan).Item1);
+            var lines = new List<string>();
+            var result = await LiveRunner.RunAsync(plan, false, new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
+            Assert.Equal(5, result.Completed);
+            Assert.All(result.Outcomes, row => Assert.Equal(EvaluationCode.Scored, row.Code));
+            Assert.Empty(result.Summary.AgentDiagnostics);
+            Assert.Equal(0, Verify("live-coverage", string.Join('\n', lines), corpus: Corpus("live-coverage")).Item1);
+            Assert.NotEqual(0, Verify("live-coverage", string.Join('\n', lines.Skip(1)), corpus: Corpus("live-coverage")).Item1);
+            var missing = JsonNode.Parse(lines[^1])!.AsObject();
+            missing.Remove("agent_diagnostics");
+            lines[^1] = missing.ToJsonString();
+            Assert.NotEqual(0, Verify("live-coverage", string.Join('\n', lines), corpus: Corpus("live-coverage")).Item1);
+            lines[^1] = LivePlanSummaryLine(result.Summary with { AgentDiagnostics = [new(0, "unknown", null, null)] });
+            Assert.NotEqual(0, Verify("live-coverage", string.Join('\n', lines), corpus: Corpus("live-coverage")).Item1);
+        }
+        finally { File.Delete(plan); }
     }
 
     [Fact]

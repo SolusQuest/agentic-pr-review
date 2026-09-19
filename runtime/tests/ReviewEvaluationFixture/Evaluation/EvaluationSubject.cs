@@ -105,6 +105,8 @@ internal sealed class EvaluationAttempt
     public override string ToString() => "evaluation_attempt";
 }
 
+internal sealed record EvaluationObservation(string Tool, AgentObservation Observation);
+
 internal sealed class EvaluationSubject
 {
     private EvaluationSubject(EvaluationAttempt attempt, R3QualitySubject admitted, string execution)
@@ -113,6 +115,7 @@ internal sealed class EvaluationSubject
         ReviewedIdentity = admitted.ReviewedIdentity!;
         Findings = admitted.Review!.Findings;
         Observations = admitted.ToolObservations.Select(o => new RequiredObservation(o.Name, o.Observation.ObservationId)).ToImmutableArray();
+        GroundedObservations = admitted.ToolObservations.Select(o => new EvaluationObservation(o.Name, o.Observation)).ToImmutableArray();
         ExecutionSha256 = execution;
     }
 
@@ -121,6 +124,7 @@ internal sealed class EvaluationSubject
     internal ReviewedIdentity ReviewedIdentity { get; }
     internal ImmutableArray<AgentFinding> Findings { get; }
     internal ImmutableArray<RequiredObservation> Observations { get; }
+    internal ImmutableArray<EvaluationObservation> GroundedObservations { get; }
     internal string ConfigurationSha256 => Attempt.ConfigurationSha256;
     internal string ExecutionSha256 { get; }
 

@@ -112,6 +112,7 @@ internal sealed record LiveRunSummary(
     long SpendCeilingMicroUsd,
     string StopReason,
     string Cleanup,
+    ImmutableArray<LiveAgentDiagnostic> AgentDiagnostics,
     string AdjudicationStatus = "not_requested",
     int HumanConfirmedCases = 0,
     int AiAdjudicatedCases = 0);

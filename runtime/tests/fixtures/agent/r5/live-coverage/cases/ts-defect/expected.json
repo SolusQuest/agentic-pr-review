@@ -1,0 +1,34 @@
+{
+  "expected_code": "Scored",
+  "defects": [
+    {
+      "id": "defect",
+      "severity": "high",
+      "observation_id": null,
+      "path": "src/client.ts",
+      "start_line": 2,
+      "end_line": 2
+    }
+  ],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "src/client.ts",
+        "start_line": 2,
+        "end_line": 2
+      }
+    },
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "src/config.ts",
+        "start_line": 2,
+        "end_line": 2
+      }
+    }
+  ],
+  "prohibited_findings": []
+}

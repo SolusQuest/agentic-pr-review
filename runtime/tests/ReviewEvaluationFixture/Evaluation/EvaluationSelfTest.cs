@@ -28,10 +28,10 @@ internal static class EvaluationSelfTest
         Func<string, ImmutableArray<AgentFinding>>? findingFactory = null, string buildId = "r5-synthetic",
         string reviewContext = "Inspect the synthetic input.", string policy = "Review synthetic inputs using bounded tools.",
         string model = "synthetic-model", string provider = "synthetic-provider", string adapter = "synthetic-adapter",
-        EvaluationReviewedIdentity? reviewedIdentity = null)
+        EvaluationReviewedIdentity? reviewedIdentity = null, int readLineCount = 2)
     {
         var identity = reviewedIdentity ?? Identity;
-        var execution = ReadExecution(identity);
+        var execution = ReadExecution(identity, readLineCount);
         var observation = execution.Observation!.ObservationId;
         var defect = new ExpectedDefect("defect-a", "high", observation, SourcePath, 1, 1);
         var spec = new EvaluationCaseInput("synthetic-scorer", Hash("authored-r5-scorer-corpus"), identity,
@@ -51,7 +51,7 @@ internal static class EvaluationSelfTest
             [new AgentEvidence(ungrounded ? new string('f', 64) : observation, SourcePath, 1, 1)])).ToImmutableArray();
         var responses = new Queue<ProjectChatResponse>();
         if (includeTool) responses.Enqueue(Response(new("read0", AgentToolRegistry.ReadFileName,
-            "{\"path\":\"src/Synthetic.cs\",\"start_line\":1,\"line_count\":2}")));
+            "{\"path\":\"src/Synthetic.cs\",\"start_line\":1,\"line_count\":" + readLineCount + "}")));
         responses.Enqueue(Response(new("finish0", AgentToolRegistry.FinishReviewName,
             Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview("Synthetic review. " + Canary, findings)))));
         var outcome = await new AgentLoop(new SyntheticChat(responses, providerFailure),
@@ -137,9 +137,9 @@ internal static class EvaluationSelfTest
 
     internal static string Hash(string value) => AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(value));
 
-    private static AgentToolExecution ReadExecution(EvaluationReviewedIdentity identity)
+    private static AgentToolExecution ReadExecution(EvaluationReviewedIdentity identity, int readLineCount)
     {
-        var value = new ReadFileResult("ok", identity.Runtime, SourcePath, Hash(Canary), 1, 2, 1, 2,
+        var value = new ReadFileResult("ok", identity.Runtime, SourcePath, Hash(Canary), 1, readLineCount, 1, 2,
             [new(1, "return value!.Trim(); // " + Canary), new(2, "return other!.Trim();")], false, null, null);
         var observation = AgentCanonical.HashDomain(AgentCanonical.ReadObservationDomain,
             ReadFileResultWriter.Write(value, includeObservationId: false));

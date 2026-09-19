@@ -60,7 +60,7 @@ internal static class EvaluationScorer
         {
             if (!subject.Observations.Any(o => o.Tool == required.Tool))
                 return CompletedRejection(testCase, subject, EvaluationCode.RequiredToolMissing);
-            if (!subject.Observations.Contains(required))
+            if (!subject.GroundedObservations.Any(o => required.Matches(o.Tool, o.Observation)))
                 return CompletedRejection(testCase, subject, EvaluationCode.RequiredObservationMissing);
         }
 
