@@ -8,6 +8,8 @@ Issue [#275](https://github.com/SolusQuest/agentic-pr-review/issues/275) supplie
 
 The boundary comes from `AgentStableRequestMaterializer` and a successful `AgentSessionRestorer` result. The restorer constructs control messages, reconstructed accepted history, and one current review context, in that order. The boundary freezes the control count and the complete accepted history count. Callers cannot choose an arbitrary shorter prefix. Bootstrap has no accepted history. The observer retains no raw request or SESSION artifact.
 
+Dynamic-suffix positives come from a two-turn actual Agent run: a synthetic provider supplies `read_file` with the production `line_count` argument, a bounded synthetic executor uses `ReadFileResultWriter` and the observation digest/line map, and `AgentToolResultAdmission` admits the canonical result before the second model request. Repeating that run with a different current call ID tests dynamic identity without inventing an unreachable Agent history. Negative controls prove that the former `end_line` spelling and an unadmitted result prevent the second request.
+
 ## Segments
 
 | Observation | Logical serialization                                                                                              | DeepSeek serialization                                                                                     |

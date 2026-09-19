@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
@@ -63,8 +64,12 @@ public sealed class R6PrefixProjectionTests
         var (restored, boundary) = await Fixture();
         var request = Request(restored.RunRequest!);
         var before = PrefixMeasurement.Observe(boundary, request);
-        var first = PrefixMeasurement.Observe(boundary, Append(request, "dynamic-a"));
-        var second = PrefixMeasurement.Observe(boundary, Append(request, "dynamic-b"));
+        var firstRun = await RunSuffix(restored.RunRequest!, boundary, "dynamic-a");
+        var secondRun = await RunSuffix(restored.RunRequest!, boundary, "dynamic-b");
+        var first = firstRun.Observations[1];
+        var second = secondRun.Observations[1];
+        Assert.Equal(before, firstRun.Observations[0]);
+        Assert.Equal(before, secondRun.Observations[0]);
         foreach (var next in new[] { first, second })
         {
             Assert.Equal(new("compared", true, true), before.Compare(next));
@@ -75,9 +80,6 @@ public sealed class R6PrefixProjectionTests
         }
         Assert.NotEqual(first.Provider.Dynamic, second.Provider.Dynamic);
         Assert.Equal(new("compared", true, true), first.Compare(second));
-        using var transport = new FinishTransport();
-        await Client(transport).GetResponseAsync(Append(request, "dynamic-a"), CancellationToken.None);
-        Assert.Equal(1, transport.Sends);
     }
 
     [Theory]
@@ -136,7 +138,7 @@ public sealed class R6PrefixProjectionTests
     public async Task ContinuationPlacementAcrossHistoricalAndCurrentAssistantsCannotHideMutation()
     {
         var (restored, boundary) = await Fixture();
-        var request = Append(Request(restored.RunRequest!), "dynamic-a");
+        var request = (await RunSuffix(restored.RunRequest!, boundary, "dynamic-a")).Request;
         var original = PrefixMeasurement.Observe(boundary, request);
         var items = request.Continuation!.Items;
         var swapped = request with { Continuation = request.Continuation with { Items = [
@@ -229,7 +231,8 @@ public sealed class R6PrefixProjectionTests
         Assert.Equal(0, empty.HistoricalMessages);
         Assert.Equal(0, empty.Logical.History.Count);
         Assert.Equal(0, empty.Provider.History.Bytes);
-        Assert.Equal(new("compared", true, true), empty.Compare(PrefixMeasurement.Observe(boundary, Append(request, "new-call"))));
+        var growing = await RunSuffix(run, boundary, "new-call");
+        Assert.Equal(new("compared", true, true), empty.Compare(growing.Observations[1]));
         AssertSafe(empty);
         foreach (var invalid in new[] {
             request with { Messages = [] }, request with { Messages = [request.Messages[0]] },
@@ -292,35 +295,115 @@ public sealed class R6PrefixProjectionTests
         return (restored, PrefixBoundary.Restored(trusted, restored));
     }
 
-    private static ProjectChatRequest Append(ProjectChatRequest request, string id)
+    [Theory]
+    [InlineData(true, AgentFailureCodes.ToolArgumentsInvalid, 0)]
+    [InlineData(false, AgentFailureCodes.ToolIoFailed, 1)]
+    public async Task InvalidArgumentsOrUnadmittedResultsCannotSupplyPositiveSuffixEvidence(
+        bool invalidArguments, string expectedCode, int expectedExecutions)
     {
-        var position = request.Messages.Length;
-        var item = new ProjectContinuationItem("current reasoning", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0);
-        return request with {
-            Messages = [.. request.Messages,
-                new("assistant", [new ProjectToolCallContent(id, "read_file", "{\"path\":\"a.cs\",\"start_line\":1,\"end_line\":1}")]),
-                new("tool", [new ProjectToolResultContent(id, "{\"lines\":[]}")])],
-            Continuation = request.Continuation is { } continuation ? continuation with { Items = [.. continuation.Items, item] } :
-                new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session-275", [item]) };
+        var (restored, boundary) = await Fixture();
+        using var transport = new FinishTransport(firstReadId: "dynamic", invalidArguments: invalidArguments);
+        var executor = new SyntheticReadExecutor(malformedResult: !invalidArguments);
+        var observer = new PrefixObservingChatClient(boundary, Client(transport));
+        var outcome = await new AgentLoop(observer, executor).RunAsync(restored.RunRequest!, CancellationToken.None);
+        Assert.False(outcome.CompletedSessionEligible);
+        Assert.Equal(expectedCode, outcome.Diagnostic!.Code);
+        Assert.Equal(expectedExecutions, executor.Executions);
+        Assert.Equal(1, transport.Sends);
+        Assert.Single(observer.Observations); // no request containing the rejected suffix exists
+    }
+
+    private static async Task<(ProjectChatRequest Request, ImmutableArray<PrefixObservation> Observations)> RunSuffix(
+        AgentRunRequest run, PrefixBoundary boundary, string id)
+    {
+        using var transport = new FinishTransport(firstReadId: id);
+        var capture = new CapturingClient(Client(transport));
+        var observer = new PrefixObservingChatClient(boundary, capture);
+        var executor = new SyntheticReadExecutor();
+        var outcome = await new AgentLoop(observer, executor).RunAsync(run, CancellationToken.None);
+        Assert.True(outcome.CompletedSessionEligible);
+        Assert.Equal(2, transport.Sends);
+        Assert.Equal(2, observer.Observations.Length);
+        Assert.Equal(1, executor.Executions);
+        // Independently bind the second actual request to production argument/result admission.
+        var request = capture.LastRequest!;
+        var call = Assert.IsType<ProjectToolCallContent>(Assert.Single(request.Messages[^2].Contents));
+        var result = Assert.IsType<ProjectToolResultContent>(Assert.Single(request.Messages[^1].Contents));
+        Assert.True(call.CallId == id && result.CallId == id);
+        Assert.True(AgentToolArguments.TryReadFileProvider(call.ArgumentsJson, out var arguments));
+        Assert.True(AgentToolResultAdmission.TryAdmit(new PreparedReadFileCall(id, arguments!), Identity,
+            executor.Execution!, out var canonical, out _));
+        Assert.True(result.Result == canonical);
+        return (request, observer.Observations);
     }
 
     private static IProjectChatClient Client(FinishTransport transport) => DeepSeekChatBackend.CreateClient(
         new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session-275"), transport);
 
-    private sealed class FinishTransport(string id = "finish-current") : IDeepSeekTransport
+    private sealed class FinishTransport(string id = "finish-current", string? firstReadId = null,
+        bool invalidArguments = false) : IDeepSeekTransport
     {
         internal byte[]? LastBody { get; private set; }
         internal int Sends { get; private set; }
         public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody, CancellationToken cancellationToken)
         {
             Sends++; LastBody = requestBody.ToArray();
-            var response = "{\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":{" +
-                "\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"reason " + Canary + "\",\"tool_calls\":[{\"id\":\"" + id +
-                "\",\"type\":\"function\",\"function\":{\"name\":\"finish_review\",\"arguments\":\"{\\\"summary\\\":\\\"done\\\",\\\"findings\\\":[]}\"}}]}}]," +
-                "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":3}}";
-            return Task.FromResult(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(response)));
+            var read = firstReadId is not null && Sends == 1;
+            var arguments = read ? invalidArguments
+                ? "{\"path\":\"a.cs\",\"start_line\":1,\"end_line\":1}"
+                : "{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}"
+                : "{\"summary\":\"done\",\"findings\":[]}";
+            using var response = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(response))
+            {
+                writer.WriteStartObject(); writer.WriteString("model", DeepSeekAdapterContext.Model);
+                writer.WriteStartArray("choices"); writer.WriteStartObject(); writer.WriteNumber("index", 0);
+                writer.WriteString("finish_reason", "tool_calls"); writer.WriteStartObject("message");
+                writer.WriteString("role", "assistant"); writer.WriteString("content", "");
+                writer.WriteString("reasoning_content", read ? "current reasoning" : "reason " + Canary);
+                writer.WriteStartArray("tool_calls"); writer.WriteStartObject(); writer.WriteString("id", read ? firstReadId : id);
+                writer.WriteString("type", "function"); writer.WriteStartObject("function");
+                writer.WriteString("name", read ? "read_file" : "finish_review"); writer.WriteString("arguments", arguments);
+                writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray();
+                writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray();
+                writer.WriteStartObject("usage"); writer.WriteNumber("prompt_tokens", 3); writer.WriteNumber("completion_tokens", 2);
+                writer.WriteNumber("total_tokens", 5); writer.WriteNumber("prompt_cache_hit_tokens", 0);
+                writer.WriteNumber("prompt_cache_miss_tokens", 3); writer.WriteEndObject(); writer.WriteEndObject();
+            }
+            return Task.FromResult(DeepSeekTransportResult.Success(response.ToArray()));
         }
         public void Dispose() { LastBody = null; }
+    }
+
+    // Test-private capture only; neither the observer nor any public output retains requests.
+    private sealed class CapturingClient(IProjectChatClient inner) : IProjectChatClient
+    {
+        internal ProjectChatRequest? LastRequest { get; private set; }
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
+        { LastRequest = request; return inner.GetResponseAsync(request, token); }
+    }
+
+    private sealed class SyntheticReadExecutor(bool malformedResult = false) : IAgentToolExecutor
+    {
+        internal int Executions { get; private set; }
+        internal AgentToolExecution? Execution { get; private set; }
+        public string? Preflight(PreparedAgentToolCall call) => null;
+        public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call, CancellationToken token)
+        {
+            var read = Assert.IsType<PreparedReadFileCall>(call);
+            Executions++;
+            var result = new ReadFileResult("ok", Identity, read.Arguments.Path,
+                AgentCanonical.HashRaw(Encoding.UTF8.GetBytes("line " + Canary)), 1, 1, 1, 1,
+                [new ReadFileLine(1, "line " + Canary)], false, null, null);
+            var observationId = AgentCanonical.HashDomain(AgentCanonical.ReadObservationDomain,
+                ReadFileResultWriter.Write(result, includeObservationId: false));
+            var bytes = malformedResult ? "{\"lines\":[]}"u8.ToArray() :
+                ReadFileResultWriter.Write(result with { ObservationId = observationId });
+            Execution = new(true, null, Encoding.UTF8.GetString(bytes), bytes,
+                new(observationId, Identity, ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
+                    .WithComparers(StringComparer.Ordinal).Add(read.Arguments.Path, ImmutableHashSet.Create(1))));
+            return ValueTask.FromResult(Execution);
+        }
     }
 
     private sealed class NoTools : IAgentToolExecutor
