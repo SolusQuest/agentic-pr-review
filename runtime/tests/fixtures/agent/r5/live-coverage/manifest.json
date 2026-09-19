@@ -111,55 +111,55 @@
       "sha256": "6b4f8217c9eba803a804c4433898fdc36c2107c83b064780d79384f4e6f9294f"
     },
     {
-      "path": "source/member-0.txt",
+      "path": "source/live-0.txt",
       "role": "repository",
       "length": 55,
       "sha256": "e31330e707dd07b2b6c0e0873cdb5abfb51abf40993fa9f228670463bdc0eaf3"
     },
     {
-      "path": "source/member-1.txt",
+      "path": "source/live-1.txt",
       "role": "repository",
       "length": 86,
       "sha256": "c063f656c4029f01fddae24e985d2ec3299485f77e01e9ce55a23bf1aaa7b1ab"
     },
     {
-      "path": "source/member-2.txt",
+      "path": "source/live-2.txt",
       "role": "repository",
       "length": 102,
       "sha256": "d49d129e266f23daec0c5333d5b2c4e2d5444841bec57d0308f9b74f4decd33e"
     },
     {
-      "path": "source/member-3.txt",
+      "path": "source/live-3.txt",
       "role": "repository",
       "length": 83,
       "sha256": "2cb3819a609411247da766c97a3e1f4cce5c1d9ffc62dc35c4d8d1c0a5eaee4f"
     },
     {
-      "path": "source/member-4.txt",
+      "path": "source/live-4.txt",
       "role": "repository",
       "length": 123,
       "sha256": "59dbb38cdadc0820a84c90603be117ac8811ac700929433017984b2b921ff70c"
     },
     {
-      "path": "source/member-5.txt",
+      "path": "source/live-5.txt",
       "role": "repository",
       "length": 186,
       "sha256": "4f10e4667fe4b566ec81fe2e315faa7fc17743df5ba62e3cbb3e8d9ba7878d40"
     },
     {
-      "path": "source/member-6.txt",
+      "path": "source/live-6.txt",
       "role": "repository",
       "length": 84,
       "sha256": "abe06c6eed2cef01e3ab03ed8eda75e57503fc8919752bd46aea3b24da27ac09"
     },
     {
-      "path": "source/member-7.txt",
+      "path": "source/live-7.txt",
       "role": "repository",
       "length": 118,
       "sha256": "3b8e652f6f25343266309b40d3c07d2c0776a818757b61fc1f0132e603c330f3"
     },
     {
-      "path": "source/member-8.txt",
+      "path": "source/live-8.txt",
       "role": "repository",
       "length": 84,
       "sha256": "1013f908ac399af77f5cde7839740c651584078b40f09dae3e90b515a2eeb362"
@@ -180,39 +180,39 @@
       "repository": [
         {
           "path": "docs/notes.txt",
-          "file": "source/member-0.txt"
+          "file": "source/live-0.txt"
         },
         {
           "path": "rules/review.md",
-          "file": "source/member-1.txt"
+          "file": "source/live-1.txt"
         },
         {
           "path": "src/Caller.cs",
-          "file": "source/member-2.txt"
+          "file": "source/live-2.txt"
         },
         {
           "path": "src/Lookup.cs",
-          "file": "source/member-3.txt"
+          "file": "source/live-3.txt"
         },
         {
           "path": "src/SafeCaller.cs",
-          "file": "source/member-4.txt"
+          "file": "source/live-4.txt"
         },
         {
           "path": "src/Upload.cs",
-          "file": "source/member-5.txt"
+          "file": "source/live-5.txt"
         },
         {
           "path": "src/client.ts",
-          "file": "source/member-6.txt"
+          "file": "source/live-6.txt"
         },
         {
           "path": "src/config.ts",
-          "file": "source/member-7.txt"
+          "file": "source/live-7.txt"
         },
         {
           "path": "src/safe-client.ts",
-          "file": "source/member-8.txt"
+          "file": "source/live-8.txt"
         }
       ],
       "diff": "diff.json",
@@ -235,39 +235,39 @@
       "repository": [
         {
           "path": "docs/notes.txt",
-          "file": "source/member-0.txt"
+          "file": "source/live-0.txt"
         },
         {
           "path": "rules/review.md",
-          "file": "source/member-1.txt"
+          "file": "source/live-1.txt"
         },
         {
           "path": "src/Caller.cs",
-          "file": "source/member-2.txt"
+          "file": "source/live-2.txt"
         },
         {
           "path": "src/Lookup.cs",
-          "file": "source/member-3.txt"
+          "file": "source/live-3.txt"
         },
         {
           "path": "src/SafeCaller.cs",
-          "file": "source/member-4.txt"
+          "file": "source/live-4.txt"
         },
         {
           "path": "src/Upload.cs",
-          "file": "source/member-5.txt"
+          "file": "source/live-5.txt"
         },
         {
           "path": "src/client.ts",
-          "file": "source/member-6.txt"
+          "file": "source/live-6.txt"
         },
         {
           "path": "src/config.ts",
-          "file": "source/member-7.txt"
+          "file": "source/live-7.txt"
         },
         {
           "path": "src/safe-client.ts",
-          "file": "source/member-8.txt"
+          "file": "source/live-8.txt"
         }
       ],
       "diff": "diff.json",
@@ -290,39 +290,39 @@
       "repository": [
         {
           "path": "docs/notes.txt",
-          "file": "source/member-0.txt"
+          "file": "source/live-0.txt"
         },
         {
           "path": "rules/review.md",
-          "file": "source/member-1.txt"
+          "file": "source/live-1.txt"
         },
         {
           "path": "src/Caller.cs",
-          "file": "source/member-2.txt"
+          "file": "source/live-2.txt"
         },
         {
           "path": "src/Lookup.cs",
-          "file": "source/member-3.txt"
+          "file": "source/live-3.txt"
         },
         {
           "path": "src/SafeCaller.cs",
-          "file": "source/member-4.txt"
+          "file": "source/live-4.txt"
         },
         {
           "path": "src/Upload.cs",
-          "file": "source/member-5.txt"
+          "file": "source/live-5.txt"
         },
         {
           "path": "src/client.ts",
-          "file": "source/member-6.txt"
+          "file": "source/live-6.txt"
         },
         {
           "path": "src/config.ts",
-          "file": "source/member-7.txt"
+          "file": "source/live-7.txt"
         },
         {
           "path": "src/safe-client.ts",
-          "file": "source/member-8.txt"
+          "file": "source/live-8.txt"
         }
       ],
       "diff": "diff.json",
@@ -345,39 +345,39 @@
       "repository": [
         {
           "path": "docs/notes.txt",
-          "file": "source/member-0.txt"
+          "file": "source/live-0.txt"
         },
         {
           "path": "rules/review.md",
-          "file": "source/member-1.txt"
+          "file": "source/live-1.txt"
         },
         {
           "path": "src/Caller.cs",
-          "file": "source/member-2.txt"
+          "file": "source/live-2.txt"
         },
         {
           "path": "src/Lookup.cs",
-          "file": "source/member-3.txt"
+          "file": "source/live-3.txt"
         },
         {
           "path": "src/SafeCaller.cs",
-          "file": "source/member-4.txt"
+          "file": "source/live-4.txt"
         },
         {
           "path": "src/Upload.cs",
-          "file": "source/member-5.txt"
+          "file": "source/live-5.txt"
         },
         {
           "path": "src/client.ts",
-          "file": "source/member-6.txt"
+          "file": "source/live-6.txt"
         },
         {
           "path": "src/config.ts",
-          "file": "source/member-7.txt"
+          "file": "source/live-7.txt"
         },
         {
           "path": "src/safe-client.ts",
-          "file": "source/member-8.txt"
+          "file": "source/live-8.txt"
         }
       ],
       "diff": "diff.json",
@@ -400,39 +400,39 @@
       "repository": [
         {
           "path": "docs/notes.txt",
-          "file": "source/member-0.txt"
+          "file": "source/live-0.txt"
         },
         {
           "path": "rules/review.md",
-          "file": "source/member-1.txt"
+          "file": "source/live-1.txt"
         },
         {
           "path": "src/Caller.cs",
-          "file": "source/member-2.txt"
+          "file": "source/live-2.txt"
         },
         {
           "path": "src/Lookup.cs",
-          "file": "source/member-3.txt"
+          "file": "source/live-3.txt"
         },
         {
           "path": "src/SafeCaller.cs",
-          "file": "source/member-4.txt"
+          "file": "source/live-4.txt"
         },
         {
           "path": "src/Upload.cs",
-          "file": "source/member-5.txt"
+          "file": "source/live-5.txt"
         },
         {
           "path": "src/client.ts",
-          "file": "source/member-6.txt"
+          "file": "source/live-6.txt"
         },
         {
           "path": "src/config.ts",
-          "file": "source/member-7.txt"
+          "file": "source/live-7.txt"
         },
         {
           "path": "src/safe-client.ts",
-          "file": "source/member-8.txt"
+          "file": "source/live-8.txt"
         }
       ],
       "diff": "diff.json",

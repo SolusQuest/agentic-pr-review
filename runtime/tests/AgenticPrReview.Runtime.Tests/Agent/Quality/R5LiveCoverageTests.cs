@@ -111,10 +111,10 @@ public sealed class R5LiveCoverageTests
             var audit = await QualityAudit.ObserveAsync(run, spec);
             Assert.True(audit.FactsMatch);
             var original = quality.Runs.Single(r => r.Input.CaseId == run.Input.CaseId);
-            Assert.Equal(original.Input.Repository.ToArray(), run.Input.Repository.ToArray());
+            Assert.Equal(original.Input.Repository.Select(e => e.Path), run.Input.Repository.Select(e => e.Path));
             foreach (var entry in original.Input.Repository)
                 Assert.Equal(File.ReadAllBytes(Path.Combine(root, "quality", "bundle", entry.File)),
-                    File.ReadAllBytes(Path.Combine(root, "live-coverage", entry.File)));
+                    File.ReadAllBytes(Path.Combine(root, "live-coverage", run.Input.Repository.Single(e => e.Path == entry.Path).File)));
             var expected = run.Expected.Input;
             Assert.All(expected.Defects, d => Assert.Null(d.ObservationId));
             Assert.All(expected.RequiredObservations, required =>
