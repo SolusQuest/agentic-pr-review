@@ -260,6 +260,9 @@ internal static class LiveRunner
         var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,
             DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead);
         var subject = EvaluationSubject.Admit(build, descriptor);
+        // A failed post-Agent admission has no typed Agent rejection. Preserve
+        // its schedule position without inventing a reason or call counts.
+        if (subject is null) diagnostics.Add(LiveAgentDiagnostic.Capture(index, null));
         if (subject is not null && options.Adjudicator is not null)
             subjects.Add(new(index, run, subject));
         return subject is not null

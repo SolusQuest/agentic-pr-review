@@ -548,9 +548,14 @@ internal static class R5CaseVerifier
             return (null, "rejected_corpus_mismatch");
         if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
             return (null, "rejected_source");
-        if (report.AgentDiagnostics.IsDefault || report.AgentDiagnostics.Any(d => d is null ||
+        // Derive coverage from admitted outcomes, never from the diagnostic rows
+        // themselves: even an empty array must not hide failed attempts.
+        if (report.Failed != outcomes.Count(o => o.ExecutionStatus == EvaluationStatus.Failed) ||
+            report.Completed != outcomes.Count(o => o.ExecutionStatus == EvaluationStatus.Completed) ||
+            report.AgentDiagnostics.IsDefault || report.AgentDiagnostics.Length != report.Failed ||
+            report.AgentDiagnostics.Any(d => d is null ||
             d.ScheduleIndex < 0 || d.ScheduleIndex >= report.Attempted ||
-            outcomes[d.ScheduleIndex].ExecutionStatus == EvaluationStatus.Completed ||
+            outcomes[d.ScheduleIndex].ExecutionStatus != EvaluationStatus.Failed ||
             d != LiveAgentDiagnostic.Capture(d.ScheduleIndex, d.ModelCalls is { } model && d.ToolCalls is { } tool
                 ? new AgentDiagnostic(d.Code, model, tool) : null)) ||
             report.AgentDiagnostics.Select(d => d.ScheduleIndex).Distinct().Count() != report.AgentDiagnostics.Length)
