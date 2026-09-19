@@ -264,7 +264,10 @@ internal static class DeepSeekResponseParser
     {
         if (root.ValueKind != JsonValueKind.Object ||
             !HasOnlyProperties(root, RootProperties) ||
-            !TryReadExactString(root, "model", DeepSeekRequestWriter.Model) ||
+            // DeepSeek serves the retained v4-flash request alias as flash.
+            // Admit only that documented response alias, never arbitrary models.
+            (!TryReadExactString(root, "model", DeepSeekRequestWriter.Model) &&
+                !TryReadExactString(root, "model", "deepseek-flash")) ||
             !ValidateOptionalRootFields(root) ||
             !root.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array ||

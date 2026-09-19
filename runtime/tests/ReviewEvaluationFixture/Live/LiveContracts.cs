@@ -111,7 +111,10 @@ internal sealed record LiveRunSummary(
     long ReservedSpendMicroUsd,
     long SpendCeilingMicroUsd,
     string StopReason,
-    string Cleanup);
+    string Cleanup,
+    string AdjudicationStatus = "not_requested",
+    int HumanConfirmedCases = 0,
+    int AiAdjudicatedCases = 0);
 
 internal enum LiveAdmissionCode
 {

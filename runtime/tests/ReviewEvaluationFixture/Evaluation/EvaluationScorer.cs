@@ -115,22 +115,11 @@ internal static class EvaluationScorer
         var credited = new HashSet<string>(StringComparer.Ordinal);
         if (adjudication is not null)
         {
-            if (!adjudication.Valid || adjudication.CorpusSha256 != spec.CorpusSha256 ||
-                adjudication.CaseSha256 != testCase.Sha256 ||
-                adjudication.ConfigurationSha256 != subject.ConfigurationSha256 ||
-                adjudication.ExecutionSha256 != subject.ExecutionSha256)
+            if (!IsValidAdjudication(testCase, subject, adjudication))
                 return InvalidAdjudication();
             foreach (var annotation in adjudication.Findings)
             {
-                if (annotation.FindingOrdinal >= subject.Findings.Length)
-                    return InvalidAdjudication();
-                if (annotation.DefectId is not null)
-                {
-                    var defect = defects.FirstOrDefault(d => d.Id == annotation.DefectId);
-                    if (defect is null || !defect.Matches(subject.Findings[annotation.FindingOrdinal]) ||
-                        !credited.Add(annotation.DefectId))
-                        return InvalidAdjudication();
-                }
+                if (annotation.DefectId is not null) credited.Add(annotation.DefectId);
                 if (annotation.Verdict == "confirmed") trueCount++;
                 else falseCount++;
             }
@@ -144,6 +133,30 @@ internal static class EvaluationScorer
             AdjudicatedDefects = credited.Count,
             UnadjudicatedFindings = pending,
         };
+    }
+
+    // Annotation provenance is independent of evidence/scenario eligibility.
+    // Harnesses accepting an annotation must check it even when Evaluate would
+    // return an evidence rejection before reaching semantic scoring.
+    internal static bool IsValidAdjudication(EvaluationCase testCase, EvaluationSubject subject,
+        EvaluationAdjudication adjudication)
+    {
+        if (!adjudication.Valid || adjudication.CorpusSha256 != testCase.Input.CorpusSha256 ||
+            adjudication.CaseSha256 != testCase.Sha256 ||
+            adjudication.ConfigurationSha256 != subject.ConfigurationSha256 ||
+            adjudication.ExecutionSha256 != subject.ExecutionSha256) return false;
+        var credited = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var annotation in adjudication.Findings)
+        {
+            if (annotation.FindingOrdinal >= subject.Findings.Length) return false;
+            if (annotation.DefectId is not null)
+            {
+                var defect = testCase.Input.Defects.FirstOrDefault(d => d.Id == annotation.DefectId);
+                if (defect is null || !defect.Matches(subject.Findings[annotation.FindingOrdinal]) ||
+                    !credited.Add(annotation.DefectId)) return false;
+            }
+        }
+        return true;
     }
 
     internal static EvaluationOutcome Failure(EvaluationCase testCase, EvaluationFailure failure,

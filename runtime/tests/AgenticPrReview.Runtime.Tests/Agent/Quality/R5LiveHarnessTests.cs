@@ -10,6 +10,142 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R5LiveHarnessTests
 {
+    private sealed class ReviewInput(StringWriter prompts, string action, string? staleField = null, bool empty = false) : TextReader
+    {
+        private string? command;
+        private int position;
+        internal string? Root { get; private set; }
+        internal string? Packet { get; private set; }
+        public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (command is null)
+            {
+                Root = prompts.ToString().Split('\n')[0].TrimEnd('\r')
+                    .Replace("r5_adjudication_private_directory ", "", StringComparison.Ordinal);
+                Packet = File.ReadAllText(Path.Combine(Root, "review.json"));
+                var path = Path.Combine(Root, "annotation.json");
+                var annotation = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+                annotation["findings"] = new JsonArray(new JsonObject
+                {
+                    ["finding_ordinal"] = 0, ["verdict"] = "confirmed", ["defect_id"] = "defect",
+                });
+                if (action == "stale") annotation["execution_sha256"] = new string('0', 64);
+                if (action == "duplicate") annotation["findings"]!.AsArray().Add(annotation["findings"]![0]!.DeepClone());
+                if (empty) annotation["findings"] = new JsonArray();
+                if (staleField is not null) annotation[staleField] = new string('0', 64);
+                File.WriteAllText(path, action == "malformed" ? "{" : annotation.ToJsonString());
+                command = action == "skip" ? "skip\n" : action == "eof" ? "" : action == "ai" ? "ai-adjudicated\n" : "human-confirmed\n";
+            }
+            if (position == command.Length) return ValueTask.FromResult(0);
+            buffer.Span[0] = command[position++];
+            return ValueTask.FromResult(1);
+        }
+    }
+
+    [Theory]
+    [InlineData("confirm", "adjudicated", 1)]
+    [InlineData("ai", "adjudicated", 1)]
+    [InlineData("stale", "input_invalid", 0)]
+    [InlineData("duplicate", "input_invalid", 0)]
+    [InlineData("malformed", "input_invalid", 0)]
+    [InlineData("skip", "pending", 0)]
+    [InlineData("eof", "pending", 0)]
+    public async Task AdjudicationUsesActualSubjectAndPreservesAccounting(string action, string status, int credit)
+    {
+        using var plan = new PlanFile(AdjudicationPlan);
+        using var prompts = new StringWriter();
+        using var input = new ReviewInput(prompts, action);
+        var lines = new List<string>();
+        var baseline = await LiveRunner.RunAsync(plan.Path, false, Options(), CancellationToken.None);
+        Assert.True(baseline.Completed == 1, System.Text.Encoding.UTF8.GetString(EvaluationJson.Write(baseline.Outcomes[0])));
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = lines.Add, Adjudicator = new LiveAdjudicator(input, prompts),
+        }, CancellationToken.None);
+        Assert.Equal(status, result.Summary.AdjudicationStatus);
+        Assert.Equal("cleaned", result.Summary.Cleanup);
+        Assert.False(Directory.Exists(input.Root));
+        Assert.Equal(baseline.Summary.SimulatedAdapterCalls, result.Summary.SimulatedAdapterCalls);
+        Assert.Equal(0, result.Summary.ActualProviderCalls);
+        Assert.Equal(baseline.Attempted, result.Attempted);
+        var row = Assert.Single(result.Outcomes);
+        Assert.Equal(credit, row.AdjudicatedTrue);
+        Assert.Equal(action == "ai" ? 0 : credit, result.Summary.HumanConfirmedCases);
+        Assert.Equal(action == "ai" ? credit : 0, result.Summary.AiAdjudicatedCases);
+        Assert.Equal(credit == 1 ? ModelObservationStatus.Adjudicated : ModelObservationStatus.Unadjudicated, row.ModelStatus);
+        Assert.All(lines.Take(1), line => Assert.NotNull(EvaluationJson.ReadOutcome(System.Text.Encoding.UTF8.GetBytes(line))));
+        using var packet = JsonDocument.Parse(input.Packet!);
+        var finding = packet.RootElement.GetProperty("findings")[0];
+        Assert.DoesNotContain(finding.GetProperty("message").GetString()!, string.Join('\n', lines));
+        Assert.True(packet.RootElement.GetProperty("source").TryGetProperty("src/Caller.cs", out _));
+        Assert.True(packet.RootElement.GetProperty("diffs").GetArrayLength() > 0);
+        Assert.DoesNotContain("reasoning_content", input.Packet!);
+        Assert.DoesNotContain("continuation", input.Packet!);
+    }
+
+    private sealed class CancelledReviewInput : TextReader
+    {
+        public override async ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(System.Threading.Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+    }
+
+    [Theory]
+    [InlineData("corpus_sha256")]
+    [InlineData("case_sha256")]
+    [InlineData("configuration_sha256")]
+    [InlineData("execution_sha256")]
+    [InlineData(null)]
+    public async Task EvidenceFailureCannotBypassAnnotationAdmission(string? staleField)
+    {
+        using var plan = new PlanFile(document =>
+        {
+            AdjudicationPlan(document);
+            document["schedule"] = new JsonArray(new JsonObject { ["case_id"] = "no-required-tool", ["repeats"] = 1 });
+        });
+        using var prompts = new StringWriter();
+        // Null field tests an out-of-range ordinal against an empty completed review.
+        using var input = new ReviewInput(prompts, "ai", staleField, empty: staleField is not null);
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { }, Adjudicator = new LiveAdjudicator(input, prompts),
+        }, CancellationToken.None);
+        Assert.Equal("input_invalid", result.Summary.AdjudicationStatus);
+        Assert.Equal(0, result.Summary.AiAdjudicatedCases);
+        Assert.Equal(0, result.Summary.HumanConfirmedCases);
+        Assert.Equal("cleaned", result.Summary.Cleanup);
+        Assert.False(Directory.Exists(input.Root));
+        var row = Assert.Single(result.Outcomes);
+        Assert.Equal(EvaluationStatus.Completed, row.ExecutionStatus);
+        Assert.Equal(EvaluationCode.RequiredToolMissing, row.Code);
+        Assert.Equal(ModelObservationStatus.NotEvaluated, row.ModelStatus);
+    }
+
+    [Fact]
+    public async Task AdjudicationTimeoutRetainsRunAndCleansPrivatePacket()
+    {
+        using var plan = new PlanFile(AdjudicationPlan);
+        using var prompts = new StringWriter();
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            Adjudicator = new LiveAdjudicator(new CancelledReviewInput(), prompts) { Timeout = TimeSpan.FromMilliseconds(100) },
+        }, CancellationToken.None);
+        Assert.Equal("cancelled", result.Summary.AdjudicationStatus);
+        Assert.Equal("cleaned", result.Summary.Cleanup);
+        Assert.Equal(1, result.Completed);
+        Assert.Equal(ModelObservationStatus.Unadjudicated, Assert.Single(result.Outcomes).ModelStatus);
+    }
+
+    private static void AdjudicationPlan(JsonObject document)
+    {
+        document["schedule"] = new JsonArray(new JsonObject { ["case_id"] = "cs-defect", ["repeats"] = 1 });
+        document["bounds"]!["per_call"]!["max_input_tokens"] = 8192;
+    }
+
     private const string Canary = "APR251_LIVE_CANARY_VALUE";
     private static string Corpus =>
         Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "quality", "bundle");
