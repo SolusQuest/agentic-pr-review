@@ -50,4 +50,86 @@ The limits are the existing 256 expanded attempts and eight model calls per atte
 
 The collector synchronizes mutations and gives callbacks captured attempt/call handles. A terminal call cannot be reopened, moved to another attempt or counted twice. Scheduling completion, cancellation and exceptional unwind seal the journal and R5 accounting once, before adjudication or public output. In-flight sends without admitted usage remain unknown; untouched slots remain unattempted. Late callbacks cannot reserve further work or mutate the frozen report. Exceptional unwind retains the existing command failure policy and does not introduce persistence or crash recovery. The runner exercises the generated writer, standalone strict reader and independent selection match before publishing, including on its existing Native AOT path.
 
-R6-T3 can consume the admitted journal's complete population, typed known usage and explicit unknown sends alongside monotonic reservations. A token subtotal, reservation ceiling, cache observation or successful reconciliation alone does not establish complete cost, pricing, quality or release readiness.
+R6-T3 consumes the admitted journal's complete population, typed known usage and explicit unknown sends alongside monotonic reservations. A token subtotal, reservation ceiling, cache observation or successful reconciliation alone does not establish complete cost, pricing, quality or release readiness.
+
+## Offline tariff pricing
+
+The evaluator provides `economics-price --journal <path> --tariff <path>`. It reads two bounded local files and writes one public JSON report to stdout. Add `--format markdown` for the corresponding human report; `--format json` is also accepted. Options can appear in either order, but missing, repeated, unknown or empty options reject. For example, after building the evaluator:
+
+```sh
+dotnet run --project runtime/tests/ReviewEvaluationFixture/AgenticPrReview.Runtime.ReviewEvaluationFixture.csproj --configuration Release --no-build -- economics-price --journal journal.json --tariff tariff.json
+```
+
+This command does not construct a provider client, read provider credentials, fetch tariff sources or execute reviews. It enters the pricing module before the live commands. Historical journal source metadata is data, so the original corpus, producer build and private input paths are unnecessary. Successful report generation returns exit code 0 even when amounts are explicitly incomplete. Invalid arguments, journals or tariffs and unsupported tariff terms return 2 with a fixed `r6_pricing_*` stderr diagnostic. Arithmetic overflow, failed report readback or infrastructure failure returns 1. Rejected input, paths, exception messages and partial price reports are not emitted.
+
+### Tariff snapshot
+
+The input identifies one fixed three-rate reference tariff, with no automatically selected billing class. This example uses **synthetic rates**, not a current provider quote:
+
+```json
+{
+  "format": "apr.r6.tariff.v1",
+  "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "retrieved_on": "2026-09-20",
+  "terms": {
+    "formula": "deepseek_hit_miss_output",
+    "provider_id": "deepseek",
+    "requested_model": "deepseek-v4-flash",
+    "response_model": null,
+    "price_class": "standard",
+    "reference_at": "2026-09-20T12:00:00Z",
+    "effective_period": {
+      "status": "known",
+      "from_inclusive": "2026-09-20T00:00:00Z",
+      "until_exclusive": "2026-09-21T00:00:00Z"
+    },
+    "token_unit": 100,
+    "rate_decimal_places": 0,
+    "rates": {
+      "cache_hit_input": { "currency": "USD", "units": 1 },
+      "cache_miss_input": { "currency": "USD", "units": 4 },
+      "output": { "currency": "USD", "units": 5 }
+    },
+    "arithmetic": {
+      "rounding": "half_even",
+      "decimal_places": 3,
+      "aggregation": "campaign_components_then_sum",
+      "normalization": "exact_unrounded_amount_per_input_token"
+    }
+  }
+}
+```
+
+Each rate is `units / 10^rate_decimal_places` currency units per `token_unit` tokens. Rates are nonnegative signed 64-bit integers; the token unit is 1 through 1,000,000,000, and both decimal-place fields are 0 through 12. USD and CNY are supported reference currencies, and all three rates must use the same currency. Mixed currency rejects; other currencies, providers, models, formulas, arithmetic policies or billing classes have explicit unsupported/mismatch diagnostics. There is no foreign-exchange conversion, tiered tariff, extra cache-write charge or independently charged reasoning partition.
+
+The requested profile remains the current DeepSeek thinking profile. A null `response_model` explicitly selects requested-alias reference pricing. Setting it to `deepseek-v4-flash` or `deepseek-flash` additionally requires that exact observed response identity on each priced call. A missing cache observation also lacks response-model evidence in T2, so that restriction can reduce both input and output coverage. Neither alias establishes an independent backend snapshot.
+
+`retrieved_on` is an exact `YYYY-MM-DD` date. All timestamps are exact `YYYY-MM-DDTHH:mm:ssZ` UTC values. A known effective interval requires both endpoints with start before end; the start is inclusive and the end exclusive. An unknown interval uses `status: "unknown"` and explicit null endpoints. `price_class` is `standard`, `peak`, `off_peak` or `unknown`. A snapshot describes one chosen class/window; the command does not infer a recurring schedule, time zone or execution class.
+
+The tariff reader enforces 64 KiB, depth 8, strict UTF-8, required fields (including explicit nullable fields), and rejects duplicate/unknown members or lossy numeric forms such as fractional rate coefficients. The source URL is an ASCII HTTPS URL of at most 2048 characters with a DNS host, default port, and no credentials, query or fragment. Percent-encoded URLs are permitted. The source is never fetched. Public JSON and Markdown contain a domain-separated SHA-256 of the exact supplied URL string instead of the raw URL. Retrieval dates, intervals, rates and source commitments remain user assertions, not verified quotations or billing settlement.
+
+### Amounts, missing observations and arithmetic
+
+For each applicable known usage observation, the input numerator is `hit_tokens * hit_rate_units + miss_tokens * miss_rate_units`, and the output numerator is `output_tokens * output_rate_units`. Both divide by `token_unit * 10^rate_decimal_places`. Completion tokens enter once; `combined_tokens`, reasoning detail and cache-write observations are not added as extra charges. Failed attempts with known usage remain priced. Local refusals and unattempted slots stay in the embedded journal without inventing sends.
+
+Exact integer numerators aggregate across the campaign before rounding. Integer quotient/remainder arithmetic performs half-even rounding to the declared output quantum separately for input and output. The displayed subtotal/total is the exact sum of those rounded component coefficients. Trailing scale zeros are reduced before conversion to `decimal`; any coefficient that still cannot represent the declared value fails as `r6_pricing_arithmetic_overflow`. This also rejects addition that would silently lose fractional precision in ordinary `decimal` arithmetic. The bounded call population, counters, rates and scales bound every integer intermediate. A nonzero amount below the declared quantum may legitimately round to zero; the original integer tariff remains in the report.
+
+`known_input_amount` and `known_output_amount` describe their priced contributors. A component with no priced contributors is null, while a measured zero is zero. A no-send population has complete zero traffic arithmetic, with its unattempted population still visible. `known_total_subtotal` retains whichever components are known, but `total_amount` is null unless every dispatched call has complete input and output pricing. Coverage lists priced input/output sends, unknown usage, absent cache observations and unknown/mismatched required response identity. Those availability counts can overlap and are not additional billing partitions.
+
+Known totals without a cache partition retain priceable output; positive input remains unpriced in the observed-partition view. Measured zero input determines zero input charge without manufacturing cache statistics. Unknown usage always prevents a complete amount, including under a zero-rate snapshot. Thus journal `usage_complete`, monetary completeness, execution completion and tariff applicability are separate dimensions. Reservations retain their own call/token counts and `spend_micro_usd`; even a CNY tariff never relabels or adds that USD reservation to usage cost.
+
+`input_amount_per_input_token` and `total_amount_per_input_token` name distinct numerators. Both normalize exact, unrounded aggregate amounts and then apply their own declared final rounding. They do not divide the rounded display amount. Each requires its complete numerator and the complete positive input-token denominator; incomplete usage, incomplete pricing and zero input have explicit unavailable reasons and null values. These are not averages of per-call percentages or quality-eligible-review costs.
+
+The separate `same_token_all_miss` view applies the miss rate to the identical known input counts and the same output rate to the identical output counts. Its input coverage may exceed observed-partition pricing when the partition is missing, but unknown usage or model applicability remains unknown. It is hypothetical repricing, not another execution, measured savings, a cache-disabled control or a cost-regression verdict. No difference between differently covered subtotals is reported as savings.
+
+### Reference applicability and standalone handoff
+
+`reference_applicability` reports period and class evidence separately. A supplied reference time outside the half-open interval yields `reference_period_mismatch`; an unknown interval or class retains its own unknown code. Those limits do not erase a valid fixed-reference arithmetic result. Selecting an off-peak reference snapshot does not prove that the calls occurred off peak.
+
+T2 contains no execution timestamps. Consequently, `execution_time_applicability` is `execution_time_unknown` and `execution_time_total_amount` is null for current journals. Retrieval/reference dates, source commit dates, file timestamps and the command's clock are never substituted for execution evidence. Backend snapshot is `not_exposed`, and invoice status is `not_evidenced`. Reference prices establish neither historical settlement nor R5 quality or R7 readiness.
+
+The JSON report embeds the complete admitted public journal and the sanitized tariff snapshot, including its arithmetic policy. `journal_sha256` binds the full generated admitted journal, rather than only T2's provenance binding; `tariff_sha256` binds the generated public snapshot, including the URL digest. The report cap is 5 MiB at depth 16. Markdown is a compact bounded summary of identities, terms, coverage, amounts and separate reservations.
+
+`PricingJson.Read(bytes)` re-admits both embedded inputs, recomputes the report, and compares every identity, amount, completeness and applicability claim. It needs no original files or in-memory producer context. `Matches(selectedJournal, selectedTariff)` separately checks independently selected inputs; neither operation authenticates a coordinated rewrite or attests paid traffic. This is R6-C1's standalone priced-journal handoff, retaining every failed and unattempted row for its later independent comparison and quality decisions.
+
+`R6PricingTests` covers arithmetic with independent expected values, rounding and representability failures, mismatches and unknown applicability, partial component coverage, maximum admitted population, strict/tampered reports, public-safe rendering and the actual command. The evaluator keeps source-generated JSON and reflection disabled. The permanent R6 framework/Native AOT gate remains R6-V1's responsibility; an AOT build alone must not be reported as execution of the new pricing command.

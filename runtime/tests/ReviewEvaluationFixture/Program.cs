@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
@@ -21,6 +22,8 @@ internal static class Program
     {
         try
         {
+            if (args.Length > 0 && args[0] == "economics-price")
+                return PricingCommand.Invoke(args);
             if (args.SequenceEqual(["live-local", "--dry-run", "--fixture", "self-test"]))
                 return await LiveSelfTest.RunAsync();
             if (args is ["live-local", "--dry-run", "--plan", { } dryPlan])
