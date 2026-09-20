@@ -18,6 +18,307 @@ public sealed class R6UsageJournalTests
     private const string Canary = "APR273_PRIVATE_PROVIDER_PATH_REASONING_CANARY";
 
     [Theory]
+    [InlineData("stop_rate")]
+    [InlineData("stop_bound")]
+    [InlineData("stop_violation")]
+    [InlineData("hidden_rate")]
+    [InlineData("hidden_bound")]
+    [InlineData("hidden_violation")]
+    [InlineData("first_budget")]
+    [InlineData("first_violation")]
+    [InlineData("budget_before_reservation")]
+    [InlineData("violation_before_usage")]
+    public async Task StrictReaderRejectsUnsupportedStopAndRefusalCauses(string fault)
+    {
+        UsageJournal journal;
+        if (fault.StartsWith("first_", StringComparison.Ordinal))
+        {
+            var collector = new UsageJournalCollector(Expected(1));
+            var attempt = collector.BeginAttempt(0);
+            attempt.AgentStarted();
+            attempt.BeginCall()!.Threw();
+            attempt.Finish("failed");
+            journal = collector.Seal("complete", Reservations(0));
+        }
+        else
+        {
+            using var plan = new PlanFile(p =>
+            {
+                if (fault is "hidden_bound" or "budget_before_reservation") p["bounds"]!["max_model_calls"] = 1;
+                if (fault is "hidden_violation" or "violation_before_usage") p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
+            });
+            journal = (await Run(plan, fault == "hidden_rate" ?
+                _ => new FakeTransport((_, _) => Task.FromResult(
+                    DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0))) : null)).Journal;
+        }
+        var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
+        if (fault.StartsWith("stop_", StringComparison.Ordinal))
+            candidate["stop_reason"] = fault switch
+            {
+                "stop_rate" => "rate_limited", "stop_bound" => "bound_stop", _ => "accounting_violation",
+            };
+        else if (fault.StartsWith("hidden_", StringComparison.Ordinal)) candidate["stop_reason"] = "complete";
+        else if (fault.StartsWith("first_", StringComparison.Ordinal))
+            candidate["calls"]![0]!["transport_outcome"] = fault == "first_budget" ? "budget_refused" : "violation_refused";
+        else
+        {
+            // Preserve identities, counts and final reservations; move the
+            // claimed refusal before the observation that could justify it.
+            var calls = candidate["calls"]!;
+            var first = calls[0]!.DeepClone();
+            foreach (var field in new[] { "dispatched", "transport_outcome", "chat_outcome", "usage_status", "usage" })
+            {
+                calls[0]![field] = calls[1]![field]?.DeepClone();
+                calls[1]![field] = first[field]?.DeepClone();
+            }
+        }
+        Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
+    }
+
+    [Theory]
+    [InlineData("calls")]
+    [InlineData("input")]
+    [InlineData("output")]
+    [InlineData("combined")]
+    [InlineData("spend")]
+    public void EveryReservationDimensionCanCauseRefusalButRelaxedBoundsCannot(string dimension)
+    {
+        var expected = Expected(1, b => dimension switch
+        {
+            "calls" => b with { MaxModelCalls = 1 },
+            "input" => b with { MaxInputTokens = 1 },
+            "output" => b with { MaxOutputTokens = 1 },
+            "combined" => b with { MaxCombinedTokens = 2 },
+            _ => b with { SpendCeilingMicroUsd = 1 },
+        });
+        var accounting = new LiveAccounting(expected.Bounds);
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var first = attempt.BeginCall()!;
+        Assert.True(accounting.TryReserve());
+        first.Dispatch();
+        first.TransportFinished(DeepSeekTransportResult.Success([]));
+        first.Returned(new(0, 0));
+        accounting.RecordUsage(new(0, 0));
+        var refused = attempt.BeginCall()!;
+        Assert.False(accounting.TryReserve());
+        refused.Refuse("budget_refused");
+        refused.Threw();
+        attempt.Finish("failed");
+        var journal = collector.Seal("bound_stop", Reservations(1));
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+
+        // Rebind the whole document to another valid selection. This must fail
+        // because the cause disappeared, not because a digest became stale.
+        var relaxed = Expected(1);
+        var candidate = journal.Document with
+        {
+            Provenance = relaxed.Provenance, Plan = relaxed.Plan, BindingSha256 = relaxed.BindingSha256,
+            Attempts = [.. journal.Document.Attempts.Select(a => a with { BindingSha256 = relaxed.BindingSha256 })],
+            Calls = [.. journal.Document.Calls.Select(c => c with { BindingSha256 = relaxed.BindingSha256 })],
+        };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DefiniteViolationPreventsReservationAndHasPriorityOverBudget(bool priority)
+    {
+        using var plan = new PlanFile(p =>
+        {
+            p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
+            if (priority) p["bounds"]!["max_model_calls"] = 1;
+        });
+        var journal = (await Run(plan)).Journal;
+        var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
+        if (priority)
+        {
+            candidate["calls"]![1]!["transport_outcome"] = "budget_refused";
+            candidate["stop_reason"] = "bound_stop";
+        }
+        else
+        {
+            candidate["calls"]![1]!["transport_outcome"] = "request_rejected";
+            var perCall = journal.Document.Plan.Bounds.PerCall;
+            candidate["reservations"] = new JsonObject
+            {
+                ["calls"] = 2, ["input_tokens"] = 2 * perCall.MaxInputTokens,
+                ["output_tokens"] = 2 * perCall.MaxOutputTokens,
+                ["combined_tokens"] = 2 * (perCall.MaxInputTokens + perCall.MaxOutputTokens),
+                ["spend_micro_usd"] = 2 * perCall.MaxChargeMicroUsd,
+            };
+        }
+        Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
+    }
+
+    [Theory]
+    [InlineData("bound")]
+    [InlineData("violation")]
+    [InlineData("rate")]
+    public async Task DefiniteStopCannotBeFollowedByAnotherScheduledAttempt(string cause)
+    {
+        using var plan = new PlanFile(p =>
+        {
+            p["schedule"]![0]!["repeats"] = 2;
+            if (cause == "bound") p["bounds"]!["max_model_calls"] = 1;
+            if (cause == "violation") p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
+        });
+        var journal = (await Run(plan, cause == "rate" ?
+            _ => new FakeTransport((_, _) => Task.FromResult(
+                DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0))) : null)).Journal;
+        var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
+        candidate["attempts"]![1]!["status"] = "failed";
+        candidate["totals"]!["attempted"] = 2;
+        candidate["totals"]!["failed"] = 2;
+        candidate["totals"]!["unattempted"] = 0;
+        Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
+    }
+
+    [Theory]
+    [InlineData("bound")]
+    [InlineData("violation")]
+    [InlineData("rate")]
+    public void CancellationCanHideAnAccountingReceiptWithoutInvalidatingItsStop(string cause)
+    {
+        var expected = Expected(1, cause == "bound" ? b => b with { MaxModelCalls = 1 } : null);
+        var accounting = new LiveAccounting(expected.Bounds);
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var call = attempt.BeginCall()!;
+        Assert.True(accounting.TryReserve());
+        call.Dispatch();
+        if (cause == "bound")
+        {
+            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.Returned(new(0, 0));
+            call = attempt.BeginCall()!;
+            Assert.False(accounting.TryReserve());
+            call.Refuse("budget_refused");
+            call.Cancel();
+            Assert.True(accounting.BudgetRefused);
+        }
+        else
+        {
+            var result = cause == "rate"
+                ? DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0)
+                : DeepSeekTransportResult.Success([]);
+            call.TransportFinished(result);
+            call.Cancel();
+            accounting.RecordOutcome(result);
+            if (cause == "violation")
+            {
+                call.Returned(new(2, 0)); // Cancellation already won the journal.
+                accounting.RecordUsage(new(2, 0));
+                Assert.True(accounting.AccountingViolation);
+            }
+            else Assert.True(accounting.RateLimited);
+        }
+        attempt.Finish("failed");
+        var stop = cause switch { "bound" => "bound_stop", "rate" => "rate_limited", _ => "accounting_violation" };
+        var journal = collector.Seal(stop, Reservations(1));
+        Assert.Equal("cancelled", journal.Document.Calls[^1].TransportOutcome);
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+        if (cause != "bound")
+        {
+            var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
+            candidate["calls"]![0]!["transport_outcome"] = "transport_failure";
+            candidate["calls"]![0]!["chat_outcome"] = "threw";
+            Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InterruptedJournalObservationDoesNotInventAnAccountingStop(bool usage)
+    {
+        var expected = Expected(1);
+        var accounting = new LiveAccounting(expected.Bounds);
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var call = attempt.BeginCall()!;
+        Assert.True(accounting.TryReserve());
+        call.Dispatch();
+        call.TransportFinished(usage ? DeepSeekTransportResult.Success([]) :
+            DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0));
+        if (usage) call.Returned(new(2, 0));
+        // Agent waiting finishes before the observer's next R5-accounting write.
+        attempt.AgentFinished(false);
+        attempt.Finish("failed");
+        var frozen = accounting.Seal();
+        Assert.False(frozen.AccountingViolation);
+        Assert.Equal(0, frozen.Outcomes.Http429);
+        var journal = collector.Seal("complete", Reservations(1));
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+    }
+
+    [Fact]
+    public void ARefusalConstrainsAnEarlierAmbiguousReservation()
+    {
+        var expected = Expected(1, b => b with { MaxModelCalls = 1 });
+        var accounting = new LiveAccounting(expected.Bounds);
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var first = attempt.BeginCall()!;
+        Assert.True(accounting.TryReserve());
+        first.Cancel(); // Reservation taken, dispatch never reached.
+        var second = attempt.BeginCall()!;
+        Assert.False(accounting.TryReserve());
+        second.Refuse("budget_refused");
+        second.Threw();
+        attempt.Finish("failed");
+        var journal = collector.Seal("bound_stop", Reservations(1));
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+        var candidate = journal.Document with { Reservations = Reservations(0) };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void FirstCallCancellationCannotEstablishBudgetExhaustion(int reserved)
+    {
+        var expected = Expected(1, b => b with { MaxModelCalls = 1 });
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        attempt.BeginCall()!.Cancel();
+        attempt.Finish("failed");
+        var journal = collector.Seal("caller_cancelled", Reservations(reserved));
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+        var candidate = journal.Document with { StopReason = "bound_stop" };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
+    }
+
+    [Fact]
+    public void LaterReservationRulesOutAnEarlierAmbiguousBudgetRefusal()
+    {
+        var expected = Expected(1, b => b with { MaxModelCalls = 1 });
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        attempt.BeginCall()!.Cancel();
+        attempt.BeginCall()!.Cancel();
+        var sent = attempt.BeginCall()!;
+        sent.Dispatch();
+        sent.TransportFinished(DeepSeekTransportResult.Success([]));
+        sent.Returned(new(0, 0));
+        attempt.Finish("failed");
+        var journal = collector.Seal("complete", Reservations(1));
+        var candidate = journal.Document with { StopReason = "bound_stop" };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
+    }
+
+    [Theory]
     [InlineData("budget")]
     [InlineData("http429")]
     [InlineData("request_rejected")]
@@ -139,12 +440,19 @@ public sealed class R6UsageJournalTests
     [InlineData("before_dispatch")]
     public void SealPreservesLegitimateUnfinishedObservations(string phase)
     {
-        var expected = Expected(1);
+        var expected = Expected(1, phase == "refused" ? b => b with { MaxModelCalls = 1 } : null);
         var collector = new UsageJournalCollector(expected);
         var attempt = collector.BeginAttempt(0);
         attempt.AgentStarted();
+        if (phase == "refused")
+        {
+            var sent = attempt.BeginCall()!;
+            sent.Dispatch();
+            sent.TransportFinished(DeepSeekTransportResult.Success([]));
+            sent.Returned(new(0, 0));
+        }
         var call = attempt.BeginCall()!;
-        var reservations = phase == "refused" ? 0 : 1;
+        var reservations = 1;
         if (phase == "refused") call.Refuse("budget_refused");
         else if (phase != "before_dispatch")
         {
@@ -158,10 +466,10 @@ public sealed class R6UsageJournalTests
             });
         }
         var journal = collector.Seal("infrastructure_failed", Reservations(reservations));
-        Assert.Equal("not_observed", Assert.Single(journal.Document.Calls).ChatOutcome);
+        Assert.Equal("not_observed", journal.Document.Calls[^1].ChatOutcome);
         Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
         var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
-        candidate["calls"]![0]!["chat_outcome"] = "cancelled";
+        candidate["calls"]![candidate["calls"]!.AsArray().Count - 1]!["chat_outcome"] = "cancelled";
         Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
     }
 
@@ -179,7 +487,7 @@ public sealed class R6UsageJournalTests
         attempt.AgentFinished(true);
         attempt.AdmitEvaluation(new string('a', 64));
         attempt.Finish("failed");
-        var journal = collector.Seal("complete", Reservations(1));
+        var journal = collector.Seal("accounting_violation", Reservations(1));
         var restored = Assert.IsType<UsageJournal>(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
         Assert.Equal("succeeded", restored.Document.Attempts[0].AgentStatus);
         Assert.Equal("failed", restored.Document.Attempts[0].Status);
@@ -501,6 +809,9 @@ public sealed class R6UsageJournalTests
     {
         var expected = Expected(256);
         var collector = new UsageJournalCollector(expected);
+        var earlierInput = Math.Min(input, 1);
+        var earlierOutput = Math.Min(output, 1);
+        var violation = input > 1 || output > 1;
         for (var index = 0; index < 256; index++)
         {
             var attempt = collector.BeginAttempt(index);
@@ -510,19 +821,26 @@ public sealed class R6UsageJournalTests
                 var call = attempt.BeginCall()!;
                 call.Dispatch();
                 call.TransportFinished(DeepSeekTransportResult.Success([]));
-                call.Returned(new(input, output, new("deepseek", "deepseek-v4-flash", "deepseek-flash", input, 0)));
+                // The only over-bound observation is the final send. Earlier
+                // calls fit, so the population obeys the monotonic stop policy.
+                var last = index == 255 && ordinal == 7;
+                var observedInput = last ? input : earlierInput;
+                var observedOutput = last ? output : earlierOutput;
+                call.Returned(new(observedInput, observedOutput,
+                    new("deepseek", "deepseek-v4-flash", "deepseek-flash", observedInput, 0)));
             }
-            attempt.AgentFinished(true);
+            var failed = index == 255 && violation;
+            attempt.AgentFinished(!failed);
             attempt.AdmitEvaluation(new string('a', 64));
-            attempt.Finish("completed");
+            attempt.Finish(failed ? "failed" : "completed");
         }
-        var journal = collector.Seal("complete", Reservations(2048));
+        var journal = collector.Seal(violation ? "accounting_violation" : "complete", Reservations(2048));
         var bytes = UsageJournalJson.Write(journal);
         Assert.InRange(bytes.Length, 1, UsageJournalLimits.JsonBytes);
         Assert.Equal(bytes, UsageJournalJson.Write(Assert.IsType<UsageJournal>(UsageJournalJson.Read(bytes, expected))));
-        Assert.Equal(2048m * input, journal.Document.Totals.KnownInputTokens);
-        Assert.Equal(2048m * (input + output), journal.Document.Totals.KnownCombinedTokens);
-        Assert.Equal(2048m * input, journal.Document.Totals.CacheReadInputTokens);
+        Assert.Equal(2047m * earlierInput + input, journal.Document.Totals.KnownInputTokens);
+        Assert.Equal(2047m * (earlierInput + earlierOutput) + input + output, journal.Document.Totals.KnownCombinedTokens);
+        Assert.Equal(2047m * earlierInput + input, journal.Document.Totals.CacheReadInputTokens);
         Assert.Equal(2048, journal.Document.Totals.KnownUsageSends);
         Assert.True(journal.Document.Totals.UsageComplete);
     }
@@ -540,7 +858,7 @@ public sealed class R6UsageJournalTests
         call.TransportFinished(DeepSeekTransportResult.Success([]));
         call.Returned(new(0, 0, new(Canary, Canary, Canary, 0, 0)));
         attempt.Finish("failed");
-        var journal = collector.Seal("bound_stop", Reservations(1));
+        var journal = collector.Seal("caller_cancelled", Reservations(1));
         Assert.Equal(new[] { "invalid", "failed", "unattempted" }, journal.Document.Attempts.Select(a => a.Status));
         Assert.Equal(1, journal.Document.Totals.Invalid);
         Assert.Equal(2, journal.Document.Totals.Attempted);
@@ -622,7 +940,7 @@ public sealed class R6UsageJournalTests
             new(expected.Provenance with { PlanSha256 = LivePlanAdmission.Digest(different) }, different)));
     }
 
-    private static UsageJournalExpectation Expected(int count)
+    private static UsageJournalExpectation Expected(int count, Func<LivePlanBounds, LivePlanBounds>? bounds = null)
     {
         var calls = count * 8;
         var plan = new LivePlanDigestInput(LiveLimits.PlanFormat, new(new string('a', 40), new string('b', 40), true),
@@ -630,6 +948,7 @@ public sealed class R6UsageJournalTests
                 DeepSeekAdapterContext.Adapter, LivePlanAdmission.ProviderConfigurationSha256()),
             Enumerable.Repeat(count == 256 ? new string('c', 64) : "cs-safe", count).ToImmutableArray(),
             new(count, calls, calls, calls, calls * 2, 120, calls, new(1, 1, 1)));
+        if (bounds is not null) plan = plan with { Bounds = bounds(plan.Bounds) };
         return new(new(count == 256 ? new string('a', 57) : "live-test", plan.Source.Commit, plan.Source.Tree, true,
             count == 256 ? new string('b', 64) : LiveRunner.BuildId, plan.CorpusSha256,
             plan.Provider.ConfigurationSha256, LivePlanAdmission.Digest(plan), "loopback"), plan);

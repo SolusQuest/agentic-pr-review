@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 
@@ -79,23 +80,101 @@ internal sealed class UsageJournal
                 document.Totals != Totals(document.Attempts, document.Calls)) return null;
             var reservation = document.Reservations;
             var bounds = expected.Bounds;
-            var required = document.Totals.ActualSends + document.Calls.Count(c => c.TransportOutcome == "request_rejected");
-            // Cancellation or sealing can win between reservation and dispatch.
-            // Other local refusals never acquire another reservation.
-            var optional = document.Calls.Count(c => !c.Dispatched &&
-                (c.TransportOutcome == "cancelled" || c.TransportOutcome == "not_dispatched" && c.ChatOutcome == "not_observed"));
-            if (reservation.Calls < required || reservation.Calls > required + optional ||
-                reservation.Calls > bounds.MaxModelCalls ||
+            if (reservation.Calls > bounds.MaxModelCalls ||
                 reservation.InputTokens != checked(reservation.Calls * bounds.PerCall.MaxInputTokens) ||
                 reservation.OutputTokens != checked(reservation.Calls * bounds.PerCall.MaxOutputTokens) ||
                 reservation.CombinedTokens != checked(reservation.InputTokens + reservation.OutputTokens) ||
                 reservation.SpendMicroUsd != checked(reservation.Calls * bounds.PerCall.MaxChargeMicroUsd) ||
                 reservation.InputTokens > bounds.MaxInputTokens || reservation.OutputTokens > bounds.MaxOutputTokens ||
-                reservation.CombinedTokens > bounds.MaxCombinedTokens || reservation.SpendMicroUsd > bounds.SpendCeilingMicroUsd)
+                reservation.CombinedTokens > bounds.MaxCombinedTokens || reservation.SpendMicroUsd > bounds.SpendCeilingMicroUsd ||
+                !ValidCauses(document, bounds))
                 return null;
             return new(document);
         }
         catch (OverflowException) { return null; }
+    }
+
+    private static bool ValidCauses(UsageJournalDocument document, LivePlanBounds bounds)
+    {
+        var perCall = bounds.PerCall;
+        var capacity = Math.Min(bounds.MaxModelCalls, Math.Min(bounds.MaxInputTokens / perCall.MaxInputTokens,
+            Math.Min(bounds.MaxOutputTokens / perCall.MaxOutputTokens,
+                Math.Min(bounds.MaxCombinedTokens / (perCall.MaxInputTokens + perCall.MaxOutputTokens),
+                    bounds.SpendCeilingMicroUsd / perCall.MaxChargeMicroUsd))));
+        long minimum = 0, maximum = 0;
+        var possibleViolation = false;
+        var definiteViolation = false;
+        var possibleRateLimit = false;
+        var definiteRateLimit = false;
+        var possibleBudgetRefusal = false;
+        var definiteBudgetRefusal = false;
+        var cursor = 0;
+        for (var index = 0; index < document.Attempts.Length; index++)
+        {
+            var attempt = document.Attempts[index];
+            var overBoundInAttempt = false;
+            for (var ordinal = 0; ordinal < attempt.Calls; ordinal++)
+            {
+                var call = document.Calls[cursor++];
+                // Another call in this serial Agent attempt proves the prior
+                // response task (including its R5 accounting update) returned.
+                definiteViolation |= overBoundInAttempt;
+                if (call.Dispatched || call.TransportOutcome == "request_rejected")
+                {
+                    if (definiteViolation || minimum == capacity) return false;
+                    minimum++;
+                    maximum = Math.Min(capacity, maximum + 1);
+                    // A granted reservation rules out any earlier ambiguous
+                    // budget refusal: exhausted reservations never recover.
+                    possibleBudgetRefusal = false;
+                }
+                else if (call.TransportOutcome == "budget_refused")
+                {
+                    if (definiteViolation || maximum < capacity) return false;
+                    minimum = maximum = capacity;
+                    possibleBudgetRefusal = definiteBudgetRefusal = true;
+                }
+                else if (call.TransportOutcome == "violation_refused")
+                {
+                    if (!possibleViolation) return false;
+                    definiteViolation = true;
+                }
+                else if (call.TransportOutcome == "cancelled" ||
+                    call.TransportOutcome == "not_dispatched" && call.ChatOutcome == "not_observed")
+                {
+                    // Cancellation/sealing may hide either the refusal or a
+                    // reservation taken before dispatch. Keep its feasible range.
+                    possibleBudgetRefusal |= !definiteViolation && maximum == capacity;
+                    if (!definiteViolation) maximum = Math.Min(capacity, maximum + 1);
+                }
+                var overBound = call.Usage is { } usage &&
+                    (usage.InputTokens > perCall.MaxInputTokens || usage.OutputTokens > perCall.MaxOutputTokens);
+                overBoundInAttempt |= overBound;
+                // Journal and R5 observation complete independently when Agent
+                // waiting is cancelled. These unknowns may hide an R5 receipt;
+                // HTTP/normalization failures and oversized sentinels cannot.
+                var hiddenReceipt = call.Dispatched && call.TransportOutcome is "cancelled" or "incomplete";
+                possibleViolation |= overBound || hiddenReceipt || call.Dispatched &&
+                    call.TransportOutcome == "success" && call.ChatOutcome is "returned" or "not_observed" &&
+                    call.UsageStatus == "unknown";
+                possibleRateLimit |= call.TransportOutcome == "http429" || hiddenReceipt;
+                definiteRateLimit |= call.TransportOutcome == "http429" && call.ChatOutcome == "threw";
+            }
+            definiteViolation |= overBoundInAttempt && attempt.AgentStatus == "succeeded";
+            if (index + 1 < document.Attempts.Length && document.Attempts[index + 1].Status != "unattempted" &&
+                (definiteViolation || definiteBudgetRefusal || definiteRateLimit)) return false;
+        }
+        if (document.Reservations.Calls < minimum || document.Reservations.Calls > maximum) return false;
+        return document.StopReason switch
+        {
+            "complete" => !definiteViolation && !definiteBudgetRefusal && !definiteRateLimit,
+            "accounting_violation" => possibleViolation,
+            "bound_stop" => !definiteViolation && possibleBudgetRefusal && document.Reservations.Calls == capacity,
+            "rate_limited" => !definiteViolation && !definiteBudgetRefusal && possibleRateLimit,
+            // These signals can arrive between calls or after the final return;
+            // their external cause is not recoverable from call rows alone.
+            _ => true,
+        };
     }
 
     private static bool ValidCall(UsageJournalCall call)
