@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
@@ -116,7 +117,8 @@ internal sealed record LiveRunSummary(
     string AdjudicationStatus = "not_requested",
     int HumanConfirmedCases = 0,
     int AiAdjudicatedCases = 0,
-    LiveCacheUsageSummary? CacheUsage = null);
+    LiveCacheUsageSummary? CacheUsage = null,
+    UsageJournalDocument? UsageJournal = null);
 
 // Known subtotals describe only measured observations, not billed campaign
 // totals. The fixed identity domain bounds the output independently of traffic.

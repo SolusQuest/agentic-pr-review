@@ -8,6 +8,8 @@ using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Accounting;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Reporting;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
@@ -23,7 +25,8 @@ internal sealed record LiveRunResult(
     int Invalid,
     ImmutableArray<EvaluationOutcome> Outcomes,
     LiveRunSummary Summary,
-    byte[] ReportJson);
+    byte[] ReportJson,
+    UsageJournal Journal);
 
 internal sealed class LiveOptions
 {
@@ -42,7 +45,7 @@ internal sealed class LiveOptions
 // transport/chat boundaries and reconciled into the public-safe report.
 internal static class LiveRunner
 {
-    private const string BuildId = "r5-live-local";
+    internal const string BuildId = "r5-live-local";
 
     internal static async Task<int> InvokeAsync(string planPath, bool execute, bool adjudicate = false)
     {
@@ -111,6 +114,10 @@ internal static class LiveRunner
         }
 
         var accounting = new LiveAccounting(plan.Bounds);
+        var expectation = new UsageJournalExpectation(new(nonce, EvaluationSource.Commit, EvaluationSource.Tree,
+            EvaluationSource.Clean, BuildId, fixture.CorpusSha256, plan.Provider.ConfigurationSha256,
+            plan.Digest, execute ? "live" : "loopback"), plan.Schedule, plan.Bounds);
+        var journal = new UsageJournalCollector(expectation);
         var rows = ImmutableArray.CreateBuilder<ReadOnlyMemory<byte>>();
         var outcomes = ImmutableArray.CreateBuilder<EvaluationOutcome>();
         var subjects = new List<LiveAdjudicationCase>();
@@ -122,59 +129,85 @@ internal static class LiveRunner
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(plan.Bounds.MaxSeconds));
 
-        for (var index = 0; index < plan.Schedule.Length; index++)
+        LiveAccountingSnapshot frozenAccounting;
+        UsageJournal frozenJournal;
+        var schedulingEnded = false;
+        try
         {
-            var caseId = plan.Schedule[index];
-            var run = cases[caseId];
-            var runId = nonce + "-" + (index + 1);
-            var trusted = run.CreateTrustedRequest(BuildId) with
+            for (var index = 0; index < plan.Schedule.Length; index++)
             {
-                ProviderId = DeepSeekAdapterContext.Provider,
-                ModelId = DeepSeekAdapterContext.Model,
-                AdapterId = DeepSeekAdapterContext.Adapter,
-            };
-            var descriptor = new EvaluationRunInput(runId, mode, EvaluationSource.Commit,
-                EvaluationSource.Tree, EvaluationSource.Clean, plan.Provider.ConfigurationSha256);
-            var attempt = EvaluationAttempt.Admit(trusted, descriptor);
-            EvaluationOutcome? outcome = null;
-            if (attempt is null || !AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable))
-            {
-                invalid++;
-                outcome = EvaluationScorer.Failure(run.Expected, EvaluationFailure.Invalid, attempt);
-            }
-            else
-            {
-                try
+                var scope = journal.BeginAttempt(index);
+                var caseId = plan.Schedule[index];
+                var run = cases[caseId];
+                var runId = nonce + "-" + (index + 1);
+                var trusted = run.CreateTrustedRequest(BuildId) with
                 {
-                    outcome = await AttemptAsync(run, trusted, stable!, descriptor, attempt, runId,
-                        execute, credential, options, accounting, subjects, diagnostics, index, deadline.Token);
-                    switch (outcome.ExecutionStatus)
+                    ProviderId = DeepSeekAdapterContext.Provider,
+                    ModelId = DeepSeekAdapterContext.Model,
+                    AdapterId = DeepSeekAdapterContext.Adapter,
+                };
+                var descriptor = new EvaluationRunInput(runId, mode, EvaluationSource.Commit,
+                    EvaluationSource.Tree, EvaluationSource.Clean, plan.Provider.ConfigurationSha256);
+                var attempt = EvaluationAttempt.Admit(trusted, descriptor);
+                EvaluationOutcome? outcome = null;
+                if (attempt is null || !AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable))
+                {
+                    invalid++;
+                    outcome = EvaluationScorer.Failure(run.Expected, EvaluationFailure.Invalid, attempt);
+                }
+                else
+                {
+                    try
                     {
-                        case EvaluationStatus.Completed: completed++; break;
-                        case EvaluationStatus.Invalid: invalid++; break;
-                        default: failed++; break;
+                        outcome = await AttemptAsync(run, trusted, stable!, descriptor, attempt, runId,
+                            execute, credential, options, accounting, scope, subjects, diagnostics, index, deadline.Token);
+                        switch (outcome.ExecutionStatus)
+                        {
+                            case EvaluationStatus.Completed: completed++; break;
+                            case EvaluationStatus.Invalid: invalid++; break;
+                            default: failed++; break;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        diagnostics.Add(LiveAgentDiagnostic.Capture(index, null));
+                        stopReason = token.IsCancellationRequested ? "caller_cancelled" : "deadline";
+                        outcome = EvaluationScorer.Failure(run.Expected, EvaluationFailure.Unknown, attempt);
+                        failed++;
                     }
                 }
-                catch (OperationCanceledException)
+                scope.AdmitEvaluation(outcome.AttemptSha256);
+                scope.Finish(outcome.ExecutionStatus switch
                 {
-                    diagnostics.Add(LiveAgentDiagnostic.Capture(index, null));
+                    EvaluationStatus.Completed => "completed",
+                    EvaluationStatus.Invalid => "invalid",
+                    _ => "failed",
+                }, deadline.IsCancellationRequested);
+                rows.Add(EvaluationJson.Write(outcome));
+                outcomes.Add(outcome);
+                if (stopReason != "complete") break;
+                if (accounting.AccountingViolation) { stopReason = "accounting_violation"; break; }
+                if (accounting.BudgetRefused) { stopReason = "bound_stop"; break; }
+                if (accounting.RateLimited) { stopReason = "rate_limited"; break; }
+                if (deadline.IsCancellationRequested)
+                {
                     stopReason = token.IsCancellationRequested ? "caller_cancelled" : "deadline";
-                    outcome = EvaluationScorer.Failure(run.Expected, EvaluationFailure.Unknown, attempt);
-                    failed++;
+                    break;
                 }
             }
-            rows.Add(EvaluationJson.Write(outcome));
-            outcomes.Add(outcome);
-            if (stopReason != "complete") break;
-            if (accounting.AccountingViolation) { stopReason = "accounting_violation"; break; }
-            if (accounting.BudgetRefused) { stopReason = "bound_stop"; break; }
-            if (accounting.RateLimited) { stopReason = "rate_limited"; break; }
-            if (deadline.IsCancellationRequested)
-            {
-                stopReason = token.IsCancellationRequested ? "caller_cancelled" : "deadline";
-                break;
-            }
+            schedulingEnded = true;
         }
+        finally
+        {
+            frozenAccounting = accounting.Seal();
+            frozenJournal = journal.Seal(schedulingEnded ? stopReason : "infrastructure_failed",
+                new(frozenAccounting.Sends, frozenAccounting.ReservedInputTokens, frozenAccounting.ReservedOutputTokens,
+                    frozenAccounting.ReservedCombinedTokens, frozenAccounting.ReservedSpendMicroUsd));
+        }
+        // Exercise both generated writing and strict admission on the maintained
+        // framework/AOT path. Public output is only the admitted frozen value.
+        frozenJournal = UsageJournalJson.Read(UsageJournalJson.Write(frozenJournal), expectation) ??
+            throw new InvalidOperationException("usage_journal_roundtrip_invalid");
 
         // Provider execution has ended. Keep only admitted subjects, never SESSION
         // or provider bytes, while a maintainer reviews the private projections.
@@ -195,19 +228,19 @@ internal static class LiveRunner
             plan.Digest, fixture.CorpusSha256, EvaluationSource.Commit, EvaluationSource.Tree,
             EvaluationSource.Clean, plan.Schedule.Length, attempted, completed, failed, invalid,
             plan.Schedule.Length - attempted,
-            execute ? 0 : (int)accounting.Sends, execute ? (int)accounting.Sends : 0,
-            accounting.KnownInputTokens, accounting.KnownOutputTokens, accounting.KnownCombinedTokens,
-            accounting.ReservedInputTokens, accounting.ReservedOutputTokens, accounting.ReservedCombinedTokens,
-            accounting.UsageUnknownCalls, accounting.AccountingViolation, accounting.Outcomes,
-            accounting.ReservedSpendMicroUsd, plan.Bounds.SpendCeilingMicroUsd, stopReason, adjudication.Cleanup,
+            execute ? 0 : (int)frozenAccounting.Sends, execute ? (int)frozenAccounting.Sends : 0,
+            frozenAccounting.KnownInputTokens, frozenAccounting.KnownOutputTokens, frozenAccounting.KnownCombinedTokens,
+            frozenAccounting.ReservedInputTokens, frozenAccounting.ReservedOutputTokens, frozenAccounting.ReservedCombinedTokens,
+            frozenAccounting.UsageUnknownCalls, frozenAccounting.AccountingViolation, frozenAccounting.Outcomes,
+            frozenAccounting.ReservedSpendMicroUsd, plan.Bounds.SpendCeilingMicroUsd, stopReason, adjudication.Cleanup,
             diagnostics.ToImmutableArray(),
             adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases,
-            accounting.CacheUsage);
+            frozenAccounting.CacheUsage, frozenJournal.Document);
         foreach (var row in rows) write(Encoding.UTF8.GetString(row.Span));
         write(Encoding.UTF8.GetString(reportBytes.Value));
         write(JsonSerializer.Serialize(summary, LiveJsonContext.Default.LiveRunSummary));
         return new(stopReason, attempted, completed, failed, invalid, outcomes.ToImmutable(),
-            summary, reportBytes.Value.ToArray());
+            summary, reportBytes.Value.ToArray(), frozenJournal);
     }
 
     private static AdmittedReplayFixture AdmitCorpus(LivePlan plan, LiveOptions options, CancellationToken token)
@@ -237,6 +270,7 @@ internal static class LiveRunner
         AgentSessionMaterializedStableRequest stable, EvaluationRunInput descriptor,
         EvaluationAttempt attempt, string runId, bool execute,
         DeepSeekCredential? credential, LiveOptions options, LiveAccounting accounting,
+        UsageJournalCollector.AttemptScope journalAttempt,
         List<LiveAdjudicationCase> subjects, List<LiveAgentDiagnostic> diagnostics, int index,
         CancellationToken token)
     {
@@ -246,13 +280,15 @@ internal static class LiveRunner
         var inner = execute
             ? options.TransportFactory.Create(credential!)
             : options.DryRunTransport(run);
-        using var metered = new LiveMeteredTransport(inner, accounting);
+        using var metered = new LiveMeteredTransport(inner, accounting, journalAttempt);
         var adapter = new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
             DeepSeekAdapterContext.Adapter, runId);
         var client = DeepSeekChatBackend.CreateClient(adapter, metered);
-        var observed = new LiveChatObserver(client, accounting);
+        var observed = new LiveChatObserver(client, accounting, journalAttempt);
+        journalAttempt.AgentStarted();
         var outcome = await new AgentLoop(observed, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)))
             .RunAsync(request, token);
+        journalAttempt.AgentFinished(outcome.Succeeded);
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)
         {
             diagnostics.Add(LiveAgentDiagnostic.Capture(index, outcome.Diagnostic));
