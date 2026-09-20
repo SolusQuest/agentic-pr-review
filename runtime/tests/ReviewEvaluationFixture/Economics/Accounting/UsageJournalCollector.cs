@@ -54,7 +54,7 @@ internal sealed class UsageJournalCollector(UsageJournalExpectation expected)
             }
             var attemptRows = attempts.ToImmutable();
             var callRows = calls.ToImmutable();
-            var document = new UsageJournalDocument(_expected.Provenance, _expected.BindingSha256, stopReason,
+            var document = new UsageJournalDocument(_expected.Provenance, _expected.Plan, _expected.BindingSha256, stopReason,
                 "not_applicable", reservations, attemptRows, callRows, UsageJournal.Totals(attemptRows, callRows));
             _result = UsageJournal.Admit(document, _expected) ??
                 throw new InvalidOperationException("usage_journal_invalid");

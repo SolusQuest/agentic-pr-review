@@ -60,7 +60,8 @@ internal sealed record LivePlanInput(
     [property: JsonRequired] ImmutableArray<LivePlanScheduleEntry> Schedule,
     [property: JsonRequired] LivePlanBounds Bounds);
 
-// Normalized admitted projection; its digest is the only public plan identity.
+// Path-free normalized projection. The journal carries this bounded selection
+// with its digest so an offline consumer can validate its structural claims.
 internal sealed record LivePlanDigestInput(
     [property: JsonRequired] string Format,
     [property: JsonRequired] LivePlanSource Source,

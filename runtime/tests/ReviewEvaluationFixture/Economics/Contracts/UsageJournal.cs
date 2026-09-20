@@ -11,9 +11,18 @@ internal sealed class UsageJournal
     private UsageJournal(UsageJournalDocument document) => Document = document;
     internal UsageJournalDocument Document { get; }
 
-    internal static UsageJournal? Admit(UsageJournalDocument? document, UsageJournalExpectation expected)
+    internal bool Matches(UsageJournalExpectation expected) =>
+        Document.Provenance == expected.Provenance && Document.BindingSha256 == expected.BindingSha256;
+
+    internal static UsageJournal? Admit(UsageJournalDocument? document, UsageJournalExpectation? expected = null)
     {
-        if (document is null || expected is null || document.Provenance != expected.Provenance ||
+        if (document is null) return null;
+        UsageJournalExpectation embedded;
+        try { embedded = new(document.Provenance, document.Plan); }
+        catch (ArgumentException) { return null; }
+        if (expected is not null && embedded.Provenance != expected.Provenance) return null;
+        expected ??= embedded;
+        if (document.Provenance != expected.Provenance ||
             document.BindingSha256 != expected.BindingSha256 || document.CacheWriteBillingStatus != "not_applicable" ||
             document.StopReason is not ("complete" or "bound_stop" or "accounting_violation" or
                 "rate_limited" or "caller_cancelled" or "deadline" or "infrastructure_failed") ||
@@ -46,6 +55,12 @@ internal sealed class UsageJournal
                         attempt.EvaluationAttemptSha256 is not null) return null;
                 }
                 else if (untouched) return null;
+                // Outcome attribution can defensively become invalid after
+                // Agent start, and post-Agent admission can fail after success.
+                // Constrain the unambiguous relationships, not those outcomes.
+                if (attempt.AgentStatus == "not_started" && attempt.Calls != 0 ||
+                    attempt.AgentStatus == "succeeded" &&
+                        (attempt.Sends == 0 || attempt.EvaluationAttemptSha256 is null)) return null;
                 if (attempt.Status == "completed" && (attempt.AgentStatus != "succeeded" ||
                     attempt.EvaluationAttemptSha256 is null || attempt.Sends == 0)) return null;
                 var sends = 0;
@@ -64,7 +79,12 @@ internal sealed class UsageJournal
                 document.Totals != Totals(document.Attempts, document.Calls)) return null;
             var reservation = document.Reservations;
             var bounds = expected.Bounds;
-            if (reservation.Calls < document.Totals.ActualSends || reservation.Calls > document.Calls.Length ||
+            var required = document.Totals.ActualSends + document.Calls.Count(c => c.TransportOutcome == "request_rejected");
+            // Cancellation or sealing can win between reservation and dispatch.
+            // Other local refusals never acquire another reservation.
+            var optional = document.Calls.Count(c => !c.Dispatched &&
+                (c.TransportOutcome == "cancelled" || c.TransportOutcome == "not_dispatched" && c.ChatOutcome == "not_observed"));
+            if (reservation.Calls < required || reservation.Calls > required + optional ||
                 reservation.Calls > bounds.MaxModelCalls ||
                 reservation.InputTokens != checked(reservation.Calls * bounds.PerCall.MaxInputTokens) ||
                 reservation.OutputTokens != checked(reservation.Calls * bounds.PerCall.MaxOutputTokens) ||
@@ -80,17 +100,32 @@ internal sealed class UsageJournal
 
     private static bool ValidCall(UsageJournalCall call)
     {
-        if (call.ChatOutcome is not ("returned" or "threw" or "cancelled" or "not_observed")) return false;
         if (!call.Dispatched)
-            return call.UsageStatus == "not_sent" && call.Usage is null &&
-                call.TransportOutcome is "budget_refused" or "violation_refused" or "request_rejected" or
-                    "not_dispatched" or "cancelled";
-        if (call.TransportOutcome is not ("success" or "http4xx" or "http429" or "http5xx" or
-            "connect_timeout" or "provider_timeout" or "transport_failure" or "response_too_large" or
-            "cancelled" or "incomplete")) return false;
-        if (call.UsageStatus == "unknown") return call.Usage is null;
-        return call.UsageStatus == "known" && call.TransportOutcome == "success" &&
-            call.ChatOutcome == "returned" && ValidUsage(call.Usage);
+        {
+            if (call.UsageStatus != "not_sent" || call.Usage is not null) return false;
+            return call.TransportOutcome switch
+            {
+                "cancelled" => call.ChatOutcome == "cancelled",
+                "budget_refused" or "violation_refused" or "request_rejected" or "not_dispatched" =>
+                    call.ChatOutcome is "threw" or "not_observed",
+                _ => false,
+            };
+        }
+        if (call.UsageStatus == "known")
+            return call.TransportOutcome == "success" && call.ChatOutcome == "returned" && ValidUsage(call.Usage);
+        if (call.UsageStatus != "unknown" || call.Usage is not null) return false;
+        // A seal may retain a transport receipt before chat observation. Such
+        // unfinished observations are explicit unknowns, not invented returns.
+        return call.TransportOutcome switch
+        {
+            "success" => call.ChatOutcome is "returned" or "threw" or "not_observed",
+            "response_too_large" => call.ChatOutcome is "returned" or "not_observed",
+            "cancelled" => call.ChatOutcome == "cancelled",
+            "incomplete" => call.ChatOutcome == "not_observed",
+            "http4xx" or "http429" or "http5xx" or "connect_timeout" or "provider_timeout" or "transport_failure" =>
+                call.ChatOutcome is "threw" or "not_observed",
+            _ => false,
+        };
     }
 
     internal static bool ValidUsage(UsageJournalUsage? usage)
@@ -135,7 +170,7 @@ internal static class UsageJournalJson
         return bytes;
     }
 
-    internal static UsageJournal? Read(ReadOnlySpan<byte> bytes, UsageJournalExpectation expected)
+    internal static UsageJournal? Read(ReadOnlySpan<byte> bytes, UsageJournalExpectation? expected = null)
     {
         if (bytes.Length is < 1 or > UsageJournalLimits.JsonBytes) return null;
         try

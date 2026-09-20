@@ -17,6 +17,178 @@ public sealed class R6UsageJournalTests
 {
     private const string Canary = "APR273_PRIVATE_PROVIDER_PATH_REASONING_CANARY";
 
+    [Theory]
+    [InlineData("budget")]
+    [InlineData("http429")]
+    [InlineData("request_rejected")]
+    [InlineData("invalid_attempt")]
+    [InlineData("missing_reservation")]
+    [InlineData("extra_reservation")]
+    public async Task StrictAdmissionRejectsImpossibleLifecycleAndReservationClaims(string fault)
+    {
+        UsageJournal journal;
+        UsageJournalExpectation expected;
+        if (fault == "invalid_attempt")
+        {
+            expected = Expected(1);
+            var collector = new UsageJournalCollector(expected);
+            collector.BeginAttempt(0).Finish("invalid");
+            journal = collector.Seal("complete", Reservations(0));
+        }
+        else
+        {
+            using var plan = new PlanFile(p =>
+            {
+                if (fault == "budget") p["bounds"]!["max_model_calls"] = 1;
+                if (fault == "extra_reservation") p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
+            });
+            var result = await Run(plan, fault is "budget" or "extra_reservation" ? null :
+                _ => new FakeTransport((_, _) => Task.FromResult(fault == "http429"
+                    ? DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0)
+                    : DeepSeekTransportResult.RequestRejected())));
+            journal = result.Journal;
+            expected = Expect(plan, journal.Document);
+        }
+        var json = JsonNode.Parse(UsageJournalJson.Write(journal))!;
+        if (fault == "invalid_attempt") json["attempts"]![0]!["agent_status"] = "succeeded";
+        else if (fault is "missing_reservation" or "extra_reservation")
+        {
+            var count = fault == "missing_reservation" ? 0 : 2;
+            var bounds = expected.Bounds;
+            json["reservations"] = new JsonObject
+            {
+                ["calls"] = count, ["input_tokens"] = count * bounds.PerCall.MaxInputTokens,
+                ["output_tokens"] = count * bounds.PerCall.MaxOutputTokens,
+                ["combined_tokens"] = count * (bounds.PerCall.MaxInputTokens + bounds.PerCall.MaxOutputTokens),
+                ["spend_micro_usd"] = count * bounds.PerCall.MaxChargeMicroUsd,
+            };
+        }
+        else json["calls"]![json["calls"]!.AsArray().Count - 1]!["chat_outcome"] = "returned";
+        Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(json.ToJsonString()), expected));
+    }
+
+    [Fact]
+    public async Task StandaloneReaderNeedsOnlyJournalBytesAfterOriginalPlanIsDeleted()
+    {
+        byte[] bytes;
+        string path;
+        using (var plan = new PlanFile())
+        {
+            path = plan.Path;
+            bytes = UsageJournalJson.Write((await Run(plan)).Journal);
+        }
+        Assert.False(File.Exists(path));
+        var admitted = Assert.IsType<UsageJournal>(UsageJournalJson.Read(bytes));
+        Assert.Equal(1, admitted.Document.Totals.Completed);
+        Assert.Equal(bytes, UsageJournalJson.Write(admitted));
+        Assert.Equal(DeepSeekAdapterContext.Model, admitted.Document.Plan.Provider.ModelId);
+        Assert.DoesNotContain(path, Encoding.UTF8.GetString(bytes));
+
+        var expected = Expected(3); // A historical source, independent of this compiled source.
+        var empty = new UsageJournalCollector(expected).Seal("caller_cancelled", Reservations(0));
+        var restored = Assert.IsType<UsageJournal>(UsageJournalJson.Read(UsageJournalJson.Write(empty)));
+        Assert.Equal(3, restored.Document.Totals.Unattempted);
+        Assert.Equal(0, restored.Document.Reservations.Calls);
+        Assert.Equal(expected.Bounds, restored.Document.Plan.Bounds);
+        Assert.True(restored.Matches(expected));
+        Assert.Null(UsageJournalJson.Read(bytes, expected));
+    }
+
+    [Fact]
+    public async Task StandaloneSelectionAdmissionRejectsUnboundUnsupportedAndUnboundedClaims()
+    {
+        using var plan = new PlanFile();
+        var bytes = UsageJournalJson.Write((await Run(plan)).Journal);
+        Action<JsonNode>[] mutations =
+        [
+            j => j.AsObject().Remove("plan"),
+            j => j["plan"] = null,
+            j => j["plan"]!["source"]!["commit"] = new string('0', 40),
+            j => j["plan"]!["corpus_sha256"] = new string('0', 64),
+            j => j["plan"]!["schedule"]![0] = "cs-defect",
+            j => j["plan"]!["provider"]!["model_id"] = Canary,
+            j => j["plan"]!["provider"]!["adapter_id"] = new string('0', 64),
+            j => j["plan"]!["provider"]!["configuration_sha256"] = new string('0', 64),
+            j => j["plan"]!["bounds"]!["max_model_calls"] = 2049,
+            j => j["plan"]!["bounds"]!["max_evaluations"] = 0,
+            j => j["plan"]!["bounds"]!["max_seconds"] = 86401,
+            j => j["plan"]!["bounds"]!["per_call"]!["max_input_tokens"] = -1,
+            j => j["plan"]!["bounds"]!["per_call"]!["max_charge_micro_usd"] = long.MaxValue,
+            j => j["plan"]!["bounds"]!["spend_ceiling_micro_usd"] = 1,
+            j => j["plan"]!["bounds"]!["per_call"] = null,
+            j => j["plan"]!["corpus_path"] = Canary,
+        ];
+        foreach (var mutate in mutations)
+        {
+            var candidate = JsonNode.Parse(bytes)!;
+            mutate(candidate);
+            Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
+        }
+        var expected = Expected(1);
+        Assert.Throws<ArgumentException>(() => new UsageJournalExpectation(expected.Provenance,
+            expected.Plan with { Bounds = expected.Bounds with { MaxModelCalls = 9 } }));
+    }
+
+    [Theory]
+    [InlineData("pending")]
+    [InlineData("success")]
+    [InlineData("http429")]
+    [InlineData("oversized")]
+    [InlineData("refused")]
+    [InlineData("rejected")]
+    [InlineData("before_dispatch")]
+    public void SealPreservesLegitimateUnfinishedObservations(string phase)
+    {
+        var expected = Expected(1);
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var call = attempt.BeginCall()!;
+        var reservations = phase == "refused" ? 0 : 1;
+        if (phase == "refused") call.Refuse("budget_refused");
+        else if (phase != "before_dispatch")
+        {
+            call.Dispatch();
+            if (phase != "pending") call.TransportFinished(phase switch
+            {
+                "success" => DeepSeekTransportResult.Success([]),
+                "http429" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0),
+                "oversized" => DeepSeekTransportResult.ResponseTooLarge(),
+                _ => DeepSeekTransportResult.RequestRejected(),
+            });
+        }
+        var journal = collector.Seal("infrastructure_failed", Reservations(reservations));
+        Assert.Equal("not_observed", Assert.Single(journal.Document.Calls).ChatOutcome);
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+        var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
+        candidate["calls"]![0]!["chat_outcome"] = "cancelled";
+        Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
+    }
+
+    [Fact]
+    public void PostAgentAdmissionFailureRetainsAgentSuccessAndKnownUsage()
+    {
+        var expected = Expected(1);
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var call = attempt.BeginCall()!;
+        call.Dispatch();
+        call.TransportFinished(DeepSeekTransportResult.Success([]));
+        call.Returned(new(7, 3));
+        attempt.AgentFinished(true);
+        attempt.AdmitEvaluation(new string('a', 64));
+        attempt.Finish("failed");
+        var journal = collector.Seal("complete", Reservations(1));
+        var restored = Assert.IsType<UsageJournal>(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+        Assert.Equal("succeeded", restored.Document.Attempts[0].AgentStatus);
+        Assert.Equal("failed", restored.Document.Attempts[0].Status);
+        Assert.Equal(7, restored.Document.Totals.KnownInputTokens);
+        var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
+        candidate["attempts"]![0]!["agent_status"] = "not_started";
+        Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(candidate.ToJsonString())));
+    }
+
     [Fact]
     public async Task RepeatedScheduleRetainsEveryAttemptAndSendInExistingSummaryFraming()
     {
@@ -224,6 +396,7 @@ public sealed class R6UsageJournalTests
         var expected = Expected(1);
         var collector = new UsageJournalCollector(expected);
         var scope = collector.BeginAttempt(0);
+        scope.AgentStarted();
         var accounting = new LiveAccounting(expected.Bounds);
         var sends = 0;
         using var transport = new LiveMeteredTransport(new FakeTransport((_, _) =>
@@ -253,6 +426,7 @@ public sealed class R6UsageJournalTests
         var expected = Expected(3);
         var collector = new UsageJournalCollector(expected);
         var first = collector.BeginAttempt(0);
+        first.AgentStarted();
         Assert.Throws<InvalidOperationException>(() => collector.BeginAttempt(1));
         var call = first.BeginCall()!;
         Assert.True(call.Dispatch());
@@ -264,6 +438,7 @@ public sealed class R6UsageJournalTests
         first.AgentFinished(false);
         first.Finish("failed");
         var second = collector.BeginAttempt(1);
+        second.AgentStarted();
         var other = second.BeginCall()!;
         other.Dispatch();
         call.TransportFinished(DeepSeekTransportResult.TransportFailure());
@@ -300,6 +475,7 @@ public sealed class R6UsageJournalTests
         {
             var collector = new UsageJournalCollector(Expected(1));
             var attempt = collector.BeginAttempt(0);
+            attempt.AgentStarted();
             var call = attempt.BeginCall()!;
             call.Dispatch();
             call.TransportFinished(DeepSeekTransportResult.Success([]));
@@ -358,6 +534,7 @@ public sealed class R6UsageJournalTests
         var collector = new UsageJournalCollector(expected);
         collector.BeginAttempt(0).Finish("invalid");
         var attempt = collector.BeginAttempt(1);
+        attempt.AgentStarted();
         var call = attempt.BeginCall()!;
         call.Dispatch();
         call.TransportFinished(DeepSeekTransportResult.Success([]));
@@ -440,22 +617,32 @@ public sealed class R6UsageJournalTests
         while (tooMany["calls"]!.AsArray().Count <= UsageJournalLimits.Calls)
             tooMany["calls"]!.AsArray().Add(template.DeepClone());
         Assert.Null(UsageJournalJson.Read(Encoding.UTF8.GetBytes(tooMany.ToJsonString()), expected));
-        Assert.Null(UsageJournalJson.Read(bytes, new(expected.Provenance, ["cs-defect", "cs-safe"], expected.Bounds)));
+        var different = expected.Plan with { Schedule = ["cs-defect", "cs-safe"] };
+        Assert.Null(UsageJournalJson.Read(bytes,
+            new(expected.Provenance with { PlanSha256 = LivePlanAdmission.Digest(different) }, different)));
     }
 
-    private static UsageJournalExpectation Expected(int count) => new(
-        new(count == 256 ? new string('a', 57) : "live-test", new string('a', 40), new string('b', 40), true,
-            count == 256 ? new string('b', 64) : LiveRunner.BuildId,
-            new string('c', 64), new string('d', 64), new string('e', 64), "loopback"),
-        Enumerable.Repeat(count == 256 ? new string('c', 64) : "cs-safe", count).ToImmutableArray(),
-        new(256, 2048, 2048, 2048, 4096, 120, 2048, new(1, 1, 1)));
+    private static UsageJournalExpectation Expected(int count)
+    {
+        var calls = count * 8;
+        var plan = new LivePlanDigestInput(LiveLimits.PlanFormat, new(new string('a', 40), new string('b', 40), true),
+            new string('c', 64), new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+                DeepSeekAdapterContext.Adapter, LivePlanAdmission.ProviderConfigurationSha256()),
+            Enumerable.Repeat(count == 256 ? new string('c', 64) : "cs-safe", count).ToImmutableArray(),
+            new(count, calls, calls, calls, calls * 2, 120, calls, new(1, 1, 1)));
+        return new(new(count == 256 ? new string('a', 57) : "live-test", plan.Source.Commit, plan.Source.Tree, true,
+            count == 256 ? new string('b', 64) : LiveRunner.BuildId, plan.CorpusSha256,
+            plan.Provider.ConfigurationSha256, LivePlanAdmission.Digest(plan), "loopback"), plan);
+    }
 
     private static UsageJournalReservations Reservations(int calls) => new(calls, calls, calls, calls * 2, calls);
 
     private static UsageJournalExpectation Expect(PlanFile file, UsageJournalDocument document)
     {
         var plan = LivePlanAdmission.Load(file.Path, false, CancellationToken.None);
-        return new(document.Provenance, plan.Schedule, plan.Bounds);
+        return new(document.Provenance, new(LiveLimits.PlanFormat,
+            new(EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean),
+            plan.Corpus.Sha256, plan.Provider, plan.Schedule, plan.Bounds));
     }
 
     private static Task<LiveRunResult> Run(PlanFile plan, Func<AdmittedReplayRun, IDeepSeekTransport>? transport = null,

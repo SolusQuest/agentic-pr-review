@@ -95,6 +95,7 @@ internal sealed record UsageJournalTotals(
 
 internal sealed record UsageJournalDocument(
     [property: JsonRequired] UsageJournalProvenance Provenance,
+    [property: JsonRequired] LivePlanDigestInput Plan,
     [property: JsonRequired] string BindingSha256,
     [property: JsonRequired] string StopReason,
     [property: JsonRequired] string CacheWriteBillingStatus,
@@ -103,38 +104,34 @@ internal sealed record UsageJournalDocument(
     [property: JsonRequired] ImmutableArray<UsageJournalCall> Calls,
     [property: JsonRequired] UsageJournalTotals Totals);
 
-// Trusted caller input, never reconstructed from the candidate journal. This
-// binds admission to a selected plan, not to proof of historical paid traffic.
+// Validated provenance and selection. An independently supplied instance adds
+// a selected-plan match to structural admission of a journal's embedded claims;
+// reconstructing it from candidate bytes cannot establish independent origin.
 internal sealed class UsageJournalExpectation
 {
-    internal UsageJournalExpectation(UsageJournalProvenance provenance,
-        ImmutableArray<string> schedule, LivePlanBounds bounds)
+    internal UsageJournalExpectation(UsageJournalProvenance provenance, LivePlanDigestInput plan)
     {
         if (provenance is null || !EvaluationLimits.Id(provenance.CampaignId) ||
-            !EvaluationLimits.Hash(provenance.SourceCommit, 40) ||
-            !EvaluationLimits.Hash(provenance.SourceTree, 40) ||
             !EvaluationLimits.Id(provenance.BuildId) ||
-            !EvaluationLimits.Hash(provenance.CorpusSha256) ||
-            !EvaluationLimits.Hash(provenance.ProviderConfigurationSha256) ||
-            !EvaluationLimits.Hash(provenance.PlanSha256) ||
+            !LivePlanAdmission.ValidProjection(plan) ||
+            provenance.SourceCommit != plan.Source.Commit || provenance.SourceTree != plan.Source.Tree ||
+            provenance.SourceClean != plan.Source.Clean || provenance.CorpusSha256 != plan.CorpusSha256 ||
+            provenance.ProviderConfigurationSha256 != plan.Provider.ConfigurationSha256 ||
+            provenance.PlanSha256 != LivePlanAdmission.Digest(plan) ||
             provenance.ExecutionKind is not ("live" or "loopback") ||
-            schedule.IsDefaultOrEmpty || schedule.Length > UsageJournalLimits.Attempts ||
-            schedule.Any(id => !EvaluationLimits.Id(id)) || bounds is null ||
-            bounds.PerCall is null || bounds.MaxModelCalls is < 1 or > UsageJournalLimits.Calls ||
-            bounds.PerCall.MaxInputTokens < 1 || bounds.PerCall.MaxOutputTokens < 1 ||
-            bounds.PerCall.MaxChargeMicroUsd < 1 ||
+            provenance.ExecutionKind == "live" && !provenance.SourceClean ||
             !EvaluationLimits.Id(provenance.CampaignId + "-256-c8"))
             throw new ArgumentException("usage_journal_expectation_invalid");
         Provenance = provenance;
-        Schedule = schedule;
-        Bounds = bounds;
+        Plan = plan;
         BindingSha256 = AgentCanonical.HashDomain("apr.r6.usage-journal.provenance",
             JsonSerializer.SerializeToUtf8Bytes(provenance, UsageJournalJsonContext.Default.UsageJournalProvenance));
     }
 
     internal UsageJournalProvenance Provenance { get; }
-    internal ImmutableArray<string> Schedule { get; }
-    internal LivePlanBounds Bounds { get; }
+    internal LivePlanDigestInput Plan { get; }
+    internal ImmutableArray<string> Schedule => Plan.Schedule;
+    internal LivePlanBounds Bounds => Plan.Bounds;
     internal string BindingSha256 { get; }
     internal string AttemptId(int index) => Provenance.CampaignId + "-" + (index + 1);
     internal string CallId(int index, int ordinal) => AttemptId(index) + "-c" + ordinal;

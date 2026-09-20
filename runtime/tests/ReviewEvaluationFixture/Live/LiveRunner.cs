@@ -116,7 +116,9 @@ internal static class LiveRunner
         var accounting = new LiveAccounting(plan.Bounds);
         var expectation = new UsageJournalExpectation(new(nonce, EvaluationSource.Commit, EvaluationSource.Tree,
             EvaluationSource.Clean, BuildId, fixture.CorpusSha256, plan.Provider.ConfigurationSha256,
-            plan.Digest, execute ? "live" : "loopback"), plan.Schedule, plan.Bounds);
+            plan.Digest, execute ? "live" : "loopback"),
+            new(LiveLimits.PlanFormat, new(EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean),
+                fixture.CorpusSha256, plan.Provider, plan.Schedule, plan.Bounds));
         var journal = new UsageJournalCollector(expectation);
         var rows = ImmutableArray.CreateBuilder<ReadOnlyMemory<byte>>();
         var outcomes = ImmutableArray.CreateBuilder<EvaluationOutcome>();
@@ -206,8 +208,9 @@ internal static class LiveRunner
         }
         // Exercise both generated writing and strict admission on the maintained
         // framework/AOT path. Public output is only the admitted frozen value.
-        frozenJournal = UsageJournalJson.Read(UsageJournalJson.Write(frozenJournal), expectation) ??
+        frozenJournal = UsageJournalJson.Read(UsageJournalJson.Write(frozenJournal)) ??
             throw new InvalidOperationException("usage_journal_roundtrip_invalid");
+        if (!frozenJournal.Matches(expectation)) throw new InvalidOperationException("usage_journal_selection_mismatch");
 
         // Provider execution has ended. Keep only admitted subjects, never SESSION
         // or provider bytes, while a maintainer reviews the private projections.
