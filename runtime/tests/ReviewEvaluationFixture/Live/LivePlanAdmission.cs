@@ -61,10 +61,7 @@ internal static class LivePlanAdmission
             throw new LivePlanRejected(LiveAdmissionCode.InvalidPlan);
 
         // Only the frozen DeepSeek thinking adapter is a supported configuration.
-        if (!StringComparer.Ordinal.Equals(provider.ProviderId, DeepSeekAdapterContext.Provider) ||
-            !StringComparer.Ordinal.Equals(provider.ModelId, DeepSeekAdapterContext.Model) ||
-            !StringComparer.Ordinal.Equals(provider.AdapterId, DeepSeekAdapterContext.Adapter) ||
-            !StringComparer.Ordinal.Equals(provider.ConfigurationSha256, ProviderConfigurationSha256()))
+        if (!ValidProvider(provider))
             throw new LivePlanRejected(LiveAdmissionCode.UnsupportedConfiguration);
 
         var expanded = Expand(input.Schedule);
@@ -78,6 +75,29 @@ internal static class LivePlanAdmission
         var digest = Digest(new(LiveLimits.PlanFormat, source, corpus.Sha256, provider, expanded, bounds));
         return new(corpus, provider, bounds, expanded, digest);
     }
+
+    // Structural admission of the path-free normalized selection, also used
+    // by offline journal readers. Current-build and credential authorization
+    // remain exclusively in Admit/Load; historical source identities are data.
+    internal static bool ValidProjection(LivePlanDigestInput? input)
+    {
+        if (input?.Source is not { } source || input.Provider is not { } provider ||
+            input.Bounds is not { PerCall: not null } bounds ||
+            input.Format != LiveLimits.PlanFormat ||
+            !EvaluationLimits.Hash(source.Commit, 40) || !EvaluationLimits.Hash(source.Tree, 40) ||
+            !EvaluationLimits.Hash(input.CorpusSha256) || !ValidProvider(provider) ||
+            input.Schedule.IsDefaultOrEmpty || input.Schedule.Length > LiveLimits.ExpandedEvaluations ||
+            input.Schedule.Any(id => !EvaluationLimits.Id(id)) ||
+            input.Schedule.Length > bounds.MaxEvaluations || !ValidBounds(bounds, input.Schedule.Length))
+            return false;
+        return bounds.SpendCeilingMicroUsd >= bounds.PerCall.MaxChargeMicroUsd;
+    }
+
+    private static bool ValidProvider(LivePlanProvider provider) =>
+        StringComparer.Ordinal.Equals(provider.ProviderId, DeepSeekAdapterContext.Provider) &&
+        StringComparer.Ordinal.Equals(provider.ModelId, DeepSeekAdapterContext.Model) &&
+        StringComparer.Ordinal.Equals(provider.AdapterId, DeepSeekAdapterContext.Adapter) &&
+        StringComparer.Ordinal.Equals(provider.ConfigurationSha256, ProviderConfigurationSha256());
 
     private static bool ValidBounds(LivePlanBounds bounds, int evaluations)
     {
@@ -110,7 +130,7 @@ internal static class LivePlanAdmission
         return expanded.ToImmutable();
     }
 
-    private static string Digest(LivePlanDigestInput input)
+    internal static string Digest(LivePlanDigestInput input)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(input, LiveJsonContext.Default.LivePlanDigestInput);
         return AgentCanonical.HashDomain(DigestDomain, bytes);

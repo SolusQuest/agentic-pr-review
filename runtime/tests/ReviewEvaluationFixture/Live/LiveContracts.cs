@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
@@ -59,7 +60,8 @@ internal sealed record LivePlanInput(
     [property: JsonRequired] ImmutableArray<LivePlanScheduleEntry> Schedule,
     [property: JsonRequired] LivePlanBounds Bounds);
 
-// Normalized admitted projection; its digest is the only public plan identity.
+// Path-free normalized projection. The journal carries this bounded selection
+// with its digest so an offline consumer can validate its structural claims.
 internal sealed record LivePlanDigestInput(
     [property: JsonRequired] string Format,
     [property: JsonRequired] LivePlanSource Source,
@@ -116,7 +118,8 @@ internal sealed record LiveRunSummary(
     string AdjudicationStatus = "not_requested",
     int HumanConfirmedCases = 0,
     int AiAdjudicatedCases = 0,
-    LiveCacheUsageSummary? CacheUsage = null);
+    LiveCacheUsageSummary? CacheUsage = null,
+    UsageJournalDocument? UsageJournal = null);
 
 // Known subtotals describe only measured observations, not billed campaign
 // totals. The fixed identity domain bounds the output independently of traffic.

@@ -8,6 +8,8 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 // capacity, because the repository has no provider billing oracle.
 internal sealed class LiveAccounting(LivePlanBounds bounds)
 {
+    private readonly object _gate = new();
+    private LiveAccountingSnapshot? _sealed;
     private int _requestRejected;
     private int _responseTooLarge;
     private int _http4xx;
@@ -77,6 +79,19 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     // Subtraction form is overflow-safe because reserved <= total always holds.
     internal bool TryReserve()
     {
+        lock (_gate) return _sealed is null && TryReserveCore();
+    }
+
+    internal LiveAccountingSnapshot Seal()
+    {
+        lock (_gate)
+            return _sealed ??= new(Sends, ReservedInputTokens, ReservedOutputTokens, ReservedCombinedTokens,
+                ReservedSpendMicroUsd, KnownInputTokens, KnownOutputTokens, KnownCombinedTokens,
+                UsageUnknownCalls, AccountingViolation, Outcomes, CacheUsage);
+    }
+
+    private bool TryReserveCore()
+    {
         if (AccountingViolation)
         {
             _violationRefused++;
@@ -103,6 +118,11 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
 
     internal void RecordOutcome(DeepSeekTransportResult result)
     {
+        lock (_gate) if (_sealed is null) RecordOutcomeCore(result);
+    }
+
+    private void RecordOutcomeCore(DeepSeekTransportResult result)
+    {
         switch (result.Outcome)
         {
             case DeepSeekTransportOutcome.RequestRejected: _requestRejected++; break;
@@ -125,11 +145,19 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
         }
     }
 
-    internal void RecordCancelled() => _cancelled++;
+    internal void RecordCancelled()
+    {
+        lock (_gate) if (_sealed is null) _cancelled++;
+    }
 
     // Observed usage is recorded only as known counters. Usage above the
     // authorized per-call bound falsifies the reservation basis itself.
     internal void RecordUsage(ProjectChatUsage usage)
+    {
+        lock (_gate) if (_sealed is null) RecordUsageCore(usage);
+    }
+
+    private void RecordUsageCore(ProjectChatUsage usage)
     {
         if (usage.InputTokens > bounds.PerCall.MaxInputTokens ||
             usage.OutputTokens > bounds.PerCall.MaxOutputTokens ||
@@ -175,13 +203,21 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
         }
     }
 
-    internal void RecordUsageUnknown() => UsageUnknownCalls++;
+    internal void RecordUsageUnknown()
+    {
+        lock (_gate) if (_sealed is null) UsageUnknownCalls++;
+    }
 
     // Sends are strictly sequential, so a refusal counter increment always
     // precedes the backend exception it produces. Pairing them prevents a
     // local gate refusal — where no provider usage ever existed — from
     // inflating usage_unknown_calls.
     internal bool TryAttributeRefusal()
+    {
+        lock (_gate) return _sealed is null && TryAttributeRefusalCore();
+    }
+
+    private bool TryAttributeRefusalCore()
     {
         if (_budgetRefused + _violationRefused > _refusalsAttributed)
         {
@@ -193,7 +229,16 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
 
     internal void RecordChatException(Exception error)
     {
-        if (error is ProjectChatNormalizationException) _normalizationExceptions++;
-        else _backendExceptions++;
+        lock (_gate)
+        {
+            if (_sealed is not null) return;
+            if (error is ProjectChatNormalizationException) _normalizationExceptions++;
+            else _backendExceptions++;
+        }
     }
 }
+
+internal sealed record LiveAccountingSnapshot(
+    long Sends, long ReservedInputTokens, long ReservedOutputTokens, long ReservedCombinedTokens,
+    long ReservedSpendMicroUsd, long KnownInputTokens, long KnownOutputTokens, long KnownCombinedTokens,
+    int UsageUnknownCalls, bool AccountingViolation, LiveTransportOutcomeCounts Outcomes, LiveCacheUsageSummary CacheUsage);
