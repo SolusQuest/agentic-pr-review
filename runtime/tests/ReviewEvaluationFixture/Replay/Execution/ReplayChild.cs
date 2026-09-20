@@ -10,6 +10,8 @@ using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 
@@ -60,6 +62,9 @@ internal static class ReplayChild
         var startup = Guid.NewGuid().ToString("N");
         AdmittedReplayRun? fixtureRun = null;
         GrowthChatMeasurement? growthChat = null;
+        HistoryChatClient? historyChat = null;
+        PrefixBoundary? historyBoundary = null;
+        PrefixObservation? historyBaseline = null;
         ReplayChildReply Reply(string code, PreparedStateReceipt? receipt = null, EvaluationOutcome? evaluation = null,
             AgentSessionArtifact? artifact = null, ReplayTransport? transport = null, int tools = 0,
             string? stage = null, string? observed = null) => new(
@@ -71,7 +76,8 @@ internal static class ReplayChild
                 artifact?.Plaintext, transport?.Requests.ToImmutableArray() ?? [], environmentKeys, environmentBytes,
                 input.GrowthProfile, input.GrowthProfile is null ? null : stage,
                 input.GrowthProfile is null ? null : observed,
-                growthChat?.Counts is { Calls: > 0 } measured ? measured : null, input.GrowthSchedule);
+                growthChat?.Counts is { Calls: > 0 } measured ? measured : null, input.GrowthSchedule,
+                historyChat?.Capture ?? (historyBaseline is null ? HistoryCapture.Unavailable : new("observed", historyBaseline, [])));
 
         // Captured bundle is re-admitted in every fresh process; only this run supplies model/tool inputs.
         var loaded = ReplayAdmission.Load(Path.Combine(input.Root, "bundle"), token);
@@ -104,10 +110,13 @@ internal static class ReplayChild
         if (input.Fault == ReplayFault.WrongHead)
             context = context with { SessionContext = context.SessionContext with
             { CurrentReviewedIdentity = identity with { HeadSha = new string('f', 40) }, Transition = AgentSessionHeadTransition.SameHead } };
+        context = HistoryFaults.Context(input.Fault, context);
+        var selectedPredecessor = input.Fault == ReplayFault.StaleGeneration && input.Predecessor is { } selected
+            ? selected with { Generation = selected.Generation + 1 } : input.Predecessor;
         var restored = await state.Service.RestoreAsync(state.Access,
             new(input.Phase == 0 ? RestrictedStateLocatorFamily.Absent : RestrictedStateLocatorFamily.Current,
                 input.Phase == 0 ? RestrictedStateRestoreIntent.Automatic : RestrictedStateRestoreIntent.Explicit,
-                input.Predecessor, context), token);
+                selectedPredecessor, context), token);
         AgentRunRequest request;
         AgentSessionPredecessor? predecessor = null;
         if (input.Phase == 0)
@@ -117,12 +126,18 @@ internal static class ReplayChild
             if (!AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable)) return Reply("input_invalid");
             request = new(identity, stable!.StablePlan, input.Session,
                 [.. stable.ControlMessages, new("user", [new ProjectTextContent(fixtureRun.InitialContext)])]);
+            historyBoundary = PrefixBoundary.Bootstrap(state.Trusted, request);
+            historyBaseline = HistoryChatClient.Measure(historyBoundary, HistoryCapture.Request(request));
         }
         else
         {
             if (restored.Result.Action != StateAction.Restored || restored.Session?.Value is not { } admitted)
                 return Reply("state_failed", stage: "restore", observed: restored.Result.Code);
             request = admitted.RunRequest;
+            historyBoundary = PrefixBoundary.Restored(state.Trusted, AgentSessionRestoreResult.Success(request, admitted.Artifact));
+            historyBaseline = HistoryChatClient.Measure(historyBoundary, HistoryCapture.Request(request));
+            if (input.Fault == ReplayFault.ChangedToolset)
+                return Reply(HistoryFaults.ToolsetRejected(admitted.Artifact, context.SessionContext) ? "state_failed" : "assertion_failed");
             predecessor = new(admitted.Artifact.Plaintext, input.Predecessor!.SessionSha256, input.Predecessor.EnvelopeSha256,
                 input.Predecessor.Generation, producer.BaseSha, producer.HeadSha, input.Predecessor.ExpectedPredecessorEnvelopeSha256);
             if (input.Fault == ReplayFault.MissingHistory)
@@ -130,6 +145,13 @@ internal static class ReplayChild
                 AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable);
                 request = new(identity, stable!.StablePlan, input.Session,
                     [.. stable.ControlMessages, new("user", [new ProjectTextContent(fixtureRun.InitialContext)])]);
+            }
+            if (input.Fault == ReplayFault.ReorderedHistory)
+            {
+                var messages = request.InitialMessages.ToArray();
+                var first = historyBoundary.ControlMessages;
+                (messages[first], messages[first + 1]) = (messages[first + 1], messages[first]);
+                request = request with { InitialMessages = messages };
             }
             if (request.Continuation is { Items.Length: > 0 } continuation)
             {
@@ -152,9 +174,10 @@ internal static class ReplayChild
         var client = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId,
             state.Trusted.AdapterId, input.Session), transport);
         if (input.GrowthProfile is not null) growthChat = new(client);
+        historyChat = new(historyBoundary!, growthChat is null ? client : growthChat, historyBaseline);
         using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
         if (input.Fault == ReplayFault.Cancelled) await runCancellation.CancelAsync();
-        var outcome = await new AgentLoop(growthChat is null ? client : growthChat,
+        var outcome = await new AgentLoop(historyChat,
             new SnapshotToolExecutor(snapshot, fixtureRun.CreateFileAccess(snapshot))).RunAsync(request, runCancellation.Token);
         var tools = outcome.Events.OfType<AgentToolResultEvent>().Count();
         if (!outcome.Succeeded)

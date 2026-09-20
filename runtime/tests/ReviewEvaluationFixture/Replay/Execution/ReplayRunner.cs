@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality.Incremental;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 
@@ -20,6 +21,7 @@ internal sealed class ReplayOptions
     internal Func<AdmittedReplayFixture, int, ReplayChildReply, bool>? Verify { get; init; }
     internal Action<string>? BeforeCleanup { get; init; }
     internal Action<ReplayChildInput, AdmittedReplayRun, ReplayChildReply>? ObserveReply { get; init; }
+    internal Func<ReplayChildInput, TimeSpan, CancellationToken, Task<ReplayProcessResult>> RunProcess { get; init; } = ReplayProcess.RunAsync;
     internal Func<string, bool> Cleanup { get; init; } = ReplayProcess.Cleanup;
 }
 
@@ -74,7 +76,7 @@ internal static class ReplayRunner
                     var fault = index == options.FaultPhase ? options.Fault : ReplayFault.None;
                     var input = new ReplayChildInput(operation, root, corpus, index, session, key, predecessor, fault);
                     var timeout = fault == ReplayFault.AfterPrepareHang ? TimeSpan.FromSeconds(3) : options.PhaseTimeout;
-                    var process = await ReplayProcess.RunAsync(input, timeout, token);
+                    var process = await options.RunProcess(input, timeout, token);
                     var reply = process.Reply;
                     var phaseCode = process.Code;
                     EvaluationOutcome? quality = null;
@@ -154,7 +156,9 @@ internal static class ReplayRunner
     internal static bool AdmitReply(ReplayChildInput input, AdmittedReplayRun run, ReplayChildReply reply, out EvaluationOutcome? quality)
     {
         quality = null;
-        if (!AdmitIdentity(input, reply) || reply.Requests.IsDefault || reply.Requests.Length > 64 ||
+        if (!AdmitIdentity(input, reply) || !HistoryCapture.Valid(input, reply.PrefixHistory) || reply.Requests.IsDefault || reply.Requests.Length > 64 ||
+            reply.PrefixHistory!.Calls.Length < reply.Requests.Length ||
+            reply.PrefixHistory.Code == "unavailable" && (reply.ModelCalls != 0 || !reply.Requests.IsEmpty) ||
             reply.Requests.Any(bytes => bytes is null || bytes.Length > 1048576) || reply.Requests.Sum(bytes => (long)bytes.Length) > ReplayWire.EvidenceLimit ||
             reply.EnvironmentKeys.IsDefault || reply.EnvironmentBytes is null || reply.EnvironmentBytes.Length > ReplayWire.InputLimit || reply.Evaluation is null ||
             !reply.EnvironmentKeys.Order(StringComparer.Ordinal).SequenceEqual(ReplayProcess.EnvironmentNames.Order(StringComparer.Ordinal)) ||
