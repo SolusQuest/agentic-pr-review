@@ -115,7 +115,22 @@ internal sealed record LiveRunSummary(
     ImmutableArray<LiveAgentDiagnostic> AgentDiagnostics,
     string AdjudicationStatus = "not_requested",
     int HumanConfirmedCases = 0,
-    int AiAdjudicatedCases = 0);
+    int AiAdjudicatedCases = 0,
+    LiveCacheUsageSummary? CacheUsage = null);
+
+// Known subtotals describe only measured observations, not billed campaign
+// totals. The fixed identity domain bounds the output independently of traffic.
+internal sealed record LiveCacheUsageSummary(
+    string ProviderId,
+    string Status,
+    int MeasuredCalls,
+    int KnownUsageWithoutCacheCalls,
+    long? CacheReadInputTokens,
+    long? UncachedInputTokens,
+    string CacheWriteBillingStatus,
+    string RequestedModel,
+    ImmutableArray<string> ResponseModels,
+    string BackendSnapshotStatus);
 
 internal enum LiveAdmissionCode
 {

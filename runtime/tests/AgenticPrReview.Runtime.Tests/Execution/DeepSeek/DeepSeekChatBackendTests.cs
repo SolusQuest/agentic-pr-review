@@ -190,6 +190,8 @@ public sealed class DeepSeekChatBackendTests
             });
         Assert.Equal(3, response.Usage!.InputTokens);
         Assert.Equal(2, response.Usage.OutputTokens);
+        Assert.Equal(new ProjectProviderUsage("deepseek", "deepseek-v4-flash",
+            "deepseek-v4-flash", 1, 2), response.Usage.ProviderUsage);
         var continuation = Assert.IsType<ProjectContinuation>(
             response.Continuation);
         Assert.Equal(DeepSeekAdapterContext.Provider, continuation.ProviderId);

@@ -201,7 +201,8 @@ internal static class LiveRunner
             accounting.UsageUnknownCalls, accounting.AccountingViolation, accounting.Outcomes,
             accounting.ReservedSpendMicroUsd, plan.Bounds.SpendCeilingMicroUsd, stopReason, adjudication.Cleanup,
             diagnostics.ToImmutableArray(),
-            adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases);
+            adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases,
+            accounting.CacheUsage);
         foreach (var row in rows) write(Encoding.UTF8.GetString(row.Span));
         write(Encoding.UTF8.GetString(reportBytes.Value));
         write(JsonSerializer.Serialize(summary, LiveJsonContext.Default.LiveRunSummary));

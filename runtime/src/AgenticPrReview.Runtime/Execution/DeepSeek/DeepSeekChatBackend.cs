@@ -168,7 +168,13 @@ internal sealed class DeepSeekChatBackend(
             new MinimalChatMessage("assistant", contents.ToArray()),
             new MinimalChatUsage(
                 response.Usage.InputTokens,
-                response.Usage.OutputTokens),
+                response.Usage.OutputTokens,
+                new ProjectProviderUsage(
+                    DeepSeekAdapterContext.Provider,
+                    DeepSeekRequestWriter.Model,
+                    response.ResponseModel,
+                    response.Usage.CacheReadInputTokens,
+                    response.Usage.UncachedInputTokens)),
             response.CapturedBytes,
             new MinimalChatContinuation(
                 context.ProviderId,
