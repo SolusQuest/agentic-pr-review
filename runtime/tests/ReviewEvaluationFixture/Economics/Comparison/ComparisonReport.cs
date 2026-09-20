@@ -14,6 +14,8 @@ internal static class ComparisonReport
         if (ComparisonJson.Select(left.Pricing, left.Evidence) != declaration.Left ||
             ComparisonJson.Select(right.Pricing, right.Evidence) != declaration.Right)
             throw new ComparisonInputException("r6_comparison_selection_mismatch");
+        if (!ComparisonAdmission.ExecutionsConsistent(left.Evidence.Outcomes.Concat(right.Evidence.Outcomes)))
+            throw new ComparisonInputException("r6_comparison_execution_conflict");
         var l = Side(left); var r = Side(right);
         var fixedReasons = FixedFactors(left, right);
         var reasons = new HashSet<string>(fixedReasons, StringComparer.Ordinal);
@@ -85,7 +87,7 @@ internal static class ComparisonReport
         var totals = journal.Totals;
         var outcomes = input.Evidence.Outcomes;
         var eligible = outcomes.Count(EvaluationReportSummary.Eligible);
-        var completed = totals.Completed == totals.Scheduled && journal.StopReason == "complete";
+        var completed = totals.Completed == totals.Scheduled;
         var human = outcomes.Count(o => Origin(input, o) == "human_declared");
         var ai = outcomes.Count(o => Origin(input, o) == "ai");
         var source = journal.Provenance;

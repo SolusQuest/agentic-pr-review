@@ -264,6 +264,166 @@ public sealed class R6ComparisonTests
     }
 
     [Theory]
+    [InlineData("hash", "left", true)]
+    [InlineData("hash", "right", true)]
+    [InlineData("hash", "both", true)]
+    [InlineData("defects", "left", true)]
+    [InlineData("defects", "right", true)]
+    [InlineData("defects", "both", true)]
+    [InlineData("hash", "left", false)]
+    [InlineData("hash", "right", false)]
+    [InlineData("hash", "both", false)]
+    [InlineData("defects", "left", false)]
+    [InlineData("defects", "right", false)]
+    [InlineData("defects", "both", false)]
+    public async Task ConflictingRepeatedCaseDefinitionsRejectBeforePairwiseComparison(string fault, string side, bool completed)
+    {
+        Sample Change(Sample sample)
+        {
+            var outcome = sample.Evidence.Outcomes[1];
+            outcome = fault == "hash" ? outcome with { CaseSha256 = Hash('9') } : outcome with { ExpectedDefects = 1 };
+            if (fault == "defects" && completed)
+                outcome = outcome with { StructurallyMissingDefects = 1, ScenarioStatus = AssertionStatus.Failed,
+                    Code = EvaluationCode.ExpectedFindingMissing };
+            Assert.NotNull(EvaluationJson.ReadOutcome(EvaluationJson.Write(outcome)));
+            return sample with { Evidence = sample.Evidence with { Outcomes = [sample.Evidence.Outcomes[0], outcome] } };
+        }
+        var left = Make("left", scheduled: 2, completed: completed ? 2 : 1, failed: completed ? 0 : 1);
+        var right = Make("right", scheduled: 2, completed: completed ? 2 : 1, failed: completed ? 0 : 1);
+        var baseline = Report(Pair(left, right));
+        if (side is "left" or "both") left = Change(left);
+        if (side is "right" or "both") right = Change(right);
+        var pair = Pair(left, right);
+        var rejected = side == "right" ? pair.Right : pair.Left;
+        Assert.Null(ComparisonJson.ReadInput(ComparisonJson.WriteInput(rejected)));
+        var command = await Command(pair);
+        Assert.Equal(2, command.Exit); Assert.Empty(command.Output);
+        Assert.Contains(side == "right" ? "right_invalid" : "left_invalid", command.Error);
+        AssertReportRejectsPair(baseline, pair);
+    }
+
+    [Fact]
+    public async Task DifferentInternallyConsistentCaseDefinitionsRemainValidButNotComparable()
+    {
+        var command = await Command(Pair(Make("left", scheduled: 2, completed: 2),
+            Make("right", scheduled: 2, completed: 2, caseHash: '9')));
+        Assert.Equal(0, command.Exit);
+        var report = Assert.IsType<ComparisonReportDocument>(ComparisonJson.Read(Encoding.UTF8.GetBytes(command.Output)));
+        Assert.Equal("not_comparable", report.Result.DescriptiveComparison.Status);
+        Assert.Contains("case_obligations_mismatch", report.Result.DescriptiveComparison.Reasons);
+        Assert.Equal(0.84m, report.Left.Pricing.ObservedUsage.TotalAmount);
+    }
+
+    [Theory]
+    [InlineData("left", true)]
+    [InlineData("right", true)]
+    [InlineData("both", true)]
+    [InlineData("left", false)]
+    [InlineData("right", false)]
+    [InlineData("both", false)]
+    public async Task ReusedExecutionCannotCreditDistinctAttemptsEvenWithExactOrigins(string side, bool definition)
+    {
+        static Sample Duplicate(Sample sample) => sample with { Evidence = sample.Evidence with { Outcomes =
+            [sample.Evidence.Outcomes[0], sample.Evidence.Outcomes[1] with { ExecutionSha256 = sample.Evidence.Outcomes[0].ExecutionSha256 }] } };
+        var left = Make("left", scheduled: 2, completed: 2); var right = Make("right", scheduled: 2, completed: 2);
+        var criterion = definition ? Definition(minimum: 2) : null;
+        var baseline = Report(Pair(Annotate(left, "human_declared"), Annotate(right, "human_declared"), definition: criterion));
+        if (side is "left" or "both") left = Duplicate(left);
+        if (side is "right" or "both") right = Duplicate(right);
+        var pair = Pair(Annotate(left, "human_declared"), Annotate(right, "human_declared"), definition: criterion);
+        var rejected = side == "right" ? pair.Right : pair.Left;
+        Assert.NotEqual(rejected.Evidence.Outcomes[0].AttemptSha256, rejected.Evidence.Outcomes[1].AttemptSha256);
+        Assert.All(rejected.Evidence.Outcomes, o => Assert.NotNull(EvaluationJson.ReadOutcome(EvaluationJson.Write(o))));
+        Assert.Null(ComparisonJson.ReadInput(ComparisonJson.WriteInput(rejected)));
+        var command = await Command(pair);
+        Assert.Equal(2, command.Exit); Assert.Empty(command.Output);
+        Assert.Contains(side == "right" ? "right_invalid" : "left_invalid", command.Error);
+        AssertReportRejectsPair(baseline, pair);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecutionAttributionContradictionsCannotBeMovedAcrossSides(bool differentSource)
+    {
+        var left = Annotate(Make("left"), "human_declared");
+        var right = Make("right", source: differentSource ? 'f' : 'a');
+        var baseline = Report(Pair(left, Annotate(right, "human_declared"), "source_build", Definition()));
+        right = right with { Evidence = right.Evidence with { Outcomes =
+            [right.Evidence.Outcomes[0] with { ExecutionSha256 = left.Evidence.Outcomes[0].ExecutionSha256 }] } };
+        var pair = Pair(left, Annotate(right, "human_declared"), "source_build", Definition());
+        Assert.NotNull(ComparisonJson.ReadInput(ComparisonJson.WriteInput(pair.Left)));
+        Assert.NotNull(ComparisonJson.ReadInput(ComparisonJson.WriteInput(pair.Right)));
+        var command = await Command(pair);
+        Assert.Equal(2, command.Exit); Assert.Empty(command.Output); Assert.Contains("execution_conflict", command.Error);
+        AssertReportRejectsPair(baseline, pair);
+    }
+
+    [Fact]
+    public async Task ExactSelfComparisonAndDistinctExecutionsOfOneAttemptRemainAdmissible()
+    {
+        var sample = Annotate(Make("same"), "human_declared");
+        var self = await Command(Pair(sample, sample, definition: Definition()));
+        Assert.Equal(0, self.Exit);
+        var other = sample with { Evidence = sample.Evidence with { Outcomes =
+            [sample.Evidence.Outcomes[0] with { ExecutionSha256 = Hash('9') }], Annotations = [] } };
+        var distinct = await Command(Pair(sample, Annotate(other, "human_declared"), definition: Definition()));
+        Assert.Equal(0, distinct.Exit);
+        foreach (var output in new[] { self.Output, distinct.Output })
+        {
+            var report = Assert.IsType<ComparisonReportDocument>(ComparisonJson.Read(Encoding.UTF8.GetBytes(output)));
+            Assert.Equal("comparable", report.Result.DescriptiveComparison.Status);
+            Assert.Equal(0m, report.Result.ObservedReferenceTotalDifference);
+            Assert.Equal(1, report.Result.Left.EffectiveReviewCost.Eligible);
+        }
+    }
+
+    [Theory]
+    [InlineData("caller_cancelled")]
+    [InlineData("deadline")]
+    public async Task LateStopAfterFinalizedWorkPreservesCompleteExecutionAndDescriptiveComparison(string stop)
+    {
+        var pair = Pair(Make("left", scheduled: 2, completed: 2, stopReason: stop),
+            Make("right", scheduled: 2, completed: 2, output: 6));
+        var command = await Command(pair);
+        Assert.Equal(0, command.Exit);
+        var report = Assert.IsType<ComparisonReportDocument>(ComparisonJson.Read(Encoding.UTF8.GetBytes(command.Output)));
+        Assert.Equal(stop, report.Left.Pricing.Journal.StopReason);
+        Assert.Equal(2, report.Result.Left.Campaign.Completed); Assert.Equal(1m, report.Result.Left.CompletionRate.Value);
+        Assert.Equal("complete", report.Result.Left.Execution.Status); Assert.Empty(report.Result.Left.Execution.Reasons);
+        Assert.Equal("complete", report.Result.Left.Usage.Status); Assert.Equal("complete", report.Result.Left.Pricing.Status);
+        Assert.Equal("comparable", report.Result.DescriptiveComparison.Status); Assert.Equal(0.20m, report.Result.ObservedReferenceTotalDifference);
+        var markdown = await Command(pair, "markdown");
+        Assert.Equal(0, markdown.Exit); Assert.Contains($"| Campaign stop cause | {stop} | complete |", markdown.Output);
+    }
+
+    [Theory]
+    [InlineData("caller_cancelled", false)]
+    [InlineData("deadline", false)]
+    [InlineData("caller_cancelled", true)]
+    [InlineData("deadline", true)]
+    public async Task StopWithUnfinishedOrUnknownWorkCannotBecomeComplete(string stop, bool failed)
+    {
+        var command = await Command(Pair(Make("left", scheduled: 2, completed: failed ? 0 : 1,
+            failed: failed ? 1 : 0, unknown: failed, stopReason: stop), Make("right", scheduled: 2, completed: 2)));
+        Assert.Equal(0, command.Exit);
+        var report = Assert.IsType<ComparisonReportDocument>(ComparisonJson.Read(Encoding.UTF8.GetBytes(command.Output)));
+        Assert.Equal(stop, report.Left.Pricing.Journal.StopReason);
+        Assert.Equal(1, report.Result.Left.Campaign.Unattempted); Assert.Equal(failed ? 1 : 0, report.Result.Left.Campaign.Failed);
+        Assert.Equal("incomplete", report.Result.Left.Execution.Status);
+        Assert.NotEqual("comparable", report.Result.DescriptiveComparison.Status); Assert.Null(report.Result.ObservedReferenceTotalDifference);
+        Assert.Equal(failed ? "incomplete" : "complete", report.Result.Left.Usage.Status);
+    }
+
+    private static void AssertReportRejectsPair(ComparisonReportDocument baseline, (ComparisonInput Left, ComparisonInput Right) pair)
+    {
+        var raw = JsonNode.Parse(ComparisonJson.Write(baseline))!;
+        raw["left"] = JsonNode.Parse(ComparisonJson.WriteInput(pair.Left));
+        raw["right"] = JsonNode.Parse(ComparisonJson.WriteInput(pair.Right));
+        Assert.Null(ComparisonJson.Read(Encoding.UTF8.GetBytes(raw.ToJsonString())));
+    }
+
+    [Theory]
     [InlineData("artifact")]
     [InlineData("phase")]
     [InlineData("call")]
@@ -516,7 +676,7 @@ public sealed class R6ComparisonTests
         bool unknown = false, bool missingCache = false, long output = 4, long hit = 6,
         char source = 'a', char config = 'e', string build = LiveRunner.BuildId,
         string model = DeepSeekAdapterContext.Model, long missRate = 4, string currency = "USD",
-        char corpus = 'c', char caseHash = 'd', int maxSeconds = 120, int? maxCalls = null)
+        char corpus = 'c', char caseHash = 'd', int maxSeconds = 120, int? maxCalls = null, string? stopReason = null)
     {
         var calls = maxCalls ?? scheduled * 8;
         var plan = new LivePlanDigestInput(LiveLimits.PlanFormat, new(new string(source, 40), new string('b', 40), true),
@@ -555,10 +715,11 @@ public sealed class R6ComparisonTests
                 done ? EvaluationFailureKind.None : EvaluationFailureKind.MalformedOutput,
                 0, done ? 1 : 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
             Assert.NotNull(EvaluationJson.ReadOutcome(EvaluationJson.Write(outcome)));
-            outcomes.Add(outcome); scope.AdmitEvaluation(attemptHash); scope.AgentFinished(done); scope.Finish(done ? "completed" : "failed");
+            outcomes.Add(outcome); scope.AdmitEvaluation(attemptHash); scope.AgentFinished(done);
+            scope.Finish(done ? "completed" : "failed", cancelled: i == attempted - 1 && (stopReason is "caller_cancelled" or "deadline"));
         }
         var perCall = expected.Bounds.PerCall;
-        var journal = collector.Seal(attempted == scheduled ? "complete" : "caller_cancelled",
+        var journal = collector.Seal(stopReason ?? (attempted == scheduled ? "complete" : "caller_cancelled"),
             new(attempted, attempted * perCall.MaxInputTokens, attempted * perCall.MaxOutputTokens,
                 attempted * (perCall.MaxInputTokens + perCall.MaxOutputTokens), attempted * perCall.MaxChargeMicroUsd));
         var tariff = new TariffInput(PricingLimits.TariffFormat, "https://example.com/synthetic", "2026-09-20",

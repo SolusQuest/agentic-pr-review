@@ -42,6 +42,7 @@ internal static class ComparisonCommand
             $"{result.Left.Campaign.Failed} / {result.Left.Campaign.Invalid} / {result.Left.Campaign.Unattempted}",
             $"{result.Right.Campaign.Failed} / {result.Right.Campaign.Invalid} / {result.Right.Campaign.Unattempted}");
         Row("Scheduled completion rate", Number(result.Left.CompletionRate.Value), Number(result.Right.CompletionRate.Value));
+        Row("Campaign stop cause", report.Left.Pricing.Journal.StopReason, report.Right.Pricing.Journal.StopReason);
         Row("Usage / observed pricing", $"{result.Left.Usage.Status} / {result.Left.Pricing.Status}",
             $"{result.Right.Usage.Status} / {result.Right.Pricing.Status}");
         Row("Reference currency", report.Left.Pricing.ObservedUsage.Currency, report.Right.Pricing.ObservedUsage.Currency);

@@ -34,9 +34,14 @@ internal static class ComparisonAdmission
         var source = journal.Provenance;
         var mode = source.ExecutionKind == "live" ? "live" : "deterministic";
         var used = new HashSet<string>(StringComparer.Ordinal);
+        var cases = new Dictionary<(string Corpus, string Case), (string Hash, int Defects)>();
         foreach (var outcome in evidence.Outcomes)
         {
             if (outcome is null || outcome.AttemptSha256 is null || !used.Add(outcome.AttemptSha256)) return false;
+            var caseKey = (outcome.CorpusSha256, outcome.CaseId);
+            var caseDefinition = (outcome.CaseSha256, outcome.ExpectedDefects);
+            if (cases.TryGetValue(caseKey, out var previous) && previous != caseDefinition) return false;
+            cases[caseKey] = caseDefinition;
             var attempts = journal.Attempts.Where(a => a.EvaluationAttemptSha256 == outcome.AttemptSha256).ToArray();
             if (attempts.Length != 1) return false;
             var attempt = attempts[0];
@@ -59,6 +64,20 @@ internal static class ComparisonAdmission
                 origin.Origin is not ("ai" or "human_declared" or "unknown")) return false;
             if (!evidence.Outcomes.Any(o => ComparisonJson.OutcomeHash(o) == origin.OutcomeSha256 &&
                 o.ExecutionSha256 == origin.ExecutionSha256)) return false;
+        }
+        return ExecutionsConsistent(evidence.Outcomes);
+    }
+
+    // A producer execution digest includes its attempt digest. Repeated presentation of
+    // the same attribution is allowed, but one execution cannot belong to two attempts.
+    internal static bool ExecutionsConsistent(IEnumerable<EvaluationOutcome> outcomes)
+    {
+        var executions = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var outcome in outcomes.Where(o => o.ExecutionSha256 is not null))
+        {
+            var execution = outcome.ExecutionSha256!;
+            if (executions.TryGetValue(execution, out var previous) && previous != outcome.AttemptSha256) return false;
+            executions[execution] = outcome.AttemptSha256!;
         }
         return true;
     }
