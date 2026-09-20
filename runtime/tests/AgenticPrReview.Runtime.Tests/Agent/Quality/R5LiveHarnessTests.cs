@@ -71,15 +71,17 @@ public sealed class R5LiveHarnessTests
             JsonSerializer.Serialize(restored.CacheUsage, LiveJsonContext.Default.LiveCacheUsageSummary));
     }
 
-    [Fact]
-    public async Task MissingOptionalCacheNeverMakesKnownTotalUsageUnknown()
+    [Theory]
+    [InlineData(10, 2)]
+    [InlineData(0, 0)]
+    public async Task MissingOptionalCacheNeverMakesKnownTotalUsageUnknown(long input, long output)
     {
         var accounting = CacheAccounting();
-        var client = new LiveChatObserver(new MinimalChatClient(new NoCacheBackend()), accounting);
+        var client = new LiveChatObserver(new MinimalChatClient(new NoCacheBackend(input, output)), accounting);
         await client.GetResponseAsync(new([], [], null), CancellationToken.None);
-        Assert.Equal(10, accounting.KnownInputTokens);
-        Assert.Equal(2, accounting.KnownOutputTokens);
-        Assert.Equal(12, accounting.KnownCombinedTokens);
+        Assert.Equal(input, accounting.KnownInputTokens);
+        Assert.Equal(output, accounting.KnownOutputTokens);
+        Assert.Equal(input + output, accounting.KnownCombinedTokens);
         Assert.Equal(0, accounting.UsageUnknownCalls);
         Assert.Equal("unavailable", accounting.CacheUsage.Status);
         Assert.Null(accounting.CacheUsage.CacheReadInputTokens);
@@ -92,7 +94,7 @@ public sealed class R5LiveHarnessTests
         Assert.Equal("partial", accounting.CacheUsage.Status);
         Assert.Equal(0, accounting.CacheUsage.CacheReadInputTokens);
         Assert.Equal(7, accounting.CacheUsage.UncachedInputTokens);
-        Assert.Equal(17, accounting.KnownInputTokens);
+        Assert.Equal(input + 7, accounting.KnownInputTokens);
         Assert.Equal(0, accounting.UsageUnknownCalls);
         AssertCacheRoundTrip(accounting.CacheUsage);
     }
@@ -157,10 +159,10 @@ public sealed class R5LiveHarnessTests
         return json;
     }
 
-    private sealed class NoCacheBackend : IMinimalChatBackend
+    private sealed class NoCacheBackend(long input, long output) : IMinimalChatBackend
     {
         public Task<MinimalChatResponse> GetResponseAsync(MinimalChatRequest request, CancellationToken token) =>
-            Task.FromResult(new MinimalChatResponse(new("assistant", []), new(10, 2)));
+            Task.FromResult(new MinimalChatResponse(new("assistant", []), new(input, output)));
     }
 
     [Theory]
@@ -817,21 +819,46 @@ public sealed class R5LiveHarnessTests
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.BudgetRefused);
     }
 
-    [Fact]
-    public async Task ResponseTooLargeCountsAsUsageUnknown()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ResponseTooLargeCountsOnlyAsUsageUnknown(int oversizedCall)
     {
         using var plan = new PlanFile();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
         {
             var inner = new ReplayTransport(run.Script, ReplayFault.None);
             var calls = 0;
-            return (IDeepSeekTransport)new FakeTransport((body, token) =>
-                ++calls == 1
-                    ? Task.FromResult(DeepSeekTransportResult.ResponseTooLarge())
-                    : inner.SendAsync(body, token));
+            return new FakeTransport(async (body, token) =>
+            {
+                if (++calls == oversizedCall) return DeepSeekTransportResult.ResponseTooLarge();
+                var original = await inner.SendAsync(body, token);
+                var response = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
+                response["usage"] = new JsonObject
+                {
+                    ["prompt_tokens"] = 7, ["completion_tokens"] = 3, ["total_tokens"] = 10,
+                    ["prompt_cache_hit_tokens"] = 2, ["prompt_cache_miss_tokens"] = 5,
+                };
+                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(response.ToJsonString()));
+            });
         }), CancellationToken.None);
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.ResponseTooLarge);
-        Assert.True(result.Summary.UsageUnknownCalls >= 1);
+        Assert.Equal(1, result.Summary.UsageUnknownCalls);
+        Assert.Equal(AgentFailureCodes.ResponseTooLarge, Assert.Single(result.Summary.AgentDiagnostics).Code);
+        Assert.Equal(oversizedCall * 1000, result.Summary.ReservedSpendMicroUsd);
+        var measured = oversizedCall - 1;
+        Assert.Equal(measured * 7, result.Summary.KnownInputTokens);
+        Assert.Equal(measured * 3, result.Summary.KnownOutputTokens);
+        Assert.Equal(measured * 10, result.Summary.KnownCombinedTokens);
+        var cache = Assert.IsType<LiveCacheUsageSummary>(result.Summary.CacheUsage);
+        Assert.Equal(measured == 0 ? "unavailable" : "partial", cache.Status);
+        Assert.Equal(measured, cache.MeasuredCalls);
+        Assert.Equal(0, cache.KnownUsageWithoutCacheCalls);
+        Assert.Equal(measured == 0 ? (long?)null : 2, cache.CacheReadInputTokens);
+        Assert.Equal(measured == 0 ? (long?)null : 5, cache.UncachedInputTokens);
+        var restored = JsonSerializer.Deserialize(lines[^1], LiveJsonContext.Default.LiveRunSummary)!;
+        Assert.Equal(AssertCacheRoundTrip(cache), AssertCacheRoundTrip(restored.CacheUsage!));
     }
 
     [Fact]
