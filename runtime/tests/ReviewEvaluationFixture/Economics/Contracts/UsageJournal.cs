@@ -179,12 +179,11 @@ internal sealed class UsageJournal
         };
     }
 
-    // Exceptions, refusals, oversized responses and unfinished seals end this
-    // Agent attempt without success. A dispatched cancellation observation can
-    // race a returned response, so it does not prove the response task threw.
+    // Agent admission requires valid usage. Cancellation ends the attempt even
+    // when an abandoned transport task later completes.
     private static bool CanContinueAgent(UsageJournalCall call) => call.Dispatched &&
-        (call.TransportOutcome == "success" && call.ChatOutcome == "returned" ||
-         call.TransportOutcome == "cancelled" && call.ChatOutcome == "cancelled");
+        call.TransportOutcome == "success" && call.ChatOutcome == "returned" &&
+        call.UsageStatus == "known";
 
     private static bool ValidCall(UsageJournalCall call)
     {

@@ -32,6 +32,8 @@ public sealed class R6UsageJournalTests
     [InlineData("transport_failure", "not_observed", true)]
     [InlineData("success", "threw", true)]
     [InlineData("success", "not_observed", true)]
+    [InlineData("success", "returned", true)]
+    [InlineData("cancelled", "cancelled", true)]
     [InlineData("response_too_large", "returned", true)]
     [InlineData("response_too_large", "not_observed", true)]
     [InlineData("incomplete", "not_observed", true)]
@@ -106,25 +108,21 @@ public sealed class R6UsageJournalTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void DispatchedCancellationObservationCanCoexistWithAgentSuccess(bool last)
+    public void TerminalUnknownUsageRemainsAdmissibleForFailedAgent(bool cancelled)
     {
         var collector = new UsageJournalCollector(Expected(1));
         var attempt = collector.BeginAttempt(0);
         attempt.AgentStarted();
-        for (var i = 0; i < 2; i++)
-        {
-            var call = attempt.BeginCall()!;
-            call.Dispatch();
-            if ((i == 1) == last) call.Cancel();
-            call.TransportFinished(DeepSeekTransportResult.Success([]));
-            call.Returned(new(0, 0)); // Cancellation may win the journal while the response task returns.
-        }
-        attempt.AgentFinished(true);
-        attempt.AdmitEvaluation(new string('d', 64));
+        var call = attempt.BeginCall()!;
+        call.Dispatch();
+        call.TransportFinished(DeepSeekTransportResult.Success([]));
+        if (cancelled) call.Cancel();
+        else call.Returned(null);
+        attempt.AgentFinished(false);
         attempt.Finish("failed");
-        var journal = collector.Seal("complete", Reservations(2));
-        Assert.Equal("cancelled", journal.Document.Calls[last ? 1 : 0].TransportOutcome);
-        Assert.Equal("succeeded", journal.Document.Attempts[0].AgentStatus);
+        var journal = collector.Seal(cancelled ? "caller_cancelled" : "complete", Reservations(1));
+        Assert.Equal(cancelled ? "cancelled" : "success", journal.Document.Calls[0].TransportOutcome);
+        Assert.Equal("failed", journal.Document.Attempts[0].AgentStatus);
         Assert.Equal(1, journal.Document.Totals.UnknownUsageSends);
         Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
     }
@@ -134,6 +132,8 @@ public sealed class R6UsageJournalTests
     [InlineData("transport_failure", "threw", true)]
     [InlineData("success", "threw", true)]
     [InlineData("success", "not_observed", true)]
+    [InlineData("success", "returned", true)]
+    [InlineData("cancelled", "cancelled", true)]
     [InlineData("response_too_large", "returned", true)]
     [InlineData("request_rejected", "threw", false)]
     public void TerminalFinalCallCannotClaimAgentSuccess(string transport, string chat, bool dispatched)
