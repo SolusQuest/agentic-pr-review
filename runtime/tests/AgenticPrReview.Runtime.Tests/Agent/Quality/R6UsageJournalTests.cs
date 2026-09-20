@@ -18,6 +18,134 @@ public sealed class R6UsageJournalTests
     private const string Canary = "APR273_PRIVATE_PROVIDER_PATH_REASONING_CANARY";
 
     [Theory]
+    [InlineData("http4xx", "threw", true)]
+    [InlineData("http4xx", "not_observed", true)]
+    [InlineData("http429", "threw", true)]
+    [InlineData("http429", "not_observed", true)]
+    [InlineData("http5xx", "threw", true)]
+    [InlineData("http5xx", "not_observed", true)]
+    [InlineData("connect_timeout", "threw", true)]
+    [InlineData("connect_timeout", "not_observed", true)]
+    [InlineData("provider_timeout", "threw", true)]
+    [InlineData("provider_timeout", "not_observed", true)]
+    [InlineData("transport_failure", "threw", true)]
+    [InlineData("transport_failure", "not_observed", true)]
+    [InlineData("success", "threw", true)]
+    [InlineData("success", "not_observed", true)]
+    [InlineData("response_too_large", "returned", true)]
+    [InlineData("response_too_large", "not_observed", true)]
+    [InlineData("incomplete", "not_observed", true)]
+    [InlineData("request_rejected", "threw", false)]
+    [InlineData("request_rejected", "not_observed", false)]
+    [InlineData("not_dispatched", "threw", false)]
+    [InlineData("not_dispatched", "not_observed", false)]
+    [InlineData("cancelled", "cancelled", false)]
+    public void StrictReaderRejectsAnotherSendAfterATerminalCall(string transport, string chat, bool dispatched)
+    {
+        var collector = new UsageJournalCollector(Expected(1));
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        for (var i = 0; i < 2; i++)
+        {
+            var call = attempt.BeginCall()!;
+            call.Dispatch();
+            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.Returned(new(0, 0));
+        }
+        attempt.AgentFinished(false);
+        attempt.Finish("failed");
+        var original = collector.Seal("complete", Reservations(2)).Document;
+        var calls = original.Calls.SetItem(0, original.Calls[0] with
+        {
+            Dispatched = dispatched, TransportOutcome = transport, ChatOutcome = chat,
+            UsageStatus = dispatched ? "unknown" : "not_sent", Usage = null,
+        });
+        var attempts = original.Attempts.SetItem(0, original.Attempts[0] with
+        {
+            Sends = dispatched ? 2 : 1, LocalRefusals = dispatched ? 0 : 1,
+        });
+        var candidate = original with
+        {
+            Calls = calls, Attempts = attempts, Totals = UsageJournal.Totals(attempts, calls),
+            StopReason = transport == "http429" ? "rate_limited" : "complete",
+            Reservations = Reservations(dispatched || transport == "request_rejected" ? 2 : 1),
+        };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void StrictReaderRejectsAnotherLocalCallAfterARefusal(bool violation, bool unfinished)
+    {
+        var expected = Expected(1, violation ? null : b => b with { MaxModelCalls = 1 });
+        var collector = new UsageJournalCollector(expected);
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var sent = attempt.BeginCall()!;
+        sent.Dispatch();
+        sent.TransportFinished(DeepSeekTransportResult.Success([]));
+        sent.Returned(new(violation ? 2 : 0, 0));
+        var refused = attempt.BeginCall()!;
+        refused.Refuse(violation ? "violation_refused" : "budget_refused");
+        if (!unfinished) refused.Threw();
+        attempt.AgentFinished(false);
+        attempt.Finish("failed");
+        var original = collector.Seal(violation ? "accounting_violation" : "bound_stop", Reservations(1)).Document;
+        var calls = original.Calls.Add(new(expected.BindingSha256, expected.CallId(0, 3), expected.AttemptId(0),
+            3, false, "not_dispatched", "threw", "not_sent", null));
+        var attempts = original.Attempts.SetItem(0, original.Attempts[0] with { Calls = 3, LocalRefusals = 2 });
+        var candidate = original with { Calls = calls, Attempts = attempts, Totals = UsageJournal.Totals(attempts, calls) };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
+    }
+
+    [Fact]
+    public void DispatchedCancellationObservationCanPrecedeAnotherReturnedCall()
+    {
+        var collector = new UsageJournalCollector(Expected(1));
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        var first = attempt.BeginCall()!;
+        first.Dispatch();
+        first.Cancel();
+        first.TransportFinished(DeepSeekTransportResult.Success([]));
+        first.Returned(new(0, 0)); // Journal cancellation won, response task may still return.
+        var second = attempt.BeginCall()!;
+        second.Dispatch();
+        second.TransportFinished(DeepSeekTransportResult.Success([]));
+        second.Returned(new(0, 0));
+        attempt.Finish("failed");
+        var journal = collector.Seal("complete", Reservations(2));
+        Assert.Equal("cancelled", journal.Document.Calls[0].TransportOutcome);
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+    }
+
+    [Fact]
+    public void TerminalCallCanEndOneAttemptWithoutStoppingTheNextAttempt()
+    {
+        var collector = new UsageJournalCollector(Expected(2));
+        for (var i = 0; i < 2; i++)
+        {
+            var attempt = collector.BeginAttempt(i);
+            attempt.AgentStarted();
+            var call = attempt.BeginCall()!;
+            call.Dispatch();
+            call.TransportFinished(i == 0 ? DeepSeekTransportResult.TransportFailure() :
+                DeepSeekTransportResult.Success([]));
+            if (i == 0) call.Threw();
+            else call.Returned(new(0, 0));
+            attempt.AgentFinished(false);
+            attempt.Finish("failed");
+        }
+        var journal = collector.Seal("complete", Reservations(2));
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+    }
+
+    [Theory]
     [InlineData("stop_rate")]
     [InlineData("stop_bound")]
     [InlineData("stop_violation")]
@@ -260,7 +388,7 @@ public sealed class R6UsageJournalTests
     [Fact]
     public void ARefusalConstrainsAnEarlierAmbiguousReservation()
     {
-        var expected = Expected(1, b => b with { MaxModelCalls = 1 });
+        var expected = Expected(2, b => b with { MaxModelCalls = 1 });
         var accounting = new LiveAccounting(expected.Bounds);
         var collector = new UsageJournalCollector(expected);
         var attempt = collector.BeginAttempt(0);
@@ -268,11 +396,16 @@ public sealed class R6UsageJournalTests
         var first = attempt.BeginCall()!;
         Assert.True(accounting.TryReserve());
         first.Cancel(); // Reservation taken, dispatch never reached.
-        var second = attempt.BeginCall()!;
+        attempt.AgentFinished(false);
+        attempt.Finish("failed");
+        var next = collector.BeginAttempt(1);
+        next.AgentStarted();
+        var second = next.BeginCall()!;
         Assert.False(accounting.TryReserve());
         second.Refuse("budget_refused");
         second.Threw();
-        attempt.Finish("failed");
+        next.AgentFinished(false);
+        next.Finish("failed");
         var journal = collector.Seal("bound_stop", Reservations(1));
         Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
         var candidate = journal.Document with { Reservations = Reservations(0) };
@@ -301,12 +434,18 @@ public sealed class R6UsageJournalTests
     [Fact]
     public void LaterReservationRulesOutAnEarlierAmbiguousBudgetRefusal()
     {
-        var expected = Expected(1, b => b with { MaxModelCalls = 1 });
+        var expected = Expected(3, b => b with { MaxModelCalls = 1 });
         var collector = new UsageJournalCollector(expected);
-        var attempt = collector.BeginAttempt(0);
+        for (var i = 0; i < 2; i++)
+        {
+            var interrupted = collector.BeginAttempt(i);
+            interrupted.AgentStarted();
+            interrupted.BeginCall()!.Cancel();
+            interrupted.AgentFinished(false);
+            interrupted.Finish("failed");
+        }
+        var attempt = collector.BeginAttempt(2);
         attempt.AgentStarted();
-        attempt.BeginCall()!.Cancel();
-        attempt.BeginCall()!.Cancel();
         var sent = attempt.BeginCall()!;
         sent.Dispatch();
         sent.TransportFinished(DeepSeekTransportResult.Success([]));
@@ -701,7 +840,7 @@ public sealed class R6UsageJournalTests
     [Fact]
     public async Task PredispatchCancellationAndRequestProjectionFailureHaveNoUsagePopulation()
     {
-        var expected = Expected(1);
+        var expected = Expected(2);
         var collector = new UsageJournalCollector(expected);
         var scope = collector.BeginAttempt(0);
         scope.AgentStarted();
@@ -717,9 +856,14 @@ public sealed class R6UsageJournalTests
         cancel.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.SendAsync(new byte[1], cancel.Token));
         call.Cancel();
-        var projection = new LiveChatObserver(new ThrowingClient(), accounting, scope);
-        await Assert.ThrowsAsync<ArgumentException>(() => projection.GetResponseAsync(new([], [], null), CancellationToken.None));
+        scope.AgentFinished(false);
         scope.Finish("failed");
+        var next = collector.BeginAttempt(1);
+        next.AgentStarted();
+        var projection = new LiveChatObserver(new ThrowingClient(), accounting, next);
+        await Assert.ThrowsAsync<ArgumentException>(() => projection.GetResponseAsync(new([], [], null), CancellationToken.None));
+        next.AgentFinished(false);
+        next.Finish("failed");
         var journal = collector.Seal("complete", Reservations(0));
         Assert.Equal(0, sends);
         Assert.Equal(2, journal.Document.Totals.LocalRefusals);
