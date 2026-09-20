@@ -71,7 +71,8 @@ internal sealed class UsageJournal
                     if (call is null || call.BindingSha256 != expected.BindingSha256 ||
                         call.AttemptId != attempt.AttemptId || call.Ordinal != ordinal ||
                         call.CallId != expected.CallId(index, ordinal) || !ValidCall(call)) return null;
-                    if (ordinal < attempt.Calls && !CanPrecedeAnotherCall(call)) return null;
+                    if ((ordinal < attempt.Calls || attempt.AgentStatus == "succeeded") &&
+                        !CanContinueAgent(call)) return null;
                     if (call.Dispatched) sends++;
                 }
                 if (sends != attempt.Sends) return null;
@@ -179,9 +180,9 @@ internal sealed class UsageJournal
     }
 
     // Exceptions, refusals, oversized responses and unfinished seals end this
-    // Agent attempt. A dispatched cancellation observation can race a returned
-    // response, so that row alone does not prove the response task threw.
-    private static bool CanPrecedeAnotherCall(UsageJournalCall call) => call.Dispatched &&
+    // Agent attempt without success. A dispatched cancellation observation can
+    // race a returned response, so it does not prove the response task threw.
+    private static bool CanContinueAgent(UsageJournalCall call) => call.Dispatched &&
         (call.TransportOutcome == "success" && call.ChatOutcome == "returned" ||
          call.TransportOutcome == "cancelled" && call.ChatOutcome == "cancelled");
 

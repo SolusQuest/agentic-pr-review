@@ -103,25 +103,93 @@ public sealed class R6UsageJournalTests
             UsageJournalJsonContext.Default.UsageJournalDocument)));
     }
 
-    [Fact]
-    public void DispatchedCancellationObservationCanPrecedeAnotherReturnedCall()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DispatchedCancellationObservationCanCoexistWithAgentSuccess(bool last)
     {
         var collector = new UsageJournalCollector(Expected(1));
         var attempt = collector.BeginAttempt(0);
         attempt.AgentStarted();
-        var first = attempt.BeginCall()!;
-        first.Dispatch();
-        first.Cancel();
-        first.TransportFinished(DeepSeekTransportResult.Success([]));
-        first.Returned(new(0, 0)); // Journal cancellation won, response task may still return.
-        var second = attempt.BeginCall()!;
-        second.Dispatch();
-        second.TransportFinished(DeepSeekTransportResult.Success([]));
-        second.Returned(new(0, 0));
+        for (var i = 0; i < 2; i++)
+        {
+            var call = attempt.BeginCall()!;
+            call.Dispatch();
+            if ((i == 1) == last) call.Cancel();
+            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.Returned(new(0, 0)); // Cancellation may win the journal while the response task returns.
+        }
+        attempt.AgentFinished(true);
+        attempt.AdmitEvaluation(new string('d', 64));
         attempt.Finish("failed");
         var journal = collector.Seal("complete", Reservations(2));
-        Assert.Equal("cancelled", journal.Document.Calls[0].TransportOutcome);
+        Assert.Equal("cancelled", journal.Document.Calls[last ? 1 : 0].TransportOutcome);
+        Assert.Equal("succeeded", journal.Document.Attempts[0].AgentStatus);
+        Assert.Equal(1, journal.Document.Totals.UnknownUsageSends);
         Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal)));
+    }
+
+    [Theory]
+    [InlineData("http429", "threw", true)]
+    [InlineData("transport_failure", "threw", true)]
+    [InlineData("success", "threw", true)]
+    [InlineData("success", "not_observed", true)]
+    [InlineData("response_too_large", "returned", true)]
+    [InlineData("request_rejected", "threw", false)]
+    public void TerminalFinalCallCannotClaimAgentSuccess(string transport, string chat, bool dispatched)
+    {
+        var collector = new UsageJournalCollector(Expected(1));
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        for (var i = 0; i < 2; i++)
+        {
+            var call = attempt.BeginCall()!;
+            call.Dispatch();
+            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.Returned(new(0, 0));
+        }
+        attempt.AgentFinished(true);
+        // A later evaluator failure may retain Agent success, but its final
+        // chat cannot be a terminal failure that prevents that success.
+        attempt.AdmitEvaluation(new string('d', 64));
+        attempt.Finish("failed");
+        var original = collector.Seal("complete", Reservations(2)).Document;
+        var calls = original.Calls.SetItem(1, original.Calls[1] with
+        {
+            Dispatched = dispatched, TransportOutcome = transport, ChatOutcome = chat,
+            UsageStatus = dispatched ? "unknown" : "not_sent", Usage = null,
+        });
+        var attempts = original.Attempts.SetItem(0, original.Attempts[0] with
+        {
+            Sends = dispatched ? 2 : 1, LocalRefusals = dispatched ? 0 : 1,
+        });
+        var candidate = original with
+        {
+            Calls = calls, Attempts = attempts, Totals = UsageJournal.Totals(attempts, calls),
+            StopReason = transport == "http429" ? "rate_limited" : "complete",
+        };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefusalFinalCallCannotClaimAgentSuccess(bool violation)
+    {
+        using var plan = new PlanFile(p =>
+        {
+            if (violation) p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
+            else p["bounds"]!["max_model_calls"] = 1;
+        });
+        var original = (await Run(plan)).Journal.Document;
+        var attempts = original.Attempts.SetItem(0, original.Attempts[0] with
+        {
+            AgentStatus = "succeeded", EvaluationAttemptSha256 = new string('d', 64),
+        });
+        var candidate = original with { Attempts = attempts };
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument)));
     }
 
     [Fact]
