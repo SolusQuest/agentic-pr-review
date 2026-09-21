@@ -66,7 +66,7 @@ def bounded(path, maximum=MAX_CAPTURE):
 
 class Gate:
     def __init__(self):
-        self.root = Path(tempfile.mkdtemp(prefix="apr-r6-gate-"))
+        self.root = Path(tempfile.mkdtemp(prefix="apr-r6-gate-", dir="/tmp"))
         self.stage = "initialization"
         self.sequence = 0
         self.groups = []
@@ -105,7 +105,10 @@ class Gate:
         output, error = run / "stdout", run / "stderr"
 
         def limits():
-            resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_CAPTURE, MAX_CAPTURE))
+            # Scenario files are bounded too. Compiler object/debug artifacts
+            # can exceed the capture limit; supervise their logs separately.
+            if audit:
+                resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_CAPTURE, MAX_CAPTURE))
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
         with output.open("wb") as stdout, error.open("wb") as stderr:
@@ -117,7 +120,8 @@ class Gate:
                 while child.poll() is None:
                     # RLIMIT_FSIZE bounds each capture; also bound aggregate tracing.
                     traces = list(run.glob("trace.*"))
-                    excessive = len(traces) > 4096 or sum(file.stat().st_size for file in traces) > MAX_TRACE
+                    excessive = (len(traces) > 4096 or sum(file.stat().st_size for file in traces) > MAX_TRACE or
+                                 output.stat().st_size > MAX_CAPTURE or error.stat().st_size > MAX_CAPTURE)
                     require(not excessive and time.monotonic() < deadline)
                     time.sleep(.1)
             except BaseException:
