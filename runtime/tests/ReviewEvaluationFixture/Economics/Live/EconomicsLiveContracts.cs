@@ -22,6 +22,8 @@ internal static class EconomicsLiveLimits
     internal const int Slots = 256;
     internal const int Calls = 8;
     internal const int OutputBasis = 4096;
+    internal const int SetupMilliseconds = 5000;
+    internal const int SupervisorMillisecondsPerSlot = 5000;
 }
 
 internal sealed record EconomicsScenario(

@@ -76,7 +76,8 @@ internal sealed class EconomicsPlan
         var per = input.Bounds.PerCall;
         if (per.MaxInputTokens is < 1 or > AgentLimits.InputTokens / 8 || per.MaxOutputTokens != 4096 ||
             input.Bounds.MaxModelCalls != plan.Slots.Length * 8L) Reject("allocation_invalid");
-        EconomicsAllocation required = new(0, 0, 0, 0, 0, 0, checked((plan.Slots.Length - 1L) * input.SpacingMilliseconds));
+        EconomicsAllocation required = new(0, 0, 0, 0, 0, 0,
+            CampaignOverheadMilliseconds(plan.Slots.Length, input.SpacingMilliseconds));
         for (var index = 0; index < plan.Slots.Length; index++)
             required = EconomicsLedger.Add(required, plan.ChildAllocation) ?? throw new EconomicsRejected("r6_economics_allocation_invalid");
         if (!EconomicsLedger.Within(required, plan.Ceiling)) Reject("allocation_invalid");
@@ -129,6 +130,12 @@ internal sealed class EconomicsPlan
         }
         return slots.ToImmutable();
     }
+
+    // These finite allowances belong to the campaign, not to a child's call/usage lease.
+    // The selected total deadline still stops work if infrastructure exhausts the headroom.
+    internal static long CampaignOverheadMilliseconds(int slots, int spacingMilliseconds) => checked(
+        EconomicsLiveLimits.SetupMilliseconds + (long)slots * EconomicsLiveLimits.SupervisorMillisecondsPerSlot +
+        (slots - 1L) * spacingMilliseconds);
 
     internal static EconomicsAllocation Allocation(LivePlanPerCall per, int seconds) =>
         new(1, 8, checked(per.MaxInputTokens * 8), checked(per.MaxOutputTokens * 8),

@@ -67,6 +67,8 @@ internal static class EconomicsCommand
         // This is a conservative preparation ceiling, not a current billing quote or execution grant.
         var per = new LivePlanPerCall(32768, 4096, 1_000_000);
         var calls = count * 8L;
+        var milliseconds = checked(count * (long)childSeconds * 1000 +
+            EconomicsPlan.CampaignOverheadMilliseconds(count, spacingMilliseconds));
         var plan = new EconomicsPlanInput(EconomicsLiveLimits.PlanFormat,
             new(EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean), EconomicsBuild.Current(),
             new(Path.GetFullPath(replay), replayFixture.CorpusSha256), new(Path.GetFullPath(growth), growthFixture.CorpusSha256),
@@ -74,7 +76,7 @@ internal static class EconomicsCommand
                 LivePlanAdmission.ProviderConfigurationSha256()), "high", Path.GetFullPath(tariff), price.Sha256,
             scenarios, childSeconds, spacingMilliseconds, "stop_remaining_tail",
             new(count, calls, calls * per.MaxInputTokens, calls * per.MaxOutputTokens,
-                calls * (per.MaxInputTokens + per.MaxOutputTokens), count * childSeconds + (count - 1L) * spacingMilliseconds / 1000 + 1,
+                calls * (per.MaxInputTokens + per.MaxOutputTokens), checked((milliseconds + 999) / 1000),
                 calls * per.MaxChargeMicroUsd, per));
         _ = EconomicsPlan.Admit(plan, false).LoadTariff(default);
         return plan;

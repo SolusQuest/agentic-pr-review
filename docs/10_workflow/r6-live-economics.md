@@ -32,6 +32,8 @@ Each child receives the production maximum of eight model calls and eight comple
 
 The parent commits a whole child allocation before launch and never reuses it, even when the child finishes cheaply. The complete expanded schedule must fit the campaign bounds, including repeats and spacing. The Agent prevents a ninth chat invocation. There is no automatic provider retry, allocation refill or implicit reset.
 
+The campaign time ceiling also covers work outside the child windows: preparation reserves five seconds for private-root/corpus setup and five seconds per selected slot for parent supervision, receipt admission, state acceptance/readback and any selected reset. It adds every full child window and completion-to-start spacing, then rounds the total up to whole seconds. Plan admission requires the same minimum, including across repetitions and the full 256-slot limit. These allowances stay outside child call/usage leases. The selected campaign deadline remains finite and the existing 86400-second maximum is unchanged; infrastructure that exhausts the headroom stops the campaign without automatically extending any deadline.
+
 | Quantity               | Report meaning                                                              |
 | ---------------------- | --------------------------------------------------------------------------- |
 | `allocations`          | Parent capacity committed before child admission; includes unused capacity. |

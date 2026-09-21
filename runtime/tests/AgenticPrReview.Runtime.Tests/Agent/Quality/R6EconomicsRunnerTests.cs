@@ -78,13 +78,85 @@ public sealed class R6EconomicsRunnerTests
             "combined" => bounds with { MaxCombinedTokens = bounds.MaxCombinedTokens - 1 },
             "spend" => bounds with { SpendCeilingMicroUsd = bounds.SpendCeilingMicroUsd - 1 },
             "attempts" => bounds with { MaxEvaluations = bounds.MaxEvaluations - 1 },
-            _ => bounds with { MaxSeconds = 3 * files.Plan.ChildSeconds - 1 },
+            _ => bounds with { MaxSeconds = bounds.MaxSeconds - 1 },
         };
         files.Write(files.Plan with { Bounds = bounds });
         var secrets = new Secrets(); var launched = false;
         await Assert.ThrowsAsync<EconomicsRejected>(() => EconomicsRunner.RunAsync(files.PlanPath, false,
             new() { Secrets = secrets, BeforeChild = _ => launched = true }));
         Assert.False(launched); Assert.Equal(0, secrets.Reads);
+    }
+
+    [Theory]
+    [InlineData(0, 17)]
+    [InlineData(1, 18)]
+    [InlineData(1000, 18)]
+    [InlineData(1001, 19)]
+    [InlineData(60000, 77)]
+    public void PreparedCampaignTimeIncludesSetupPerSlotSupervisionAndRoundedSpacing(int spacing, long seconds)
+    {
+        using var files = new Inputs();
+        var plan = EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
+            [new("replay", 2, 1, false)], childSeconds: 1, spacingMilliseconds: spacing);
+        Assert.Equal(seconds, plan.Bounds.MaxSeconds);
+        Assert.NotNull(EconomicsPlan.Admit(plan, false));
+        var rejected = Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(
+            plan with { Bounds = plan.Bounds with { MaxSeconds = seconds - 1 } }, false));
+        Assert.Equal("r6_economics_allocation_invalid", rejected.Code);
+    }
+
+    [Fact]
+    public void MaximumScheduleAccountsForEverySupervisorSlotWithoutRaisingGlobalTimeLimit()
+    {
+        using var files = new Inputs();
+        ImmutableArray<EconomicsScenario> scenarios =
+            [new("replay", 2, 16, false), new("tools", 7, 16, false), new("continuation", 7, 16, false)];
+        var plan = EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
+            scenarios, childSeconds: 1);
+        Assert.Equal(256, EconomicsPlan.Expand(scenarios).Length);
+        Assert.Equal(1541, plan.Bounds.MaxSeconds);
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(
+            plan with { Bounds = plan.Bounds with { MaxSeconds = 1540 } }, false));
+        Assert.Throws<EconomicsRejected>(() => EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path,
+            files.Plan.TariffPath, scenarios, childSeconds: 300, spacingMilliseconds: 60000));
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(
+            plan with { Bounds = plan.Bounds with { MaxSeconds = 86401 } }, false));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PreparedCampaignRetainsChildWindowsWithSupervisorWork(bool duringSetup)
+    {
+        using var files = new Inputs();
+        files.Write(EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
+            [new("replay", 2, 1, false)], childSeconds: 5));
+        var accepted = 0;
+        var secrets = new Secrets();
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false, new()
+        {
+            Secrets = secrets,
+            PrivateRoot = _ => { if (duringSetup) Thread.Sleep(3000); },
+            BeforeAccept = () => { if (!duringSetup && accepted++ == 0) Thread.Sleep(3000); },
+            Process = async (input, credential, token) =>
+            {
+                var elapsed = Stopwatch.StartNew();
+                var observed = await EconomicsProcess.RunAsync(input, credential, token);
+                // Keep each genuine successful child near its allocated five-second window.
+                var remaining = TimeSpan.FromMilliseconds(4500) - elapsed.Elapsed;
+                if (remaining > TimeSpan.Zero) await Task.Delay(remaining, token);
+                return observed;
+            },
+        });
+        Assert.True(result.StopReason == "complete", Describe(result));
+        Assert.Equal(2, result.Attempted); Assert.Equal(0, result.ReceiptMissing);
+        Assert.Equal("cleaned", result.Cleanup); Assert.Equal(0, secrets.Reads);
+        Assert.True(result.Steps[1].Restored);
+        Assert.All(result.Steps, step => { Assert.True(step.Accepted); Assert.True(step.Readback); });
+        Assert.Equal(10000, result.Allocations.Milliseconds);
+        Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
+        Assert.NotNull(UsageJournal.Admit(result.Journal!));
+        _ = Compare(result, result);
     }
 
     [Theory]
