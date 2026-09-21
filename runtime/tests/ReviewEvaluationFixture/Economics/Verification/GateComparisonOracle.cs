@@ -17,6 +17,11 @@ internal static class GateComparisonOracle
             var left = ComparisonJson.ReadInput(Bytes(item.Evidence.GetProperty("left")))!;
             var right = ComparisonJson.ReadInput(Bytes(item.Evidence.GetProperty("right")))!;
             Require(left is not null && right is not null);
+            foreach (var input in new[] { left!, right! })
+                Require(input.Pricing.Journal.Provenance.SourceCommit == selection.SourceCommit &&
+                    input.Pricing.Journal.Provenance.SourceTree == selection.SourceTree &&
+                    input.Pricing.Journal.Provenance.SourceClean == selection.SourceClean &&
+                    input.Pricing.Journal.Provenance.CorpusSha256 == selection.ReplaySha256);
             var conflict = false;
             try { _ = ComparisonReport.Create(left!, right!); }
             catch (ComparisonInputException error) { conflict = error.Code == "r6_comparison_expectation_conflict"; }

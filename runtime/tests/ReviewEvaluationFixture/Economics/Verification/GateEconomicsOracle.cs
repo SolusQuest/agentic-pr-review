@@ -26,7 +26,8 @@ internal static class GateEconomicsOracle
             report.Plan.BuildSha256 == selection.BuildSha256 && report.Plan.Workload.ReplaySha256 == selection.ReplaySha256 &&
             report.Plan.Workload.GrowthSha256 == selection.GrowthSha256);
         Require(evidence!.Workers.Length <= report.Attempted && evidence.Workers.Select(worker => worker.ProcessId).Distinct().Count() == evidence.Workers.Length &&
-            evidence.Workers.Select(worker => worker.Startup).Distinct().Count() == evidence.Workers.Length);
+            evidence.Workers.Select(worker => worker.Startup).Distinct().Count() == evidence.Workers.Length &&
+            evidence.Workers.Select(worker => worker.Index).Distinct().Count() == evidence.Workers.Length);
         foreach (var worker in evidence.Workers)
         {
             Require(worker.Index >= 0 && worker.Index < report.Attempted && Guid.TryParseExact(worker.Startup, "N", out _));
@@ -71,6 +72,13 @@ internal static class GateEconomicsOracle
             report.C1Handoff == "unavailable_missing_receipt");
         else Require(report.Journal is not null && report.Pricing is not null && report.C1Handoff == "available" &&
             report.Journal.Totals.Scheduled == scheduled && report.Journal.Totals.Unattempted == scheduled - attempted);
+        if (report.Pricing is { } price)
+        {
+            var terms = price.Tariff.Terms;
+            Require(terms.TokenUnit == 1_000_000 && terms.RateDecimalPlaces == 0 && terms.Arithmetic.DecimalPlaces == 6 &&
+                terms.Rates.CacheHitInput == new TariffRate("USD", 1) && terms.Rates.CacheMissInput == new TariffRate("USD", 4) &&
+                terms.Rates.Output == new TariffRate("USD", 5));
+        }
         if (complete)
         {
             Require(report.UsageComplete && report.MonetaryComplete && report.Steps.All(step => step.Readback));

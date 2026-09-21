@@ -68,6 +68,18 @@ internal static class GateTokenOracle
         Bound(document.Journal, selection);
         var view = document.ObservedUsage;
         var other = document.SameTokenAllMiss;
+        var terms = document.Tariff.Terms;
+        var rounding = item.Id is "t3-half-even-low" or "t3-half-even-even" or "t3-half-even-high";
+        var aggregate = item.Id == "t3-aggregate";
+        var zeroRates = item.Id == "t3-unknown-zero-rate";
+        Require(terms.TokenUnit == (rounding ? 2 : aggregate ? 1000 : 100) && terms.RateDecimalPlaces == 0 &&
+            terms.Arithmetic.DecimalPlaces == (rounding ? 0 : aggregate ? 2 : 3) &&
+            terms.Rates.CacheHitInput.Units == (zeroRates ? 0 : 1) && terms.Rates.Output.Units == (zeroRates ? 0 : 5) &&
+            terms.Rates.CacheMissInput.Units == (item.Id == "t3-half-even-low" ? 3 : item.Id == "t3-half-even-high" ? 7 :
+                item.Id == "t3-half-even-even" || aggregate ? 5 : zeroRates ? 0 : 4));
+        Require(document.Journal.Totals.ActualSends == (aggregate || zeroRates ? 2 : 1) &&
+            document.Journal.Totals.KnownInputTokens == (rounding ? 1 : aggregate ? 2 : item.Id == "t3-zero-denominator" ? 0 : 10) &&
+            document.Journal.Totals.KnownOutputTokens == (rounding || aggregate || item.Id == "t3-zero-denominator" ? 0 : 4));
         Require(view.Currency == (item.Id == "t3-cny" ? "CNY" : "USD"));
         Require(document.ExecutionTimeApplicability == "execution_time_unknown" && document.ExecutionTimeTotalAmount is null &&
             document.InvoiceStatus == "not_evidenced" && document.BackendSnapshotStatus == "not_exposed");
