@@ -120,9 +120,9 @@ public sealed class R6VerifierCoverageTests
             var item = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(evidence, GateJson.Default.GateEconomics));
             Assert.True(GateContracts.Safe(item.Evidence));
             var projection = GateEconomicsOracle.Verify(item, selection);
-            if (id == "c2-replay")
+            if (id is "c2-replay" or "c2-cancel-after-usage")
             {
-                var repeated = await GateEconomicsCases.RunCase(root, id, plan);
+                var repeated = await GateEconomicsCases.RunCase(root, id, plan, Enum.Parse<EconomicsFault>(fault));
                 var repeatedItem = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(repeated, GateJson.Default.GateEconomics));
                 Assert.True(JsonElement.DeepEquals(projection, GateEconomicsOracle.Verify(repeatedItem, selection)));
                 var forged = evidence with { Report = evidence.Report with { Cleanup = "cleanup_failed" } };
