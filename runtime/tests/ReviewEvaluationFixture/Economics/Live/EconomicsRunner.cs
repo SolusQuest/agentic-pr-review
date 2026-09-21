@@ -96,6 +96,10 @@ internal static class EconomicsRunner
                 var run = workload.Run(slot, campaign);
                 options.BeforeChild?.Invoke(input);
                 var result = await options.Process(input, () => providerSecret ??= options.Secrets.TakeProviderCredential(), deadline.Token);
+                // The worker sees the linked campaign token; only this owner can
+                // distinguish a parent deadline from the operator's cancellation.
+                if (result.Code == "caller_cancelled" && deadline.IsCancellationRequested && !token.IsCancellationRequested)
+                    result = result with { Code = "deadline" };
                 var finished = clock.ElapsedMilliseconds;
                 steps[slot.Index] = steps[slot.Index] with { FinishedMilliseconds = finished };
                 var receipt = result.Receipt;

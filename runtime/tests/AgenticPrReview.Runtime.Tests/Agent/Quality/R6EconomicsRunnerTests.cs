@@ -693,6 +693,29 @@ public sealed class R6EconomicsRunnerTests
             Convert.FromBase64String(EconomicsCredentialProbe.Canaries["AGENTIC_REVIEW_R3_STATE_KEY_B64"]), key));
     }
 
+    [Fact]
+    public async Task CampaignDeadlineDuringChildSupervisionIsNotMisreportedAsOperatorCancellation()
+    {
+        using var files = new Inputs();
+        files.Write(EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
+            [new("replay", 2, 1, false)], childSeconds: 1));
+        var secrets = new Secrets();
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false, new()
+        {
+            Secrets = secrets,
+            Process = async (input, credential, token) =>
+            {
+                // Delay the selected child until the actual campaign deadline expires.
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(Timeout.Infinite, token));
+                return await EconomicsProcess.RunAsync(input, credential, token);
+            },
+        });
+        Assert.Equal("deadline", result.StopReason); Assert.Equal("cleaned", result.Cleanup);
+        Assert.Equal(1, result.Attempted); Assert.Equal(1, result.ReceiptMissing); Assert.Equal(0, secrets.Reads);
+        Assert.False(result.Steps[1].Allocated);
+        Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
+    }
+
     [LinuxInterruptTheory]
     [InlineData(false)]
     [InlineData(true)]
