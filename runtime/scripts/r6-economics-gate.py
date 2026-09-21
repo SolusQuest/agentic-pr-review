@@ -99,6 +99,7 @@ class Gate:
             env = {key: self.env[key] for key in ("PATH", "DOTNET_ROOT") if key in self.env}
             env.update(HOME=str(private / "home"), DOTNET_CLI_HOME=str(private / "home"),
                        TMP=str(private / "tmp"), TEMP=str(private / "tmp"), TMPDIR=str(private / "tmp"),
+                       R6_GATE_DIAGNOSTICS_FILE=str(run / "fixture-failure"),
                        DOTNET_EnableDiagnostics="0", LANG="C.UTF-8", LC_ALL="C.UTF-8")
             command = ["strace", "-ff", "-qq", "-s", "256", "-e", "trace=network,process",
                        "-o", str(run / "trace"), *map(str, command)]

@@ -50,9 +50,20 @@ internal static class GateCommand
             else throw new InvalidOperationException("r6_gate_arguments_invalid");
             return 0;
         }
-        catch
+        catch (Exception error)
         {
             // Never expose candidate bytes, filesystem paths or exceptions.
+            // The supervisor can retain bounded diagnostics privately without
+            // turning untrusted exception text into a public log channel.
+            if (Environment.GetEnvironmentVariable("R6_GATE_DIAGNOSTICS_FILE") is { Length: > 0 } diagnostic)
+            {
+                try
+                {
+                    var detail = error.ToString();
+                    File.WriteAllText(diagnostic, detail[..Math.Min(detail.Length, 16384)]);
+                }
+                catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException) { }
+            }
             Console.Error.WriteLine("r6_gate_rejected");
             return 1;
         }
