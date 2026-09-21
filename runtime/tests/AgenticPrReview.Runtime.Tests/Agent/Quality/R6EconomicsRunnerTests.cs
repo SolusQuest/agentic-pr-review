@@ -607,6 +607,163 @@ public sealed class R6EconomicsRunnerTests
         Assert.True(command.Exit == 0, command.Error); Assert.Contains("inconclusive", command.Output);
         Assert.DoesNotContain(files.Root, command.Output);
     }
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task FailedPrepareWithRecoveryReceiptPreservesCompletedEvaluationAndKnownTraffic(int index)
+    {
+        using var files = new Inputs();
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false,
+            new() { Fault = EconomicsFault.PrepareWriteFailure, FaultIndex = index });
+        Assert.Equal(index + 1, result.Attempted); Assert.Equal(0, result.ReceiptMissing);
+        var failed = result.Steps[index];
+        Assert.Equal("state_failed", failed.Code); Assert.Equal("completed", failed.EvaluationStatus);
+        Assert.False(failed.Prepared); Assert.False(failed.Accepted);
+        Assert.All(failed.Observation!.Calls, call => Assert.Equal("known", call.UsageStatus));
+        Assert.Equal(2, failed.Observation.Reservations); Assert.NotNull(failed.Observation.CompletedSessionSha256);
+        Assert.All(result.Steps.Skip(index + 1), step => Assert.False(step.Allocated));
+        Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
+        Assert.NotNull(UsageJournal.Admit(result.Journal)); Assert.NotNull(Compare(result, result));
+    }
+
+    [Theory]
+    [InlineData("complete")]
+    [InlineData("not_created")]
+    public async Task FinalMissingReceiptCannotClaimSuccessfulCompletionOrAnUncreatedRoot(string mutation)
+    {
+        using var files = new Inputs();
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false,
+            new() { Fault = EconomicsFault.AfterPrepareCrash, FaultIndex = 2 });
+        Assert.Equal(3, result.Attempted); Assert.Equal(1, result.ReceiptMissing);
+        Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
+        var changed = mutation == "complete" ? result with { StopReason = "complete" } : result with { Cleanup = "not_created" };
+        Assert.Null(EconomicsReportJson.Read(JsonSerializer.SerializeToUtf8Bytes(changed, EconomicsLiveJson.Default.EconomicsReport)));
+    }
+
+    [Fact]
+    public async Task SyntheticCredentialCrossesPrivateFrameOnlyIntoAuthorizationAndRestoresProtectedHistory()
+    {
+        using var files = new Inputs();
+        var previous = EconomicsCredentialProbe.Canaries.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+        Assert.Equal(32, Convert.FromBase64String(EconomicsCredentialProbe.Canaries["AGENTIC_REVIEW_R3_STATE_KEY_B64"]).Length);
+        var keys = new List<byte[]>(); var receipts = new List<EconomicsReceipt>();
+        var secrets = new ProbeSecrets();
+        try
+        {
+            foreach (var item in EconomicsCredentialProbe.Canaries) Environment.SetEnvironmentVariable(item.Key, item.Value);
+            var result = await EconomicsRunner.RunAsync(files.PlanPath, false, new()
+            {
+                CredentialProbe = true, Secrets = secrets,
+                BeforeChild = input => keys.Add(input.StateKey.ToArray()), ObservedReceipt = receipts.Add,
+            });
+            Assert.True(result.StopReason == "complete", Describe(result)); Assert.Equal("loopback", result.ExecutionKind);
+            Assert.Equal(1, secrets.Reads); Assert.Equal(3, receipts.Count);
+            Assert.Equal(3, receipts.Select(receipt => receipt.Startup).Distinct().Count());
+            foreach (var receipt in receipts)
+            {
+                var proof = Assert.IsType<EconomicsCredentialProof>(receipt.CredentialProof);
+                Assert.Equal(2, proof.Requests); Assert.True(proof.EnvironmentChecked); Assert.True(proof.CompletedSessionChecked);
+                Assert.Equal(receipt.Index > 0, proof.RestoredSessionChecked); Assert.True(proof.StoredObjects > 0);
+                EconomicsCredentialProbe.AssertProtected(JsonSerializer.SerializeToUtf8Bytes(receipt,
+                    EconomicsLiveJson.Default.EconomicsReceipt), keys[receipt.Index]);
+            }
+            var output = EconomicsReportJson.Write(result);
+            Assert.All(keys, key => EconomicsCredentialProbe.AssertProtected(output, key));
+            Assert.DoesNotContain("credential_proof", Encoding.UTF8.GetString(output));
+            Assert.NotNull(Compare(result, result));
+            Assert.All(EconomicsCredentialProbe.Canaries, item => Assert.Equal(item.Value, Environment.GetEnvironmentVariable(item.Key)));
+        }
+        finally
+        {
+            foreach (var item in previous) Environment.SetEnvironmentVariable(item.Key, item.Value);
+            foreach (var key in keys) System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    [Fact]
+    public void CredentialProbeRejectsEveryCanaryAndActualKeyEncodingInProtectedSinks()
+    {
+        var key = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        EconomicsCredentialProbe.AssertProtected(Encoding.UTF8.GetBytes("safe session"), key);
+        foreach (var value in EconomicsCredentialProbe.Canaries.Values.Append(Convert.ToBase64String(key))
+            .Append(Convert.ToHexString(key)).Append(Convert.ToHexString(key).ToLowerInvariant()))
+            Assert.Throws<IOException>(() => EconomicsCredentialProbe.AssertProtected(Encoding.UTF8.GetBytes(value), key));
+        Assert.Throws<IOException>(() => EconomicsCredentialProbe.AssertProtected(key, key));
+        Assert.Throws<IOException>(() => EconomicsCredentialProbe.AssertProtected(
+            Convert.FromBase64String(EconomicsCredentialProbe.Canaries["AGENTIC_REVIEW_R3_STATE_KEY_B64"]), key));
+    }
+
+    [LinuxInterruptTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActualCliInterruptPreservesKnownPrefixReapsWorkerAndCleansPrivateRoot(bool activeChild)
+    {
+        using var files = new Inputs();
+        files.Write(EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
+            [new("replay", 3, 1, false)], spacingMilliseconds: 2000));
+        var start = ReplayProcess.StartInfo(files.Root);
+        start.ArgumentList[^1] = "economics-live"; start.ArgumentList.Add("--plan"); start.ArgumentList.Add(files.PlanPath);
+        using var command = Process.Start(start)!;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var output = command.StandardOutput.ReadToEndAsync(timeout.Token);
+        Process? worker = null;
+        try
+        {
+            var marker = activeChild ? "r6_economics_child_ready 1 " : "r6_economics_step_completed 0";
+            while (true)
+            {
+                var line = await command.StandardError.ReadLineAsync(timeout.Token);
+                Assert.NotNull(line);
+                if (!line.StartsWith(marker, StringComparison.Ordinal)) continue;
+                if (activeChild)
+                {
+                    worker = Process.GetProcessById(int.Parse(line.Split(' ')[^1], System.Globalization.CultureInfo.InvariantCulture));
+                    Assert.False(worker.HasExited);
+                }
+                break;
+            }
+            var campaignRoot = Assert.Single(Directory.GetDirectories(Path.Combine(files.Root, "tmp"), "apr-r5-replay-*"));
+            var signal = new ProcessStartInfo("/bin/kill") { UseShellExecute = false, CreateNoWindow = true };
+            signal.ArgumentList.Add("-s"); signal.ArgumentList.Add("INT");
+            signal.ArgumentList.Add(command.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            using (var interrupt = Process.Start(signal)!)
+            { await interrupt.WaitForExitAsync(timeout.Token); Assert.Equal(0, interrupt.ExitCode); }
+            var remainingError = command.StandardError.ReadToEndAsync(timeout.Token);
+            using var reap = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await command.WaitForExitAsync(reap.Token);
+            Assert.Equal(1, command.ExitCode);
+            var report = Assert.IsType<EconomicsReport>(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(await output)));
+            Assert.Equal("caller_cancelled", report.StopReason); Assert.Equal("cleaned", report.Cleanup);
+            Assert.Equal(activeChild ? 2 : 1, report.Attempted);
+            Assert.True(report.Steps[0].Accepted); Assert.True(report.Steps[0].Readback);
+            Assert.Equal(2, report.Steps[0].Observation!.Reservations);
+            Assert.All(report.Steps[0].Observation!.Calls, call => Assert.Equal("known", call.UsageStatus));
+            Assert.False(report.Steps[2].Allocated); Assert.False(Directory.Exists(campaignRoot));
+            if (worker is not null) Assert.True(worker.HasExited);
+            Assert.DoesNotContain(files.Root, await remainingError);
+        }
+        finally
+        {
+            if (!command.HasExited) { command.Kill(entireProcessTree: true); await command.WaitForExitAsync(); }
+            if (worker is not null)
+            {
+                if (!worker.HasExited) { worker.Kill(entireProcessTree: true); await worker.WaitForExitAsync(); }
+                worker.Dispose();
+            }
+        }
+    }
+
+    private sealed class LinuxInterruptTheoryAttribute : TheoryAttribute
+    {
+        public LinuxInterruptTheoryAttribute()
+        { if (!OperatingSystem.IsLinux()) Skip = "Actual POSIX SIGINT delivery is exercised by the required Linux runtime CI."; }
+    }
+    private sealed class ProbeSecrets : ILiveSecretSource
+    {
+        internal int Reads;
+        public string? TakeProviderCredential() { Reads++; return EconomicsCredentialProbe.Provider; }
+    }
+
     private static ComparisonReportDocument Compare(EconomicsReport left, EconomicsReport right)
     {
         var le = new ComparisonEvidence(left.Outcomes, [], [], []);
@@ -648,7 +805,7 @@ public sealed class R6EconomicsRunnerTests
     }
     private static async Task<(int Exit, string Output, string Error)> Command(string[] args)
     {
-        var output = new StringWriter(); var error = new StringWriter();
+        using var output = new StringWriter(); using var error = new StringWriter();
         var previousOutput = Console.Out; var previousError = Console.Error;
         try
         {

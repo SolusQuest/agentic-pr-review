@@ -30,6 +30,10 @@ internal static class EconomicsJournal
             counts.LastContinuationAfterBytes > 2L * AgentLimits.ContinuationTotalBytes || !EvaluationLimits.Hash(receipt.InitialPrefixSha256) ||
             receipt.Evaluation is not { } evaluation || EvaluationJson.ReadOutcome(EvaluationJson.Write(evaluation)) != evaluation)
             return false;
+        if (input.Fault == EconomicsFault.CredentialProbe
+            ? receipt.CredentialProof is not { EnvironmentChecked: true, CompletedSessionChecked: true, StoredObjects: >= 1 and <= 16 } proof ||
+                proof.Requests != receipt.Calls.Length || proof.RestoredSessionChecked != receipt.Restored
+            : receipt.CredentialProof is not null) return false;
         var descriptor = new EvaluationRunInput(input.Campaign + "-" + (input.Slot.Index + 1),
             input.Transport == "live" ? "live" : "deterministic", input.Plan.Source.Commit, input.Plan.Source.Tree,
             input.Plan.Source.Clean, input.Plan.Provider.ConfigurationSha256);

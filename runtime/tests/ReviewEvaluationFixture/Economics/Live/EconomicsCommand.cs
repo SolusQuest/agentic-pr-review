@@ -30,11 +30,25 @@ internal static class EconomicsCommand
             else if (args is ["economics-live", "--dry-run", "--plan", var dryPlan]) path = dryPlan;
             else if (args is ["economics-live", "--execute", "--plan", var livePlan]) { path = livePlan; execute = true; }
             if (string.IsNullOrWhiteSpace(path)) throw new EconomicsRejected("r6_economics_input_invalid");
-            var report = await EconomicsRunner.RunAsync(path, execute);
-            var outputBytes = EconomicsReportJson.Write(report);
-            Console.WriteLine(Encoding.UTF8.GetString(outputBytes));
-            return report.StopReason == "complete" && report.Cleanup == "cleaned" ? 0 : 1;
+            using var cancellation = new CancellationTokenSource();
+            ConsoleCancelEventHandler handler = (_, signal) => { signal.Cancel = true; cancellation.Cancel(); };
+            Console.CancelKeyPress += handler;
+            try
+            {
+                var options = new EconomicsOptions
+                {
+                    Process = (input, credential, token) => EconomicsProcess.RunWithStartAsync(input, credential, token, null,
+                        ready => Console.Error.WriteLine($"r6_economics_child_ready {ready.Index} {ready.ProcessId}")),
+                    Completed = index => Console.Error.WriteLine($"r6_economics_step_completed {index}"),
+                };
+                var report = await EconomicsRunner.RunAsync(path, execute, options, cancellation.Token);
+                var outputBytes = EconomicsReportJson.Write(report);
+                Console.WriteLine(Encoding.UTF8.GetString(outputBytes));
+                return report.StopReason == "complete" && report.Cleanup == "cleaned" ? 0 : 1;
+            }
+            finally { Console.CancelKeyPress -= handler; }
         }
+        catch (OperationCanceledException) { Console.Error.WriteLine("r6_economics_cancelled"); return 1; }
         catch (EconomicsRejected rejected) { Console.Error.WriteLine(rejected.Code); return 2; }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or OverflowException or ArgumentException)
         { Console.Error.WriteLine("r6_economics_input_invalid"); return 2; }

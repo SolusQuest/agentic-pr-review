@@ -15,6 +15,7 @@ internal sealed class EconomicsOptions
 {
     // Internal deterministic injection only; there is no CLI transport/fault switch.
     internal bool LoopbackExecute { get; init; }
+    internal bool CredentialProbe { get; init; }
     internal EconomicsFault Fault { get; init; }
     internal int FaultIndex { get; init; } = 1;
     internal ILiveSecretSource Secrets { get; init; } = new LiveEnvironmentSecretSource();
@@ -25,6 +26,7 @@ internal sealed class EconomicsOptions
     internal Action<EconomicsReceipt>? ObservedReceipt { get; init; }
     internal Action? BeforeAccept { get; init; }
     internal Action? Finalized { get; init; }
+    internal Action<int>? Completed { get; init; }
 }
 
 internal static class EconomicsRunner
@@ -37,7 +39,7 @@ internal static class EconomicsRunner
         var tariff = selected.LoadTariff(token);
         _ = EconomicsWorkload.Load(selected, token);
         var transport = execute && !options.LoopbackExecute ? "live" : "loopback";
-        if (transport == "live" && options.Fault != EconomicsFault.None) EconomicsPlan.Reject("plan_invalid");
+        if (transport == "live" && (options.Fault != EconomicsFault.None || options.CredentialProbe)) EconomicsPlan.Reject("plan_invalid");
         var campaign = "c2-" + Guid.NewGuid().ToString("N")[..20];
         var operation = Guid.NewGuid().ToString("N");
         var ledger = new EconomicsLedger(selected.Ceiling);
@@ -82,7 +84,8 @@ internal static class EconomicsRunner
                     StartedMilliseconds = started, Reset = reset,
                     IntervalMilliseconds = slot.Index == 0 ? null : started - steps[slot.Index - 1].FinishedMilliseconds };
                 attempted++; missing++;
-                var fault = slot.Index == options.FaultIndex ? options.Fault : EconomicsFault.None;
+                var fault = options.CredentialProbe ? EconomicsFault.CredentialProbe :
+                    slot.Index == options.FaultIndex ? options.Fault : EconomicsFault.None;
                 var predecessor = lineages.GetValueOrDefault(slot.Chain);
                 var input = new EconomicsChildInput(operation, root, plan.Input, plan.Sha256, plan.WorkloadSha256,
                     campaign, slot, lease, sessions[slot.Chain], key, predecessor, transport, fault);
@@ -144,6 +147,7 @@ internal static class EconomicsRunner
                 steps[slot.Index] = steps[slot.Index] with { Code = "completed", Readback = true, FinishedMilliseconds = clock.ElapsedMilliseconds };
                 if (slot.Index == 0 && receipt.ToolCalls == 0 || slot.Index == 1 && !receipt.Restored)
                 { stop = "representative_history_insufficient"; break; }
+                options.Completed?.Invoke(slot.Index);
             }
         }
         catch (ReplayProcessUnreaped) { reaped = false; stop = "child_unreaped"; }

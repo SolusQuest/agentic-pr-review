@@ -63,7 +63,7 @@ internal enum EconomicsFault
     None, WrongSource, WrongBuild, WrongPredecessor, BeforeReadyCrash, AfterPrepareCrash,
     PartialReply, OversizedReply, WrongReply, RateLimit, ProviderFailure, UsageViolation,
     CancelAfterUsage, CancelAfterPrepare, RejectAccept, CorruptState, CleanupFailure,
-    StartFailure, Hang, ThreeCalls, EightCalls,
+    StartFailure, Hang, ThreeCalls, EightCalls, PrepareWriteFailure, CredentialProbe,
 }
 
 // These types are private pipe frames. Never serialize them into a public report.
@@ -74,6 +74,8 @@ internal sealed record EconomicsChildReady(string Operation, string PlanSha256, 
     string SourceCommit, string SourceTree, bool SourceClean, string BuildSha256,
     int ProcessId, string Startup, string Code, bool Restored);
 internal sealed record EconomicsSecretFrame(string Operation, string LeaseId, string? Credential);
+internal sealed record EconomicsCredentialProof(int Requests, bool EnvironmentChecked, bool RestoredSessionChecked,
+    bool CompletedSessionChecked, int StoredObjects);
 internal sealed record EconomicsCall(int Ordinal, bool Dispatched, string TransportOutcome, string ChatOutcome,
     string UsageStatus, UsageJournalUsage? Usage);
 // Public scoped evidence only: no private IPC identities, state keys or candidate locators.
@@ -85,7 +87,8 @@ internal sealed record EconomicsReceipt(string Operation, string PlanSha256, str
     string? PredecessorSha256, string Code, string? Stage, string? Diagnostic, bool Restored,
     string AgentStatus, EvaluationOutcome? Evaluation, PreparedStateReceipt? Prepared,
     ImmutableArray<EconomicsCall> Calls, LiveAccountingSnapshot Accounting, int ToolCalls,
-    string? InitialPrefixSha256, string? CompletedSessionSha256, GrowthChatCounts Measurement);
+    string? InitialPrefixSha256, string? CompletedSessionSha256, GrowthChatCounts Measurement,
+    EconomicsCredentialProof? CredentialProof = null);
 
 internal sealed record EconomicsStep(int Index, string CaseId, string Code, string ReceiptCoverage,
     bool Allocated, string? AttemptSha256, string? EvaluationStatus, bool Restored,

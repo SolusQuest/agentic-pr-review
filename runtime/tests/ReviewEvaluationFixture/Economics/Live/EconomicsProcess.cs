@@ -13,7 +13,8 @@ internal static class EconomicsProcess
 
     // Test-only launch substitution; the command never exposes this hook.
     internal static async Task<EconomicsProcessResult> RunWithStartAsync(EconomicsChildInput input,
-        Func<string?> credential, CancellationToken token, Action<ProcessStartInfo>? configure)
+        Func<string?> credential, CancellationToken token, Action<ProcessStartInfo>? configure,
+        Action<EconomicsChildReady>? onReady = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(input.Plan.ChildSeconds));
@@ -39,10 +40,11 @@ internal static class EconomicsProcess
             ready = await EconomicsWire.ReadAsync(process.StandardOutput.BaseStream,
                 EconomicsLiveJson.Default.EconomicsChildReady, 16384, deadline.Token);
             if (!ValidReady(input, ready, process.Id)) return new("ready_invalid", ready, null);
+            onReady?.Invoke(ready);
             // Only the validated ready frame opens the secret ingress. This delegate
             // is not invoked at all on dry-run or source/state/lease admission failure.
             string? secret = null;
-            if (input.Transport == "live")
+            if (input.Transport == "live" || input.Fault == EconomicsFault.CredentialProbe)
             {
                 secret = credential();
                 if (secret is null) return new("credential_invalid", ready, null);

@@ -52,7 +52,8 @@ internal static class EconomicsReportJson
             report.Scheduled != plan.Slots.Length || report.Steps.Length != report.Scheduled ||
             report.Attempted < 0 || report.Attempted > report.Scheduled || report.ReceiptMissing is < 0 or > 1 ||
             report.ReceiptMissing > report.Attempted || report.Outcomes.Length != report.Attempted - report.ReceiptMissing ||
-            report.StopReason == "complete" && report.Attempted != report.Scheduled ||
+            report.StopReason == "complete" && (report.Attempted != report.Scheduled || report.ReceiptMissing != 0) ||
+            report.Cleanup == "not_created" && report.Attempted != 0 ||
             report.StopReason == "child_unreaped" && report.Cleanup != "cleanup_failed") return false;
         EconomicsAllocation allocation = new(0, 0, 0, 0, 0, 0, 0);
         var startups = new HashSet<string>(StringComparer.Ordinal);
@@ -120,6 +121,9 @@ internal static class EconomicsReportJson
                 outcome.ConfigurationSha256, AgentCanonical.HashRaw(EvaluationJson.Write(descriptor)))) return false;
         }
         if (report.Allocations != allocation) return false;
+        // Terminal and root claims apply to both complete and missing-receipt coverage.
+        if (report.StopReason == "complete" && (report.Steps[0].ToolCalls < 1 || !report.Steps[1].Restored ||
+            report.Steps[^1].Code != "completed")) return false;
         var observed = report.Steps.Take(report.Outcomes.Length).Select(step => step.Observation!).ToArray();
         var reconstructed = EconomicsJournal.CreateObserved(plan, report.Campaign, report.ExecutionKind, observed, report.Outcomes,
             report.ReceiptMissing == 0 ? EconomicsRunner.JournalStop(report.StopReason) : "infrastructure_failed");
@@ -138,8 +142,6 @@ internal static class EconomicsReportJson
         for (var index = 0; index < report.Outcomes.Length; index++)
             if (journal.Document.Attempts[index].EvaluationAttemptSha256 != report.Outcomes[index].AttemptSha256 ||
                 journal.Document.Attempts[index].Status != report.Steps[index].EvaluationStatus) return false;
-        if (report.StopReason == "complete" && (report.Steps[0].ToolCalls < 1 || !report.Steps[1].Restored ||
-            report.Steps[^1].Code != "completed")) return false;
         var evidence = new ComparisonEvidence(report.Outcomes, [], [], []);
         var selection = ComparisonJson.Select(report.Pricing, evidence);
         // Validate the exact downstream identities without creating a comparison or baseline.

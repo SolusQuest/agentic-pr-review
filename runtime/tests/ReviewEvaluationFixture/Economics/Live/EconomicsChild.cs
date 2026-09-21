@@ -42,7 +42,8 @@ internal static class EconomicsChild
             var workload = EconomicsWorkload.Load(plan, deadline.Token);
             var run = workload.Run(input.Slot, input.Campaign);
             var prior = input.Slot.Previous is { } previous ? workload.Run(plan.Slots[previous], input.Campaign) : null;
-            using var state = new ReplayState(run, input.Session, StateRoot(input.Root, input.Slot.Chain), input.StateKey);
+            using var state = new ReplayState(run, input.Session, StateRoot(input.Root, input.Slot.Chain), input.StateKey,
+                input.Fault == EconomicsFault.PrepareWriteFailure ? () => throw new IOException() : null);
             var identity = run.Input.ReviewedIdentity.Runtime;
             var producer = prior?.Input.ReviewedIdentity.Runtime ?? identity;
             var transition = ReplayState.Transition(run, prior);
@@ -86,12 +87,16 @@ internal static class EconomicsChild
             var secret = await EconomicsWire.ReadAsync(Console.OpenStandardInput(), EconomicsLiveJson.Default.EconomicsSecretFrame,
                 16384, deadline.Token);
             if (secret.Operation != input.Operation || secret.LeaseId != input.Lease.Id ||
-                input.Transport == "loopback" && secret.Credential is not null) return 2;
+                input.Transport == "loopback" && (input.Fault == EconomicsFault.CredentialProbe
+                    ? secret.Credential != EconomicsCredentialProbe.Provider : secret.Credential is not null)) return 2;
             if (input.Fault == EconomicsFault.Hang) await Task.Delay(Timeout.Infinite, deadline.Token);
             var accounting = new LiveAccounting(plan.ChildBounds);
             var calls = new EconomicsCalls();
+            using var credentialProbe = input.Fault == EconomicsFault.CredentialProbe ? new EconomicsCredentialProbe(run.Script) : null;
             IDeepSeekTransport underlying = input.Transport == "live"
                 ? LiveDeepSeekTransportFactory.Instance.Create(DeepSeekCredential.Create(secret.Credential ?? throw new IOException()))
+                : credentialProbe is not null ? DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create(secret.Credential!),
+                    credentialProbe, TimeSpan.FromSeconds(input.Plan.ChildSeconds))
                 : new EconomicsLoopback(run.Script, input.Fault, plan.Input.Bounds.PerCall.MaxInputTokens);
             using var metered = new LiveMeteredTransport(underlying, accounting, calls);
             var backend = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId,
@@ -110,6 +115,7 @@ internal static class EconomicsChild
                 .RunAsync(request, deadline.Token);
             EvaluationOutcome evaluation;
             PreparedStateReceipt? prepared = null;
+            EconomicsCredentialProof? credentialProof = null;
             string code, stage;
             string? diagnostic, sessionSha = null;
             if (!outcome.Succeeded)
@@ -135,8 +141,14 @@ internal static class EconomicsChild
                         transition, run.InitialContext);
                     var result = await state.Service.PrepareAsync(state.Access,
                         new(predecessor, built.Artifact.Plaintext, prepareContext), deadline.Token);
-                    prepared = result.Receipt; stage = "prepare"; diagnostic = result.Result.Code;
+                    // Prove the real service's failed-write recovery shape before C2 normalizes it.
+                    if (input.Fault == EconomicsFault.PrepareWriteFailure &&
+                        (result.Result.Action == StateAction.Prepared || result.Receipt is null)) throw new IOException();
+                    prepared = result.Result.Action == StateAction.Prepared ? result.Receipt : null;
+                    stage = "prepare"; diagnostic = result.Result.Code;
                     code = result.Result.Action == StateAction.Prepared ? "prepared" : "state_failed";
+                    credentialProof = credentialProbe?.Verify(input.StateKey, sessionPredecessor?.Plaintext,
+                        built.Artifact.Plaintext, StateRoot(input.Root, input.Slot.Chain));
                 }
             }
             // Finish and seal before publishing a receipt. Late callbacks retain the
@@ -146,7 +158,8 @@ internal static class EconomicsChild
                 input.Lease.Id, Environment.ProcessId, startup, input.Transport, input.Session,
                 predecessor?.SessionSha256, code, stage, diagnostic, predecessor is not null,
                 outcome.Succeeded ? "succeeded" : "failed", evaluation, prepared, callRows, accounting.Seal(),
-                outcome.Events.OfType<AgentToolResultEvent>().Count(), baseline.Provider.Whole.Sha256, sessionSha, measurement.Counts);
+                outcome.Events.OfType<AgentToolResultEvent>().Count(), baseline.Provider.Whole.Sha256, sessionSha, measurement.Counts,
+                credentialProof);
             if (prepared is not null && input.Fault == EconomicsFault.AfterPrepareCrash) return 9;
             if (input.Fault == EconomicsFault.PartialReply) { Console.Write("partial"); return 0; }
             if (input.Fault == EconomicsFault.OversizedReply)

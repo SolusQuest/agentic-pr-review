@@ -43,13 +43,17 @@ The per-call input and charge basis does not prove provider tokenization or bill
 
 ## State and failure outcomes
 
-Agent completion, evaluation quality, candidate preparation, parent acceptance, independent readback and fresh-child restoration are separate events. A completed evaluation keeps its original status and costs if later state acceptance fails. A failed predecessor stops the remaining declared tail; repeated chains cannot bypass that stop. Only a specifically planned and evidenced capacity stop permits its following reset.
+Agent completion, evaluation quality, candidate preparation, parent acceptance, independent readback and fresh-child restoration are separate events. A completed evaluation keeps its original status and costs if later state preparation or acceptance fails. A preparation failure's optional recovery receipt does not mean the candidate was prepared. A failed predecessor stops the remaining declared tail; repeated chains cannot bypass that stop. Only a specifically planned and evidenced capacity stop permits its following reset.
 
 Reset uses existing authorized deletion of the owned local restricted-state scope after verifying its selected predecessor. Deletion and absence are read back before a new session accepts generation zero and a fresh child restores it. This proves the local harness transition. It does not claim the production ActionHost epoch or sticky-publication reset path.
 
 Missing or invalid child receipts retain the full allocation, full scheduled denominator and any separately received evidence. Each receipted step keeps a scoped `observation` with its exact call inventory, reservations, bounded capacity measurements and prefix/session hashes. Total usage and cost remain incomplete, and full-campaign C1 export is unavailable. A smaller complete journal is never substituted for that campaign. A child that cannot be reaped prevents successors and private-root deletion; `cleanup_failed` records that outcome.
 
 The public report excludes raw requests, responses, SESSION plaintext, keys, paths and environment contents. It contains fixed codes, selected hashes, counters, realized intervals and admitted evaluation/pricing projections. Private IPC is never a public artifact.
+
+Ctrl+C cancels the command cooperatively: the runner stops admitting successors, terminates and reaps its active worker, retains the known prefix and committed allocations, cleans its owned root and emits a cancellation report with a nonzero exit. Cancellation before plan admission emits a fixed diagnostic. Stderr progress contains only `r6_economics_child_ready <index> <pid>` after validated readiness and `r6_economics_step_completed <index>` after acceptance/readback; stdout remains the final JSON report. Forced process termination is outside this cooperative guarantee.
+
+The synthetic credential regression delivers a fake provider credential through the same second private frame into the existing HTTP transport's capturing test handler. It checks distinct credential canaries and the actual ephemeral state key across full outbound requests, completed/restored SESSION bytes, encrypted storage and actual worker environments. It performs no network request and keeps the reported execution kind `loopback`; captures never enter public evidence.
 
 ## C1 handoff and limits
 
