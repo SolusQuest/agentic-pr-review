@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import xml.etree.ElementTree as ET
 
 
@@ -111,16 +112,21 @@ class Gate:
             child = subprocess.Popen(command, cwd=REPO, env=env, stdout=stdout, stderr=stderr,
                                      start_new_session=True, preexec_fn=limits)
             self.groups.append(child.pid)
-            deadline = time.monotonic() + seconds
-            while child.poll() is None:
-                # RLIMIT_FSIZE bounds each capture; also bound aggregate tracing.
-                traces = list(run.glob("trace.*"))
-                excessive = len(traces) > 4096 or sum(file.stat().st_size for file in traces) > MAX_TRACE
-                if excessive or time.monotonic() >= deadline:
+            try:
+                deadline = time.monotonic() + seconds
+                while child.poll() is None:
+                    # RLIMIT_FSIZE bounds each capture; also bound aggregate tracing.
+                    traces = list(run.glob("trace.*"))
+                    excessive = len(traces) > 4096 or sum(file.stat().st_size for file in traces) > MAX_TRACE
+                    require(not excessive and time.monotonic() < deadline)
+                    time.sleep(.1)
+            except BaseException:
+                try:
                     os.killpg(child.pid, signal.SIGKILL)
-                    child.wait(timeout=10)
-                    raise RuntimeError("execution bound")
-                time.sleep(.1)
+                except ProcessLookupError:
+                    pass
+                child.wait(timeout=10)
+                raise
         require(not owned_processes(private, child.pid))
         require(child.returncode == code)
         bounded(output)
@@ -231,5 +237,7 @@ if __name__ == "__main__":
         # No candidate text, exception message, private path or captured log is
         # printed/uploaded. Failed owned evidence is retained, never erased to
         # manufacture a cleanup pass. Timeout kills only the launched group.
+        if gate is not None:
+            (gate.root / "supervisor-error").write_text(traceback.format_exc()[-16384:])
         print("r6_economics_gate result=rejected stage=" + (gate.stage if gate else "initialization"), file=sys.stderr)
         sys.exit(1)
