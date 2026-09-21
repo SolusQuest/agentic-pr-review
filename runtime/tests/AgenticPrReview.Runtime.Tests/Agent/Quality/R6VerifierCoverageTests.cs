@@ -59,6 +59,11 @@ public sealed class R6VerifierCoverageTests
             Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(substituted, selection));
             var alias = GateCase.Create("t1-partition", "10/4/6/4", GateContracts.Bytes(cases.Single(item => item.Id == "t1-alias").Evidence));
             Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(alias, selection));
+            // Both round to 2. Equal output cannot substitute a different
+            // independently selected numerator into the low-half probe.
+            var sameAmount = GateCase.Create("t3-half-even-low", "3/2",
+                GateContracts.Bytes(cases.Single(item => item.Id == "t3-half-even-even").Evidence));
+            Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(sameAmount, selection));
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
     }
