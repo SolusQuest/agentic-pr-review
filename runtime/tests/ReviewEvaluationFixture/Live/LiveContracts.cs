@@ -1,9 +1,28 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
+
+// Two internal consumers observe the same transport/chat boundary: the in-process
+// campaign journal and a fresh child's bounded receipt. Neither owns provider policy.
+internal interface ILiveAttemptObserver
+{
+    ILiveCallObserver? BeginCall();
+    ILiveCallObserver? CurrentCall { get; }
+}
+internal interface ILiveCallObserver
+{
+    bool Dispatch();
+    void Refuse(string reason);
+    void TransportFinished(DeepSeekTransportResult? result);
+    void Returned(ProjectChatUsage? usage);
+    void Threw();
+    void Cancel();
+}
 
 // An admitted plan is the complete authorization input for one live-local
 // invocation. Token and spend ceilings are maintainer-authorized reservation

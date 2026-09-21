@@ -21,7 +21,7 @@ internal sealed class LiveDeepSeekTransportFactory : ILiveTransportFactory
 // Metered wrapper at the transport boundary: the only place that sees the
 // reservation gate, typed provider outcomes (429, timeouts) and send counts.
 internal sealed class LiveMeteredTransport(IDeepSeekTransport inner, LiveAccounting accounting,
-    UsageJournalCollector.AttemptScope? attempt = null)
+    ILiveAttemptObserver? attempt = null)
     : IDeepSeekTransport
 {
     public async Task<DeepSeekTransportResult> SendAsync(
@@ -35,7 +35,7 @@ internal sealed class LiveMeteredTransport(IDeepSeekTransport inner, LiveAccount
         using var registration = cancellationToken.Register(static state =>
         {
             var (metered, seen, current) =
-                ((LiveMeteredTransport, CancellationFlag, UsageJournalCollector.CallScope?))state!;
+                ((LiveMeteredTransport, CancellationFlag, ILiveCallObserver?))state!;
             current?.Cancel();
             metered.RecordCancelledOnce(seen);
         }, (this, flag, call));

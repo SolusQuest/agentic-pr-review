@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Accounting;
 
@@ -72,8 +73,10 @@ internal sealed class UsageJournalCollector(UsageJournalExpectation expected)
         internal List<CallScope> Calls { get; } = [];
     }
 
-    internal sealed class AttemptScope(UsageJournalCollector owner, Attempt state)
+    internal sealed class AttemptScope(UsageJournalCollector owner, Attempt state) : ILiveAttemptObserver
     {
+        ILiveCallObserver? ILiveAttemptObserver.BeginCall() => BeginCall();
+        ILiveCallObserver? ILiveAttemptObserver.CurrentCall => CurrentCall;
         internal void AdmitEvaluation(string? sha256)
         {
             lock (owner._gate)
@@ -135,8 +138,14 @@ internal sealed class UsageJournalCollector(UsageJournalExpectation expected)
         }
     }
 
-    internal sealed class CallScope(UsageJournalCollector owner, Attempt attempt, int ordinal)
+    internal sealed class CallScope(UsageJournalCollector owner, Attempt attempt, int ordinal) : ILiveCallObserver
     {
+        bool ILiveCallObserver.Dispatch() => Dispatch();
+        void ILiveCallObserver.Refuse(string reason) => Refuse(reason);
+        void ILiveCallObserver.TransportFinished(DeepSeekTransportResult? result) => TransportFinished(result);
+        void ILiveCallObserver.Returned(ProjectChatUsage? usage) => Returned(usage);
+        void ILiveCallObserver.Threw() => Threw();
+        void ILiveCallObserver.Cancel() => Cancel();
         internal bool Ended;
         internal bool Dispatched;
         private bool _transportObserved;

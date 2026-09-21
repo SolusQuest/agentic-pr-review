@@ -14,7 +14,7 @@ internal sealed class ReplayState : IDisposable
     internal const long Now = 1_800_000_000;
     internal const string Build = "r5-completed-replay";
     private readonly Keys keys;
-    internal ReplayState(AdmittedReplayRun run, string session, string root, byte[] key)
+    internal ReplayState(AdmittedReplayRun run, string session, string root, byte[] key, Action? beforeWriteTestHook = null)
     {
         Trusted = run.CreateTrustedRequest(Build);
         if (!AgentStableRequestMaterializer.TryMaterialize(Trusted, null, out var stable)) throw new InvalidOperationException();
@@ -26,7 +26,7 @@ internal sealed class ReplayState : IDisposable
         Access = access;
         keys = new(key);
         Directory.CreateDirectory(Path.Combine(root, "state"));
-        Service = new(new LocalRestrictedStateStore(Path.Combine(root, "state")), keys,
+        Service = new(new LocalRestrictedStateStore(Path.Combine(root, "state"), beforeWriteTestHook: beforeWriteTestHook), keys,
             new AgentSessionRestrictedStateAdmission(), () => Now);
         Session = session;
     }
