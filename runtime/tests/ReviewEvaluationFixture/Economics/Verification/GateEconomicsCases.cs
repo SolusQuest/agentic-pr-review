@@ -40,7 +40,9 @@ internal static class GateEconomicsCases
             ("c2-provider-failure", EconomicsFault.ProviderFailure), ("c2-cancel-after-usage", EconomicsFault.CancelAfterUsage),
             ("c2-cancel-after-prepare", EconomicsFault.CancelAfterPrepare), ("c2-reject-accept", EconomicsFault.RejectAccept),
         }) await Add(id, fault.ToString(), fault: fault);
-        await Add("c2-hang", "Hang", replay with { ChildSeconds = 1 }, EconomicsFault.Hang, index: 0);
+        // Leave bounded startup headroom under the external syscall audit so
+        // the negative proves a ready worker hung, not merely a slow launch.
+        await Add("c2-hang", "Hang", replay with { ChildSeconds = 5 }, EconomicsFault.Hang, index: 0);
         await Add("c2-preparation-failure", "PrepareWriteFailure", fault: EconomicsFault.PrepareWriteFailure);
         await Add("c2-credential-probe", "CredentialProbe");
 

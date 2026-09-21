@@ -105,6 +105,7 @@ public sealed class R6VerifierCoverageTests
     [InlineData("c2-credential-probe", "None")]
     [InlineData("c2-cleanup", "None")]
     [InlineData("c2-unreaped", "None")]
+    [InlineData("c2-hang", "Hang")]
     public async Task EconomicsOracleChecksActualWorkerAndFailureSemantics(string id, string fault)
     {
         var selection = GateContracts.Select(Fixtures);
@@ -114,8 +115,8 @@ public sealed class R6VerifierCoverageTests
             var tariff = Path.Combine(root, "tariff.json");
             File.WriteAllBytes(tariff, GateTokenCases.TariffBytes(GateTokenCases.Input(unit: 1_000_000, places: 6)));
             var plan = EconomicsCommand.Prepare(Path.Combine(Fixtures, "replay"), Path.Combine(Fixtures, "growth"), tariff,
-                [new("replay", 3, 1, false)]);
-            var evidence = await GateEconomicsCases.RunCase(root, id, plan, Enum.Parse<EconomicsFault>(fault));
+                [new("replay", 3, 1, false)], childSeconds: id == "c2-hang" ? 5 : 30);
+            var evidence = await GateEconomicsCases.RunCase(root, id, plan, Enum.Parse<EconomicsFault>(fault), index: id == "c2-hang" ? 0 : 1);
             var item = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(evidence, GateJson.Default.GateEconomics));
             Assert.True(GateContracts.Safe(item.Evidence));
             var projection = GateEconomicsOracle.Verify(item, selection);

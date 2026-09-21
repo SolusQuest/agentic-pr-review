@@ -91,7 +91,7 @@ internal static class GateEconomicsOracle
         if (item.Id is "c2-reject-accept" or "c2-cancel-after-prepare" or "c2-preparation-failure")
             Require(report.Steps[1].EvaluationStatus == "completed" && !report.Steps[1].Accepted &&
                 report.Steps[1].Prepared == (item.Id != "c2-preparation-failure") && report.Steps[1].Observation!.Calls.All(call => call.UsageStatus == "known"));
-        if (item.Id == "c2-hang") Require(evidence.Workers.Length == 1 && report.Plan.Workload.ChildSeconds == 1);
+        if (item.Id == "c2-hang") Require(evidence.Workers.Length == 1 && report.Plan.Workload.ChildSeconds == 5);
         if (item.Id == "c2-spaced-repeat") Require(report.Plan.Workload.SpacingMilliseconds == 50 && report.Steps.Skip(1).All(step => step.IntervalMilliseconds >= 50) &&
             !report.Steps[2].Restored && report.Steps[3].Restored);
         if (item.Id == "c2-unreaped") Require(evidence.Workers.IsEmpty);
