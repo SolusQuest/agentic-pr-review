@@ -101,7 +101,7 @@ class Gate:
                        TMP=str(private / "tmp"), TEMP=str(private / "tmp"), TMPDIR=str(private / "tmp"),
                        R6_GATE_DIAGNOSTICS_FILE=str(run / "fixture-failure"),
                        DOTNET_EnableDiagnostics="0", LANG="C.UTF-8", LC_ALL="C.UTF-8")
-            command = ["strace", "-ff", "-qq", "-s", "256", "-e", "trace=network,process",
+            command = ["strace", "--seccomp-bpf", "-ff", "-qq", "-s", "256", "-e", "trace=network,process",
                        "-o", str(run / "trace"), *map(str, command)]
         output, error = run / "stdout", run / "stderr"
 
