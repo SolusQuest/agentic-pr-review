@@ -68,7 +68,7 @@ internal static class EconomicsRunner
             {
                 deadline.Token.ThrowIfCancellationRequested();
                 if (slot.Index > 0 && plan.Input.SpacingMilliseconds > 0)
-                    await Task.Delay(plan.Input.SpacingMilliseconds, deadline.Token);
+                    await WaitSpacingAsync(plan.Input.SpacingMilliseconds, () => clock.ElapsedMilliseconds, Task.Delay, deadline.Token);
                 var reset = false;
                 if (slot.ResetChain is { } oldChain)
                 {
@@ -181,6 +181,21 @@ internal static class EconomicsRunner
             receipts.Select(receipt => receipt.Evaluation!).ToImmutableArray(), journal?.Document, pricing?.Document);
         options.Finalized?.Invoke();
         return report;
+    }
+
+    // Timer completion is only a wake-up hint. Some timer clocks wake slightly
+    // early relative to Stopwatch; recheck the monotonic floor before admission.
+    internal static async Task WaitSpacingAsync(int milliseconds, Func<long> elapsed,
+        Func<int, CancellationToken, Task> delay, CancellationToken token)
+    {
+        var target = checked(elapsed() + milliseconds);
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            var remaining = target - elapsed();
+            if (remaining <= 0) return;
+            await delay(checked((int)remaining), token);
+        }
     }
 
     internal static string JournalStop(string stop) => stop is "complete" or "accounting_violation" or "rate_limited" or

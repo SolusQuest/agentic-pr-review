@@ -592,6 +592,28 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Theory]
+    [InlineData(48, false)]
+    [InlineData(0, false)]
+    [InlineData(50, false)]
+    [InlineData(48, true)]
+    public async Task EarlyTimerWakeCannotShortenSpacingOrAdmitWorkAfterCancellation(int firstWake, bool cancel)
+    {
+        long elapsed = 100;
+        var waits = new List<int>();
+        using var cancellation = new CancellationTokenSource();
+        var wait = EconomicsRunner.WaitSpacingAsync(50, () => elapsed, (remaining, token) =>
+        {
+            Assert.Equal(cancellation.Token, token); waits.Add(remaining);
+            elapsed += waits.Count == 1 ? firstWake : remaining;
+            if (cancel) cancellation.Cancel();
+            return Task.CompletedTask;
+        }, cancellation.Token);
+        if (cancel) { await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait); Assert.Single(waits); }
+        else { await wait; Assert.True(elapsed >= 150); }
+        Assert.All(waits, remaining => Assert.InRange(remaining, 1, 50));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ActualComparisonCommandConsumesSuccessfulAndKnownFailedC2Evidence(bool failure)
