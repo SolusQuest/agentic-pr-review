@@ -76,6 +76,10 @@ internal sealed record EconomicsChildReady(string Operation, string PlanSha256, 
 internal sealed record EconomicsSecretFrame(string Operation, string LeaseId, string? Credential);
 internal sealed record EconomicsCall(int Ordinal, bool Dispatched, string TransportOutcome, string ChatOutcome,
     string UsageStatus, UsageJournalUsage? Usage);
+// Public scoped evidence only: no private IPC identities, state keys or candidate locators.
+internal sealed record EconomicsObservation(string Code, string? Stage, string? Diagnostic, string AgentStatus,
+    ImmutableArray<EconomicsCall> Calls, long Reservations, GrowthChatCounts Measurement,
+    string InitialPrefixSha256, string? CompletedSessionSha256);
 internal sealed record EconomicsReceipt(string Operation, string PlanSha256, string WorkloadSha256,
     int Index, string LeaseId, int ProcessId, string Startup, string Transport, string Session,
     string? PredecessorSha256, string Code, string? Stage, string? Diagnostic, bool Restored,
@@ -87,7 +91,7 @@ internal sealed record EconomicsStep(int Index, string CaseId, string Code, stri
     bool Allocated, string? AttemptSha256, string? EvaluationStatus, bool Restored,
     bool Prepared, bool Accepted, bool Readback, bool Reset, int? ProcessId, string? Startup,
     long StartedMilliseconds, long FinishedMilliseconds, long? IntervalMilliseconds,
-    string? SessionSha256, string? PredecessorSha256, int? ToolCalls);
+    string? SessionSha256, string? PredecessorSha256, int? ToolCalls, EconomicsObservation? Observation);
 internal sealed record EconomicsReport(string Format, string ExecutionKind, EconomicsPlanSelection Plan,
     string PlanSha256, string WorkloadSha256, string Campaign, string StopReason, string Cleanup,
     EconomicsAllocation Allocations, int Scheduled, int Attempted, int ReceiptMissing,

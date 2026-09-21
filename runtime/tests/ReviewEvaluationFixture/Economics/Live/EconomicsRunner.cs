@@ -109,7 +109,8 @@ internal static class EconomicsRunner
                 var step = steps[slot.Index] with { ReceiptCoverage = "complete", Code = receipt.Code,
                     AttemptSha256 = receipt.Evaluation!.AttemptSha256, EvaluationStatus = receipt.Evaluation.ExecutionStatus.ToString().ToLowerInvariant(),
                     Restored = receipt.Restored, Prepared = receipt.Prepared is not null, ProcessId = receipt.ProcessId,
-                    Startup = receipt.Startup, PredecessorSha256 = receipt.PredecessorSha256, ToolCalls = receipt.ToolCalls };
+                    Startup = receipt.Startup, PredecessorSha256 = receipt.PredecessorSha256, ToolCalls = receipt.ToolCalls,
+                    Observation = EconomicsJournal.Observe(receipt) };
                 steps[slot.Index] = step;
                 if (receiptStop is not null) { stop = receiptStop; break; }
                 if (slot.ExpectedCapacity)
@@ -177,7 +178,7 @@ internal static class EconomicsRunner
     internal static string JournalStop(string stop) => stop is "complete" or "accounting_violation" or "rate_limited" or
         "caller_cancelled" or "deadline" ? stop : "infrastructure_failed";
     private static EconomicsStep Empty(EconomicsSlot slot) => new(slot.Index, slot.CaseId, "unattempted", "unattempted", false,
-        null, null, false, false, false, false, false, null, null, 0, 0, null, null, null, null);
+        null, null, false, false, false, false, false, null, null, 0, 0, null, null, null, null, null);
 
     internal static async Task<bool> ReadbackAsync(AdmittedReplayRun run, string session, string root, int chain,
         byte[] key, AcceptedLineage predecessor, CancellationToken token)

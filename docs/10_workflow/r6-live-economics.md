@@ -47,7 +47,7 @@ Agent completion, evaluation quality, candidate preparation, parent acceptance, 
 
 Reset uses existing authorized deletion of the owned local restricted-state scope after verifying its selected predecessor. Deletion and absence are read back before a new session accepts generation zero and a fresh child restores it. This proves the local harness transition. It does not claim the production ActionHost epoch or sticky-publication reset path.
 
-Missing or invalid child receipts retain the full allocation, full scheduled denominator and any separately received evidence. Total usage and cost remain incomplete, and full-campaign C1 export is unavailable. A smaller complete journal is never substituted for that campaign. A child that cannot be reaped prevents successors and private-root deletion; `cleanup_failed` records that outcome.
+Missing or invalid child receipts retain the full allocation, full scheduled denominator and any separately received evidence. Each receipted step keeps a scoped `observation` with its exact call inventory, reservations, bounded capacity measurements and prefix/session hashes. Total usage and cost remain incomplete, and full-campaign C1 export is unavailable. A smaller complete journal is never substituted for that campaign. A child that cannot be reaped prevents successors and private-root deletion; `cleanup_failed` records that outcome.
 
 The public report excludes raw requests, responses, SESSION plaintext, keys, paths and environment contents. It contains fixed codes, selected hashes, counters, realized intervals and admitted evaluation/pricing projections. Private IPC is never a public artifact.
 

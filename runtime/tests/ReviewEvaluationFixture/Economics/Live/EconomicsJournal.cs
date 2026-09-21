@@ -69,6 +69,21 @@ internal static class EconomicsJournal
     internal static UsageJournal? Create(EconomicsPlan plan, string campaign, string transport,
         IReadOnlyList<EconomicsReceipt> receipts, string stopReason)
     {
+        if (receipts.Where((receipt, index) => receipt.Index != index).Any()) return null;
+        return CreateObserved(plan, campaign, transport, receipts.Select(Observe).ToArray(),
+            receipts.Select(receipt => receipt.Evaluation!).ToArray(), stopReason);
+    }
+
+    internal static EconomicsObservation Observe(EconomicsReceipt receipt) => new(receipt.Code, receipt.Stage,
+        receipt.Diagnostic, receipt.AgentStatus, receipt.Calls, receipt.Accounting.Sends, receipt.Measurement,
+        receipt.InitialPrefixSha256!, receipt.CompletedSessionSha256);
+
+    // Admission of the known prefix is internal. A missing child is never published
+    // as an unattempted slot in a replacement full-campaign journal.
+    internal static UsageJournal? CreateObserved(EconomicsPlan plan, string campaign, string transport,
+        IReadOnlyList<EconomicsObservation> receipts, IReadOnlyList<EvaluationOutcome> outcomes, string stopReason)
+    {
+        if (receipts.Count != outcomes.Count || receipts.Count > plan.Slots.Length) return null;
         var expected = plan.Expectation(campaign, transport);
         var attempts = ImmutableArray.CreateBuilder<UsageJournalAttempt>();
         var calls = ImmutableArray.CreateBuilder<UsageJournalCall>();
@@ -82,15 +97,14 @@ internal static class EconomicsJournal
                 continue;
             }
             var receipt = receipts[index];
-            if (receipt.Index != index) return null;
             var sends = receipt.Calls.Count(call => call.Dispatched);
             attempts.Add(new(expected.BindingSha256, expected.AttemptId(index), index, plan.Slots[index].CaseId,
-                receipt.Evaluation!.ExecutionStatus.ToString().ToLowerInvariant(), receipt.AgentStatus,
-                receipt.Evaluation.AttemptSha256, receipt.Calls.Length, sends, receipt.Calls.Length - sends));
+                outcomes[index].ExecutionStatus.ToString().ToLowerInvariant(), receipt.AgentStatus,
+                outcomes[index].AttemptSha256, receipt.Calls.Length, sends, receipt.Calls.Length - sends));
             foreach (var call in receipt.Calls)
                 calls.Add(new(expected.BindingSha256, expected.CallId(index, call.Ordinal), expected.AttemptId(index),
                     call.Ordinal, call.Dispatched, call.TransportOutcome, call.ChatOutcome, call.UsageStatus, call.Usage));
-            reserved += receipt.Accounting.Sends;
+            reserved += receipt.Reservations;
         }
         var per = plan.Input.Bounds.PerCall;
         var attemptRows = attempts.ToImmutable(); var callRows = calls.ToImmutable();
@@ -110,8 +124,33 @@ internal static class EconomicsJournal
         if (receipt.Diagnostic == "agent_deadline_exceeded") return "deadline";
         return null;
     }
-    internal static bool Capacity(EconomicsReceipt receipt) => receipt.Code == "session_failed" &&
+    internal static bool Capacity(EconomicsReceipt receipt) => Capacity(Observe(receipt));
+    internal static bool Capacity(EconomicsObservation receipt) => receipt.Code == "session_failed" &&
         receipt.Diagnostic == AgentSessionCodes.ConstructionLimit || receipt.Code == "agent_failed" &&
         receipt.Diagnostic == "agent_response_invalid" && (receipt.Measurement.LastResponseMessages > AgentLimits.Messages ||
             receipt.Measurement.LastContinuationAfterBytes > AgentLimits.ContinuationTotalBytes);
+
+    internal static bool ValidObservation(EconomicsObservation? observation, EconomicsStep step)
+    {
+        if (observation is not { Measurement: { } counts } value || value.Calls.IsDefault ||
+            value.Calls.Length is < 1 or > 8 || counts.Calls != value.Calls.Length || value.Reservations is < 0 or > 8 ||
+            !EvaluationLimits.Hash(value.InitialPrefixSha256) ||
+            counts.LastProjectRequestBytes is < 1 or > AgentLimits.RequestBytes || counts.LastMessages is < 1 or > AgentLimits.Messages ||
+            counts.LastResponseMessages < counts.LastMessages || counts.LastResponseMessages > counts.LastMessages + 1 + AgentLimits.ToolCallsPerResponse ||
+            counts.LastContinuationBeforeBytes is < 0 or > AgentLimits.ContinuationTotalBytes ||
+            counts.LastContinuationAfterBytes < counts.LastContinuationBeforeBytes ||
+            counts.LastContinuationAfterBytes > 2L * AgentLimits.ContinuationTotalBytes) return false;
+        return value.Code switch
+        {
+            "agent_failed" => value.Stage == "agent" && GrowthProfiles.AgentCode(value.Diagnostic) && value.AgentStatus == "failed" &&
+                step.EvaluationStatus == "failed" && !step.Prepared && value.CompletedSessionSha256 is null,
+            "session_failed" => value.Stage == "build" && GrowthProfiles.SessionCode(value.Diagnostic) && value.AgentStatus == "succeeded" &&
+                step.EvaluationStatus == "failed" && !step.Prepared && value.CompletedSessionSha256 is null,
+            "prepared" or "state_failed" => value.Stage == "prepare" && GrowthProfiles.StateCode(value.Diagnostic) &&
+                value.AgentStatus == "succeeded" && step.EvaluationStatus == "completed" &&
+                EvaluationLimits.Hash(value.CompletedSessionSha256) && step.Prepared == (value.Code == "prepared") &&
+                (!step.Accepted || step.SessionSha256 == value.CompletedSessionSha256),
+            _ => false,
+        };
+    }
 }

@@ -106,6 +106,10 @@ public sealed class R6EconomicsRunnerTests
         Assert.False(result.UsageComplete); Assert.False(result.MonetaryComplete);
         Assert.Null(result.Journal); Assert.Null(result.Pricing); Assert.Single(result.Outcomes);
         Assert.Equal("unattempted", result.Steps[2].Code); Assert.Equal("cleaned", result.Cleanup);
+        Assert.NotNull(result.Steps[0].Observation);
+        Assert.All(result.Steps[0].Observation!.Calls, call => Assert.Equal("known", call.UsageStatus));
+        Assert.Equal(2, result.Steps[0].Observation!.Reservations);
+        Assert.Null(result.Steps[1].Observation); Assert.Null(result.Steps[2].Observation);
         var json = EconomicsReportJson.Write(result);
         Assert.DoesNotContain(Canary, Encoding.UTF8.GetString(json));
     }
@@ -148,6 +152,8 @@ public sealed class R6EconomicsRunnerTests
         var result = await EconomicsRunner.RunAsync(files.PlanPath, false);
         Assert.True(result.StopReason == "complete", Describe(result));
         Assert.Equal(2, result.Steps.Count(step => step.Code == "capacity_stop"));
+        Assert.All(result.Steps.Where(step => step.Code == "capacity_stop"), step =>
+            Assert.True(EconomicsJournal.Capacity(step.Observation!)));
         Assert.Equal(2, result.Steps.Count(step => step.Reset));
         foreach (var reset in result.Steps.Where(step => step.Reset))
         {
@@ -498,6 +504,9 @@ public sealed class R6EconomicsRunnerTests
             node => node["steps"]![0]!["accepted"] = false,
             node => node["campaign"] = "forged-campaign",
             node => node["outcomes"]![0]!["attempt_sha256"] = new string('f', 64),
+            node => node["steps"]![0]!["observation"]!["reservations"] = 8,
+            node => node["steps"]![0]!["observation"]!["calls"]![0]!["usage"]!["input_tokens"] = 123,
+            node => node["steps"]![0]!["observation"]!["measurement"]!["calls"] = 0,
         ];
         foreach (var mutate in mutations)
         {
@@ -509,6 +518,9 @@ public sealed class R6EconomicsRunnerTests
         Assert.Null(EconomicsReportJson.Read(new byte[EconomicsLiveLimits.ReportBytes + 1]));
         var missing = await EconomicsRunner.RunAsync(files.PlanPath, false, new() { Fault = EconomicsFault.AfterPrepareCrash, FaultIndex = 1 });
         var altered = JsonNode.Parse(EconomicsReportJson.Write(missing))!; altered["campaign"] = "forged-campaign";
+        Assert.Null(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(altered.ToJsonString())));
+        altered = JsonNode.Parse(EconomicsReportJson.Write(missing))!;
+        altered["steps"]![0]!["observation"]!["calls"]![0]!["ordinal"] = 0;
         Assert.Null(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(altered.ToJsonString())));
     }
 

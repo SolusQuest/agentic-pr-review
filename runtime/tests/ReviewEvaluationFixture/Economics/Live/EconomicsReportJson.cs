@@ -69,11 +69,12 @@ internal static class EconomicsReportJson
                 if (step.ReceiptCoverage != "unattempted" || step.Code is not ("unattempted" or "reset_failed") ||
                     step.AttemptSha256 is not null || step.EvaluationStatus is not null || step.Restored || step.Prepared || step.Accepted ||
                     step.Readback || step.Reset || step.ProcessId is not null || step.Startup is not null || step.SessionSha256 is not null ||
-                    step.PredecessorSha256 is not null || step.ToolCalls is not null || step.StartedMilliseconds != 0 ||
+                    step.PredecessorSha256 is not null || step.ToolCalls is not null || step.Observation is not null || step.StartedMilliseconds != 0 ||
                     step.FinishedMilliseconds != 0 || step.IntervalMilliseconds is not null) return false;
                 continue;
             }
             allocation = EconomicsLedger.Add(allocation, plan.ChildAllocation)!;
+            if (step.Reset != (plan.Slots[index].ResetChain is not null)) return false;
             if (index > 0 && report.Steps[index - 1] is { } prior &&
                 !(prior.Code == "completed" && prior.Accepted && prior.Readback) &&
                 !(prior.Code == "capacity_stop" && prior.Readback && plan.Slots[index].ResetChain == plan.Slots[index - 1].Chain)) return false;
@@ -87,7 +88,8 @@ internal static class EconomicsReportJson
             {
                 if (step.ReceiptCoverage != "missing" || step.AttemptSha256 is not null || step.EvaluationStatus is not null ||
                     step.Prepared || step.Accepted || step.Readback || step.ProcessId is not null || step.Startup is not null ||
-                    step.SessionSha256 is not null || step.PredecessorSha256 is not null || step.ToolCalls is not null || step.Restored) return false;
+                    step.SessionSha256 is not null || step.PredecessorSha256 is not null || step.ToolCalls is not null ||
+                    step.Observation is not null || step.Restored) return false;
                 continue;
             }
             var outcome = report.Outcomes[index];
@@ -106,6 +108,10 @@ internal static class EconomicsReportJson
                 outcome.ExecutionStatus.ToString().ToLowerInvariant() != step.EvaluationStatus ||
                 outcome.SourceCommit != input.Source.Commit || outcome.SourceTree != input.Source.Tree || outcome.SourceClean != input.Source.Clean ||
                 outcome.Mode != (report.ExecutionKind == "live" ? "live" : "deterministic")) return false;
+            if (!EconomicsJournal.ValidObservation(step.Observation, step) ||
+                step.Code is not ("completed" or "capacity_stop") && step.Code != step.Observation!.Code ||
+                step.Code == "capacity_stop" && (!plan.Slots[index].ExpectedCapacity || !step.Readback || step.Accepted ||
+                    !EconomicsJournal.Capacity(step.Observation!))) return false;
             if (plan.Slots[index].Previous is { } previous &&
                 step.PredecessorSha256 != report.Steps[previous].SessionSha256) return false;
             var descriptor = new EvaluationRunInput(report.Campaign + "-" + (index + 1), outcome.Mode,
@@ -114,12 +120,17 @@ internal static class EconomicsReportJson
                 outcome.ConfigurationSha256, AgentCanonical.HashRaw(EvaluationJson.Write(descriptor)))) return false;
         }
         if (report.Allocations != allocation) return false;
+        var observed = report.Steps.Take(report.Outcomes.Length).Select(step => step.Observation!).ToArray();
+        var reconstructed = EconomicsJournal.CreateObserved(plan, report.Campaign, report.ExecutionKind, observed, report.Outcomes,
+            report.ReceiptMissing == 0 ? EconomicsRunner.JournalStop(report.StopReason) : "infrastructure_failed");
+        if (reconstructed is null) return false;
         if (report.ReceiptMissing != 0) return !report.UsageComplete && !report.MonetaryComplete &&
             report.C1Handoff == "unavailable_missing_receipt" && report.Journal is null && report.Pricing is null;
         var journal = UsageJournal.Admit(report.Journal, plan.Expectation(report.Campaign, report.ExecutionKind));
         if (journal is null || journal.Document.StopReason != EconomicsRunner.JournalStop(report.StopReason) ||
             journal.Document.Totals.Attempted != report.Attempted ||
             journal.Document.Totals.UsageComplete != report.UsageComplete || report.Pricing is null) return false;
+        if (!UsageJournalJson.Write(reconstructed).AsSpan().SequenceEqual(UsageJournalJson.Write(journal))) return false;
         var pricing = PricingJson.Read(JsonSerializer.SerializeToUtf8Bytes(report.Pricing, PricingJsonContext.Default.PricingReportDocument));
         var tariff = AdmittedTariff.Admit(report.Pricing.Tariff, out _);
         if (pricing is null || tariff is null || tariff.Sha256 != plan.Input.TariffSha256 || !pricing.Matches(journal, tariff) ||
