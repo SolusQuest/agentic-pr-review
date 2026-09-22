@@ -27,7 +27,9 @@ MUTATIONS = (
     "missing-case duplicate-case renamed-case reordered-case substituted-case "
     "wrong-source wrong-tree wrong-clean wrong-build wrong-mode wrong-corpus "
     "invalid-binding wrong-artifact price-tamper chain-tamper live cleanup unreaped "
-    "unknown-field duplicate-field raw-canary escaped-canary extra-record stderr-canary"
+    "unknown-field duplicate-field raw-canary escaped-canary extra-record stderr-canary "
+    "aggregate-inputs comparison-corpus prefix-domain prefix-generation history-session history-plan "
+    "host-capacity-epoch host-capacity-session host-restore-epoch host-restore-session host-code host-disposition"
 ).split()
 NETWORK = re.compile(rb"\b(?:socket|connect|sendto|sendmsg|sendmmsg)\(.*\bAF_INET6?\b")
 
@@ -209,7 +211,7 @@ class Gate:
             verify(candidate, errors, 1)
         self.run([*runner, "r6-gate", "mutate", "--report", report,
                   "--mutation", "retained-root"], retained=True, seconds=30)
-        print("r6_economics_gate mode=" + mode + " cases=82 adversarial=26 result=verified", flush=True)
+        print(f"r6_economics_gate mode={mode} cases=82 adversarial={len(MUTATIONS) + 1} result=verified", flush=True)
         return stable
 
     def execute(self, selected_mode):

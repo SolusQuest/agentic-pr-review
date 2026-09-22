@@ -2,6 +2,7 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 using static AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification.GateContracts;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification;
@@ -22,6 +23,9 @@ internal static class GatePrefixOracle
             value.Comparisons.Length == value.Observations.Length - 1 && value.Counts.IsEmpty);
         foreach (var observation in value!.Observations)
         {
+            // Shape admission does not validate digest values or the
+            // bootstrap/generation/accepted-session relationship.
+            Require(HistoryCapture.Safe(new("observed", observation, [])));
             Require(observation.Domain.SourceCommit == selection.SourceCommit && observation.Domain.SourceTree == selection.SourceTree &&
                 observation.Domain.SourceClean == selection.SourceClean && observation.ControlMessages == 1 &&
                 observation.HistoricalMessages is 0 or 3);

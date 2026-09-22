@@ -24,6 +24,17 @@ internal static class GateHistoryOracle
         Require(report.Rows.Select(row => row.ProcessId).Distinct().Count() == report.Rows.Length);
         foreach (var row in report.Rows) Absent(row.ProcessId);
         Require(HistoryReport.Positive(report.Rows[0]));
+        var session = report.Rows[0].Capture.Baseline!.Domain.SessionSha256;
+        var phasePlans = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in report.Rows)
+        {
+            var observations = new[] { row.Capture.Baseline }.Concat(row.Capture.Calls).OfType<PrefixObservation>().ToArray();
+            if (observations.Length == 0) continue;
+            // One selected session spans the chain. A phase uses one domain,
+            // and each new predecessor produces a distinct stable plan.
+            Require(observations.All(value => value.Domain.SessionSha256 == session && value.Domain == observations[0].Domain) &&
+                phasePlans.Add(observations[0].Domain.StablePlanSha256));
+        }
         if (positive) Require(report.ContinuityVerified);
         else
         {
@@ -93,6 +104,9 @@ internal static class GateHistoryOracle
             Require(row.Phase == i && row.StoredMarkersMatch && row.WireExclusion && row.InitialMessages >= 2 &&
                 row.AcceptedCount == row.AcceptanceIdentities.Length && row.AcceptanceIdentities.Distinct().Count() == row.AcceptedCount &&
                 row.AcceptanceIdentities.All(Hex) && Hex(row.EpochSha256) && Hex(row.SessionIdSha256) && Hex(row.StoredSessionSha256));
+            if (i < capacity || i > capacity + 1)
+                Require(row.Disposition == "Accepted" && row.AgentCode is null && row.ModelCalls is null);
+            else Require(row.Disposition == "NotCommitted");
             if (i < capacity)
                 Require(row.Disposition == "Accepted" && row.Generation == i && row.AcceptedCount == Math.Min(2, i + 1) && row.Publications == i + 1 &&
                     row.EpochSha256 == rows[0].EpochSha256 && row.SessionIdSha256 == rows[0].SessionIdSha256 &&
@@ -103,11 +117,14 @@ internal static class GateHistoryOracle
         var restored = rows[capacity + 1];
         var reset = rows[capacity + 2];
         var next = rows[capacity + 3];
-        Require(stopped.Disposition != "Accepted" && stopped.AgentCode == AgentFailureCodes.ResponseInvalid && stopped.ModelCalls == 1 &&
+        Require(stopped.Disposition == "NotCommitted" && stopped.AgentCode == AgentFailureCodes.ResponseInvalid && stopped.ModelCalls == 1 &&
             stopped.InitialMessages + 9 > AgentLimits.Messages && stopped.AcceptanceIdentities.SequenceEqual(previous.AcceptanceIdentities) &&
+            stopped.Generation == previous.Generation && stopped.EpochSha256 == previous.EpochSha256 &&
+            stopped.SessionIdSha256 == previous.SessionIdSha256 && stopped.RestoredSessionSha256 == previous.StoredSessionSha256 &&
             stopped.StoredSessionSha256 == previous.StoredSessionSha256 && stopped.Publications == previous.Publications);
-        Require(restored.Disposition != "Accepted" && restored.AgentCode == AgentFailureCodes.ChatFailed &&
+        Require(restored.Disposition == "NotCommitted" && restored.AgentCode == AgentFailureCodes.ChatFailed && restored.ModelCalls == 0 &&
             restored.AcceptanceIdentities.SequenceEqual(previous.AcceptanceIdentities) && restored.StoredSessionSha256 == previous.StoredSessionSha256 &&
+            restored.Generation == previous.Generation && restored.EpochSha256 == previous.EpochSha256 && restored.Publications == previous.Publications &&
             restored.SessionIdSha256 == previous.SessionIdSha256 && restored.RestoredSessionSha256 == previous.StoredSessionSha256);
         Require(reset.Disposition == "Accepted" && reset.Generation == 0 && reset.AcceptedCount == 1 && reset.RestoredSessionSha256 is null &&
             reset.EpochSha256 != previous.EpochSha256 && reset.SessionIdSha256 != previous.SessionIdSha256 &&

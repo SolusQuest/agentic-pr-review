@@ -1,6 +1,11 @@
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
@@ -64,6 +69,19 @@ public sealed class R6VerifierCoverageTests
             var sameAmount = GateCase.Create("t3-half-even-low", "3/2",
                 GateContracts.Bytes(cases.Single(item => item.Id == "t3-half-even-even").Evidence));
             Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(sameAmount, selection));
+            void RejectPrice(string id, ProjectChatUsage?[] usage, TariffInput input, int? scheduled = null)
+            {
+                var selected = cases.Single(item => item.Id == id);
+                var wrong = PricingReport.Create(GateTokenCases.Journal(selection, usage, scheduled), GateTokenCases.Tariff(input));
+                var rebound = GateCase.Create(id, selected.Selection, PricingJson.Write(wrong));
+                Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(rebound, selection));
+            }
+            var aggregate = GateTokenCases.Input(miss: 5, unit: 1000, places: 2);
+            RejectPrice("t3-aggregate", [GateTokenCases.Measured(0, 0, 0), GateTokenCases.Measured(2, 0, 0)], aggregate);
+            RejectPrice("t3-aggregate", [GateTokenCases.Measured(2, 0, 0), GateTokenCases.Measured(0, 0, 0)], aggregate);
+            RejectPrice("t3-aggregate", [GateTokenCases.Measured(1, 0, 0), GateTokenCases.Measured(1, 0, 0)], aggregate, scheduled: 3);
+            RejectPrice("t3-unknown-zero-rate", [null, GateTokenCases.Measured(10, 4, 6)], GateTokenCases.Input(hit: 0, miss: 0, output: 0));
+            RejectPrice("t3-zero-denominator", [GateTokenCases.Measured(0, 0, 0)], GateTokenCases.Input());
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
     }
@@ -81,6 +99,11 @@ public sealed class R6VerifierCoverageTests
             GateComparisonCases.Run(cases, selection, root);
             Assert.Equal(9, cases.Count);
             foreach (var item in cases) GateComparisonOracle.Verify(item, selection, cases.ToDictionary(value => value.Id));
+            Assert.NotEqual(selection.ReplaySha256, selection.GrowthSha256);
+            var substituted = new List<GateCase>();
+            GateComparisonCases.Run(substituted, selection with { ReplaySha256 = selection.GrowthSha256 }, root);
+            foreach (var item in substituted)
+                Assert.Throws<InvalidOperationException>(() => GateComparisonOracle.Verify(item, selection, cases.ToDictionary(value => value.Id)));
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
     }
@@ -140,7 +163,31 @@ public sealed class R6VerifierCoverageTests
         var host = await GateHostCases.RunAsync(Path.Combine(Fixtures, "growth"), selection);
         var item = GateCase.Create("p2-host-capacity-reset", "production-host-capacity-reset",
             System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(host, GateJson.Default.GateHostReport));
-        GateHistoryOracle.Verify(item, selection);
+        var projected = GateHistoryOracle.Verify(item, selection);
+        foreach (var phase in new[] { 5, 6 })
+            foreach (var field in new[] { "epoch_sha256", "session_id_sha256" })
+                Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(
+                    Rewrite(item, value => value["rows"]![phase]![field] = GateContracts.Hash('e')), selection));
+        foreach (var phase in new[] { 0, 4, 7, 8 })
+        {
+            var wrong = Rewrite(item, value => value["rows"]![phase]!["agent_code"] = "UNLISTED_PRIVATE_PAYLOAD_279");
+            Assert.True(GateContracts.Safe(wrong.Evidence));
+            Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(wrong, selection));
+            Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(
+                Rewrite(item, value => value["rows"]![phase]!["model_calls"] = 1), selection));
+        }
+        foreach (var phase in new[] { 5, 6 })
+            Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(
+                Rewrite(item, value => value["rows"]![phase]!["disposition"] = "UNLISTED_PRIVATE_PAYLOAD_279"), selection));
+        var renamed = Rewrite(item, value =>
+        {
+            for (var phase = 0; phase < 9; phase++)
+            {
+                value["rows"]![phase]!["epoch_sha256"] = GateContracts.Hash(phase < 7 ? 'a' : 'b');
+                value["rows"]![phase]!["session_id_sha256"] = GateContracts.Hash(phase < 7 ? 'c' : 'd');
+            }
+        });
+        Assert.True(JsonElement.DeepEquals(projected, GateHistoryOracle.Verify(renamed, selection)));
     }
 
     [Fact]
@@ -155,6 +202,24 @@ public sealed class R6VerifierCoverageTests
             Assert.True(GateContracts.Safe(item.Evidence), item.Id);
             GateHistoryOracle.Verify(item, selection);
         }
+        foreach (var id in new[] { "p2-replay", "p2-tools", "p2-continuation" })
+        {
+            var item = cases.Single(value => value.Id == id);
+            var projected = GateHistoryOracle.Verify(item, selection);
+            Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(Rewrite(item, value =>
+                ChangeDomain(value["rows"]![1]!["capture"]!, "session_sha256", GateContracts.Hash('e'))), selection));
+            Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(Rewrite(item, value =>
+                ChangeDomain(value["rows"]![1]!["capture"]!, "stable_plan_sha256",
+                    value["rows"]![0]!["capture"]!["baseline"]!["domain"]!["stable_plan_sha256"]!.GetValue<string>())), selection));
+            var renamed = Rewrite(item, value =>
+            {
+                foreach (var row in value["rows"]!.AsArray()) ChangeDomain(row!["capture"]!, "session_sha256", GateContracts.Hash('e'));
+            });
+            Assert.True(JsonElement.DeepEquals(projected, GateHistoryOracle.Verify(renamed, selection)));
+        }
+        var repeated = GateCase.Create("p2-replay", "replay", HistoryJson.Write(await HistoryRunner.ReplayAsync(Path.Combine(Fixtures, "replay"))));
+        Assert.True(JsonElement.DeepEquals(GateHistoryOracle.Verify(cases.Single(item => item.Id == "p2-replay"), selection),
+            GateHistoryOracle.Verify(repeated, selection)));
     }
 
     [Fact]
@@ -174,7 +239,40 @@ public sealed class R6VerifierCoverageTests
                 if (item.Id.StartsWith('t')) GateTokenOracle.Verify(item, selection);
                 else GatePrefixOracle.Verify(item, selection);
             }
+            var dynamic = cases.Single(item => item.Id == "p1-dynamic-suffix");
+            foreach (var field in new[] { "stable_plan_sha256", "session_sha256", "accepted_session_sha256" })
+            {
+                var wrong = Rewrite(dynamic, value =>
+                {
+                    foreach (var observation in value["observations"]!.AsArray())
+                        observation!["domain"]![field] = "UNLISTED_PRIVATE_PAYLOAD_279";
+                });
+                Assert.True(GateContracts.Safe(wrong.Evidence));
+                Assert.Throws<InvalidOperationException>(() => GatePrefixOracle.Verify(wrong, selection));
+            }
+            foreach (var generation in new long[] { -2, -1, long.MaxValue })
+                Assert.Throws<InvalidOperationException>(() => GatePrefixOracle.Verify(Rewrite(dynamic, value =>
+                {
+                    foreach (var observation in value["observations"]!.AsArray()) observation!["domain"]!["generation"] = generation;
+                }), selection));
+            Assert.Throws<InvalidOperationException>(() => GatePrefixOracle.Verify(Rewrite(dynamic, value =>
+            {
+                foreach (var observation in value["observations"]!.AsArray()) observation!["domain"]!["accepted_session_sha256"] = null;
+            }), selection));
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
+    }
+
+    private static GateCase Rewrite(GateCase item, Action<JsonNode> change)
+    {
+        var evidence = JsonNode.Parse(item.Evidence.GetRawText())!;
+        change(evidence);
+        return GateCase.Create(item.Id, item.Selection, Encoding.UTF8.GetBytes(evidence.ToJsonString()));
+    }
+
+    private static void ChangeDomain(JsonNode capture, string field, string value)
+    {
+        if (capture["baseline"] is { } baseline) baseline["domain"]![field] = value;
+        foreach (var call in capture["calls"]!.AsArray()) if (call is not null) call["domain"]![field] = value;
     }
 }

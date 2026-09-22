@@ -33,7 +33,14 @@ internal static class GateComparisonOracle
         Require(report.Left.Pricing.Journal.Provenance.SourceCommit == selection.SourceCommit &&
             report.Left.Pricing.Journal.Provenance.SourceTree == selection.SourceTree &&
             report.Left.Pricing.Journal.Provenance.SourceClean == selection.SourceClean &&
+            report.Right.Pricing.Journal.Provenance.SourceTree == selection.SourceTree &&
+            report.Right.Pricing.Journal.Provenance.SourceClean == selection.SourceClean &&
             report.Right.Pricing.Journal.Provenance.SourceCommit == (item.Id == "c1-source-axis" ? Hash('f', 40) : selection.SourceCommit));
+        // C2 carries a composite workload digest and is associated with its
+        // exact original artifacts below. Ordinary C1 selects the replay seed.
+        if (item.Id != "c1-c2-handoff")
+            Require(report.Left.Pricing.Journal.Provenance.CorpusSha256 == selection.ReplaySha256 &&
+                report.Right.Pricing.Journal.Provenance.CorpusSha256 == selection.ReplaySha256);
         Require(result.FormalRegression == "inconclusive" && result.HistoricalR5Quality == "inconclusive" && result.R7Readiness == "not_evaluated" &&
             result.Left.IndependentHumanConfirmation == "not_evidenced" && result.Right.IndependentHumanConfirmation == "not_evidenced" &&
             result.Left.CampaignLifecycleAssociation == "native_campaign_link_unproven" &&

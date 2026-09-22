@@ -66,6 +66,7 @@ internal static class GateTokenOracle
         var price = PricingJson.Read(bytes) ?? throw new InvalidOperationException("r6_gate_price");
         var document = price.Document;
         Bound(document.Journal, selection);
+        SelectedPriceUsage(item.Id, document.Journal);
         var view = document.ObservedUsage;
         var other = document.SameTokenAllMiss;
         var terms = document.Tariff.Terms;
@@ -106,6 +107,37 @@ internal static class GateTokenOracle
                 view.TotalAmountPerInputToken.Availability == "input_denominator_incomplete" && other.TotalAmount is null);
         if (item.Id == "t3-aggregate") Require(document.Journal.Totals.ActualSends == 2 && document.Journal.Totals.KnownInputTokens == 2);
         return item.Evidence;
+    }
+
+    private static void SelectedPriceUsage(string id, UsageJournalDocument journal)
+    {
+        // Equal campaign totals cannot establish the selected per-call probe.
+        // These observations are authored here, independently of the producer.
+        var known = new UsageJournalUsage(10, 4, 14, new(DeepSeekAdapterContext.Model, 6, 4));
+        var unit = new UsageJournalUsage(1, 0, 1, new(DeepSeekAdapterContext.Model, 0, 1));
+        UsageJournalUsage?[] expected = id switch
+        {
+            "t3-usd" or "t3-cny" => [known],
+            "t3-half-even-low" or "t3-half-even-even" or "t3-half-even-high" => [unit],
+            "t3-aggregate" => [unit, unit],
+            "t3-zero-denominator" => [new(0, 0, 0, null)],
+            "t3-missing-partition" => [new(10, 4, 14, null)],
+            "t3-unknown-zero-rate" => [known, null],
+            _ => throw new InvalidOperationException("r6_gate_price_case"),
+        };
+        Require(journal.StopReason == "complete" && journal.Attempts.Length == expected.Length && journal.Calls.Length == expected.Length &&
+            journal.Totals.Scheduled == expected.Length && journal.Totals.Attempted == expected.Length &&
+            journal.Totals.Failed == expected.Length && journal.Totals.Completed == 0 && journal.Totals.Invalid == 0 &&
+            journal.Totals.Unattempted == 0 && journal.Totals.LocalRefusals == 0);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var attempt = journal.Attempts[index]; var call = journal.Calls[index]; var usage = expected[index];
+            Require(attempt.ScheduleIndex == index && attempt.Calls == 1 && attempt.Sends == 1 &&
+                call.AttemptId == attempt.AttemptId && call.Ordinal == 1 && call.Dispatched && call.Usage == usage &&
+                call.UsageStatus == (usage is null ? "unknown" : "known") &&
+                call.TransportOutcome == (usage is null ? "transport_failure" : "success") &&
+                call.ChatOutcome == (usage is null ? "threw" : "returned"));
+        }
     }
 
     private static void Bound(UsageJournalDocument doc, GateSelection selection) => Require(
