@@ -1,0 +1,51 @@
+namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification;
+
+// Outside-in authority: never derive this list from the producer, its report,
+// its passed-case count, or a filtered test discovery result.
+internal static class GateInventory
+{
+    internal static readonly (string Id, string Selection)[] Cases =
+    [
+        ("t1-partition", "10/4/6/4"), ("t1-alias", "documented-alias"),
+        ("t1-zero", "measured-zero"), ("t1-total-only", "optional-cache-absent"),
+        ("t1-malformed-partition", "partition-mismatch"),
+        ("t2-known-failed", "known-after-failure"), ("t2-unknown", "unknown-send"),
+        ("t2-local-refusal", "reservation-refused"), ("t2-unattempted-tail", "cancelled-tail"),
+        ("t2-terminal-order", "send-after-terminal"), ("t2-late-finalization", "sealed-call"),
+        ("t3-usd", "USD"), ("t3-cny", "CNY"), ("t3-half-even-low", "3/2"),
+        ("t3-half-even-even", "5/2"), ("t3-half-even-high", "7/2"),
+        ("t3-aggregate", "two-calls-one-component"), ("t3-zero-denominator", "zero-input"),
+        ("t3-missing-partition", "total-only"), ("t3-unknown-zero-rate", "unknown-zero-rate"),
+        ("t3-overflow", "unrepresentable"),
+        ("p1-bootstrap-restored", "actual-restore"), ("p1-dynamic-suffix", "dynamic"),
+        ("p1-control", "policy"), ("p1-history", "old-content"), ("p1-settings", "tools"),
+        ("p1-continuation-position", "position"), ("p1-logical-only", "logical-order"),
+        ("p1-domain", "session-domain"), ("p1-invalid-position", "invalid-position"),
+        ("p2-replay", "replay"), ("p2-tools", "tools"), ("p2-continuation", "continuation"),
+        ("p2-missing-history", "MissingHistory"), ("p2-reordered-history", "ReorderedHistory"),
+        ("p2-missing-continuation", "MissingContinuation"), ("p2-wrong-position", "WrongContinuationPosition"),
+        ("p2-changed-continuation", "ChangedContinuation"), ("p2-wrong-scope", "WrongScope"),
+        ("p2-wrong-head", "WrongHead"), ("p2-stale-generation", "StaleGeneration"),
+        ("p2-policy", "ChangedPolicy"), ("p2-model", "ChangedModel"),
+        ("p2-adapter", "ChangedAdapter"), ("p2-toolset", "ChangedToolset"),
+        ("p2-host-capacity-reset", "production-host-capacity-reset"),
+        ("c1-descriptive", "observed-reference"), ("c1-source-axis", "source_build"),
+        ("c1-fixed-mismatch", "tariff-mismatch"), ("c1-partial-population", "failed-and-tail"),
+        ("c1-effective-conditional", "declared-origin"), ("c1-control-unsupported", "cache_policy"),
+        ("c1-prefix-bound", "stable_continuity"), ("c1-prefix-unbound", "unbound-expectation"),
+        ("c1-prefix-conflict", "conflicting-expectation"), ("c1-c2-handoff", "actual-c2"),
+        ("c2-replay", "replay"), ("c2-full", "capacity-reset"), ("c2-execute-loopback", "execute-loopback"),
+        ("c2-wrong-source", "WrongSource"), ("c2-wrong-build", "WrongBuild"),
+        ("c2-wrong-predecessor", "WrongPredecessor"), ("c2-before-ready-crash", "BeforeReadyCrash"),
+        ("c2-after-prepare-crash", "AfterPrepareCrash"), ("c2-partial-reply", "PartialReply"),
+        ("c2-oversized-reply", "OversizedReply"), ("c2-wrong-reply", "WrongReply"),
+        ("c2-rate-limit", "RateLimit"), ("c2-usage-violation", "UsageViolation"),
+        ("c2-provider-failure", "ProviderFailure"), ("c2-cancel-after-usage", "CancelAfterUsage"),
+        ("c2-cancel-after-prepare", "CancelAfterPrepare"), ("c2-reject-accept", "RejectAccept"),
+        ("c2-hang", "Hang"), ("c2-preparation-failure", "PrepareWriteFailure"),
+        ("c2-credential-probe", "CredentialProbe"), ("c2-plan-budget", "allocation-refused"),
+        ("c2-spaced-repeat", "repeat-spacing"), ("c2-final-missing", "final-missing"),
+        ("c2-cleanup", "cleanup-negative"), ("c2-unreaped", "unreaped-negative"),
+        ("c2-campaign-deadline", "campaign-deadline"),
+    ];
+}

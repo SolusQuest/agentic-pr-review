@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Comparison;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
@@ -24,6 +25,7 @@ internal static class Program
     {
         try
         {
+            if (args.Length > 0 && args[0] == "r6-gate") return await GateCommand.InvokeAsync(args);
             if (args.SequenceEqual(["economics-child"])) return await EconomicsChild.MainAsync();
             if (args.Length > 0 && args[0] is "economics-live" or "economics-plan") return await EconomicsCommand.InvokeAsync(args);
             if (args.Length > 0 && args[0] == "economics-compare")

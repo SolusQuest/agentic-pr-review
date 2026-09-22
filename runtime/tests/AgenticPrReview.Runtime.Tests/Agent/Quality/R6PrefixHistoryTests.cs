@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 using AgenticPrReview.Runtime.Tests.Host.Action;
@@ -127,6 +128,9 @@ public sealed class R6PrefixHistoryTests
         // This production-Host assertion proves epoch change, generation0, actual capacity rejection,
         // predecessor preservation, old-fact exclusion, and independent new-epoch continuation.
         await ActionHostCompositionTests.VerifyCapacityResetAsync();
+        var callable = await GateHostCases.RunAsync(Bundle("growth"), GateContracts.Select(Path.GetDirectoryName(Bundle("growth"))!));
+        Assert.Contains(callable.Rows, row => row.Action == "reset" && row.Generation == 0 && row.StoredMarkersMatch);
+        Assert.Equal("continue", callable.Rows[^1].Action);
         var world = new ResetProbeWorld();
         var initial = await world.RunAsync(0);
         var reset = await world.RunAsync(1, reset: true);

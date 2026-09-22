@@ -111,14 +111,20 @@ internal static class ResetOwnerProbe
 // acceptance operations below run through the production Host; no positive capability is forged.
 internal sealed class ResetProbeWorld
 {
+    private string? scriptedAcceptedHead;
     internal ResetProbeClock Time { get; } = new();
     internal ScriptedLocatorStore Store { get; } = new() { FilterListsByName = true, UseNumericObjectIds = true };
     internal ResetProbeRemote Remote { get; } = new();
 
-    internal async Task<ResetProbeInvocation> RunAsync(int phase, bool reset = false, bool failProvider = false)
+    internal async Task<ResetProbeInvocation> RunAsync(int phase, bool reset = false, bool failProvider = false,
+        ReplayScript? script = null, bool fresh = false)
     {
         var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
-        if (phase > 0) scenario.Transport.PullRequest = scenario.Transport.PullRequest with { HeadSha = new(phase == 1 ? 'f' : '9', 40) };
+        if (script is not null)
+            scenario.Transport.PullRequest = scenario.Transport.PullRequest with
+            { HeadSha = (100 + phase).ToString("x40", System.Globalization.CultureInfo.InvariantCulture) };
+        else if (phase > 0)
+            scenario.Transport.PullRequest = scenario.Transport.PullRequest with { HeadSha = new(phase == 1 ? 'f' : '9', 40) };
         var old = scenario.Launch;
         ResetOwnerProbe.Require(ActionHostProviderApiKey.TryCreate("synthetic-provider-key", out var providerKey));
         ResetOwnerProbe.Require(ActionHostStateKey.TryCreate(Convert.ToBase64String(Enumerable.Repeat((byte)7, 32).ToArray()), out var key));
@@ -131,13 +137,18 @@ internal sealed class ResetProbeWorld
         scenario.Transport.CurrentRun = scenario.Transport.CurrentRun with { Id = launch!.RunId };
         Store.ProducingRunIdentity = launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         Store.ProducingRunAttempt = launch.RunAttempt;
-        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest, previousHead: phase > 1 ? new string('f', 40) : null);
-        var provider = new ResetProbeProvider(phase, failProvider);
+        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest,
+            previousHead: script is not null ? scriptedAcceptedHead : phase > 1 ? new string('f', 40) : null,
+            withInlineFile: script is not null,
+            fileBytes: script is null ? null : Encoding.UTF8.GetBytes((fresh ? ResetWorkload.FreshFact : ResetWorkload.OldFact) + "\n"));
+        var provider = new ResetProbeProvider(phase, failProvider, script);
         var staging = Path.Combine(Path.GetTempPath(), "apr-reset-owner-" + Guid.NewGuid().ToString("N"));
         var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github, new StatePorts(Store, github),
             Remote, provider, Time, () => staging)).RunAsync(launch, CancellationToken.None);
         ResetOwnerProbe.Require(!Directory.Exists(staging));
+        if (script is not null && completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted)
+            scriptedAcceptedHead = scenario.Transport.PullRequest.HeadSha;
         return new(completion, launch, provider);
     }
 
@@ -159,28 +170,35 @@ internal sealed class ResetProbeClock : TimeProvider
             dueTime == TimeSpan.FromSeconds(5) || dueTime == TimeSpan.FromSeconds(10) ? TimeSpan.Zero : dueTime, period);
 }
 
-internal sealed class ResetProbeProvider(int phase, bool fail) : IActionHostProviderRunnerFactory
+internal sealed class ResetProbeProvider(int phase, bool fail, ReplayScript? selectedScript = null) : IActionHostProviderRunnerFactory
 {
     internal int Creates { get; private set; }
     internal AgentRunRequest? Request { get; private set; }
+    internal AgentRunOutcome? Outcome { get; private set; }
+    internal ImmutableArray<byte[]> Requests { get; private set; } = [];
     public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
         ReviewedSnapshot snapshot, TimeProvider timeProvider)
     {
         Creates++;
-        return new Runner(this, phase, fail, timeProvider);
+        return new Runner(this, phase, fail, timeProvider, snapshot, selectedScript);
     }
-    private sealed class Runner(ResetProbeProvider owner, int phase, bool fail, TimeProvider time) : IActionHostProviderRunner
+    private sealed class Runner(ResetProbeProvider owner, int phase, bool fail, TimeProvider time,
+        ReviewedSnapshot snapshot, ReplayScript? selectedScript) : IActionHostProviderRunner
     {
         public async Task<AgentRunOutcome> RunAsync(AgentRunRequest request, CancellationToken token)
         {
             owner.Request = request;
-            if (fail) return AgentRunOutcome.Failure(AgentFailureCodes.ChatFailed, 0, 0, []);
+            if (fail) return owner.Outcome = AgentRunOutcome.Failure(AgentFailureCodes.ChatFailed, 0, 0, []);
             var terminal = Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview($"Synthetic reset review {phase}.", []));
-            var script = new ReplayScript([new([new("reset-finish-" + phase, "finish_review", terminal)], "synthetic reset continuation")]);
+            var script = selectedScript ?? new ReplayScript([new([new("reset-finish-" + phase, "finish_review", terminal)], "synthetic reset continuation")]);
             using var transport = new ReplayTransport(script, ReplayFault.None);
             var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
                 DeepSeekAdapterContext.Adapter, request.SessionId), transport);
-            return await new AgentLoop(client, new NoTools(), time).RunAsync(request, token);
+            var outcome = await new AgentLoop(client, selectedScript is null ? new NoTools() :
+                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), time).RunAsync(request, token);
+            owner.Outcome = outcome;
+            owner.Requests = transport.Requests.ToImmutableArray();
+            return outcome;
         }
         public void Dispose() { }
     }

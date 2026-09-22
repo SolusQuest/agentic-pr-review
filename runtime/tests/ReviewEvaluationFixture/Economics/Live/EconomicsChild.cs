@@ -192,7 +192,14 @@ internal static class EconomicsChild
     private sealed class CancelAfterUsage(IProjectChatClient inner, CancellationTokenSource cancellation) : IProjectChatClient
     {
         public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
-        { var response = await inner.GetResponseAsync(request, token); await cancellation.CancelAsync(); return response; }
+        {
+            // The observer must seal known usage first. Never return a completed
+            // response alongside a cancelled token: WaitAsync may choose either
+            // completion, making Agent response measurements timing-dependent.
+            _ = await inner.GetResponseAsync(request, token);
+            await cancellation.CancelAsync();
+            throw new OperationCanceledException(token);
+        }
     }
 }
 
