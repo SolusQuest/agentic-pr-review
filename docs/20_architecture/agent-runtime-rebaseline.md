@@ -1,14 +1,14 @@
 # Agent Runtime Architecture Rebaseline
 
-Status: selected target architecture; R1-R3 are complete, and R4 has reached the W13 migration-cutover audit. The exact merged W13 tree still requires its E1 main-push identity handoff before E2.
+Status: selected target architecture; R1-R4 are complete. The R4 handoff records W13/E1 migration closure and E2 Native AOT verification; [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) records the trusted two-run proof. R5 delivered evaluation engineering with inconclusive live model quality; R6 exit and R7 distribution remain evidence-gated.
 
 Drafted: 2026-07-24.
 
-Last revised: 2026-08-09.
+Last revised: 2026-09-24.
 
-Rebaseline activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative reset activation point. The R4 contract was activated by the merged docs gate and its implementation graph has reached the closed W13 cutover inventory recorded in [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md).
+Rebaseline activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative reset activation point. The R4 contract was activated by the merged docs gate; [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) records the completed W13/E1 and E2 evidence.
 
-This document records the architecture rebaseline for the project-owned code review agent. It supersedes the earlier long-term assumption that TypeScript remains the business-capable GitHub Action host and C# remains behind a broad language-neutral protocol. Dated M0-M4 planning documents are historical evidence; current implementation contracts and the R3 removal handoff describe the surviving development-head surfaces until R4 replaces them.
+This document records the architecture rebaseline for the project-owned code review agent. It supersedes the earlier long-term assumption that TypeScript remains the business-capable GitHub Action host and C# remains behind a broad language-neutral protocol. Dated M0-M4 planning documents are historical evidence; current implementation contracts, the R3 removal handoff, and the R4 migration cutover handoff describe the surviving development-head surfaces.
 
 The breaking-reset governance gate and post-merge transition were completed through [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75) and documentation PR #76. Issue #75 is closed; the R1, R2, and R3 milestones and their implementation graphs subsequently completed.
 
@@ -22,7 +22,7 @@ R3 replaced the single-request C# provider path with the real thinking/tool Agen
 
 R4 owns the retained deterministic CLI/application/protocol/storage path, C# `Canonical/**`, `Ledger/**`, and `Prefix/**`, GitHub reads and C# publication, production restricted-state transport and keys, the thin Node bridge, and the final public wrapper. W3-W15 removed the superseded TypeScript invocation, state, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families after their C# replacements or reviewed-obsolete dispositions were pinned. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence. Direct-runtime schema/model ownership and the deliberately different ActionHost H3/H5/Agent/publisher contracts remain separately recorded. The surviving TypeScript files are the thin wrapper and bridge, their tests, conformance machinery, and the permanent S2 negative vectors.
 
-The activated R4 contract, including the trusted workflow entrypoint, immutable GitHub snapshot, downstream-owned encrypted artifact adapter, key policy, publisher transaction, wrapper seam, and dependency-ordered replacement graph, is defined in [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md). The W13 handoff controls current migration closure and exact-tree E1 identity.
+The activated R4 contract, including the trusted workflow entrypoint, immutable GitHub snapshot, downstream-owned encrypted artifact adapter, key policy, publisher transaction, wrapper seam, and dependency-ordered replacement graph, is defined in [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md). The W13 handoff records the closed migration inventory and exact-tree E1 identity.
 
 ## Decision Summary
 
@@ -967,7 +967,7 @@ An old schema or fixture does not survive merely because an existing test import
 
 ### Milestone Migration And Retirement Schedule
 
-Rows R0-R4 are the accepted migration schedule; their verbs record the plan used at those phases and are not instructions to recreate completed leaves. R4 implementation has reached W13 migration closure, while its exact-tree E1/E2 proof gates and R5-R7 remain evidence-driven phases.
+Rows R0-R4 are the accepted migration schedule; their verbs record the plan used at those phases and are not instructions to recreate completed leaves. R4 completed W13/E1 migration closure, E2 proof, and the trusted two-run proof. R5's quality result remains inconclusive, while R6 exit and R7 distribution remain evidence-driven phases.
 
 | Phase | When migration or retirement analysis begins                  | Approximate work                                                                                                                                                                                                                                                                                                             | Phase retirement gate                                                                                                                                                      |
 | ----- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

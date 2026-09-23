@@ -1,6 +1,6 @@
 # R4 ActionHost and thin-wrapper plan
 
-Status: activated normative R4 contract from refinement issue [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138). The implementation graph has reached the W13 cutover audit recorded in [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md). The checked-in nested Action and wrapper remain repository-controlled prepared-payload proof only, not a supported downstream Action or R7 public default.
+Status: activated normative R4 contract from refinement issue [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138). The completed W13/E1 and E2 gates are recorded in [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md), and the trusted two-run proof is recorded by [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181). The checked-in nested Action and wrapper remain repository-controlled prepared-payload proof only, not a supported downstream Action or R7 public default.
 
 Baseline: `main` at `736508728acc6b2064b75f2e1da81b9342aac70b`, the final R3 implementation and protected no-publish proof commit. R3 supplies the six-tool Agent, exact DeepSeek thinking continuation, authenticated encrypted STATE containing SESSION, a local state-store conformance implementation, and framework-dependent plus Linux x64 Native AOT fresh-process evidence. R4 owns the production GitHub Host, immutable snapshot, downstream-owned artifact state, deterministic publisher, thin wrapper, and replacement of retained TypeScript business paths.
 
