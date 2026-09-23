@@ -1,0 +1,58 @@
+{
+  "format": "apr.r6.economics-plan.v1",
+  "source": {
+    "commit": "4698a5fbe26bf40d55cd41e479bf8e2caacca1d2",
+    "tree": "5e6faf28ce5c163c836e8cbf65fea1447f60e3fa",
+    "clean": true
+  },
+  "build_sha256": "3cd6f6a36ea67dde640d08b6dacf81195e3294e36b12223457dba62715dd50b8",
+  "workload": {
+    "replay_sha256": "f32f29e8c121ca3bca94e59c2f6cfaabaaff3fea2755fd24319ce8233aeb3c68",
+    "growth_sha256": "7db3bb53f2a9453556307b2d11d00be106253c004cd29a7c5796b790b763f333",
+    "scenarios": [
+      {
+        "profile": "replay",
+        "phases": 3,
+        "repeats": 2,
+        "reset_after_capacity": false
+      },
+      {
+        "profile": "tools",
+        "phases": 6,
+        "repeats": 1,
+        "reset_after_capacity": true
+      },
+      {
+        "profile": "continuation",
+        "phases": 7,
+        "repeats": 1,
+        "reset_after_capacity": true
+      }
+    ],
+    "child_seconds": 300,
+    "spacing_milliseconds": 5000,
+    "stop_rule": "stop_remaining_tail"
+  },
+  "provider": {
+    "provider_id": "deepseek",
+    "model_id": "deepseek-v4-flash",
+    "adapter_id": "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+    "configuration_sha256": "a2c605221edbd73a239123b52538fa47b9bb3e7d2db72192dde60a919a9603df"
+  },
+  "thinking": "high",
+  "tariff_sha256": "3c67f355b27a71c23e00c0990dc3b63f8f3ea7a9f0c5c86fe245298557b02baf",
+  "bounds": {
+    "max_evaluations": 23,
+    "max_model_calls": 184,
+    "max_input_tokens": 6029312,
+    "max_output_tokens": 753664,
+    "max_combined_tokens": 6782976,
+    "max_seconds": 7130,
+    "spend_ceiling_micro_usd": 2713264,
+    "per_call": {
+      "max_input_tokens": 32768,
+      "max_output_tokens": 4096,
+      "max_charge_micro_usd": 14746
+    }
+  }
+}

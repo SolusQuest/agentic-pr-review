@@ -1,0 +1,131 @@
+{
+  "issue": 280,
+  "disposition": "bounded_insufficiency",
+  "execution_source": {
+    "commit": "4698a5fbe26bf40d55cd41e479bf8e2caacca1d2",
+    "tree": "5e6faf28ce5c163c836e8cbf65fea1447f60e3fa",
+    "clean": true
+  },
+  "execution_artifact": "framework",
+  "authorization": {
+    "granted_on": "2026-09-22",
+    "basis": "explicit_maintainer_local_deepseek_key_and_paid_calls_with_delegated_finite_choices",
+    "numeric_selection_owner": "operator",
+    "live_campaigns_selected": 1,
+    "live_campaigns_executed": 1,
+    "pre_dispatch_plan_recorded": true,
+    "credential_access_after_plan_review_and_keyless_validation": true,
+    "experimental_preregistration": "not_producer_evidenced"
+  },
+  "provider_documentation": {
+    "checked_on": "2026-09-22",
+    "pricing_refreshed_before_dispatch_utc": "2026-09-22T06:35:00Z",
+    "pricing_refresh_time_precision": "minute_approximate",
+    "pricing_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "cache_url": "https://api-docs.deepseek.com/guides/kv_cache/",
+    "isolation_url": "https://api-docs.deepseek.com/quick_start/rate_limit/",
+    "thinking_url": "https://api-docs.deepseek.com/guides/thinking_mode/",
+    "requested_alias": "deepseek-v4-flash",
+    "documented_serving_model": "DeepSeek-V4.1-Flash",
+    "admitted_live_response_models": [],
+    "backend_snapshot_status": "not_exposed",
+    "tariff_reference_class": "peak",
+    "execution_time_applicability": "execution_time_unknown",
+    "invoice_status": "not_evidenced"
+  },
+  "validation": {
+    "npm_check": {
+      "passed": true,
+      "test_files": 42,
+      "tests": 764,
+      "source": "4698a5fbe26bf40d55cd41e479bf8e2caacca1d2"
+    },
+    "delivery_npm_check": {
+      "passed": true,
+      "test_files": 42,
+      "tests": 764,
+      "scope": "report_and_evidence_delivery"
+    },
+    "dist_check": "passed",
+    "r6_gate": {
+      "mode": "all",
+      "result": "verified",
+      "framework_cases": 82,
+      "framework_adversarial": 37,
+      "native_aot_cases": 82,
+      "native_aot_adversarial": 37,
+      "parity": "verified",
+      "private_state": "absent"
+    },
+    "exact_plan_dry_run": "complete",
+    "report_reader": "unchanged_EconomicsReportJson_Read",
+    "pricing_reader": "unchanged_PricingJson_Read",
+    "journal_readback": "unchanged_economics_price_cli_and_full_nested_document_equality",
+    "tampered_scheduled_denominator": "rejected_for_both_reports",
+    "independent_reconciliation": "exact_plan_projection_counters_partitions_and_Decimal_half_even_amounts",
+    "build_warnings": [
+      "NU1900_vulnerability_database_unavailable",
+      "IL3058_existing_JsonSchema_Net_advisory"
+    ]
+  },
+  "rehearsal": {
+    "mode": "dry-run",
+    "start_utc": "2026-09-22T06:32:19.515198+00:00",
+    "end_utc": "2026-09-22T06:34:24.412960+00:00",
+    "elapsed_seconds": 127.334,
+    "process_exit": 0,
+    "outer_stop": "none",
+    "runnable_plan_file_sha256": "24d1fbcf01581f4d44dafe0a98ec3eb18c0d755e78075a8ceaf4c278a3559aba",
+    "report_raw_sha256": "3cbd2cda749f9b77a158e940d6d6ca5cd5d57cc76b367458717d31eb25954d4f",
+    "progress_lines": 44,
+    "ready_workers": 23,
+    "ready_workers_gone": true,
+    "process_group_gone": true,
+    "private_root_observed_count": 1,
+    "private_temp_empty": true,
+    "credential_absent_from_outputs": true,
+    "parent_environment_allowlisted": true,
+    "github_environment_absent": true
+  },
+  "live": {
+    "mode": "execute",
+    "start_utc": "2026-09-22T06:40:06.385404+00:00",
+    "end_utc": "2026-09-22T06:40:22.613395+00:00",
+    "elapsed_seconds": 16.228,
+    "process_exit": 1,
+    "outer_stop": "none",
+    "runnable_plan_file_sha256": "24d1fbcf01581f4d44dafe0a98ec3eb18c0d755e78075a8ceaf4c278a3559aba",
+    "report_raw_sha256": "e1297cba7fae7dfe4bcfc947811281cdcdc4eb18d2f178037492117a5b59a488",
+    "progress_lines": 1,
+    "ready_workers": 1,
+    "ready_workers_gone": true,
+    "process_group_gone": true,
+    "private_root_observed_count": 1,
+    "private_temp_empty": true,
+    "credential_absent_from_outputs": true,
+    "parent_environment_allowlisted": true,
+    "github_environment_absent": true
+  },
+  "privacy": {
+    "output_files_checked": [
+      "plan-selection.json",
+      "tariff.json",
+      "dry-run.json",
+      "live.json",
+      "operator-evidence.json"
+    ],
+    "raw_provider_traffic_captured": false,
+    "raw_private_ipc_published": false,
+    "raw_session_published": false,
+    "source_controlled_workload": "existing_public_safe_synthetic_replay_and_growth",
+    "parent_environment": "fresh_allowlist_without_github_or_actions_credentials",
+    "credential_delivery": "private_stdin_then_existing_parent_ingress_and_validated_child_private_frame",
+    "cleanup_observation": "ready_worker_pid_absence_owned_process_group_absence_and_owned_temp_empty_before_return"
+  },
+  "published_artifacts_sha256": {
+    "plan-selection.json": "c605e3b2593f1ef490b80e8afe9dc6e4b7b41cf79a365bb9a58fe8d722373402",
+    "tariff.json": "fc4b434c11670955119560d2c28cff07473c576e26361f62b3731bb838a97148",
+    "dry-run.json": "5e192f98926850e1fbb6512f47aa72f531f65abcefe51d93384bb3937e8cd79b",
+    "live.json": "2c1775ce621fb25491c57263a37fd45201cb7c4fef48e35c59e36cd5304da6cf"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "format": "apr.r6.tariff.v1",
+  "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "retrieved_on": "2026-09-22",
+  "terms": {
+    "formula": "deepseek_hit_miss_output",
+    "provider_id": "deepseek",
+    "requested_model": "deepseek-v4-flash",
+    "response_model": null,
+    "price_class": "peak",
+    "reference_at": "2026-09-22T06:07:00Z",
+    "effective_period": {
+      "status": "unknown",
+      "from_inclusive": null,
+      "until_exclusive": null
+    },
+    "token_unit": 1000000,
+    "rate_decimal_places": 3,
+    "rates": {
+      "cache_hit_input": {
+        "currency": "USD",
+        "units": 6
+      },
+      "cache_miss_input": {
+        "currency": "USD",
+        "units": 300
+      },
+      "output": {
+        "currency": "USD",
+        "units": 1200
+      }
+    },
+    "arithmetic": {
+      "rounding": "half_even",
+      "decimal_places": 9,
+      "aggregation": "campaign_components_then_sum",
+      "normalization": "exact_unrounded_amount_per_input_token"
+    }
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "issue": 280,
+  "disposition": "bounded_insufficiency",
+  "execution_source": {
+    "commit": "4698a5fbe26bf40d55cd41e479bf8e2caacca1d2",
+    "tree": "5e6faf28ce5c163c836e8cbf65fea1447f60e3fa",
+    "clean": true
+  },
+  "execution_artifact": "framework",
+  "execution_platform": "windows_x64",
+  "prior_observation": {
+    "directory": "2026-09-22-observation",
+    "retained_without_rewriting": true,
+    "unknown_usage_sends": 1,
+    "prior_charge": "unknown",
+    "combined_historical_total": "unavailable",
+    "cross_platform_experimental_equivalence": "not_claimed"
+  },
+  "authorization": {
+    "paid_key_grant_on": "2026-09-22",
+    "additional_campaign_requested_on": "2026-09-23",
+    "basis": "explicit_maintainer_local_key_paid_grant_and_request_to_reverify",
+    "numeric_selection_owner": "operator",
+    "additional_campaigns_selected": 1,
+    "additional_campaigns_executed": 1,
+    "pre_dispatch_plan_recorded": true,
+    "credential_access_after_plan_review_and_keyless_validation": true,
+    "experimental_preregistration": "not_producer_evidenced"
+  },
+  "provider_documentation": {
+    "checked_on": "2026-09-23",
+    "pricing_refreshed_before_dispatch_utc": "2026-09-23T06:44:50Z",
+    "pricing_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "thinking_url": "https://api-docs.deepseek.com/guides/thinking_mode/",
+    "cache_url": "https://api-docs.deepseek.com/guides/kv_cache/",
+    "isolation_url": "https://api-docs.deepseek.com/quick_start/rate_limit/",
+    "requested_alias": "deepseek-v4-flash",
+    "documented_serving_model": "DeepSeek-V4.1-Flash",
+    "admitted_live_response_models": ["deepseek-flash"],
+    "tariff_reference_class": "peak",
+    "execution_time_applicability": "execution_time_unknown",
+    "invoice_status": "not_evidenced",
+    "backend_snapshot_status": "not_exposed"
+  },
+  "preflight": {
+    "windows_credential_free_https": "verified",
+    "wsl_tls": "timeout_with_local_and_public_dns_addresses",
+    "windows_private_temp": "short_owner_only_acl_path",
+    "process_identity": "observed_direct_child_handles_retained_until_run_end",
+    "runtime_source_policy_oracle_unchanged": true,
+    "prior_failed_keyless_preflights": [
+      "long_temp_path_state_cleanup_failed",
+      "windows_pid_reuse_oracle_rejection"
+    ],
+    "prior_failed_preflights_are_live_population": false
+  },
+  "validation": {
+    "inherited_exact_source_linux_r6_gate": {
+      "mode": "all",
+      "framework_cases": 82,
+      "framework_adversarial": 37,
+      "native_aot_cases": 82,
+      "native_aot_adversarial": 37,
+      "parity": "verified",
+      "private_state": "absent"
+    },
+    "supplemental_windows_framework": {
+      "cases": 82,
+      "hostile_report_mutations": 36,
+      "result": "verified",
+      "syscall_audit": "not_claimed",
+      "native_aot_execution": "not_claimed"
+    },
+    "exact_plan_dry_run": "complete",
+    "report_reader": "unchanged_EconomicsReportJson_Read",
+    "pricing_reader": "unchanged_PricingJson_Read",
+    "journal_readback": "unchanged_economics_price_cli_and_full_nested_document_equality",
+    "tampered_scheduled_denominator": "rejected_for_both_reports",
+    "independent_reconciliation": "exact_plan_projection_counters_partitions_and_Decimal_half_even_amounts",
+    "build_warnings": ["IL3058_existing_JsonSchema_Net_advisory"]
+  },
+  "runnable_plan_file_sha256": "368039a9e62baf2f49e6aa7566dfa3df6f4fd2535d3e9599b1dea500b7933f81",
+  "rehearsal": {
+    "name": "dry-run",
+    "start_utc": "2026-09-23T06:02:58.4543562+00:00",
+    "end_utc": "2026-09-23T06:05:06.9876738+00:00",
+    "elapsed_seconds": 128.552,
+    "process_exit": 0,
+    "outer_stop": "none",
+    "ready_workers": 23,
+    "ready_workers_gone": true,
+    "parent_exited": true,
+    "private_root_observed_count": 1,
+    "private_temp_empty": true,
+    "credential_absent_from_outputs": true,
+    "parent_environment_allowlisted": true,
+    "github_environment_absent": true,
+    "short_private_temp": true,
+    "observed_child_handles": 24,
+    "observed_children_gone": true,
+    "report_raw_sha256": "c3bf96b654b33b73bf4c47d6fa2080f48eb8b848a2785fa2541b62bb8e71ba04"
+  },
+  "live": {
+    "name": "execute",
+    "start_utc": "2026-09-23T06:45:17.0225344+00:00",
+    "end_utc": "2026-09-23T06:45:42.4334542+00:00",
+    "elapsed_seconds": 25.443,
+    "process_exit": 1,
+    "outer_stop": "none",
+    "ready_workers": 2,
+    "ready_workers_gone": true,
+    "parent_exited": true,
+    "private_root_observed_count": 1,
+    "private_temp_empty": true,
+    "credential_absent_from_outputs": true,
+    "parent_environment_allowlisted": true,
+    "github_environment_absent": true,
+    "short_private_temp": true,
+    "observed_child_handles": 3,
+    "observed_children_gone": true,
+    "report_raw_sha256": "6cf51092b124633f5bf325a6afedb4596553d969187698d0963c7d96106755bf"
+  },
+  "privacy": {
+    "source_controlled_workload": "existing_public_safe_synthetic_replay_and_growth",
+    "parent_environment": "fresh_allowlist_without_github_or_actions_credentials",
+    "credential_delivery": "existing_parent_environment_ingress_and_validated_child_private_frame",
+    "raw_provider_traffic_captured": false,
+    "raw_private_ipc_published": false,
+    "raw_session_published": false,
+    "cleanup_observation": "ready_worker_and_observed_child_exit_owned_temp_empty_before_return",
+    "output_files_checked": [
+      "plan-selection.json",
+      "tariff.json",
+      "dry-run.json",
+      "live.json",
+      "operator-evidence.json"
+    ]
+  },
+  "published_artifacts_sha256": {
+    "plan-selection.json": "0740f4a9a76f9a42b5740cda25e7eeb9f0e995ed3cce0668c64d14196112dddc",
+    "tariff.json": "fc4b434c11670955119560d2c28cff07473c576e26361f62b3731bb838a97148",
+    "dry-run.json": "8b10084497ed32353cf62501aa3d07484e25c9113cadf6ba12f1a07f5587e265",
+    "live.json": "dc5234edb7561d4216c6ade33b8b23a5eb4f86c73ac6010660a989be84e96327"
+  }
+}
