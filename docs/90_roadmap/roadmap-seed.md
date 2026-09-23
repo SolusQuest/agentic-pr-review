@@ -102,7 +102,7 @@ The current implementation on `main` includes:
 - framework-dependent and Linux x64 Native AOT product validation;
 - a closed TypeScript migration record: R4-W3 through W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families after mapped C# evidence or reviewed-obsolete dispositions passed. No current TypeScript state reader, publisher, business protocol adapter, or compatibility route remains. Direct-runtime schemas and fixtures remain C#-owned, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
-R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path now exist for repository-controlled prepared-payload proof. W13 closes the migration inventory; exact-tree E1/E2 evidence, the maintainer-authorized trusted proof, supported release payload delivery, and the public default remain at their named later gates.
+R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path now exist for repository-controlled prepared-payload proof. W13/E1 [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175), E2 [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179), and the maintainer-authorized trusted two-run proof [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) are completed R4 evidence. Supported release payload delivery and the public default remain R7 decisions.
 
 ## Historical Milestones
 
@@ -334,7 +334,7 @@ Exit criteria:
 
 Goal: converge on one C# business implementation and remove cross-language duplication.
 
-Planning status: milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10) and refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138) own the activated design contract in [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md). The implementation graph has reached W13 migration closure; [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md) controls the exact-tree E1 handoff to E2.
+Implementation record: milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10) and refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138) own the design contract in [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md). The graph completed W13/E1 migration closure, E2 Native AOT verification and the trusted proof recorded by [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181); [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md) retains their exact-source evidence.
 
 In scope:
 
