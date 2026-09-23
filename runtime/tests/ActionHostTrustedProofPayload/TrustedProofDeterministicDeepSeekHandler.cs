@@ -196,9 +196,9 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
             (string Id, string Name, string Arguments)[] bootstrap =
             [
                 ("e2p-list-changed", "list_changed_files",
-                    "{\"after\":null}"),
+                    "{}"),
                 ("e2p-list-files", "list_files",
-                    "{\"prefix\":null,\"after\":null}"),
+                    "{}"),
                 ("e2p-read-diff", "read_diff",
                     "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1," +
                     "\"hunk_count\":20}"),
