@@ -124,7 +124,7 @@ internal static partial class AgentToolArguments
         }
     }
 
-    private static byte[] WriteSearchText(
+    internal static byte[] WriteSearchText(
         string query,
         string? path,
         bool includePath)

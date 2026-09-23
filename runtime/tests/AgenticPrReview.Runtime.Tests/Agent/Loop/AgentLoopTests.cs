@@ -1,10 +1,12 @@
 using System.Collections.Immutable;
 using System.Text;
+using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Loop;
 
@@ -643,8 +645,10 @@ public sealed class AgentLoopTests
         Assert.IsType<AgentFailureEvent>(outcome.Events[^1]);
     }
 
-    [Fact]
-    public async Task LiveAgentVerifierInvalidToolArgumentsStopBeforeDispatch()
+    [Theory]
+    [InlineData("{\"query\":\"x\",\"unknown\":true}")]
+    [InlineData("{\"query\":\"x\",\"path\":null}")]
+    public async Task LiveAgentVerifierInvalidToolArgumentsStopBeforeDispatch(string invalidArguments)
     {
         var response = new ProjectChatResponse(
             new ProjectChatMessage(
@@ -657,7 +661,7 @@ public sealed class AgentLoopTests
                     new ProjectToolCallContent(
                         "two",
                         "search_text",
-                        "{\"query\":\"x\",\"unknown\":true}"),
+                        invalidArguments),
                 ]),
             new ProjectChatUsage(1, 1),
             1);
@@ -829,6 +833,17 @@ public sealed class AgentLoopTests
         Assert.Single(
             outcome.Events.OfType<AgentToolResultEvent>(),
             item => item.Name == "list_files");
+        var wire = DeepSeekRequestWriter.Write(
+            MinimalChatClient.Materialize(chat.Requests[1]));
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, wire.Outcome);
+        using var document = JsonDocument.Parse(wire.Body.ToArray());
+        var historicalCall = document.RootElement.GetProperty("messages")
+            .EnumerateArray()
+            .SelectMany(message => message.TryGetProperty("tool_calls", out var calls)
+                ? calls.EnumerateArray().ToArray()
+                : [])
+            .Single(call => call.GetProperty("function").GetProperty("name").GetString() == "list_files");
+        Assert.Equal("{}", historicalCall.GetProperty("function").GetProperty("arguments").GetString());
     }
 
     [Fact]
