@@ -1,0 +1,743 @@
+{
+  "format": "apr.r6.economics-run.v1",
+  "execution_kind": "loopback",
+  "plan": {
+    "format": "apr.r6.economics-plan.v1",
+    "source": {
+      "commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+      "tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+      "clean": true
+    },
+    "build_sha256": "6ffe86a5125738dc140abac5b11a2956dd3eb633fcdc13da68e65231ef19f74a",
+    "workload": {
+      "replay_sha256": "f32f29e8c121ca3bca94e59c2f6cfaabaaff3fea2755fd24319ce8233aeb3c68",
+      "growth_sha256": "7db3bb53f2a9453556307b2d11d00be106253c004cd29a7c5796b790b763f333",
+      "scenarios": [
+        { "profile": "replay", "phases": 2, "repeats": 1, "reset_after_capacity": false }
+      ],
+      "child_seconds": 300,
+      "spacing_milliseconds": 5000,
+      "stop_rule": "stop_remaining_tail"
+    },
+    "provider": {
+      "provider_id": "deepseek",
+      "model_id": "deepseek-v4-flash",
+      "adapter_id": "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+      "configuration_sha256": "a2c605221edbd73a239123b52538fa47b9bb3e7d2db72192dde60a919a9603df"
+    },
+    "thinking": "high",
+    "tariff_sha256": "3c67f355b27a71c23e00c0990dc3b63f8f3ea7a9f0c5c86fe245298557b02baf",
+    "bounds": {
+      "max_evaluations": 2,
+      "max_model_calls": 16,
+      "max_input_tokens": 524288,
+      "max_output_tokens": 65536,
+      "max_combined_tokens": 589824,
+      "max_seconds": 620,
+      "spend_ceiling_micro_usd": 235936,
+      "per_call": {
+        "max_input_tokens": 32768,
+        "max_output_tokens": 4096,
+        "max_charge_micro_usd": 14746
+      }
+    }
+  },
+  "plan_sha256": "31172d6ccc5444abd95f3ce4a26654eeb0d41db6d16056d55d2ce530d8f029c3",
+  "workload_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+  "campaign": "c2-eb9067862ab344fc80d5",
+  "stop_reason": "complete",
+  "cleanup": "cleaned",
+  "allocations": {
+    "attempts": 2,
+    "calls": 16,
+    "input_tokens": 524288,
+    "output_tokens": 65536,
+    "combined_tokens": 589824,
+    "spend_micro_usd": 235936,
+    "milliseconds": 600000
+  },
+  "scheduled": 2,
+  "attempted": 2,
+  "receipt_missing": 0,
+  "usage_complete": true,
+  "monetary_complete": true,
+  "c1_handoff": "available",
+  "steps": [
+    {
+      "index": 0,
+      "case_id": "c2-replay-0",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "e2a69c7a900e119666eb9bf6083397999803798634210e95cc402218b55e43ac",
+      "evaluation_status": "completed",
+      "restored": false,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": false,
+      "process_id": 46884,
+      "startup": "04ca0f8ca690458babeb9b6bc52f695a",
+      "started_milliseconds": 60,
+      "finished_milliseconds": 994,
+      "interval_milliseconds": null,
+      "session_sha256": "937088f11b2a8fa0cdb7fbf8d75c5a3066dee9e6971f054d84f5b00b31fb6bcd",
+      "predecessor_sha256": null,
+      "tool_calls": 2,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3,
+              "output_tokens": 2,
+              "combined_tokens": 5,
+              "cache": {
+                "response_model": "deepseek-v4-flash",
+                "cache_read_input_tokens": 0,
+                "uncached_input_tokens": 3
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3,
+              "output_tokens": 2,
+              "combined_tokens": 5,
+              "cache": {
+                "response_model": "deepseek-v4-flash",
+                "cache_read_input_tokens": 0,
+                "uncached_input_tokens": 3
+              }
+            }
+          }
+        ],
+        "reservations": 2,
+        "measurement": {
+          "calls": 2,
+          "last_project_request_bytes": 5053,
+          "last_messages": 5,
+          "last_response_messages": 6,
+          "last_continuation_before_bytes": 163,
+          "last_continuation_after_bytes": 318
+        },
+        "initial_prefix_sha256": "951fcbb553b192f437a381d9bb0d723bfbfd86a702af1c42897037b2345abf32",
+        "completed_session_sha256": "937088f11b2a8fa0cdb7fbf8d75c5a3066dee9e6971f054d84f5b00b31fb6bcd"
+      }
+    },
+    {
+      "index": 1,
+      "case_id": "c2-replay-1",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "567edad2d0a15fa19eeeae223d3f4de9dfa286e65ace59af986916abaec5c8ec",
+      "evaluation_status": "completed",
+      "restored": true,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": false,
+      "process_id": 45348,
+      "startup": "c88985a8d28546d9bee22ff945e50982",
+      "started_milliseconds": 5996,
+      "finished_milliseconds": 6894,
+      "interval_milliseconds": 5002,
+      "session_sha256": "4b60f6ea95aaaee927e4ee6ae5971e64be998dc566d6c5c612009df481aafc63",
+      "predecessor_sha256": "937088f11b2a8fa0cdb7fbf8d75c5a3066dee9e6971f054d84f5b00b31fb6bcd",
+      "tool_calls": 1,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3,
+              "output_tokens": 2,
+              "combined_tokens": 5,
+              "cache": {
+                "response_model": "deepseek-v4-flash",
+                "cache_read_input_tokens": 0,
+                "uncached_input_tokens": 3
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3,
+              "output_tokens": 2,
+              "combined_tokens": 5,
+              "cache": {
+                "response_model": "deepseek-v4-flash",
+                "cache_read_input_tokens": 0,
+                "uncached_input_tokens": 3
+              }
+            }
+          }
+        ],
+        "reservations": 2,
+        "measurement": {
+          "calls": 2,
+          "last_project_request_bytes": 6659,
+          "last_messages": 10,
+          "last_response_messages": 11,
+          "last_continuation_before_bytes": 476,
+          "last_continuation_after_bytes": 632
+        },
+        "initial_prefix_sha256": "3b3453530b134e5d618ed5108be38d6dd4562eab6564081abe4b4586b337363c",
+        "completed_session_sha256": "4b60f6ea95aaaee927e4ee6ae5971e64be998dc566d6c5c612009df481aafc63"
+      }
+    }
+  ],
+  "outcomes": [
+    {
+      "case_id": "c2-replay-0",
+      "corpus_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+      "case_sha256": "1ecbc987c9227934ca1d9a1adf99cc3eff01f0cfd5587f5a187039080f58d329",
+      "configuration_sha256": "68023a1c2cc2a4d16c508831279e665bdf30633bafeac9230fdd06353d5d13fe",
+      "attempt_sha256": "e2a69c7a900e119666eb9bf6083397999803798634210e95cc402218b55e43ac",
+      "execution_sha256": "e85f915069af212f5f784d6eaeefe38dedd45615552aab4358549eeaae78a441",
+      "source_commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+      "source_tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+      "source_clean": true,
+      "mode": "deterministic",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 2,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    },
+    {
+      "case_id": "c2-replay-1",
+      "corpus_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+      "case_sha256": "fbf7eb7b30e2b715299fc66607431da6bc0c269288360a910b20fe01ba7cc192",
+      "configuration_sha256": "68023a1c2cc2a4d16c508831279e665bdf30633bafeac9230fdd06353d5d13fe",
+      "attempt_sha256": "567edad2d0a15fa19eeeae223d3f4de9dfa286e65ace59af986916abaec5c8ec",
+      "execution_sha256": "7b47be251d48e3e40b8d07575d5e2edb9d2f780e341b0640caa513db688c72cc",
+      "source_commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+      "source_tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+      "source_clean": true,
+      "mode": "deterministic",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 1,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    }
+  ],
+  "journal": {
+    "provenance": {
+      "campaign_id": "c2-eb9067862ab344fc80d5",
+      "source_commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+      "source_tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+      "source_clean": true,
+      "build_id": "c2-6ffe86a5125738dc140abac5b11a2956",
+      "corpus_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+      "provider_configuration_sha256": "a2c605221edbd73a239123b52538fa47b9bb3e7d2db72192dde60a919a9603df",
+      "plan_sha256": "0b9b1e6907d16e5def9d318b4a9d72b0aaf7bebfb056539b82b636b65ed3dca3",
+      "execution_kind": "loopback"
+    },
+    "plan": {
+      "format": "apr.r5.live-plan.v1",
+      "source": {
+        "commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+        "tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+        "clean": true
+      },
+      "corpus_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+      "provider": {
+        "provider_id": "deepseek",
+        "model_id": "deepseek-v4-flash",
+        "adapter_id": "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+        "configuration_sha256": "a2c605221edbd73a239123b52538fa47b9bb3e7d2db72192dde60a919a9603df"
+      },
+      "schedule": ["c2-replay-0", "c2-replay-1"],
+      "bounds": {
+        "max_evaluations": 2,
+        "max_model_calls": 16,
+        "max_input_tokens": 524288,
+        "max_output_tokens": 65536,
+        "max_combined_tokens": 589824,
+        "max_seconds": 620,
+        "spend_ceiling_micro_usd": 235936,
+        "per_call": {
+          "max_input_tokens": 32768,
+          "max_output_tokens": 4096,
+          "max_charge_micro_usd": 14746
+        }
+      }
+    },
+    "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+    "stop_reason": "complete",
+    "cache_write_billing_status": "not_applicable",
+    "reservations": {
+      "calls": 4,
+      "input_tokens": 131072,
+      "output_tokens": 16384,
+      "combined_tokens": 147456,
+      "spend_micro_usd": 58984
+    },
+    "attempts": [
+      {
+        "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+        "attempt_id": "c2-eb9067862ab344fc80d5-1",
+        "schedule_index": 0,
+        "case_id": "c2-replay-0",
+        "status": "completed",
+        "agent_status": "succeeded",
+        "evaluation_attempt_sha256": "e2a69c7a900e119666eb9bf6083397999803798634210e95cc402218b55e43ac",
+        "calls": 2,
+        "sends": 2,
+        "local_refusals": 0
+      },
+      {
+        "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+        "attempt_id": "c2-eb9067862ab344fc80d5-2",
+        "schedule_index": 1,
+        "case_id": "c2-replay-1",
+        "status": "completed",
+        "agent_status": "succeeded",
+        "evaluation_attempt_sha256": "567edad2d0a15fa19eeeae223d3f4de9dfa286e65ace59af986916abaec5c8ec",
+        "calls": 2,
+        "sends": 2,
+        "local_refusals": 0
+      }
+    ],
+    "calls": [
+      {
+        "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+        "call_id": "c2-eb9067862ab344fc80d5-1-c1",
+        "attempt_id": "c2-eb9067862ab344fc80d5-1",
+        "ordinal": 1,
+        "dispatched": true,
+        "transport_outcome": "success",
+        "chat_outcome": "returned",
+        "usage_status": "known",
+        "usage": {
+          "input_tokens": 3,
+          "output_tokens": 2,
+          "combined_tokens": 5,
+          "cache": {
+            "response_model": "deepseek-v4-flash",
+            "cache_read_input_tokens": 0,
+            "uncached_input_tokens": 3
+          }
+        }
+      },
+      {
+        "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+        "call_id": "c2-eb9067862ab344fc80d5-1-c2",
+        "attempt_id": "c2-eb9067862ab344fc80d5-1",
+        "ordinal": 2,
+        "dispatched": true,
+        "transport_outcome": "success",
+        "chat_outcome": "returned",
+        "usage_status": "known",
+        "usage": {
+          "input_tokens": 3,
+          "output_tokens": 2,
+          "combined_tokens": 5,
+          "cache": {
+            "response_model": "deepseek-v4-flash",
+            "cache_read_input_tokens": 0,
+            "uncached_input_tokens": 3
+          }
+        }
+      },
+      {
+        "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+        "call_id": "c2-eb9067862ab344fc80d5-2-c1",
+        "attempt_id": "c2-eb9067862ab344fc80d5-2",
+        "ordinal": 1,
+        "dispatched": true,
+        "transport_outcome": "success",
+        "chat_outcome": "returned",
+        "usage_status": "known",
+        "usage": {
+          "input_tokens": 3,
+          "output_tokens": 2,
+          "combined_tokens": 5,
+          "cache": {
+            "response_model": "deepseek-v4-flash",
+            "cache_read_input_tokens": 0,
+            "uncached_input_tokens": 3
+          }
+        }
+      },
+      {
+        "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+        "call_id": "c2-eb9067862ab344fc80d5-2-c2",
+        "attempt_id": "c2-eb9067862ab344fc80d5-2",
+        "ordinal": 2,
+        "dispatched": true,
+        "transport_outcome": "success",
+        "chat_outcome": "returned",
+        "usage_status": "known",
+        "usage": {
+          "input_tokens": 3,
+          "output_tokens": 2,
+          "combined_tokens": 5,
+          "cache": {
+            "response_model": "deepseek-v4-flash",
+            "cache_read_input_tokens": 0,
+            "uncached_input_tokens": 3
+          }
+        }
+      }
+    ],
+    "totals": {
+      "scheduled": 2,
+      "attempted": 2,
+      "completed": 2,
+      "failed": 0,
+      "invalid": 0,
+      "unattempted": 0,
+      "calls": 4,
+      "actual_sends": 4,
+      "local_refusals": 0,
+      "known_usage_sends": 4,
+      "unknown_usage_sends": 0,
+      "usage_complete": true,
+      "known_input_tokens": 12,
+      "known_output_tokens": 8,
+      "known_combined_tokens": 20,
+      "measured_cache_sends": 4,
+      "cache_read_input_tokens": 0,
+      "uncached_input_tokens": 12
+    }
+  },
+  "pricing": {
+    "format": "apr.r6.priced-usage.v1",
+    "journal": {
+      "provenance": {
+        "campaign_id": "c2-eb9067862ab344fc80d5",
+        "source_commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+        "source_tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+        "source_clean": true,
+        "build_id": "c2-6ffe86a5125738dc140abac5b11a2956",
+        "corpus_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+        "provider_configuration_sha256": "a2c605221edbd73a239123b52538fa47b9bb3e7d2db72192dde60a919a9603df",
+        "plan_sha256": "0b9b1e6907d16e5def9d318b4a9d72b0aaf7bebfb056539b82b636b65ed3dca3",
+        "execution_kind": "loopback"
+      },
+      "plan": {
+        "format": "apr.r5.live-plan.v1",
+        "source": {
+          "commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+          "tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+          "clean": true
+        },
+        "corpus_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+        "provider": {
+          "provider_id": "deepseek",
+          "model_id": "deepseek-v4-flash",
+          "adapter_id": "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+          "configuration_sha256": "a2c605221edbd73a239123b52538fa47b9bb3e7d2db72192dde60a919a9603df"
+        },
+        "schedule": ["c2-replay-0", "c2-replay-1"],
+        "bounds": {
+          "max_evaluations": 2,
+          "max_model_calls": 16,
+          "max_input_tokens": 524288,
+          "max_output_tokens": 65536,
+          "max_combined_tokens": 589824,
+          "max_seconds": 620,
+          "spend_ceiling_micro_usd": 235936,
+          "per_call": {
+            "max_input_tokens": 32768,
+            "max_output_tokens": 4096,
+            "max_charge_micro_usd": 14746
+          }
+        }
+      },
+      "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+      "stop_reason": "complete",
+      "cache_write_billing_status": "not_applicable",
+      "reservations": {
+        "calls": 4,
+        "input_tokens": 131072,
+        "output_tokens": 16384,
+        "combined_tokens": 147456,
+        "spend_micro_usd": 58984
+      },
+      "attempts": [
+        {
+          "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+          "attempt_id": "c2-eb9067862ab344fc80d5-1",
+          "schedule_index": 0,
+          "case_id": "c2-replay-0",
+          "status": "completed",
+          "agent_status": "succeeded",
+          "evaluation_attempt_sha256": "e2a69c7a900e119666eb9bf6083397999803798634210e95cc402218b55e43ac",
+          "calls": 2,
+          "sends": 2,
+          "local_refusals": 0
+        },
+        {
+          "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+          "attempt_id": "c2-eb9067862ab344fc80d5-2",
+          "schedule_index": 1,
+          "case_id": "c2-replay-1",
+          "status": "completed",
+          "agent_status": "succeeded",
+          "evaluation_attempt_sha256": "567edad2d0a15fa19eeeae223d3f4de9dfa286e65ace59af986916abaec5c8ec",
+          "calls": 2,
+          "sends": 2,
+          "local_refusals": 0
+        }
+      ],
+      "calls": [
+        {
+          "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+          "call_id": "c2-eb9067862ab344fc80d5-1-c1",
+          "attempt_id": "c2-eb9067862ab344fc80d5-1",
+          "ordinal": 1,
+          "dispatched": true,
+          "transport_outcome": "success",
+          "chat_outcome": "returned",
+          "usage_status": "known",
+          "usage": {
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "combined_tokens": 5,
+            "cache": {
+              "response_model": "deepseek-v4-flash",
+              "cache_read_input_tokens": 0,
+              "uncached_input_tokens": 3
+            }
+          }
+        },
+        {
+          "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+          "call_id": "c2-eb9067862ab344fc80d5-1-c2",
+          "attempt_id": "c2-eb9067862ab344fc80d5-1",
+          "ordinal": 2,
+          "dispatched": true,
+          "transport_outcome": "success",
+          "chat_outcome": "returned",
+          "usage_status": "known",
+          "usage": {
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "combined_tokens": 5,
+            "cache": {
+              "response_model": "deepseek-v4-flash",
+              "cache_read_input_tokens": 0,
+              "uncached_input_tokens": 3
+            }
+          }
+        },
+        {
+          "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+          "call_id": "c2-eb9067862ab344fc80d5-2-c1",
+          "attempt_id": "c2-eb9067862ab344fc80d5-2",
+          "ordinal": 1,
+          "dispatched": true,
+          "transport_outcome": "success",
+          "chat_outcome": "returned",
+          "usage_status": "known",
+          "usage": {
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "combined_tokens": 5,
+            "cache": {
+              "response_model": "deepseek-v4-flash",
+              "cache_read_input_tokens": 0,
+              "uncached_input_tokens": 3
+            }
+          }
+        },
+        {
+          "binding_sha256": "968c9326b200200b167f2c66e9e1d647f4e84756ba722bbaadb222e0cae75f75",
+          "call_id": "c2-eb9067862ab344fc80d5-2-c2",
+          "attempt_id": "c2-eb9067862ab344fc80d5-2",
+          "ordinal": 2,
+          "dispatched": true,
+          "transport_outcome": "success",
+          "chat_outcome": "returned",
+          "usage_status": "known",
+          "usage": {
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "combined_tokens": 5,
+            "cache": {
+              "response_model": "deepseek-v4-flash",
+              "cache_read_input_tokens": 0,
+              "uncached_input_tokens": 3
+            }
+          }
+        }
+      ],
+      "totals": {
+        "scheduled": 2,
+        "attempted": 2,
+        "completed": 2,
+        "failed": 0,
+        "invalid": 0,
+        "unattempted": 0,
+        "calls": 4,
+        "actual_sends": 4,
+        "local_refusals": 0,
+        "known_usage_sends": 4,
+        "unknown_usage_sends": 0,
+        "usage_complete": true,
+        "known_input_tokens": 12,
+        "known_output_tokens": 8,
+        "known_combined_tokens": 20,
+        "measured_cache_sends": 4,
+        "cache_read_input_tokens": 0,
+        "uncached_input_tokens": 12
+      }
+    },
+    "tariff": {
+      "format": "apr.r6.tariff.v1",
+      "source_url_sha256": "6ccd89ec3a5c0d87deb63632b3e17e8199f2ae95e13b3292e2fc22d49f6e8991",
+      "retrieved_on": "2026-09-22",
+      "terms": {
+        "formula": "deepseek_hit_miss_output",
+        "provider_id": "deepseek",
+        "requested_model": "deepseek-v4-flash",
+        "response_model": null,
+        "price_class": "peak",
+        "reference_at": "2026-09-22T06:07:00Z",
+        "effective_period": {
+          "status": "unknown",
+          "from_inclusive": null,
+          "until_exclusive": null
+        },
+        "token_unit": 1000000,
+        "rate_decimal_places": 3,
+        "rates": {
+          "cache_hit_input": { "currency": "USD", "units": 6 },
+          "cache_miss_input": { "currency": "USD", "units": 300 },
+          "output": { "currency": "USD", "units": 1200 }
+        },
+        "arithmetic": {
+          "rounding": "half_even",
+          "decimal_places": 9,
+          "aggregation": "campaign_components_then_sum",
+          "normalization": "exact_unrounded_amount_per_input_token"
+        }
+      }
+    },
+    "journal_sha256": "fcc7f53e14886d5ba6ddb2cc87b232fff82ec6fd2002ca0385858e1b59a11aa7",
+    "tariff_sha256": "3c67f355b27a71c23e00c0990dc3b63f8f3ea7a9f0c5c86fe245298557b02baf",
+    "reference_applicability": {
+      "period": "effective_period_unknown",
+      "price_class": "reference_class_declared"
+    },
+    "execution_time_applicability": "execution_time_unknown",
+    "execution_time_total_amount": null,
+    "backend_snapshot_status": "not_exposed",
+    "invoice_status": "not_evidenced",
+    "observed_usage": {
+      "kind": "observed_usage_fixed_reference",
+      "currency": "USD",
+      "known_input_amount": 0.0000036,
+      "known_output_amount": 0.0000096,
+      "known_total_subtotal": 0.0000132,
+      "input_complete": true,
+      "output_complete": true,
+      "total_complete": true,
+      "total_amount": 0.0000132,
+      "coverage": {
+        "priced_input_sends": 4,
+        "priced_output_sends": 4,
+        "unknown_usage_sends": 0,
+        "missing_cache_partition_sends": 0,
+        "model_unknown_sends": 0,
+        "model_mismatch_sends": 0
+      },
+      "input_amount_per_input_token": {
+        "availability": "available",
+        "value": 0.0000003,
+        "input_tokens": 12
+      },
+      "total_amount_per_input_token": {
+        "availability": "available",
+        "value": 0.0000011,
+        "input_tokens": 12
+      }
+    },
+    "same_token_all_miss": {
+      "kind": "same_token_all_miss_counterfactual",
+      "currency": "USD",
+      "known_input_amount": 0.0000036,
+      "known_output_amount": 0.0000096,
+      "known_total_subtotal": 0.0000132,
+      "input_complete": true,
+      "output_complete": true,
+      "total_complete": true,
+      "total_amount": 0.0000132,
+      "coverage": {
+        "priced_input_sends": 4,
+        "priced_output_sends": 4,
+        "unknown_usage_sends": 0,
+        "missing_cache_partition_sends": 0,
+        "model_unknown_sends": 0,
+        "model_mismatch_sends": 0
+      },
+      "input_amount_per_input_token": {
+        "availability": "available",
+        "value": 0.0000003,
+        "input_tokens": 12
+      },
+      "total_amount_per_input_token": {
+        "availability": "available",
+        "value": 0.0000011,
+        "input_tokens": 12
+      }
+    }
+  }
+}
