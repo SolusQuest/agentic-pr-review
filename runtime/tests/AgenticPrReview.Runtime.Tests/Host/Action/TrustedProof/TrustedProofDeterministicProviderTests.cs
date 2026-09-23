@@ -69,6 +69,39 @@ public sealed class TrustedProofDeterministicProviderTests
             StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("list_changed_files", "{\"after\":null}")]
+    [InlineData("list_files", "{\"prefix\":null,\"after\":null}")]
+    public async Task ProviderHistoryRejectsDurableNullSpelling(
+        string toolName,
+        string canonicalArguments)
+    {
+        const string credential = "provider-canary-value";
+        using var invoker = new HttpMessageInvoker(
+            new TrustedProofDeterministicDeepSeekHandler(credential));
+        var messages = new JsonArray();
+        var first = await SendAsync(invoker, credential, messages);
+        AppendExchange(messages, first);
+        if (toolName == "list_files")
+        {
+            var second = await SendAsync(invoker, credential, messages);
+            AppendExchange(messages, second);
+        }
+
+        var priorCall = messages
+            .Where(message => message?["tool_calls"]?[0]?["function"]?["name"]?
+                .GetValue<string>() == toolName)
+            .Single()!;
+        priorCall["tool_calls"]![0]!["function"]!["arguments"] =
+            canonicalArguments;
+        using var rejected = await SendRawAsync(
+            invoker,
+            credential,
+            messages);
+
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+    }
+
     [Fact]
     public async Task ContinuationRejectsCurrentContentInjectionAndMissingHistory()
     {
@@ -208,16 +241,6 @@ public sealed class TrustedProofDeterministicProviderTests
         var root = JsonNode.Parse(response)!;
         var message = root["choices"]![0]!["message"]!.DeepClone();
         var callId = message["tool_calls"]![0]!["id"]!.GetValue<string>();
-        var function = message["tool_calls"]![0]!["function"]!;
-        var name = function["name"]!.GetValue<string>();
-        if (name == "list_changed_files")
-        {
-            function["arguments"] = "{\"after\":null}";
-        }
-        else if (name == "list_files")
-        {
-            function["arguments"] = "{\"prefix\":null,\"after\":null}";
-        }
         messages.Add(message);
         messages.Add(new JsonObject
         {

@@ -133,29 +133,9 @@ internal static class TrustedProofVerifierHost
                 using var document = JsonDocument.Parse(responseBytes);
                 var message = document.RootElement.GetProperty("choices")[0]
                     .GetProperty("message");
-                var function = message.GetProperty("tool_calls")[0]
-                    .GetProperty("function");
                 var callId = message.GetProperty("tool_calls")[0]
                     .GetProperty("id").GetString()!;
-                var name = function.GetProperty("name").GetString();
-                var messageJson = message.GetRawText();
-                if (name == "list_changed_files")
-                {
-                    messageJson = messageJson.Replace(
-                        "\"arguments\":\"{}\"",
-                        "\"arguments\":\"{\\\"after\\\":null}\"",
-                        StringComparison.Ordinal);
-                }
-                else if (name == "list_files")
-                {
-                    messageJson = messageJson.Replace(
-                        "\"arguments\":\"{}\"",
-                        "\"arguments\":\"{\\\"prefix\\\":null," +
-                            "\\\"after\\\":null}\"",
-                        StringComparison.Ordinal);
-                }
-
-                messages.Add(messageJson);
+                messages.Add(message.GetRawText());
                 messages.Add(
                     "{\"role\":\"tool\",\"tool_call_id\":\"" + callId +
                     "\",\"content\":\"{\\\"result\\\":\\\"accepted\\\"}\"}");

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -533,7 +534,7 @@ internal static class DeepSeekRequestWriter
                 writer.WritePropertyName("function");
                 writer.WriteStartObject();
                 writer.WriteString("name", call.Name);
-                writer.WriteString("arguments", call.Text);
+                writer.WriteString("arguments", HistoricalToolArguments(call));
                 writer.WriteEndObject();
                 writer.WriteEndObject();
             }
@@ -552,6 +553,53 @@ internal static class DeepSeekRequestWriter
         }
 
         writer.WriteEndObject();
+    }
+
+    private static string HistoricalToolArguments(MinimalChatContent call)
+    {
+        // SESSION keeps absent options as canonical nulls. The advertised
+        // provider tool schemas require those options to be omitted.
+        if (StringComparer.Ordinal.Equals(
+                call.Name,
+                AgentToolRegistry.ListFilesName) &&
+            AgentToolArguments.TryListFilesCanonical(
+                call.Text!,
+                out var listFiles))
+        {
+            return Encoding.UTF8.GetString(AgentToolArguments.WriteListFiles(
+                listFiles!.Prefix,
+                listFiles.After,
+                includePrefix: listFiles.Prefix is not null,
+                includeAfter: listFiles.After is not null));
+        }
+
+        if (StringComparer.Ordinal.Equals(
+                call.Name,
+                AgentToolRegistry.ListChangedFilesName) &&
+            AgentToolArguments.TryListChangedFilesCanonical(
+                call.Text!,
+                out var changedFiles))
+        {
+            return Encoding.UTF8.GetString(
+                AgentToolArguments.WriteListChangedFiles(
+                    changedFiles!.After,
+                    includeAfter: changedFiles.After is not null));
+        }
+
+        if (StringComparer.Ordinal.Equals(
+                call.Name,
+                AgentToolRegistry.SearchTextName) &&
+            AgentToolArguments.TrySearchTextCanonical(
+                call.Text!,
+                out var search))
+        {
+            return Encoding.UTF8.GetString(AgentToolArguments.WriteSearchText(
+                search!.Query,
+                search.Path,
+                includePath: search.Path is not null));
+        }
+
+        return call.Text!;
     }
 
     private static bool CorrectPosition(

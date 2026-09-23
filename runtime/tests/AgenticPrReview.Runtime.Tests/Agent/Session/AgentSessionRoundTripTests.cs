@@ -9,6 +9,7 @@ using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Canonical;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Session;
 
@@ -1588,6 +1589,32 @@ public sealed partial class AgentSessionRoundTripTests
                 (call.CallId, call.Name, call.ArgumentsJson)),
             restoredCalls.Select(call =>
                 (call.CallId, call.Name, call.ArgumentsJson)));
+        var providerRequest = new ProjectChatRequest(
+            restored.RunRequest.InitialMessages.ToArray(),
+            AgentToolRegistry.Definitions.ToArray(),
+            restored.RunRequest.Continuation,
+            ThinkingRequired: true);
+        var wire = DeepSeekRequestWriter.Write(
+            MinimalChatClient.Materialize(providerRequest));
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, wire.Outcome);
+        using var document = JsonDocument.Parse(wire.Body.ToArray());
+        var wireCalls = document.RootElement.GetProperty("messages")
+            .EnumerateArray()
+            .SelectMany(message => message.TryGetProperty("tool_calls", out var toolCalls)
+                ? toolCalls.EnumerateArray().ToArray()
+                : [])
+            .Select(call => (
+                Name: call.GetProperty("function").GetProperty("name").GetString(),
+                Arguments: call.GetProperty("function").GetProperty("arguments").GetString()))
+            .Where(call => call.Name != AgentToolRegistry.FinishReviewName)
+            .ToArray();
+        Assert.Equal(
+            [
+                (AgentToolRegistry.ListFilesName, "{}"),
+                (AgentToolRegistry.ListChangedFilesName, "{}"),
+                (AgentToolRegistry.ReadDiffName, "{\"path\":\"src/a.cs\",\"start_hunk\":1,\"hunk_count\":20}"),
+            ],
+            wireCalls);
         var restoredResults = restored.RunRequest.InitialMessages
             .SelectMany(message => message.Contents)
             .OfType<ProjectToolResultContent>()

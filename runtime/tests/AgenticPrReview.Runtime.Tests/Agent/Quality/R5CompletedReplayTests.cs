@@ -211,6 +211,48 @@ public sealed class R5CompletedReplayTests
     }
 
     [Fact]
+    public async Task RestoredExplicitNullToolArgumentRejectsEntireBatchAndPreservesPredecessor()
+    {
+        using var bundle = new MutableBundle();
+        bundle.EditJson("script-1.json", script =>
+        {
+            script["turns"]![0]!["tool_calls"]!.AsArray().Add(new JsonObject
+            {
+                ["id"] = "null_optional",
+                ["name"] = "search_text",
+                ["arguments_json"] = "{\"query\":\"needle\",\"path\":null}",
+            });
+        });
+        Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture);
+        ReplayChildReply? rejected = null;
+        var result = await ReplayRunner.RunAsync(bundle.Root, new()
+        {
+            ObserveReply = (input, _, reply) =>
+            {
+                if (input.Phase == 1) rejected = reply;
+            },
+        });
+
+        Assert.Equal("agent_failed", result.Code);
+        Assert.Equal("cleaned", result.Cleanup);
+        Assert.Equal(2, result.Steps.Length);
+        Assert.True(result.Steps[0].Accepted);
+        var failed = result.Steps[1];
+        Assert.Equal("agent_failed", failed.Code);
+        Assert.False(failed.Accepted);
+        Assert.True(failed.PredecessorPreserved);
+        Assert.Equal(0, failed.ToolCalls);
+        Assert.Null(failed.Generation);
+        Assert.Null(failed.QualityCode);
+        Assert.Null(result.Observations[1].EnvelopeSha256);
+        Assert.NotNull(rejected);
+        Assert.Equal("agent_failed", rejected.Code);
+        Assert.Equal(0, rejected.ToolCalls);
+        Assert.Null(rejected.Prepared);
+        Assert.Empty(rejected.Plaintext ?? []);
+    }
+
+    [Fact]
     public async Task ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials()
     {
         var names = new[] { "GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "AGENTIC_REVIEW_DEEPSEEK_API_KEY", "ARBITRARY_CANARY_CREDENTIAL", "AWS_SECRET_ACCESS_KEY", "NPM_TOKEN" };

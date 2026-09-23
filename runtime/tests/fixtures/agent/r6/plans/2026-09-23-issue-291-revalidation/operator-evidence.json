@@ -1,0 +1,109 @@
+{
+  "issue": 291,
+  "pr": 292,
+  "purpose": "one_time_paid_revalidation_of_corrected_pr_head",
+  "execution_source": {
+    "commit": "b1de0b729d6316c9570b1fd83422281bb72767ac",
+    "tree": "716bf9904551f6e62a6ebd37841a12db36cf06e0",
+    "clean": true
+  },
+  "execution_artifact": "windows_x64_framework",
+  "build_sha256": "6ffe86a5125738dc140abac5b11a2956dd3eb633fcdc13da68e65231ef19f74a",
+  "campaign": "c2-e8f47a4204ec42128498",
+  "authorization": {
+    "paid_calls_granted_on": "2026-09-23",
+    "basis": "explicit_maintainer_request_to_revalidate_pr_branch_with_local_deepseek_key",
+    "campaigns_selected": 1,
+    "campaigns_executed": 1,
+    "credential_source": "existing_repository_local_deepseek_key_file",
+    "credential_access_after_plan_review_and_keyless_rehearsal": true
+  },
+  "selection": {
+    "plan_file_sha256": "ec809b1634f897aecfcfad5968f7373c1a243d400862d96f17c75a5b1487f601",
+    "plan_sha256": "31172d6ccc5444abd95f3ce4a26654eeb0d41db6d16056d55d2ce530d8f029c3",
+    "workload_sha256": "91df9c8a548b1b67bf4fb1052c73b6f572cd59175e6828f6e1efc3c957925503",
+    "scenarios": [
+      {
+        "profile": "replay",
+        "phases": 2,
+        "repeats": 1,
+        "reset_after_capacity": false
+      }
+    ],
+    "bounds": {
+      "max_evaluations": 2,
+      "max_model_calls": 16,
+      "max_input_tokens": 524288,
+      "max_output_tokens": 65536,
+      "max_combined_tokens": 589824,
+      "max_seconds": 620,
+      "spend_ceiling_micro_usd": 235936,
+      "per_call": {
+        "max_input_tokens": 32768,
+        "max_output_tokens": 4096,
+        "max_charge_micro_usd": 14746
+      }
+    },
+    "stop_rule": "stop_remaining_tail"
+  },
+  "provider_documentation": {
+    "pricing_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "refreshed_utc": "2026-09-23T12:07:14.99607Z",
+    "http_status": 200,
+    "retained_alias_still_listed": true,
+    "peak_reference_rates_usd_per_million": {
+      "hit_input": "0.006",
+      "miss_input": "0.30",
+      "output": "1.20"
+    },
+    "effective_period": "unknown",
+    "invoice_settlement": "not_evidenced"
+  },
+  "preflight": {
+    "exact_head_ci_checks": "12_of_12_passed",
+    "relay_plan_task": "a5a95f30-831a-415f-8da1-a0c53b2f5395",
+    "relay_plan_verdict": "PLAN_READY",
+    "credential_free_endpoint_status": 401,
+    "keyless_two_stage_rehearsal": "complete",
+    "keyless_rehearsal_raw_sha256": "5b3c01632bbe3aae36339558a4cd642dfbef77ddae795ce6cc588cce75d2a928",
+    "keyless_rehearsal_native_price_readback": "matched"
+  },
+  "live": {
+    "start_utc": "2026-09-23T12:08:22.197074Z",
+    "end_utc": "2026-09-23T12:08:41.170441Z",
+    "elapsed_seconds": 19.025,
+    "process_exit": 0,
+    "outer_stop": "none",
+    "report_raw_sha256": "93e0071d62237d213ef159d2086aec665fcb371d33b6536d4f9fb7a0f66fa943",
+    "ready_workers": 2,
+    "ready_workers_gone": true,
+    "observed_child_handles": 3,
+    "observed_children_gone": true,
+    "private_temp_empty": true,
+    "native_price_readback": "matched",
+    "independent_decimal_reconciliation": "matched"
+  },
+  "privacy": {
+    "workload": "existing_public_safe_synthetic_replay_corpus",
+    "parent_environment_allowlisted": true,
+    "github_environment_absent": true,
+    "credential_absent_from_outputs": true,
+    "raw_provider_traffic_published": false,
+    "raw_private_ipc_published": false,
+    "raw_session_plaintext_published": false,
+    "private_state_cleanup": "observed_empty_before_return"
+  },
+  "limits": {
+    "historical_2026_09_23_rejected_arguments_recovered": false,
+    "prior_issue_280_populations_rewritten": false,
+    "independent_model_quality_proven": false,
+    "causal_cache_savings_proven": false,
+    "execution_time_billing_proven": false
+  },
+  "published_artifacts_sha256": {
+    "plan-selection.json": "6f24f2d56423d6f7714c057627a8c9650618dd1fd41d014ac80331f51552d30e",
+    "tariff.json": "fc4b434c11670955119560d2c28cff07473c576e26361f62b3731bb838a97148",
+    "dry-run.json": "e00d7d65eee913866e5e6b79f20055bfb07cc12aae9c61a98c6d27b0a7bf625c",
+    "live.json": "1eecde83630414b5ee57e0714b6d251dc751dbdf3bacc4f200d7ff635100d5c0"
+  }
+}

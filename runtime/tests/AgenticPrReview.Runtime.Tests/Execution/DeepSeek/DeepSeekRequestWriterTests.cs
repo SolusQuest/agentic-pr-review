@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
@@ -122,6 +123,58 @@ public sealed class DeepSeekRequestWriterTests
         Assert.Equal("call-2", messages[3].GetProperty("tool_call_id").GetString());
         Assert.Equal("second", messages[3].GetProperty("content").GetString());
         Assert.Equal("user", messages[4].GetProperty("role").GetString());
+    }
+
+    [Theory]
+    [InlineData(AgentToolRegistry.ListFilesName,
+        "{\"prefix\":null,\"after\":null}", "{}")]
+    [InlineData(AgentToolRegistry.ListFilesName,
+        "{\"prefix\":\"src\",\"after\":null}", "{\"prefix\":\"src\"}")]
+    [InlineData(AgentToolRegistry.ListFilesName,
+        "{\"prefix\":null,\"after\":\"src/a.cs\"}", "{\"after\":\"src/a.cs\"}")]
+    [InlineData(AgentToolRegistry.ListChangedFilesName,
+        "{\"after\":null}", "{}")]
+    [InlineData(AgentToolRegistry.SearchTextName,
+        "{\"query\":\"needle\",\"path\":null}", "{\"query\":\"needle\"}")]
+    [InlineData(AgentToolRegistry.SearchTextName,
+        "{\"query\":\"needle\",\"path\":\"src/a.cs\"}",
+        "{\"query\":\"needle\",\"path\":\"src/a.cs\"}")]
+    [InlineData(AgentToolRegistry.ReadFileName,
+        "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":400}",
+        "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":400}")]
+    [InlineData(AgentToolRegistry.ReadDiffName,
+        "{\"path\":\"src/a.cs\",\"start_hunk\":1,\"hunk_count\":20}",
+        "{\"path\":\"src/a.cs\",\"start_hunk\":1,\"hunk_count\":20}")]
+    public void HistoricalCanonicalArgumentsRespectAdvertisedOptionalFields(
+        string name,
+        string canonical,
+        string expectedProviderArguments)
+    {
+        var definition = Assert.Single(
+            AgentToolRegistry.Definitions,
+            tool => StringComparer.Ordinal.Equals(tool.Name, name));
+        var request = BuildRequest(
+            [
+                new MinimalChatMessage("assistant", [Call("call-1", name, canonical)]),
+                new MinimalChatMessage("tool", [Result("call-1", "{}")]),
+                new MinimalChatMessage("user", [Text("continue")]),
+            ],
+            [new MinimalChatTool(
+                definition.Name,
+                definition.Description,
+                definition.SchemaJson)]);
+
+        var result = DeepSeekRequestWriter.Write(request);
+
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, result.Outcome);
+        using var document = JsonDocument.Parse(result.Body.ToArray());
+        Assert.Equal(
+            expectedProviderArguments,
+            document.RootElement.GetProperty("messages")[0]
+                .GetProperty("tool_calls")[0]
+                .GetProperty("function")
+                .GetProperty("arguments")
+                .GetString());
     }
 
     [Fact]
