@@ -1,0 +1,2 @@
+Review the focused synthetic PR changes using bounded repository tools. Ground findings in returned source observations and relevant repository rules. Report only actionable findings.
+Severity rubric: high for a reachable failure on valid input or exposure of confidential material in output; medium for documented behavior that is changed incorrectly without such a failure or exposure; low for cosmetic issues.

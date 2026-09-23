@@ -24,12 +24,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PROJECT="${REPO_ROOT}/runtime/tests/ReviewEvaluationFixture/AgenticPrReview.Runtime.ReviewEvaluationFixture.csproj"
 TEST_PROJECT="${REPO_ROOT}/runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj"
 FIXTURES="${REPO_ROOT}/runtime/tests/fixtures/agent/r5"
+R6_QUALITY_SANDBOX="${REPO_ROOT}/runtime/tests/fixtures/agent/r6/quality-sandbox"
 ASSEMBLY="AgenticPrReview.Runtime.ReviewEvaluationFixture"
 DOTNET_CMD="${DOTNET_CMD:-dotnet}"
 
 CORPUS_CANARIES="APR242_TERMINAL_CANARY,APR242_CANDIDATE_CANARY,APR242_NOTES_CANARY,APR242_POLICY_CANARY,APR242_SOURCE_CANARY"
 LIVE_CANARY="APR251_PRIVATE_CONTENT_CANARY"
-FOCUSED_CLASSES="R5IncrementalReviewTests,R5SessionGrowthTests,R5CapacityResetTests,R5ResetHandoffTests,R5VerifierCoverageTests"
+FOCUSED_CLASSES="R5IncrementalReviewTests,R5SessionGrowthTests,R5CapacityResetTests,R5ResetHandoffTests,R5VerifierCoverageTests,R6QualitySandboxTests"
 
 _roots=()
 
@@ -70,6 +71,7 @@ _require_inputs() {
   _require_file test-project "${TEST_PROJECT}"
   _require_file quality-corpus "${FIXTURES}/quality/bundle/manifest.json"
   _require_file live-coverage-corpus "${FIXTURES}/live-coverage/manifest.json"
+  _require_file quality-sandbox-corpus "${R6_QUALITY_SANDBOX}/manifest.json"
   _require_file replay-corpus "${FIXTURES}/replay/manifest.json"
   _require_file incremental-corpus "${FIXTURES}/incremental/manifest.json"
   _require_file growth-corpus "${FIXTURES}/growth/manifest.json"
@@ -98,6 +100,7 @@ _scenario() {
   case "${name}" in
     reset-owner|live-self-test) ;;
     quality|live-plan) extra+=(--corpus "${FIXTURES}/quality/bundle") ;;
+    quality-sandbox) extra+=(--corpus "${R6_QUALITY_SANDBOX}") ;;
     *) extra+=(--corpus "${FIXTURES}/${name}") ;;
   esac
   case "${name}" in
@@ -154,6 +157,11 @@ _run_scenarios() {
       >"${EVIDENCE}/${mode}/coverage.plan.out" ||
     _fail "APR_R5_EVAL_COVERAGE_PLAN_FAILED ${mode}"
   _scenario "${mode}" live-coverage live-local --dry-run --plan "${coverage_plan}"
+  local sandbox_plan="${EVIDENCE}/${mode}/quality-sandbox.plan.json"
+  "${RUNNER[@]}" r5-plan --corpus "${R6_QUALITY_SANDBOX}" --out "${sandbox_plan}" \
+      >"${EVIDENCE}/${mode}/quality-sandbox.plan.out" ||
+    _fail "APR_R5_EVAL_QUALITY_SANDBOX_PLAN_FAILED ${mode}"
+  _scenario "${mode}" quality-sandbox live-local --dry-run --plan "${sandbox_plan}"
   printf 'r5_eval_gate mode=%s artifact_sha256=%s\n' "${mode}" "${ARTIFACT_SHA}"
 }
 
@@ -164,7 +172,7 @@ _run_focused_tests() {
     trx_arg="$(cygpath -w "${trx}")"
   fi
   "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
-      --filter "FullyQualifiedName~R5IncrementalReviewTests|FullyQualifiedName~R5SessionGrowthTests|FullyQualifiedName~R5CapacityResetTests|FullyQualifiedName~R5ResetHandoffTests|FullyQualifiedName~R5VerifierCoverageTests" \
+      --filter "FullyQualifiedName~R5IncrementalReviewTests|FullyQualifiedName~R5SessionGrowthTests|FullyQualifiedName~R5CapacityResetTests|FullyQualifiedName~R5ResetHandoffTests|FullyQualifiedName~R5VerifierCoverageTests|FullyQualifiedName~R6QualitySandboxTests" \
       --logger "trx;LogFileName=${trx_arg}" >"${BUILD}/focused.log" 2>&1 ||
     _fail "APR_R5_EVAL_FOCUSED_TESTS_FAILED"
   "${RUNNER[@]}" verify-cases --trx "${trx}" --require "${FOCUSED_CLASSES}" ||
@@ -185,7 +193,7 @@ run_aot() {
 
 run_parity() {
   local name
-  for name in quality replay incremental growth reset-owner live-self-test live-plan live-coverage; do
+  for name in quality replay incremental growth reset-owner live-self-test live-plan live-coverage quality-sandbox; do
     "${RUNNER[@]}" verify-cases --parity \
         "${EVIDENCE}/framework/${name}.verdict.json" \
         "${EVIDENCE}/aot/${name}.verdict.json" ||

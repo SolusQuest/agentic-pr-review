@@ -1,0 +1,44 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "tool0",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/config.ts\",\"start_line\":1,\"line_count\":20}"
+        }
+      ],
+      "reasoning_content": ""
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "tool1",
+          "name": "search_text",
+          "arguments_json": "{\"query\":\"timeoutMs\",\"path\":\"src/client.ts\"}"
+        }
+      ],
+      "reasoning_content": ""
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "tool2",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/client.ts\",\"start_line\":1,\"line_count\":20}"
+        }
+      ],
+      "reasoning_content": ""
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "finish",
+          "name": "finish_review",
+          "arguments_json": "{\"summary\":\"Deterministic synthetic review.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"Synthetic ts-defect defect\",\"message\":\"A zero timeout disables the local-job deadline, but the truthy fallback replaces it with 3000.\",\"evidence\":[{\"observation_id\":\"0774ecc236fc2d53ffbf0590379994231cc8cc70019dd1662a86c72ce59d1ac9\",\"path\":\"src/client.ts\",\"start_line\":2,\"end_line\":2}]}]}"
+        }
+      ],
+      "reasoning_content": ""
+    }
+  ]
+}

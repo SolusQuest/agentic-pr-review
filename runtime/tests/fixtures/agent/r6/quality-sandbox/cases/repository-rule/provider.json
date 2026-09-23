@@ -1,0 +1,54 @@
+{
+  "turns": [
+    {
+      "tool_calls": [
+        {
+          "id": "tool0",
+          "name": "list_files",
+          "arguments_json": "{\"prefix\":\"rules\"}"
+        }
+      ],
+      "reasoning_content": ""
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "tool1",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"rules/review.md\",\"start_line\":1,\"line_count\":20}"
+        }
+      ],
+      "reasoning_content": ""
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "tool2",
+          "name": "search_text",
+          "arguments_json": "{\"query\":\"Log\",\"path\":\"src/Upload.cs\"}"
+        }
+      ],
+      "reasoning_content": ""
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "tool3",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/Upload.cs\",\"start_line\":1,\"line_count\":20}"
+        }
+      ],
+      "reasoning_content": ""
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "finish",
+          "name": "finish_review",
+          "arguments_json": "{\"summary\":\"Deterministic synthetic review.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Synthetic repository-rule defect\",\"message\":\"The failure path passes the access token to Console.Error.WriteLine against the repository review rule.\",\"evidence\":[{\"observation_id\":\"1a407dd73f35cc1ed80719e7410a3ccdd0dbd5c962ca3dfe6c6cb07b661b40ce\",\"path\":\"src/Upload.cs\",\"start_line\":5,\"end_line\":5}]}]}"
+        }
+      ],
+      "reasoning_content": ""
+    }
+  ]
+}
