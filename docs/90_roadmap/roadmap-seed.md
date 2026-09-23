@@ -422,7 +422,7 @@ Exit criteria:
 - sustained prefix instability blocks promotion;
 - cost regression is evaluated only on comparable complete runs.
 
-A new R6 issue must be refined from real Agent evidence before cost-harness implementation resumes. After their R0 supersession, issue #54 and unmerged PR #74 remain historical inputs only; do not reopen or move their existing design unchanged into R6.
+The [R6 issue graph](https://github.com/SolusQuest/agentic-pr-review/issues/267) and deterministic economics gate are delivered. Separately authorized observations recorded one unknown-cost send, an incomplete 23-stage repeat, and a later successful two-stage restored continuation on a corrected source. The [R6 economics conclusion](r6-economics-results.md) records an evidence-insufficient exit disposition: no comparable complete cost pair, full representative live history or independently established model quality. R7 refinement may use those bounded results, while release and default promotion remain separate decisions. After their R0 supersession, issue #54 and unmerged PR #74 remain historical inputs only; do not reopen or move their existing design unchanged into R6.
 
 ### R7: Distribution And Default Graduation
 

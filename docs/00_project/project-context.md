@@ -62,15 +62,7 @@ The current implementation contains:
 
 R3 is complete. R4 has restored the bounded wrapper and its official artifact bridge over an explicitly prepared payload, completed the TypeScript business/state/publisher/protocol cutover, and closed the migration inventory in [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md). The development head is still not a supported downstream Action. The exact merged W13 tree must pass the E1 main-push handoff before E2, while the maintainer-authorized trusted two-run proof, release payload delivery, and public default remain owned by their later gates.
 
-The selected next direction is R4:
-
-- keep the completed R3 Agent, tools, SESSION, grounding, DeepSeek continuation, and capability boundaries as the product core;
-- add trusted GitHub event/configuration authorization and exact-SHA snapshot materialization in C# ActionHost;
-- add downstream-repository-owned encrypted artifact state behind the internal asynchronous state-store seam;
-- move deterministic sticky/inline publication and transaction recovery into C# Host code;
-- integrate the thin Node Action wrapper and private artifact bridge with the remaining trusted Host proof work;
-- delete retained TypeScript business families only through named replacement gates;
-- keep downstream release/payload delivery and broad cost graduation in their later milestones.
+R4's Host, state, publication and TypeScript cutover work is an implementation record, not the next selected migration direction. R5 engineering evaluation is delivered, while its [live model-quality result](../90_roadmap/r5-evaluation-results.md) remains inconclusive. R6's deterministic economics gate and a bounded live restored continuation are demonstrated, but the [R6 economics conclusion](../90_roadmap/r6-economics-results.md) leaves representative live history, comparable complete cost runs and independent quality evidence unmet. R7 may refine from that record; supported release payload delivery and the public default still need their own evidence and decisions.
 
 A separate Agent process is deferred until fault, resource, extension, or trust evidence justifies the additional protocol and distribution surface.
 
