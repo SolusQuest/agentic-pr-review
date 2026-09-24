@@ -19,6 +19,17 @@ internal sealed record PreparedListFilesCall(
         AgentToolRegistry.ListFilesName,
         Arguments.CanonicalBytes);
 
+// Diagnostic stages only. These never authorize a provider argument.
+internal enum ListFilesArgumentFailure
+{
+    None,
+    Input,
+    Normalization,
+    Shape,
+    Path,
+    Spelling,
+}
+
 internal static partial class AgentToolArguments
 {
     internal static bool TryListFiles(
@@ -28,7 +39,8 @@ internal static partial class AgentToolArguments
             json,
             allowCanonicalNulls: false,
             allowProviderSpelling: false,
-            out arguments);
+            out arguments,
+            out _);
 
     internal static bool TryListFilesCanonical(
         string json,
@@ -37,27 +49,38 @@ internal static partial class AgentToolArguments
             json,
             allowCanonicalNulls: true,
             allowProviderSpelling: false,
-            out arguments);
+            out arguments,
+            out _);
 
     internal static bool TryListFilesProvider(
         string json,
         out ListFilesArguments? arguments) =>
+        TryListFilesProvider(json, out arguments, out _);
+
+    internal static bool TryListFilesProvider(
+        string json,
+        out ListFilesArguments? arguments,
+        out ListFilesArgumentFailure failure) =>
         TryListFiles(
             json,
             allowCanonicalNulls: false,
             allowProviderSpelling: true,
-            out arguments);
+            out arguments,
+            out failure);
 
     private static bool TryListFiles(
         string json,
         bool allowCanonicalNulls,
         bool allowProviderSpelling,
-        out ListFilesArguments? arguments)
+        out ListFilesArguments? arguments,
+        out ListFilesArgumentFailure failure)
     {
         arguments = null;
+        failure = ListFilesArgumentFailure.None;
         var input = StrictInputBytes(json);
         if (input is null)
         {
+            failure = ListFilesArgumentFailure.Input;
             return false;
         }
         var providerComparison = allowProviderSpelling
@@ -69,6 +92,7 @@ internal static partial class AgentToolArguments
         if (deserializationInput is null ||
             allowProviderSpelling && providerComparison is null)
         {
+            failure = ListFilesArgumentFailure.Normalization;
             return false;
         }
 
@@ -77,10 +101,15 @@ internal static partial class AgentToolArguments
             var dto = JsonSerializer.Deserialize(
                 deserializationInput,
                 AgentToolJsonContext.Default.ListFilesArgumentsDto);
-            if (dto is null ||
-                (dto.Prefix is not null && !RepositoryPath.IsValid(dto.Prefix)) ||
+            if (dto is null)
+            {
+                failure = ListFilesArgumentFailure.Shape;
+                return false;
+            }
+            if ((dto.Prefix is not null && !RepositoryPath.IsValid(dto.Prefix)) ||
                 (dto.After is not null && !RepositoryPath.IsValid(dto.After)))
             {
+                failure = ListFilesArgumentFailure.Path;
                 return false;
             }
 
@@ -101,6 +130,7 @@ internal static partial class AgentToolArguments
                         WriteListFiles(dto.Prefix, dto.After, true, true));
             if (!accepted)
             {
+                failure = ListFilesArgumentFailure.Spelling;
                 return false;
             }
 
@@ -113,10 +143,12 @@ internal static partial class AgentToolArguments
         }
         catch (JsonException)
         {
+            failure = ListFilesArgumentFailure.Shape;
             return false;
         }
         catch (Rfc8785CanonicalizationException)
         {
+            failure = ListFilesArgumentFailure.Normalization;
             return false;
         }
     }

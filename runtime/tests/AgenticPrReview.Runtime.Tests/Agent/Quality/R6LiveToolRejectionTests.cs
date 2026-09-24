@@ -64,6 +64,28 @@ public sealed class R6LiveToolRejectionTests
         }
     }
 
+    [Theory]
+    [InlineData("{bad", LiveToolRejectionProjector.InvalidJson)]
+    [InlineData("[]", LiveToolRejectionProjector.ListShapeInvalid)]
+    [InlineData("{\"prefix\":1}", LiveToolRejectionProjector.ListShapeInvalid)]
+    [InlineData("{\"extra\":false}", LiveToolRejectionProjector.ListShapeInvalid)]
+    [InlineData("{\"prefix\":\"../outside\"}", LiveToolRejectionProjector.ListPathInvalid)]
+    [InlineData("{\"prefix\":null}", LiveToolRejectionProjector.ListSpellingInvalid)]
+    public void ListFilesRejectionKeepsTheParserStageWithoutArguments(string arguments,
+        string category)
+    {
+        var projection = LiveToolRejectionProjector.Project(Response(
+            Call("one", AgentToolRegistry.ListFilesName, arguments)), Executor("cs-safe"));
+        Assert.Equal(AgentFailureCodes.ToolArgumentsInvalid, projection?.FailureCode);
+        Assert.Equal(category, projection?.Category);
+        var diagnostic = LiveAgentDiagnostic.Capture(0,
+            new AgentDiagnostic(AgentFailureCodes.ToolArgumentsInvalid, 1, 0), projection);
+        Assert.Equal(category, diagnostic.Category);
+        Assert.True(diagnostic.IsCanonical());
+        var report = JsonSerializer.Serialize(diagnostic, LiveJsonContext.Default.LiveAgentDiagnostic);
+        Assert.DoesNotContain(arguments, report, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void OrderedBatchesProjectOnlyTheFirstActualRejection()
     {
@@ -123,5 +145,17 @@ public sealed class R6LiveToolRejectionTests
         Assert.DoesNotContain(Canary,
             JsonSerializer.Serialize(forged, LiveJsonContext.Default.LiveAgentDiagnostic),
             StringComparison.Ordinal);
+
+        var listProjection = LiveToolRejectionProjector.Project(Response(
+            Call("two", AgentToolRegistry.ListFilesName, "{\"" + Canary + "\":null}")),
+            Executor("cs-safe"));
+        var listDiagnostic = LiveAgentDiagnostic.Capture(2,
+            new AgentDiagnostic(AgentFailureCodes.ToolArgumentsInvalid, 1, 0),
+            listProjection);
+        Assert.Equal(LiveToolRejectionProjector.ListShapeInvalid, listDiagnostic.Category);
+        Assert.DoesNotContain(Canary,
+            JsonSerializer.Serialize(listDiagnostic, LiveJsonContext.Default.LiveAgentDiagnostic),
+            StringComparison.Ordinal);
+        Assert.False((listDiagnostic with { Tool = AgentToolRegistry.ReadFileName }).IsCanonical());
     }
 }

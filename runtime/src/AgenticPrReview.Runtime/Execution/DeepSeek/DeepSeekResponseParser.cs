@@ -12,32 +12,53 @@ internal enum DeepSeekResponseParseOutcome
     Success,
 }
 
+// A closed diagnostic domain. No response field or value is retained here.
+internal enum DeepSeekResponseInvalidCategory
+{
+    None,
+    TransportContract,
+    Json,
+    Root,
+    Usage,
+    Choice,
+    Message,
+    Internal,
+}
+
 internal sealed class DeepSeekResponseParseResult
 {
     private DeepSeekResponseParseResult(
         DeepSeekResponseParseOutcome outcome,
-        DeepSeekParsedToolResponse? response)
+        DeepSeekParsedToolResponse? response,
+        DeepSeekResponseInvalidCategory invalidCategory)
     {
         if (outcome == DeepSeekResponseParseOutcome.Success !=
-            (response is not null))
+            (response is not null) ||
+            (outcome == DeepSeekResponseParseOutcome.Invalid) !=
+            (invalidCategory != DeepSeekResponseInvalidCategory.None))
         {
             throw new ArgumentException("The parse result state is invalid.");
         }
 
         Outcome = outcome;
         Response = response;
+        InvalidCategory = invalidCategory;
     }
 
     internal DeepSeekResponseParseOutcome Outcome { get; }
     internal DeepSeekParsedToolResponse? Response { get; }
+    internal DeepSeekResponseInvalidCategory InvalidCategory { get; }
 
-    internal static DeepSeekResponseParseResult Invalid() => new(
+    internal static DeepSeekResponseParseResult Invalid(
+        DeepSeekResponseInvalidCategory category) => new(
         DeepSeekResponseParseOutcome.Invalid,
-        null);
+        null,
+        category);
 
     internal static DeepSeekResponseParseResult MissingTool() => new(
         DeepSeekResponseParseOutcome.MissingTool,
-        null);
+        null,
+        DeepSeekResponseInvalidCategory.None);
 
     internal static DeepSeekResponseParseResult Success(
         DeepSeekParsedToolResponse response)
@@ -45,7 +66,8 @@ internal sealed class DeepSeekResponseParseResult
         ArgumentNullException.ThrowIfNull(response);
         return new DeepSeekResponseParseResult(
             DeepSeekResponseParseOutcome.Success,
-            response);
+            response,
+            DeepSeekResponseInvalidCategory.None);
     }
 
     public override string ToString() => Outcome switch
@@ -237,7 +259,8 @@ internal static class DeepSeekResponseParser
             transportResult.Body.Length >
                 DeepSeekTransportPolicy.SuccessBodyMaxBytes)
         {
-            return DeepSeekResponseParseResult.Invalid();
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.TransportContract);
         }
 
         try
@@ -245,7 +268,8 @@ internal static class DeepSeekResponseParser
             var body = transportResult.Body.ToArray();
             if (!HasUniquePropertyNames(body))
             {
-                return DeepSeekResponseParseResult.Invalid();
+                return DeepSeekResponseParseResult.Invalid(
+                    DeepSeekResponseInvalidCategory.Json);
             }
 
             using var document = JsonDocument.Parse(
@@ -260,13 +284,18 @@ internal static class DeepSeekResponseParser
                 document.RootElement,
                 transportResult.CapturedCount.Value);
         }
+        catch (JsonException)
+        {
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.Json);
+        }
         catch (Exception exception) when (
             exception is ArgumentException or
             InvalidOperationException or
-            JsonException or
             OverflowException)
         {
-            return DeepSeekResponseParseResult.Invalid();
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.Internal);
         }
     }
 
@@ -283,10 +312,16 @@ internal static class DeepSeekResponseParser
             !ValidateOptionalRootFields(root) ||
             !root.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array ||
-            choices.GetArrayLength() != 1 ||
-            !TryReadUsage(root, out var usage))
+            choices.GetArrayLength() != 1)
         {
-            return DeepSeekResponseParseResult.Invalid();
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.Root);
+        }
+
+        if (!TryReadUsage(root, out var usage))
+        {
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.Usage);
         }
 
         var choice = choices[0];
@@ -298,16 +333,19 @@ internal static class DeepSeekResponseParser
             logprobs.ValueKind != JsonValueKind.Null ||
             !choice.TryGetProperty("message", out var message))
         {
-            return DeepSeekResponseParseResult.Invalid();
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.Choice);
         }
 
-        if (TryReadExactString(choice, "finish_reason", "tool_calls") &&
-            TryReadToolMessage(
+        if (TryReadExactString(choice, "finish_reason", "tool_calls"))
+        {
+            if (!TryReadToolMessage(
                 message,
                 out var content,
                 out var reasoning,
                 out var calls))
-        {
+                return DeepSeekResponseParseResult.Invalid(
+                    DeepSeekResponseInvalidCategory.Message);
             return DeepSeekResponseParseResult.Success(
                 new DeepSeekParsedToolResponse(
                     content!,
@@ -318,10 +356,15 @@ internal static class DeepSeekResponseParser
                     root.GetProperty("model").GetString()!));
         }
 
-        return TryReadExactString(choice, "finish_reason", "stop") &&
-            IsValidNoToolMessage(message)
-            ? DeepSeekResponseParseResult.MissingTool()
-            : DeepSeekResponseParseResult.Invalid();
+        if (TryReadExactString(choice, "finish_reason", "stop"))
+        {
+            return IsValidNoToolMessage(message)
+                ? DeepSeekResponseParseResult.MissingTool()
+                : DeepSeekResponseParseResult.Invalid(
+                    DeepSeekResponseInvalidCategory.Message);
+        }
+        return DeepSeekResponseParseResult.Invalid(
+            DeepSeekResponseInvalidCategory.Choice);
     }
 
     private static bool ValidateOptionalRootFields(JsonElement root)
@@ -514,8 +557,10 @@ internal static class DeepSeekResponseParser
             return false;
         }
 
-        if (checked(cacheHitTokens + cacheMissTokens) != promptTokens ||
-            checked(promptTokens + completionTokens) != totalTokens)
+        if (cacheHitTokens > promptTokens ||
+            cacheMissTokens != promptTokens - cacheHitTokens ||
+            promptTokens > totalTokens ||
+            completionTokens != totalTokens - promptTokens)
         {
             return false;
         }

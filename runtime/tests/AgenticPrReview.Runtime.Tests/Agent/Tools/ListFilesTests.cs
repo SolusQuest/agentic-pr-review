@@ -51,6 +51,39 @@ public sealed class ListFilesTests
         Assert.False(AgentToolArguments.TryListFiles(input, out _));
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"prefix\":\"src\"}")]
+    [InlineData("{\"after\":\"src/a.cs\"}")]
+    [InlineData("{\"prefix\":\"src\",\"after\":\"src/a.cs\"}")]
+    public void ProviderAdmissionKeepsAcceptedShapesUnchanged(string input)
+    {
+        Assert.True(AgentToolArguments.TryListFilesProvider(input, out _, out var failure));
+        Assert.Equal(ListFilesArgumentFailure.None, failure);
+    }
+
+    [Theory]
+    [InlineData("{bad", "Normalization")]
+    [InlineData("[]", "Shape")]
+    [InlineData("{\"prefix\":1}", "Shape")]
+    [InlineData("{\"extra\":false}", "Shape")]
+    [InlineData("{\"prefix\":\"../outside\"}", "Path")]
+    [InlineData("{\"prefix\":null}", "Spelling")]
+    public void ProviderRejectionReportsOnlyItsFixedStage(string input,
+        string expected)
+    {
+        Assert.False(AgentToolArguments.TryListFilesProvider(input, out _, out var failure));
+        Assert.Equal(expected, failure.ToString());
+    }
+
+    [Fact]
+    public void OversizedProviderArgumentReportsInputStage()
+    {
+        var input = "{\"prefix\":\"" + new string('a', AgentLimits.ToolArgumentsBytes) + "\"}";
+        Assert.False(AgentToolArguments.TryListFilesProvider(input, out _, out var failure));
+        Assert.Equal(ListFilesArgumentFailure.Input, failure);
+    }
+
     [Fact]
     public void CanonicalHistoryRequiresBothExplicitNullableProperties()
     {

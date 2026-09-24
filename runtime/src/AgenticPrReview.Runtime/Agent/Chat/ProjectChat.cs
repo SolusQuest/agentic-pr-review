@@ -9,6 +9,22 @@ internal interface IProjectChatClient
         CancellationToken cancellationToken);
 }
 
+// Fixed stage reasons for local diagnostics. A provider adapter maps its
+// parser-specific categories into this provider-neutral domain.
+internal enum ProjectChatNormalizationReason
+{
+    None,
+    RequestProjection,
+    TransportContract,
+    ProviderJson,
+    ProviderRoot,
+    ProviderUsage,
+    ProviderChoice,
+    ProviderMessage,
+    ProviderInternal,
+    ResponseProjection,
+}
+
 internal sealed class ProjectChatNormalizationException : Exception
 {
     internal ProjectChatNormalizationException()
@@ -17,6 +33,12 @@ internal sealed class ProjectChatNormalizationException : Exception
     }
 
     internal ProjectChatNormalizationException(string diagnosticCode)
+        : this(diagnosticCode, ProjectChatNormalizationReason.None)
+    {
+    }
+
+    internal ProjectChatNormalizationException(string diagnosticCode,
+        ProjectChatNormalizationReason reason)
         : base("The backend response could not be normalized.")
     {
         if (diagnosticCode is not (
@@ -27,9 +49,11 @@ internal sealed class ProjectChatNormalizationException : Exception
         }
 
         DiagnosticCode = diagnosticCode;
+        Reason = reason;
     }
 
     internal string DiagnosticCode { get; }
+    internal ProjectChatNormalizationReason Reason { get; }
 }
 
 internal sealed record ProjectChatRequest(

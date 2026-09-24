@@ -9,6 +9,35 @@ namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 public sealed class DeepSeekResponseParserTests
 {
     [Fact]
+    public void InvalidResponsesReportOnlyTheirFixedRejectingStage()
+    {
+        var cases = new (string Body, DeepSeekResponseInvalidCategory Category)[]
+        {
+            (Response() + "{}", DeepSeekResponseInvalidCategory.Json),
+            (Response(rootSuffix: ",\"unknown\":true"), DeepSeekResponseInvalidCategory.Root),
+            (Response(usage: "{}"), DeepSeekResponseInvalidCategory.Usage),
+            (Response(usage: Usage(long.MaxValue, 1, long.MaxValue, long.MaxValue, 1)),
+                DeepSeekResponseInvalidCategory.Usage),
+            (Response(choice: Choice(Message(), index: "1")), DeepSeekResponseInvalidCategory.Choice),
+            (Response(choice: Choice(Message(reasoningLiteral: "null"))),
+                DeepSeekResponseInvalidCategory.Message),
+        };
+        foreach (var (body, expected) in cases)
+        {
+            var parsed = Parse(body);
+            Assert.Equal(DeepSeekResponseParseOutcome.Invalid, parsed.Outcome);
+            Assert.Equal(expected, parsed.InvalidCategory);
+            Assert.Equal("invalid", parsed.ToString());
+        }
+
+        Assert.Equal(DeepSeekResponseInvalidCategory.TransportContract,
+            DeepSeekResponseParser.Parse(null).InvalidCategory);
+        Assert.Equal(DeepSeekResponseInvalidCategory.None, Parse(Response()).InvalidCategory);
+        Assert.Equal(DeepSeekResponseInvalidCategory.None, Parse(Response(choice: Choice(
+            Message(callsLiteral: "null"), finishReason: "\"stop\""))).InvalidCategory);
+    }
+
+    [Fact]
     public void AcceptsDocumentedFlashResponseAliasWithoutBroadeningModelAdmission()
     {
         var original = Response();

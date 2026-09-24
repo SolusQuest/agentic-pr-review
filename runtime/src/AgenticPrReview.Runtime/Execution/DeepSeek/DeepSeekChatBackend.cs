@@ -63,14 +63,18 @@ internal sealed class DeepSeekChatBackend(
             !context.IsValid ||
             !ValidReplay(request))
         {
-            throw new ProjectChatNormalizationException();
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.RequestProjection);
         }
 
         var projection = DeepSeekRequestWriter.Write(request);
         if (projection.Outcome != DeepSeekRequestWriteOutcome.Success ||
             !projection.HasBody)
         {
-            throw new ProjectChatNormalizationException();
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.RequestProjection);
         }
 
         var transportResult = await transport.SendAsync(
@@ -79,13 +83,17 @@ internal sealed class DeepSeekChatBackend(
         cancellationToken.ThrowIfCancellationRequested();
         if (transportResult is null)
         {
-            throw new ProjectChatNormalizationException();
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.TransportContract);
         }
 
         return transportResult.Outcome switch
         {
             DeepSeekTransportOutcome.RequestRejected =>
-                throw new ProjectChatNormalizationException(),
+                throw new ProjectChatNormalizationException(
+                    AgentFailureCodes.ResponseInvalid,
+                    ProjectChatNormalizationReason.TransportContract),
             DeepSeekTransportOutcome.Success => Parse(transportResult, request),
             DeepSeekTransportOutcome.ResponseTooLarge =>
                 ResponseTooLarge(request.Messages.Length),
@@ -94,7 +102,9 @@ internal sealed class DeepSeekChatBackend(
             DeepSeekTransportOutcome.ProviderTimeout or
             DeepSeekTransportOutcome.TransportFailure =>
                 throw new DeepSeekChatBackendException(),
-            _ => throw new ProjectChatNormalizationException(),
+            _ => throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.TransportContract),
         };
     }
 
@@ -112,7 +122,24 @@ internal sealed class DeepSeekChatBackend(
         if (parsed.Outcome != DeepSeekResponseParseOutcome.Success ||
             parsed.Response is not { } response)
         {
-            throw new ProjectChatNormalizationException();
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                parsed.InvalidCategory switch
+                {
+                    DeepSeekResponseInvalidCategory.TransportContract =>
+                        ProjectChatNormalizationReason.TransportContract,
+                    DeepSeekResponseInvalidCategory.Json =>
+                        ProjectChatNormalizationReason.ProviderJson,
+                    DeepSeekResponseInvalidCategory.Root =>
+                        ProjectChatNormalizationReason.ProviderRoot,
+                    DeepSeekResponseInvalidCategory.Usage =>
+                        ProjectChatNormalizationReason.ProviderUsage,
+                    DeepSeekResponseInvalidCategory.Choice =>
+                        ProjectChatNormalizationReason.ProviderChoice,
+                    DeepSeekResponseInvalidCategory.Message =>
+                        ProjectChatNormalizationReason.ProviderMessage,
+                    _ => ProjectChatNormalizationReason.ProviderInternal,
+                });
         }
 
         var messagePosition = request.Messages.Length;
