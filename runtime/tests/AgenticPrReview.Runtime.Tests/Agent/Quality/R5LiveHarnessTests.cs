@@ -1,9 +1,11 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text;
+using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
@@ -14,6 +16,83 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R5LiveHarnessTests
 {
+    [Theory]
+    [InlineData("cs-safe", "{\"path\":null}", AgentFailureCodes.ToolArgumentsInvalid,
+        LiveToolRejectionProjector.InvalidContract)]
+    [InlineData("repository-rule", "{\"path\":\"src/APR251_PRIVATE_CONTENT_CANARY.cs\"}",
+        AgentFailureCodes.ToolPathNotTracked, LiveToolRejectionProjector.PathNotTracked)]
+    public async Task FrozenR6LiveReportAttributesToolRejectionWithoutContent(
+        string caseId, string arguments, string expectedCode, string expectedCategory)
+    {
+        var corpus = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r6", "quality-sandbox");
+        var admitted = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(corpus).Fixture);
+        using var plan = new PlanFile(document =>
+        {
+            document["corpus"]!["path"] = corpus;
+            document["corpus"]!["sha256"] = admitted.CorpusSha256;
+            document["schedule"] = new JsonArray(new JsonObject
+            {
+                ["case_id"] = caseId, ["repeats"] = 1,
+            });
+        });
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        {
+            var replay = new ReplayTransport(run.Script, ReplayFault.None);
+            return new FakeTransport(async (request, token) =>
+            {
+                var original = await replay.SendAsync(request, token);
+                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
+                var function = body["choices"]![0]!["message"]!["tool_calls"]![0]!["function"]!;
+                function["name"] = AgentToolRegistry.ReadFileName;
+                function["arguments"] = arguments;
+                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+            });
+        }), CancellationToken.None);
+
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(0, result.Completed);
+        var diagnostic = Assert.Single(result.Summary.AgentDiagnostics);
+        Assert.Equal(expectedCode, diagnostic.Code);
+        Assert.Equal(AgentToolRegistry.ReadFileName, diagnostic.Tool);
+        Assert.Equal(expectedCategory, diagnostic.Category);
+        Assert.Equal(0, diagnostic.ToolCalls);
+        Assert.Equal(0, result.Summary.UsageUnknownCalls);
+        Assert.DoesNotContain(Canary, string.Join('\n', lines), StringComparison.Ordinal);
+        Assert.Equal(diagnostic,
+            Assert.Single(JsonSerializer.Deserialize(lines[^1], LiveJsonContext.Default.LiveRunSummary)!
+                .AgentDiagnostics));
+    }
+
+    [Fact]
+    public void PublishedR6DiagnosticsRemainStrictlyReadableWithPriorShape()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r6",
+            "quality-observation", "live-868775.jsonl");
+        var bytes = File.ReadAllBytes(path);
+        Assert.Equal("760616d13f1bcc4ecb65c5797a91dc6af81983a1ee15c659c69e34cf49a4c24c",
+            Convert.ToHexStringLower(SHA256.HashData(bytes)));
+        var summaryJson = File.ReadLines(path).Last();
+        var summary = JsonSerializer.Deserialize(summaryJson, LiveJsonContext.Default.LiveRunSummary);
+        Assert.NotNull(summary);
+        using var original = JsonDocument.Parse(summaryJson);
+        var projected = JsonSerializer.SerializeToElement(summary, LiveJsonContext.Default.LiveRunSummary);
+        Assert.True(JsonElement.DeepEquals(original.RootElement, projected));
+        Assert.All(summary.AgentDiagnostics, diagnostic =>
+        {
+            Assert.Null(diagnostic.Tool);
+            Assert.Null(diagnostic.Category);
+            Assert.True(diagnostic.IsCanonical());
+        });
+
+        var priorShape = JsonSerializer.SerializeToElement(
+            new LiveAgentDiagnostic(1, AgentFailureCodes.ToolArgumentsInvalid, 1, 0),
+            LiveJsonContext.Default.LiveAgentDiagnostic);
+        Assert.Equal(4, priorShape.EnumerateObject().Count());
+        Assert.False(priorShape.TryGetProperty("tool", out _));
+        Assert.False(priorShape.TryGetProperty("category", out _));
+    }
+
     [Theory]
     [InlineData(2, 5, 3)]
     [InlineData(0, 7, 3)]

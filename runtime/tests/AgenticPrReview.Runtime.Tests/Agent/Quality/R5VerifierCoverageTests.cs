@@ -2,6 +2,9 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
@@ -610,6 +613,38 @@ public sealed class R5VerifierCoverageTests
             Assert.Equal(0, Verify("live-plan", string.Join('\n', lines), corpus: Corpus("quality", "bundle")).Code);
         }
         finally { File.Delete(plan); }
+    }
+
+    [Fact]
+    public void LivePlanDiagnosticAttributionIsAdmittedOnlyFromClosedDomains()
+    {
+        var attributed = PlanSummary() with
+        {
+            AgentDiagnostics =
+            [
+                new(8, AgentFailureCodes.ToolArgumentsInvalid, 1, 0,
+                    AgentToolRegistry.ReadFileName, LiveToolRejectionProjector.InvalidContract),
+                new(12, "unknown", null, null),
+            ],
+        };
+        Assert.Equal(0, Verify("live-plan", LivePlanOutput(attributed),
+            corpus: Corpus("quality", "bundle")).Code);
+
+        foreach (var rejected in new LiveAgentDiagnostic[]
+        {
+            attributed.AgentDiagnostics[0] with { Tool = VerifierCanary },
+            attributed.AgentDiagnostics[0] with { Category = VerifierCanary },
+            attributed.AgentDiagnostics[0] with { Category = LiveToolRejectionProjector.PathNotTracked },
+            attributed.AgentDiagnostics[0] with { Tool = null },
+            attributed.AgentDiagnostics[0] with { Code = AgentFailureCodes.ToolPathNotTracked },
+        })
+        {
+            var report = attributed with { AgentDiagnostics = [rejected, attributed.AgentDiagnostics[1]] };
+            var (code, verdict) = Verify("live-plan", LivePlanOutput(report),
+                corpus: Corpus("quality", "bundle"));
+            Assert.Equal(1, code);
+            Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+        }
     }
 
     [Fact]

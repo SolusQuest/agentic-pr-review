@@ -568,8 +568,7 @@ internal static class R5CaseVerifier
             report.AgentDiagnostics.Any(d => d is null ||
             d.ScheduleIndex < 0 || d.ScheduleIndex >= report.Attempted ||
             outcomes[d.ScheduleIndex].ExecutionStatus != EvaluationStatus.Failed ||
-            d != LiveAgentDiagnostic.Capture(d.ScheduleIndex, d.ModelCalls is { } model && d.ToolCalls is { } tool
-                ? new AgentDiagnostic(d.Code, model, tool) : null)) ||
+            !d.IsCanonical()) ||
             report.AgentDiagnostics.Select(d => d.ScheduleIndex).Distinct().Count() != report.AgentDiagnostics.Length)
             return (null, "rejected_report_invalid");
         var parity = SourceParity();
