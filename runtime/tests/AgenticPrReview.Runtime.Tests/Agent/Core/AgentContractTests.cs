@@ -110,7 +110,10 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("list_files", list.Name);
                 Assert.Equal(
-                    "List tracked repository paths from the reviewed snapshot in ordinal order.",
+                    "List tracked repository paths from the reviewed snapshot in ordinal order. " +
+                    "Use {} to list all paths. prefix and after are optional repository-relative " +
+                    "path strings; omit either field when unused and never pass null or an empty " +
+                    "string. Use read_file to read file contents.",
                     list.Description);
                 Assert.Equal(AgentToolRegistry.ListFilesSchema, list.SchemaJson);
             },
@@ -161,7 +164,7 @@ public sealed class AgentContractTests
             "587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
-            "66ba6ceb1ddd5c2aef95e613bef43b4675c986d4756c05bf350a09badb9c535c",
+            "40a21e6739d1a121464bafd431261bfb3805076c3f28dfaae189b9423fb7dccc",
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions));
 
         var original = AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);

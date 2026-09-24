@@ -677,6 +677,42 @@ public sealed class AgentLoopTests
         Assert.Empty(executor.PreflightOrder);
     }
 
+    [Theory]
+    [InlineData("{\"prefix\":null}")]
+    [InlineData("{\"prefix\":\"\"}")]
+    [InlineData("{\"after\":\"\"}")]
+    [InlineData("{\"prefix\":\"../p\"}")]
+    [InlineData("{\"unknown\":true}")]
+    [InlineData("{bad")]
+    public async Task InvalidListFilesArgumentsStopTheWholeBatchBeforeDispatch(
+        string invalidArguments)
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage(
+                "assistant",
+                [
+                    new ProjectToolCallContent(
+                        "one",
+                        "read_file",
+                        "{\"path\":\"a.txt\"}"),
+                    new ProjectToolCallContent(
+                        "two",
+                        "list_files",
+                        invalidArguments),
+                ]),
+            new ProjectChatUsage(1, 1),
+            1);
+        var executor = new ScriptedToolExecutor();
+
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        AssertFailure(outcome, "agent_tool_arguments_invalid");
+        Assert.Empty(executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+    }
+
     [Fact]
     public async Task CompleteResponseAllowlistPreflightRunsBeforeFirstTool()
     {
