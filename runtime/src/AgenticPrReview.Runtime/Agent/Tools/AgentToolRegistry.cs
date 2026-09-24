@@ -13,7 +13,12 @@ internal static class AgentToolRegistry
     internal const string FinishReviewName = "finish_review";
 
     internal const string ListFilesDescription =
-        "List tracked repository paths from the reviewed snapshot in ordinal order.";
+        "List tracked repository paths from the reviewed snapshot in ordinal order, " +
+        "one bounded page at a time. Use {} to start an unfiltered listing. If " +
+        "truncated is true, call list_files again with after set to next_after and " +
+        "the same prefix, if any, until truncated is false. prefix and after are " +
+        "optional repository-relative path strings; omit either field when unused " +
+        "and never pass null or an empty string. Use read_file to read file contents.";
     internal const string ListChangedFilesDescription =
         "List bounded changed-file metadata from the reviewed snapshot in ordinal path order.";
     internal const string ReadDiffDescription =

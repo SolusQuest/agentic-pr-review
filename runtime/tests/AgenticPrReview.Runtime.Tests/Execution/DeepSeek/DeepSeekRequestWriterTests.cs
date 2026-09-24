@@ -35,6 +35,95 @@ public sealed class DeepSeekRequestWriterTests
     }
 
     [Fact]
+    public void WritesTheCompleteFrozenAgentToolsetWithListFilesGuidance()
+    {
+        var tools = AgentToolRegistry.Definitions
+            .Select(definition => new MinimalChatTool(
+                definition.Name,
+                definition.Description,
+                definition.SchemaJson))
+            .ToArray();
+        var result = DeepSeekRequestWriter.Write(BuildRequest(
+            [new MinimalChatMessage("user", [Text("review")])],
+            tools));
+
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, result.Outcome);
+        using var document = JsonDocument.Parse(result.Body.ToArray());
+        var root = document.RootElement;
+        Assert.False(root.TryGetProperty("tool_choice", out _));
+        var serialized = root.GetProperty("tools");
+        var expected = new (string Name, string Description, string Schema)[]
+        {
+            (
+                "list_files",
+                "List tracked repository paths from the reviewed snapshot in ordinal order, " +
+                "one bounded page at a time. Use {} to start an unfiltered listing. If " +
+                "truncated is true, call list_files again with after set to next_after and " +
+                "the same prefix, if any, until truncated is false. prefix and after are " +
+                "optional repository-relative path strings; omit either field when unused " +
+                "and never pass null or an empty string. Use read_file to read file contents.",
+                "{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"}," +
+                "\"after\":{\"type\":\"string\"}},\"additionalProperties\":false}"),
+            (
+                "list_changed_files",
+                "List bounded changed-file metadata from the reviewed snapshot in ordinal path order.",
+                "{\"type\":\"object\",\"properties\":{\"after\":{\"type\":\"string\"}}," +
+                "\"additionalProperties\":false}"),
+            (
+                "read_diff",
+                "Read bounded complete diff hunks for one changed path in the reviewed snapshot.",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}," +
+                "\"start_hunk\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647}," +
+                "\"hunk_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}}," +
+                "\"required\":[\"path\"],\"additionalProperties\":false}"),
+            (
+                "search_text",
+                "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot.",
+                "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," +
+                "\"path\":{\"type\":\"string\"}},\"required\":[\"query\"]," +
+                "\"additionalProperties\":false}"),
+            (
+                "read_file",
+                "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}," +
+                "\"start_line\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647}," +
+                "\"line_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":400}}," +
+                "\"required\":[\"path\"],\"additionalProperties\":false}"),
+            (
+                "finish_review",
+                "Finish the review with validated grounded findings.",
+                "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}," +
+                "\"findings\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\"," +
+                "\"properties\":{\"severity\":{\"type\":\"string\",\"enum\":[\"critical\",\"high\",\"medium\",\"low\"]}," +
+                "\"title\":{\"type\":\"string\"},\"message\":{\"type\":\"string\"}," +
+                "\"evidence\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":8," +
+                "\"items\":{\"type\":\"object\",\"properties\":{\"observation_id\":{\"type\":\"string\"}," +
+                "\"path\":{\"type\":\"string\"},\"start_line\":{\"type\":\"integer\",\"minimum\":1," +
+                "\"maximum\":2147483647},\"end_line\":{\"type\":\"integer\",\"minimum\":1," +
+                "\"maximum\":2147483647}},\"required\":[\"observation_id\",\"path\",\"start_line\"," +
+                "\"end_line\"],\"additionalProperties\":false}}},\"required\":[\"severity\",\"title\"," +
+                "\"message\",\"evidence\"],\"additionalProperties\":false}}}," +
+                "\"required\":[\"summary\",\"findings\"],\"additionalProperties\":false}"),
+        };
+
+        Assert.Equal(expected.Length, serialized.GetArrayLength());
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var entry = serialized[index];
+            Assert.Equal("function", entry.GetProperty("type").GetString());
+            var function = entry.GetProperty("function");
+            Assert.False(function.TryGetProperty("strict", out _));
+            Assert.Equal(expected[index].Name, function.GetProperty("name").GetString());
+            Assert.Equal(
+                expected[index].Description,
+                function.GetProperty("description").GetString());
+            Assert.Equal(
+                expected[index].Schema,
+                function.GetProperty("parameters").GetRawText());
+        }
+    }
+
+    [Fact]
     public void OmitsProviderControlsAtTheirStructuralLocations()
     {
         var tools = new[]
