@@ -136,6 +136,24 @@ internal sealed class DeepSeekChatBackend(
                         ProjectChatNormalizationReason.ProviderUsage,
                     DeepSeekResponseInvalidCategory.Choice =>
                         ProjectChatNormalizationReason.ProviderChoice,
+                    DeepSeekResponseInvalidCategory.ChoiceShape =>
+                        ProjectChatNormalizationReason.ProviderChoiceShape,
+                    DeepSeekResponseInvalidCategory.ChoiceIndex =>
+                        ProjectChatNormalizationReason.ProviderChoiceIndex,
+                    DeepSeekResponseInvalidCategory.ChoiceLogprobs =>
+                        ProjectChatNormalizationReason.ProviderChoiceLogprobs,
+                    DeepSeekResponseInvalidCategory.ChoiceMessageMissing =>
+                        ProjectChatNormalizationReason.ProviderChoiceMessageMissing,
+                    DeepSeekResponseInvalidCategory.FinishReasonLength =>
+                        ProjectChatNormalizationReason.ProviderFinishReasonLength,
+                    DeepSeekResponseInvalidCategory.FinishReasonContentFilter =>
+                        ProjectChatNormalizationReason.ProviderFinishReasonContentFilter,
+                    DeepSeekResponseInvalidCategory.FinishReasonResource =>
+                        ProjectChatNormalizationReason.ProviderFinishReasonResource,
+                    DeepSeekResponseInvalidCategory.FinishReasonAborted =>
+                        ProjectChatNormalizationReason.ProviderFinishReasonAborted,
+                    DeepSeekResponseInvalidCategory.FinishReasonOther =>
+                        ProjectChatNormalizationReason.ProviderFinishReasonOther,
                     DeepSeekResponseInvalidCategory.Message =>
                         ProjectChatNormalizationReason.ProviderMessage,
                     _ => ProjectChatNormalizationReason.ProviderInternal,

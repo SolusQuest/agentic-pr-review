@@ -50,6 +50,42 @@ public sealed class R6ResponseAdmissionTests
             StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("length", LiveNormalizationCategories.ProviderFinishReasonLength)]
+    [InlineData("content_filter", LiveNormalizationCategories.ProviderFinishReasonContentFilter)]
+    [InlineData("insufficient_system_resource", LiveNormalizationCategories.ProviderFinishReasonResource)]
+    [InlineData("aborted", LiveNormalizationCategories.ProviderFinishReasonAborted)]
+    [InlineData(Canary, LiveNormalizationCategories.ProviderFinishReasonOther)]
+    public async Task RejectedFinishReasonCrossesAgentAndReportWithoutProviderText(
+        string finishReason, string expectedCategory)
+    {
+        var raw = "{\"choices\":[{\"index\":0,\"message\":{},\"finish_reason\":\"" +
+            finishReason + "\"}],\"model\":\"deepseek-v4-flash\",\"usage\":" +
+            "{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5," +
+            "\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}";
+        var transport = new FixedTransport(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw)));
+        var accounting = Accounting();
+        using var metered = new LiveMeteredTransport(transport, accounting);
+        var backend = DeepSeekChatBackend.CreateClient(Context(), metered);
+        var observed = new LiveChatObserver(backend, accounting);
+
+        var outcome = await new AgentLoop(observed, new UnexpectedExecutor())
+            .RunAsync(Request(), CancellationToken.None);
+
+        Assert.False(outcome.Succeeded);
+        Assert.Equal(AgentFailureCodes.ResponseInvalid, outcome.Diagnostic?.Code);
+        Assert.Equal(1, transport.Sends);
+        Assert.Equal(1, accounting.UsageUnknownCalls);
+        Assert.Equal(1, accounting.Outcomes.NormalizationExceptions);
+        var diagnostic = LiveAgentDiagnostic.Capture(0, outcome.Diagnostic,
+            normalizationReason: observed.TakeNormalizationReason());
+        Assert.Equal(expectedCategory, diagnostic.Category);
+        Assert.True(diagnostic.IsCanonical());
+        var json = JsonSerializer.Serialize(diagnostic, LiveJsonContext.Default.LiveAgentDiagnostic);
+        Assert.DoesNotContain(Canary, json, StringComparison.Ordinal);
+        Assert.False((diagnostic with { Code = AgentFailureCodes.ChatFailed }).IsCanonical());
+    }
+
     [Fact]
     public async Task SuccessfulBackendWithInvalidProjectProjectionHasDistinctReason()
     {

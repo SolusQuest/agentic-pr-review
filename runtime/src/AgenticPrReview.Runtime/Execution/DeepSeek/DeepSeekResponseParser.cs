@@ -21,6 +21,15 @@ internal enum DeepSeekResponseInvalidCategory
     Root,
     Usage,
     Choice,
+    ChoiceShape,
+    ChoiceIndex,
+    ChoiceLogprobs,
+    ChoiceMessageMissing,
+    FinishReasonLength,
+    FinishReasonContentFilter,
+    FinishReasonResource,
+    FinishReasonAborted,
+    FinishReasonOther,
     Message,
     Internal,
 }
@@ -326,15 +335,29 @@ internal static class DeepSeekResponseParser
 
         var choice = choices[0];
         if (choice.ValueKind != JsonValueKind.Object ||
-            !HasOnlyProperties(choice, ChoiceProperties) ||
-            !TryReadNonnegativeInt64(choice, "index", out var index) ||
-            index != 0 ||
-            choice.TryGetProperty("logprobs", out var logprobs) &&
-            logprobs.ValueKind != JsonValueKind.Null ||
-            !choice.TryGetProperty("message", out var message))
+            !HasOnlyProperties(choice, ChoiceProperties))
         {
             return DeepSeekResponseParseResult.Invalid(
-                DeepSeekResponseInvalidCategory.Choice);
+                DeepSeekResponseInvalidCategory.ChoiceShape);
+        }
+
+        if (!TryReadNonnegativeInt64(choice, "index", out var index) || index != 0)
+        {
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.ChoiceIndex);
+        }
+
+        if (choice.TryGetProperty("logprobs", out var logprobs) &&
+            logprobs.ValueKind != JsonValueKind.Null)
+        {
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.ChoiceLogprobs);
+        }
+
+        if (!choice.TryGetProperty("message", out var message))
+        {
+            return DeepSeekResponseParseResult.Invalid(
+                DeepSeekResponseInvalidCategory.ChoiceMessageMissing);
         }
 
         if (TryReadExactString(choice, "finish_reason", "tool_calls"))
@@ -363,8 +386,20 @@ internal static class DeepSeekResponseParser
                 : DeepSeekResponseParseResult.Invalid(
                     DeepSeekResponseInvalidCategory.Message);
         }
-        return DeepSeekResponseParseResult.Invalid(
-            DeepSeekResponseInvalidCategory.Choice);
+        // These exact terminal values are diagnostic only. They do not admit
+        // a response or change the existing fail-closed behavior.
+        var category = choice.TryGetProperty("finish_reason", out var finishReason) &&
+            finishReason.ValueKind == JsonValueKind.String
+            ? finishReason.GetString() switch
+            {
+                "length" => DeepSeekResponseInvalidCategory.FinishReasonLength,
+                "content_filter" => DeepSeekResponseInvalidCategory.FinishReasonContentFilter,
+                "insufficient_system_resource" => DeepSeekResponseInvalidCategory.FinishReasonResource,
+                "aborted" => DeepSeekResponseInvalidCategory.FinishReasonAborted,
+                _ => DeepSeekResponseInvalidCategory.FinishReasonOther,
+            }
+            : DeepSeekResponseInvalidCategory.FinishReasonOther;
+        return DeepSeekResponseParseResult.Invalid(category);
     }
 
     private static bool ValidateOptionalRootFields(JsonElement root)
