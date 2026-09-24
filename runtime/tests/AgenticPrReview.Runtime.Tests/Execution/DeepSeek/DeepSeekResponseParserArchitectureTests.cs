@@ -19,6 +19,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
             {
                 typeof(DeepSeekResponseParser),
                 typeof(DeepSeekResponseParseOutcome),
+                typeof(DeepSeekResponseInvalidCategory),
                 typeof(DeepSeekResponseParseResult),
                 typeof(DeepSeekParsedToolResponse),
                 typeof(DeepSeekParsedToolCall),
@@ -163,6 +164,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
             {
                 typeof(DeepSeekResponseParser),
                 typeof(DeepSeekResponseParseOutcome),
+                typeof(DeepSeekResponseInvalidCategory),
                 typeof(DeepSeekResponseParseResult),
                 typeof(DeepSeekParsedToolResponse),
                 typeof(DeepSeekParsedToolCall),

@@ -9,6 +9,79 @@ namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 public sealed class DeepSeekResponseParserTests
 {
     [Fact]
+    public void InvalidResponsesReportOnlyTheirFixedRejectingStage()
+    {
+        var cases = new (string Body, DeepSeekResponseInvalidCategory Category)[]
+        {
+            (Response() + "{}", DeepSeekResponseInvalidCategory.Json),
+            (Response(rootSuffix: ",\"unknown\":true"), DeepSeekResponseInvalidCategory.Root),
+            (Response(usage: "{}"), DeepSeekResponseInvalidCategory.Usage),
+            (Response(usage: Usage(long.MaxValue, 1, long.MaxValue, long.MaxValue, 1)),
+                DeepSeekResponseInvalidCategory.Usage),
+            (Response(choice: Choice(Message(), index: "1")), DeepSeekResponseInvalidCategory.ChoiceIndex),
+            (Response(choice: Choice(Message(reasoningLiteral: "null"))),
+                DeepSeekResponseInvalidCategory.Message),
+        };
+        foreach (var (body, expected) in cases)
+        {
+            var parsed = Parse(body);
+            Assert.Equal(DeepSeekResponseParseOutcome.Invalid, parsed.Outcome);
+            Assert.Equal(expected, parsed.InvalidCategory);
+            Assert.Equal("invalid", parsed.ToString());
+        }
+
+        Assert.Equal(DeepSeekResponseInvalidCategory.TransportContract,
+            DeepSeekResponseParser.Parse(null).InvalidCategory);
+        Assert.Equal(DeepSeekResponseInvalidCategory.None, Parse(Response()).InvalidCategory);
+        Assert.Equal(DeepSeekResponseInvalidCategory.None, Parse(Response(choice: Choice(
+            Message(callsLiteral: "null"), finishReason: "\"stop\""))).InvalidCategory);
+    }
+
+    [Fact]
+    public void ChoiceRejectionsPreserveParserPrecedenceAndNeverAdmitTerminalReasons()
+    {
+        var cases = new (string Choice, DeepSeekResponseInvalidCategory Category)[]
+        {
+            ("null", DeepSeekResponseInvalidCategory.ChoiceShape),
+            (Choice(Message(), extra: ",\"unexpected\":true"),
+                DeepSeekResponseInvalidCategory.ChoiceShape),
+            (Choice(Message(), index: "null"), DeepSeekResponseInvalidCategory.ChoiceIndex),
+            (Choice(Message(), index: "1", finishReason: "\"length\""),
+                DeepSeekResponseInvalidCategory.ChoiceIndex),
+            (Choice(Message(), extra: ",\"logprobs\":{}"),
+                DeepSeekResponseInvalidCategory.ChoiceLogprobs),
+            ("{\"index\":0,\"finish_reason\":\"length\"}",
+                DeepSeekResponseInvalidCategory.ChoiceMessageMissing),
+            (Choice(Message(), finishReason: "\"length\""),
+                DeepSeekResponseInvalidCategory.FinishReasonLength),
+            (Choice(Message(), finishReason: "\"content_filter\""),
+                DeepSeekResponseInvalidCategory.FinishReasonContentFilter),
+            (Choice(Message(), finishReason: "\"insufficient_system_resource\""),
+                DeepSeekResponseInvalidCategory.FinishReasonResource),
+            (Choice(Message(), finishReason: "\"aborted\""),
+                DeepSeekResponseInvalidCategory.FinishReasonAborted),
+            (Choice(Message(), finishReason: "\"provider-private-canary\""),
+                DeepSeekResponseInvalidCategory.FinishReasonOther),
+            (Choice(Message(), finishReason: "null"),
+                DeepSeekResponseInvalidCategory.FinishReasonOther),
+        };
+
+        foreach (var (choice, category) in cases)
+        {
+            var parsed = Parse(Response(choice: choice));
+            Assert.Equal(DeepSeekResponseParseOutcome.Invalid, parsed.Outcome);
+            Assert.Equal(category, parsed.InvalidCategory);
+            Assert.Equal("invalid", parsed.ToString());
+            Assert.Null(parsed.Response);
+        }
+
+        AssertSuccess(Response(choice: Choice(Message(), extra: ",\"logprobs\":null")));
+        Assert.Equal(DeepSeekResponseParseOutcome.MissingTool,
+            Parse(Response(choice: Choice(Message(callsLiteral: "null"),
+                finishReason: "\"stop\""))).Outcome);
+    }
+
+    [Fact]
     public void AcceptsDocumentedFlashResponseAliasWithoutBroadeningModelAdmission()
     {
         var original = Response();

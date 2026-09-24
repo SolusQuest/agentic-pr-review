@@ -295,10 +295,12 @@ internal static class LiveRunner
             .RunAsync(request, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
         var rejection = observed.TakeRejection();
+        var normalizationReason = observed.TakeNormalizationReason();
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)
         {
             diagnostics.Add(LiveAgentDiagnostic.Capture(index, outcome.Diagnostic,
-                rejection ?? LiveToolRejectionProjection.Unknown(outcome.Diagnostic?.Code ?? "unknown")));
+                rejection ?? LiveToolRejectionProjection.Unknown(outcome.Diagnostic?.Code ?? "unknown"),
+                normalizationReason));
             return EvaluationScorer.Failure(run.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
         }
         var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,

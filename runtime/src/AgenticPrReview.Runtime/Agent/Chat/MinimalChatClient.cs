@@ -1,3 +1,5 @@
+using AgenticPrReview.Runtime.Agent.Core;
+
 namespace AgenticPrReview.Runtime.Agent.Chat;
 
 internal sealed class MinimalChatClient(
@@ -15,7 +17,9 @@ internal sealed class MinimalChatClient(
         catch (Exception exception) when (
             IsNormalizationDomainException(exception))
         {
-            throw new ProjectChatNormalizationException();
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.RequestProjection);
         }
 
         var response = await backend.GetResponseAsync(native, cancellationToken);
@@ -37,7 +41,9 @@ internal sealed class MinimalChatClient(
         catch (Exception exception) when (
             IsNormalizationDomainException(exception))
         {
-            throw new ProjectChatNormalizationException();
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.ResponseProjection);
         }
     }
 
