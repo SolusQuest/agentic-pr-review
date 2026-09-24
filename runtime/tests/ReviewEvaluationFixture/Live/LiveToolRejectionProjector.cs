@@ -50,37 +50,25 @@ internal static class LiveToolRejectionProjector
         // phases separate so a later malformed call cannot be misattributed to
         // an earlier valid call's untracked path.
         var prepared = new List<PreparedAgentToolCall>(calls.Length);
-        var invalid = new List<(string Tool, string Category)>();
         foreach (var call in calls)
         {
             if (!TryPrepare(call, out var tool, out var parsed))
                 return null;
             if (parsed is null)
-                invalid.Add((tool, ArgumentCategory(call.ArgumentsJson)));
-            else
-                prepared.Add(parsed);
+                return new(AgentFailureCodes.ToolArgumentsInvalid, tool,
+                    ArgumentCategory(call.ArgumentsJson));
+            prepared.Add(parsed);
         }
 
-        if (invalid.Count > 0)
-            return invalid.Count == 1
-                ? new(AgentFailureCodes.ToolArgumentsInvalid, invalid[0].Tool, invalid[0].Category)
-                : LiveToolRejectionProjection.Unknown(AgentFailureCodes.ToolArgumentsInvalid);
-
-        string? firstFailure = null;
-        var untracked = new List<string>();
         foreach (var call in prepared)
         {
             var failure = executor.Preflight(call);
-            firstFailure ??= failure;
+            if (failure is null) continue;
             if (failure == AgentFailureCodes.ToolPathNotTracked)
-                untracked.Add(KnownTool(call.Name));
-        }
-
-        if (firstFailure != AgentFailureCodes.ToolPathNotTracked)
+                return new(AgentFailureCodes.ToolPathNotTracked, KnownTool(call.Name), PathNotTracked);
             return null;
-        return untracked.Count == 1
-            ? new(AgentFailureCodes.ToolPathNotTracked, untracked[0], PathNotTracked)
-            : LiveToolRejectionProjection.Unknown(AgentFailureCodes.ToolPathNotTracked);
+        }
+        return null;
     }
 
     private static string ArgumentCategory(string json)

@@ -65,21 +65,34 @@ public sealed class R6LiveToolRejectionTests
     }
 
     [Fact]
-    public void AmbiguousBatchesAndUnknownNamesNeverInventAttribution()
+    public void OrderedBatchesProjectOnlyTheFirstActualRejection()
     {
         var executor = Executor("cs-safe");
         var multipleMalformed = LiveToolRejectionProjector.Project(Response(
-            Call("one", AgentToolRegistry.ReadFileName, "{bad"),
+            Call("one", AgentToolRegistry.ReadFileName, "{\"path\":null}"),
             Call("two", AgentToolRegistry.SearchTextName, "{bad")), executor);
         Assert.Equal(AgentFailureCodes.ToolArgumentsInvalid, multipleMalformed?.FailureCode);
-        Assert.Equal("unknown", multipleMalformed?.Tool);
-        Assert.Equal("unknown", multipleMalformed?.Category);
+        Assert.Equal(AgentToolRegistry.ReadFileName, multipleMalformed?.Tool);
+        Assert.Equal(LiveToolRejectionProjector.InvalidContract, multipleMalformed?.Category);
+
+        var reverseMalformed = LiveToolRejectionProjector.Project(Response(
+            Call("one", AgentToolRegistry.SearchTextName, "{bad"),
+            Call("two", AgentToolRegistry.ReadFileName, "{\"path\":null}")), executor);
+        Assert.Equal(AgentFailureCodes.ToolArgumentsInvalid, reverseMalformed?.FailureCode);
+        Assert.Equal(AgentToolRegistry.SearchTextName, reverseMalformed?.Tool);
+        Assert.Equal(LiveToolRejectionProjector.InvalidJson, reverseMalformed?.Category);
 
         var multipleUntracked = LiveToolRejectionProjector.Project(Response(
             Call("one", AgentToolRegistry.ReadFileName, "{\"path\":\"missing-a.cs\"}"),
             Call("two", AgentToolRegistry.ReadFileName, "{\"path\":\"missing-b.cs\"}")), executor);
         Assert.Equal(AgentFailureCodes.ToolPathNotTracked, multipleUntracked?.FailureCode);
-        Assert.Equal("unknown", multipleUntracked?.Tool);
+        Assert.Equal(AgentToolRegistry.ReadFileName, multipleUntracked?.Tool);
+        Assert.Equal(LiveToolRejectionProjector.PathNotTracked, multipleUntracked?.Category);
+
+        var earlierOtherFailure = LiveToolRejectionProjector.Project(Response(
+            Call("one", AgentToolRegistry.ListFilesName, "{\"after\":\"missing-a.cs\"}"),
+            Call("two", AgentToolRegistry.ReadFileName, "{\"path\":\"missing-b.cs\"}")), executor);
+        Assert.Null(earlierOtherFailure);
 
         var unknownName = LiveToolRejectionProjector.Project(Response(
             Call("one", Canary, "{\"path\":\"src/SafeCaller.cs\"}")), executor);
