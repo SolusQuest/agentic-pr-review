@@ -1,0 +1,7 @@
+namespace ReviewSandbox;
+
+public static class Upload
+{
+    public static void Failed(string accessToken) => Log(accessToken);
+    private static void Log(string value) => System.Console.Error.WriteLine(value);
+}

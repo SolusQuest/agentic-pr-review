@@ -1,0 +1,6 @@
+namespace ReviewSandbox;
+
+public static class Caller
+{
+    public static string Label(string key) => Lookup.Find(key).Trim();
+}

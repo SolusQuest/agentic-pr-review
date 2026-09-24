@@ -1,0 +1,34 @@
+{
+  "expected_code": "Scored",
+  "defects": [
+    {
+      "id": "defect",
+      "severity": "high",
+      "observation_id": null,
+      "path": "src/Upload.cs",
+      "start_line": 5,
+      "end_line": 5
+    }
+  ],
+  "required_observations": [
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "src/Upload.cs",
+        "start_line": 5,
+        "end_line": 6
+      }
+    },
+    {
+      "tool": "read_file",
+      "observation_id": null,
+      "coverage": {
+        "path": "rules/review.md",
+        "start_line": 3,
+        "end_line": 3
+      }
+    }
+  ],
+  "prohibited_findings": []
+}

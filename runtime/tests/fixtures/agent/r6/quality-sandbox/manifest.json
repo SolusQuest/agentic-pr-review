@@ -1,0 +1,471 @@
+{
+  "format": "apr.r5.synthetic-replay.v1",
+  "source_kind": "authored-synthetic",
+  "configuration": {
+    "workflow_identity": "r6@quality-sandbox",
+    "provider_id": "synthetic-provider",
+    "model_id": "synthetic-model",
+    "adapter_id": "synthetic-adapter"
+  },
+  "files": [
+    {
+      "path": "cases/cs-defect/context.txt",
+      "role": "context",
+      "length": 84,
+      "sha256": "a7e6fb6183310e5186e8257011bac99aab4da0192c2bb2acecb9434f6d47e031"
+    },
+    {
+      "path": "cases/cs-defect/expected.json",
+      "role": "assertions",
+      "length": 634,
+      "sha256": "d35bfc72e443dba7661d09984d4c5fed2f1a2e8d83cc0cb655e1c7049d55fa8a"
+    },
+    {
+      "path": "cases/cs-defect/provider.json",
+      "role": "script",
+      "length": 1487,
+      "sha256": "6f9f2cbd960aeca9a74e736bc17b7f325c4dba73383c804614c07fe17264d7e0"
+    },
+    {
+      "path": "cases/cs-safe/context.txt",
+      "role": "context",
+      "length": 88,
+      "sha256": "f18885eaab9d707b0c04e566e7687e8d8a5bf2983dca1d9415b7a1bb02c0ef22"
+    },
+    {
+      "path": "cases/cs-safe/expected.json",
+      "role": "assertions",
+      "length": 564,
+      "sha256": "36e09e40bf5febb6817b0ba86e8f1eb607999a21e996abe6531931ee3dd4203a"
+    },
+    {
+      "path": "cases/cs-safe/provider.json",
+      "role": "script",
+      "length": 763,
+      "sha256": "6cd7ebd95aeceba73dfca2bd23798a08a605a9a1c1518a24eae8447c24c98e3b"
+    },
+    {
+      "path": "cases/repository-rule/context.txt",
+      "role": "context",
+      "length": 84,
+      "sha256": "c775697fac39c4b41b43722f1d02e632a46f94838bb1eaafa2638fcc7cab8108"
+    },
+    {
+      "path": "cases/repository-rule/expected.json",
+      "role": "assertions",
+      "length": 636,
+      "sha256": "652e948ee0b78b2fda390e8df680d4f39cd60faa14e14438a638440c725d729a"
+    },
+    {
+      "path": "cases/repository-rule/provider.json",
+      "role": "script",
+      "length": 1548,
+      "sha256": "abca906a42ea0699a0613161d8ac23bd4f6012e63c58e5ea95d5a4eae3b7afee"
+    },
+    {
+      "path": "cases/ts-defect/context.txt",
+      "role": "context",
+      "length": 84,
+      "sha256": "438eafdf65090ddf66e993bc1dd0a3123e931b408c7ee1eee8a2ddd288a9a6f7"
+    },
+    {
+      "path": "cases/ts-defect/expected.json",
+      "role": "assertions",
+      "length": 636,
+      "sha256": "8451dc850f67d8ad9906329503c263784ac4403a29d3202a6d238596f34a8b5a"
+    },
+    {
+      "path": "cases/ts-defect/provider.json",
+      "role": "script",
+      "length": 1335,
+      "sha256": "1a6071acb234bcfe507fc4dcc834b3ff3efb722ff7e1a403b66e8218ee14a671"
+    },
+    {
+      "path": "cases/ts-safe/context.txt",
+      "role": "context",
+      "length": 89,
+      "sha256": "0f4f2c8e2e44ab49ea11acd6a979dd57b40a0d83dce39b7b3b5e42353b2d57bd"
+    },
+    {
+      "path": "cases/ts-safe/expected.json",
+      "role": "assertions",
+      "length": 566,
+      "sha256": "a68c0f3b00360c778c76261954a3af09a2927c95d90c26ce47484aef1ff0ba34"
+    },
+    {
+      "path": "cases/ts-safe/provider.json",
+      "role": "script",
+      "length": 764,
+      "sha256": "c9bcf10494b3a50b6b7ed6452ed4bbfafca8c3d6a9ddbaf35815ee0b06d01508"
+    },
+    {
+      "path": "diff.json",
+      "role": "diff",
+      "length": 5652,
+      "sha256": "dc08dfdeea4366ec3292d96cb16d6fc2caac6126bde1d46173eea4ad0f8bfee5"
+    },
+    {
+      "path": "policy.txt",
+      "role": "policy",
+      "length": 413,
+      "sha256": "286bbbc31a63516d30d63c192bd65ea19579579411bd2acbd6008a5f1a7eb42c"
+    },
+    {
+      "path": "source/README.md",
+      "role": "repository",
+      "length": 199,
+      "sha256": "dfdff1e6d38af4ce8eb36abd2d286643cb096b6ca6083d1f494c0c0f448fa888"
+    },
+    {
+      "path": "source/docs/notes.txt",
+      "role": "repository",
+      "length": 37,
+      "sha256": "b54b07a1e235690ad5bb51c5173f2514775d6cb779749e827469bfd16d3569ec"
+    },
+    {
+      "path": "source/rules/review.md",
+      "role": "repository",
+      "length": 78,
+      "sha256": "c6829cbce2e3ad2a70d99b894a4715c0ca76ffb619747727f32e3ae4c6cd5bba"
+    },
+    {
+      "path": "source/src/Caller.cs",
+      "role": "repository",
+      "length": 128,
+      "sha256": "4f672cc8a0ae9afe963d5a87476db4f15c74d6dac77ec973fa44b2ff436f84b7"
+    },
+    {
+      "path": "source/src/Lookup.cs",
+      "role": "repository",
+      "length": 141,
+      "sha256": "26f842df85e844e212318bbffba989c8bafb008d5e51e1c8510fd4ff5abc1087"
+    },
+    {
+      "path": "source/src/SafeCaller.cs",
+      "role": "repository",
+      "length": 149,
+      "sha256": "dd87e2ba74ebe72aaaf9e3ad3c080f962e36a8733def5901943912f902dab08c"
+    },
+    {
+      "path": "source/src/Upload.cs",
+      "role": "repository",
+      "length": 212,
+      "sha256": "a37bf142680a6b9d07bc1f5a5c4f213a946f42f654af3f99c1e1ce55c67de858"
+    },
+    {
+      "path": "source/src/client.ts",
+      "role": "repository",
+      "length": 84,
+      "sha256": "abe06c6eed2cef01e3ab03ed8eda75e57503fc8919752bd46aea3b24da27ac09"
+    },
+    {
+      "path": "source/src/config.ts",
+      "role": "repository",
+      "length": 91,
+      "sha256": "d63aa649545e66117b1e7156c5a209912f21a436168e6e12b9a9e812b30635fe"
+    },
+    {
+      "path": "source/src/safe-client.ts",
+      "role": "repository",
+      "length": 84,
+      "sha256": "1013f908ac399af77f5cde7839740c651584078b40f09dae3e90b515a2eeb362"
+    }
+  ],
+  "runs": [
+    {
+      "id": "cs-defect",
+      "case_id": "cs-defect",
+      "transition": "initial",
+      "previous_run_id": null,
+      "reviewed_identity": {
+        "repository_id": "1383960589",
+        "review_target": 1,
+        "base_sha": "9eec5432d1e11e7823804f4de61f97dfb07822e6",
+        "head_sha": "ac9d7a41f971e4b1071313c979b41b20637bfef4"
+      },
+      "repository": [
+        {
+          "path": "README.md",
+          "file": "source/README.md"
+        },
+        {
+          "path": "docs/notes.txt",
+          "file": "source/docs/notes.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/rules/review.md"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/src/Caller.cs"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/src/Lookup.cs"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/src/SafeCaller.cs"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/src/Upload.cs"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/src/client.ts"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/src/config.ts"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/src/safe-client.ts"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/cs-defect/context.txt",
+      "script": "cases/cs-defect/provider.json",
+      "assertions": "cases/cs-defect/expected.json"
+    },
+    {
+      "id": "cs-safe",
+      "case_id": "cs-safe",
+      "transition": "same_head",
+      "previous_run_id": "cs-defect",
+      "reviewed_identity": {
+        "repository_id": "1383960589",
+        "review_target": 1,
+        "base_sha": "9eec5432d1e11e7823804f4de61f97dfb07822e6",
+        "head_sha": "ac9d7a41f971e4b1071313c979b41b20637bfef4"
+      },
+      "repository": [
+        {
+          "path": "README.md",
+          "file": "source/README.md"
+        },
+        {
+          "path": "docs/notes.txt",
+          "file": "source/docs/notes.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/rules/review.md"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/src/Caller.cs"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/src/Lookup.cs"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/src/SafeCaller.cs"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/src/Upload.cs"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/src/client.ts"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/src/config.ts"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/src/safe-client.ts"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/cs-safe/context.txt",
+      "script": "cases/cs-safe/provider.json",
+      "assertions": "cases/cs-safe/expected.json"
+    },
+    {
+      "id": "ts-defect",
+      "case_id": "ts-defect",
+      "transition": "same_head",
+      "previous_run_id": "cs-safe",
+      "reviewed_identity": {
+        "repository_id": "1383960589",
+        "review_target": 1,
+        "base_sha": "9eec5432d1e11e7823804f4de61f97dfb07822e6",
+        "head_sha": "ac9d7a41f971e4b1071313c979b41b20637bfef4"
+      },
+      "repository": [
+        {
+          "path": "README.md",
+          "file": "source/README.md"
+        },
+        {
+          "path": "docs/notes.txt",
+          "file": "source/docs/notes.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/rules/review.md"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/src/Caller.cs"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/src/Lookup.cs"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/src/SafeCaller.cs"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/src/Upload.cs"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/src/client.ts"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/src/config.ts"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/src/safe-client.ts"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/ts-defect/context.txt",
+      "script": "cases/ts-defect/provider.json",
+      "assertions": "cases/ts-defect/expected.json"
+    },
+    {
+      "id": "ts-safe",
+      "case_id": "ts-safe",
+      "transition": "same_head",
+      "previous_run_id": "ts-defect",
+      "reviewed_identity": {
+        "repository_id": "1383960589",
+        "review_target": 1,
+        "base_sha": "9eec5432d1e11e7823804f4de61f97dfb07822e6",
+        "head_sha": "ac9d7a41f971e4b1071313c979b41b20637bfef4"
+      },
+      "repository": [
+        {
+          "path": "README.md",
+          "file": "source/README.md"
+        },
+        {
+          "path": "docs/notes.txt",
+          "file": "source/docs/notes.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/rules/review.md"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/src/Caller.cs"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/src/Lookup.cs"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/src/SafeCaller.cs"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/src/Upload.cs"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/src/client.ts"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/src/config.ts"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/src/safe-client.ts"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/ts-safe/context.txt",
+      "script": "cases/ts-safe/provider.json",
+      "assertions": "cases/ts-safe/expected.json"
+    },
+    {
+      "id": "repository-rule",
+      "case_id": "repository-rule",
+      "transition": "same_head",
+      "previous_run_id": "ts-safe",
+      "reviewed_identity": {
+        "repository_id": "1383960589",
+        "review_target": 1,
+        "base_sha": "9eec5432d1e11e7823804f4de61f97dfb07822e6",
+        "head_sha": "ac9d7a41f971e4b1071313c979b41b20637bfef4"
+      },
+      "repository": [
+        {
+          "path": "README.md",
+          "file": "source/README.md"
+        },
+        {
+          "path": "docs/notes.txt",
+          "file": "source/docs/notes.txt"
+        },
+        {
+          "path": "rules/review.md",
+          "file": "source/rules/review.md"
+        },
+        {
+          "path": "src/Caller.cs",
+          "file": "source/src/Caller.cs"
+        },
+        {
+          "path": "src/Lookup.cs",
+          "file": "source/src/Lookup.cs"
+        },
+        {
+          "path": "src/SafeCaller.cs",
+          "file": "source/src/SafeCaller.cs"
+        },
+        {
+          "path": "src/Upload.cs",
+          "file": "source/src/Upload.cs"
+        },
+        {
+          "path": "src/client.ts",
+          "file": "source/src/client.ts"
+        },
+        {
+          "path": "src/config.ts",
+          "file": "source/src/config.ts"
+        },
+        {
+          "path": "src/safe-client.ts",
+          "file": "source/src/safe-client.ts"
+        }
+      ],
+      "diff": "diff.json",
+      "policy": "policy.txt",
+      "context": "cases/repository-rule/context.txt",
+      "script": "cases/repository-rule/provider.json",
+      "assertions": "cases/repository-rule/expected.json"
+    }
+  ]
+}
