@@ -61,10 +61,11 @@ internal static class LiveToolRejectionProjector
                 return null;
             if (parsed is null)
                 return new(AgentFailureCodes.ToolArgumentsInvalid, tool,
-                    category == ListInputInvalid ? ListInputInvalid :
-                    ArgumentCategory(call.ArgumentsJson) == InvalidJson
-                        ? InvalidJson
-                        : category ?? InvalidContract);
+                    call.Name == AgentToolRegistry.ListFilesName
+                        ? category ?? InvalidContract
+                        : ArgumentCategory(call.ArgumentsJson) == InvalidJson
+                            ? InvalidJson
+                            : category ?? InvalidContract);
             prepared.Add(parsed);
         }
 
@@ -118,6 +119,7 @@ internal static class LiveToolRejectionProjector
                 else category = failure switch
                 {
                     ListFilesArgumentFailure.Input => ListInputInvalid,
+                    ListFilesArgumentFailure.Json => InvalidJson,
                     ListFilesArgumentFailure.Normalization => ListNormalizationInvalid,
                     ListFilesArgumentFailure.Shape => ListShapeInvalid,
                     ListFilesArgumentFailure.Path => ListPathInvalid,

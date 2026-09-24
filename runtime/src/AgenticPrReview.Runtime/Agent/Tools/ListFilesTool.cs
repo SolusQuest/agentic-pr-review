@@ -24,6 +24,7 @@ internal enum ListFilesArgumentFailure
 {
     None,
     Input,
+    Json,
     Normalization,
     Shape,
     Path,
@@ -92,7 +93,7 @@ internal static partial class AgentToolArguments
         if (deserializationInput is null ||
             allowProviderSpelling && providerComparison is null)
         {
-            failure = ListFilesArgumentFailure.Normalization;
+            failure = JsonOrFailure(input, ListFilesArgumentFailure.Normalization);
             return false;
         }
 
@@ -143,13 +144,27 @@ internal static partial class AgentToolArguments
         }
         catch (JsonException)
         {
-            failure = ListFilesArgumentFailure.Shape;
+            failure = JsonOrFailure(input, ListFilesArgumentFailure.Shape);
             return false;
         }
         catch (Rfc8785CanonicalizationException)
         {
             failure = ListFilesArgumentFailure.Normalization;
             return false;
+        }
+    }
+
+    private static ListFilesArgumentFailure JsonOrFailure(
+        byte[] input, ListFilesArgumentFailure otherwise)
+    {
+        try
+        {
+            using var _ = JsonDocument.Parse(input);
+            return otherwise;
+        }
+        catch (JsonException)
+        {
+            return ListFilesArgumentFailure.Json;
         }
     }
 

@@ -63,7 +63,7 @@ public sealed class ListFilesTests
     }
 
     [Theory]
-    [InlineData("{bad", "Normalization")]
+    [InlineData("{bad", "Json")]
     [InlineData("[]", "Shape")]
     [InlineData("{\"prefix\":1}", "Shape")]
     [InlineData("{\"extra\":false}", "Shape")]
