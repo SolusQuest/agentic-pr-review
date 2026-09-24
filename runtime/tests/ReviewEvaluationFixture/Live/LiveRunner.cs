@@ -287,14 +287,18 @@ internal static class LiveRunner
         var adapter = new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
             DeepSeekAdapterContext.Adapter, runId);
         var client = DeepSeekChatBackend.CreateClient(adapter, metered);
-        var observed = new LiveChatObserver(client, accounting, journalAttempt);
+        var executor = new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot));
+        var observed = new LiveChatObserver(client, accounting, journalAttempt,
+            response => LiveToolRejectionProjector.Project(response, executor));
         journalAttempt.AgentStarted();
-        var outcome = await new AgentLoop(observed, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)))
+        var outcome = await new AgentLoop(observed, executor)
             .RunAsync(request, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
+        var rejection = observed.TakeRejection();
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)
         {
-            diagnostics.Add(LiveAgentDiagnostic.Capture(index, outcome.Diagnostic));
+            diagnostics.Add(LiveAgentDiagnostic.Capture(index, outcome.Diagnostic,
+                rejection ?? LiveToolRejectionProjection.Unknown(outcome.Diagnostic?.Code ?? "unknown")));
             return EvaluationScorer.Failure(run.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
         }
         var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,

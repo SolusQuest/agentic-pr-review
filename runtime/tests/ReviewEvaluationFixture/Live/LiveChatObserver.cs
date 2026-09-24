@@ -7,12 +7,23 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 // Chat-layer observer: the only seam that sees admitted usage and typed
 // backend exceptions, both erased inside AgentRunOutcome.
 internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting accounting,
-    ILiveAttemptObserver? attempt = null)
+    ILiveAttemptObserver? attempt = null,
+    Func<ProjectChatResponse, LiveToolRejectionProjection?>? rejectionProjector = null)
     : IProjectChatClient
 {
+    private LiveToolRejectionProjection? lastRejection;
+
+    internal LiveToolRejectionProjection? TakeRejection()
+    {
+        var value = lastRejection;
+        lastRejection = null;
+        return value;
+    }
+
     public async Task<ProjectChatResponse> GetResponseAsync(
         ProjectChatRequest request, CancellationToken cancellationToken)
     {
+        lastRejection = null;
         var call = attempt?.BeginCall();
         try
         {
@@ -24,6 +35,11 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
             {
                 call?.Returned(null);
                 return response;
+            }
+            if (rejectionProjector is not null)
+            {
+                try { lastRejection = rejectionProjector(response); }
+                catch { lastRejection = null; }
             }
             call?.Returned(response.Usage);
             if (response.Usage is { } usage) accounting.RecordUsage(usage);

@@ -190,5 +190,6 @@ internal sealed class LivePlan(
     AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(LivePlanInput))]
 [JsonSerializable(typeof(LivePlanDigestInput))]
+[JsonSerializable(typeof(LiveAgentDiagnostic))]
 [JsonSerializable(typeof(LiveRunSummary))]
 internal sealed partial class LiveJsonContext : JsonSerializerContext;

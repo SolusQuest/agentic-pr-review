@@ -36,6 +36,7 @@
     <None Include="..\fixtures\agent\r3-quality\**\*" Link="fixtures\agent\r3-quality\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\agent\r5\**\*" Link="fixtures\agent\r5\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\agent\r6\quality-sandbox\**\*" Link="fixtures\agent\r6\quality-sandbox\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\fixtures\agent\r6\quality-observation\*.jsonl" Link="fixtures\agent\r6\quality-observation\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\agent\r3-live-agent\**\*" Link="fixtures\agent\r3-live-agent\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\prefix-contract\**\*" Link="fixtures\prefix-contract\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

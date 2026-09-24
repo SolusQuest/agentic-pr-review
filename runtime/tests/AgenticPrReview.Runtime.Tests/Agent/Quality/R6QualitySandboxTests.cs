@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality;
@@ -10,6 +11,32 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 public sealed class R6QualitySandboxTests
 {
     private static string Corpus => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r6", "quality-sandbox");
+
+    [Theory]
+    [InlineData("cs-safe", "{\"path\":null}", AgentFailureCodes.ToolArgumentsInvalid)]
+    [InlineData("repository-rule", "{\"path\":\"src/NotTracked.cs\"}", AgentFailureCodes.ToolPathNotTracked)]
+    public async Task FrozenSnapshotRejectsBadToolBatchBeforeAnyExecution(
+        string caseId, string rejectedArguments, string expectedCode)
+    {
+        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture);
+        var run = fixture.Runs.Single(value => value.Input.CaseId == caseId);
+        var first = run.Script.Turns[0] with
+        {
+            ToolCalls =
+            [
+                new ReplayToolCall("first", AgentToolRegistry.ReadFileName,
+                    "{\"path\":\"src/Upload.cs\"}"),
+                new ReplayToolCall("second", AgentToolRegistry.ReadFileName, rejectedArguments),
+            ],
+        };
+        var script = new ReplayScript(run.Script.Turns.SetItem(0, first));
+        var derived = run.Derive(run.Input, script, fixture.CorpusSha256);
+        var result = await QualityRunner.ExecuteAsync(derived, Truth(caseId));
+        Assert.False(result.AgentOutcome.Succeeded);
+        Assert.Equal(expectedCode, result.AgentOutcome.Diagnostic?.Code);
+        Assert.Equal(0, result.AgentOutcome.Diagnostic?.ToolCalls);
+        Assert.Empty(result.AgentOutcome.Events.OfType<AgentToolResultEvent>());
+    }
 
     private static QualityCaseSpec Truth(string id)
     {
