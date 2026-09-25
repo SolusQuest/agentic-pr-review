@@ -1,8 +1,16 @@
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AgenticPrReview.Runtime.Execution.DeepSeek;
+
+internal enum DeepSeekRequestProfile
+{
+    Current = 0,
+    Output8192 = 1,
+}
 
 internal sealed class DeepSeekAdapterContext(
     string providerId,
@@ -26,6 +34,33 @@ internal sealed class DeepSeekAdapterContext(
         "\"framing\":\"deepseek.reasoning_content.utf8.v1\"}";
     internal const string Adapter =
         "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502";
+    internal static string CandidateAdapterDescriptor { get; } = AdapterDescriptor.Replace(
+        "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal);
+    internal static string CandidateAdapter { get; } = Convert.ToHexString(
+        SHA256.HashData(Encoding.UTF8.GetBytes(CandidateAdapterDescriptor))).ToLowerInvariant();
+
+    internal static bool TryResolveProfile(string? adapterId, out DeepSeekRequestProfile profile)
+    {
+        profile = DeepSeekRequestProfile.Current;
+        if (StringComparer.Ordinal.Equals(adapterId, Adapter)) return true;
+        if (!StringComparer.Ordinal.Equals(adapterId, CandidateAdapter)) return false;
+        profile = DeepSeekRequestProfile.Output8192;
+        return true;
+    }
+
+    internal static string AdapterFor(DeepSeekRequestProfile profile) => profile switch
+    {
+        DeepSeekRequestProfile.Current => Adapter,
+        DeepSeekRequestProfile.Output8192 => CandidateAdapter,
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+    };
+
+    internal static AgentLimitAuthority LimitAuthorityFor(DeepSeekRequestProfile profile) => profile switch
+    {
+        DeepSeekRequestProfile.Current => new(Adapter, AgentLimitProfile.Current),
+        DeepSeekRequestProfile.Output8192 => new(CandidateAdapter, AgentLimitProfile.Output8192),
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+    };
 
     internal string ProviderId { get; } = providerId;
     internal string ModelId { get; } = modelId;
@@ -35,8 +70,14 @@ internal sealed class DeepSeekAdapterContext(
     internal bool IsValid =>
         StringComparer.Ordinal.Equals(ProviderId, Provider) &&
         StringComparer.Ordinal.Equals(ModelId, Model) &&
-        StringComparer.Ordinal.Equals(AdapterId, Adapter) &&
+        TryResolveProfile(AdapterId, out _) &&
         AgentValueDomains.IsIdentifier(SessionId);
+
+    internal bool TryProfile(out DeepSeekRequestProfile profile)
+    {
+        profile = DeepSeekRequestProfile.Current;
+        return IsValid && TryResolveProfile(AdapterId, out profile);
+    }
 
     public override string ToString() => "deepseek_adapter_context";
 }
@@ -68,7 +109,13 @@ internal sealed class DeepSeekChatBackend(
                 ProjectChatNormalizationReason.RequestProjection);
         }
 
-        var projection = DeepSeekRequestWriter.Write(request);
+        if (!context.TryProfile(out var profile))
+        {
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.RequestProjection);
+        }
+        var projection = DeepSeekRequestWriter.Write(request, profile);
         if (projection.Outcome != DeepSeekRequestWriteOutcome.Success ||
             !projection.HasBody)
         {

@@ -55,6 +55,14 @@ internal static class Program
                 Console.WriteLine(verdict.ToJsonString());
                 return code;
             }
+            if (args is ["r5-plan", "--corpus", { } candidateCorpus, "--out", { } candidateOut,
+                "--profile", "output8192"])
+            {
+                var (code, verdict) = R5CaseVerifier.MakeLivePlan(candidateCorpus, candidateOut,
+                    DeepSeekRequestProfile.Output8192);
+                Console.WriteLine(verdict.ToJsonString());
+                return code;
+            }
             if (args.SequenceEqual(["reset", "--fixture", "self-test"]))
                 return await Growth.Reset.ResetOwnerProbe.RunAsync();
             if (args.SequenceEqual(["replay-child"])) return await ReplayChild.MainAsync();
@@ -302,6 +310,7 @@ internal static class R5CaseVerifier
             case "reset-owner": return ExtractResetOwner(lines[^1]);
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
             case "live-plan": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
+            case "live-candidate": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
             case "live-coverage": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             case "quality-sandbox": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             default: return (null, "input_invalid");
@@ -675,7 +684,8 @@ internal static class R5CaseVerifier
     // carries no credential, is written to a caller-owned private path, and V1
     // never dispatches --execute. Live authorization remains a separate V3
     // act.
-    internal static (int, JsonObject) MakeLivePlan(string corpus, string outPath)
+    internal static (int, JsonObject) MakeLivePlan(string corpus, string outPath,
+        DeepSeekRequestProfile profile = DeepSeekRequestProfile.Current)
     {
         try
         {
@@ -703,8 +713,8 @@ internal static class R5CaseVerifier
                 {
                     ["provider_id"] = DeepSeekAdapterContext.Provider,
                     ["model_id"] = DeepSeekAdapterContext.Model,
-                    ["adapter_id"] = DeepSeekAdapterContext.Adapter,
-                    ["configuration_sha256"] = LivePlanAdmission.ProviderConfigurationSha256(),
+                    ["adapter_id"] = DeepSeekAdapterContext.AdapterFor(profile),
+                    ["configuration_sha256"] = LivePlanAdmission.ProviderConfigurationSha256(profile),
                 },
                 ["schedule"] = new JsonArray(declared
                     .Select(id => (JsonNode)new JsonObject { ["case_id"] = id, ["repeats"] = 1 }).ToArray()),
@@ -713,14 +723,17 @@ internal static class R5CaseVerifier
                     ["max_evaluations"] = declared.Length,
                     ["max_model_calls"] = declared.Length * AgentLimits.ModelCalls,
                     ["max_input_tokens"] = declared.Length * AgentLimits.ModelCalls * 8192L,
-                    ["max_output_tokens"] = declared.Length * AgentLimits.ModelCalls * 512L,
-                    ["max_combined_tokens"] = declared.Length * AgentLimits.ModelCalls * 8704L,
+                    ["max_output_tokens"] = declared.Length * AgentLimits.ModelCalls *
+                        (profile == DeepSeekRequestProfile.Current ? 512L : DeepSeekRequestWriter.CandidateMaxTokens),
+                    ["max_combined_tokens"] = declared.Length * AgentLimits.ModelCalls *
+                        (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + DeepSeekRequestWriter.CandidateMaxTokens),
                     ["max_seconds"] = 600,
                     ["spend_ceiling_micro_usd"] = declared.Length * AgentLimits.ModelCalls * 1000L,
                     ["per_call"] = new JsonObject
                     {
                         ["max_input_tokens"] = 8192,
-                        ["max_output_tokens"] = 512,
+                        ["max_output_tokens"] = profile == DeepSeekRequestProfile.Current ? 512 :
+                            DeepSeekRequestWriter.CandidateMaxTokens,
                         ["max_charge_micro_usd"] = 1000,
                     },
                 },

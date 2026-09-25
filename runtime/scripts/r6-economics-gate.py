@@ -202,7 +202,7 @@ class Gate:
         self.mark(mode + "-verify")
         verdict_path, _ = verify(report, stderr)
         verdict = json.loads(bounded(verdict_path))
-        require(verdict["code"] == "r6_gate_verified" and verdict["cases"] == 82)
+        require(verdict["code"] == "r6_gate_verified" and verdict["cases"] == 83)
         stable = bounded(projection)
         self.mark(mode + "-hostile-producers")
         for mutation in MUTATIONS:
@@ -211,7 +211,7 @@ class Gate:
             verify(candidate, errors, 1)
         self.run([*runner, "r6-gate", "mutate", "--report", report,
                   "--mutation", "retained-root"], retained=True, seconds=30)
-        print(f"r6_economics_gate mode={mode} cases=82 adversarial={len(MUTATIONS) + 1} result=verified", flush=True)
+        print(f"r6_economics_gate mode={mode} cases=83 adversarial={len(MUTATIONS) + 1} result=verified", flush=True)
         return stable
 
     def execute(self, selected_mode):

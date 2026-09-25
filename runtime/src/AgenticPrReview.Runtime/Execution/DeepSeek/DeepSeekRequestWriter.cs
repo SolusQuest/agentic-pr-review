@@ -82,6 +82,7 @@ internal static class DeepSeekRequestWriter
 {
     internal const string Model = "deepseek-v4-flash";
     internal const int MaxTokens = 4096;
+    internal const int CandidateMaxTokens = 8192;
     internal const int ToolsMaximum = 128;
 
     private static readonly UTF8Encoding StrictUtf8 = new(
@@ -89,9 +90,11 @@ internal static class DeepSeekRequestWriter
         throwOnInvalidBytes: true);
 
     internal static DeepSeekRequestWriteResult Write(
-        MinimalChatRequest? request)
+        MinimalChatRequest? request,
+        DeepSeekRequestProfile profile = DeepSeekRequestProfile.Current)
     {
-        if (!TryValidate(request, out var schemas))
+        if (profile is not (DeepSeekRequestProfile.Current or DeepSeekRequestProfile.Output8192) ||
+            !TryValidate(request, out var schemas))
         {
             return DeepSeekRequestWriteResult.Invalid();
         }
@@ -102,7 +105,7 @@ internal static class DeepSeekRequestWriter
                 DeepSeekTransportPolicy.RequestBodyMaxBytes);
             using (var writer = new Utf8JsonWriter(output))
             {
-                WriteRequest(writer, request!, schemas!);
+                WriteRequest(writer, request!, schemas!, profile);
                 writer.Flush();
             }
 
@@ -465,7 +468,8 @@ internal static class DeepSeekRequestWriter
     private static void WriteRequest(
         Utf8JsonWriter writer,
         MinimalChatRequest request,
-        byte[][] schemas)
+        byte[][] schemas,
+        DeepSeekRequestProfile profile)
     {
         writer.WriteStartObject();
         writer.WriteString("model", Model);
@@ -483,7 +487,7 @@ internal static class DeepSeekRequestWriter
         writer.WriteString("type", "enabled");
         writer.WriteEndObject();
         writer.WriteString("reasoning_effort", "high");
-        writer.WriteNumber("max_tokens", MaxTokens);
+        writer.WriteNumber("max_tokens", profile == DeepSeekRequestProfile.Current ? MaxTokens : CandidateMaxTokens);
         writer.WritePropertyName("tools");
         writer.WriteStartArray();
         for (var index = 0; index < request.Tools.Length; index++)

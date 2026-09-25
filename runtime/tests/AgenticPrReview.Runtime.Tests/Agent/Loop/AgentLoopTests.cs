@@ -1457,6 +1457,41 @@ public sealed class AgentLoopTests
         Assert.True(outcome.Succeeded);
     }
 
+    [Theory]
+    [InlineData(65_536, true)]
+    [InlineData(65_537, false)]
+    public async Task CandidateCumulativeOutputLimitUsesTheTrustedAuthority(long outputTokens, bool admitted)
+    {
+        var authority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Output8192);
+        var baseline = Request();
+        var request = baseline with
+        {
+            StablePlan = baseline.StablePlan with
+            {
+                ProviderId = DeepSeekAdapterContext.Provider,
+                ModelId = DeepSeekAdapterContext.Model,
+                AdapterId = authority.AdapterId,
+                LimitsSha256 = AgentCanonical.LimitsSha256(authority.Profile),
+            },
+        };
+        var chat = new ScriptedChatClient([Response(TerminalCall("finish", "done"), 0, outputTokens)]);
+        var outcome = await new AgentLoop(chat, new ScriptedToolExecutor(), limitAuthority: authority)
+            .RunAsync(request, CancellationToken.None);
+        Assert.Equal(admitted, outcome.Succeeded);
+        if (!admitted) AssertFailure(outcome, "agent_token_limit");
+        Assert.Single(chat.Requests);
+
+        var crossed = request with
+        {
+            StablePlan = request.StablePlan with { LimitsSha256 = AgentCanonical.LimitsSha256() },
+        };
+        var refusedChat = new ScriptedChatClient([Response(TerminalCall("finish", "done"), 0, 1)]);
+        var refused = await new AgentLoop(refusedChat, new ScriptedToolExecutor(), limitAuthority: authority)
+            .RunAsync(crossed, CancellationToken.None);
+        AssertFailure(refused, "agent_response_invalid");
+        Assert.Empty(refusedChat.Requests);
+    }
+
     [Fact]
     public async Task EighthFailedToFinishTurnEndsAtModelLimitWithoutRetry()
     {

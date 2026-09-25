@@ -8,6 +8,24 @@ internal readonly record struct AgentLimit(
     long Value,
     string Unit);
 
+internal enum AgentLimitProfile
+{
+    Current = 0,
+    Output8192 = 1,
+}
+
+// This authority is supplied by trusted composition. Agent code only knows
+// the selected adapter identity and cumulative limits, not provider policy.
+internal sealed record AgentLimitAuthority(string AdapterId, AgentLimitProfile Profile)
+{
+    internal static bool TryResolve(string adapterId, AgentLimitAuthority? authority, out AgentLimitProfile profile)
+    {
+        profile = authority?.Profile ?? AgentLimitProfile.Current;
+        return (authority is null || StringComparer.Ordinal.Equals(adapterId, authority.AdapterId)) &&
+            profile is AgentLimitProfile.Current or AgentLimitProfile.Output8192;
+    }
+}
+
 internal static class AgentLimits
 {
     internal const int ModelCalls = 8;
@@ -18,6 +36,8 @@ internal static class AgentLimits
     internal const long InputTokens = 262_144;
     internal const long OutputTokens = 32_768;
     internal const long CombinedTokens = 294_912;
+    internal const long Output8192Tokens = 65_536;
+    internal const long Combined8192Tokens = 327_680;
     internal const int RequestBytes = 1 * 1024 * 1024;
     internal const int ResponseBytes = 1 * 1024 * 1024;
     internal const int Messages = 64;
@@ -120,4 +140,32 @@ internal static class AgentLimits
         new(52, "diff_source_bytes_per_file", DiffSourceBytesPerFile, "bytes"),
         new(53, "diff_snapshot_bytes", DiffSnapshotBytes, "bytes"),
     ];
+
+    internal static ImmutableArray<AgentLimit> RegistryFor(AgentLimitProfile profile) => profile switch
+    {
+        AgentLimitProfile.Current => Registry,
+        AgentLimitProfile.Output8192 => CandidateRegistry,
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+    };
+
+    internal static long OutputTokensFor(AgentLimitProfile profile) => profile switch
+    {
+        AgentLimitProfile.Current => OutputTokens,
+        AgentLimitProfile.Output8192 => Output8192Tokens,
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+    };
+
+    internal static long CombinedTokensFor(AgentLimitProfile profile) => profile switch
+    {
+        AgentLimitProfile.Current => CombinedTokens,
+        AgentLimitProfile.Output8192 => Combined8192Tokens,
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+    };
+
+    private static ImmutableArray<AgentLimit> CandidateRegistry { get; } = Registry.Select(row => row.Name switch
+    {
+        "output_tokens" => row with { Value = Output8192Tokens },
+        "combined_tokens" => row with { Value = Combined8192Tokens },
+        _ => row,
+    }).ToImmutableArray();
 }

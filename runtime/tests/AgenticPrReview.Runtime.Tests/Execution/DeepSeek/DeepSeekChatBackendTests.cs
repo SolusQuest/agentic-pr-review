@@ -36,6 +36,28 @@ public sealed class DeepSeekChatBackendTests
     }
 
     [Fact]
+    public void CandidateAdapterHasDistinctExactDescriptorAndClosedLimitAuthority()
+    {
+        Assert.Equal("d87f3f29cff8d5d3d276c9e3fa22cebf1f1291da89d03597b7a0ebde5cd9f42d",
+            DeepSeekAdapterContext.CandidateAdapter);
+        Assert.Equal(DeepSeekAdapterContext.AdapterDescriptor.Replace(
+                "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal),
+            DeepSeekAdapterContext.CandidateAdapterDescriptor);
+        Assert.Equal(DeepSeekAdapterContext.CandidateAdapter,
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                DeepSeekAdapterContext.CandidateAdapterDescriptor))).ToLowerInvariant());
+        Assert.True(DeepSeekAdapterContext.TryResolveProfile(DeepSeekAdapterContext.Adapter, out var current));
+        Assert.Equal(DeepSeekRequestProfile.Current, current);
+        Assert.True(DeepSeekAdapterContext.TryResolveProfile(DeepSeekAdapterContext.CandidateAdapter, out var candidate));
+        Assert.Equal(DeepSeekRequestProfile.Output8192, candidate);
+        Assert.False(DeepSeekAdapterContext.TryResolveProfile("unknown", out _));
+        Assert.Equal(AgentLimitProfile.Current, DeepSeekAdapterContext.LimitAuthorityFor(current).Profile);
+        Assert.Equal(AgentLimitProfile.Output8192, DeepSeekAdapterContext.LimitAuthorityFor(candidate).Profile);
+        Assert.True(new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+            DeepSeekAdapterContext.CandidateAdapter, "candidate-session").IsValid);
+    }
+
+    [Fact]
     public void CodecUsesExactUtf8BytesAndDeepSeekStructure()
     {
         var codec = DeepSeekReasoningContinuationCodec.Instance;
