@@ -50,7 +50,7 @@ internal sealed class EconomicsPlan
     internal AgentSessionTrustedRequest TrustedRequest(AdmittedReplayRun run)
     {
         var trusted = run.CreateTrustedRequest(ReplayState.Build);
-        return Profile == DeepSeekRequestProfile.Current ? trusted : trusted with
+        return trusted with
         {
             ProviderId = Input.Provider.ProviderId,
             ModelId = Input.Provider.ModelId,

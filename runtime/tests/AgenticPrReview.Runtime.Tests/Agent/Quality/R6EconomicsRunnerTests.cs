@@ -158,6 +158,22 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Fact]
+    public void CurrentEconomicsPlanBindsTheClosedAdapterEvenForAnotherAdmittedReplayFixture()
+    {
+        using var files = new Inputs();
+        var plan = EconomicsPlan.Admit(files.Plan, false);
+        var seed = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay-seed", "valid");
+        var foreign = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(seed).Fixture).Runs[0];
+        var trusted = plan.TrustedRequest(foreign);
+        Assert.Equal(DeepSeekAdapterContext.Provider, trusted.ProviderId);
+        Assert.Equal(DeepSeekAdapterContext.Model, trusted.ModelId);
+        Assert.Equal(DeepSeekAdapterContext.Adapter, trusted.AdapterId);
+        Assert.Equal(DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Current), trusted.LimitAuthority);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
+        Assert.Equal(AgentCanonical.LimitsSha256(), stable!.StablePlan.LimitsSha256);
+    }
+
+    [Fact]
     public void MaximumScheduleAccountsForEverySupervisorSlotWithoutRaisingGlobalTimeLimit()
     {
         using var files = new Inputs();
