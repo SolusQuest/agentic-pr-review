@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
@@ -576,6 +577,31 @@ public sealed class R5VerifierCoverageTests
         Assert.Equal(EvaluationSource.Commit, parity["source_commit"]?.GetValue<string>());
         Assert.Equal(13, parity["cases"]!.AsArray().Count);
         Assert.NotNull(parity["configuration_sha256"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Output65536LiveScenarioUsesTheStrictPlanVerifier()
+    {
+        var plan = WriteTemp("{}");
+        try
+        {
+            Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus("quality", "bundle"), plan,
+                DeepSeekRequestProfile.Output65536).Item1);
+            var lines = new List<string>();
+            var run = await LiveRunner.RunAsync(plan, false,
+                new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
+            Assert.Equal(DeepSeekAdapterContext.Output65536Adapter,
+                run.Journal.Document.Plan.Provider.AdapterId);
+            Assert.Equal(0, Verify("live-output65536", string.Join('\n', lines),
+                corpus: Corpus("quality", "bundle")).Code);
+            lines[^1] = LivePlanSummaryLine(run.Summary with
+            { Completed = run.Summary.Completed + 1 });
+            var (code, verdict) = Verify("live-output65536", string.Join('\n', lines),
+                corpus: Corpus("quality", "bundle"));
+            Assert.Equal(1, code);
+            Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+        }
+        finally { File.Delete(plan); }
     }
 
     [Fact]

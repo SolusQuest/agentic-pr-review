@@ -319,6 +319,7 @@ internal static class R5CaseVerifier
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
             case "live-plan": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
             case "live-candidate": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
+            case "live-output65536": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
             case "live-coverage": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             case "quality-sandbox": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             default: return (null, "input_invalid");

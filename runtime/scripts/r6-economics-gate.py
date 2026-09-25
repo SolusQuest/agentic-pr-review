@@ -167,7 +167,7 @@ class Gate:
         require(results and all(result.get("outcome") == "Passed" for result in results))
         required = {
             "ComparisonOracleRetainsConditionalQualityAndRejectsConflictingInputs": 1,
-            "EconomicsOracleChecksActualWorkerAndFailureSemantics": 20,
+            "EconomicsOracleChecksActualWorkerAndFailureSemantics": 21,
             "HostProbeReadsActualEncryptedResetGenerationAndFreshContinuation": 1,
             "HistoryOwnersProduceFreshWorkersAndTheProductionHostResetChain": 1,
             "TokenAndPrefixOwnersProduceTheIndependentlyRequiredSemantics": 1,
