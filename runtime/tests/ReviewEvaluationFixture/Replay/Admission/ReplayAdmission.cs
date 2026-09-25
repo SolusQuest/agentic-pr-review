@@ -73,6 +73,7 @@ internal static class ReplayAdmission
             !ReplayLimits.Text(configuration.WorkflowIdentity, 256) || !ReplayLimits.Text(configuration.ProviderId, 128) ||
             !ReplayLimits.Text(configuration.ModelId, 128) || !ReplayLimits.Text(configuration.AdapterId, 128) ||
             StringComparer.Ordinal.Equals(configuration.AdapterId, DeepSeekAdapterContext.CandidateAdapter) ||
+            StringComparer.Ordinal.Equals(configuration.AdapterId, DeepSeekAdapterContext.Output65536Adapter) ||
             manifest.Files.IsDefault || manifest.Files.Length is < 1 or > ReplayLimits.Files ||
             manifest.Runs.IsDefault || manifest.Runs.Length is < 1 or > ReplayLimits.Runs) return false;
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ReplayLimits.ManifestName };

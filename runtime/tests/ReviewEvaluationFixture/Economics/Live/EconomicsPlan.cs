@@ -91,8 +91,7 @@ internal sealed class EconomicsPlan
             execute && (!input.Source.Clean || currentBuild && !EvaluationSource.Clean)) Reject("source_invalid");
         var per = input.Bounds.PerCall;
         if (per.MaxInputTokens is < 1 or > AgentLimits.InputTokens / 8 ||
-            per.MaxOutputTokens != (profile == DeepSeekRequestProfile.Current
-                ? DeepSeekRequestWriter.MaxTokens : DeepSeekRequestWriter.CandidateMaxTokens) ||
+            per.MaxOutputTokens != DeepSeekRequestWriter.MaxTokensFor(profile) ||
             input.Bounds.MaxModelCalls != plan.Slots.Length * 8L) Reject("allocation_invalid");
         EconomicsAllocation required = new(0, 0, 0, 0, 0, 0,
             CampaignOverheadMilliseconds(plan.Slots.Length, input.SpacingMilliseconds));

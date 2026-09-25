@@ -1492,6 +1492,77 @@ public sealed class AgentLoopTests
         Assert.Empty(refusedChat.Requests);
     }
 
+    [Theory]
+    [InlineData(65_536, true)]
+    [InlineData(65_537, false)]
+    public async Task Output65536EightCallCumulativeBoundaryUsesTrustedAuthority(
+        long finalOutputTokens, bool admitted)
+    {
+        var authority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Output65536);
+        var baseline = Request();
+        var request = baseline with
+        {
+            StablePlan = baseline.StablePlan with
+            {
+                ProviderId = DeepSeekAdapterContext.Provider,
+                ModelId = DeepSeekAdapterContext.Model,
+                AdapterId = authority.AdapterId,
+                LimitsSha256 = AgentCanonical.LimitsSha256(authority.Profile),
+            },
+        };
+        var responses = Enumerable.Range(0, AgentLimits.ModelCalls).Select(index => Response(
+            index == AgentLimits.ModelCalls - 1
+                ? TerminalCall("finish", "done")
+                : new ProjectToolCallContent("read-" + index, "read_file", "{\"path\":\"a.txt\"}"),
+            32_768,
+            index == AgentLimits.ModelCalls - 1 ? finalOutputTokens : 65_536)).ToArray();
+        var chat = new ScriptedChatClient(responses);
+        var executor = new ScriptedToolExecutor(call => Success(call, new string('a', 64), "a.txt", 1));
+        var outcome = await new AgentLoop(chat, executor, limitAuthority: authority)
+            .RunAsync(request, CancellationToken.None);
+        Assert.Equal(admitted, outcome.Succeeded);
+        if (!admitted) AssertFailure(outcome, "agent_token_limit");
+        Assert.Equal(AgentLimits.ModelCalls, chat.Requests.Count);
+        Assert.Equal(AgentLimits.ModelCalls - 1, executor.Order.Count);
+
+        var crossed = request with
+        {
+            StablePlan = request.StablePlan with { LimitsSha256 = AgentCanonical.LimitsSha256() },
+        };
+        var refusedChat = new ScriptedChatClient([Response(TerminalCall("finish", "done"), 0, 1)]);
+        var refused = await new AgentLoop(refusedChat, new ScriptedToolExecutor(), limitAuthority: authority)
+            .RunAsync(crossed, CancellationToken.None);
+        AssertFailure(refused, "agent_response_invalid");
+        Assert.Empty(refusedChat.Requests);
+    }
+
+    [Fact]
+    public async Task Output65536RefusesNinthCallAfterEightToolTurns()
+    {
+        var authority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Output65536);
+        var baseline = Request();
+        var request = baseline with
+        {
+            StablePlan = baseline.StablePlan with
+            {
+                ProviderId = DeepSeekAdapterContext.Provider,
+                ModelId = DeepSeekAdapterContext.Model,
+                AdapterId = authority.AdapterId,
+                LimitsSha256 = AgentCanonical.LimitsSha256(authority.Profile),
+            },
+        };
+        var responses = Enumerable.Range(0, AgentLimits.ModelCalls)
+            .Select(index => Response(new ProjectToolCallContent("read-" + index,
+                "read_file", "{\"path\":\"a.txt\"}"), 32_768, 65_536))
+            .Append(Response(TerminalCall("finish", "too late"), 0, 0));
+        var chat = new ScriptedChatClient(responses);
+        var executor = new ScriptedToolExecutor(call => Success(call, new string('a', 64), "a.txt", 1));
+        var outcome = await new AgentLoop(chat, executor, limitAuthority: authority)
+            .RunAsync(request, CancellationToken.None);
+        AssertFailure(outcome, "agent_model_limit");
+        Assert.Equal(AgentLimits.ModelCalls, chat.Requests.Count);
+    }
+
     [Fact]
     public async Task EighthFailedToFinishTurnEndsAtModelLimitWithoutRetry()
     {

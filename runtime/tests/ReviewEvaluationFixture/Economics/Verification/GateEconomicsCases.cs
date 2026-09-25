@@ -44,6 +44,26 @@ internal static class GateEconomicsCases
             },
         };
         await Add("c2-output8192", "candidate-output8192", candidate);
+        var output65536PerCall = replay.Bounds.PerCall with
+        {
+            MaxOutputTokens = DeepSeekRequestWriter.Output65536MaxTokens,
+        };
+        var output65536 = replay with
+        {
+            Provider = replay.Provider with
+            {
+                AdapterId = DeepSeekAdapterContext.Output65536Adapter,
+                ConfigurationSha256 = LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536),
+            },
+            Bounds = replay.Bounds with
+            {
+                PerCall = output65536PerCall,
+                MaxOutputTokens = replay.Bounds.MaxModelCalls * output65536PerCall.MaxOutputTokens,
+                MaxCombinedTokens = replay.Bounds.MaxModelCalls *
+                    (output65536PerCall.MaxInputTokens + output65536PerCall.MaxOutputTokens),
+            },
+        };
+        await Add("c2-output65536", "candidate-output65536", output65536);
         await Add("c2-full", "capacity-reset", Prepare());
         // Deliberately fail on an uncommitted build. Final acceptance cannot
         // silently take the dirty-source rejection branch in place of execute.

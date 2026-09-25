@@ -158,6 +158,64 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Fact]
+    public void Output65536EconomicsPlanBindsFullChildAllocationAndTariff()
+    {
+        using var files = new Inputs();
+        var original = files.Plan;
+        var calls = original.Bounds.MaxModelCalls;
+        var per = original.Bounds.PerCall with { MaxOutputTokens = 65_536 };
+        var input = original with
+        {
+            Provider = original.Provider with
+            {
+                AdapterId = DeepSeekAdapterContext.Output65536Adapter,
+                ConfigurationSha256 = LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536),
+            },
+            Bounds = original.Bounds with
+            {
+                PerCall = per,
+                MaxOutputTokens = calls * per.MaxOutputTokens,
+                MaxCombinedTokens = calls * (per.MaxInputTokens + per.MaxOutputTokens),
+            },
+        };
+        var admitted = EconomicsPlan.Admit(input, false);
+        Assert.Equal(DeepSeekRequestProfile.Output65536, admitted.Profile);
+        Assert.Equal(262_144, admitted.ChildAllocation.InputTokens);
+        Assert.Equal(524_288, admitted.ChildAllocation.OutputTokens);
+        Assert.Equal(786_432, admitted.ChildAllocation.CombinedTokens);
+        Assert.NotNull(admitted.LoadTariff(default));
+        var replay = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(input.Replay.Path).Fixture);
+        var trusted = admitted.TrustedRequest(replay.Runs[0]);
+        Assert.Equal(DeepSeekAdapterContext.Output65536Adapter, trusted.AdapterId);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
+        Assert.Equal(AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536),
+            stable!.StablePlan.LimitsSha256);
+        foreach (var output in new[] { 4096, 8192, 65_535, 65_537 })
+        {
+            Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+            {
+                Bounds = input.Bounds with { PerCall = per with { MaxOutputTokens = output } },
+            }, false));
+        }
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+        {
+            Bounds = input.Bounds with { MaxOutputTokens = input.Bounds.MaxOutputTokens - 1 },
+        }, false));
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+        {
+            Provider = input.Provider with { ConfigurationSha256 = LivePlanAdmission.ProviderConfigurationSha256() },
+        }, false));
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+        {
+            Bounds = input.Bounds with
+            {
+                PerCall = per with { MaxChargeMicroUsd = 1 },
+                SpendCeilingMicroUsd = calls,
+            },
+        }, false).LoadTariff(default));
+    }
+
+    [Fact]
     public void CurrentEconomicsPlanBindsTheClosedAdapterEvenForAnotherAdmittedReplayFixture()
     {
         using var files = new Inputs();

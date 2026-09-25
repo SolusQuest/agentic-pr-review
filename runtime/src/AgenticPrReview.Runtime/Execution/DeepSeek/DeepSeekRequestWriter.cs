@@ -83,7 +83,16 @@ internal static class DeepSeekRequestWriter
     internal const string Model = "deepseek-v4-flash";
     internal const int MaxTokens = 4096;
     internal const int CandidateMaxTokens = 8192;
+    internal const int Output65536MaxTokens = 65_536;
     internal const int ToolsMaximum = 128;
+
+    internal static int MaxTokensFor(DeepSeekRequestProfile profile) => profile switch
+    {
+        DeepSeekRequestProfile.Current => MaxTokens,
+        DeepSeekRequestProfile.Output8192 => CandidateMaxTokens,
+        DeepSeekRequestProfile.Output65536 => Output65536MaxTokens,
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+    };
 
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
@@ -93,7 +102,8 @@ internal static class DeepSeekRequestWriter
         MinimalChatRequest? request,
         DeepSeekRequestProfile profile = DeepSeekRequestProfile.Current)
     {
-        if (profile is not (DeepSeekRequestProfile.Current or DeepSeekRequestProfile.Output8192) ||
+        if (profile is not (DeepSeekRequestProfile.Current or DeepSeekRequestProfile.Output8192 or
+                DeepSeekRequestProfile.Output65536) ||
             !TryValidate(request, out var schemas))
         {
             return DeepSeekRequestWriteResult.Invalid();
@@ -487,7 +497,7 @@ internal static class DeepSeekRequestWriter
         writer.WriteString("type", "enabled");
         writer.WriteEndObject();
         writer.WriteString("reasoning_effort", "high");
-        writer.WriteNumber("max_tokens", profile == DeepSeekRequestProfile.Current ? MaxTokens : CandidateMaxTokens);
+        writer.WriteNumber("max_tokens", MaxTokensFor(profile));
         writer.WritePropertyName("tools");
         writer.WriteStartArray();
         for (var index = 0; index < request.Tools.Length; index++)
