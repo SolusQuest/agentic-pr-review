@@ -115,8 +115,9 @@ internal static class LivePlanAdmission
             bounds.MaxSeconds is < 1 or > 86400 || bounds.SpendCeilingMicroUsd < 1 ||
             perCall.MaxInputTokens is < 1 || perCall.MaxInputTokens > Math.Min(bounds.MaxInputTokens, AgentLimits.InputTokens) ||
             perCall.MaxOutputTokens is < 1 || perCall.MaxOutputTokens > Math.Min(bounds.MaxOutputTokens,
-                profile == DeepSeekRequestProfile.Current ? DeepSeekRequestWriter.MaxTokens : DeepSeekRequestWriter.CandidateMaxTokens) ||
-            profile == DeepSeekRequestProfile.Output8192 && perCall.MaxOutputTokens != DeepSeekRequestWriter.CandidateMaxTokens ||
+                DeepSeekRequestWriter.MaxTokensFor(profile)) ||
+            profile != DeepSeekRequestProfile.Current &&
+                perCall.MaxOutputTokens != DeepSeekRequestWriter.MaxTokensFor(profile) ||
             perCall.MaxInputTokens + perCall.MaxOutputTokens > bounds.MaxCombinedTokens ||
             perCall.MaxChargeMicroUsd < 1)
             return false;

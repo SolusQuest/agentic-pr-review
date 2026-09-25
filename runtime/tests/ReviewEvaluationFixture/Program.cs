@@ -63,6 +63,14 @@ internal static class Program
                 Console.WriteLine(verdict.ToJsonString());
                 return code;
             }
+            if (args is ["r5-plan", "--corpus", { } output65536Corpus, "--out", { } output65536Out,
+                "--profile", "output65536"])
+            {
+                var (code, verdict) = R5CaseVerifier.MakeLivePlan(output65536Corpus, output65536Out,
+                    DeepSeekRequestProfile.Output65536);
+                Console.WriteLine(verdict.ToJsonString());
+                return code;
+            }
             if (args.SequenceEqual(["reset", "--fixture", "self-test"]))
                 return await Growth.Reset.ResetOwnerProbe.RunAsync();
             if (args.SequenceEqual(["replay-child"])) return await ReplayChild.MainAsync();
@@ -311,6 +319,7 @@ internal static class R5CaseVerifier
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
             case "live-plan": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
             case "live-candidate": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
+            case "live-output65536": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
             case "live-coverage": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             case "quality-sandbox": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             default: return (null, "input_invalid");
@@ -724,16 +733,16 @@ internal static class R5CaseVerifier
                     ["max_model_calls"] = declared.Length * AgentLimits.ModelCalls,
                     ["max_input_tokens"] = declared.Length * AgentLimits.ModelCalls * 8192L,
                     ["max_output_tokens"] = declared.Length * AgentLimits.ModelCalls *
-                        (profile == DeepSeekRequestProfile.Current ? 512L : DeepSeekRequestWriter.CandidateMaxTokens),
+                        (profile == DeepSeekRequestProfile.Current ? 512L : DeepSeekRequestWriter.MaxTokensFor(profile)),
                     ["max_combined_tokens"] = declared.Length * AgentLimits.ModelCalls *
-                        (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + DeepSeekRequestWriter.CandidateMaxTokens),
+                        (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + DeepSeekRequestWriter.MaxTokensFor(profile)),
                     ["max_seconds"] = 600,
                     ["spend_ceiling_micro_usd"] = declared.Length * AgentLimits.ModelCalls * 1000L,
                     ["per_call"] = new JsonObject
                     {
                         ["max_input_tokens"] = 8192,
                         ["max_output_tokens"] = profile == DeepSeekRequestProfile.Current ? 512 :
-                            DeepSeekRequestWriter.CandidateMaxTokens,
+                            DeepSeekRequestWriter.MaxTokensFor(profile),
                         ["max_charge_micro_usd"] = 1000,
                     },
                 },

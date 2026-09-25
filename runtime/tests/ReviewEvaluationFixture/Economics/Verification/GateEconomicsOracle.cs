@@ -48,7 +48,7 @@ internal static class GateEconomicsOracle
         }
         var negativeRoot = item.Id is "c2-cleanup" or "c2-unreaped";
         Require(evidence.NegativeRootObserved == negativeRoot && report.Cleanup == (negativeRoot ? "cleanup_failed" : "cleaned"));
-        var complete = item.Id is "c2-replay" or "c2-output8192" or "c2-full" or "c2-execute-loopback" or
+        var complete = item.Id is "c2-replay" or "c2-output8192" or "c2-output65536" or "c2-full" or "c2-execute-loopback" or
             "c2-credential-probe" or "c2-spaced-repeat";
         var missing = item.Id is "c2-wrong-source" or "c2-wrong-build" or "c2-wrong-predecessor" or
             "c2-before-ready-crash" or "c2-after-prepare-crash" or "c2-partial-reply" or "c2-oversized-reply" or
@@ -100,6 +100,22 @@ internal static class GateEconomicsOracle
                 report.Plan.Bounds.MaxOutputTokens == report.Plan.Bounds.MaxModelCalls * 8192 &&
                 report.Journal!.Plan.Provider.AdapterId == DeepSeekAdapterContext.CandidateAdapter &&
                 report.Journal.Reservations.OutputTokens == report.Journal.Reservations.Calls * 8192 &&
+                report.Steps.All(step => step.Accepted && step.Readback));
+        }
+        if (item.Id == "c2-output65536")
+        {
+            Require(report.Plan.Provider.AdapterId == DeepSeekAdapterContext.Output65536Adapter &&
+                report.Plan.Provider.ConfigurationSha256 ==
+                    LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536) &&
+                report.Plan.Bounds.PerCall.MaxInputTokens == 32768 &&
+                report.Plan.Bounds.PerCall.MaxOutputTokens == 65536 &&
+                report.Plan.Bounds.MaxOutputTokens == report.Plan.Bounds.MaxModelCalls * 65536 &&
+                report.Plan.Bounds.MaxCombinedTokens == report.Plan.Bounds.MaxModelCalls * (32768 + 65536) &&
+                report.Allocations.InputTokens == attempted * 262144 &&
+                report.Allocations.OutputTokens == attempted * 524288 &&
+                report.Allocations.CombinedTokens == attempted * 786432 &&
+                report.Journal!.Plan.Provider.AdapterId == DeepSeekAdapterContext.Output65536Adapter &&
+                report.Journal.Reservations.OutputTokens == report.Journal.Reservations.Calls * 65536 &&
                 report.Steps.All(step => step.Accepted && step.Readback));
         }
         if (item.Id is "c2-reject-accept" or "c2-cancel-after-prepare" or "c2-preparation-failure")
