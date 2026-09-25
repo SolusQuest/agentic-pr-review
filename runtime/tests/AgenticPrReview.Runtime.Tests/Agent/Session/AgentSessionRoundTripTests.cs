@@ -789,6 +789,7 @@ public sealed partial class AgentSessionRoundTripTests
     {
         var currentAuthority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Current);
         var candidateAuthority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Output8192);
+        var output65536Authority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Output65536);
         var template = Trusted() with
         {
             ProviderId = DeepSeekAdapterContext.Provider,
@@ -804,24 +805,46 @@ public sealed partial class AgentSessionRoundTripTests
             AdapterId = DeepSeekAdapterContext.CandidateAdapter,
             LimitAuthority = candidateAuthority,
         };
+        var output65536 = template with
+        {
+            AdapterId = DeepSeekAdapterContext.Output65536Adapter,
+            LimitAuthority = output65536Authority,
+        };
         var crossedOld = current with { LimitAuthority = candidateAuthority };
         var crossedCandidate = candidate with { LimitAuthority = currentAuthority };
+        var crossedOutput65536 = output65536 with { LimitAuthority = currentAuthority };
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(current, null, out var currentStable));
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(candidate, null, out var candidateStable));
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(output65536, null, out var output65536Stable));
         Assert.Equal(AgentCanonical.LimitsSha256(), currentStable!.StablePlan.LimitsSha256);
         Assert.Equal(AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192),
             candidateStable!.StablePlan.LimitsSha256);
+        Assert.Equal(AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536),
+            output65536Stable!.StablePlan.LimitsSha256);
         Assert.NotEqual(AgentCanonical.StablePlanSha256(currentStable.StablePlan),
             AgentCanonical.StablePlanSha256(candidateStable.StablePlan));
+        Assert.NotEqual(AgentCanonical.StablePlanSha256(candidateStable.StablePlan),
+            AgentCanonical.StablePlanSha256(output65536Stable.StablePlan));
         Assert.False(AgentStableRequestMaterializer.TryMaterialize(crossedOld, null, out _));
         Assert.False(AgentStableRequestMaterializer.TryMaterialize(crossedCandidate, null, out _));
+        Assert.False(AgentStableRequestMaterializer.TryMaterialize(crossedOutput65536, null, out _));
 
         var built = await BuildGenerationAsync(candidate, null, "g0", "finish0", reasoning: false);
         Assert.True(Restore(built.Artifact, built.EnvelopeSha256, candidate,
             AgentSessionHeadTransition.SameHead).Succeeded);
-        foreach (var crossed in new[] { crossedOld, crossedCandidate, current })
+        foreach (var crossed in new[] { crossedOld, crossedCandidate, current, output65536 })
         {
             var result = Restore(built.Artifact, built.EnvelopeSha256, crossed,
+                AgentSessionHeadTransition.SameHead);
+            Assert.False(result.Succeeded);
+            Assert.Null(result.RunRequest);
+        }
+        var builtOutput65536 = await BuildGenerationAsync(output65536, null, "g1", "finish1", reasoning: false);
+        Assert.True(Restore(builtOutput65536.Artifact, builtOutput65536.EnvelopeSha256, output65536,
+            AgentSessionHeadTransition.SameHead).Succeeded);
+        foreach (var crossed in new[] { current, candidate, crossedOutput65536 })
+        {
+            var result = Restore(builtOutput65536.Artifact, builtOutput65536.EnvelopeSha256, crossed,
                 AgentSessionHeadTransition.SameHead);
             Assert.False(result.Succeeded);
             Assert.Null(result.RunRequest);

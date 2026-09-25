@@ -627,6 +627,16 @@ public sealed class R5LiveHarnessTests
         document["bounds"]!["per_call"]!["max_output_tokens"] = DeepSeekRequestWriter.CandidateMaxTokens;
     }
 
+    private static void Output65536Plan(JsonObject document)
+    {
+        document["provider"]!["adapter_id"] = DeepSeekAdapterContext.Output65536Adapter;
+        document["provider"]!["configuration_sha256"] =
+            LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536);
+        document["bounds"]!["max_output_tokens"] = AgentLimits.Output65536Tokens;
+        document["bounds"]!["max_combined_tokens"] = AgentLimits.Combined65536Tokens;
+        document["bounds"]!["per_call"]!["max_output_tokens"] = DeepSeekRequestWriter.Output65536MaxTokens;
+    }
+
     private sealed class PlanFile : IDisposable
     {
         internal string Root { get; } =
@@ -913,6 +923,88 @@ public sealed class R5LiveHarnessTests
         Assert.Equal((long)transport.Requests.Count * 8192, result.Summary.ReservedOutputTokens);
         Assert.Equal(DeepSeekAdapterContext.CandidateAdapter, result.Journal.Document.Plan.Provider.AdapterId);
         Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(result.Journal)));
+    }
+
+    [Fact]
+    public async Task Output65536DryRunBindsPlanAgentWriterAccountingAndStrictJournal()
+    {
+        using var plan = new PlanFile(Output65536Plan);
+        var transport = new ReplayTransport(
+            Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs
+                .Single(run => run.Input.CaseId == "cs-safe").Script,
+            ReplayFault.None);
+        var result = await LiveRunner.RunAsync(plan.Path, false,
+            Options(transport: _ => transport), CancellationToken.None);
+        Assert.Equal("complete", result.StopReason);
+        Assert.Equal(1, result.Attempted);
+        Assert.NotEmpty(transport.Requests);
+        foreach (var request in transport.Requests)
+        {
+            using var document = JsonDocument.Parse(request);
+            Assert.Equal(65_536, document.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.False(document.RootElement.TryGetProperty("tool_choice", out _));
+        }
+        Assert.Equal((long)transport.Requests.Count * 65_536, result.Summary.ReservedOutputTokens);
+        Assert.Equal(DeepSeekAdapterContext.Output65536Adapter, result.Journal.Document.Plan.Provider.AdapterId);
+        Assert.Equal(LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536),
+            result.Journal.Document.Plan.Provider.ConfigurationSha256);
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(result.Journal)));
+    }
+
+    [Theory]
+    [InlineData(4096)]
+    [InlineData(8192)]
+    [InlineData(65535)]
+    [InlineData(65537)]
+    public void Output65536ReservationMustBeExact(int outputTokens)
+    {
+        Assert.Equal(LiveAdmissionCode.InvalidPlan, RejectPlan(document =>
+        {
+            Output65536Plan(document);
+            document["bounds"]!["per_call"]!["max_output_tokens"] = outputTokens;
+        }));
+    }
+
+    [Fact]
+    public async Task Output65536WrongConfigurationRejectsBeforeCredentialOrTransport()
+    {
+        using var plan = new PlanFile(document =>
+        {
+            Output65536Plan(document);
+            document["provider"]!["configuration_sha256"] =
+                LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output8192);
+        });
+        var secret = new FakeSecret(Canary);
+        var factory = new FakeFactory(_ => throw new InvalidOperationException("must not be constructed"));
+        await Assert.ThrowsAsync<LivePlanRejected>(() => LiveRunner.RunAsync(plan.Path, true,
+            new LiveOptions { SecretSource = secret, TransportFactory = factory }, CancellationToken.None));
+        Assert.Equal(0, secret.Taken);
+        Assert.Equal(0, factory.Calls);
+    }
+
+    [Theory]
+    [InlineData(65_536, false)]
+    [InlineData(65_537, true)]
+    public async Task Output65536UsageBoundaryIsAccountedAfterARealAdapterResponse(
+        int outputTokens, bool violation)
+    {
+        using var plan = new PlanFile(Output65536Plan);
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        {
+            var inner = new ReplayTransport(run.Script, ReplayFault.None);
+            return new FakeTransport(async (body, token) =>
+            {
+                var response = await inner.SendAsync(body, token);
+                if (response.Outcome != DeepSeekTransportOutcome.Success) return response;
+                var document = JsonNode.Parse(Encoding.UTF8.GetString(response.Body.AsSpan()))!;
+                document["usage"]!["completion_tokens"] = outputTokens;
+                document["usage"]!["total_tokens"] = 3 + outputTokens;
+                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(document.ToJsonString()));
+            });
+        }), CancellationToken.None);
+        Assert.Equal(violation, result.Summary.AccountingViolation);
+        Assert.Equal(violation ? "accounting_violation" : "complete", result.StopReason);
+        Assert.True(result.Summary.KnownOutputTokens >= outputTokens);
     }
 
     [Theory]

@@ -35,6 +35,7 @@ internal static class GateInventory
         ("c1-prefix-bound", "stable_continuity"), ("c1-prefix-unbound", "unbound-expectation"),
         ("c1-prefix-conflict", "conflicting-expectation"), ("c1-c2-handoff", "actual-c2"),
         ("c2-replay", "replay"), ("c2-output8192", "candidate-output8192"),
+        ("c2-output65536", "candidate-output65536"),
         ("c2-full", "capacity-reset"), ("c2-execute-loopback", "execute-loopback"),
         ("c2-wrong-source", "WrongSource"), ("c2-wrong-build", "WrongBuild"),
         ("c2-wrong-predecessor", "WrongPredecessor"), ("c2-before-ready-crash", "BeforeReadyCrash"),

@@ -20,12 +20,15 @@ public sealed class R5ReplayAdmissionTests
     private const string Canary = "EXPECTATION_ONLY_CANARY";
     private static string Seed => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay-seed", "valid");
 
-    [Fact]
-    public void CandidateAdapterRequiresAClosedEvaluatorPlanInsteadOfGenericReplayAdmission()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ExperimentalAdaptersRequireAClosedEvaluatorPlanInsteadOfGenericReplayAdmission(
+        int profile)
     {
         using var bundle = new Bundle();
         bundle.Manifest(document => document["configuration"]!["adapter_id"] =
-            DeepSeekAdapterContext.CandidateAdapter);
+            DeepSeekAdapterContext.AdapterFor((DeepSeekRequestProfile)profile));
         var result = ReplayAdmission.Load(bundle.Root);
         Assert.Equal(ReplayAdmissionCode.InvalidManifest, result.Code);
         Assert.Null(result.Fixture);
