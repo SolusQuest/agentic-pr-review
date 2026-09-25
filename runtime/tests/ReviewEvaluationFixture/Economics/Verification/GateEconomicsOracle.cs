@@ -1,7 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using static AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification.GateContracts;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification;
@@ -46,7 +48,8 @@ internal static class GateEconomicsOracle
         }
         var negativeRoot = item.Id is "c2-cleanup" or "c2-unreaped";
         Require(evidence.NegativeRootObserved == negativeRoot && report.Cleanup == (negativeRoot ? "cleanup_failed" : "cleaned"));
-        var complete = item.Id is "c2-replay" or "c2-full" or "c2-execute-loopback" or "c2-credential-probe" or "c2-spaced-repeat";
+        var complete = item.Id is "c2-replay" or "c2-output8192" or "c2-full" or "c2-execute-loopback" or
+            "c2-credential-probe" or "c2-spaced-repeat";
         var missing = item.Id is "c2-wrong-source" or "c2-wrong-build" or "c2-wrong-predecessor" or
             "c2-before-ready-crash" or "c2-after-prepare-crash" or "c2-partial-reply" or "c2-oversized-reply" or
             "c2-wrong-reply" or "c2-hang" or "c2-final-missing" or "c2-unreaped" or "c2-campaign-deadline";
@@ -87,6 +90,17 @@ internal static class GateEconomicsOracle
             var sends = item.Id == "c2-full" ? 39 : item.Id == "c2-spaced-repeat" ? 8 : 6;
             Require(report.Journal!.Totals.ActualSends == sends && report.Journal.Totals.KnownInputTokens == sends * 3 &&
                 report.Journal.Totals.KnownOutputTokens == sends * 2 && report.Pricing!.ObservedUsage.TotalAmount == sends * .000022m);
+        }
+        if (item.Id == "c2-output8192")
+        {
+            Require(report.Plan.Provider.AdapterId == DeepSeekAdapterContext.CandidateAdapter &&
+                report.Plan.Provider.ConfigurationSha256 ==
+                    LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output8192) &&
+                report.Plan.Bounds.PerCall.MaxOutputTokens == 8192 &&
+                report.Plan.Bounds.MaxOutputTokens == report.Plan.Bounds.MaxModelCalls * 8192 &&
+                report.Journal!.Plan.Provider.AdapterId == DeepSeekAdapterContext.CandidateAdapter &&
+                report.Journal.Reservations.OutputTokens == report.Journal.Reservations.Calls * 8192 &&
+                report.Steps.All(step => step.Accepted && step.Readback));
         }
         if (item.Id is "c2-reject-accept" or "c2-cancel-after-prepare" or "c2-preparation-failure")
             Require(report.Steps[1].EvaluationStatus == "completed" && !report.Steps[1].Accepted &&

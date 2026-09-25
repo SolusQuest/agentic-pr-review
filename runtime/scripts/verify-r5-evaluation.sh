@@ -99,7 +99,7 @@ _scenario() {
   local extra=()
   case "${name}" in
     reset-owner|live-self-test) ;;
-    quality|live-plan) extra+=(--corpus "${FIXTURES}/quality/bundle") ;;
+    quality|live-plan|live-candidate) extra+=(--corpus "${FIXTURES}/quality/bundle") ;;
     quality-sandbox) extra+=(--corpus "${R6_QUALITY_SANDBOX}") ;;
     *) extra+=(--corpus "${FIXTURES}/${name}") ;;
   esac
@@ -152,6 +152,11 @@ _run_scenarios() {
       >"${EVIDENCE}/${mode}/live.plan.out" ||
     _fail "APR_R5_EVAL_PLAN_FAILED ${mode}"
   _scenario "${mode}" live-plan live-local --dry-run --plan "${plan}"
+  local candidate_plan="${EVIDENCE}/${mode}/live-candidate.plan.json"
+  "${RUNNER[@]}" r5-plan --corpus "${FIXTURES}/quality/bundle" --out "${candidate_plan}" --profile output8192 \
+      >"${EVIDENCE}/${mode}/live-candidate.plan.out" ||
+    _fail "APR_R5_EVAL_CANDIDATE_PLAN_FAILED ${mode}"
+  _scenario "${mode}" live-candidate live-local --dry-run --plan "${candidate_plan}"
   local coverage_plan="${EVIDENCE}/${mode}/coverage.plan.json"
   "${RUNNER[@]}" r5-plan --corpus "${FIXTURES}/live-coverage" --out "${coverage_plan}" \
       >"${EVIDENCE}/${mode}/coverage.plan.out" ||
@@ -193,7 +198,7 @@ run_aot() {
 
 run_parity() {
   local name
-  for name in quality replay incremental growth reset-owner live-self-test live-plan live-coverage quality-sandbox; do
+  for name in quality replay incremental growth reset-owner live-self-test live-plan live-candidate live-coverage quality-sandbox; do
     "${RUNNER[@]}" verify-cases --parity \
         "${EVIDENCE}/framework/${name}.verdict.json" \
         "${EVIDENCE}/aot/${name}.verdict.json" ||

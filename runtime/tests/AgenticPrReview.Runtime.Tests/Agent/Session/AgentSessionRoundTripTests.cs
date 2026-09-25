@@ -785,6 +785,50 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     [Fact]
+    public async Task DeepSeekLimitAuthorityRejectsCrossedPairsBeforeMaterializationAndRestore()
+    {
+        var currentAuthority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Current);
+        var candidateAuthority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Output8192);
+        var template = Trusted() with
+        {
+            ProviderId = DeepSeekAdapterContext.Provider,
+            ModelId = DeepSeekAdapterContext.Model,
+        };
+        var current = template with
+        {
+            AdapterId = DeepSeekAdapterContext.Adapter,
+            LimitAuthority = currentAuthority,
+        };
+        var candidate = template with
+        {
+            AdapterId = DeepSeekAdapterContext.CandidateAdapter,
+            LimitAuthority = candidateAuthority,
+        };
+        var crossedOld = current with { LimitAuthority = candidateAuthority };
+        var crossedCandidate = candidate with { LimitAuthority = currentAuthority };
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(current, null, out var currentStable));
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(candidate, null, out var candidateStable));
+        Assert.Equal(AgentCanonical.LimitsSha256(), currentStable!.StablePlan.LimitsSha256);
+        Assert.Equal(AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192),
+            candidateStable!.StablePlan.LimitsSha256);
+        Assert.NotEqual(AgentCanonical.StablePlanSha256(currentStable.StablePlan),
+            AgentCanonical.StablePlanSha256(candidateStable.StablePlan));
+        Assert.False(AgentStableRequestMaterializer.TryMaterialize(crossedOld, null, out _));
+        Assert.False(AgentStableRequestMaterializer.TryMaterialize(crossedCandidate, null, out _));
+
+        var built = await BuildGenerationAsync(candidate, null, "g0", "finish0", reasoning: false);
+        Assert.True(Restore(built.Artifact, built.EnvelopeSha256, candidate,
+            AgentSessionHeadTransition.SameHead).Succeeded);
+        foreach (var crossed in new[] { crossedOld, crossedCandidate, current })
+        {
+            var result = Restore(built.Artifact, built.EnvelopeSha256, crossed,
+                AgentSessionHeadTransition.SameHead);
+            Assert.False(result.Succeeded);
+            Assert.Null(result.RunRequest);
+        }
+    }
+
+    [Fact]
     public async Task CanonicalWritersEnforceExactRecordAndSessionCaps()
     {
         var built = await BuildGenerationAsync(
@@ -5542,7 +5586,8 @@ public sealed partial class AgentSessionRoundTripTests
             previous?.Continuation);
         var outcome = await LoopWithContinuationCount(
             callId,
-            continuationCount).RunAsync(
+            continuationCount,
+            trusted.LimitAuthority).RunAsync(
             run,
             CancellationToken.None);
         Assert.True(outcome.CompletedSessionEligible);
@@ -5554,7 +5599,8 @@ public sealed partial class AgentSessionRoundTripTests
 
     private static AgentLoop LoopWithContinuationCount(
         string callId,
-        int continuationCount) =>
+        int continuationCount,
+        AgentLimitAuthority? limitAuthority = null) =>
         new(
             new OneResponseChatClient(request =>
             {
@@ -5611,7 +5657,7 @@ public sealed partial class AgentSessionRoundTripTests
                     CapturedResponseBodyBytes: 1,
                     continuation);
             }),
-            new NeverToolExecutor());
+            new NeverToolExecutor(), limitAuthority: limitAuthority);
 
     private static StableAgentPlan Materialize(
         AgentSessionTrustedRequest trusted,

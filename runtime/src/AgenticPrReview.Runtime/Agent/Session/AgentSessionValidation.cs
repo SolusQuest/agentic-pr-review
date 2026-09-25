@@ -28,6 +28,7 @@ internal static class AgentStableRequestMaterializer
             !AgentValueDomains.IsUtf8(trusted.ProviderId, 1, 128) ||
             !AgentValueDomains.IsUtf8(trusted.ModelId, 1, 128) ||
             !AgentValueDomains.IsUtf8(trusted.AdapterId, 1, 128) ||
+            !AgentLimitAuthority.TryResolve(trusted.AdapterId, trusted.LimitAuthority, out var limitProfile) ||
             (priorSessionSha256 is not null &&
                 !AgentSessionValidation.IsLowerHex(
                     priorSessionSha256,
@@ -45,7 +46,7 @@ internal static class AgentStableRequestMaterializer
             trusted.WorkflowIdentity,
             AgentCanonical.HashRaw(trusted.TrustedPolicyBytes),
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions),
-            AgentCanonical.LimitsSha256(),
+            AgentCanonical.LimitsSha256(limitProfile),
             trusted.BuildId,
             trusted.ProviderId,
             trusted.ModelId,

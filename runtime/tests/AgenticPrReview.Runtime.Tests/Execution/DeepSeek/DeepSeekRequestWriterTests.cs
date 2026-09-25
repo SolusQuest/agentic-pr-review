@@ -35,6 +35,28 @@ public sealed class DeepSeekRequestWriterTests
     }
 
     [Fact]
+    public void CandidateWriterChangesOnlyTheWireOutputCap()
+    {
+        var request = BuildRequest(
+        [
+            new MinimalChatMessage("system", [Text("policy")]),
+            new MinimalChatMessage("user", [Text("review")]),
+        ]);
+        var current = DeepSeekRequestWriter.Write(request);
+        var candidate = DeepSeekRequestWriter.Write(request, DeepSeekRequestProfile.Output8192);
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, current.Outcome);
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, candidate.Outcome);
+        Assert.Equal(
+            Encoding.UTF8.GetString(current.Body.AsSpan()).Replace(
+                "\"max_tokens\":4096", "\"max_tokens\":8192", StringComparison.Ordinal),
+            Encoding.UTF8.GetString(candidate.Body.AsSpan()));
+        using var document = JsonDocument.Parse(candidate.Body.ToArray());
+        Assert.False(document.RootElement.TryGetProperty("tool_choice", out _));
+        Assert.Equal(DeepSeekRequestWriteOutcome.Invalid,
+            DeepSeekRequestWriter.Write(request, (DeepSeekRequestProfile)42).Outcome);
+    }
+
+    [Fact]
     public void WritesTheCompleteFrozenAgentToolsetWithListFilesGuidance()
     {
         var tools = AgentToolRegistry.Definitions

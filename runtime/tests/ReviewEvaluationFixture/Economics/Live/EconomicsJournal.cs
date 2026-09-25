@@ -37,7 +37,7 @@ internal static class EconomicsJournal
         var descriptor = new EvaluationRunInput(input.Campaign + "-" + (input.Slot.Index + 1),
             input.Transport == "live" ? "live" : "deterministic", input.Plan.Source.Commit, input.Plan.Source.Tree,
             input.Plan.Source.Clean, input.Plan.Provider.ConfigurationSha256);
-        var attempt = EvaluationAttempt.Admit(run.CreateTrustedRequest(ReplayState.Build), descriptor);
+        var attempt = EvaluationAttempt.Admit(plan.TrustedRequest(run), descriptor);
         if (attempt is null || evaluation.CaseId != run.Input.CaseId || evaluation.CorpusSha256 != plan.WorkloadSha256 ||
             evaluation.CaseSha256 != run.Expected.Sha256 || evaluation.ConfigurationSha256 != attempt.ConfigurationSha256 ||
             evaluation.AttemptSha256 != attempt.AttemptSha256 || evaluation.Mode != descriptor.Mode ||

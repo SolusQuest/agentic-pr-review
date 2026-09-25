@@ -13,9 +13,9 @@ internal static class LivePlanAdmission
     internal const string ProviderConfigurationDomain = "live-provider-settings";
     private const string DigestDomain = "apr.r5.live-plan";
 
-    internal static string ProviderConfigurationSha256() =>
+    internal static string ProviderConfigurationSha256(DeepSeekRequestProfile profile = DeepSeekRequestProfile.Current) =>
         EvaluationAttempt.Hash(ProviderConfigurationDomain,
-            DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter);
+            DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.AdapterFor(profile));
 
     internal static LivePlan Load(string path, bool execute, CancellationToken token)
     {
@@ -61,13 +61,13 @@ internal static class LivePlanAdmission
             throw new LivePlanRejected(LiveAdmissionCode.InvalidPlan);
 
         // Only the frozen DeepSeek thinking adapter is a supported configuration.
-        if (!ValidProvider(provider))
+        if (!TryProviderProfile(provider, out var profile))
             throw new LivePlanRejected(LiveAdmissionCode.UnsupportedConfiguration);
 
         var expanded = Expand(input.Schedule);
         if (expanded.Length is < 1 or > LiveLimits.ExpandedEvaluations ||
             expanded.Length > bounds.MaxEvaluations ||
-            !ValidBounds(bounds, expanded.Length))
+            !ValidBounds(bounds, expanded.Length, profile))
             throw new LivePlanRejected(LiveAdmissionCode.InvalidPlan);
         if (bounds.SpendCeilingMicroUsd < perCall.MaxChargeMicroUsd)
             throw new LivePlanRejected(LiveAdmissionCode.Unpriceable);
@@ -85,31 +85,38 @@ internal static class LivePlanAdmission
             input.Bounds is not { PerCall: not null } bounds ||
             input.Format != LiveLimits.PlanFormat ||
             !EvaluationLimits.Hash(source.Commit, 40) || !EvaluationLimits.Hash(source.Tree, 40) ||
-            !EvaluationLimits.Hash(input.CorpusSha256) || !ValidProvider(provider) ||
+            !EvaluationLimits.Hash(input.CorpusSha256) || !TryProviderProfile(provider, out var profile) ||
             input.Schedule.IsDefaultOrEmpty || input.Schedule.Length > LiveLimits.ExpandedEvaluations ||
             input.Schedule.Any(id => !EvaluationLimits.Id(id)) ||
-            input.Schedule.Length > bounds.MaxEvaluations || !ValidBounds(bounds, input.Schedule.Length))
+            input.Schedule.Length > bounds.MaxEvaluations || !ValidBounds(bounds, input.Schedule.Length, profile))
             return false;
         return bounds.SpendCeilingMicroUsd >= bounds.PerCall.MaxChargeMicroUsd;
     }
 
-    private static bool ValidProvider(LivePlanProvider provider) =>
-        StringComparer.Ordinal.Equals(provider.ProviderId, DeepSeekAdapterContext.Provider) &&
-        StringComparer.Ordinal.Equals(provider.ModelId, DeepSeekAdapterContext.Model) &&
-        StringComparer.Ordinal.Equals(provider.AdapterId, DeepSeekAdapterContext.Adapter) &&
-        StringComparer.Ordinal.Equals(provider.ConfigurationSha256, ProviderConfigurationSha256());
+    internal static bool TryProviderProfile(LivePlanProvider provider, out DeepSeekRequestProfile profile)
+    {
+        profile = DeepSeekRequestProfile.Current;
+        return StringComparer.Ordinal.Equals(provider.ProviderId, DeepSeekAdapterContext.Provider) &&
+            StringComparer.Ordinal.Equals(provider.ModelId, DeepSeekAdapterContext.Model) &&
+            DeepSeekAdapterContext.TryResolveProfile(provider.AdapterId, out profile) &&
+            StringComparer.Ordinal.Equals(provider.ConfigurationSha256, ProviderConfigurationSha256(profile));
+    }
 
-    private static bool ValidBounds(LivePlanBounds bounds, int evaluations)
+    private static bool ValidBounds(LivePlanBounds bounds, int evaluations, DeepSeekRequestProfile profile)
     {
         var perCall = bounds.PerCall;
         if (bounds.MaxEvaluations < 1 || bounds.MaxEvaluations > LiveLimits.ExpandedEvaluations ||
             bounds.MaxModelCalls < 1 || bounds.MaxModelCalls > (long)AgentLimits.ModelCalls * evaluations ||
             bounds.MaxInputTokens < 1 || bounds.MaxInputTokens > (long)AgentLimits.InputTokens * evaluations ||
-            bounds.MaxOutputTokens < 1 || bounds.MaxOutputTokens > (long)AgentLimits.OutputTokens * evaluations ||
-            bounds.MaxCombinedTokens < 1 || bounds.MaxCombinedTokens > (long)AgentLimits.CombinedTokens * evaluations ||
+            bounds.MaxOutputTokens < 1 || bounds.MaxOutputTokens > AgentLimits.OutputTokensFor(
+                DeepSeekAdapterContext.LimitAuthorityFor(profile).Profile) * evaluations ||
+            bounds.MaxCombinedTokens < 1 || bounds.MaxCombinedTokens > AgentLimits.CombinedTokensFor(
+                DeepSeekAdapterContext.LimitAuthorityFor(profile).Profile) * evaluations ||
             bounds.MaxSeconds is < 1 or > 86400 || bounds.SpendCeilingMicroUsd < 1 ||
             perCall.MaxInputTokens is < 1 || perCall.MaxInputTokens > Math.Min(bounds.MaxInputTokens, AgentLimits.InputTokens) ||
-            perCall.MaxOutputTokens is < 1 || perCall.MaxOutputTokens > Math.Min(bounds.MaxOutputTokens, 4096L) ||
+            perCall.MaxOutputTokens is < 1 || perCall.MaxOutputTokens > Math.Min(bounds.MaxOutputTokens,
+                profile == DeepSeekRequestProfile.Current ? DeepSeekRequestWriter.MaxTokens : DeepSeekRequestWriter.CandidateMaxTokens) ||
+            profile == DeepSeekRequestProfile.Output8192 && perCall.MaxOutputTokens != DeepSeekRequestWriter.CandidateMaxTokens ||
             perCall.MaxInputTokens + perCall.MaxOutputTokens > bounds.MaxCombinedTokens ||
             perCall.MaxChargeMicroUsd < 1)
             return false;

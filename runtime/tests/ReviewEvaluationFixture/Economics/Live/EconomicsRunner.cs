@@ -73,7 +73,7 @@ internal static class EconomicsRunner
                 if (slot.ResetChain is { } oldChain)
                 {
                     if (!lineages.TryGetValue(oldChain, out var old) || !acceptedRuns.TryGetValue(oldChain, out var oldRun) ||
-                        !await ResetAsync(oldRun, sessions[oldChain], root, oldChain, key, old, deadline.Token))
+                        !await ResetAsync(plan, oldRun, sessions[oldChain], root, oldChain, key, old, deadline.Token))
                     { stop = "reset_failed"; steps[slot.Index] = steps[slot.Index] with { Code = stop }; break; }
                     reset = true;
                 }
@@ -123,7 +123,7 @@ internal static class EconomicsRunner
                 if (slot.ExpectedCapacity)
                 {
                     if (!EconomicsJournal.Capacity(receipt) || predecessor is null ||
-                        !await ReadbackAsync(acceptedRuns[slot.Chain], input.Session, root, slot.Chain, key, predecessor, deadline.Token))
+                        !await ReadbackAsync(plan, acceptedRuns[slot.Chain], input.Session, root, slot.Chain, key, predecessor, deadline.Token))
                     { stop = "representative_history_insufficient"; break; }
                     steps[slot.Index] = step with { Code = "capacity_stop", Readback = true };
                     continue;
@@ -133,7 +133,8 @@ internal static class EconomicsRunner
                 if (fault == EconomicsFault.CancelAfterPrepare) { stop = "caller_cancelled"; break; }
                 options.BeforeAccept?.Invoke(); deadline.Token.ThrowIfCancellationRequested();
                 if (fault == EconomicsFault.RejectAccept) { stop = "state_failed"; break; }
-                using var state = new ReplayState(run, input.Session, EconomicsChild.StateRoot(root, slot.Chain), key);
+                using var state = new ReplayState(run, input.Session, EconomicsChild.StateRoot(root, slot.Chain), key,
+                    trustedOverride: plan.TrustedRequest(run));
                 var identity = run.Input.ReviewedIdentity.Runtime;
                 var prior = slot.Previous is { } previous ? workload.Run(plan.Slots[previous], campaign) : null;
                 var context = state.Context(identity, identity, slot.Phase, predecessor?.EnvelopeSha256,
@@ -146,7 +147,7 @@ internal static class EconomicsRunner
                     predecessor?.EnvelopeSha256, ReplayState.Now, ReplayState.Now + RestrictedStateFormat.MaximumRetentionSeconds, true);
                 lineages[slot.Chain] = lineage; acceptedRuns[slot.Chain] = run;
                 steps[slot.Index] = step with { Accepted = true, SessionSha256 = lineage.SessionSha256 };
-                if (!await ReadbackAsync(run, input.Session, root, slot.Chain, key, lineage, deadline.Token))
+                if (!await ReadbackAsync(plan, run, input.Session, root, slot.Chain, key, lineage, deadline.Token))
                 { stop = "state_failed"; break; }
                 steps[slot.Index] = steps[slot.Index] with { Code = "completed", Readback = true, FinishedMilliseconds = clock.ElapsedMilliseconds };
                 if (slot.Index == 0 && receipt.ToolCalls == 0 || slot.Index == 1 && !receipt.Restored)
@@ -203,10 +204,11 @@ internal static class EconomicsRunner
     private static EconomicsStep Empty(EconomicsSlot slot) => new(slot.Index, slot.CaseId, "unattempted", "unattempted", false,
         null, null, false, false, false, false, false, null, null, 0, 0, null, null, null, null, null);
 
-    internal static async Task<bool> ReadbackAsync(AdmittedReplayRun run, string session, string root, int chain,
+    internal static async Task<bool> ReadbackAsync(EconomicsPlan plan, AdmittedReplayRun run, string session, string root, int chain,
         byte[] key, AcceptedLineage predecessor, CancellationToken token)
     {
-        using var state = new ReplayState(run, session, EconomicsChild.StateRoot(root, chain), key);
+        using var state = new ReplayState(run, session, EconomicsChild.StateRoot(root, chain), key,
+            trustedOverride: plan.TrustedRequest(run));
         var identity = run.Input.ReviewedIdentity.Runtime;
         var context = state.Context(identity, identity, predecessor.Generation, predecessor.ExpectedPredecessorEnvelopeSha256,
             AgentSessionHeadTransition.SameHead, run.InitialContext);
@@ -215,11 +217,12 @@ internal static class EconomicsRunner
         return restored.Result.Action == StateAction.Restored && restored.Session?.SessionSha256 == predecessor.SessionSha256;
     }
 
-    private static async Task<bool> ResetAsync(AdmittedReplayRun run, string session, string root, int chain,
+    private static async Task<bool> ResetAsync(EconomicsPlan plan, AdmittedReplayRun run, string session, string root, int chain,
         byte[] key, AcceptedLineage predecessor, CancellationToken token)
     {
-        if (!await ReadbackAsync(run, session, root, chain, key, predecessor, token)) return false;
-        using var state = new ReplayState(run, session, EconomicsChild.StateRoot(root, chain), key);
+        if (!await ReadbackAsync(plan, run, session, root, chain, key, predecessor, token)) return false;
+        using var state = new ReplayState(run, session, EconomicsChild.StateRoot(root, chain), key,
+            trustedOverride: plan.TrustedRequest(run));
         var reset = await state.Service.ResetAsync(state.Access, token);
         if (reset.Action != StateAction.Reset) return false;
         var identity = run.Input.ReviewedIdentity.Runtime;

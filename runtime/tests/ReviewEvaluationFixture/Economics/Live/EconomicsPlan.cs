@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
@@ -16,9 +17,10 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 
 internal sealed class EconomicsPlan
 {
-    private EconomicsPlan(EconomicsPlanInput input, ImmutableArray<EconomicsSlot> slots)
+    private EconomicsPlan(EconomicsPlanInput input, ImmutableArray<EconomicsSlot> slots,
+        DeepSeekRequestProfile profile)
     {
-        Input = input; Slots = slots;
+        Input = input; Slots = slots; Profile = profile;
         Workload = new(input.Replay.Sha256, input.Growth.Sha256, input.Scenarios, input.ChildSeconds,
             input.SpacingMilliseconds, input.StopRule);
         Selection = new(input.Format, input.Source, input.BuildSha256, Workload, input.Provider,
@@ -31,6 +33,7 @@ internal sealed class EconomicsPlan
     }
 
     internal EconomicsPlanInput Input { get; }
+    internal DeepSeekRequestProfile Profile { get; }
     internal ImmutableArray<EconomicsSlot> Slots { get; }
     internal EconomicsWorkloadSelection Workload { get; }
     internal EconomicsPlanSelection Selection { get; }
@@ -43,6 +46,18 @@ internal sealed class EconomicsPlan
         Input.Bounds.SpendCeilingMicroUsd, checked(Input.Bounds.MaxSeconds * 1000));
     internal LivePlanBounds ChildBounds => new(1, 8, ChildAllocation.InputTokens, ChildAllocation.OutputTokens,
         ChildAllocation.CombinedTokens, Input.ChildSeconds, ChildAllocation.SpendMicroUsd, Input.Bounds.PerCall);
+
+    internal AgentSessionTrustedRequest TrustedRequest(AdmittedReplayRun run)
+    {
+        var trusted = run.CreateTrustedRequest(ReplayState.Build);
+        return Profile == DeepSeekRequestProfile.Current ? trusted : trusted with
+        {
+            ProviderId = Input.Provider.ProviderId,
+            ModelId = Input.Provider.ModelId,
+            AdapterId = Input.Provider.AdapterId,
+            LimitAuthority = DeepSeekAdapterContext.LimitAuthorityFor(Profile),
+        };
+    }
 
     internal UsageJournalExpectation Expectation(string campaign, string transport) => new(
         new(campaign, Input.Source.Commit, Input.Source.Tree, Input.Source.Clean, "c2-" + Input.BuildSha256[..32],
@@ -68,13 +83,16 @@ internal sealed class EconomicsPlan
             input.StopRule != "stop_remaining_tail" || input.Scenarios.IsDefaultOrEmpty ||
             input.Scenarios.Length > EconomicsLiveLimits.Scenarios || !PathValue(input.Replay.Path) ||
             !PathValue(input.Growth.Path) || !PathValue(input.TariffPath)) Reject("plan_invalid");
-        var plan = new EconomicsPlan(input!, Expand(input!.Scenarios));
+        if (!LivePlanAdmission.TryProviderProfile(input!.Provider, out var profile)) Reject("plan_invalid");
+        var plan = new EconomicsPlan(input, Expand(input.Scenarios), profile);
         if (!LivePlanAdmission.ValidProjection(plan.Projection)) Reject("plan_invalid");
         if (currentBuild && (input.Source.Commit != EvaluationSource.Commit || input.Source.Tree != EvaluationSource.Tree ||
                 input.Source.Clean != EvaluationSource.Clean || input.BuildSha256 != EconomicsBuild.Current()) ||
             execute && (!input.Source.Clean || currentBuild && !EvaluationSource.Clean)) Reject("source_invalid");
         var per = input.Bounds.PerCall;
-        if (per.MaxInputTokens is < 1 or > AgentLimits.InputTokens / 8 || per.MaxOutputTokens != 4096 ||
+        if (per.MaxInputTokens is < 1 or > AgentLimits.InputTokens / 8 ||
+            per.MaxOutputTokens != (profile == DeepSeekRequestProfile.Current
+                ? DeepSeekRequestWriter.MaxTokens : DeepSeekRequestWriter.CandidateMaxTokens) ||
             input.Bounds.MaxModelCalls != plan.Slots.Length * 8L) Reject("allocation_invalid");
         EconomicsAllocation required = new(0, 0, 0, 0, 0, 0,
             CampaignOverheadMilliseconds(plan.Slots.Length, input.SpacingMilliseconds));
