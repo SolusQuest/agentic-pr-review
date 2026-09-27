@@ -245,6 +245,34 @@ public sealed class R5VerifierCoverageTests
         }
     }
 
+    [Theory]
+    [InlineData("prefix", "dot_segment", true)]
+    [InlineData("both", "unknown", true)]
+    [InlineData("unknown", "unknown", true)]
+    [InlineData("both", "absolute", false)]
+    [InlineData("prefix", "unknown", false)]
+    [InlineData("unknown", "dot_segment", false)]
+    public void LivePlanReaderAdmitsOnlyCanonicalPathDetailPairs(
+        string field, string rule, bool expected)
+    {
+        var summary = PlanSummary() with
+        {
+            AgentDiagnostics =
+            [
+                new(8, AgentFailureCodes.ToolArgumentsInvalid, 1, 0,
+                    AgentToolRegistry.ListFilesName,
+                    LiveToolRejectionProjector.ListPathInvalid, field, rule),
+                new(12, "unknown", null, null),
+            ],
+        };
+        var (code, verdict) = Verify("live-plan", LivePlanOutput(summary),
+            corpus: Corpus("quality", "bundle"));
+        Assert.Equal(expected ? 0 : 1, code);
+        Assert.Equal(expected ? "verified" : "rejected_report_invalid",
+            expected ? verdict["code"]?.GetValue<string>() :
+                verdict["reason"]?.GetValue<string>());
+    }
+
     private static (int Code, JsonObject Verdict) Verify(string scenario, string report,
         string? corpus = null, string forbid = CorpusCanary)
     {

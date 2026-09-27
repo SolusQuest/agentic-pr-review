@@ -121,6 +121,9 @@ public sealed class R6LiveToolRejectionTests
         Assert.False((diagnostic with { PathField = Canary }).IsCanonical());
         Assert.False((diagnostic with { PathRule = Canary }).IsCanonical());
         Assert.False((diagnostic with { PathField = null }).IsCanonical());
+        Assert.False((diagnostic with { PathField = "both", PathRule = "absolute" }).IsCanonical());
+        Assert.False((diagnostic with { PathField = "prefix", PathRule = "unknown" }).IsCanonical());
+        Assert.False((diagnostic with { PathField = "unknown", PathRule = "dot_segment" }).IsCanonical());
         Assert.False((diagnostic with { Tool = AgentToolRegistry.ReadFileName }).IsCanonical());
     }
 

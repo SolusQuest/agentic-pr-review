@@ -108,13 +108,16 @@ internal static class LiveToolRejectionProjector
         _ => "unknown",
     };
 
-    internal static bool ValidPathField(string? value) =>
-        value is "prefix" or "after" or "both" or "unknown";
-
-    internal static bool ValidPathRule(string? value) =>
-        value is "empty" or "absolute" or "too_long" or "invalid_unicode" or
+    internal static bool ValidPathDetail(string? field, string? rule)
+    {
+        if (field is null || rule is null)
+            return field is null && rule is null;
+        if (field is "both" or "unknown") return rule == "unknown";
+        return (field is "prefix" or "after") && (rule is
+            "empty" or "absolute" or "too_long" or "invalid_unicode" or
             "forbidden_character" or "empty_segment" or "dot_segment" or
-            "trailing_dot_or_space" or "unknown";
+            "trailing_dot_or_space");
+    }
 
     private static string PathField(ListFilesPathField field) => field switch
     {

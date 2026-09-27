@@ -86,11 +86,8 @@ internal sealed record LiveAgentDiagnostic(int ScheduleIndex, string Code, int? 
             if (rejection.Tool == AgentToolRegistry.ListFilesName &&
                 rejection.Category == LiveToolRejectionProjector.ListPathInvalid)
             {
-                if (rejection.PathField is null && rejection.PathRule is null)
-                    return new(index, code, diagnostic.ModelCalls, diagnostic.ToolCalls,
-                        rejection.Tool, rejection.Category);
-                if (LiveToolRejectionProjector.ValidPathField(rejection.PathField) &&
-                    LiveToolRejectionProjector.ValidPathRule(rejection.PathRule))
+                if (LiveToolRejectionProjector.ValidPathDetail(
+                    rejection.PathField, rejection.PathRule))
                     return new(index, code, diagnostic.ModelCalls, diagnostic.ToolCalls,
                         rejection.Tool, rejection.Category,
                         rejection.PathField, rejection.PathRule);
