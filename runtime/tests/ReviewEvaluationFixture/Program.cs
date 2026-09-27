@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -568,6 +569,11 @@ internal static class R5CaseVerifier
         }
         var report = ReadComplete(lines[^1], LiveJsonContext.Default.LiveRunSummary);
         if (report is null) return (null, "rejected_report_invalid");
+        if (!R6V5QualityGate.ValidStatus(report.V5QualityCandidateStatus) ||
+            report.V5QualityCandidateStatus is { } status && status !=
+                R6V5QualityGate.Evaluate(report, declared.ToImmutableArray(),
+                    outcomes.ToImmutableArray()))
+            return (null, "rejected_report_invalid");
         if (report.Format != "r5-live-local-v1") return (null, "rejected_report_invalid");
         if (report.StopReason != "complete") return (null, "rejected_code");
         if (report.Scheduled != report.Attempted + report.Unattempted ||

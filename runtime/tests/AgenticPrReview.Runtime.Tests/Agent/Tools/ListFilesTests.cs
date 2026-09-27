@@ -62,6 +62,21 @@ public sealed class ListFilesTests
         Assert.Equal(ListFilesArgumentFailure.None, failure);
     }
 
+    [Fact]
+    public void ProviderSyntaxNormalizationDoesNotRewriteTheAdmittedPathValue()
+    {
+        const string providerArguments = "{ \"prefix\" : \"\\u0073rc\" }";
+        Assert.False(AgentToolArguments.TryListFiles(providerArguments, out _));
+        Assert.True(AgentToolArguments.TryListFilesProvider(providerArguments,
+            out var admitted, out var failure, out var pathRejection));
+        Assert.Equal("src", admitted!.Prefix);
+        Assert.Null(admitted.After);
+        Assert.Equal(ListFilesArgumentFailure.None, failure);
+        Assert.Null(pathRejection);
+        Assert.Equal("{\"prefix\":\"src\",\"after\":null}",
+            Encoding.UTF8.GetString(admitted.CanonicalBytes));
+    }
+
     [Theory]
     [InlineData("{bad", "Json")]
     [InlineData("[]", "Shape")]
@@ -74,6 +89,57 @@ public sealed class ListFilesTests
     {
         Assert.False(AgentToolArguments.TryListFilesProvider(input, out _, out var failure));
         Assert.Equal(expected, failure.ToString());
+    }
+
+    [Theory]
+    [InlineData("{\"prefix\":\"\"}", "Prefix", "Empty")]
+    [InlineData("{\"prefix\":\"/src\"}", "Prefix", "Absolute")]
+    [InlineData("{\"prefix\":\"src\\\\file\"}", "Prefix", "ForbiddenCharacter")]
+    [InlineData("{\"prefix\":\"src//file\"}", "Prefix", "EmptySegment")]
+    [InlineData("{\"prefix\":\"src/../file\"}", "Prefix", "DotSegment")]
+    [InlineData("{\"after\":\"src/file.\"}", "After", "TrailingDotOrSpace")]
+    [InlineData("{\"prefix\":\"../p\",\"after\":\"/a\"}", "Both", "Unknown")]
+    public void ProviderPathRejectionIdentifiesOnlyClosedFieldAndRule(
+        string input, string field, string rule)
+    {
+        Assert.False(AgentToolArguments.TryListFilesProvider(input, out var admitted,
+            out var failure, out var pathRejection));
+        Assert.Null(admitted);
+        Assert.Equal(ListFilesArgumentFailure.Path, failure);
+        Assert.Equal(new ListFilesPathRejection(
+            Enum.Parse<ListFilesPathField>(field),
+            Enum.Parse<RepositoryPathFailure>(rule)), pathRejection);
+        Assert.DoesNotContain("src", pathRejection.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PathRulePrecedenceAndAdmissionStayAligned()
+    {
+        var oversized = new string('a', AgentLimits.PathBytes + 1);
+        Assert.Equal(RepositoryPathFailure.TooLong, RepositoryPath.Failure(oversized));
+        Assert.False(AgentToolArguments.TryListFilesProvider(
+            "{\"prefix\":\"" + oversized + "\"}", out _, out var oversizedFailure,
+            out var oversizedDetail));
+        Assert.Equal(ListFilesArgumentFailure.Path, oversizedFailure);
+        Assert.Equal(new ListFilesPathRejection(ListFilesPathField.Prefix,
+            RepositoryPathFailure.TooLong), oversizedDetail);
+        Assert.Equal(RepositoryPathFailure.InvalidUnicode, RepositoryPath.Failure("a\ud800"));
+        Assert.Equal(RepositoryPathFailure.Absolute, RepositoryPath.Failure("/../bad:"));
+        Assert.Equal(RepositoryPathFailure.ForbiddenCharacter,
+            RepositoryPath.Failure("a:/../bad"));
+        foreach (var path in new[] { "src", "src/file.cs", "dir/@file" })
+        {
+            Assert.Equal(RepositoryPathFailure.None, RepositoryPath.Failure(path));
+            Assert.True(RepositoryPath.IsValid(path));
+            Assert.True(AgentToolArguments.TryListFilesProvider(
+                "{\"prefix\":\"" + path + "\"}", out var admitted,
+                out var failure, out var pathRejection));
+            Assert.Equal(path, admitted!.Prefix);
+            Assert.Equal(ListFilesArgumentFailure.None, failure);
+            Assert.Null(pathRejection);
+        }
+        foreach (var path in new[] { oversized, "a\ud800", "/../bad:", "a:/../bad" })
+            Assert.False(RepositoryPath.IsValid(path));
     }
 
     [Fact]

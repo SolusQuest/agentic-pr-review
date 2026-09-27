@@ -8,7 +8,8 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
 // Only fixed repository-owned values leave this projection. It observes a
 // response but never changes AgentLoop admission or retains provider content.
-internal sealed record LiveToolRejectionProjection(string FailureCode, string Tool, string Category)
+internal sealed record LiveToolRejectionProjection(string FailureCode, string Tool, string Category,
+    string? PathField = null, string? PathRule = null)
 {
     internal static LiveToolRejectionProjection Unknown(string code) =>
         new(code, "unknown", "unknown");
@@ -57,7 +58,8 @@ internal static class LiveToolRejectionProjector
         var prepared = new List<PreparedAgentToolCall>(calls.Length);
         foreach (var call in calls)
         {
-            if (!TryPrepare(call, out var tool, out var parsed, out var category))
+            if (!TryPrepare(call, out var tool, out var parsed, out var category,
+                out var pathRejection))
                 return null;
             if (parsed is null)
                 return new(AgentFailureCodes.ToolArgumentsInvalid, tool,
@@ -65,7 +67,9 @@ internal static class LiveToolRejectionProjector
                         ? category ?? InvalidContract
                         : ArgumentCategory(call.ArgumentsJson) == InvalidJson
                             ? InvalidJson
-                            : category ?? InvalidContract);
+                            : category ?? InvalidContract,
+                    pathRejection is { } rejected ? PathField(rejected.Field) : null,
+                    pathRejection is { } rejectedRule ? PathRule(rejectedRule.Rule) : null);
             prepared.Add(parsed);
         }
 
@@ -104,17 +108,48 @@ internal static class LiveToolRejectionProjector
         _ => "unknown",
     };
 
+    internal static bool ValidPathField(string? value) =>
+        value is "prefix" or "after" or "both" or "unknown";
+
+    internal static bool ValidPathRule(string? value) =>
+        value is "empty" or "absolute" or "too_long" or "invalid_unicode" or
+            "forbidden_character" or "empty_segment" or "dot_segment" or
+            "trailing_dot_or_space" or "unknown";
+
+    private static string PathField(ListFilesPathField field) => field switch
+    {
+        ListFilesPathField.Prefix => "prefix",
+        ListFilesPathField.After => "after",
+        ListFilesPathField.Both => "both",
+        _ => "unknown",
+    };
+
+    private static string PathRule(RepositoryPathFailure rule) => rule switch
+    {
+        RepositoryPathFailure.Empty => "empty",
+        RepositoryPathFailure.Absolute => "absolute",
+        RepositoryPathFailure.TooLong => "too_long",
+        RepositoryPathFailure.InvalidUnicode => "invalid_unicode",
+        RepositoryPathFailure.ForbiddenCharacter => "forbidden_character",
+        RepositoryPathFailure.EmptySegment => "empty_segment",
+        RepositoryPathFailure.DotSegment => "dot_segment",
+        RepositoryPathFailure.TrailingDotOrSpace => "trailing_dot_or_space",
+        _ => "unknown",
+    };
+
     private static bool TryPrepare(ProjectToolCallContent call, out string tool,
-        out PreparedAgentToolCall? prepared, out string? category)
+        out PreparedAgentToolCall? prepared, out string? category,
+        out ListFilesPathRejection? pathRejection)
     {
         prepared = null;
         category = null;
+        pathRejection = null;
         tool = KnownTool(call.Name);
         switch (call.Name)
         {
             case AgentToolRegistry.ListFilesName:
                 if (AgentToolArguments.TryListFilesProvider(call.ArgumentsJson, out var list,
-                    out var failure))
+                    out var failure, out pathRejection))
                     prepared = new PreparedListFilesCall(call.CallId, list!);
                 else category = failure switch
                 {

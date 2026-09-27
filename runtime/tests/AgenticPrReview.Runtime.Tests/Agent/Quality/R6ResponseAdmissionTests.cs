@@ -16,6 +16,43 @@ public sealed class R6ResponseAdmissionTests
     private const string Canary = "APR303_PRIVATE_RESPONSE_CANARY";
 
     [Fact]
+    public async Task InboundListFilesArgumentsReachAdmissionWithoutPathRewriting()
+    {
+        const string arguments = "{ \"prefix\" : \"../APR303_PRIVATE_RESPONSE_CANARY\" }";
+        var raw = "{\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\"," +
+            "\"content\":\"\",\"reasoning_content\":\"reasoning\",\"tool_calls\":[{" +
+            "\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_files\"," +
+            "\"arguments\":" + JsonSerializer.Serialize(arguments) +
+            "}}]},\"finish_reason\":\"tool_calls\"}],\"model\":\"deepseek-v4-flash\"," +
+            "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5," +
+            "\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}";
+        var response = DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw));
+        var parsed = DeepSeekResponseParser.Parse(response);
+        Assert.Equal(DeepSeekResponseParseOutcome.Success, parsed.Outcome);
+        Assert.Equal(arguments, Assert.IsType<DeepSeekParsedToolResponse>(parsed.Response)
+            .Calls.Single().Arguments);
+
+        var transport = new FixedTransport(response);
+        var backend = DeepSeekChatBackend.CreateClient(Context(), transport);
+        var capturing = new CapturingClient(backend);
+        var executor = new UnexpectedExecutor();
+        var outcome = await new AgentLoop(capturing, executor).RunAsync(Request(), CancellationToken.None);
+        var toolCall = Assert.Single(Assert.IsType<ProjectChatResponse>(capturing.Response)
+            .Message!.Contents.OfType<ProjectToolCallContent>());
+        Assert.Equal(arguments, toolCall.ArgumentsJson);
+        Assert.False(AgentToolArguments.TryListFilesProvider(toolCall.ArgumentsJson,
+            out _, out var failure, out var detail));
+        Assert.Equal(ListFilesArgumentFailure.Path, failure);
+        Assert.Equal(new ListFilesPathRejection(ListFilesPathField.Prefix,
+            RepositoryPathFailure.DotSegment), detail);
+        Assert.False(outcome.Succeeded);
+        Assert.Equal(AgentFailureCodes.ToolArgumentsInvalid, outcome.Diagnostic?.Code);
+        Assert.Equal(0, outcome.Diagnostic?.ToolCalls);
+        Assert.Equal(0, executor.Calls);
+        Assert.Equal(1, transport.Sends);
+    }
+
+    [Fact]
     public async Task SuccessfulTransportWithInvalidUsageKeepsUnknownAccountingAndSafeReason()
     {
         var raw = "{\"choices\":[{}],\"model\":\"deepseek-v4-flash\"," +
@@ -144,6 +181,17 @@ public sealed class R6ResponseAdmissionTests
             return Task.FromResult(result);
         }
         public void Dispose() { }
+    }
+
+    private sealed class CapturingClient(IProjectChatClient inner) : IProjectChatClient
+    {
+        internal ProjectChatResponse? Response { get; private set; }
+        public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request,
+            CancellationToken cancellationToken)
+        {
+            Response = await inner.GetResponseAsync(request, cancellationToken);
+            return Response;
+        }
     }
 
     private sealed class UnexpectedExecutor : IAgentToolExecutor

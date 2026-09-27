@@ -225,6 +225,26 @@ public sealed class R5VerifierCoverageTests
             .Append(LivePlanSummaryLine(summary ?? PlanSummary())));
     }
 
+    [Fact]
+    public void EarlierLiveSummaryOmissionRemainsAdmittedButForgedV5StatusIsRejected()
+    {
+        var earlier = LivePlanOutput();
+        Assert.DoesNotContain("v5_quality_candidate_status", earlier, StringComparison.Ordinal);
+        Assert.Equal(0, Verify("live-plan", earlier,
+            corpus: Corpus("quality", "bundle")).Code);
+        foreach (var status in new[] { "private-canary", R6V5QualityGate.CandidatePass })
+        {
+            var tampered = LivePlanOutput(PlanSummary() with
+            {
+                V5QualityCandidateStatus = status,
+            });
+            var (code, verdict) = Verify("live-plan", tampered,
+                corpus: Corpus("quality", "bundle"));
+            Assert.Equal(1, code);
+            Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+        }
+    }
+
     private static (int Code, JsonObject Verdict) Verify(string scenario, string report,
         string? corpus = null, string forbid = CorpusCanary)
     {

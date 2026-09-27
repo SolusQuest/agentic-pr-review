@@ -314,13 +314,35 @@ internal sealed class ReviewedSnapshot
                 source.RepresentedDeletions == change.Deletions;
 }
 
+// Repository-owned lexical rejection reasons. These values are diagnostic only;
+// the same ordered check remains the authority for path admission.
+internal enum RepositoryPathFailure
+{
+    None,
+    Empty,
+    Absolute,
+    TooLong,
+    InvalidUnicode,
+    ForbiddenCharacter,
+    EmptySegment,
+    DotSegment,
+    TrailingDotOrSpace,
+    Unknown,
+}
+
 internal static class RepositoryPath
 {
-    internal static bool IsValid(string path)
+    internal static bool IsValid(string path) => Failure(path) == RepositoryPathFailure.None;
+
+    internal static RepositoryPathFailure Failure(string? path)
     {
-        if (string.IsNullOrEmpty(path) || path[0] == '/')
+        if (string.IsNullOrEmpty(path))
         {
-            return false;
+            return RepositoryPathFailure.Empty;
+        }
+        if (path[0] == '/')
+        {
+            return RepositoryPathFailure.Absolute;
         }
 
         try
@@ -328,12 +350,12 @@ internal static class RepositoryPath
             if (new System.Text.UTF8Encoding(false, true).GetByteCount(path) >
                 AgentLimits.PathBytes)
             {
-                return false;
+                return RepositoryPathFailure.TooLong;
             }
         }
         catch (System.Text.EncoderFallbackException)
         {
-            return false;
+            return RepositoryPathFailure.InvalidUnicode;
         }
 
         foreach (var character in path)
@@ -342,21 +364,27 @@ internal static class RepositoryPath
                 character is '\\' or ':' or '?' or '#' or '*' or '"' or
                     '<' or '>' or '|')
             {
-                return false;
+                return RepositoryPathFailure.ForbiddenCharacter;
             }
         }
 
         foreach (var segment in path.Split('/'))
         {
-            if (segment.Length == 0 ||
-                segment is "." or ".." ||
-                segment[^1] is '.' or ' ')
+            if (segment.Length == 0)
             {
-                return false;
+                return RepositoryPathFailure.EmptySegment;
+            }
+            if (segment is "." or "..")
+            {
+                return RepositoryPathFailure.DotSegment;
+            }
+            if (segment[^1] is '.' or ' ')
+            {
+                return RepositoryPathFailure.TrailingDotOrSpace;
             }
         }
 
-        return true;
+        return RepositoryPathFailure.None;
     }
 }
 

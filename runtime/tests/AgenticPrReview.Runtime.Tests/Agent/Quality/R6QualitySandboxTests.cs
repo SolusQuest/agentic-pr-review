@@ -2,7 +2,9 @@ using System.Collections.Immutable;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 
@@ -11,6 +13,28 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 public sealed class R6QualitySandboxTests
 {
     private static string Corpus => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r6", "quality-sandbox");
+
+    [Fact]
+    public async Task FrozenFiveCaseKeylessRunDoesNotClaimLiveV5Quality()
+    {
+        var plan = Path.GetTempFileName();
+        try
+        {
+            Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus, plan).Item1);
+            var lines = new List<string>();
+            var result = await LiveRunner.RunAsync(plan, false,
+                new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
+            Assert.Equal(5, result.Completed);
+            Assert.Equal(R6V5QualityGate.NotEvaluable,
+                result.Summary.V5QualityCandidateStatus);
+            Assert.Contains("\"v5_quality_candidate_status\":\"not_evaluable\"",
+                lines[^1], StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(plan);
+        }
+    }
 
     [Theory]
     [InlineData("cs-safe", "{\"path\":null}", AgentFailureCodes.ToolArgumentsInvalid)]

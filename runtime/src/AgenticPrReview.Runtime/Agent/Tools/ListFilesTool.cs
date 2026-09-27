@@ -31,6 +31,13 @@ internal enum ListFilesArgumentFailure
     Spelling,
 }
 
+internal enum ListFilesPathField { Prefix, After, Both, Unknown }
+
+// Never carries provider arguments or a path value.
+internal readonly record struct ListFilesPathRejection(
+    ListFilesPathField Field,
+    RepositoryPathFailure Rule);
+
 internal static partial class AgentToolArguments
 {
     internal static bool TryListFiles(
@@ -41,6 +48,7 @@ internal static partial class AgentToolArguments
             allowCanonicalNulls: false,
             allowProviderSpelling: false,
             out arguments,
+            out _,
             out _);
 
     internal static bool TryListFilesCanonical(
@@ -51,6 +59,7 @@ internal static partial class AgentToolArguments
             allowCanonicalNulls: true,
             allowProviderSpelling: false,
             out arguments,
+            out _,
             out _);
 
     internal static bool TryListFilesProvider(
@@ -62,22 +71,32 @@ internal static partial class AgentToolArguments
         string json,
         out ListFilesArguments? arguments,
         out ListFilesArgumentFailure failure) =>
+        TryListFilesProvider(json, out arguments, out failure, out _);
+
+    internal static bool TryListFilesProvider(
+        string json,
+        out ListFilesArguments? arguments,
+        out ListFilesArgumentFailure failure,
+        out ListFilesPathRejection? pathRejection) =>
         TryListFiles(
             json,
             allowCanonicalNulls: false,
             allowProviderSpelling: true,
             out arguments,
-            out failure);
+            out failure,
+            out pathRejection);
 
     private static bool TryListFiles(
         string json,
         bool allowCanonicalNulls,
         bool allowProviderSpelling,
         out ListFilesArguments? arguments,
-        out ListFilesArgumentFailure failure)
+        out ListFilesArgumentFailure failure,
+        out ListFilesPathRejection? pathRejection)
     {
         arguments = null;
         failure = ListFilesArgumentFailure.None;
+        pathRejection = null;
         var input = StrictInputBytes(json);
         if (input is null)
         {
@@ -107,10 +126,22 @@ internal static partial class AgentToolArguments
                 failure = ListFilesArgumentFailure.Shape;
                 return false;
             }
-            if ((dto.Prefix is not null && !RepositoryPath.IsValid(dto.Prefix)) ||
-                (dto.After is not null && !RepositoryPath.IsValid(dto.After)))
+            var prefixFailure = dto.Prefix is null
+                ? RepositoryPathFailure.None
+                : RepositoryPath.Failure(dto.Prefix);
+            var afterFailure = dto.After is null
+                ? RepositoryPathFailure.None
+                : RepositoryPath.Failure(dto.After);
+            if (prefixFailure != RepositoryPathFailure.None ||
+                afterFailure != RepositoryPathFailure.None)
             {
                 failure = ListFilesArgumentFailure.Path;
+                pathRejection = prefixFailure != RepositoryPathFailure.None &&
+                    afterFailure != RepositoryPathFailure.None
+                    ? new(ListFilesPathField.Both, RepositoryPathFailure.Unknown)
+                    : prefixFailure != RepositoryPathFailure.None
+                        ? new(ListFilesPathField.Prefix, prefixFailure)
+                        : new(ListFilesPathField.After, afterFailure);
                 return false;
             }
 

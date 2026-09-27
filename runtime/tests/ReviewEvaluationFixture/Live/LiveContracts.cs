@@ -138,7 +138,9 @@ internal sealed record LiveRunSummary(
     int HumanConfirmedCases = 0,
     int AiAdjudicatedCases = 0,
     LiveCacheUsageSummary? CacheUsage = null,
-    UsageJournalDocument? UsageJournal = null);
+    UsageJournalDocument? UsageJournal = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? V5QualityCandidateStatus = null);
 
 // Known subtotals describe only measured observations, not billed campaign
 // totals. The fixed identity domain bounds the output independently of traffic.

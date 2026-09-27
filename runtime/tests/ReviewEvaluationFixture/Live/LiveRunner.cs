@@ -243,6 +243,11 @@ internal static class LiveRunner
             diagnostics.ToImmutableArray(),
             adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases,
             frozenAccounting.CacheUsage, frozenJournal.Document);
+        summary = summary with
+        {
+            V5QualityCandidateStatus = R6V5QualityGate.Evaluate(
+                summary, plan.Schedule, outcomes.ToImmutable()),
+        };
         foreach (var row in rows) write(Encoding.UTF8.GetString(row.Span));
         write(Encoding.UTF8.GetString(reportBytes.Value));
         write(JsonSerializer.Serialize(summary, LiveJsonContext.Default.LiveRunSummary));
