@@ -17,7 +17,8 @@ internal sealed record AgentRunRequest(
 internal sealed class AgentLoop(
     IProjectChatClient chatClient,
     IAgentToolExecutor toolExecutor,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    AgentLimitAuthority? limitAuthority = null)
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
@@ -41,7 +42,7 @@ internal sealed class AgentLoop(
         long continuationBytes = 0;
 
         if (!run.ReviewedIdentity.IsValid() ||
-            !ValidStablePlan(run.StablePlan, run.ReviewedIdentity) ||
+            !ValidStablePlan(run.StablePlan, run.ReviewedIdentity, limitAuthority, out var limitProfile) ||
             !AgentValueDomains.IsIdentifier(run.SessionId) ||
             !TryValidateInitialMessages(
                 messages,
@@ -180,6 +181,7 @@ internal sealed class AgentLoop(
 
             var admissionFailure = AdmitResponse(
                 response,
+                limitProfile,
                 usedCallIds,
                 messages.Count,
                 contentParts,
@@ -410,6 +412,7 @@ internal sealed class AgentLoop(
 
     private string? AdmitResponse(
         ProjectChatResponse response,
+        AgentLimitProfile limitProfile,
         HashSet<string> usedCallIds,
         int currentMessages,
         int currentParts,
@@ -503,8 +506,8 @@ internal sealed class AgentLoop(
         }
 
         if (newInput > AgentLimits.InputTokens ||
-            newOutput > AgentLimits.OutputTokens ||
-            newCombined > AgentLimits.CombinedTokens)
+            newOutput > AgentLimits.OutputTokensFor(limitProfile) ||
+            newCombined > AgentLimits.CombinedTokensFor(limitProfile))
         {
             return AgentFailureCodes.TokenLimit;
         }
@@ -1136,9 +1139,13 @@ internal sealed class AgentLoop(
 
     private static bool ValidStablePlan(
         StableAgentPlan plan,
-        ReviewedIdentity identity)
+        ReviewedIdentity identity,
+        AgentLimitAuthority? authority,
+        out AgentLimitProfile profile)
     {
+        profile = AgentLimitProfile.Current;
         return plan is not null &&
+            AgentLimitAuthority.TryResolve(plan.AdapterId, authority, out profile) &&
             StringComparer.Ordinal.Equals(
                 plan.RepositoryId,
                 identity.RepositoryId) &&
@@ -1150,7 +1157,7 @@ internal sealed class AgentLoop(
                 AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions)) &&
             StringComparer.Ordinal.Equals(
                 plan.LimitsSha256,
-                AgentCanonical.LimitsSha256()) &&
+                AgentCanonical.LimitsSha256(profile)) &&
             AgentValueDomains.IsUtf8(plan.BuildId, 1, 256) &&
             AgentValueDomains.IsUtf8(plan.ProviderId, 1, 128) &&
             AgentValueDomains.IsUtf8(plan.ModelId, 1, 128) &&

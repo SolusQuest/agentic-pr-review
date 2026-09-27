@@ -3,9 +3,12 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
+using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Comparison;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
@@ -103,6 +106,71 @@ public sealed class R6EconomicsRunnerTests
         var rejected = Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(
             plan with { Bounds = plan.Bounds with { MaxSeconds = seconds - 1 } }, false));
         Assert.Equal("r6_economics_allocation_invalid", rejected.Code);
+    }
+
+    [Fact]
+    public void CandidateEconomicsPlanBindsFullChildAllocationAndTrustedIdentity()
+    {
+        using var files = new Inputs();
+        var original = files.Plan;
+        var calls = original.Bounds.MaxModelCalls;
+        var per = original.Bounds.PerCall with { MaxOutputTokens = 8192 };
+        var input = original with
+        {
+            Provider = original.Provider with
+            {
+                AdapterId = DeepSeekAdapterContext.CandidateAdapter,
+                ConfigurationSha256 = LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output8192),
+            },
+            Bounds = original.Bounds with
+            {
+                PerCall = per,
+                MaxOutputTokens = calls * per.MaxOutputTokens,
+                MaxCombinedTokens = calls * (per.MaxInputTokens + per.MaxOutputTokens),
+            },
+        };
+        var admitted = EconomicsPlan.Admit(input, false);
+        Assert.Equal(DeepSeekRequestProfile.Output8192, admitted.Profile);
+        Assert.Equal(65_536, admitted.ChildAllocation.OutputTokens);
+        Assert.Equal(327_680, admitted.ChildAllocation.CombinedTokens);
+        Assert.NotNull(admitted.LoadTariff(default));
+        var replay = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(input.Replay.Path).Fixture);
+        var trusted = admitted.TrustedRequest(replay.Runs[0]);
+        Assert.Equal(DeepSeekAdapterContext.CandidateAdapter, trusted.AdapterId);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
+        Assert.Equal(AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192), stable!.StablePlan.LimitsSha256);
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+        {
+            Bounds = input.Bounds with { PerCall = per with { MaxOutputTokens = 4096 } },
+        }, false));
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+        {
+            Bounds = input.Bounds with { PerCall = per with { MaxOutputTokens = 8193 } },
+        }, false));
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+        {
+            Bounds = input.Bounds with { MaxOutputTokens = input.Bounds.MaxOutputTokens - 1 },
+        }, false));
+        Assert.Throws<EconomicsRejected>(() => EconomicsPlan.Admit(input with
+        {
+            Provider = input.Provider with { ConfigurationSha256 = LivePlanAdmission.ProviderConfigurationSha256() },
+        }, false));
+    }
+
+    [Fact]
+    public void CurrentEconomicsPlanBindsTheClosedAdapterEvenForAnotherAdmittedReplayFixture()
+    {
+        using var files = new Inputs();
+        var plan = EconomicsPlan.Admit(files.Plan, false);
+        var seed = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay-seed", "valid");
+        var foreign = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(seed).Fixture).Runs[0];
+        var trusted = plan.TrustedRequest(foreign);
+        Assert.Equal(DeepSeekAdapterContext.Provider, trusted.ProviderId);
+        Assert.Equal(DeepSeekAdapterContext.Model, trusted.ModelId);
+        Assert.Equal(DeepSeekAdapterContext.Adapter, trusted.AdapterId);
+        Assert.Equal(DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Current), trusted.LimitAuthority);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
+        Assert.Equal(AgentCanonical.LimitsSha256(), stable!.StablePlan.LimitsSha256);
     }
 
     [Fact]

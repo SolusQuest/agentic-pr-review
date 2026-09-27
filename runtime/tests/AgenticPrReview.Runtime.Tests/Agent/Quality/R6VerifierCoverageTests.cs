@@ -30,7 +30,7 @@ public sealed class R6VerifierCoverageTests
             p2-wrong-head p2-stale-generation p2-policy p2-model p2-adapter p2-toolset p2-host-capacity-reset
             c1-descriptive c1-source-axis c1-fixed-mismatch c1-partial-population c1-effective-conditional
             c1-control-unsupported c1-prefix-bound c1-prefix-unbound c1-prefix-conflict c1-c2-handoff
-            c2-replay c2-full c2-execute-loopback c2-wrong-source c2-wrong-build c2-wrong-predecessor
+            c2-replay c2-output8192 c2-full c2-execute-loopback c2-wrong-source c2-wrong-build c2-wrong-predecessor
             c2-before-ready-crash c2-after-prepare-crash c2-partial-reply c2-oversized-reply c2-wrong-reply
             c2-rate-limit c2-usage-violation c2-provider-failure c2-cancel-after-usage c2-cancel-after-prepare
             c2-reject-accept c2-hang c2-preparation-failure c2-credential-probe c2-plan-budget

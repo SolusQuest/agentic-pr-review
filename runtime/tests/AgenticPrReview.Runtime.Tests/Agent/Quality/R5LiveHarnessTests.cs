@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
@@ -616,6 +617,16 @@ public sealed class R5LiveHarnessTests
         },
     };
 
+    private static void CandidatePlan(JsonObject document)
+    {
+        document["provider"]!["adapter_id"] = DeepSeekAdapterContext.CandidateAdapter;
+        document["provider"]!["configuration_sha256"] =
+            LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output8192);
+        document["bounds"]!["max_output_tokens"] = AgentLimits.Output8192Tokens;
+        document["bounds"]!["max_combined_tokens"] = AgentLimits.Combined8192Tokens;
+        document["bounds"]!["per_call"]!["max_output_tokens"] = DeepSeekRequestWriter.CandidateMaxTokens;
+    }
+
     private sealed class PlanFile : IDisposable
     {
         internal string Root { get; } =
@@ -878,6 +889,91 @@ public sealed class R5LiveHarnessTests
         Assert.Equal("r5-live-local-v1", summaryDocument.RootElement.GetProperty("format").GetString());
         Assert.Equal("loopback", summaryDocument.RootElement.GetProperty("execution_kind").GetString());
         Assert.Equal(64, summaryDocument.RootElement.GetProperty("plan_sha256").GetString()!.Length);
+    }
+
+    [Fact]
+    public async Task CandidateDryRunBindsPlanAgentWriterAccountingAndStrictJournal()
+    {
+        using var plan = new PlanFile(CandidatePlan);
+        var transport = new ReplayTransport(
+            Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs
+                .Single(run => run.Input.CaseId == "cs-safe").Script,
+            ReplayFault.None);
+        var result = await LiveRunner.RunAsync(plan.Path, false,
+            Options(transport: _ => transport), CancellationToken.None);
+        Assert.Equal("complete", result.StopReason);
+        Assert.Equal(1, result.Attempted);
+        Assert.NotEmpty(transport.Requests);
+        foreach (var request in transport.Requests)
+        {
+            using var document = JsonDocument.Parse(request);
+            Assert.Equal(8192, document.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.False(document.RootElement.TryGetProperty("tool_choice", out _));
+        }
+        Assert.Equal((long)transport.Requests.Count * 8192, result.Summary.ReservedOutputTokens);
+        Assert.Equal(DeepSeekAdapterContext.CandidateAdapter, result.Journal.Document.Plan.Provider.AdapterId);
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(result.Journal)));
+    }
+
+    [Theory]
+    [InlineData("old-adapter-new-reservation", "InvalidPlan")]
+    [InlineData("candidate-old-reservation", "InvalidPlan")]
+    [InlineData("candidate-over-cap", "InvalidPlan")]
+    [InlineData("candidate-wrong-config", "UnsupportedConfiguration")]
+    public void CrossedOutputProfilesRejectAtPlanAdmission(string mutation, string expected)
+    {
+        Assert.Equal(expected, RejectPlan(document =>
+        {
+            if (mutation != "old-adapter-new-reservation") CandidatePlan(document);
+            switch (mutation)
+            {
+                case "old-adapter-new-reservation":
+                    document["bounds"]!["per_call"]!["max_output_tokens"] = 8192;
+                    break;
+                case "candidate-old-reservation":
+                    document["bounds"]!["per_call"]!["max_output_tokens"] = 4096;
+                    break;
+                case "candidate-over-cap":
+                    document["bounds"]!["per_call"]!["max_output_tokens"] = 8193;
+                    break;
+                case "candidate-wrong-config":
+                    document["provider"]!["configuration_sha256"] = LivePlanAdmission.ProviderConfigurationSha256();
+                    break;
+            }
+        }).ToString());
+    }
+
+    [Fact]
+    public async Task CandidateReservationMismatchNeverReadsTheCredentialOrCreatesTransport()
+    {
+        using var plan = new PlanFile(document =>
+        {
+            CandidatePlan(document);
+            document["bounds"]!["per_call"]!["max_output_tokens"] = 4096;
+        });
+        var secret = new FakeSecret(Canary);
+        var factory = new FakeFactory(_ => throw new InvalidOperationException("must not be constructed"));
+        await Assert.ThrowsAsync<LivePlanRejected>(() => LiveRunner.RunAsync(plan.Path, true,
+            new LiveOptions { SecretSource = secret, TransportFactory = factory }, CancellationToken.None));
+        Assert.Equal(0, secret.Taken);
+        Assert.Equal(0, factory.Calls);
+    }
+
+    [Fact]
+    public async Task CandidateUnderfundedScheduleIsAdmittedAndStopsAtReservationBoundary()
+    {
+        using var plan = new PlanFile(document =>
+        {
+            CandidatePlan(document);
+            document["bounds"]!["max_model_calls"] = 1;
+            document["bounds"]!["max_input_tokens"] = 65_536;
+            document["bounds"]!["max_output_tokens"] = 8192;
+            document["bounds"]!["max_combined_tokens"] = 73_728;
+        });
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(), CancellationToken.None);
+        Assert.Equal("bound_stop", result.StopReason);
+        Assert.Equal(1, result.Summary.ReservedOutputTokens / 8192);
+        Assert.Equal(1, result.Summary.TransportOutcomeCounts.BudgetRefused);
     }
 
     [Fact]

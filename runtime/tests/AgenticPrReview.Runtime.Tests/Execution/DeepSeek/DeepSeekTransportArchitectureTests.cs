@@ -249,6 +249,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
         [
             .. roots,
             typeof(DeepSeekRequestWriter),
+                typeof(DeepSeekRequestProfile),
                 typeof(DeepSeekRequestWriteResult),
                 typeof(DeepSeekRequestWriteOutcome),
                 typeof(IDeepSeekTransport),
@@ -284,6 +285,8 @@ public sealed partial class DeepSeekTransportArchitectureTests
                 typeof(AgentContinuationCodecValue),
                 typeof(AgentContinuationEncodedPayload),
                 typeof(AgentLimits),
+                typeof(AgentLimitAuthority),
+                typeof(AgentLimitProfile),
             typeof(AgentValueDomains),
         ];
         var approvedProductionTypes = approvedRoots

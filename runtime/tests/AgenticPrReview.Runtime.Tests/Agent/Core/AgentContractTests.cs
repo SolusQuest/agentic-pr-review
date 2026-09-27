@@ -77,6 +77,31 @@ public sealed class AgentContractTests
                 (row.Name, row.Value, row.Unit)));
     }
 
+    [Fact]
+    public void Output8192LimitsChangeOnlyTheTwoCumulativeTokenRows()
+    {
+        Assert.Equal("587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6",
+            AgentCanonical.LimitsSha256());
+        Assert.Equal("620174ae7519d7a0cd76296600cb3d0783328d2ea0d62170d8d058ea3eb41cda",
+            AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192));
+        var current = AgentLimits.Registry;
+        var candidate = AgentLimits.RegistryFor(AgentLimitProfile.Output8192);
+        Assert.Equal(current.Length, candidate.Length);
+        for (var index = 0; index < current.Length; index++)
+        {
+            Assert.Equal(current[index].Ordinal, candidate[index].Ordinal);
+            Assert.Equal(current[index].Name, candidate[index].Name);
+            Assert.Equal(current[index].Unit, candidate[index].Unit);
+            Assert.Equal(current[index].Name switch
+            {
+                "output_tokens" => 65_536,
+                "combined_tokens" => 327_680,
+                _ => current[index].Value,
+            }, candidate[index].Value);
+        }
+        Assert.NotEqual(AgentCanonical.LimitsBytes(), AgentCanonical.LimitsBytes(AgentLimitProfile.Output8192));
+    }
+
     [Theory]
     [InlineData("apr.limits.r2", "7e668195c0b61e7f4bace357ead81d03df6baa17d6319e350391fd7623bcc42e")]
     [InlineData("apr.toolset.r2", "14075edaa6a137ace8019f5adda76600d3e43038a4eb7c8497061d983be7f538")]

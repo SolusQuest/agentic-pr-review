@@ -65,7 +65,8 @@ internal sealed record AgentSessionTrustedRequest(
     string BuildId,
     string ProviderId,
     string ModelId,
-    string AdapterId);
+    string AdapterId,
+    AgentLimitAuthority? LimitAuthority = null);
 
 internal sealed record AgentSessionMaterializedStableRequest(
     StableAgentPlan StablePlan,

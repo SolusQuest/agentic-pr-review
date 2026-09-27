@@ -92,6 +92,9 @@ internal static class LiveRunner
         options ??= new();
         var write = options.WriteLine ?? Console.WriteLine;
         var plan = LivePlanAdmission.Load(planPath, execute, token);
+        if (!LivePlanAdmission.TryProviderProfile(plan.Provider, out var profile))
+            throw new InvalidOperationException("live_profile_invalid");
+        var limitAuthority = DeepSeekAdapterContext.LimitAuthorityFor(profile);
         var fixture = AdmitCorpus(plan, options, token);
         var cases = ResolveCases(plan, fixture);
         var nonce = "live-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
@@ -146,7 +149,8 @@ internal static class LiveRunner
                 {
                     ProviderId = DeepSeekAdapterContext.Provider,
                     ModelId = DeepSeekAdapterContext.Model,
-                    AdapterId = DeepSeekAdapterContext.Adapter,
+                    AdapterId = plan.Provider.AdapterId,
+                    LimitAuthority = limitAuthority,
                 };
                 var descriptor = new EvaluationRunInput(runId, mode, EvaluationSource.Commit,
                     EvaluationSource.Tree, EvaluationSource.Clean, plan.Provider.ConfigurationSha256);
@@ -285,13 +289,13 @@ internal static class LiveRunner
             : options.DryRunTransport(run);
         using var metered = new LiveMeteredTransport(inner, accounting, journalAttempt);
         var adapter = new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-            DeepSeekAdapterContext.Adapter, runId);
+            trusted.AdapterId, runId);
         var client = DeepSeekChatBackend.CreateClient(adapter, metered);
         var executor = new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot));
         var observed = new LiveChatObserver(client, accounting, journalAttempt,
             response => LiveToolRejectionProjector.Project(response, executor));
         journalAttempt.AgentStarted();
-        var outcome = await new AgentLoop(observed, executor)
+        var outcome = await new AgentLoop(observed, executor, limitAuthority: trusted.LimitAuthority)
             .RunAsync(request, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
         var rejection = observed.TakeRejection();

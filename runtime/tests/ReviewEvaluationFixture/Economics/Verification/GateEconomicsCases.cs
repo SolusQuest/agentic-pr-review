@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
@@ -26,6 +27,23 @@ internal static class GateEconomicsCases
             cases.Add(GateCase.Create(id, selected, JsonSerializer.SerializeToUtf8Bytes(evidence, GateJson.Default.GateEconomics)));
         }
         await Add("c2-replay", "replay");
+        var candidatePerCall = replay.Bounds.PerCall with { MaxOutputTokens = DeepSeekRequestWriter.CandidateMaxTokens };
+        var candidate = replay with
+        {
+            Provider = replay.Provider with
+            {
+                AdapterId = DeepSeekAdapterContext.CandidateAdapter,
+                ConfigurationSha256 = LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output8192),
+            },
+            Bounds = replay.Bounds with
+            {
+                PerCall = candidatePerCall,
+                MaxOutputTokens = replay.Bounds.MaxModelCalls * candidatePerCall.MaxOutputTokens,
+                MaxCombinedTokens = replay.Bounds.MaxModelCalls *
+                    (candidatePerCall.MaxInputTokens + candidatePerCall.MaxOutputTokens),
+            },
+        };
+        await Add("c2-output8192", "candidate-output8192", candidate);
         await Add("c2-full", "capacity-reset", Prepare());
         // Deliberately fail on an uncommitted build. Final acceptance cannot
         // silently take the dirty-source rejection branch in place of execute.

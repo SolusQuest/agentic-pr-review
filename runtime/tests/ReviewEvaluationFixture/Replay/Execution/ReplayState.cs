@@ -14,9 +14,10 @@ internal sealed class ReplayState : IDisposable
     internal const long Now = 1_800_000_000;
     internal const string Build = "r5-completed-replay";
     private readonly Keys keys;
-    internal ReplayState(AdmittedReplayRun run, string session, string root, byte[] key, Action? beforeWriteTestHook = null)
+    internal ReplayState(AdmittedReplayRun run, string session, string root, byte[] key,
+        Action? beforeWriteTestHook = null, AgentSessionTrustedRequest? trustedOverride = null)
     {
-        Trusted = run.CreateTrustedRequest(Build);
+        Trusted = trustedOverride ?? run.CreateTrustedRequest(Build);
         if (!AgentStableRequestMaterializer.TryMaterialize(Trusted, null, out var stable)) throw new InvalidOperationException();
         var plan = stable!.StablePlan;
         var scope = new RestrictedStateScope(plan.RepositoryId, plan.WorkflowIdentity, plan.ReviewTarget, session,

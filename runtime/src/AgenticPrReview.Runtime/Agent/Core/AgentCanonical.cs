@@ -24,20 +24,21 @@ internal static class AgentCanonical
     internal const string SessionDomain = "apr.session.r2";
     internal const string StateEnvelopeDomain = "apr.state-envelope.r2";
 
-    internal static byte[] LimitsBytes()
+    internal static byte[] LimitsBytes(AgentLimitProfile profile = AgentLimitProfile.Current)
     {
+        var registry = AgentLimits.RegistryFor(profile);
         var writer = new Rfc8785Writer(4_096);
         writer.WriteObjectStart();
         writer.WriteProperty("limits");
         writer.WriteArrayStart();
-        for (var index = 0; index < AgentLimits.Registry.Length; index++)
+        for (var index = 0; index < registry.Length; index++)
         {
             if (index > 0)
             {
                 writer.WriteComma();
             }
 
-            var row = AgentLimits.Registry[index];
+            var row = registry[index];
             writer.WriteObjectStart();
             writer.WriteProperty("ordinal");
             writer.WriteNumber(row.Ordinal);
@@ -55,7 +56,8 @@ internal static class AgentCanonical
         return writer.ToImmutableArray().ToArray();
     }
 
-    internal static string LimitsSha256() => HashDomain(LimitsDomain, LimitsBytes());
+    internal static string LimitsSha256(AgentLimitProfile profile = AgentLimitProfile.Current) =>
+        HashDomain(LimitsDomain, LimitsBytes(profile));
 
     internal static byte[] ToolsetBytes(IReadOnlyList<ProjectToolDefinition> tools)
     {

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
@@ -482,8 +483,10 @@ public sealed class LiveAgentFreshProcessTests
     [InlineData("provider")]
     [InlineData("model")]
     [InlineData("adapter")]
+    [InlineData("candidate-adapter")]
     [InlineData("policy")]
     [InlineData("limits")]
+    [InlineData("candidate-limits")]
     [InlineData("toolset")]
     [InlineData("build")]
     [InlineData("session")]
@@ -523,6 +526,10 @@ public sealed class LiveAgentFreshProcessTests
             {
                 Stable = document.Stable with { AdapterId = "other" },
             },
+            "candidate-adapter" => document with
+            {
+                Stable = document.Stable with { AdapterId = DeepSeekAdapterContext.CandidateAdapter },
+            },
             "policy" => document with
             {
                 Stable = document.Stable with
@@ -535,6 +542,13 @@ public sealed class LiveAgentFreshProcessTests
                 AuthorizedScope = document.AuthorizedScope with
                 {
                     LimitsSha256 = new string('0', 64),
+                },
+            },
+            "candidate-limits" => document with
+            {
+                AuthorizedScope = document.AuthorizedScope with
+                {
+                    LimitsSha256 = AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192),
                 },
             },
             "toolset" => document with
@@ -574,7 +588,7 @@ public sealed class LiveAgentFreshProcessTests
 
         Assert.Equal(1, files.AuthorizationReads);
         Assert.Equal(0, files.AuthorizedLayoutCalls);
-        if (mismatch is "provider" or "model" or "adapter")
+        if (mismatch is "provider" or "model" or "adapter" or "candidate-adapter")
         {
             Assert.Equal(10, result.ExitCode);
             Assert.Equal(

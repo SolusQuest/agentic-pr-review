@@ -3,6 +3,7 @@ using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
@@ -71,6 +72,7 @@ internal static class ReplayAdmission
             manifest.Configuration is not { } configuration ||
             !ReplayLimits.Text(configuration.WorkflowIdentity, 256) || !ReplayLimits.Text(configuration.ProviderId, 128) ||
             !ReplayLimits.Text(configuration.ModelId, 128) || !ReplayLimits.Text(configuration.AdapterId, 128) ||
+            StringComparer.Ordinal.Equals(configuration.AdapterId, DeepSeekAdapterContext.CandidateAdapter) ||
             manifest.Files.IsDefault || manifest.Files.Length is < 1 or > ReplayLimits.Files ||
             manifest.Runs.IsDefault || manifest.Runs.Length is < 1 or > ReplayLimits.Runs) return false;
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ReplayLimits.ManifestName };

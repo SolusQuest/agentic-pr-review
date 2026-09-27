@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 
@@ -18,6 +19,17 @@ public sealed class R5ReplayAdmissionTests
     private const string SourcePath = "src/Counter.cs";
     private const string Canary = "EXPECTATION_ONLY_CANARY";
     private static string Seed => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay-seed", "valid");
+
+    [Fact]
+    public void CandidateAdapterRequiresAClosedEvaluatorPlanInsteadOfGenericReplayAdmission()
+    {
+        using var bundle = new Bundle();
+        bundle.Manifest(document => document["configuration"]!["adapter_id"] =
+            DeepSeekAdapterContext.CandidateAdapter);
+        var result = ReplayAdmission.Load(bundle.Root);
+        Assert.Equal(ReplayAdmissionCode.InvalidManifest, result.Code);
+        Assert.Null(result.Fixture);
+    }
 
     [Fact]
     public async Task CompleteSeedProducesOwnedInputsForActualToolsAndPolicy()

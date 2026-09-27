@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
@@ -43,7 +44,8 @@ internal static class EconomicsChild
             var run = workload.Run(input.Slot, input.Campaign);
             var prior = input.Slot.Previous is { } previous ? workload.Run(plan.Slots[previous], input.Campaign) : null;
             using var state = new ReplayState(run, input.Session, StateRoot(input.Root, input.Slot.Chain), input.StateKey,
-                input.Fault == EconomicsFault.PrepareWriteFailure ? () => throw new IOException() : null);
+                input.Fault == EconomicsFault.PrepareWriteFailure ? () => throw new IOException() : null,
+                plan.TrustedRequest(run));
             var identity = run.Input.ReviewedIdentity.Runtime;
             var producer = prior?.Input.ReviewedIdentity.Runtime ?? identity;
             var transition = ReplayState.Transition(run, prior);
@@ -97,7 +99,8 @@ internal static class EconomicsChild
                 ? LiveDeepSeekTransportFactory.Instance.Create(DeepSeekCredential.Create(secret.Credential ?? throw new IOException()))
                 : credentialProbe is not null ? DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create(secret.Credential!),
                     credentialProbe, TimeSpan.FromSeconds(input.Plan.ChildSeconds))
-                : new EconomicsLoopback(run.Script, input.Fault, plan.Input.Bounds.PerCall.MaxInputTokens);
+                : new EconomicsLoopback(run.Script, input.Fault, plan.Input.Bounds.PerCall.MaxInputTokens,
+                    plan.Input.Bounds.PerCall.MaxOutputTokens);
             using var metered = new LiveMeteredTransport(underlying, accounting, calls);
             var backend = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId,
                 state.Trusted.AdapterId, input.Session), metered);
@@ -111,7 +114,8 @@ internal static class EconomicsChild
                 input.Transport == "live" ? "live" : "deterministic", EvaluationSource.Commit, EvaluationSource.Tree,
                 EvaluationSource.Clean, input.Plan.Provider.ConfigurationSha256);
             var attempt = EvaluationAttempt.Admit(state.Trusted, descriptor) ?? throw new IOException();
-            var outcome = await new AgentLoop(history, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)))
+            var outcome = await new AgentLoop(history, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)),
+                limitAuthority: state.Trusted.LimitAuthority)
                 .RunAsync(request, deadline.Token);
             EvaluationOutcome evaluation;
             PreparedStateReceipt? prepared = null;
@@ -208,9 +212,10 @@ internal sealed class EconomicsLoopback : IDeepSeekTransport
     private readonly ReplayTransport inner;
     private readonly EconomicsFault fault;
     private readonly long inputBasis;
-    internal EconomicsLoopback(ReplayScript script, EconomicsFault fault, long inputBasis)
+    private readonly long? expectedOutputCap;
+    internal EconomicsLoopback(ReplayScript script, EconomicsFault fault, long inputBasis, long? expectedOutputCap = null)
     {
-        this.fault = fault; this.inputBasis = inputBasis;
+        this.fault = fault; this.inputBasis = inputBasis; this.expectedOutputCap = expectedOutputCap;
         if (fault is EconomicsFault.ThreeCalls or EconomicsFault.EightCalls)
         {
             var first = script.Turns[0];
@@ -223,6 +228,19 @@ internal sealed class EconomicsLoopback : IDeepSeekTransport
     }
     public async Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody, CancellationToken token)
     {
+        if (expectedOutputCap is { } cap)
+        {
+            try
+            {
+                using var request = JsonDocument.Parse(requestBody);
+                if (request.RootElement.GetProperty("max_tokens").GetInt64() != cap)
+                    return DeepSeekTransportResult.RequestRejected();
+            }
+            catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException)
+            {
+                return DeepSeekTransportResult.RequestRejected();
+            }
+        }
         if (fault == EconomicsFault.RateLimit) return DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0);
         if (fault == EconomicsFault.ProviderFailure) return DeepSeekTransportResult.TransportFailure();
         var result = await inner.SendAsync(requestBody, token);
