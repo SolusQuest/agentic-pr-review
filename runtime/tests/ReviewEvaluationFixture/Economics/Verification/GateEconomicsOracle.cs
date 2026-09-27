@@ -93,13 +93,14 @@ internal static class GateEconomicsOracle
         }
         if (item.Id == "c2-output8192")
         {
-            Require(report.Plan.Provider.AdapterId == DeepSeekAdapterContext.CandidateAdapter &&
+            Require(report.Journal is { } journal &&
+                report.Plan.Provider.AdapterId == DeepSeekAdapterContext.CandidateAdapter &&
                 report.Plan.Provider.ConfigurationSha256 ==
                     LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output8192) &&
                 report.Plan.Bounds.PerCall.MaxOutputTokens == 8192 &&
                 report.Plan.Bounds.MaxOutputTokens == report.Plan.Bounds.MaxModelCalls * 8192 &&
-                report.Journal!.Plan.Provider.AdapterId == DeepSeekAdapterContext.CandidateAdapter &&
-                report.Journal.Reservations.OutputTokens == report.Journal.Reservations.Calls * 8192 &&
+                journal.Plan.Provider.AdapterId == DeepSeekAdapterContext.CandidateAdapter &&
+                journal.Reservations.OutputTokens == journal.Reservations.Calls * 8192 &&
                 report.Steps.All(step => step.Accepted && step.Readback));
         }
         if (item.Id is "c2-reject-accept" or "c2-cancel-after-prepare" or "c2-preparation-failure")
