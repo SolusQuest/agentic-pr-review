@@ -19,6 +19,11 @@ internal static class LiveToolRejectionProjector
     internal const string InvalidJson = "arguments_json_invalid";
     internal const string InvalidContract = "arguments_contract_invalid";
     internal const string PathNotTracked = "path_not_tracked";
+    internal const string ListInputInvalid = "list_files_input_invalid";
+    internal const string ListNormalizationInvalid = "list_files_normalization_invalid";
+    internal const string ListShapeInvalid = "list_files_shape_invalid";
+    internal const string ListPathInvalid = "list_files_path_invalid";
+    internal const string ListSpellingInvalid = "list_files_spelling_invalid";
 
     internal static LiveToolRejectionProjection? Project(
         ProjectChatResponse response,
@@ -52,11 +57,15 @@ internal static class LiveToolRejectionProjector
         var prepared = new List<PreparedAgentToolCall>(calls.Length);
         foreach (var call in calls)
         {
-            if (!TryPrepare(call, out var tool, out var parsed))
+            if (!TryPrepare(call, out var tool, out var parsed, out var category))
                 return null;
             if (parsed is null)
                 return new(AgentFailureCodes.ToolArgumentsInvalid, tool,
-                    ArgumentCategory(call.ArgumentsJson));
+                    call.Name == AgentToolRegistry.ListFilesName
+                        ? category ?? InvalidContract
+                        : ArgumentCategory(call.ArgumentsJson) == InvalidJson
+                            ? InvalidJson
+                            : category ?? InvalidContract);
             prepared.Add(parsed);
         }
 
@@ -96,15 +105,27 @@ internal static class LiveToolRejectionProjector
     };
 
     private static bool TryPrepare(ProjectToolCallContent call, out string tool,
-        out PreparedAgentToolCall? prepared)
+        out PreparedAgentToolCall? prepared, out string? category)
     {
         prepared = null;
+        category = null;
         tool = KnownTool(call.Name);
         switch (call.Name)
         {
             case AgentToolRegistry.ListFilesName:
-                if (AgentToolArguments.TryListFilesProvider(call.ArgumentsJson, out var list))
+                if (AgentToolArguments.TryListFilesProvider(call.ArgumentsJson, out var list,
+                    out var failure))
                     prepared = new PreparedListFilesCall(call.CallId, list!);
+                else category = failure switch
+                {
+                    ListFilesArgumentFailure.Input => ListInputInvalid,
+                    ListFilesArgumentFailure.Json => InvalidJson,
+                    ListFilesArgumentFailure.Normalization => ListNormalizationInvalid,
+                    ListFilesArgumentFailure.Shape => ListShapeInvalid,
+                    ListFilesArgumentFailure.Path => ListPathInvalid,
+                    ListFilesArgumentFailure.Spelling => ListSpellingInvalid,
+                    _ => InvalidContract,
+                };
                 return true;
             case AgentToolRegistry.ListChangedFilesName:
                 if (AgentToolArguments.TryListChangedFilesProvider(call.ArgumentsJson, out var changed))

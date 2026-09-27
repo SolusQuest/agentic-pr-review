@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
@@ -16,6 +17,143 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R5LiveHarnessTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task R6AdmissionCategoriesCrossLiveRunnerAndStrictVerifier(bool responseInvalid)
+    {
+        // The strict V1 verifier pins all thirteen cases. wrong-evidence is
+        // already expected to fail, so changing its failure boundary preserves
+        // the declared Q1 code while exercising the new diagnostic shape.
+        var corpus = Corpus;
+        using var plan = new PlanFile();
+        Assert.Equal(0, R5CaseVerifier.MakeLivePlan(corpus, plan.Path).Item1);
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        {
+            var replay = new ReplayTransport(run.Script, ReplayFault.None);
+            if (run.Input.CaseId != "wrong-evidence") return replay;
+            var sends = 0;
+            return new FakeTransport(async (request, token) =>
+            {
+                var original = await replay.SendAsync(request, token);
+                if (++sends != 1) return original;
+                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
+                if (responseInvalid)
+                    body["usage"] = new JsonObject { [Canary] = 1 };
+                else
+                {
+                    var function = body["choices"]![0]!["message"]!["tool_calls"]![0]!["function"]!;
+                    function["name"] = AgentToolRegistry.ListFilesName;
+                    function["arguments"] = "{\"prefix\":\"../" + Canary + "\"}";
+                }
+                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+            });
+        }), CancellationToken.None);
+
+        Assert.Equal("complete", result.StopReason);
+        Assert.Equal(13, result.Attempted);
+        var diagnostic = Assert.Single(result.Summary.AgentDiagnostics.Where(d => d.ScheduleIndex == 8));
+        Assert.Equal(responseInvalid ? AgentFailureCodes.ResponseInvalid : AgentFailureCodes.ToolArgumentsInvalid,
+            diagnostic.Code);
+        Assert.Equal(responseInvalid ? LiveNormalizationCategories.ProviderUsage :
+            LiveToolRejectionProjector.ListPathInvalid, diagnostic.Category);
+        Assert.Equal(responseInvalid ? null : AgentToolRegistry.ListFilesName, diagnostic.Tool);
+        Assert.Equal(0, diagnostic.ToolCalls);
+        var journalAttempt = Assert.Single(result.Journal.Document.Attempts.Where(a => a.ScheduleIndex == 8));
+        var call = Assert.Single(result.Journal.Document.Calls.Where(c => c.AttemptId == journalAttempt.AttemptId));
+        Assert.True(call.Dispatched);
+        Assert.Equal("success", call.TransportOutcome);
+        Assert.Equal(responseInvalid ? "threw" : "returned", call.ChatOutcome);
+        Assert.Equal(responseInvalid ? "unknown" : "known", call.UsageStatus);
+        Assert.Equal(responseInvalid ? 1 : 0, result.Summary.UsageUnknownCalls);
+        Assert.Equal(responseInvalid ? 1 : 0, result.Summary.TransportOutcomeCounts.NormalizationExceptions);
+        Assert.DoesNotContain(Canary, string.Join('\n', lines), StringComparison.Ordinal);
+        Assert.Equal(diagnostic, Assert.Single(JsonSerializer.Deserialize(lines[^1],
+            LiveJsonContext.Default.LiveRunSummary)!.AgentDiagnostics.Where(d => d.ScheduleIndex == 8)));
+
+        var reportPath = Path.Combine(plan.Root, "report.jsonl");
+        File.WriteAllLines(reportPath, lines);
+        var (code, verdict) = R5CaseVerifier.Run(["verify-cases", "--scenario", "live-plan",
+            "--corpus", corpus, "--forbid", Canary, "--report", reportPath]);
+        Assert.True(code == 0, verdict.ToJsonString());
+        Assert.Equal("verified", verdict["code"]?.GetValue<string>());
+
+        var forged = result.Summary with
+        {
+            AgentDiagnostics = [.. result.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex == 8
+                ? d with { Category = responseInvalid ? LiveToolRejectionProjector.ListPathInvalid :
+                    LiveNormalizationCategories.ProviderUsage }
+                : d)],
+        };
+        lines[^1] = JsonSerializer.Serialize(forged, LiveJsonContext.Default.LiveRunSummary);
+        File.WriteAllLines(reportPath, lines);
+        var (rejected, reason) = R5CaseVerifier.Run(["verify-cases", "--scenario", "live-plan",
+            "--corpus", corpus, "--forbid", Canary, "--report", reportPath]);
+        Assert.Equal(1, rejected);
+        Assert.Equal("rejected_report_invalid", reason["reason"]?.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData(false, LiveNormalizationCategories.ProviderFinishReasonLength)]
+    [InlineData(true, LiveNormalizationCategories.ProviderChoiceShape)]
+    public async Task R6ChoiceReasonsCrossLiveRunnerAndStrictVerifier(
+        bool malformedChoice, string expectedCategory)
+    {
+        using var plan = new PlanFile();
+        Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus, plan.Path).Item1);
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        {
+            var replay = new ReplayTransport(run.Script, ReplayFault.None);
+            if (run.Input.CaseId != "wrong-evidence") return replay;
+            var sends = 0;
+            return new FakeTransport(async (request, token) =>
+            {
+                var original = await replay.SendAsync(request, token);
+                if (++sends != 1) return original;
+                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
+                if (malformedChoice)
+                    body["choices"]![0] = JsonValue.Create(Canary);
+                else
+                    body["choices"]![0]!["finish_reason"] = "length";
+                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+            });
+        }), CancellationToken.None);
+
+        Assert.Equal("complete", result.StopReason);
+        Assert.Equal(13, result.Attempted);
+        var diagnostic = Assert.Single(result.Summary.AgentDiagnostics.Where(d => d.ScheduleIndex == 8));
+        Assert.Equal(AgentFailureCodes.ResponseInvalid, diagnostic.Code);
+        Assert.Equal(expectedCategory, diagnostic.Category);
+        Assert.Null(diagnostic.Tool);
+        var attempt = Assert.Single(result.Journal.Document.Attempts.Where(a => a.ScheduleIndex == 8));
+        var call = Assert.Single(result.Journal.Document.Calls.Where(c => c.AttemptId == attempt.AttemptId));
+        Assert.Equal("success", call.TransportOutcome);
+        Assert.Equal("threw", call.ChatOutcome);
+        Assert.Equal("unknown", call.UsageStatus);
+        Assert.Equal(1, result.Summary.UsageUnknownCalls);
+        Assert.DoesNotContain(Canary, string.Join('\n', lines), StringComparison.Ordinal);
+
+        var reportPath = Path.Combine(plan.Root, "choice-report.jsonl");
+        File.WriteAllLines(reportPath, lines);
+        var (verified, verdict) = R5CaseVerifier.Run(["verify-cases", "--scenario", "live-plan",
+            "--corpus", Corpus, "--forbid", Canary, "--report", reportPath]);
+        Assert.True(verified == 0, verdict.ToJsonString());
+
+        var forged = result.Summary with
+        {
+            AgentDiagnostics = [.. result.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex == 8
+                ? d with { Category = LiveToolRejectionProjector.ListPathInvalid } : d)],
+        };
+        lines[^1] = JsonSerializer.Serialize(forged, LiveJsonContext.Default.LiveRunSummary);
+        File.WriteAllLines(reportPath, lines);
+        var (rejected, reason) = R5CaseVerifier.Run(["verify-cases", "--scenario", "live-plan",
+            "--corpus", Corpus, "--forbid", Canary, "--report", reportPath]);
+        Assert.Equal(1, rejected);
+        Assert.Equal("rejected_report_invalid", reason["reason"]?.GetValue<string>());
+    }
+
     [Theory]
     [InlineData("cs-safe", "{\"path\":null}", AgentFailureCodes.ToolArgumentsInvalid,
         LiveToolRejectionProjector.InvalidContract)]

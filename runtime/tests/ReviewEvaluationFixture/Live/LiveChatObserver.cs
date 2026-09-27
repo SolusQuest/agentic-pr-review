@@ -12,6 +12,7 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
     : IProjectChatClient
 {
     private LiveToolRejectionProjection? lastRejection;
+    private ProjectChatNormalizationReason? lastNormalizationReason;
 
     internal LiveToolRejectionProjection? TakeRejection()
     {
@@ -20,10 +21,18 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
         return value;
     }
 
+    internal ProjectChatNormalizationReason? TakeNormalizationReason()
+    {
+        var value = lastNormalizationReason;
+        lastNormalizationReason = null;
+        return value;
+    }
+
     public async Task<ProjectChatResponse> GetResponseAsync(
         ProjectChatRequest request, CancellationToken cancellationToken)
     {
         lastRejection = null;
+        lastNormalizationReason = null;
         var call = attempt?.BeginCall();
         try
         {
@@ -53,6 +62,8 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
+            if (error is ProjectChatNormalizationException normalization)
+                lastNormalizationReason = normalization.Reason;
             call?.Threw();
             // A local gate refusal produced no provider usage at all; only a
             // call that was actually sent can have unobservable usage.
