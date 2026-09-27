@@ -50,6 +50,7 @@ public sealed class ActionHostTrustedPolicyTests
         Assert.Equal(DeepSeekAdapterContext.Model, policy.ModelId);
         Assert.Equal(DeepSeekAdapterContext.Adapter, policy.AdapterId);
         Assert.NotEqual(DeepSeekAdapterContext.CandidateAdapter, policy.AdapterId);
+        Assert.NotEqual(DeepSeekAdapterContext.Output65536Adapter, policy.AdapterId);
         Assert.Equal(DeepSeekTransportPolicy.Endpoint, policy.Endpoint);
         Assert.True(policy.ThinkingEnabled);
         Assert.True(policy.PromptCachingEnabled);
@@ -57,6 +58,7 @@ public sealed class ActionHostTrustedPolicyTests
             AgentToolRegistry.Definitions), policy.ToolsetSha256);
         Assert.Equal(AgentCanonical.LimitsSha256(), policy.LimitsSha256);
         Assert.NotEqual(AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192), policy.LimitsSha256);
+        Assert.NotEqual(AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536), policy.LimitsSha256);
         Assert.Equal(RestrictedStateFormat.MaximumRetentionSeconds,
             policy.StateRetentionSeconds);
         Assert.Equal(7 * 24 * 60 * 60, policy.StateRetentionSeconds);

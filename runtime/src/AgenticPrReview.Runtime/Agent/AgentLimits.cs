@@ -12,6 +12,7 @@ internal enum AgentLimitProfile
 {
     Current = 0,
     Output8192 = 1,
+    Output65536 = 2,
 }
 
 // This authority is supplied by trusted composition. Agent code only knows
@@ -22,7 +23,7 @@ internal sealed record AgentLimitAuthority(string AdapterId, AgentLimitProfile P
     {
         profile = authority?.Profile ?? AgentLimitProfile.Current;
         return (authority is null || StringComparer.Ordinal.Equals(adapterId, authority.AdapterId)) &&
-            profile is AgentLimitProfile.Current or AgentLimitProfile.Output8192;
+            profile is AgentLimitProfile.Current or AgentLimitProfile.Output8192 or AgentLimitProfile.Output65536;
     }
 }
 
@@ -38,6 +39,8 @@ internal static class AgentLimits
     internal const long CombinedTokens = 294_912;
     internal const long Output8192Tokens = 65_536;
     internal const long Combined8192Tokens = 327_680;
+    internal const long Output65536Tokens = 524_288;
+    internal const long Combined65536Tokens = 786_432;
     internal const int RequestBytes = 1 * 1024 * 1024;
     internal const int ResponseBytes = 1 * 1024 * 1024;
     internal const int Messages = 64;
@@ -145,6 +148,7 @@ internal static class AgentLimits
     {
         AgentLimitProfile.Current => Registry,
         AgentLimitProfile.Output8192 => CandidateRegistry,
+        AgentLimitProfile.Output65536 => Output65536Registry,
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
 
@@ -152,6 +156,7 @@ internal static class AgentLimits
     {
         AgentLimitProfile.Current => OutputTokens,
         AgentLimitProfile.Output8192 => Output8192Tokens,
+        AgentLimitProfile.Output65536 => Output65536Tokens,
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
 
@@ -159,6 +164,7 @@ internal static class AgentLimits
     {
         AgentLimitProfile.Current => CombinedTokens,
         AgentLimitProfile.Output8192 => Combined8192Tokens,
+        AgentLimitProfile.Output65536 => Combined65536Tokens,
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
 
@@ -166,6 +172,13 @@ internal static class AgentLimits
     {
         "output_tokens" => row with { Value = Output8192Tokens },
         "combined_tokens" => row with { Value = Combined8192Tokens },
+        _ => row,
+    }).ToImmutableArray();
+
+    private static ImmutableArray<AgentLimit> Output65536Registry { get; } = Registry.Select(row => row.Name switch
+    {
+        "output_tokens" => row with { Value = Output65536Tokens },
+        "combined_tokens" => row with { Value = Combined65536Tokens },
         _ => row,
     }).ToImmutableArray();
 }

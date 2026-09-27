@@ -10,6 +10,7 @@ internal enum DeepSeekRequestProfile
 {
     Current = 0,
     Output8192 = 1,
+    Output65536 = 2,
 }
 
 internal sealed class DeepSeekAdapterContext(
@@ -38,20 +39,33 @@ internal sealed class DeepSeekAdapterContext(
         "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal);
     internal static string CandidateAdapter { get; } = Convert.ToHexString(
         SHA256.HashData(Encoding.UTF8.GetBytes(CandidateAdapterDescriptor))).ToLowerInvariant();
+    internal static string Output65536AdapterDescriptor { get; } = AdapterDescriptor.Replace(
+        "\"max_tokens\":4096,", "\"max_tokens\":65536,", StringComparison.Ordinal);
+    internal static string Output65536Adapter { get; } = Convert.ToHexString(
+        SHA256.HashData(Encoding.UTF8.GetBytes(Output65536AdapterDescriptor))).ToLowerInvariant();
 
     internal static bool TryResolveProfile(string? adapterId, out DeepSeekRequestProfile profile)
     {
         profile = DeepSeekRequestProfile.Current;
         if (StringComparer.Ordinal.Equals(adapterId, Adapter)) return true;
-        if (!StringComparer.Ordinal.Equals(adapterId, CandidateAdapter)) return false;
-        profile = DeepSeekRequestProfile.Output8192;
-        return true;
+        if (StringComparer.Ordinal.Equals(adapterId, CandidateAdapter))
+        {
+            profile = DeepSeekRequestProfile.Output8192;
+            return true;
+        }
+        if (StringComparer.Ordinal.Equals(adapterId, Output65536Adapter))
+        {
+            profile = DeepSeekRequestProfile.Output65536;
+            return true;
+        }
+        return false;
     }
 
     internal static string AdapterFor(DeepSeekRequestProfile profile) => profile switch
     {
         DeepSeekRequestProfile.Current => Adapter,
         DeepSeekRequestProfile.Output8192 => CandidateAdapter,
+        DeepSeekRequestProfile.Output65536 => Output65536Adapter,
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
 
@@ -59,6 +73,7 @@ internal sealed class DeepSeekAdapterContext(
     {
         DeepSeekRequestProfile.Current => new(Adapter, AgentLimitProfile.Current),
         DeepSeekRequestProfile.Output8192 => new(CandidateAdapter, AgentLimitProfile.Output8192),
+        DeepSeekRequestProfile.Output65536 => new(Output65536Adapter, AgentLimitProfile.Output65536),
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
 
