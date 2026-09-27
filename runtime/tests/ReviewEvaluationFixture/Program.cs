@@ -318,8 +318,10 @@ internal static class R5CaseVerifier
             case "reset-owner": return ExtractResetOwner(lines[^1]);
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
             case "live-plan": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
-            case "live-candidate": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
-            case "live-output65536": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
+            case "live-candidate": return ExtractLivePlan(lines, corpusSha, expected, QualityCases,
+                DeepSeekRequestProfile.Output8192);
+            case "live-output65536": return ExtractLivePlan(lines, corpusSha, expected, QualityCases,
+                DeepSeekRequestProfile.Output65536);
             case "live-coverage": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             case "quality-sandbox": return ExtractLivePlan(lines, corpusSha, expected, LiveCoverageCases);
             default: return (null, "input_invalid");
@@ -522,7 +524,8 @@ internal static class R5CaseVerifier
     }
 
     private static (JsonObject?, string?) ExtractLivePlan(string[] lines, string? corpusSha,
-        IReadOnlyDictionary<string, EvaluationCode>? expected, string[] declared)
+        IReadOnlyDictionary<string, EvaluationCode>? expected, string[] declared,
+        DeepSeekRequestProfile? requiredProfile = null)
     {
         // The complete live output shape is Q1 outcome rows, one Q4 evaluation
         // report and the run summary. A bare summary is incomplete evidence:
@@ -578,6 +581,28 @@ internal static class R5CaseVerifier
             return (null, "rejected_corpus_mismatch");
         if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
             return (null, "rejected_source");
+        if (requiredProfile is { } profile)
+        {
+            // The scenario name is an external claim. Bind it to the admitted
+            // plan and actual dry-run reservations, not just a shared hash shape.
+            var outputTokens = profile switch
+            {
+                DeepSeekRequestProfile.Output8192 => 8192,
+                DeepSeekRequestProfile.Output65536 => 65536,
+                _ => throw new ArgumentOutOfRangeException(nameof(requiredProfile)),
+            };
+            var journal = report.UsageJournal;
+            if (report.SimulatedAdapterCalls <= 0 || journal is null ||
+                journal.Plan.Provider.AdapterId != DeepSeekAdapterContext.AdapterFor(profile) ||
+                journal.Plan.Provider.ConfigurationSha256 != LivePlanAdmission.ProviderConfigurationSha256(profile) ||
+                journal.Provenance.ProviderConfigurationSha256 != journal.Plan.Provider.ConfigurationSha256 ||
+                journal.Plan.Bounds.PerCall.MaxOutputTokens != outputTokens ||
+                journal.Provenance.PlanSha256 != report.PlanSha256 ||
+                journal.Reservations.Calls != report.SimulatedAdapterCalls ||
+                report.ReservedOutputTokens != (long)report.SimulatedAdapterCalls * outputTokens ||
+                journal.Reservations.OutputTokens != report.ReservedOutputTokens)
+                return (null, "rejected_configuration");
+        }
         // Derive coverage from admitted outcomes, never from the diagnostic rows
         // themselves: even an empty array must not hide failed attempts.
         if (report.Failed != outcomes.Count(o => o.ExecutionStatus == EvaluationStatus.Failed) ||

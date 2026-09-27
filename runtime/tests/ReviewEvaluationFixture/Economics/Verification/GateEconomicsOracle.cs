@@ -105,7 +105,8 @@ internal static class GateEconomicsOracle
         }
         if (item.Id == "c2-output65536")
         {
-            Require(report.Plan.Provider.AdapterId == DeepSeekAdapterContext.Output65536Adapter &&
+            Require(report.Journal is { } journal &&
+                report.Plan.Provider.AdapterId == DeepSeekAdapterContext.Output65536Adapter &&
                 report.Plan.Provider.ConfigurationSha256 ==
                     LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536) &&
                 report.Plan.Bounds.PerCall.MaxInputTokens == 32768 &&
@@ -115,8 +116,8 @@ internal static class GateEconomicsOracle
                 report.Allocations.InputTokens == attempted * 262144 &&
                 report.Allocations.OutputTokens == attempted * 524288 &&
                 report.Allocations.CombinedTokens == attempted * 786432 &&
-                report.Journal!.Plan.Provider.AdapterId == DeepSeekAdapterContext.Output65536Adapter &&
-                report.Journal.Reservations.OutputTokens == report.Journal.Reservations.Calls * 65536 &&
+                journal.Plan.Provider.AdapterId == DeepSeekAdapterContext.Output65536Adapter &&
+                journal.Reservations.OutputTokens == journal.Reservations.Calls * 65536 &&
                 report.Steps.All(step => step.Accepted && step.Readback));
         }
         if (item.Id is "c2-reject-accept" or "c2-cancel-after-prepare" or "c2-preparation-failure")

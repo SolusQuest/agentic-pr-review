@@ -592,14 +592,61 @@ public sealed class R5VerifierCoverageTests
                 new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
             Assert.Equal(DeepSeekAdapterContext.Output65536Adapter,
                 run.Journal.Document.Plan.Provider.AdapterId);
+            var journal = run.Summary.UsageJournal ?? throw new InvalidOperationException("missing_usage_journal");
+            Assert.Equal(LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536),
+                journal.Plan.Provider.ConfigurationSha256);
+            Assert.Equal(run.Summary.PlanSha256, journal.Provenance.PlanSha256);
+            Assert.Equal(run.Summary.SimulatedAdapterCalls * 65536L, run.Summary.ReservedOutputTokens);
             Assert.Equal(0, Verify("live-output65536", string.Join('\n', lines),
                 corpus: Corpus("quality", "bundle")).Code);
+            lines[^1] = LivePlanSummaryLine(run.Summary with
+            { ReservedOutputTokens = run.Summary.ReservedOutputTokens - 1 });
+            var (reservationCode, reservationVerdict) = Verify("live-output65536", string.Join('\n', lines),
+                corpus: Corpus("quality", "bundle"));
+            Assert.Equal(1, reservationCode);
+            Assert.Equal("rejected_configuration", reservationVerdict["reason"]?.GetValue<string>());
             lines[^1] = LivePlanSummaryLine(run.Summary with
             { Completed = run.Summary.Completed + 1 });
             var (code, verdict) = Verify("live-output65536", string.Join('\n', lines),
                 corpus: Corpus("quality", "bundle"));
             Assert.Equal(1, code);
             Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+        }
+        finally { File.Delete(plan); }
+    }
+
+    [Fact]
+    public async Task Output8192LiveScenarioAcceptsItsSelectedPlan()
+    {
+        var plan = WriteTemp("{}");
+        try
+        {
+            Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus("quality", "bundle"), plan,
+                DeepSeekRequestProfile.Output8192).Item1);
+            var lines = new List<string>();
+            await LiveRunner.RunAsync(plan, false, new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
+            var (code, verdict) = Verify("live-candidate", string.Join('\n', lines),
+                corpus: Corpus("quality", "bundle"));
+            Assert.True(code == 0, verdict.ToJsonString());
+        }
+        finally { File.Delete(plan); }
+    }
+
+    [Theory]
+    [InlineData("live-candidate")]
+    [InlineData("live-output65536")]
+    public async Task ExperimentalLiveScenarioRejectsRelabeledCurrentPlan(string scenario)
+    {
+        var plan = WriteTemp("{}");
+        try
+        {
+            Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus("quality", "bundle"), plan).Item1);
+            var lines = new List<string>();
+            await LiveRunner.RunAsync(plan, false, new LiveOptions { WriteLine = lines.Add }, CancellationToken.None);
+            var (code, verdict) = Verify(scenario, string.Join('\n', lines),
+                corpus: Corpus("quality", "bundle"));
+            Assert.Equal(1, code);
+            Assert.Equal("rejected_configuration", verdict["reason"]?.GetValue<string>());
         }
         finally { File.Delete(plan); }
     }
