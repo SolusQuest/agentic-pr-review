@@ -212,7 +212,7 @@ public sealed class R6ProspectivePipelineTests
         var duplicateReceipts = receipts.SetItem(4, repoReceipt with
         { FindingRowCount = 2, Findings = [repoFinding, repoFinding with { FindingOrdinal = 1 }] });
         Check(baseline with { ProspectiveCaseReceipts = duplicateReceipts },
-            outcomes.SetItem(4, outcomes[4] with { FindingCount = 2 }),
+            outcomes.SetItem(4, outcomes[4] with { FindingCount = 2, UnadjudicatedFindings = 2 }),
             "blocked", "within_case_duplicate");
 
         var boundedLegacy = outcomes.SetItem(4, outcomes[4] with
@@ -235,7 +235,9 @@ public sealed class R6ProspectivePipelineTests
             "authored", "repository-token-log", "exact", "none", "confirmed_off_focus");
         var repeatedReceipts = receipts.SetItem(1, receipts[1] with
         { FindingRowCount = 1, Findings = [offFocus] });
-        var repeatedOutcomes = outcomes.SetItem(1, outcomes[1] with { FindingCount = 1 });
+        var repeatedOutcomes = outcomes.SetItem(1, outcomes[1] with
+        { FindingCount = 1, UnadjudicatedFindings = 1,
+            ModelStatus = ModelObservationStatus.Unadjudicated });
         Check(baseline with { ProspectiveCaseReceipts = repeatedReceipts }, repeatedOutcomes,
             "candidate_pass", "all_gates_passed");
         var repeatedGate = R6ProspectiveQualityGate.Evaluate(
