@@ -293,8 +293,13 @@ public sealed class R6ProspectivePipelineTests
         Check(baseline with { AgentDiagnostics = [new LiveAgentDiagnostic(4,
             "response_invalid", 1, 0)] }, outcomes,
             "blocked", "population_ineligible");
-        Check(baseline with { ProspectiveRecoveryReceipts = [] }, outcomes,
-            "blocked", "recovery_count_invalid");
+        var missingRecovery = baseline with { ProspectiveRecoveryReceipts = [] };
+        var missingRecoveryGate = R6ProspectiveQualityGate.Evaluate(missingRecovery, outcomes)!;
+        Assert.Equal("recovery_count_invalid", missingRecoveryGate.Reason);
+        var missingRecoveryRead = R6ProspectiveReportReader.Read(WriteReport(missingRecovery with
+        { ProspectiveQualityCandidate = missingRecoveryGate }, outcomes));
+        Assert.Equal("rejected", missingRecoveryRead.Status);
+        Assert.Equal("receipt_shape_invalid", missingRecoveryRead.Reason);
 
         var evidenceFailed = outcomes[4] with
         {
