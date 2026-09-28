@@ -366,7 +366,7 @@ internal static class LiveRunner
             if (prospectiveSelected)
             {
                 var capture = R6ProspectiveRecoveryAudit.Capture(index,
-                    run.Expected, outcome, null);
+                    run.Expected, outcome, null, attempt.ConfigurationSha256);
                 recoveryReceipts.Add(capture.Receipt);
                 recoveries.AddRange(capture.CanonicalDiagnostics);
             }
@@ -384,7 +384,7 @@ internal static class LiveRunner
         if (prospectiveSelected)
         {
             var capture = R6ProspectiveRecoveryAudit.Capture(index,
-                run.Expected, outcome, subject);
+                run.Expected, outcome, subject, attempt.ConfigurationSha256);
             recoveryReceipts.Add(capture.Receipt);
             recoveries.AddRange(capture.CanonicalDiagnostics);
         }

@@ -30,7 +30,8 @@ internal static class R6ProspectiveRecoveryAudit
     internal const string Blocked = "blocked";
 
     internal static R6ProspectiveRecoveryCapture Capture(int scheduleIndex,
-        EvaluationCase testCase, AgentRunOutcome outcome, EvaluationSubject? subject)
+        EvaluationCase testCase, AgentRunOutcome outcome, EvaluationSubject? subject,
+        string? attemptedConfigurationSha256 = null)
     {
         var events = outcome.Events;
         var reason = None;
@@ -73,7 +74,8 @@ internal static class R6ProspectiveRecoveryAudit
         if (found > 1 && reason != "error_pair_invalid") reason = "multiple_recoveries";
         var receipt = new R6ProspectiveRecoveryReceipt(R6ProspectiveRubric.Id,
             R6ProspectiveRubric.Sha256, scheduleIndex,
-            testCase.Sha256, subject?.ConfigurationSha256, subject?.ExecutionSha256,
+            testCase.Sha256, subject?.ConfigurationSha256 ?? attemptedConfigurationSha256,
+            subject?.ExecutionSha256,
             found, reason == None ? None : reason == "qualified" ? Qualified : Blocked, reason);
         return new(receipt, diagnostics);
     }

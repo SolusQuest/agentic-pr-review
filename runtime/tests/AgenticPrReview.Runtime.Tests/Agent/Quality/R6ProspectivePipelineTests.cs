@@ -665,7 +665,8 @@ public sealed class R6ProspectivePipelineTests
         }, CancellationToken.None);
         Assert.Equal("candidate_pass", result.Summary.ProspectiveQualityCandidate?.Status);
         Assert.Contains(SourceCanary, input.LastPacket);
-        Assert.Contains(LocalPathCanary, input.LastPacket);
+        Assert.Equal(LocalPathCanary, JsonNode.Parse(input.LastPacket)!["local_path_probe"]!
+            .GetValue<string>());
         Assert.False(Directory.Exists(input.Root));
         AssertPublicProjection(lines, "r6_prospective_candidate_pass all_gates_passed", 0);
     }
