@@ -19,6 +19,24 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R6ProspectivePipelineTests
 {
+    private const string TitleCanary = "APR311_TITLE_9a4f7de2b1c849e4";
+    private const string MessageCanary = "APR311_MESSAGE_fbd832c763e14d1a";
+    private const string SummaryCanary = "APR311_SUMMARY_37eac419d88347f0";
+    private const string ReasoningCanary = "APR311_REASONING_64bb1ac927fe4d89";
+    private const string SourceCanary = "APR311_SOURCE_a3fdf04e71784c22";
+    private const string EvidencePathCanary = "src/APR311_EVIDENCE_58c63e190fba4a01.cs";
+    private const string LocalPathCanary = "C:\\APR311_LOCAL_77d189ed350a48cb\\secret.txt";
+    private const string AnnotationCanary = "APR311_ANNOTATION_00a3ac57571f4d8d";
+    private const string ExceptionCanary = "APR311_EXCEPTION_e8fbc6e559c84c9a";
+    private const string CredentialCanary = "APR311_CREDENTIAL_266bd85e88ea4ab9";
+
+    private static readonly string[] PrivateCanaries =
+    [
+        TitleCanary, MessageCanary, SummaryCanary, ReasoningCanary,
+        SourceCanary, EvidencePathCanary, LocalPathCanary,
+        AnnotationCanary, ExceptionCanary, CredentialCanary,
+    ];
+
     private static string Corpus => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r6",
         "quality-sandbox");
 
@@ -128,6 +146,30 @@ public sealed class R6ProspectivePipelineTests
     }
 
     [Fact]
+    public async Task SelectedPaidRunRequiresTrustedReviewerBeforeCredentialAccess()
+    {
+        // Execute admission requires the committed source marker. The clean
+        // corrected head and CI exercise this branch; dirty edits cannot.
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile();
+        var secret = new FakeSecret("APR311_UNUSED_KEY_CANARY");
+        var created = 0;
+        var error = await Assert.ThrowsAsync<LivePlanRejected>(() => LiveRunner.RunAsync(
+            plan.Path, true, new LiveOptions
+            {
+                SecretSource = secret,
+                TransportFactory = new FakeFactory(_ =>
+                {
+                    created++;
+                    throw new InvalidOperationException("transport_must_not_be_created");
+                }),
+            }, CancellationToken.None));
+        Assert.Equal(LiveAdmissionCode.InvalidPlan, error.Code);
+        Assert.Equal(0, secret.Taken);
+        Assert.Equal(0, created);
+    }
+
+    [Fact]
     public async Task ProspectiveReviewerUsesPrivatePacketAndEmitsFiveExecutionBoundReceipts()
     {
         using var plan = new PlanFile();
@@ -202,6 +244,31 @@ public sealed class R6ProspectivePipelineTests
             ["ordinary-observation"], error));
     }
 
+    [Fact]
+    public void MalformedRejectedEventGetsBoundedBlockedReceiptBeforeLegacyProjection()
+    {
+        var testCase = Assert.IsType<AdmittedReplayFixture>(
+            ReplayAdmission.Load(Corpus).Fixture).Runs[0].Expected;
+        ImmutableArray<AgentLogicalEvent> events =
+        [
+            new AgentRecoveryToolCallEvent("rejected", AgentToolRegistry.ListFilesName,
+                new string('a', 64), [], true),
+            new AgentToolErrorEvent("different-call", AgentToolRegistry.ListFilesName,
+                new string('b', 64), []),
+        ];
+        var outcome = AgentRunOutcome.Failure("tool_arguments_invalid", 1, 0, events);
+        Assert.Throws<InvalidOperationException>(() =>
+            LiveRecoveryDiagnostic.Capture(0, outcome));
+        var capture = R6ProspectiveRecoveryAudit.Capture(0, testCase, outcome, null);
+        Assert.Empty(capture.CanonicalDiagnostics);
+        Assert.Equal(1, capture.Receipt.ObservedCount);
+        Assert.Equal("blocked", capture.Receipt.Status);
+        Assert.Equal("error_pair_invalid", capture.Receipt.Reason);
+        Assert.True(R6ProspectiveRecoveryAudit.ValidPublicBinding(capture.Receipt, 0));
+        Assert.False(R6ProspectiveRecoveryAudit.ValidPublicBinding(
+            capture.Receipt with { Status = "qualified" }, 0));
+    }
+
     [Theory]
     [InlineData("origin")]
     [InlineData("execution_sha256")]
@@ -219,8 +286,10 @@ public sealed class R6ProspectivePipelineTests
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
         Assert.Equal("input_invalid", result.Summary.AdjudicationStatus);
-        Assert.Equal(5, result.Summary.ProspectiveCaseReceipts!.Value.Length);
-        Assert.All(result.Summary.ProspectiveCaseReceipts.Value,
+        var receipts = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            result.Summary.ProspectiveCaseReceipts);
+        Assert.Equal(5, receipts.Length);
+        Assert.All(receipts,
             receipt => Assert.Equal("pending", receipt.Status));
         Assert.Equal("cleaned", result.Summary.Cleanup);
         Assert.False(Directory.Exists(input.Root));
@@ -361,13 +430,16 @@ public sealed class R6ProspectivePipelineTests
             baseline.ProspectiveCaseReceipts);
         var repoReceipt = receipts[4];
         var repoFinding = Assert.Single(repoReceipt.Findings);
-        var unresolved = repoFinding with { Verdict = "unresolved", Reason = "review_pending" };
+        var unresolved = repoFinding with { Verdict = "unresolved", Reason = "review_pending",
+            ExpectedDefectId = null, DefectGroupScope = null, DefectGroupId = null,
+            CitationClass = "invalid" };
         var unresolvedReceipts = receipts.SetItem(4, repoReceipt with { Findings = [unresolved] });
         Check(baseline with { ProspectiveCaseReceipts = unresolvedReceipts }, outcomes,
             "blocked", "finding_ineligible");
 
         var falseFinding = repoFinding with { Verdict = "false_unsafe", Reason = "review_rejected",
-            DefectGroupScope = null, DefectGroupId = null, ExpectedDefectId = null };
+            DefectGroupScope = null, DefectGroupId = null, ExpectedDefectId = null,
+            CitationClass = "invalid" };
         var falseReceipts = receipts.SetItem(4, repoReceipt with { Findings = [falseFinding] });
         Check(baseline with { ProspectiveCaseReceipts = falseReceipts }, outcomes,
             "blocked", "finding_ineligible");
@@ -408,6 +480,36 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal(1, repeatedGate.CrossCaseRepeats);
         Assert.Equal("cost_recorded", repeatedGate.UsabilityStatus);
         Assert.Equal("passed", repeatedGate.SafetyStatus);
+
+        var laterFalse = new R6ProspectiveFindingReceipt(0, "false_unsafe", null,
+            null, null, "invalid", "none", "review_rejected");
+        var blockedButMeasured = repeatedReceipts.SetItem(3, receipts[3] with
+        { FindingRowCount = 1, Findings = [laterFalse] });
+        var blockedButMeasuredOutcomes = repeatedOutcomes.SetItem(3,
+            outcomes[3] with { FindingCount = 1, UnadjudicatedFindings = 1,
+                ModelStatus = ModelObservationStatus.Unadjudicated });
+        var measuredSummary = baseline with
+        { ProspectiveCaseReceipts = blockedButMeasured };
+        Check(measuredSummary, blockedButMeasuredOutcomes,
+            "blocked", "finding_ineligible");
+        var measuredGate = R6ProspectiveQualityGate.Evaluate(
+            measuredSummary, blockedButMeasuredOutcomes)!;
+        Assert.Equal(3, measuredGate.ExpectedCredits);
+        Assert.Equal(1, measuredGate.TrueOffFocusFindings);
+        Assert.Equal(1, measuredGate.CrossCaseRepeats);
+        Assert.Equal(5, measuredGate.AiAdjudicatedCases);
+        Assert.Equal("cost_recorded", measuredGate.UsabilityStatus);
+        Assert.Equal("failed", measuredGate.SafetyStatus);
+        var malformedLater = blockedButMeasured.SetItem(4, receipts[4] with
+        { Findings = [repoFinding with { DefectGroupId = "forged-group" }] });
+        var malformedSummary = baseline with
+        { ProspectiveCaseReceipts = malformedLater };
+        var malformedClaim = R6ProspectiveQualityGate.Evaluate(
+            malformedSummary, blockedButMeasuredOutcomes)!;
+        Assert.Equal("rejected", R6ProspectiveReportReader.Read(
+            WriteReport(malformedSummary with
+            { ProspectiveQualityCandidate = malformedClaim },
+                blockedButMeasuredOutcomes)).Status);
 
         foreach (var safeIndex in new[] { 1, 3 })
         {
@@ -457,15 +559,24 @@ public sealed class R6ProspectivePipelineTests
             ProspectiveRecoveryReceipts = attested.SetItem(0, attested[0] with
             { Status = "blocked", Reason = "followup_missing" }) }, outcomes,
             "blocked", "recovery_ineligible");
+        var malformedPair = recoveryReceipts.SetItem(0, recoveryReceipts[0] with
+        { ObservedCount = 1, Status = "blocked", Reason = "error_pair_invalid" });
+        Check(baseline with { ProspectiveRecoveryReceipts = malformedPair }, outcomes,
+            "blocked", "recovery_ineligible");
+        Check(baseline with { RecoveryDiagnostics = [recovery with { ScheduleIndex = 5 }] },
+            outcomes, "blocked", "recovery_count_invalid");
+        var secondRecovery = recovery with { ScheduleIndex = 1 };
+        var twoAttested = attested.SetItem(1, attested[1] with
+        { ObservedCount = 1, Status = "qualified", Reason = "qualified" });
         var extraRecovery = baseline with { RecoveryDiagnostics = [recovery,
-            recovery with { RejectionIndex = 1 }] };
+            secondRecovery], ProspectiveRecoveryReceipts = twoAttested };
         Assert.Equal("recovery_count_invalid", R6ProspectiveQualityGate.Evaluate(
             extraRecovery, outcomes)?.Reason);
         var extraClaim = R6ProspectiveQualityGate.Evaluate(extraRecovery, outcomes)!;
         var extraRead = R6ProspectiveReportReader.Read(WriteReport(extraRecovery with
         { ProspectiveQualityCandidate = extraClaim }, outcomes));
-        Assert.Equal("rejected", extraRead.Status);
-        Assert.Equal("receipt_shape_invalid", extraRead.Reason);
+        Assert.Equal("blocked", extraRead.Status);
+        Assert.Equal("recovery_count_invalid", extraRead.Reason);
     }
 
     [Fact]
@@ -493,6 +604,198 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal("false_unsafe", result.Summary.ProspectiveCaseReceipts!.Value[0]
             .Findings[0].Verdict);
     }
+
+    [Theory]
+    [InlineData("run_local_context", "assessed", "reviewed_other")]
+    [InlineData("wrong_authored_context", "pending", null)]
+    public async Task ContextualKnownAnchorDoesNotAssignAnotherDefectGroup(
+        string annotation, string expectedStatus, string? expectedCitation)
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile();
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, corruption: annotation);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var next = 0;
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = _ => { },
+            SecretSource = new FakeSecret("APR311_SYNTHETIC_CREDENTIAL_CANARY"),
+            TransportFactory = new FakeFactory(_ =>
+            {
+                var run = runs[next++];
+                return new ReplayTransport(run.Input.CaseId == "cs-defect"
+                    ? WithContextEvidence(run.Script) : run.Script, ReplayFault.None);
+            }),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+
+        Assert.Equal(expectedStatus, result.Summary.ProspectiveCaseReceipts!.Value[0].Status);
+        if (expectedCitation is not null)
+        {
+            var finding = result.Summary.ProspectiveCaseReceipts.Value[0].Findings[0];
+            Assert.Equal("true_off_focus", finding.Verdict);
+            Assert.Equal("run", finding.DefectGroupScope);
+            Assert.StartsWith("run-", finding.DefectGroupId, StringComparison.Ordinal);
+            Assert.Equal(expectedCitation, finding.CitationClass);
+        }
+        else Assert.Equal("input_invalid", result.Summary.AdjudicationStatus);
+    }
+
+    [Fact]
+    public async Task PublicProjectionAndVerifierExcludeDistinctPrivateCanariesOnCandidatePass()
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile();
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            injectPacketCanaries: true);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var next = 0;
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            SecretSource = new FakeSecret(CredentialCanary),
+            TransportFactory = new FakeFactory(_ => new ReplayTransport(
+                WithModelCanaries(runs[next++].Script), ReplayFault.None)),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal("candidate_pass", result.Summary.ProspectiveQualityCandidate?.Status);
+        Assert.Contains(SourceCanary, input.LastPacket);
+        Assert.Contains(LocalPathCanary, input.LastPacket);
+        Assert.False(Directory.Exists(input.Root));
+        AssertPublicProjection(lines, "r6_prospective_candidate_pass all_gates_passed", 0);
+    }
+
+    [Theory]
+    [InlineData("annotation")]
+    [InlineData("exception")]
+    [InlineData("evidence_path")]
+    public async Task PublicProjectionAndVerifierExcludePrivateCanariesOnBlockedRun(string failure)
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile();
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            corruption: failure == "annotation" ? "private_canary" :
+                failure == "exception" ? "exception_canary" : null,
+            injectPacketCanaries: true);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var next = 0;
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            SecretSource = new FakeSecret(CredentialCanary),
+            TransportFactory = new FakeFactory(_ =>
+            {
+                var run = runs[next++];
+                return new ReplayTransport(WithModelCanaries(run.Script,
+                    invalidEvidencePath: failure == "evidence_path" &&
+                        run.Input.CaseId == "repository-rule"), ReplayFault.None);
+            }),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal("blocked", result.Summary.ProspectiveQualityCandidate?.Status);
+        Assert.False(Directory.Exists(input.Root));
+        AssertPublicProjection(lines,
+            "r6_prospective_blocked population_ineligible", 1);
+    }
+
+    private static ReplayScript WithModelCanaries(ReplayScript script,
+        bool invalidEvidencePath = false) => script with
+    {
+        Turns = script.Turns.Select((turn, index) => turn with
+        {
+            ReasoningContent = index == 0 ? ReasoningCanary : turn.ReasoningContent,
+            ToolCalls = turn.ToolCalls.Select(call =>
+            {
+                if (call.Name != "finish_review") return call;
+                var terminal = JsonNode.Parse(call.ArgumentsJson)!.AsObject();
+                terminal["summary"] = SummaryCanary;
+                foreach (var finding in terminal["findings"]!.AsArray())
+                {
+                    finding!["title"] = TitleCanary;
+                    finding["message"] = MessageCanary;
+                    if (invalidEvidencePath)
+                        finding["evidence"]![0]!["path"] = EvidencePathCanary;
+                }
+                return call with { ArgumentsJson = terminal.ToJsonString() };
+            }).ToImmutableArray(),
+        }).ToImmutableArray(),
+    };
+
+    // Mechanical grouping test: the synthetic second line is not a claim that
+    // this fixture contains another real defect. The independent reviewer owns
+    // that causal judgment; the parser must not infer it from contextual overlap.
+    private static ReplayScript WithContextEvidence(ReplayScript script) => script with
+    {
+        Turns = script.Turns.Select(turn => turn with
+        {
+            ToolCalls = turn.ToolCalls.Select(call =>
+            {
+                if (call.Name != "finish_review") return call;
+                var terminal = JsonNode.Parse(call.ArgumentsJson)!.AsObject();
+                var evidence = terminal["findings"]![0]!["evidence"]!.AsArray();
+                var context = evidence[0]!.DeepClone();
+                context["start_line"] = 4;
+                context["end_line"] = 4;
+                evidence.Add(context);
+                return call with { ArgumentsJson = terminal.ToJsonString() };
+            }).ToImmutableArray(),
+        }).ToImmutableArray(),
+    };
+
+    private static void AssertPublicProjection(IReadOnlyList<string> lines,
+        string expectedVerifierLine, int expectedExit)
+    {
+        Assert.Equal(7, lines.Count);
+        var jsonl = string.Join('\n', lines) + "\n";
+        foreach (var canary in PrivateCanaries)
+            Assert.DoesNotContain(canary, jsonl, StringComparison.Ordinal);
+        var summary = JsonNode.Parse(lines[^1])!.AsObject();
+        var cases = summary["prospective_case_receipts"]!.AsArray();
+        var recoveries = summary["prospective_recovery_receipts"]!.AsArray();
+        Assert.Equal(5, cases.Count);
+        Assert.Equal(5, recoveries.Count);
+        AssertKeys(cases[0]!.AsObject(), "rubric_id", "rubric_sha256",
+            "schedule_index", "case_id", "corpus_sha256", "case_sha256",
+            "configuration_sha256", "execution_sha256", "origin", "status",
+            "finding_row_count", "findings");
+        AssertKeys(recoveries[0]!.AsObject(), "rubric_id", "rubric_sha256",
+            "schedule_index", "case_sha256", "configuration_sha256",
+            "execution_sha256", "observed_count", "status", "reason");
+        AssertKeys(summary["prospective_quality_candidate"]!.AsObject(),
+            "status", "reason", "expected_credits", "true_off_focus_findings",
+            "cross_case_repeats", "unique_defect_groups", "qualified_recoveries",
+            "ai_adjudicated_cases", "human_confirmed_cases",
+            "legacy_structural_status", "prospective_semantic_status",
+            "safety_status", "usability_status");
+        foreach (var caseRow in cases)
+            foreach (var finding in caseRow!["findings"]!.AsArray())
+                AssertKeys(finding!.AsObject(), "finding_ordinal", "verdict",
+                    "expected_defect_id", "defect_group_scope", "defect_group_id",
+                    "citation_class", "safe_line_role", "reason");
+        var path = System.IO.Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, jsonl);
+            using var output = new StringWriter();
+            Assert.Equal(expectedExit, R6ProspectiveReportReader.Invoke(path, output));
+            Assert.Equal(expectedVerifierLine, output.ToString().Trim());
+            foreach (var canary in PrivateCanaries)
+                Assert.DoesNotContain(canary, output.ToString(), StringComparison.Ordinal);
+        }
+        finally { File.Delete(path); }
+    }
+
+    private static void AssertKeys(JsonObject value, params string[] expected) =>
+        Assert.Equal(expected.Order(StringComparer.Ordinal),
+            value.Select(property => property.Key).Order(StringComparer.Ordinal));
 
     private static byte[] WriteReport(LiveRunSummary summary,
         System.Collections.Immutable.ImmutableArray<EvaluationOutcome> outcomes)
@@ -569,7 +872,7 @@ public sealed class R6ProspectivePipelineTests
     }
 
     private sealed class PacketReviewInput(StringWriter prompts, bool approveExpected = false,
-        string? corruption = null) : TextReader
+        string? corruption = null, bool injectPacketCanaries = false) : TextReader
     {
         private int promptCount;
         private int position;
@@ -586,11 +889,24 @@ public sealed class R6ProspectivePipelineTests
                 StringComparison.Ordinal));
             if (current > promptCount)
             {
+                if (corruption == "exception_canary")
+                    throw new IOException(ExceptionCanary);
                 promptCount = current;
                 position = 0;
                 Root ??= lines[0].TrimEnd('\r').Replace("r6_review_private_directory ", "",
                     StringComparison.Ordinal);
-                LastPacket = File.ReadAllText(System.IO.Path.Combine(Root, "review.json"));
+                var packetPath = System.IO.Path.Combine(Root, "review.json");
+                LastPacket = File.ReadAllText(packetPath);
+                if (injectPacketCanaries)
+                {
+                    var privatePacket = JsonNode.Parse(LastPacket)!.AsObject();
+                    var source = privatePacket["source"]!.AsObject();
+                    var sourceName = source.First().Key;
+                    source[sourceName] = source[sourceName]!.GetValue<string>() + SourceCanary;
+                    privatePacket["local_path_probe"] = LocalPathCanary;
+                    File.WriteAllText(packetPath, privatePacket.ToJsonString());
+                    LastPacket = File.ReadAllText(packetPath);
+                }
                 var annotationPath = System.IO.Path.Combine(Root, "annotation.json");
                 var annotation = JsonNode.Parse(File.ReadAllText(annotationPath))!.AsObject();
                 using var packet = JsonDocument.Parse(LastPacket);
@@ -630,6 +946,8 @@ public sealed class R6ProspectivePipelineTests
                 if (current == 1)
                 {
                     if (corruption == "origin") annotation["origin"] = "human-confirmed";
+                    else if (corruption == "private_canary")
+                        annotation["private_note"] = AnnotationCanary;
                     else if (corruption is "execution_sha256" or "rubric_sha256")
                         annotation[corruption] = new string('0', 64);
                     else if (corruption == "false_explanation" && findings.GetArrayLength() > 0)
@@ -639,6 +957,16 @@ public sealed class R6ProspectivePipelineTests
                         row["expected_defect_id"] = null;
                         row["defect_group_scope"] = null;
                         row["defect_group_id"] = null;
+                    }
+                    else if (corruption is "run_local_context" or "wrong_authored_context" &&
+                        findings.GetArrayLength() > 0)
+                    {
+                        var row = annotation["findings"]![0]!;
+                        row["verdict"] = "true_off_focus";
+                        row["defect_group_scope"] = corruption == "run_local_context"
+                            ? "run" : "authored";
+                        row["defect_group_id"] = corruption == "run_local_context"
+                            ? "run-contextual-novel-claim" : "ts-zero-timeout";
                     }
                 }
                 File.WriteAllText(annotationPath, annotation.ToJsonString());

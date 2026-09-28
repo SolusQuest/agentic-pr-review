@@ -28,6 +28,65 @@ internal static class R6ProspectiveQualityGate
     private static readonly string[] ExpectedGroups =
         ["cs-null-deref", "", "ts-zero-timeout", "", "repository-token-log"];
 
+    // Public rows are untrusted persisted evidence. Validate their complete
+    // grammar before a blocking finding can short-circuit the gate decision.
+    internal static bool ValidFindingShape(R6ProspectiveFindingReceipt? finding,
+        int caseIndex, int ordinal)
+    {
+        if (finding is null || finding.FindingOrdinal != ordinal ||
+            finding.SafeLineRole is not (R6ProspectiveAssessment.None or
+                R6ProspectiveAssessment.Comparison or R6ProspectiveAssessment.Accusation))
+            return false;
+        var isTrue = finding.Verdict is R6ProspectiveAssessment.Expected or
+            R6ProspectiveAssessment.TrueOffFocus;
+        if (!isTrue && finding.Verdict is not (R6ProspectiveAssessment.FalseUnsafe or
+            R6ProspectiveAssessment.Unresolved)) return false;
+        if (isTrue)
+        {
+            if (finding.DefectGroupScope is not (R6ProspectiveAssessment.Authored or
+                    R6ProspectiveAssessment.Run) ||
+                finding.DefectGroupId is null ||
+                finding.DefectGroupScope == R6ProspectiveAssessment.Authored &&
+                    finding.DefectGroupId is not ("cs-null-deref" or "ts-zero-timeout" or
+                        "repository-token-log") ||
+                finding.DefectGroupScope == R6ProspectiveAssessment.Run &&
+                    (!finding.DefectGroupId.StartsWith("run-", StringComparison.Ordinal) ||
+                     finding.DefectGroupId.Length != 68 ||
+                     !EvaluationLimits.Hash(finding.DefectGroupId[4..])) ||
+                finding.CitationClass is not ("exact" or "bounded_context" or
+                    "reviewed_other" or "invalid") ||
+                finding.DefectGroupScope == R6ProspectiveAssessment.Authored &&
+                    finding.CitationClass == "reviewed_other" ||
+                finding.DefectGroupScope == R6ProspectiveAssessment.Run &&
+                    finding.CitationClass is "exact" or "bounded_context")
+                return false;
+            if (finding.Verdict == R6ProspectiveAssessment.Expected)
+            {
+                if (ExpectedGroups[caseIndex].Length == 0 ||
+                    finding.DefectGroupScope != R6ProspectiveAssessment.Authored ||
+                    finding.DefectGroupId != ExpectedGroups[caseIndex] ||
+                    finding.ExpectedDefectId != "defect") return false;
+            }
+            else if (finding.ExpectedDefectId is not null ||
+                finding.DefectGroupScope == R6ProspectiveAssessment.Authored &&
+                    finding.DefectGroupId == ExpectedGroups[caseIndex]) return false;
+        }
+        else if (finding.ExpectedDefectId is not null ||
+            finding.DefectGroupScope is not null || finding.DefectGroupId is not null ||
+            finding.CitationClass != "invalid") return false;
+        var reason = finding.Verdict switch
+        {
+            R6ProspectiveAssessment.FalseUnsafe => "review_rejected",
+            R6ProspectiveAssessment.Unresolved => "review_pending",
+            _ when finding.SafeLineRole == R6ProspectiveAssessment.Accusation =>
+                "safe_line_accusation",
+            _ when finding.CitationClass == "invalid" => "citation_invalid",
+            R6ProspectiveAssessment.Expected => "confirmed_expected",
+            _ => "confirmed_off_focus",
+        };
+        return finding.Reason == reason;
+    }
+
     internal static R6ProspectiveGateResult? Evaluate(LiveRunSummary summary,
         ImmutableArray<EvaluationOutcome> outcomes)
     {
@@ -77,15 +136,12 @@ internal static class R6ProspectiveQualityGate
         var recoveryDiagnostics = summary.RecoveryDiagnostics ?? [];
         var recoveryReceipts = summary.ProspectiveRecoveryReceipts ?? [];
         if (recoveryDiagnostics.IsDefault || recoveryReceipts.IsDefault ||
-            recoveryReceipts.Length != 5 || recoveryDiagnostics.Length > 1)
+            recoveryReceipts.Length != 5 ||
+            recoveryDiagnostics.Any(item => item.ScheduleIndex is < 0 or >= 5))
             return Block("recovery_count_invalid");
 
-        var groups = new HashSet<(string Scope, string Id)>();
-        var expectedCredits = 0;
-        var offFocus = 0;
-        var repeats = 0;
-        var ai = 0;
-        var human = 0;
+        // Phase one validates every bound row. A malformed later row cannot be
+        // hidden behind an earlier unsafe finding in the retained public report.
         for (var index = 0; index < 5; index++)
         {
             var row = outcomes[index];
@@ -124,88 +180,101 @@ internal static class R6ProspectiveQualityGate
                 audit.ScheduleIndex != index || audit.CaseSha256 != row.CaseSha256 ||
                 audit.ConfigurationSha256 != row.ConfigurationSha256 ||
                 audit.ExecutionSha256 != row.ExecutionSha256 ||
-                audit.ObservedCount != caseDiagnostics.Length ||
-                audit.ObservedCount is < 0 or > 1 ||
-                audit.Status != (audit.ObservedCount == 0
-                    ? R6ProspectiveRecoveryAudit.None : R6ProspectiveRecoveryAudit.Qualified) ||
-                audit.Reason != (audit.ObservedCount == 0 ? "none" : "qualified") ||
+                !R6ProspectiveRecoveryAudit.ValidPublicBinding(audit,
+                    caseDiagnostics.Length) ||
                 caseDiagnostics.Where((d, position) => !d.IsCanonical() ||
                     d.RejectionIndex != position).Any())
                 return Block("recovery_ineligible");
-            if (caseReceipt.Origin == R6ProspectiveAssessment.AiOrigin) ai++;
-            else if (caseReceipt.Origin == R6ProspectiveAssessment.HumanOrigin) human++;
-            else return Block("origin_invalid");
+            if (caseReceipt.Origin is not (R6ProspectiveAssessment.AiOrigin or
+                R6ProspectiveAssessment.HumanOrigin)) return Block("origin_invalid");
+            for (var ordinal = 0; ordinal < caseReceipt.Findings.Length; ordinal++)
+                if (!ValidFindingShape(caseReceipt.Findings[ordinal], index, ordinal))
+                    return Block("finding_shape_invalid");
+        }
 
+        // Phase two derives facts for all five cases before deciding whether any
+        // semantic or safety failure blocks this population.
+        var groups = new HashSet<(string Scope, string Id)>();
+        var expectedCredits = 0;
+        var offFocus = 0;
+        var repeats = 0;
+        var ai = 0;
+        var human = 0;
+        var qualifiedRecoveries = 0;
+        string? blockedReason = null;
+        var safetyFailed = false;
+        var semanticFailed = false;
+        var withinCaseDuplicate = false;
+        for (var index = 0; index < 5; index++)
+        {
+            var row = outcomes[index];
+            var caseReceipt = receipts[index];
+            var audit = recoveryReceipts[index];
+            if (caseReceipt.Origin == R6ProspectiveAssessment.AiOrigin) ai++;
+            else human++;
+            if (audit.Status == R6ProspectiveRecoveryAudit.Qualified)
+                qualifiedRecoveries++;
+            else if (audit.Status == R6ProspectiveRecoveryAudit.Blocked)
+                blockedReason ??= "recovery_ineligible";
             var localGroups = new HashSet<(string Scope, string Id)>();
             var focal = 0;
-            for (var ordinal = 0; ordinal < caseReceipt.Findings.Length; ordinal++)
+            foreach (var finding in caseReceipt.Findings)
             {
-                var finding = caseReceipt.Findings[ordinal];
-                if (finding is null || finding.FindingOrdinal != ordinal ||
-                    finding.Verdict is R6ProspectiveAssessment.FalseUnsafe or
-                        R6ProspectiveAssessment.Unresolved ||
+                if (finding.Verdict is R6ProspectiveAssessment.FalseUnsafe or
+                    R6ProspectiveAssessment.Unresolved ||
                     finding.SafeLineRole == R6ProspectiveAssessment.Accusation ||
                     finding.CitationClass == "invalid")
-                    return Block("finding_ineligible");
+                {
+                    blockedReason ??= "finding_ineligible";
+                    semanticFailed = true;
+                    safetyFailed = true;
+                }
                 if (finding.Verdict is not (R6ProspectiveAssessment.Expected or
-                    R6ProspectiveAssessment.TrueOffFocus) ||
-                    finding.DefectGroupScope is not (R6ProspectiveAssessment.Authored or
-                        R6ProspectiveAssessment.Run) ||
-                    finding.DefectGroupId is null ||
-                    finding.DefectGroupScope == R6ProspectiveAssessment.Authored &&
-                        finding.DefectGroupId is not ("cs-null-deref" or "ts-zero-timeout" or
-                            "repository-token-log") ||
-                    finding.DefectGroupScope == R6ProspectiveAssessment.Run &&
-                        (!finding.DefectGroupId.StartsWith("run-", StringComparison.Ordinal) ||
-                         finding.DefectGroupId.Length != 68 ||
-                         !EvaluationLimits.Hash(finding.DefectGroupId[4..])) ||
-                    finding.SafeLineRole is not (R6ProspectiveAssessment.None or
-                        R6ProspectiveAssessment.Comparison) ||
-                    finding.CitationClass is not ("exact" or "bounded_context" or "reviewed_other") ||
-                    finding.Reason != (finding.Verdict == R6ProspectiveAssessment.Expected
-                        ? "confirmed_expected" : "confirmed_off_focus"))
-                    return Block("finding_shape_invalid");
-                var group = (finding.DefectGroupScope, finding.DefectGroupId);
-                if (!localGroups.Add(group)) return Block("within_case_duplicate");
-                if (!groups.Add(group)) repeats++;
-                if (finding.Verdict == R6ProspectiveAssessment.Expected)
+                    R6ProspectiveAssessment.TrueOffFocus)) continue;
+                var group = (finding.DefectGroupScope!, finding.DefectGroupId!);
+                if (!localGroups.Add(group))
                 {
-                    if (ExpectedGroups[index].Length == 0 ||
-                        finding.DefectGroupScope != R6ProspectiveAssessment.Authored ||
-                        finding.DefectGroupId != ExpectedGroups[index] ||
-                        finding.ExpectedDefectId != "defect" ||
-                        finding.CitationClass == "reviewed_other")
-                        return Block("expected_binding_invalid");
-                    focal++;
+                    blockedReason ??= "within_case_duplicate";
+                    withinCaseDuplicate = true;
+                    semanticFailed = true;
+                    continue;
                 }
-                else
-                {
-                    if (finding.ExpectedDefectId is not null ||
-                        finding.DefectGroupScope == R6ProspectiveAssessment.Authored &&
-                        finding.DefectGroupId == ExpectedGroups[index])
-                        return Block("off_focus_binding_invalid");
-                    offFocus++;
-                }
+                if (finding.Verdict == R6ProspectiveAssessment.Expected) focal++;
+                else offFocus++;
             }
+            foreach (var group in localGroups)
+                if (!groups.Add(group)) repeats++;
             if (focal != (ExpectedGroups[index].Length == 0 ? 0 : 1))
-                return Block("expected_finding_missing");
+            {
+                blockedReason ??= "expected_finding_missing";
+                semanticFailed = true;
+            }
             if (row.Code == EvaluationCode.ExpectedFindingMissing && focal == 0 ||
                 row.Code == EvaluationCode.ProhibitedFinding && row.ProhibitedObservations == 0 ||
                 row.Code == EvaluationCode.Scored &&
                     (row.ProhibitedObservations != 0 || row.StructurallyMissingDefects != 0))
-                return Block("legacy_override_invalid");
+                blockedReason ??= "legacy_override_invalid";
             if (row.ProhibitedObservations > 0 &&
                 caseReceipt.Findings.Count(f => f.SafeLineRole ==
                     R6ProspectiveAssessment.Comparison) < row.ProhibitedObservations)
-                return Block("prohibited_evidence_unexplained");
-            expectedCredits += focal;
+                blockedReason ??= "prohibited_evidence_unexplained";
+            if (focal > 0) expectedCredits++;
         }
         if (summary.AiAdjudicatedCases != ai || summary.HumanConfirmedCases != human)
             return Block("origin_count_mismatch");
+        if (recoveryReceipts.Sum(receipt => receipt.ObservedCount) > 1 ||
+            recoveryDiagnostics.Length > 1)
+            blockedReason ??= "recovery_count_invalid";
+        var usability = withinCaseDuplicate ? "blocked" :
+            repeats > 0 || qualifiedRecoveries > 0 || offFocus > 0
+                ? "cost_recorded" : "clean";
+        if (blockedReason is not null)
+            return new("blocked", blockedReason, expectedCredits, offFocus,
+                repeats, groups.Count, qualifiedRecoveries, ai, human, legacy,
+                semanticFailed ? "failed" : "passed",
+                safetyFailed ? "failed" : "passed", usability);
         return new("candidate_pass", "all_gates_passed", expectedCredits, offFocus,
-            repeats, groups.Count, recoveryDiagnostics.Length, ai, human,
-            legacy, "passed", "passed",
-            repeats > 0 || recoveryDiagnostics.Length > 0 || offFocus > 0
-                ? "cost_recorded" : "clean");
+            repeats, groups.Count, qualifiedRecoveries, ai, human,
+            legacy, "passed", "passed", usability);
     }
 }

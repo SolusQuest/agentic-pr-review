@@ -100,7 +100,8 @@ internal static class LiveRunner
         var write = options.WriteLine ?? Console.WriteLine;
         var plan = LivePlanAdmission.Load(planPath, execute, token);
         if (plan.Rubric is null && options.ProspectiveReviewer is not null ||
-            plan.Rubric is not null && options.Adjudicator is not null)
+            plan.Rubric is not null && options.Adjudicator is not null ||
+            execute && plan.Rubric is not null && options.ProspectiveReviewer is null)
             throw new LivePlanRejected(LiveAdmissionCode.InvalidPlan);
         if (!LivePlanAdmission.TryProviderProfile(plan.Provider, out var profile))
             throw new InvalidOperationException("live_profile_invalid");
@@ -356,14 +357,19 @@ internal static class LiveRunner
         var outcome = await new AgentLoop(observed, executor, limitAuthority: trusted.LimitAuthority)
             .RunAsync(request, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
-        recoveries.AddRange(LiveRecoveryDiagnostic.Capture(index, outcome));
+        if (!prospectiveSelected)
+            recoveries.AddRange(LiveRecoveryDiagnostic.Capture(index, outcome));
         var rejection = observed.TakeRejection();
         var normalizationReason = observed.TakeNormalizationReason();
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)
         {
             if (prospectiveSelected)
-                recoveryReceipts.Add(R6ProspectiveRecoveryAudit.Capture(index,
-                    run.Expected, outcome, null));
+            {
+                var capture = R6ProspectiveRecoveryAudit.Capture(index,
+                    run.Expected, outcome, null);
+                recoveryReceipts.Add(capture.Receipt);
+                recoveries.AddRange(capture.CanonicalDiagnostics);
+            }
             diagnostics.Add(LiveAgentDiagnostic.Capture(index, outcome.Diagnostic,
                 rejection ?? LiveToolRejectionProjection.Unknown(outcome.Diagnostic?.Code ?? "unknown"),
                 normalizationReason));
@@ -376,8 +382,12 @@ internal static class LiveRunner
         // its schedule position without inventing a reason or call counts.
         if (subject is null) diagnostics.Add(LiveAgentDiagnostic.Capture(index, null));
         if (prospectiveSelected)
-            recoveryReceipts.Add(R6ProspectiveRecoveryAudit.Capture(index,
-                run.Expected, outcome, subject));
+        {
+            var capture = R6ProspectiveRecoveryAudit.Capture(index,
+                run.Expected, outcome, subject);
+            recoveryReceipts.Add(capture.Receipt);
+            recoveries.AddRange(capture.CanonicalDiagnostics);
+        }
         if (subject is not null && (options.Adjudicator is not null ||
             options.ProspectiveReviewer is not null))
             subjects.Add(new(index, run, subject));

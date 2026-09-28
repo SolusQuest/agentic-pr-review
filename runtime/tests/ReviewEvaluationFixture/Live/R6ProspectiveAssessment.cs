@@ -138,17 +138,12 @@ internal static class R6ProspectiveAssessment
             if (safeRole is null) return null;
 
             var defect = Defects.FirstOrDefault(d => d.GroupId == row.DefectGroupId);
-            var knownAnchor = Defects.FirstOrDefault(d => finding.Evidence.Any(e =>
-                e.Path == d.Path && e.StartLine <= d.Line && e.EndLine >= d.Line));
             var scopeValid = row.DefectGroupScope == Authored && defect is not null ||
                 row.DefectGroupScope == Run && defect is null &&
                 row.DefectGroupId is not null && EvaluationLimits.Id(row.DefectGroupId) &&
                 row.DefectGroupId.StartsWith("run-", StringComparison.Ordinal);
             var isTrue = row.Verdict is Expected or TrueOffFocus;
             if (isTrue != scopeValid ||
-                isTrue && knownAnchor is not null &&
-                    (row.DefectGroupScope != Authored || row.DefectGroupId != knownAnchor.GroupId) ||
-                isTrue && knownAnchor is null && row.DefectGroupScope == Authored ||
                 !isTrue && (row.ExpectedDefectId is not null || row.DefectGroupScope is not null ||
                     row.DefectGroupId is not null) ||
                 row.Verdict is not (Expected or TrueOffFocus or FalseUnsafe or Unresolved))
@@ -162,6 +157,12 @@ internal static class R6ProspectiveAssessment
                     e.EndLine - e.StartLine <= 2 &&
                     subject.GroundedObservations.Any(o => o.Observation.Grounds(e)))
                     ? "reviewed_other" : "invalid";
+
+            // Authored off-focus identity must prove its selected frozen anchor.
+            // A different reviewed defect may cite that anchor as context without
+            // inheriting the authored defect's causal identity.
+            if (row.Verdict == TrueOffFocus && defect is not null &&
+                citationClass == "invalid") return null;
 
             if (row.Verdict == Expected &&
                 (defect?.CaseId != testCase.Input.Id || row.ExpectedDefectId != "defect") ||

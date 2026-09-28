@@ -119,14 +119,8 @@ internal static class R6ProspectiveReportReader
                 recovery.ScheduleIndex != index || recovery.CaseSha256 != outcome.CaseSha256 ||
                 recovery.ConfigurationSha256 != outcome.ConfigurationSha256 ||
                 recovery.ExecutionSha256 != outcome.ExecutionSha256 ||
-                recovery.ObservedCount != diagnostics.Count(d => d.ScheduleIndex == index) ||
-                recovery.ObservedCount is < 0 or > 1 ||
-                recovery.Status is not (R6ProspectiveRecoveryAudit.None or
-                    R6ProspectiveRecoveryAudit.Qualified or R6ProspectiveRecoveryAudit.Blocked) ||
-                recovery.Reason is not ("none" or "qualified" or "capture_missing" or
-                    "error_pair_invalid" or "rejected_dispatched" or
-                    "recovery_error_as_evidence" or "followup_missing" or
-                    "completion_missing" or "count_mismatch" or "multiple_recoveries"))
+                !R6ProspectiveRecoveryAudit.ValidPublicBinding(recovery,
+                    diagnostics.Count(d => d.ScheduleIndex == index)))
                 return false;
             if (receipt.Status == "pending")
             {
@@ -136,30 +130,34 @@ internal static class R6ProspectiveReportReader
             {
                 if (receipt.Origin is not (R6ProspectiveAssessment.AiOrigin or
                         R6ProspectiveAssessment.HumanOrigin) ||
-                    receipt.Findings.Length != receipt.FindingRowCount) return false;
+                    receipt.Findings.Length != receipt.FindingRowCount ||
+                    receipt.Findings.Where((finding, ordinal) =>
+                        !R6ProspectiveQualityGate.ValidFindingShape(finding, index, ordinal)).Any())
+                    return false;
             }
             else return false;
         }
         return true;
     }
 
-    internal static int Invoke(string path)
+    internal static int Invoke(string path, TextWriter? output = null)
     {
+        output ??= Console.Out;
         try
         {
             var file = new FileInfo(path);
             if (!file.Exists || file.Length is < 1 or > MaximumBytes)
             {
-                Console.WriteLine("r6_prospective_report_size_invalid");
+                output.WriteLine("r6_prospective_report_size_invalid");
                 return 2;
             }
             var result = Read(File.ReadAllBytes(path));
-            Console.WriteLine("r6_prospective_" + result.Status + " " + result.Reason);
+            output.WriteLine("r6_prospective_" + result.Status + " " + result.Reason);
             return result.Status == "candidate_pass" ? 0 : 1;
         }
         catch
         {
-            Console.WriteLine("r6_prospective_report_unavailable");
+            output.WriteLine("r6_prospective_report_unavailable");
             return 2;
         }
     }
