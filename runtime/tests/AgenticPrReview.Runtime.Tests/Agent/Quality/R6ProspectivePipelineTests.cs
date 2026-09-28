@@ -284,8 +284,13 @@ public sealed class R6ProspectivePipelineTests
             "blocked", "population_ineligible");
         Check(baseline with { AccountingViolation = true }, outcomes,
             "blocked", "population_ineligible");
-        Check(baseline with { SourceClean = false }, outcomes,
-            "blocked", "plan_binding_invalid");
+        var dirtySource = baseline with { SourceClean = false };
+        var dirtyGate = R6ProspectiveQualityGate.Evaluate(dirtySource, outcomes)!;
+        Assert.Equal("plan_binding_invalid", dirtyGate.Reason);
+        var dirtyRead = R6ProspectiveReportReader.Read(WriteReport(dirtySource with
+        { ProspectiveQualityCandidate = dirtyGate }, outcomes));
+        Assert.Equal("rejected", dirtyRead.Status);
+        Assert.Equal("plan_binding_invalid", dirtyRead.Reason);
         Check(baseline with { Cleanup = "cleanup_failed" }, outcomes,
             "blocked", "population_ineligible");
         Check(baseline with { Completed = 4, Failed = 1 }, outcomes,

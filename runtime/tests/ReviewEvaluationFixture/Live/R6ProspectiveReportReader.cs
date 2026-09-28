@@ -54,6 +54,8 @@ internal static class R6ProspectiveReportReader
             if (!summaryBytes.AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(summary,
                 LiveJsonContext.Default.LiveRunSummary)))
                 return Reject("summary_canonical_invalid");
+            if (!ValidJournalBinding(summary))
+                return Reject("plan_binding_invalid");
             if (!ValidReceiptShape(summary, outcomes.ToImmutable()))
                 return Reject("receipt_shape_invalid");
             var recomputed = R6ProspectiveQualityGate.Evaluate(summary, outcomes.ToImmutable());
@@ -68,8 +70,7 @@ internal static class R6ProspectiveReportReader
         }
     }
 
-    private static bool ValidReceiptShape(LiveRunSummary summary,
-        ImmutableArray<EvaluationOutcome> outcomes)
+    private static bool ValidJournalBinding(LiveRunSummary summary)
     {
         if (summary.ProspectiveRubric is not { } rubric ||
             rubric.Id != R6ProspectiveRubric.Id ||
@@ -82,7 +83,15 @@ internal static class R6ProspectiveReportReader
             journal.Provenance.SourceCommit != summary.SourceCommit ||
             journal.Provenance.SourceTree != summary.SourceTree ||
             journal.Provenance.SourceClean != summary.SourceClean ||
-            journal.Provenance.ExecutionKind != summary.ExecutionKind ||
+            journal.Provenance.ExecutionKind != summary.ExecutionKind)
+            return false;
+        return true;
+    }
+
+    private static bool ValidReceiptShape(LiveRunSummary summary,
+        ImmutableArray<EvaluationOutcome> outcomes)
+    {
+        if (summary.ProspectiveRubric is not { } rubric ||
             summary.ProspectiveCaseReceipts is not { } cases || cases.IsDefault ||
             summary.ProspectiveRecoveryReceipts is not { } recoveries ||
             recoveries.IsDefault || cases.Length != 5 || recoveries.Length != 5 ||
