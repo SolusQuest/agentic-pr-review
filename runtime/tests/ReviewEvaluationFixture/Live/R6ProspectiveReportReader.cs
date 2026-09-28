@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
-using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Reporting;
 
@@ -54,7 +53,8 @@ internal static class R6ProspectiveReportReader
             if (!summaryBytes.AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(summary,
                 LiveJsonContext.Default.LiveRunSummary)))
                 return Reject("summary_canonical_invalid");
-            if (!ValidJournalBinding(summary))
+            if (!R6ProspectiveQualityGate.ValidJournalBinding(summary,
+                    outcomes.ToImmutable()))
                 return Reject("plan_binding_invalid");
             if (!ValidReceiptShape(summary, outcomes.ToImmutable()))
                 return Reject("receipt_shape_invalid");
@@ -68,24 +68,6 @@ internal static class R6ProspectiveReportReader
         {
             return Reject("report_invalid");
         }
-    }
-
-    private static bool ValidJournalBinding(LiveRunSummary summary)
-    {
-        if (summary.ProspectiveRubric is not { } rubric ||
-            rubric.Id != R6ProspectiveRubric.Id ||
-            rubric.Sha256 != R6ProspectiveRubric.Sha256 ||
-            summary.UsageJournal is not { } journal ||
-            UsageJournal.Admit(journal) is null ||
-            journal.Plan.Rubric != rubric ||
-            journal.Provenance.PlanSha256 != summary.PlanSha256 ||
-            journal.Provenance.CorpusSha256 != summary.CorpusSha256 ||
-            journal.Provenance.SourceCommit != summary.SourceCommit ||
-            journal.Provenance.SourceTree != summary.SourceTree ||
-            journal.Provenance.SourceClean != summary.SourceClean ||
-            journal.Provenance.ExecutionKind != summary.ExecutionKind)
-            return false;
-        return true;
     }
 
     private static bool ValidReceiptShape(LiveRunSummary summary,

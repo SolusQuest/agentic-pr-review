@@ -18,7 +18,7 @@ One recovery per five-case population may qualify when the rejected tool call wa
 
 ## Privacy, migration and validation
 
-Public receipts expose closed enums, IDs, hashes and counts only. Private review packets and annotations are deleted after each case and their directory cleanup is a hard gate. The strict reader recomputes the candidate from admitted outcomes and receipts; the summary's claimed status is never authority. It cannot independently rejudge prose truth and reports the attestation origin explicitly.
+Public receipts expose closed enums, IDs, hashes and counts only. Private review packets and annotations are deleted after each case and their directory cleanup is a hard gate. The strict reader binds each journal evaluation-attempt hash to its outcome row and reconciles journal totals and reservations with summary counters before recomputing the candidate; a journal from another run with the same plan cannot supply credit. The summary's claimed status is never authority. The reader cannot independently rejudge prose truth and reports the attestation origin explicitly.
 
 The public result separates `legacy_structural_status`, `prospective_semantic_status`, `safety_status` and `usability_status` from the aggregate candidate. Thus a bounded 5-7 citation can retain the old structural failure while earning prospective semantic credit; true cross-case repeats remain visible as usability cost. A blocked or keyless run is never an entry decision.
 

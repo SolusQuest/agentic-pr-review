@@ -87,6 +87,62 @@ internal static class R6ProspectiveQualityGate
         return finding.Reason == reason;
     }
 
+    // The journal's own admission proves its internal graph. Public readback
+    // must also bind that graph to these outcome rows and summary counters;
+    // the finite plan alone is shared by distinct live executions.
+    internal static bool ValidJournalBinding(LiveRunSummary summary,
+        ImmutableArray<EvaluationOutcome> outcomes)
+    {
+        if (summary.ProspectiveRubric is not { } rubric ||
+            rubric.Id != R6ProspectiveRubric.Id ||
+            rubric.Sha256 != R6ProspectiveRubric.Sha256 ||
+            summary.UsageJournal is not { } journal ||
+            UsageJournal.Admit(journal) is null ||
+            journal.Plan.Rubric != rubric ||
+            !journal.Plan.Schedule.SequenceEqual(R6ProspectiveRubric.Cases) ||
+            journal.Provenance.PlanSha256 != summary.PlanSha256 ||
+            journal.Provenance.CorpusSha256 != summary.CorpusSha256 ||
+            journal.Provenance.SourceCommit != summary.SourceCommit ||
+            journal.Provenance.SourceTree != summary.SourceTree ||
+            journal.Provenance.SourceClean != summary.SourceClean ||
+            journal.Provenance.ExecutionKind != summary.ExecutionKind ||
+            journal.StopReason != summary.StopReason ||
+            journal.Plan.Bounds.SpendCeilingMicroUsd != summary.SpendCeilingMicroUsd ||
+            journal.Attempts.Length != outcomes.Length)
+            return false;
+        for (var index = 0; index < outcomes.Length; index++)
+        {
+            var row = outcomes[index];
+            var attempt = journal.Attempts[index];
+            if (attempt.CaseId != row.CaseId ||
+                attempt.EvaluationAttemptSha256 != row.AttemptSha256 ||
+                attempt.Status != (row.ExecutionStatus switch
+                {
+                    EvaluationStatus.Completed => "completed",
+                    EvaluationStatus.Invalid => "invalid",
+                    _ => "failed",
+                })) return false;
+        }
+        var totals = journal.Totals;
+        var reservations = journal.Reservations;
+        return totals.Scheduled == summary.Scheduled &&
+            totals.Attempted == summary.Attempted &&
+            totals.Completed == summary.Completed &&
+            totals.Failed == summary.Failed &&
+            totals.Invalid == summary.Invalid &&
+            totals.Unattempted == summary.Unattempted &&
+            reservations.Calls == (long)summary.ActualProviderCalls +
+                summary.SimulatedAdapterCalls &&
+            (decimal)summary.KnownInputTokens == totals.KnownInputTokens &&
+            (decimal)summary.KnownOutputTokens == totals.KnownOutputTokens &&
+            (decimal)summary.KnownCombinedTokens == totals.KnownCombinedTokens &&
+            summary.UsageUnknownCalls == totals.UnknownUsageSends &&
+            reservations.InputTokens == summary.ReservedInputTokens &&
+            reservations.OutputTokens == summary.ReservedOutputTokens &&
+            reservations.CombinedTokens == summary.ReservedCombinedTokens &&
+            reservations.SpendMicroUsd == summary.ReservedSpendMicroUsd;
+    }
+
     internal static R6ProspectiveGateResult? Evaluate(LiveRunSummary summary,
         ImmutableArray<EvaluationOutcome> outcomes)
     {
@@ -111,16 +167,7 @@ internal static class R6ProspectiveQualityGate
         if (summary.ExecutionKind != "live")
             return new("not_evaluable", "keyless_run", 0, 0, 0, 0, 0, 0, 0,
                 legacy, "not_evaluable", "not_evaluable", "not_evaluable");
-        if (summary.UsageJournal is not { } journal ||
-            UsageJournal.Admit(journal) is null ||
-            journal.Provenance.PlanSha256 != summary.PlanSha256 ||
-            journal.Provenance.CorpusSha256 != summary.CorpusSha256 ||
-            journal.Provenance.SourceCommit != summary.SourceCommit ||
-            journal.Provenance.SourceTree != summary.SourceTree ||
-            journal.Provenance.SourceClean != summary.SourceClean ||
-            journal.Provenance.ExecutionKind != summary.ExecutionKind ||
-            journal.Plan.Rubric != summary.ProspectiveRubric ||
-            !journal.Plan.Schedule.SequenceEqual(R6ProspectiveRubric.Cases))
+        if (!ValidJournalBinding(summary, outcomes))
             return Block("plan_binding_invalid");
         if (summary.Scheduled != 5 || summary.Attempted != 5 || summary.Completed != 5 ||
             summary.Failed != 0 || summary.Invalid != 0 || summary.Unattempted != 0 ||

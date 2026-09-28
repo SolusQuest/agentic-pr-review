@@ -347,10 +347,66 @@ public sealed class R6ProspectivePipelineTests
             Assert.Equal(reason, read.Reason);
         }
 
+        void RejectBinding(LiveRunSummary summary,
+            ImmutableArray<EvaluationOutcome> rows)
+        {
+            Assert.Equal("plan_binding_invalid",
+                R6ProspectiveQualityGate.Evaluate(summary, rows)?.Reason);
+            var read = R6ProspectiveReportReader.Read(WriteReport(summary, rows));
+            Assert.Equal("rejected", read.Status);
+            Assert.Equal("plan_binding_invalid", read.Reason);
+        }
+
         var baseline = result.Summary;
         var outcomes = result.Outcomes;
-        Check(baseline with { UsageUnknownCalls = 1 }, outcomes,
-            "blocked", "population_ineligible");
+        using var secondPrompts = new StringWriter();
+        using var secondInput = new PacketReviewInput(secondPrompts, approveExpected: true);
+        var secondIndex = 0;
+        var second = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = _ => { },
+            SecretSource = new FakeSecret("APR311_SECOND_SYNTHETIC_CREDENTIAL"),
+            TransportFactory = new FakeFactory(_ => new ReplayTransport(
+                runs[secondIndex++].Script, ReplayFault.None)),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(secondInput,
+                secondPrompts, R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal("candidate_pass", second.Summary.ProspectiveQualityCandidate?.Status);
+        var firstJournal = Assert.IsType<UsageJournalDocument>(baseline.UsageJournal);
+        var secondJournal = Assert.IsType<UsageJournalDocument>(second.Summary.UsageJournal);
+        Assert.Equal(firstJournal.Provenance.PlanSha256,
+            secondJournal.Provenance.PlanSha256);
+        Assert.NotEqual(firstJournal.Provenance.CampaignId,
+            secondJournal.Provenance.CampaignId);
+        Assert.NotEqual(firstJournal.Attempts[0].EvaluationAttemptSha256,
+            secondJournal.Attempts[0].EvaluationAttemptSha256);
+        Assert.NotNull(UsageJournal.Admit(secondJournal));
+        var mixedSummary = baseline with { UsageJournal = secondJournal };
+        RejectBinding(mixedSummary, outcomes);
+
+        var knownCallIndex = Enumerable.Range(0, firstJournal.Calls.Length)
+            .First(index => firstJournal.Calls[index].UsageStatus == "known");
+        var knownCall = firstJournal.Calls[knownCallIndex];
+        var usage = Assert.IsType<UsageJournalUsage>(knownCall.Usage);
+        var changedCache = usage.Cache is { } cache ? cache with
+        { UncachedInputTokens = cache.UncachedInputTokens + 1 } : null;
+        var changedCalls = firstJournal.Calls.SetItem(knownCallIndex, knownCall with
+        { Usage = usage with { InputTokens = usage.InputTokens + 1,
+            CombinedTokens = usage.CombinedTokens + 1, Cache = changedCache } });
+        var changedJournal = firstJournal with
+        { Calls = changedCalls, Totals = UsageJournal.Totals(firstJournal.Attempts,
+            changedCalls) };
+        Assert.NotNull(UsageJournal.Admit(changedJournal));
+        var inconsistentUsage = baseline with { UsageJournal = changedJournal };
+        RejectBinding(inconsistentUsage, outcomes);
+        RejectBinding(baseline with
+        { KnownInputTokens = baseline.KnownInputTokens + 1 }, outcomes);
+        RejectBinding(baseline with
+        { ReservedInputTokens = baseline.ReservedInputTokens + 1 }, outcomes);
+        RejectBinding(baseline with
+        { ActualProviderCalls = baseline.ActualProviderCalls + 1 }, outcomes);
+
+        RejectBinding(baseline with { UsageUnknownCalls = 1 }, outcomes);
         Check(baseline with { AccountingViolation = true }, outcomes,
             "blocked", "population_ineligible");
         var dirtySource = baseline with { SourceClean = false };
@@ -362,8 +418,7 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal("plan_binding_invalid", dirtyRead.Reason);
         Check(baseline with { Cleanup = "cleanup_failed" }, outcomes,
             "blocked", "population_ineligible");
-        Check(baseline with { Completed = 4, Failed = 1 }, outcomes,
-            "blocked", "population_ineligible");
+        RejectBinding(baseline with { Completed = 4, Failed = 1 }, outcomes);
         Check(baseline with { AgentDiagnostics = [new LiveAgentDiagnostic(4,
             "response_invalid", 1, 0)] }, outcomes,
             "blocked", "population_ineligible");
@@ -416,15 +471,14 @@ public sealed class R6ProspectivePipelineTests
             baseline.ProspectiveCaseReceipts);
         var failedRecovery = Assert.IsType<ImmutableArray<R6ProspectiveRecoveryReceipt>>(
             baseline.ProspectiveRecoveryReceipts);
-        Check(baseline with
+        RejectBinding(baseline with
         {
             ProspectiveCaseReceipts = failedReceipts.SetItem(4, failedReceipts[4] with
             { ExecutionSha256 = null, Origin = "none", Status = "pending",
                 FindingRowCount = 0, Findings = [] }),
             ProspectiveRecoveryReceipts = failedRecovery.SetItem(4, failedRecovery[4] with
             { ExecutionSha256 = null, Status = "blocked", Reason = "capture_missing" }),
-        }, outcomes.SetItem(4, agentFailed),
-            "blocked", "case_binding_invalid");
+        }, outcomes.SetItem(4, agentFailed));
 
         var receipts = Assert.IsType<System.Collections.Immutable.ImmutableArray<R6ProspectiveCaseReceipt>>(
             baseline.ProspectiveCaseReceipts);
