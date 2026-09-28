@@ -22,10 +22,12 @@ internal static class R6ProspectiveReportReader
         try
         {
             var text = StrictUtf8.GetString(bytes);
-            var lines = text.Split('\n');
-            if (lines.Length != 8 || lines[^1].Length != 0 ||
-                lines.Take(7).Any(line => line.Length == 0 || line.EndsWith('\r')))
+            var rawLines = text.Split('\n');
+            if (rawLines.Length != 8 || rawLines[^1].Length != 0 ||
+                rawLines.Take(7).Any(line => line.Length == 0 || line.Contains('\r') &&
+                    (!line.EndsWith('\r') || line[..^1].Contains('\r'))))
                 return Reject("report_shape_invalid");
+            var lines = rawLines.Take(7).Select(line => line.TrimEnd('\r')).ToArray();
             var rawRows = lines.Take(5).Select(Encoding.UTF8.GetBytes)
                 .Select(value => (ReadOnlyMemory<byte>)value).ToImmutableArray();
             var outcomes = ImmutableArray.CreateBuilder<EvaluationOutcome>();

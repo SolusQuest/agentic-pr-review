@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -11,6 +12,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Reporting;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
@@ -88,6 +90,8 @@ public sealed class R6ProspectivePipelineTests
         var read = R6ProspectiveReportReader.Read(bytes);
         Assert.Equal("not_evaluable", read.Status);
         Assert.Equal("keyless_run", read.Reason);
+        Assert.Equal("not_evaluable", R6ProspectiveReportReader.Read(
+            Encoding.UTF8.GetBytes(string.Join("\r\n", lines) + "\r\n")).Status);
         Assert.DoesNotContain("reasoning", Encoding.UTF8.GetString(bytes), StringComparison.OrdinalIgnoreCase);
 
         var summary = JsonNode.Parse(lines[^1])!.AsObject();
@@ -130,7 +134,7 @@ public sealed class R6ProspectivePipelineTests
     {
         // The evaluator embeds a dirty-source marker at build time. This case
         // runs on a committed checkout in CI and in the exact-head local gate.
-        if (!EvaluationSource.Clean) return;
+        if (!IsCleanSource()) return;
         using var plan = new PlanFile();
         using var prompts = new StringWriter();
         using var input = new PacketReviewInput(prompts, approveExpected: true);
@@ -150,11 +154,109 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal(1, secret.Taken);
         Assert.Equal(5, result.Completed);
         Assert.Equal("candidate_pass", result.Summary.ProspectiveQualityCandidate?.Status);
-        Assert.Equal(3, result.Summary.ProspectiveQualityCandidate.ExpectedCredits);
+        var baselineGate = Assert.IsType<R6ProspectiveGateResult>(
+            result.Summary.ProspectiveQualityCandidate);
+        Assert.Equal(3, baselineGate.ExpectedCredits);
+        Assert.Equal("passed", baselineGate.LegacyStructuralStatus);
+        Assert.Equal("passed", baselineGate.ProspectiveSemanticStatus);
+        Assert.Equal("passed", baselineGate.SafetyStatus);
+        Assert.Equal("clean", baselineGate.UsabilityStatus);
         Assert.Equal(5, result.Summary.ProspectiveCaseReceipts?.Length);
         Assert.Equal("candidate_pass", R6ProspectiveReportReader.Read(
             Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Status);
         Assert.DoesNotContain("APR311_SYNTHETIC_CREDENTIAL_CANARY", string.Join('\n', lines));
+
+        void Check(LiveRunSummary summary, System.Collections.Immutable.ImmutableArray<EvaluationOutcome> rows,
+            string status, string reason)
+        {
+            var gate = Assert.IsType<R6ProspectiveGateResult>(
+                R6ProspectiveQualityGate.Evaluate(summary, rows));
+            Assert.Equal(status, gate.Status);
+            Assert.Equal(reason, gate.Reason);
+            var read = R6ProspectiveReportReader.Read(WriteReport(summary with
+            { ProspectiveQualityCandidate = gate }, rows));
+            Assert.Equal(status, read.Status);
+            Assert.Equal(reason, read.Reason);
+        }
+
+        var baseline = result.Summary;
+        var outcomes = result.Outcomes;
+        Check(baseline with { UsageUnknownCalls = 1 }, outcomes,
+            "blocked", "population_ineligible");
+        Check(baseline with { AccountingViolation = true }, outcomes,
+            "blocked", "population_ineligible");
+        Check(baseline with { SourceClean = false }, outcomes,
+            "blocked", "plan_binding_invalid");
+        Check(baseline with { Cleanup = "cleanup_failed" }, outcomes,
+            "blocked", "population_ineligible");
+        Check(baseline with { Completed = 4, Failed = 1 }, outcomes,
+            "blocked", "population_ineligible");
+        Check(baseline with { ProspectiveRecoveryReceipts = [] }, outcomes,
+            "blocked", "recovery_count_invalid");
+
+        var receipts = Assert.IsType<System.Collections.Immutable.ImmutableArray<R6ProspectiveCaseReceipt>>(
+            baseline.ProspectiveCaseReceipts);
+        var repoReceipt = receipts[4];
+        var repoFinding = Assert.Single(repoReceipt.Findings);
+        var unresolved = repoFinding with { Verdict = "unresolved", Reason = "review_pending" };
+        var unresolvedReceipts = receipts.SetItem(4, repoReceipt with { Findings = [unresolved] });
+        Check(baseline with { ProspectiveCaseReceipts = unresolvedReceipts }, outcomes,
+            "blocked", "finding_ineligible");
+
+        var falseFinding = repoFinding with { Verdict = "false_unsafe", Reason = "review_rejected",
+            DefectGroupScope = null, DefectGroupId = null, ExpectedDefectId = null };
+        var falseReceipts = receipts.SetItem(4, repoReceipt with { Findings = [falseFinding] });
+        Check(baseline with { ProspectiveCaseReceipts = falseReceipts }, outcomes,
+            "blocked", "finding_ineligible");
+
+        var duplicateReceipts = receipts.SetItem(4, repoReceipt with
+        { FindingRowCount = 2, Findings = [repoFinding, repoFinding with { FindingOrdinal = 1 }] });
+        Check(baseline with { ProspectiveCaseReceipts = duplicateReceipts },
+            outcomes.SetItem(4, outcomes[4] with { FindingCount = 2 }),
+            "blocked", "within_case_duplicate");
+
+        var boundedLegacy = outcomes.SetItem(4, outcomes[4] with
+        {
+            Code = EvaluationCode.ExpectedFindingMissing,
+            ScenarioStatus = AssertionStatus.Failed,
+            StructuralMatches = 0,
+            StructurallyMissingDefects = 1,
+        });
+        var boundedReceipts = receipts.SetItem(4, repoReceipt with
+        { Findings = [repoFinding with { CitationClass = "bounded_context" }] });
+        Check(baseline with { ProspectiveCaseReceipts = boundedReceipts }, boundedLegacy,
+            "candidate_pass", "all_gates_passed");
+        var boundedGate = R6ProspectiveQualityGate.Evaluate(
+            baseline with { ProspectiveCaseReceipts = boundedReceipts }, boundedLegacy)!;
+        Assert.Equal("failed", boundedGate.LegacyStructuralStatus);
+        Assert.Equal("passed", boundedGate.ProspectiveSemanticStatus);
+
+        var offFocus = new R6ProspectiveFindingReceipt(0, "true_off_focus", null,
+            "authored", "repository-token-log", "exact", "none", "confirmed_off_focus");
+        var repeatedReceipts = receipts.SetItem(1, receipts[1] with
+        { FindingRowCount = 1, Findings = [offFocus] });
+        var repeatedOutcomes = outcomes.SetItem(1, outcomes[1] with { FindingCount = 1 });
+        Check(baseline with { ProspectiveCaseReceipts = repeatedReceipts }, repeatedOutcomes,
+            "candidate_pass", "all_gates_passed");
+        var repeatedGate = R6ProspectiveQualityGate.Evaluate(
+            baseline with { ProspectiveCaseReceipts = repeatedReceipts }, repeatedOutcomes)!;
+        Assert.Equal(1, repeatedGate.CrossCaseRepeats);
+        Assert.Equal("cost_recorded", repeatedGate.UsabilityStatus);
+        Assert.Equal("passed", repeatedGate.SafetyStatus);
+    }
+
+    private static byte[] WriteReport(LiveRunSummary summary,
+        System.Collections.Immutable.ImmutableArray<EvaluationOutcome> outcomes)
+    {
+        var rows = outcomes.Select(EvaluationJson.Write).ToArray();
+        var report = EvaluationReport.Create(rows.Select(row =>
+            (ReadOnlyMemory<byte>)row).ToImmutableArray());
+        Assert.True(report.Succeeded);
+        var aggregate = EvaluationReportJson.Write(report.Value);
+        Assert.True(aggregate.Succeeded);
+        return Encoding.UTF8.GetBytes(string.Join('\n', rows.Select(Encoding.UTF8.GetString)
+            .Append(Encoding.UTF8.GetString(aggregate.Value!))
+            .Append(JsonSerializer.Serialize(summary, LiveJsonContext.Default.LiveRunSummary))) + "\n");
     }
 
     [Theory]
@@ -294,4 +396,7 @@ public sealed class R6ProspectivePipelineTests
     {
         public IDeepSeekTransport Create(DeepSeekCredential credential) => create(credential);
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool IsCleanSource() => EvaluationSource.Clean;
 }
