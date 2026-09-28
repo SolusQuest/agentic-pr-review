@@ -32,10 +32,10 @@ Open question for a future population: independent operator calibration of seman
 
 The retained public #295 JSONL files are immutable historical evidence. Each contains five case rows, an aggregate report and a summary. Their SHA-256 values are:
 
-| Report | SHA-256 | Completed cases |
-| --- | --- | ---: |
-| `transport-blocked-370cfbd.jsonl` | `19ed7d1edda26c0760214a8b8a90a427db3bd9574c6d45401c59cae55ed5599e` | 0/5 |
-| `live-868775.jsonl` | `760616d13f1bcc4ecb65c5797a91dc6af81983a1ee15c659c69e34cf49a4c24c` | 3/5 |
-| `live-64k-04f72fd.jsonl` | `f7926cb69a462e07f26331c76ee582a5c018f7d4a63d73bcdf545fec448e391d` | 4/5 |
+| Report                            | SHA-256                                                            | Completed cases |
+| --------------------------------- | ------------------------------------------------------------------ | --------------: |
+| `transport-blocked-370cfbd.jsonl` | `19ed7d1edda26c0760214a8b8a90a427db3bd9574c6d45401c59cae55ed5599e` |             0/5 |
+| `live-868775.jsonl`               | `760616d13f1bcc4ecb65c5797a91dc6af81983a1ee15c659c69e34cf49a4c24c` |             3/5 |
+| `live-64k-04f72fd.jsonl`          | `f7926cb69a462e07f26331c76ee582a5c018f7d4a63d73bcdf545fec448e391d` |             4/5 |
 
 Their public rows retain case identities, counts and prior verdicts, but omit finding prose, citations and returned tool results. The separately retained #310 one-case display packet was available locally during this design. It shows a high-severity token logging finding citing `src/Upload.cs:5-7`, `rules/review.md:3-3` and `src/Upload.cs:1-7`. Frozen Upload line 5 forwards the access token to `Log`, line 6 writes it to stderr, and line 7 closes the class. The old exact-span scorer required `src/Upload.cs:5-5`, so it reported `ExpectedFindingMissing` even after the bounded recovered tool call completed. That display packet lacks authenticated returned tool results. It cannot construct an `EvaluationSubject`, and it was never a five-case population or independently semantically adjudicated. If the private packet is unavailable to another reviewer, its status is `unavailable`, not reconstructed from public data. For all these archived sources, `authenticated_subject_available=false` and prospective quality credit is refused.

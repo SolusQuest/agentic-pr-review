@@ -463,6 +463,32 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal("receipt_shape_invalid", extraRead.Reason);
     }
 
+    [Fact]
+    public async Task ReviewerCanDenyCausalCreditDespiteCompactGroundedCitation()
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile();
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            corruption: "false_explanation");
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var next = 0;
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = _ => { },
+            SecretSource = new FakeSecret("APR311_SYNTHETIC_CREDENTIAL_CANARY"),
+            TransportFactory = new FakeFactory(_ => new ReplayTransport(runs[next++].Script,
+                ReplayFault.None)),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal("adjudicated", result.Summary.AdjudicationStatus);
+        Assert.Equal("finding_ineligible", result.Summary.ProspectiveQualityCandidate?.Reason);
+        Assert.Equal("failed", result.Summary.ProspectiveQualityCandidate?.SafetyStatus);
+        Assert.Equal("false_unsafe", result.Summary.ProspectiveCaseReceipts!.Value[0]
+            .Findings[0].Verdict);
+    }
+
     private static byte[] WriteReport(LiveRunSummary summary,
         System.Collections.Immutable.ImmutableArray<EvaluationOutcome> outcomes)
     {
@@ -601,6 +627,14 @@ public sealed class R6ProspectivePipelineTests
                     if (corruption == "origin") annotation["origin"] = "human-confirmed";
                     else if (corruption is "execution_sha256" or "rubric_sha256")
                         annotation[corruption] = new string('0', 64);
+                    else if (corruption == "false_explanation" && findings.GetArrayLength() > 0)
+                    {
+                        var row = annotation["findings"]![0]!;
+                        row["verdict"] = "false_unsafe";
+                        row["expected_defect_id"] = null;
+                        row["defect_group_scope"] = null;
+                        row["defect_group_id"] = null;
+                    }
                 }
                 File.WriteAllText(annotationPath, annotation.ToJsonString());
             }

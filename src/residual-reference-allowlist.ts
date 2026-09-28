@@ -305,4 +305,22 @@ export const residualReferenceRules = [
     'the Codeload endpoint segment is the exact GitHub tarball transport shape in the production reader and its bounded verifier fixtures, not a supported legacy runtime route',
     'an accepted Git-object transport change must preserve equivalent bounded Codeload redirect and archive-download evidence',
   ),
+  narrowConformance(
+    'RR-042',
+    /legacy/iu,
+    /^docs\/90_roadmap\/r6-prospective-quality-rubric\.md$/u,
+    'R6 prospective quality-rubric decision owner',
+    'current prospective rubric and historical scoring separation',
+    'legacy means the retained R5 exact-scenario signal that the new R6 rubric records without rewriting it',
+    'an accepted R6 rubric revision must retain historical #295 outcome provenance and its separate structural dimension',
+  ),
+  narrowConformance(
+    'RR-043',
+    /legacy/iu,
+    /^runtime\/tests\/(?:AgenticPrReview\.Runtime\.Tests\/Agent\/Quality\/R6ProspectivePipelineTests|ReviewEvaluationFixture\/Live\/R6ProspectiveQualityGate)\.cs$/u,
+    'R6 prospective quality-rubric evaluator and tests',
+    'current explicit structural-versus-semantic conformance',
+    'legacy names only the retained R5 scenario status and two bounded prospective override controls',
+    'an accepted evaluator replacement must keep old outcomes immutable and verify the same hard-gate precedence',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];

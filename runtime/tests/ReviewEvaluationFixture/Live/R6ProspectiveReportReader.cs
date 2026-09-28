@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Reporting;
 
@@ -73,6 +74,15 @@ internal static class R6ProspectiveReportReader
         if (summary.ProspectiveRubric is not { } rubric ||
             rubric.Id != R6ProspectiveRubric.Id ||
             rubric.Sha256 != R6ProspectiveRubric.Sha256 ||
+            summary.UsageJournal is not { } journal ||
+            UsageJournal.Admit(journal) is null ||
+            journal.Plan.Rubric != rubric ||
+            journal.Provenance.PlanSha256 != summary.PlanSha256 ||
+            journal.Provenance.CorpusSha256 != summary.CorpusSha256 ||
+            journal.Provenance.SourceCommit != summary.SourceCommit ||
+            journal.Provenance.SourceTree != summary.SourceTree ||
+            journal.Provenance.SourceClean != summary.SourceClean ||
+            journal.Provenance.ExecutionKind != summary.ExecutionKind ||
             summary.ProspectiveCaseReceipts is not { } cases || cases.IsDefault ||
             summary.ProspectiveRecoveryReceipts is not { } recoveries ||
             recoveries.IsDefault || cases.Length != 5 || recoveries.Length != 5 ||
