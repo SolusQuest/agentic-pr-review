@@ -67,7 +67,7 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                 File.Delete(packetPath);
                 File.Delete(annotationPath);
             }
-            if (receipts.Count != cases.Count) status = "pending";
+            if (status == "adjudicated" && receipts.Count != cases.Count) status = "pending";
         }
         catch (OperationCanceledException) { status = "cancelled"; }
         catch { status = "failed"; }

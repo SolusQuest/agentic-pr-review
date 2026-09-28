@@ -53,6 +53,8 @@ internal static class R6ProspectiveReportReader
             if (!summaryBytes.AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(summary,
                 LiveJsonContext.Default.LiveRunSummary)))
                 return Reject("summary_canonical_invalid");
+            if (!ValidReceiptShape(summary, outcomes.ToImmutable()))
+                return Reject("receipt_shape_invalid");
             var recomputed = R6ProspectiveQualityGate.Evaluate(summary, outcomes.ToImmutable());
             if (recomputed is null || recomputed != summary.ProspectiveQualityCandidate)
                 return Reject("candidate_claim_mismatch");
@@ -63,6 +65,63 @@ internal static class R6ProspectiveReportReader
         {
             return Reject("report_invalid");
         }
+    }
+
+    private static bool ValidReceiptShape(LiveRunSummary summary,
+        ImmutableArray<EvaluationOutcome> outcomes)
+    {
+        if (summary.ProspectiveRubric is not { } rubric ||
+            rubric.Id != R6ProspectiveRubric.Id ||
+            rubric.Sha256 != R6ProspectiveRubric.Sha256 ||
+            summary.ProspectiveCaseReceipts is not { } cases || cases.IsDefault ||
+            summary.ProspectiveRecoveryReceipts is not { } recoveries ||
+            recoveries.IsDefault || cases.Length != 5 || recoveries.Length != 5 ||
+            outcomes.Length != 5)
+            return false;
+        var diagnostics = summary.RecoveryDiagnostics ?? [];
+        if (diagnostics.IsDefault) return false;
+        for (var index = 0; index < 5; index++)
+        {
+            var outcome = outcomes[index];
+            var receipt = cases[index];
+            var recovery = recoveries[index];
+            if (receipt is null || recovery is null ||
+                receipt.RubricId != rubric.Id || receipt.RubricSha256 != rubric.Sha256 ||
+                receipt.ScheduleIndex != index ||
+                receipt.CaseId != R6ProspectiveRubric.Cases[index] ||
+                receipt.CorpusSha256 != outcome.CorpusSha256 ||
+                receipt.CaseSha256 != outcome.CaseSha256 ||
+                receipt.ConfigurationSha256 != outcome.ConfigurationSha256 ||
+                receipt.ExecutionSha256 != outcome.ExecutionSha256 ||
+                receipt.FindingRowCount != outcome.FindingCount ||
+                receipt.Findings.IsDefault ||
+                recovery.RubricId != rubric.Id ||
+                recovery.RubricSha256 != rubric.Sha256 ||
+                recovery.ScheduleIndex != index || recovery.CaseSha256 != outcome.CaseSha256 ||
+                recovery.ConfigurationSha256 != outcome.ConfigurationSha256 ||
+                recovery.ExecutionSha256 != outcome.ExecutionSha256 ||
+                recovery.ObservedCount != diagnostics.Count(d => d.ScheduleIndex == index) ||
+                recovery.ObservedCount is < 0 or > 1 ||
+                recovery.Status is not (R6ProspectiveRecoveryAudit.None or
+                    R6ProspectiveRecoveryAudit.Qualified or R6ProspectiveRecoveryAudit.Blocked) ||
+                recovery.Reason is not ("none" or "qualified" or "capture_missing" or
+                    "error_pair_invalid" or "rejected_dispatched" or
+                    "recovery_error_as_evidence" or "followup_missing" or
+                    "completion_missing" or "count_mismatch" or "multiple_recoveries"))
+                return false;
+            if (receipt.Status == "pending")
+            {
+                if (receipt.Origin != "none" || receipt.Findings.Length != 0) return false;
+            }
+            else if (receipt.Status == "assessed")
+            {
+                if (receipt.Origin is not (R6ProspectiveAssessment.AiOrigin or
+                        R6ProspectiveAssessment.HumanOrigin) ||
+                    receipt.Findings.Length != receipt.FindingRowCount) return false;
+            }
+            else return false;
+        }
+        return true;
     }
 
     internal static int Invoke(string path)

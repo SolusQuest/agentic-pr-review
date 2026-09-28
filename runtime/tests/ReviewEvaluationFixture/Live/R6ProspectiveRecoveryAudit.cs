@@ -71,17 +71,23 @@ internal static class R6ProspectiveRecoveryAudit
 
     internal static bool ErrorExcludedFromEvidence(ImmutableArray<AgentLogicalEvent> events,
         EvaluationSubject subject, AgentToolErrorEvent error)
+        => ErrorExcludedFromEvidence(events,
+            subject.Observations.Select(item => item.ObservationId),
+            subject.GroundedObservations.Select(item => item.Observation.ObservationId),
+            subject.Findings.SelectMany(item => item.Evidence).Select(item => item.ObservationId),
+            error);
+
+    internal static bool ErrorExcludedFromEvidence(ImmutableArray<AgentLogicalEvent> events,
+        IEnumerable<string?> observations, IEnumerable<string?> grounded,
+        IEnumerable<string?> findingEvidence, AgentToolErrorEvent error)
     {
         var ordinary = events.OfType<AgentToolResultEvent>().ToArray();
         var admittedIds = ordinary.Select(item => item.ObservationId)
             .ToHashSet(StringComparer.Ordinal);
         return ordinary.All(item => item.CallId != error.CallId &&
                 item.ResultSha256 != error.ResultSha256) &&
-            subject.Observations.All(item => item.ObservationId is not null &&
-                admittedIds.Contains(item.ObservationId)) &&
-            subject.GroundedObservations.All(item =>
-                admittedIds.Contains(item.Observation.ObservationId)) &&
-            subject.Findings.SelectMany(item => item.Evidence).All(item =>
-                admittedIds.Contains(item.ObservationId));
+            observations.All(item => item is not null && admittedIds.Contains(item)) &&
+            grounded.All(item => item is not null && admittedIds.Contains(item)) &&
+            findingEvidence.All(item => item is not null && admittedIds.Contains(item));
     }
 }

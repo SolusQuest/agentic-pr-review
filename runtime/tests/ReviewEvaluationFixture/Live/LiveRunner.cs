@@ -251,6 +251,30 @@ internal static class LiveRunner
         if (!reportBytes.Succeeded || reportBytes.Value is null)
             throw new InvalidOperationException("live_report_invalid");
         var attempted = completed + failed + invalid;
+        ImmutableArray<R6ProspectiveCaseReceipt>? prospectiveCases = plan.Rubric is null ? null : Enumerable.Range(0, plan.Schedule.Length)
+            .Select(index =>
+            {
+                var row = index < outcomes.Count ? outcomes[index] : null;
+                return prospective?.Receipts.FirstOrDefault(receipt =>
+                    receipt.ScheduleIndex == index) ??
+                    new R6ProspectiveCaseReceipt(R6ProspectiveRubric.Id,
+                        R6ProspectiveRubric.Sha256, index, plan.Schedule[index],
+                        fixture.CorpusSha256, cases[plan.Schedule[index]].Expected.Sha256,
+                        row?.ConfigurationSha256, row?.ExecutionSha256,
+                        "none", "pending", row?.FindingCount ?? 0, []);
+            }).ToImmutableArray();
+        ImmutableArray<R6ProspectiveRecoveryReceipt>? prospectiveRecoveries = plan.Rubric is null ? null : Enumerable.Range(0,
+                plan.Schedule.Length)
+            .Select(index =>
+            {
+                var row = index < outcomes.Count ? outcomes[index] : null;
+                return recoveryReceipts.FirstOrDefault(receipt => receipt.ScheduleIndex == index) ??
+                    new R6ProspectiveRecoveryReceipt(R6ProspectiveRubric.Id,
+                        R6ProspectiveRubric.Sha256, index,
+                        cases[plan.Schedule[index]].Expected.Sha256,
+                        row?.ConfigurationSha256, row?.ExecutionSha256,
+                        0, R6ProspectiveRecoveryAudit.Blocked, "capture_missing");
+            }).ToImmutableArray();
         var summary = new LiveRunSummary("r5-live-local-v1", execute ? "live" : "loopback",
             plan.Digest, fixture.CorpusSha256, EvaluationSource.Commit, EvaluationSource.Tree,
             EvaluationSource.Clean, plan.Schedule.Length, attempted, completed, failed, invalid,
@@ -265,10 +289,8 @@ internal static class LiveRunner
             frozenAccounting.CacheUsage, frozenJournal.Document,
             RecoveryDiagnostics: recoveries.Count == 0 ? null : recoveries.ToImmutableArray(),
             ProspectiveRubric: plan.Rubric,
-            ProspectiveCaseReceipts: plan.Rubric is null ? null :
-                prospective?.Receipts ?? [],
-            ProspectiveRecoveryReceipts: plan.Rubric is null ? null :
-                recoveryReceipts.ToImmutableArray());
+            ProspectiveCaseReceipts: prospectiveCases,
+            ProspectiveRecoveryReceipts: prospectiveRecoveries);
         summary = summary with
         {
             V5QualityCandidateStatus = R6V5QualityGate.Evaluate(

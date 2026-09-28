@@ -44,8 +44,8 @@ internal sealed record R6ProspectiveCaseReceipt(
     [property: JsonRequired] string CaseId,
     [property: JsonRequired] string CorpusSha256,
     [property: JsonRequired] string CaseSha256,
-    [property: JsonRequired] string ConfigurationSha256,
-    [property: JsonRequired] string ExecutionSha256,
+    [property: JsonRequired] string? ConfigurationSha256,
+    [property: JsonRequired] string? ExecutionSha256,
     [property: JsonRequired] string Origin,
     [property: JsonRequired] string Status,
     [property: JsonRequired] int FindingRowCount,
@@ -138,12 +138,17 @@ internal static class R6ProspectiveAssessment
             if (safeRole is null) return null;
 
             var defect = Defects.FirstOrDefault(d => d.GroupId == row.DefectGroupId);
+            var knownAnchor = Defects.FirstOrDefault(d => finding.Evidence.Any(e =>
+                e.Path == d.Path && e.StartLine <= d.Line && e.EndLine >= d.Line));
             var scopeValid = row.DefectGroupScope == Authored && defect is not null ||
                 row.DefectGroupScope == Run && defect is null &&
                 row.DefectGroupId is not null && EvaluationLimits.Id(row.DefectGroupId) &&
                 row.DefectGroupId.StartsWith("run-", StringComparison.Ordinal);
             var isTrue = row.Verdict is Expected or TrueOffFocus;
             if (isTrue != scopeValid ||
+                isTrue && knownAnchor is not null &&
+                    (row.DefectGroupScope != Authored || row.DefectGroupId != knownAnchor.GroupId) ||
+                isTrue && knownAnchor is null && row.DefectGroupScope == Authored ||
                 !isTrue && (row.ExpectedDefectId is not null || row.DefectGroupScope is not null ||
                     row.DefectGroupId is not null) ||
                 row.Verdict is not (Expected or TrueOffFocus or FalseUnsafe or Unresolved))
@@ -173,10 +178,7 @@ internal static class R6ProspectiveAssessment
                 Expected => "confirmed_expected",
                 _ => "confirmed_off_focus",
             };
-            var publicGroupId = row.DefectGroupScope == Run && row.DefectGroupId is not null
-                ? "run-" + AgentCanonical.HashDomain("apr.r6.v5.run-defect-group",
-                    Encoding.UTF8.GetBytes(row.DefectGroupId))
-                : row.DefectGroupId;
+            var publicGroupId = PublicGroupId(row.DefectGroupScope, row.DefectGroupId);
             receipts.Add(new(row.FindingOrdinal, row.Verdict, row.ExpectedDefectId,
                 row.DefectGroupScope, publicGroupId, citationClass, safeRole, reason));
         }
@@ -192,6 +194,12 @@ internal static class R6ProspectiveAssessment
         var defect = Defects.FirstOrDefault(item => item.GroupId == groupId);
         return defect is null ? "invalid" : CitationClass(finding, observations, defect);
     }
+
+    internal static string? PublicGroupId(string? scope, string? id) =>
+        scope == Run && id is not null
+            ? "run-" + AgentCanonical.HashDomain("apr.r6.v5.run-defect-group",
+                Encoding.UTF8.GetBytes(id))
+            : id;
 
     private static string CitationClass(AgentFinding finding,
         ImmutableArray<EvaluationObservation> observations, Defect defect)
