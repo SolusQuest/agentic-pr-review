@@ -750,6 +750,35 @@ internal static class AgentSessionCodec
                     result.Classification);
                 return true;
 
+            case "tool_error":
+                var error = JsonSerializer.Deserialize(
+                    element,
+                    AgentSessionJsonContext.Default.AgentSessionToolErrorDto);
+                if (error?.Kind is null ||
+                    error.Id is null ||
+                    error.SourceMessageId is null ||
+                    error.CallId is null ||
+                    error.Name is null ||
+                    error.ResultJson is null ||
+                    error.Role is null ||
+                    error.Framing is null ||
+                    error.Classification is null)
+                {
+                    return false;
+                }
+
+                record = new AgentSessionToolErrorRecord(
+                    error.Id,
+                    error.Sequence,
+                    error.SourceMessageId,
+                    error.CallId,
+                    error.Name,
+                    error.ResultJson,
+                    error.Role,
+                    error.Framing,
+                    error.Classification);
+                return true;
+
             case "review_outcome":
                 var outcome = JsonSerializer.Deserialize(
                     element,
@@ -865,6 +894,26 @@ internal static class AgentSessionCodec
                     call.CallId,
                     call.Name,
                     call.ArgumentsJson);
+                return true;
+            case "recovery_tool_call":
+                var recovery = JsonSerializer.Deserialize(
+                    element,
+                    AgentSessionJsonContext.Default
+                        .AgentSessionRecoveryToolCallDto);
+                if (recovery?.Kind is null ||
+                    recovery.CallId is null ||
+                    recovery.Name is null ||
+                    recovery.ArgumentsJson is null)
+                {
+                    return false;
+                }
+
+                content = new AgentSessionRecoveryToolCallContent(
+                    recovery.ContentPosition,
+                    recovery.CallId,
+                    recovery.Name,
+                    recovery.ArgumentsJson,
+                    recovery.Rejected);
                 return true;
             case "terminal_call":
                 var terminal = JsonSerializer.Deserialize(
@@ -1130,6 +1179,16 @@ internal static class AgentSessionCodec
                 writer.WriteProperty("result_json");
                 writer.WriteString(result.ResultJson);
                 break;
+            case AgentSessionToolErrorRecord error:
+                writer.WriteProperty("source_message_id");
+                writer.WriteString(error.SourceMessageId);
+                writer.WriteProperty("call_id");
+                writer.WriteString(error.CallId);
+                writer.WriteProperty("name");
+                writer.WriteString(error.Name);
+                writer.WriteProperty("result_json");
+                writer.WriteString(error.ResultJson);
+                break;
             case AgentSessionReviewOutcomeRecord outcome:
                 writer.WriteProperty("terminal_message_id");
                 writer.WriteString(outcome.TerminalMessageId);
@@ -1181,6 +1240,16 @@ internal static class AgentSessionCodec
                 writer.WriteString(call.Name);
                 writer.WriteProperty("arguments_json");
                 writer.WriteString(call.ArgumentsJson);
+                break;
+            case AgentSessionRecoveryToolCallContent recovery:
+                writer.WriteProperty("call_id");
+                writer.WriteString(recovery.CallId);
+                writer.WriteProperty("name");
+                writer.WriteString(recovery.Name);
+                writer.WriteProperty("arguments_json");
+                writer.WriteString(recovery.ArgumentsJson);
+                writer.WriteProperty("rejected");
+                writer.WriteBoolean(recovery.Rejected);
                 break;
             case AgentSessionTerminalCallContent terminal:
                 writer.WriteProperty("call_id");

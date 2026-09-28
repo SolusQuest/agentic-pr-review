@@ -296,21 +296,25 @@ public sealed class R6PrefixProjectionTests
     }
 
     [Theory]
-    [InlineData(true, AgentFailureCodes.ToolArgumentsInvalid, 0)]
+    [InlineData(true, null, 0)]
     [InlineData(false, AgentFailureCodes.ToolIoFailed, 1)]
     public async Task InvalidArgumentsOrUnadmittedResultsCannotSupplyPositiveSuffixEvidence(
-        bool invalidArguments, string expectedCode, int expectedExecutions)
+        bool invalidArguments, string? expectedCode, int expectedExecutions)
     {
         var (restored, boundary) = await Fixture();
         using var transport = new FinishTransport(firstReadId: "dynamic", invalidArguments: invalidArguments);
         var executor = new SyntheticReadExecutor(malformedResult: !invalidArguments);
         var observer = new PrefixObservingChatClient(boundary, Client(transport));
         var outcome = await new AgentLoop(observer, executor).RunAsync(restored.RunRequest!, CancellationToken.None);
-        Assert.False(outcome.CompletedSessionEligible);
-        Assert.Equal(expectedCode, outcome.Diagnostic!.Code);
+        Assert.Equal(invalidArguments, outcome.CompletedSessionEligible);
+        Assert.Equal(expectedCode, outcome.Diagnostic?.Code);
         Assert.Equal(expectedExecutions, executor.Executions);
-        Assert.Equal(1, transport.Sends);
-        Assert.Single(observer.Observations); // no request containing the rejected suffix exists
+        Assert.Equal(invalidArguments ? 2 : 1, transport.Sends);
+        Assert.Equal(invalidArguments ? 2 : 1,
+            observer.Observations.Length);
+        // The recovery request carries only fixed errors, never a tool
+        // observation capable of grounding the rejected suffix.
+        Assert.Empty(outcome.Events.OfType<AgentToolResultEvent>());
     }
 
     private static async Task<(ProjectChatRequest Request, ImmutableArray<PrefixObservation> Observations)> RunSuffix(

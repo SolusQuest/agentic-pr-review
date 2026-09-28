@@ -34,6 +34,7 @@ internal sealed class AgentLoop(
         var usedCallIds = new HashSet<string>(StringComparer.Ordinal);
         var modelCalls = 0;
         var toolCalls = 0;
+        var toolBudgetCalls = 0;
         var contentParts = 0;
         long inputTokens = 0;
         long outputTokens = 0;
@@ -185,7 +186,7 @@ internal sealed class AgentLoop(
                 usedCallIds,
                 messages.Count,
                 contentParts,
-                toolCalls,
+                toolBudgetCalls,
                 ref inputTokens,
                 ref outputTokens,
                 ref combinedTokens,
@@ -195,6 +196,35 @@ internal sealed class AgentLoop(
                 out var admittedParts);
             if (admissionFailure is not null)
             {
+                if (StringComparer.Ordinal.Equals(
+                        admissionFailure,
+                        AgentFailureCodes.ToolArgumentsInvalid))
+                {
+                    var recoveryFailure = TryRecoverResponse(
+                        response,
+                        run,
+                        limitProfile,
+                        messages,
+                        events,
+                        usedCallIds,
+                        ref continuation,
+                        ref continuationBytes,
+                        ref inputTokens,
+                        ref outputTokens,
+                        ref combinedTokens,
+                        ref toolResultBytes,
+                        ref contentParts,
+                        ref toolBudgetCalls,
+                        started,
+                        cancellationToken);
+                    if (recoveryFailure is null)
+                    {
+                        continue;
+                    }
+
+                    admissionFailure = recoveryFailure;
+                }
+
                 return Failure(
                     admissionFailure,
                     modelCalls,
@@ -233,6 +263,7 @@ internal sealed class AgentLoop(
                 preparedCalls[0] is PreparedFinishReviewCall terminal)
             {
                 toolCalls++;
+                toolBudgetCalls++;
                 events.Add(new AgentToolCallEvent(
                     terminal.CallId,
                     terminal.Name,
@@ -270,6 +301,7 @@ internal sealed class AgentLoop(
                 }
 
                 toolCalls++;
+                toolBudgetCalls++;
                 events.Add(new AgentToolCallEvent(
                     call.CallId,
                     call.Name,
@@ -408,6 +440,298 @@ internal sealed class AgentLoop(
             }
 
         }
+    }
+
+    private string? TryRecoverResponse(
+        ProjectChatResponse response,
+        AgentRunRequest run,
+        AgentLimitProfile limitProfile,
+        List<ProjectChatMessage> messages,
+        ImmutableArray<AgentLogicalEvent>.Builder events,
+        HashSet<string> usedCallIds,
+        ref ProjectContinuation? continuation,
+        ref long continuationBytes,
+        ref long inputTokens,
+        ref long outputTokens,
+        ref long combinedTokens,
+        ref long toolResultBytes,
+        ref int contentParts,
+        ref int toolBudgetCalls,
+        long started,
+        CancellationToken cancellationToken)
+    {
+        // AdmitResponse already checked the outer envelope, usage, message
+        // shape, count and ordinary limits before reaching an argument error.
+        // Re-parse the complete batch so a later unknown tool or bad ID cannot
+        // turn a partially inspected response into recoverable history.
+        var calls = response.Message.Contents
+            .OfType<ProjectToolCallContent>()
+            .ToArray();
+        var localIds = new HashSet<string>(StringComparer.Ordinal);
+        var members = new List<(
+            ProjectToolCallContent Call,
+            PreparedAgentToolCall? Prepared,
+            string? Error)>(calls.Length);
+        var anyInvalid = false;
+        foreach (var call in calls)
+        {
+            if (!localIds.Add(call.CallId) ||
+                usedCallIds.Contains(call.CallId))
+            {
+                return AgentFailureCodes.ResponseInvalid;
+            }
+
+            PreparedAgentToolCall? prepared = null;
+            string? error = null;
+            switch (call.Name)
+            {
+                case AgentToolRegistry.ListFilesName:
+                    if (AgentToolArguments.TryListFilesProvider(
+                            call.ArgumentsJson,
+                            out var list,
+                            out var failure,
+                            out var pathRejection))
+                    {
+                        prepared = new PreparedListFilesCall(call.CallId, list!);
+                    }
+                    else
+                    {
+                        error = failure == ListFilesArgumentFailure.Path &&
+                            pathRejection is { } path
+                            ? AgentRecoveryFeedback.ListFilesPathInvalid(path)
+                            : AgentRecoveryFeedback.ArgumentsInvalid;
+                    }
+
+                    break;
+                case AgentToolRegistry.ListChangedFilesName:
+                    if (AgentToolArguments.TryListChangedFilesProvider(
+                            call.ArgumentsJson,
+                            out var changed))
+                    {
+                        prepared = new PreparedListChangedFilesCall(
+                            call.CallId, changed!);
+                    }
+                    else
+                    {
+                        error = AgentRecoveryFeedback.ArgumentsInvalid;
+                    }
+
+                    break;
+                case AgentToolRegistry.ReadDiffName:
+                    if (AgentToolArguments.TryReadDiffProvider(
+                            call.ArgumentsJson,
+                            out var diff))
+                    {
+                        prepared = new PreparedReadDiffCall(call.CallId, diff!);
+                    }
+                    else
+                    {
+                        error = AgentRecoveryFeedback.ArgumentsInvalid;
+                    }
+
+                    break;
+                case AgentToolRegistry.ReadFileName:
+                    if (AgentToolArguments.TryReadFileProvider(
+                            call.ArgumentsJson,
+                            out var read))
+                    {
+                        prepared = new PreparedReadFileCall(call.CallId, read!);
+                    }
+                    else
+                    {
+                        error = AgentRecoveryFeedback.ArgumentsInvalid;
+                    }
+
+                    break;
+                case AgentToolRegistry.SearchTextName:
+                    if (AgentToolArguments.TrySearchTextProvider(
+                            call.ArgumentsJson,
+                            out var search))
+                    {
+                        prepared = new PreparedSearchTextCall(call.CallId, search!);
+                    }
+                    else
+                    {
+                        error = AgentRecoveryFeedback.ArgumentsInvalid;
+                    }
+
+                    break;
+                default:
+                    return AgentFailureCodes.UnknownTool;
+            }
+
+            anyInvalid |= error is not null;
+            members.Add((call, prepared, error));
+        }
+
+        if (!anyInvalid || members.Count is < 1 or >
+            AgentLimits.ToolCallsPerResponse ||
+            toolBudgetCalls + members.Count > AgentLimits.ToolCalls)
+        {
+            return AgentFailureCodes.ResponseInvalid;
+        }
+
+        long nextInput;
+        long nextOutput;
+        long nextCombined;
+        long nextResultBytes = toolResultBytes;
+        try
+        {
+            nextInput = checked(inputTokens + response.Usage!.InputTokens);
+            nextOutput = checked(outputTokens + response.Usage.OutputTokens);
+            nextCombined = checked(
+                combinedTokens + response.Usage.InputTokens +
+                response.Usage.OutputTokens);
+        }
+        catch (OverflowException)
+        {
+            return AgentFailureCodes.UsageInvalid;
+        }
+
+        if (nextInput > AgentLimits.InputTokens ||
+            nextOutput > AgentLimits.OutputTokensFor(limitProfile) ||
+            nextCombined > AgentLimits.CombinedTokensFor(limitProfile))
+        {
+            return AgentFailureCodes.TokenLimit;
+        }
+
+        var recoveryCalls = new List<ProjectRecoveryToolCallContent>(members.Count);
+        var errors = new List<ProjectToolErrorContent>(members.Count);
+        foreach (var member in members)
+        {
+            var rejected = member.Error is not null;
+            var arguments = rejected
+                ? AgentRecoveryFeedback.RejectedArguments
+                : Encoding.UTF8.GetString(member.Prepared!.CanonicalArguments);
+            recoveryCalls.Add(new ProjectRecoveryToolCallContent(
+                member.Call.CallId,
+                member.Call.Name,
+                arguments,
+                rejected));
+            var result = member.Error ?? AgentRecoveryFeedback.BatchNotExecuted;
+            var resultLength = Encoding.UTF8.GetByteCount(result);
+            if (resultLength > AgentLimits.ToolResultBytes)
+            {
+                return AgentFailureCodes.ToolResultLimit;
+            }
+
+            try
+            {
+                nextResultBytes = checked(nextResultBytes + resultLength);
+            }
+            catch (OverflowException)
+            {
+                return AgentFailureCodes.ToolResultLimit;
+            }
+
+            errors.Add(new ProjectToolErrorContent(
+                member.Call.CallId, result));
+        }
+
+        if (nextResultBytes > AgentLimits.ToolResultsTotalBytes)
+        {
+            return AgentFailureCodes.ToolResultLimit;
+        }
+
+        var nextIds = new HashSet<string>(usedCallIds, StringComparer.Ordinal);
+        nextIds.UnionWith(localIds);
+        var stagedContinuationBytes = continuationBytes;
+        if (!TryMergeResponseContinuation(
+                continuation,
+                response.Continuation,
+                run.StablePlan,
+                run.SessionId,
+                response.Message,
+                messages.Count,
+                nextIds,
+                ref stagedContinuationBytes,
+                out var nextContinuation,
+                out var continuationEvents))
+        {
+            return AgentFailureCodes.ResponseInvalid;
+        }
+
+        var byId = recoveryCalls.ToDictionary(
+            call => call.CallId, StringComparer.Ordinal);
+        var eventContents = response.Message.Contents.Select(content =>
+            content is ProjectToolCallContent call
+                ? (ProjectChatContent)byId[call.CallId]
+                : content).ToArray();
+        var assistant = new ProjectChatMessage(
+            "assistant",
+            eventContents.Where(content =>
+                content is not ProjectReasoningContent).ToArray());
+        var stagedMessages = messages
+            .Append(assistant)
+            .Concat(errors.Select(error => new ProjectChatMessage(
+                "tool", [error])))
+            .ToArray();
+        if (stagedMessages.Length > AgentLimits.Messages ||
+            contentParts + response.Message.Contents.Length + errors.Count >
+                AgentLimits.PartsTotal)
+        {
+            return AgentFailureCodes.ResponseInvalid;
+        }
+
+        try
+        {
+            var nextRequest = new ProjectChatRequest(
+                stagedMessages,
+                AgentToolRegistry.Definitions.ToArray(),
+                nextContinuation,
+                ThinkingRequired: true);
+            if (AgentRequestWriter.Write(nextRequest).Length >
+                AgentLimits.RequestBytes)
+            {
+                return AgentFailureCodes.RequestTooLarge;
+            }
+        }
+        catch (Rfc8785CanonicalizationException)
+        {
+            return AgentFailureCodes.ResponseInvalid;
+        }
+
+        var stop = StopReason(started, cancellationToken);
+        if (stop is not null)
+        {
+            return stop;
+        }
+
+        // This is the only mutation boundary for the recovery transaction.
+        inputTokens = nextInput;
+        outputTokens = nextOutput;
+        combinedTokens = nextCombined;
+        toolResultBytes = nextResultBytes;
+        toolBudgetCalls += members.Count;
+        contentParts += response.Message.Contents.Length + errors.Count;
+        usedCallIds.UnionWith(localIds);
+        messages.AddRange(stagedMessages.Skip(messages.Count));
+        events.Add(CreateMessageEvent(
+            stagedMessages.Length - errors.Count - 1,
+            new ProjectChatMessage("assistant", eventContents)));
+        events.AddRange(continuationEvents);
+        for (var index = 0; index < recoveryCalls.Count; index++)
+        {
+            var call = recoveryCalls[index];
+            var error = errors[index];
+            var argumentBytes = Encoding.UTF8.GetBytes(call.ArgumentsJson);
+            var resultBytes = Encoding.UTF8.GetBytes(error.Result);
+            events.Add(new AgentRecoveryToolCallEvent(
+                call.CallId,
+                call.Name,
+                AgentCanonical.HashRaw(argumentBytes),
+                argumentBytes.ToImmutableArray(),
+                call.Rejected));
+            events.Add(new AgentToolErrorEvent(
+                call.CallId,
+                call.Name,
+                AgentCanonical.HashRaw(resultBytes),
+                resultBytes.ToImmutableArray()));
+        }
+
+        continuation = nextContinuation;
+        continuationBytes = stagedContinuationBytes;
+        return null;
     }
 
     private string? AdmitResponse(
@@ -951,7 +1275,11 @@ internal sealed class AgentLoop(
         out int contentParts)
     {
         contentParts = 0;
-        var pendingResults = new Queue<string>();
+        var pendingResults = new Queue<(
+            string CallId,
+            string Name,
+            bool Recovery,
+            bool Rejected)>();
         foreach (var message in messages)
         {
             if (message is null ||
@@ -984,15 +1312,41 @@ internal sealed class AgentLoop(
 
                 foreach (var content in message.Contents)
                 {
-                    if (content is not ProjectToolResultContent result ||
+                    if (pendingResults.Count == 0)
+                    {
+                        return false;
+                    }
+
+                    var expected = pendingResults.Dequeue();
+                    if (expected.Recovery)
+                    {
+                        if (content is not ProjectToolErrorContent error ||
+                            !StringComparer.Ordinal.Equals(
+                                expected.CallId, error.CallId) ||
+                            !AgentValueDomains.IsUtf8(
+                                error.Result, 1, AgentLimits.ToolResultBytes) ||
+                            !(expected.Rejected
+                                ? StringComparer.Ordinal.Equals(
+                                    error.Result,
+                                    AgentRecoveryFeedback.ArgumentsInvalid) ||
+                                    expected.Name == AgentToolRegistry.ListFilesName &&
+                                    AgentRecoveryFeedback.IsCanonicalPathError(
+                                        error.Result)
+                                : StringComparer.Ordinal.Equals(
+                                    error.Result,
+                                    AgentRecoveryFeedback.BatchNotExecuted)))
+                        {
+                            return false;
+                        }
+                    }
+                    else if (content is not ProjectToolResultContent result ||
                         !AgentValueDomains.IsIdentifier(result.CallId) ||
                         !AgentValueDomains.IsUtf8(
                             result.Result,
                             1,
                             AgentLimits.ToolResultBytes) ||
-                        pendingResults.Count == 0 ||
                         !StringComparer.Ordinal.Equals(
-                            pendingResults.Dequeue(),
+                            expected.CallId,
                             result.CallId))
                     {
                         return false;
@@ -1021,6 +1375,7 @@ internal sealed class AgentLoop(
             }
 
             var calls = new List<ProjectToolCallContent>();
+            var recoveryCalls = new List<ProjectRecoveryToolCallContent>();
             foreach (var content in message.Contents)
             {
                 switch (content)
@@ -1031,12 +1386,21 @@ internal sealed class AgentLoop(
                         when TryValidatePriorCall(call, usedCallIds):
                         calls.Add(call);
                         break;
+                    case ProjectRecoveryToolCallContent recovery
+                        when TryValidatePriorRecoveryCall(
+                            recovery, usedCallIds):
+                        recoveryCalls.Add(recovery);
+                        break;
                     default:
                         return false;
                 }
             }
 
-            if (calls.Count is < 1 or > AgentLimits.ToolCallsPerResponse)
+            if (calls.Count > 0 && recoveryCalls.Count > 0 ||
+                calls.Count + recoveryCalls.Count is < 1 or >
+                    AgentLimits.ToolCallsPerResponse ||
+                recoveryCalls.Count > 0 &&
+                !recoveryCalls.Any(call => call.Rejected))
             {
                 return false;
             }
@@ -1055,7 +1419,13 @@ internal sealed class AgentLoop(
 
             foreach (var call in calls)
             {
-                pendingResults.Enqueue(call.CallId);
+                pendingResults.Enqueue((call.CallId, call.Name, false, false));
+            }
+
+            foreach (var call in recoveryCalls)
+            {
+                pendingResults.Enqueue((
+                    call.CallId, call.Name, true, call.Rejected));
             }
         }
 
@@ -1137,6 +1507,33 @@ internal sealed class AgentLoop(
                 .SequenceEqual(prepared.CanonicalArguments);
     }
 
+    private static bool TryValidatePriorRecoveryCall(
+        ProjectRecoveryToolCallContent call,
+        HashSet<string> usedCallIds)
+    {
+        if (call.Name is not (
+            AgentToolRegistry.ListFilesName or
+            AgentToolRegistry.ListChangedFilesName or
+            AgentToolRegistry.ReadDiffName or
+            AgentToolRegistry.ReadFileName or
+            AgentToolRegistry.SearchTextName))
+        {
+            return false;
+        }
+
+        if (call.Rejected)
+        {
+            return AgentValueDomains.IsIdentifier(call.CallId) &&
+                StringComparer.Ordinal.Equals(
+                    call.ArgumentsJson,
+                    AgentRecoveryFeedback.RejectedArguments) &&
+                usedCallIds.Add(call.CallId);
+        }
+
+        return TryValidatePriorCall(new ProjectToolCallContent(
+            call.CallId, call.Name, call.ArgumentsJson), usedCallIds);
+    }
+
     private static bool ValidStablePlan(
         StableAgentPlan plan,
         ReviewedIdentity identity,
@@ -1196,11 +1593,23 @@ internal sealed class AgentLoop(
                         call.CallId,
                         call.Name,
                         ToolCallArgumentsSha256(call)),
+                ProjectRecoveryToolCallContent call =>
+                    new AgentRecoveryToolCallReferencePart(
+                        call.CallId,
+                        call.Name,
+                        AgentCanonical.HashRaw(
+                            Encoding.UTF8.GetBytes(call.ArgumentsJson)),
+                        call.Rejected),
                 ProjectToolResultContent result =>
                     new AgentToolResultReferencePart(
                         result.CallId,
                         AgentCanonical.HashRaw(
                             Encoding.UTF8.GetBytes(result.Result))),
+                ProjectToolErrorContent error =>
+                    new AgentToolErrorReferencePart(
+                        error.CallId,
+                        AgentCanonical.HashRaw(
+                            Encoding.UTF8.GetBytes(error.Result))),
                 _ => throw new InvalidOperationException(
                     "Unsupported project message content."),
             });
@@ -1425,11 +1834,27 @@ internal static class AgentRequestWriter
                     writer.WriteProperty("arguments_json");
                     writer.WriteString(call.ArgumentsJson);
                     break;
+                case ProjectRecoveryToolCallContent call:
+                    writer.WriteProperty("call_id");
+                    writer.WriteString(call.CallId);
+                    writer.WriteProperty("name");
+                    writer.WriteString(call.Name);
+                    writer.WriteProperty("arguments_json");
+                    writer.WriteString(call.ArgumentsJson);
+                    writer.WriteProperty("rejected");
+                    writer.WriteBoolean(call.Rejected);
+                    break;
                 case ProjectToolResultContent result:
                     writer.WriteProperty("call_id");
                     writer.WriteString(result.CallId);
                     writer.WriteProperty("result");
                     writer.WriteString(result.Result);
+                    break;
+                case ProjectToolErrorContent error:
+                    writer.WriteProperty("call_id");
+                    writer.WriteString(error.CallId);
+                    writer.WriteProperty("result");
+                    writer.WriteString(error.Result);
                     break;
             }
 

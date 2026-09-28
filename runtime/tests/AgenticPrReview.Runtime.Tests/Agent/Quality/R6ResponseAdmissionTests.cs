@@ -46,10 +46,17 @@ public sealed class R6ResponseAdmissionTests
         Assert.Equal(new ListFilesPathRejection(ListFilesPathField.Prefix,
             RepositoryPathFailure.DotSegment), detail);
         Assert.False(outcome.Succeeded);
-        Assert.Equal(AgentFailureCodes.ToolArgumentsInvalid, outcome.Diagnostic?.Code);
+        // The fixed transport repeats the same call ID after feedback; the
+        // second response therefore fails ID admission, with no dispatch.
+        Assert.Equal(AgentFailureCodes.ResponseInvalid,
+            outcome.Diagnostic?.Code);
         Assert.Equal(0, outcome.Diagnostic?.ToolCalls);
         Assert.Equal(0, executor.Calls);
-        Assert.Equal(1, transport.Sends);
+        Assert.Equal(2, transport.Sends);
+        var recovery = Assert.Single(outcome.Events
+            .OfType<AgentRecoveryToolCallEvent>());
+        Assert.Equal(AgentRecoveryFeedback.RejectedArguments,
+            Encoding.UTF8.GetString(recovery.SanitizedArguments.AsSpan()));
     }
 
     [Fact]

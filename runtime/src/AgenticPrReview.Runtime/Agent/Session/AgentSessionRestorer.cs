@@ -356,6 +356,13 @@ internal static class AgentSessionRequestReconstruction
                                     result.ResultJson),
                             ]));
                         break;
+                    case AgentSessionToolErrorRecord error:
+                        messages.Add(new ProjectChatMessage(
+                            "tool",
+                            [new ProjectToolErrorContent(
+                                error.CallId,
+                                error.ResultJson)]));
+                        break;
                     case AgentSessionReviewOutcomeRecord outcome:
                         messages.Add(new ProjectChatMessage(
                             "tool",
@@ -423,6 +430,12 @@ internal static class AgentSessionRequestReconstruction
                     call.CallId,
                     call.Name,
                     call.ArgumentsJson),
+            AgentSessionRecoveryToolCallContent recovered =>
+                new ProjectRecoveryToolCallContent(
+                    recovered.CallId,
+                    recovered.Name,
+                    recovered.ArgumentsJson,
+                    recovered.Rejected),
             AgentSessionTerminalCallContent terminal =>
                 new ProjectToolCallContent(
                     terminal.CallId,

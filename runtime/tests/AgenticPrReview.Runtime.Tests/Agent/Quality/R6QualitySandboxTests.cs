@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
@@ -39,7 +40,7 @@ public sealed class R6QualitySandboxTests
     [Theory]
     [InlineData("cs-safe", "{\"path\":null}", AgentFailureCodes.ToolArgumentsInvalid)]
     [InlineData("repository-rule", "{\"path\":\"src/NotTracked.cs\"}", AgentFailureCodes.ToolPathNotTracked)]
-    public async Task FrozenSnapshotRejectsBadToolBatchBeforeAnyExecution(
+    public async Task FrozenSnapshotKeepsBadToolBatchAtomic(
         string caseId, string rejectedArguments, string expectedCode)
     {
         var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture);
@@ -56,10 +57,26 @@ public sealed class R6QualitySandboxTests
         var script = new ReplayScript(run.Script.Turns.SetItem(0, first));
         var derived = run.Derive(run.Input, script, fixture.CorpusSha256);
         var result = await QualityRunner.ExecuteAsync(derived, Truth(caseId));
-        Assert.False(result.AgentOutcome.Succeeded);
-        Assert.Equal(expectedCode, result.AgentOutcome.Diagnostic?.Code);
-        Assert.Equal(0, result.AgentOutcome.Diagnostic?.ToolCalls);
-        Assert.Empty(result.AgentOutcome.Events.OfType<AgentToolResultEvent>());
+        if (expectedCode == AgentFailureCodes.ToolArgumentsInvalid)
+        {
+            Assert.True(result.AgentOutcome.Succeeded);
+            Assert.Equal(["first", "second"], result.AgentOutcome.Events
+                .OfType<AgentRecoveryToolCallEvent>()
+                .Select(call => call.CallId));
+            Assert.DoesNotContain(result.AgentOutcome.Events
+                .OfType<AgentToolCallEvent>(), call =>
+                    call.CallId is "first" or "second");
+            Assert.DoesNotContain(result.AgentOutcome.Events
+                .OfType<AgentToolResultEvent>(), value =>
+                    value.CallId is "first" or "second");
+        }
+        else
+        {
+            Assert.False(result.AgentOutcome.Succeeded);
+            Assert.Equal(expectedCode, result.AgentOutcome.Diagnostic?.Code);
+            Assert.Equal(0, result.AgentOutcome.Diagnostic?.ToolCalls);
+            Assert.Empty(result.AgentOutcome.Events.OfType<AgentToolResultEvent>());
+        }
     }
 
     private static QualityCaseSpec Truth(string id)

@@ -184,7 +184,7 @@ public sealed class R5CompletedReplayTests
     [Theory]
     [InlineData(1, false, "tool_failed")]
     [InlineData(2, false, "tool_failed")]
-    [InlineData(1, true, "agent_failed")]
+    [InlineData(1, true, "assertion_failed")]
     public async Task RealToolRejectionRetainsFailureSourceAndPredecessor(int phase, bool invalidArguments, string expected)
     {
         using var bundle = new MutableBundle();
@@ -233,12 +233,12 @@ public sealed class R5CompletedReplayTests
             },
         });
 
-        Assert.Equal("agent_failed", result.Code);
+        Assert.Equal("assertion_failed", result.Code);
         Assert.Equal("cleaned", result.Cleanup);
         Assert.Equal(2, result.Steps.Length);
         Assert.True(result.Steps[0].Accepted);
         var failed = result.Steps[1];
-        Assert.Equal("agent_failed", failed.Code);
+        Assert.Equal("assertion_failed", failed.Code);
         Assert.False(failed.Accepted);
         Assert.True(failed.PredecessorPreserved);
         Assert.Equal(0, failed.ToolCalls);
@@ -246,10 +246,18 @@ public sealed class R5CompletedReplayTests
         Assert.Null(failed.QualityCode);
         Assert.Null(result.Observations[1].EnvelopeSha256);
         Assert.NotNull(rejected);
-        Assert.Equal("agent_failed", rejected.Code);
+        Assert.Equal("prepared", rejected.Code);
         Assert.Equal(0, rejected.ToolCalls);
-        Assert.Null(rejected.Prepared);
-        Assert.Empty(rejected.Plaintext ?? []);
+        Assert.NotNull(rejected.Prepared);
+        Assert.Equal(2, rejected.Requests.Length);
+        using var retry = JsonDocument.Parse(rejected.Requests[1]);
+        var messages = retry.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+        var rejectedCall = messages[^3].GetProperty("tool_calls").EnumerateArray()
+            .Single(call => call.GetProperty("id").GetString() == "null_optional");
+        Assert.Equal("{\"_apr_rejected\":true}", rejectedCall.GetProperty("function")
+            .GetProperty("arguments").GetString());
+        Assert.Equal("{\"status\":\"error\",\"code\":\"arguments_invalid\",\"retryable\":true}",
+            messages[^1].GetProperty("content").GetString());
     }
 
     [Fact]

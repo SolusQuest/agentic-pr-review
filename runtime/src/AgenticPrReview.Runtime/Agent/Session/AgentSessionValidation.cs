@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Canonical;
 
@@ -474,6 +475,7 @@ internal static class AgentSessionValidation
                     message,
                     identifiers,
                     out var normalCalls,
+                    out var recoveryCalls,
                     out var terminalCall,
                     out failureCode))
             {
@@ -504,6 +506,60 @@ internal static class AgentSessionValidation
 
                 terminalSeen = true;
                 recordIndex++;
+                continue;
+            }
+
+            if (recoveryCalls.Length > 0)
+            {
+                foreach (var call in recoveryCalls)
+                {
+                    if (recordIndex >= run.Records.Length ||
+                        run.Records[recordIndex] is not
+                            AgentSessionToolErrorRecord error ||
+                        !StringComparer.Ordinal.Equals(
+                            error.SourceMessageId, message.Id) ||
+                        !StringComparer.Ordinal.Equals(
+                            error.CallId, call.CallId) ||
+                        !StringComparer.Ordinal.Equals(
+                            error.Name, call.Name) ||
+                        !TryUtf8Length(
+                            error.ResultJson,
+                            1,
+                            AgentLimits.ToolResultBytes,
+                            out var errorBytes) ||
+                        !(call.Rejected
+                            ? StringComparer.Ordinal.Equals(
+                                error.ResultJson,
+                                AgentRecoveryFeedback.ArgumentsInvalid) ||
+                                call.Name == AgentToolRegistry.ListFilesName &&
+                                AgentRecoveryFeedback.IsCanonicalPathError(
+                                    error.ResultJson)
+                            : StringComparer.Ordinal.Equals(
+                                error.ResultJson,
+                                AgentRecoveryFeedback.BatchNotExecuted)))
+                    {
+                        failureCode = AgentSessionCodes.AssociationInvalid;
+                        return false;
+                    }
+
+                    try
+                    {
+                        toolResultBytes = checked(
+                            toolResultBytes + errorBytes!.Length);
+                    }
+                    catch (OverflowException)
+                    {
+                        return false;
+                    }
+
+                    if (toolResultBytes > AgentLimits.ToolResultsTotalBytes)
+                    {
+                        return false;
+                    }
+
+                    recordIndex++;
+                }
+
                 continue;
             }
 
@@ -584,10 +640,12 @@ internal static class AgentSessionValidation
         AgentSessionAssistantMessageRecord message,
         HashSet<string> identifiers,
         out ImmutableArray<AgentSessionToolCallContent> normalCalls,
+        out ImmutableArray<AgentSessionRecoveryToolCallContent> recoveryCalls,
         out AgentSessionTerminalCallContent? terminalCall,
         out string failureCode)
     {
         normalCalls = [];
+        recoveryCalls = [];
         terminalCall = null;
         failureCode = AgentSessionCodes.RecordInvalid;
         if (message.Contents.Length is < 1 or > AgentLimits.PartsPerMessage)
@@ -597,6 +655,8 @@ internal static class AgentSessionValidation
 
         var calls =
             ImmutableArray.CreateBuilder<AgentSessionToolCallContent>();
+        var recovery = ImmutableArray
+            .CreateBuilder<AgentSessionRecoveryToolCallContent>();
         for (var index = 0; index < message.Contents.Length; index++)
         {
             var content = message.Contents[index];
@@ -633,6 +693,12 @@ internal static class AgentSessionValidation
                         TryValidateNormalCall(call):
                     calls.Add(call);
                     break;
+                case AgentSessionRecoveryToolCallContent recovered
+                    when AgentValueDomains.IsIdentifier(recovered.CallId) &&
+                        identifiers.Add(recovered.CallId) &&
+                        IsValidRecoveryCall(recovered):
+                    recovery.Add(recovered);
+                    break;
                 case AgentSessionTerminalCallContent terminal
                     when AgentValueDomains.IsIdentifier(terminal.CallId) &&
                         identifiers.Add(terminal.CallId) &&
@@ -666,18 +732,50 @@ internal static class AgentSessionValidation
 
         if (terminalCall is not null)
         {
-            if (calls.Count != 0)
+            if (calls.Count != 0 || recovery.Count != 0)
             {
                 return false;
             }
         }
-        else if (calls.Count is < 1 or > AgentLimits.ToolCallsPerResponse)
+        else if (calls.Count > 0 && recovery.Count > 0 ||
+            calls.Count + recovery.Count is < 1 or >
+                AgentLimits.ToolCallsPerResponse ||
+            recovery.Count > 0 &&
+            !recovery.Any(call => call.Rejected))
         {
             return false;
         }
 
         normalCalls = calls.ToImmutable();
+        recoveryCalls = recovery.ToImmutable();
         return true;
+    }
+
+    private static bool IsValidRecoveryCall(
+        AgentSessionRecoveryToolCallContent call)
+    {
+        if (call.Name is not (
+            AgentToolRegistry.ListFilesName or
+            AgentToolRegistry.ListChangedFilesName or
+            AgentToolRegistry.ReadDiffName or
+            AgentToolRegistry.ReadFileName or
+            AgentToolRegistry.SearchTextName))
+        {
+            return false;
+        }
+
+        if (call.Rejected)
+        {
+            return StringComparer.Ordinal.Equals(
+                call.ArgumentsJson,
+                AgentRecoveryFeedback.RejectedArguments);
+        }
+
+        return TryValidateNormalCall(new AgentSessionToolCallContent(
+            call.ContentPosition,
+            call.CallId,
+            call.Name,
+            call.ArgumentsJson));
     }
 
     private static bool TryValidateNormalCall(
@@ -1307,6 +1405,10 @@ internal static class AgentSessionValidation
                             StringComparer.Ordinal.Equals(
                                 call.CallId,
                                 item.AssociatedCallId) ||
+                        content is AgentSessionRecoveryToolCallContent recovered &&
+                            StringComparer.Ordinal.Equals(
+                                recovered.CallId,
+                                item.AssociatedCallId) ||
                         content is AgentSessionTerminalCallContent terminal &&
                             StringComparer.Ordinal.Equals(
                                 terminal.CallId,
@@ -1379,6 +1481,7 @@ internal static class AgentSessionValidation
                     .ToImmutableArray(),
                 message.Contents.Count(content =>
                     content is AgentSessionToolCallContent or
+                        AgentSessionRecoveryToolCallContent or
                         AgentSessionTerminalCallContent)))
             .ToImmutableArray();
         return AgentContinuationCodecBoundary.TryValidateStructure(
@@ -1413,6 +1516,14 @@ internal static class AgentSessionValidation
                 StringComparer.Ordinal.Equals(
                     record.Classification,
                     "untrusted_tool_data"),
+            AgentSessionToolErrorRecord =>
+                StringComparer.Ordinal.Equals(record.Role, "tool") &&
+                StringComparer.Ordinal.Equals(
+                    record.Framing,
+                    "tool_error") &&
+                StringComparer.Ordinal.Equals(
+                    record.Classification,
+                    "repository_feedback"),
             AgentSessionReviewOutcomeRecord =>
                 StringComparer.Ordinal.Equals(record.Role, "assistant") &&
                 StringComparer.Ordinal.Equals(

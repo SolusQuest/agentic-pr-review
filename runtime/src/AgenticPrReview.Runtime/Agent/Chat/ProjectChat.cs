@@ -115,6 +115,27 @@ internal sealed record ProjectToolResultContent(
     public override string ToString() => "project_tool_result_content";
 }
 
+// A rejected provider argument is never represented as an executable call.
+// ArgumentsJson is the repository-authored placeholder or canonical arguments
+// for a valid sibling that was not executed in an atomic rejected batch.
+internal sealed record ProjectRecoveryToolCallContent(
+    string CallId,
+    string Name,
+    string ArgumentsJson,
+    bool Rejected)
+    : ProjectChatContent("recovery_tool_call")
+{
+    public override string ToString() => "project_recovery_tool_call_content";
+}
+
+internal sealed record ProjectToolErrorContent(
+    string CallId,
+    string Result)
+    : ProjectChatContent("tool_error")
+{
+    public override string ToString() => "project_tool_error_content";
+}
+
 internal sealed record ProjectChatUsage(
     long InputTokens,
     long OutputTokens,

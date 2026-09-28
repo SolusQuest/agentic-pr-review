@@ -249,6 +249,39 @@ internal sealed class AgentSessionToolResultDto
     public string? Classification { get; set; }
 }
 
+internal sealed class AgentSessionToolErrorDto
+{
+    [JsonPropertyName("kind")]
+    public string? Kind { get; set; }
+
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("sequence")]
+    public int Sequence { get; set; }
+
+    [JsonPropertyName("source_message_id")]
+    public string? SourceMessageId { get; set; }
+
+    [JsonPropertyName("call_id")]
+    public string? CallId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("result_json")]
+    public string? ResultJson { get; set; }
+
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
+
+    [JsonPropertyName("framing")]
+    public string? Framing { get; set; }
+
+    [JsonPropertyName("classification")]
+    public string? Classification { get; set; }
+}
+
 internal sealed class AgentSessionReviewOutcomeDto
 {
     [JsonPropertyName("kind")]
@@ -325,6 +358,27 @@ internal sealed class AgentSessionToolCallDto
 
     [JsonPropertyName("arguments_json")]
     public string? ArgumentsJson { get; set; }
+}
+
+internal sealed class AgentSessionRecoveryToolCallDto
+{
+    [JsonPropertyName("kind")]
+    public string? Kind { get; set; }
+
+    [JsonPropertyName("content_position")]
+    public int ContentPosition { get; set; }
+
+    [JsonPropertyName("call_id")]
+    public string? CallId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("arguments_json")]
+    public string? ArgumentsJson { get; set; }
+
+    [JsonPropertyName("rejected")]
+    public bool Rejected { get; set; }
 }
 
 internal sealed class AgentSessionTerminalCallDto
@@ -501,10 +555,12 @@ internal sealed class AgentSessionSearchMatchDto
 [JsonSerializable(typeof(AgentSessionReviewContextDto))]
 [JsonSerializable(typeof(AgentSessionAssistantMessageDto))]
 [JsonSerializable(typeof(AgentSessionToolResultDto))]
+[JsonSerializable(typeof(AgentSessionToolErrorDto))]
 [JsonSerializable(typeof(AgentSessionReviewOutcomeDto))]
 [JsonSerializable(typeof(AgentSessionTextContentDto))]
 [JsonSerializable(typeof(AgentSessionContinuationSlotDto))]
 [JsonSerializable(typeof(AgentSessionToolCallDto))]
+[JsonSerializable(typeof(AgentSessionRecoveryToolCallDto))]
 [JsonSerializable(typeof(AgentSessionTerminalCallDto))]
 [JsonSerializable(typeof(AgentSessionContinuationDto))]
 [JsonSerializable(typeof(AgentSessionReadFileResultDto))]

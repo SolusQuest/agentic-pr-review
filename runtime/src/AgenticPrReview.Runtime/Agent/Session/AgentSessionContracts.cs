@@ -382,6 +382,27 @@ internal sealed record AgentSessionToolResultRecord(
     public override string ToString() => "agent_session_tool_result";
 }
 
+internal sealed record AgentSessionToolErrorRecord(
+    string Id,
+    int Sequence,
+    string SourceMessageId,
+    string CallId,
+    string Name,
+    string ResultJson,
+    string Role,
+    string Framing,
+    string Classification)
+    : AgentSessionRecord(
+        "tool_error",
+        Id,
+        Sequence,
+        Role,
+        Framing,
+        Classification)
+{
+    public override string ToString() => "agent_session_tool_error";
+}
+
 internal sealed record AgentSessionReviewOutcomeRecord(
     string Id,
     int Sequence,
@@ -432,6 +453,17 @@ internal sealed record AgentSessionToolCallContent(
     : AgentSessionAssistantContent("tool_call", ContentPosition)
 {
     public override string ToString() => "agent_session_tool_call";
+}
+
+internal sealed record AgentSessionRecoveryToolCallContent(
+    int ContentPosition,
+    string CallId,
+    string Name,
+    string ArgumentsJson,
+    bool Rejected)
+    : AgentSessionAssistantContent("recovery_tool_call", ContentPosition)
+{
+    public override string ToString() => "agent_session_recovery_tool_call";
 }
 
 internal sealed record AgentSessionTerminalCallContent(
