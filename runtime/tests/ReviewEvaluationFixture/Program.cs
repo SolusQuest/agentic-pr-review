@@ -644,6 +644,8 @@ internal static class R5CaseVerifier
 
                 if (recovery.RejectionIndex != nextRejection++)
                     return (null, "rejected_report_invalid");
+                if (recovery.RejectionIndex >= AgentLimits.ToolCalls)
+                    return (null, "rejected_report_invalid");
             }
         }
         var parity = SourceParity();

@@ -95,6 +95,23 @@ public sealed class R5LiveHarnessTests
         Assert.Equal("rejected_report_invalid",
             recoveryReason["reason"]?.GetValue<string>());
 
+        var impossibleRecovery = result.Summary with
+        {
+            RecoveryDiagnostics = [.. Enumerable.Range(0, AgentLimits.ToolCalls + 1)
+                .Select(rejection => new LiveRecoveryDiagnostic(0, rejection,
+                    AgentToolRegistry.ReadFileName,
+                    LiveRecoveryDiagnostic.ArgumentsInvalid))],
+        };
+        lines[^1] = JsonSerializer.Serialize(impossibleRecovery,
+            LiveJsonContext.Default.LiveRunSummary);
+        File.WriteAllLines(reportPath, lines);
+        var (boundRejected, boundReason) = R5CaseVerifier.Run(
+            ["verify-cases", "--scenario", "live-plan", "--corpus", corpus,
+                "--forbid", Canary, "--report", reportPath]);
+        Assert.Equal(1, boundRejected);
+        Assert.Equal("rejected_report_invalid",
+            boundReason["reason"]?.GetValue<string>());
+
         var forged = result.Summary with
         {
             AgentDiagnostics = [.. result.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex == 8
