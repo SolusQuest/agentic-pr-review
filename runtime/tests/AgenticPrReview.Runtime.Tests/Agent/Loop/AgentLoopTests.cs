@@ -648,7 +648,7 @@ public sealed class AgentLoopTests
     [Theory]
     [InlineData("{\"query\":\"x\",\"unknown\":true}")]
     [InlineData("{\"query\":\"x\",\"path\":null}")]
-    public async Task LiveAgentVerifierInvalidToolArgumentsStopBeforeDispatch(string invalidArguments)
+    public async Task InvalidSearchArgumentsReturnAtomicFeedback(string invalidArguments)
     {
         var response = new ProjectChatResponse(
             new ProjectChatMessage(
@@ -666,15 +666,36 @@ public sealed class AgentLoopTests
             new ProjectChatUsage(1, 1),
             1);
         var executor = new ScriptedToolExecutor();
+        var chat = new ScriptedChatClient([
+            response,
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
         var loop = new AgentLoop(
-            new ScriptedChatClient([response]),
+            chat,
             executor);
 
         var outcome = await loop.RunAsync(Request(), CancellationToken.None);
 
-        AssertFailure(outcome, "agent_tool_arguments_invalid");
+        Assert.True(outcome.Succeeded);
         Assert.Empty(executor.Order);
         Assert.Empty(executor.PreflightOrder);
+        Assert.Null(outcome.Diagnostic);
+        var history = chat.Requests[1].Messages;
+        var assistant = Assert.Single(history, message =>
+            message.Role == "assistant");
+        var calls = assistant.Contents
+            .Cast<ProjectRecoveryToolCallContent>().ToArray();
+        Assert.Equal(["one", "two"], calls.Select(call => call.CallId));
+        Assert.False(calls[0].Rejected);
+        Assert.True(calls[1].Rejected);
+        Assert.Equal(AgentRecoveryFeedback.RejectedArguments,
+            calls[1].ArgumentsJson);
+        Assert.Equal(
+            [AgentRecoveryFeedback.BatchNotExecuted,
+                AgentRecoveryFeedback.ArgumentsInvalid],
+            history.Where(message => message.Role == "tool")
+                .Select(message => Assert.IsType<ProjectToolErrorContent>(
+                    Assert.Single(message.Contents)).Result));
     }
 
     [Theory]
@@ -684,7 +705,7 @@ public sealed class AgentLoopTests
     [InlineData("{\"prefix\":\"../p\"}")]
     [InlineData("{\"unknown\":true}")]
     [InlineData("{bad")]
-    public async Task InvalidListFilesArgumentsStopTheWholeBatchBeforeDispatch(
+    public async Task InvalidListFilesArgumentsReturnAtomicFeedback(
         string invalidArguments)
     {
         var response = new ProjectChatResponse(
@@ -703,14 +724,337 @@ public sealed class AgentLoopTests
             new ProjectChatUsage(1, 1),
             1);
         var executor = new ScriptedToolExecutor();
+        var chat = new ScriptedChatClient([
+            response,
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
 
+        var outcome = await new AgentLoop(
+            chat,
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Empty(executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+        var errors = chat.Requests[1].Messages
+            .Where(message => message.Role == "tool")
+            .Select(message => Assert.IsType<ProjectToolErrorContent>(
+                Assert.Single(message.Contents)).Result)
+            .ToArray();
+        Assert.Equal(AgentRecoveryFeedback.BatchNotExecuted, errors[0]);
+        Assert.True(errors[1] == AgentRecoveryFeedback.ArgumentsInvalid ||
+            AgentRecoveryFeedback.IsCanonicalPathError(errors[1]));
+    }
+
+    [Theory]
+    [InlineData("list_files")]
+    [InlineData("list_changed_files")]
+    [InlineData("read_diff")]
+    [InlineData("read_file")]
+    [InlineData("search_text")]
+    public async Task EveryReadOnlyToolCanCorrectInvalidArguments(
+        string toolName)
+    {
+        const string canary = "rejected-argument-private-canary";
+        var chat = new ScriptedChatClient([
+            Response(new ProjectToolCallContent(
+                "invalid", toolName, "{\"private\":\"" + canary +
+                    "\",\"bad\":"), 3, 2),
+            Response(TerminalCall("finish", "done"), 4, 2),
+        ]);
+        var executor = new ScriptedToolExecutor();
+
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Empty(executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+        Assert.Single(outcome.Events.OfType<AgentRecoveryToolCallEvent>());
+        Assert.DoesNotContain(outcome.Events.OfType<AgentToolCallEvent>(),
+            call => call.CallId == "invalid");
+        var requestBytes = AgentRequestWriter.Write(chat.Requests[1]);
+        Assert.DoesNotContain(canary, Encoding.UTF8.GetString(requestBytes),
+            StringComparison.Ordinal);
+        var error = Assert.Single(chat.Requests[1].Messages
+            .SelectMany(message => message.Contents)
+            .OfType<ProjectToolErrorContent>());
+        Assert.Equal(AgentRecoveryFeedback.ArgumentsInvalid, error.Result);
+    }
+
+    [Theory]
+    [InlineData("{\"prefix\":\"\"}", "prefix", "empty")]
+    [InlineData("{\"prefix\":\"/src\"}", "prefix", "absolute")]
+    [InlineData("{\"prefix\":\"src\\\\file\"}", "prefix", "forbidden_character")]
+    [InlineData("{\"prefix\":\"src//file\"}", "prefix", "empty_segment")]
+    [InlineData("{\"prefix\":\"src/../file\"}", "prefix", "dot_segment")]
+    [InlineData("too_long", "prefix", "too_long")]
+    [InlineData("{\"after\":\"src/file.\"}", "after", "trailing_dot_or_space")]
+    [InlineData("{\"prefix\":\"../p\",\"after\":\"/a\"}", "both", "unknown")]
+    public async Task ListFilesRecoveryUsesExactClosedPathFeedback(
+        string arguments, string field, string rule)
+    {
+        if (arguments == "too_long")
+        {
+            arguments = "{\"prefix\":\"" +
+                new string('a', AgentLimits.PathBytes + 1) + "\"}";
+        }
+
+        var chat = new ScriptedChatClient([
+            Response(new ProjectToolCallContent("invalid", "list_files", arguments), 1, 1),
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
+        var executor = new ScriptedToolExecutor();
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Empty(executor.PreflightOrder);
+        var error = Assert.Single(chat.Requests[1].Messages
+            .SelectMany(message => message.Contents)
+            .OfType<ProjectToolErrorContent>());
+        Assert.Equal(
+            "{\"status\":\"error\",\"code\":\"list_files_path_invalid\",\"path_field\":\"" +
+            field + "\",\"path_rule\":\"" + rule + "\",\"retryable\":true}",
+            error.Result);
+    }
+
+    [Fact]
+    public void InvalidUnicodePathRuleUsesExactCanonicalRecoveryFeedback()
+    {
+        var rule = RepositoryPath.Failure("a\ud800");
+        Assert.Equal(RepositoryPathFailure.InvalidUnicode, rule);
+        var feedback = AgentRecoveryFeedback.ListFilesPathInvalid(
+            new ListFilesPathRejection(ListFilesPathField.Prefix, rule));
+        Assert.Equal(
+            "{\"status\":\"error\",\"code\":\"list_files_path_invalid\",\"path_field\":\"prefix\",\"path_rule\":\"invalid_unicode\",\"retryable\":true}",
+            feedback);
+        Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(feedback));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MixedBatchReturnsOrderedErrorsWithoutDispatch(
+        bool invalidFirst)
+    {
+        var invalid = new ProjectToolCallContent(
+            "invalid", "list_files", "{\"prefix\":\"../private\"}");
+        var valid = new ProjectToolCallContent(
+            "valid", "read_file", "{\"path\":\"a.txt\"}");
+        var chat = new ScriptedChatClient([
+            new ProjectChatResponse(
+                new ProjectChatMessage("assistant", invalidFirst
+                    ? [invalid, valid]
+                    : [valid, invalid]),
+                new ProjectChatUsage(1, 1),
+                1),
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
+        var executor = new ScriptedToolExecutor();
+
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Empty(executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+        var history = chat.Requests[1].Messages;
+        var calls = Assert.Single(history, message =>
+            message.Role == "assistant").Contents
+            .Cast<ProjectRecoveryToolCallContent>().ToArray();
+        Assert.Equal(invalidFirst
+            ? ["invalid", "valid"]
+            : ["valid", "invalid"],
+            calls.Select(call => call.CallId));
+        var errors = history.Where(message => message.Role == "tool")
+            .Select(message => Assert.IsType<ProjectToolErrorContent>(
+                Assert.Single(message.Contents))).ToArray();
+        Assert.Equal(calls.Select(call => call.CallId),
+            errors.Select(error => error.CallId));
+        Assert.Equal(invalidFirst,
+            AgentRecoveryFeedback.IsCanonicalPathError(errors[0].Result));
+        Assert.Equal(invalidFirst,
+            errors[1].Result == AgentRecoveryFeedback.BatchNotExecuted);
+    }
+
+    [Fact]
+    public async Task RecoveryBudgetStopsRepeatedRejectedBatches()
+    {
+        var responses = Enumerable.Range(0, 7).Select(batch =>
+            new ProjectChatResponse(
+                new ProjectChatMessage("assistant",
+                    Enumerable.Range(0, 4).Select(index =>
+                        (ProjectChatContent)new ProjectToolCallContent(
+                            $"invalid_{batch}_{index}",
+                            "list_files",
+                            "{bad")).ToArray()),
+                new ProjectChatUsage(1, 1),
+                1)).ToArray();
+        var executor = new ScriptedToolExecutor();
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient(responses),
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        AssertFailure(outcome, AgentFailureCodes.ToolLimit);
+        Assert.Equal(0, outcome.Diagnostic!.ToolCalls);
+        Assert.Equal(7, outcome.Diagnostic.ModelCalls);
+        Assert.Empty(executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+        Assert.Equal(24, outcome.Events
+            .OfType<AgentRecoveryToolCallEvent>().Count());
+    }
+
+    [Fact]
+    public async Task UnknownToolAfterInvalidCallStillFailsClosed()
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage("assistant", [
+                new ProjectToolCallContent(
+                    "invalid", "list_files", "{bad"),
+                new ProjectToolCallContent(
+                    "unknown", "unknown_tool", "{}"),
+            ]),
+            new ProjectChatUsage(1, 1),
+            1);
+        var executor = new ScriptedToolExecutor();
         var outcome = await new AgentLoop(
             new ScriptedChatClient([response]),
             executor).RunAsync(Request(), CancellationToken.None);
 
-        AssertFailure(outcome, "agent_tool_arguments_invalid");
+        AssertFailure(outcome, AgentFailureCodes.UnknownTool);
         Assert.Empty(executor.PreflightOrder);
         Assert.Empty(executor.Order);
+        Assert.Empty(outcome.Events.OfType<AgentRecoveryToolCallEvent>());
+    }
+
+    [Fact]
+    public async Task DeepSeekProjectionPreservesRecoveryReasoningAndCallPair()
+    {
+        const string canary = "private-tool-argument-only-canary";
+        const string reasoning = "reasoning bytes remain in place";
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage("assistant", [
+                new ProjectReasoningContent(
+                    reasoning, "", "deepseek.reasoning_content.utf8.v1",
+                    null, 1, 0),
+                new ProjectToolCallContent(
+                    "invalid", "list_files",
+                    "{\"prefix\":\"../" + canary + "\"}"),
+            ]),
+            new ProjectChatUsage(2, 2),
+            1,
+            new ProjectContinuation(
+                "provider", "model", "adapter", "session",
+                [new ProjectContinuationItem(
+                    reasoning, "", "deepseek.reasoning_content.utf8.v1",
+                    null, 1, 0)]));
+        var chat = new ScriptedChatClient([
+            response,
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request(), CancellationToken.None);
+        Assert.True(outcome.Succeeded);
+
+        var projected = MinimalChatClient.Materialize(chat.Requests[1]);
+        var written = DeepSeekRequestWriter.Write(
+            projected,
+            DeepSeekRequestProfile.Output65536);
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, written.Outcome);
+        var json = Encoding.UTF8.GetString(written.Body.AsSpan());
+        Assert.DoesNotContain(canary, json, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(json);
+        var messages = document.RootElement.GetProperty("messages");
+        var assistant = messages[1];
+        Assert.Equal(reasoning,
+            assistant.GetProperty("reasoning_content").GetString());
+        var call = assistant.GetProperty("tool_calls")[0];
+        Assert.Equal("invalid", call.GetProperty("id").GetString());
+        Assert.Equal(AgentRecoveryFeedback.RejectedArguments,
+            call.GetProperty("function").GetProperty("arguments").GetString());
+        Assert.Equal("invalid",
+            messages[2].GetProperty("tool_call_id").GetString());
+        Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(
+            messages[2].GetProperty("content").GetString()!));
+    }
+
+    [Fact]
+    public async Task TwoInvalidMembersEachReceiveAnError()
+    {
+        var chat = new ScriptedChatClient([
+            new ProjectChatResponse(
+                new ProjectChatMessage("assistant", [
+                    new ProjectToolCallContent(
+                        "path", "list_files", "{\"prefix\":\"../private\"}"),
+                    new ProjectToolCallContent(
+                        "shape", "read_file", "{\"path\":null}"),
+                ]),
+                new ProjectChatUsage(1, 1),
+                1),
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
+        var executor = new ScriptedToolExecutor();
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Empty(executor.PreflightOrder);
+        var errors = chat.Requests[1].Messages
+            .SelectMany(message => message.Contents)
+            .OfType<ProjectToolErrorContent>().ToArray();
+        Assert.Equal(2, errors.Length);
+        Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(
+            errors[0].Result));
+        Assert.Equal(AgentRecoveryFeedback.ArgumentsInvalid,
+            errors[1].Result);
+    }
+
+    [Fact]
+    public async Task InvalidRecoveryContinuationCommitsNoRecoveryEvents()
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage("assistant", [
+                new ProjectReasoningContent(
+                    "reasoning", "", "frame", null, 1, 0),
+                new ProjectToolCallContent(
+                    "bad", "list_files", "{\"prefix\":\"../private\"}"),
+            ]),
+            new ProjectChatUsage(1, 1),
+            1,
+            new ProjectContinuation(
+                "provider", "model", "adapter", "session",
+                [new ProjectContinuationItem(
+                    "different", "", "frame", null, 1, 0)]));
+        var executor = new ScriptedToolExecutor();
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        AssertFailure(outcome, AgentFailureCodes.ResponseInvalid);
+        Assert.Empty(executor.PreflightOrder);
+        Assert.Empty(outcome.Events.OfType<AgentRecoveryToolCallEvent>());
+        Assert.Empty(outcome.Events.OfType<AgentToolErrorEvent>());
+    }
+
+    [Fact]
+    public async Task RecoveredResponseUsageIsChargedExactlyOnce()
+    {
+        var chat = new ScriptedChatClient([
+            Response(new ProjectToolCallContent(
+                "bad", "list_files", "{bad"),
+                AgentLimits.InputTokens - 1, 0),
+            Response(TerminalCall("finish", "done"), 1, 0),
+        ]);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(2, chat.Requests.Count);
     }
 
     [Fact]

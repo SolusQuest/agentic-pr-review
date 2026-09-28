@@ -3,7 +3,7 @@ outer-authorization-denied	pre_activation	no_advance	state_access_denied
 inner-authorization-denied	pre_transport	no_advance	state_access_denied
 provider-http-failure	pre_commit	no_advance	agent_chat_failed
 provider-malformed-response	pre_commit	no_advance	agent_response_invalid
-tool-arguments-invalid	pre_commit	no_advance	agent_tool_arguments_invalid
+tool-arguments-invalid	pre_commit	no_advance	agent_chat_failed
 terminal-ungrounded	pre_commit	no_advance	agent_terminal_invalid
 transition-from-head-invalid	pre_activation	prior_unchanged	session_transition_rejected
 lineage-authority-tampered	pre_activation	prior_unchanged	state_lineage_mismatch

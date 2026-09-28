@@ -129,7 +129,9 @@ internal static class PrefixMeasurement
                 {
                     case ProjectTextContent text: Add(text.Text); break;
                     case ProjectToolCallContent call: Add(call.CallId); Add(call.Name); Add(call.ArgumentsJson); break;
+                    case ProjectRecoveryToolCallContent call: Add(call.CallId); Add(call.Name); Add(call.ArgumentsJson); break;
                     case ProjectToolResultContent result: Add(result.CallId); Add(result.Result); break;
+                    case ProjectToolErrorContent result: Add(result.CallId); Add(result.Result); break;
                     case ProjectReasoningContent reasoning:
                         Add(reasoning.Text); Add(reasoning.Opaque); Add(reasoning.Framing); Add(reasoning.AssociatedCallId); break;
                     default: throw new PrefixObservationException();

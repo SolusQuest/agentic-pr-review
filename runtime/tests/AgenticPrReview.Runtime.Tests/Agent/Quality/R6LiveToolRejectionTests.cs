@@ -74,16 +74,70 @@ public sealed class R6LiveToolRejectionTests
     public void ListFilesRejectionKeepsTheParserStageWithoutArguments(string arguments,
         string category)
     {
-        var projection = LiveToolRejectionProjector.Project(Response(
-            Call("one", AgentToolRegistry.ListFilesName, arguments)), Executor("cs-safe"));
-        Assert.Equal(AgentFailureCodes.ToolArgumentsInvalid, projection?.FailureCode);
-        Assert.Equal(category, projection?.Category);
+        var projection = Assert.IsType<LiveToolRejectionProjection>(
+            LiveToolRejectionProjector.Project(Response(
+                Call("one", AgentToolRegistry.ListFilesName, arguments)), Executor("cs-safe")));
+        Assert.Equal(AgentFailureCodes.ToolArgumentsInvalid, projection.FailureCode);
+        Assert.Equal(category, projection.Category);
+        if (category == LiveToolRejectionProjector.ListPathInvalid)
+        {
+            Assert.Equal("prefix", projection.PathField);
+            Assert.Equal("dot_segment", projection.PathRule);
+        }
+        else
+        {
+            Assert.Null(projection.PathField);
+            Assert.Null(projection.PathRule);
+        }
         var diagnostic = LiveAgentDiagnostic.Capture(0,
             new AgentDiagnostic(AgentFailureCodes.ToolArgumentsInvalid, 1, 0), projection);
         Assert.Equal(category, diagnostic.Category);
+        Assert.Equal(projection.PathField, diagnostic.PathField);
+        Assert.Equal(projection.PathRule, diagnostic.PathRule);
         Assert.True(diagnostic.IsCanonical());
         var report = JsonSerializer.Serialize(diagnostic, LiveJsonContext.Default.LiveAgentDiagnostic);
         Assert.DoesNotContain(arguments, report, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{\"prefix\":\"../APR299_PRIVATE_ARGUMENT_CANARY\"}", "prefix", "dot_segment")]
+    [InlineData("{\"after\":\"/APR299_PRIVATE_ARGUMENT_CANARY\"}", "after", "absolute")]
+    [InlineData("{\"prefix\":\"../APR299_PRIVATE_ARGUMENT_CANARY\",\"after\":\"/bad\"}", "both", "unknown")]
+    public void ListPathDetailIsClosedAndCannotLeakPrivateArguments(
+        string arguments, string field, string rule)
+    {
+        var projection = Assert.IsType<LiveToolRejectionProjection>(
+            LiveToolRejectionProjector.Project(Response(
+                Call(Canary, AgentToolRegistry.ListFilesName, arguments)), Executor("cs-safe")));
+        Assert.Equal(LiveToolRejectionProjector.ListPathInvalid, projection.Category);
+        Assert.Equal(field, projection.PathField);
+        Assert.Equal(rule, projection.PathRule);
+        var diagnostic = LiveAgentDiagnostic.Capture(0,
+            new AgentDiagnostic(AgentFailureCodes.ToolArgumentsInvalid, 1, 0), projection);
+        Assert.True(diagnostic.IsCanonical());
+        var json = JsonSerializer.Serialize(diagnostic, LiveJsonContext.Default.LiveAgentDiagnostic);
+        Assert.DoesNotContain(Canary, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(arguments, json, StringComparison.Ordinal);
+        Assert.False((diagnostic with { PathField = Canary }).IsCanonical());
+        Assert.False((diagnostic with { PathRule = Canary }).IsCanonical());
+        Assert.False((diagnostic with { PathField = null }).IsCanonical());
+        Assert.False((diagnostic with { PathField = "both", PathRule = "absolute" }).IsCanonical());
+        Assert.False((diagnostic with { PathField = "prefix", PathRule = "unknown" }).IsCanonical());
+        Assert.False((diagnostic with { PathField = "unknown", PathRule = "dot_segment" }).IsCanonical());
+        Assert.False((diagnostic with { Tool = AgentToolRegistry.ReadFileName }).IsCanonical());
+    }
+
+    [Fact]
+    public void EarlierPathDiagnosticWithoutDetailStillReprojectsByteIdentically()
+    {
+        const string earlier = "{\"schedule_index\":0,\"code\":\"agent_tool_arguments_invalid\"," +
+            "\"model_calls\":1,\"tool_calls\":0,\"tool\":\"list_files\"," +
+            "\"category\":\"list_files_path_invalid\"}";
+        var diagnostic = JsonSerializer.Deserialize(earlier, LiveJsonContext.Default.LiveAgentDiagnostic);
+        Assert.NotNull(diagnostic);
+        Assert.True(diagnostic.IsCanonical());
+        Assert.Equal(earlier, JsonSerializer.Serialize(diagnostic,
+            LiveJsonContext.Default.LiveAgentDiagnostic));
     }
 
     [Fact]

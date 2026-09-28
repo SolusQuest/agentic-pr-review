@@ -225,6 +225,54 @@ public sealed class R5VerifierCoverageTests
             .Append(LivePlanSummaryLine(summary ?? PlanSummary())));
     }
 
+    [Fact]
+    public void EarlierLiveSummaryOmissionRemainsAdmittedButForgedV5StatusIsRejected()
+    {
+        var earlier = LivePlanOutput();
+        Assert.DoesNotContain("v5_quality_candidate_status", earlier, StringComparison.Ordinal);
+        Assert.Equal(0, Verify("live-plan", earlier,
+            corpus: Corpus("quality", "bundle")).Code);
+        foreach (var status in new[] { "private-canary", R6V5QualityGate.CandidatePass })
+        {
+            var tampered = LivePlanOutput(PlanSummary() with
+            {
+                V5QualityCandidateStatus = status,
+            });
+            var (code, verdict) = Verify("live-plan", tampered,
+                corpus: Corpus("quality", "bundle"));
+            Assert.Equal(1, code);
+            Assert.Equal("rejected_report_invalid", verdict["reason"]?.GetValue<string>());
+        }
+    }
+
+    [Theory]
+    [InlineData("prefix", "dot_segment", true)]
+    [InlineData("both", "unknown", true)]
+    [InlineData("unknown", "unknown", true)]
+    [InlineData("both", "absolute", false)]
+    [InlineData("prefix", "unknown", false)]
+    [InlineData("unknown", "dot_segment", false)]
+    public void LivePlanReaderAdmitsOnlyCanonicalPathDetailPairs(
+        string field, string rule, bool expected)
+    {
+        var summary = PlanSummary() with
+        {
+            AgentDiagnostics =
+            [
+                new(8, AgentFailureCodes.ToolArgumentsInvalid, 1, 0,
+                    AgentToolRegistry.ListFilesName,
+                    LiveToolRejectionProjector.ListPathInvalid, field, rule),
+                new(12, "unknown", null, null),
+            ],
+        };
+        var (code, verdict) = Verify("live-plan", LivePlanOutput(summary),
+            corpus: Corpus("quality", "bundle"));
+        Assert.Equal(expected ? 0 : 1, code);
+        Assert.Equal(expected ? "verified" : "rejected_report_invalid",
+            expected ? verdict["code"]?.GetValue<string>() :
+                verdict["reason"]?.GetValue<string>());
+    }
+
     private static (int Code, JsonObject Verdict) Verify(string scenario, string report,
         string? corpus = null, string forbid = CorpusCanary)
     {

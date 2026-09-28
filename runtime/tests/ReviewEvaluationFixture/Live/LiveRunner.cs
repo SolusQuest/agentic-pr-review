@@ -127,6 +127,7 @@ internal static class LiveRunner
         var outcomes = ImmutableArray.CreateBuilder<EvaluationOutcome>();
         var subjects = new List<LiveAdjudicationCase>();
         var diagnostics = new List<LiveAgentDiagnostic>();
+        var recoveries = new List<LiveRecoveryDiagnostic>();
         var completed = 0;
         var failed = 0;
         var invalid = 0;
@@ -166,7 +167,8 @@ internal static class LiveRunner
                     try
                     {
                         outcome = await AttemptAsync(run, trusted, stable!, descriptor, attempt, runId,
-                            execute, credential, options, accounting, scope, subjects, diagnostics, index, deadline.Token);
+                            execute, credential, options, accounting, scope, subjects, diagnostics,
+                            recoveries, index, deadline.Token);
                         switch (outcome.ExecutionStatus)
                         {
                             case EvaluationStatus.Completed: completed++; break;
@@ -242,7 +244,13 @@ internal static class LiveRunner
             frozenAccounting.ReservedSpendMicroUsd, plan.Bounds.SpendCeilingMicroUsd, stopReason, adjudication.Cleanup,
             diagnostics.ToImmutableArray(),
             adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases,
-            frozenAccounting.CacheUsage, frozenJournal.Document);
+            frozenAccounting.CacheUsage, frozenJournal.Document,
+            RecoveryDiagnostics: recoveries.Count == 0 ? null : recoveries.ToImmutableArray());
+        summary = summary with
+        {
+            V5QualityCandidateStatus = R6V5QualityGate.Evaluate(
+                summary, plan.Schedule, outcomes.ToImmutable()),
+        };
         foreach (var row in rows) write(Encoding.UTF8.GetString(row.Span));
         write(Encoding.UTF8.GetString(reportBytes.Value));
         write(JsonSerializer.Serialize(summary, LiveJsonContext.Default.LiveRunSummary));
@@ -278,7 +286,8 @@ internal static class LiveRunner
         EvaluationAttempt attempt, string runId, bool execute,
         DeepSeekCredential? credential, LiveOptions options, LiveAccounting accounting,
         UsageJournalCollector.AttemptScope journalAttempt,
-        List<LiveAdjudicationCase> subjects, List<LiveAgentDiagnostic> diagnostics, int index,
+        List<LiveAdjudicationCase> subjects, List<LiveAgentDiagnostic> diagnostics,
+        List<LiveRecoveryDiagnostic> recoveries, int index,
         CancellationToken token)
     {
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable.StablePlan, runId,
@@ -298,6 +307,7 @@ internal static class LiveRunner
         var outcome = await new AgentLoop(observed, executor, limitAuthority: trusted.LimitAuthority)
             .RunAsync(request, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
+        recoveries.AddRange(LiveRecoveryDiagnostic.Capture(index, outcome));
         var rejection = observed.TakeRejection();
         var normalizationReason = observed.TakeNormalizationReason();
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)

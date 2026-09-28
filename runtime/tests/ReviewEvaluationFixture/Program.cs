@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -568,6 +569,11 @@ internal static class R5CaseVerifier
         }
         var report = ReadComplete(lines[^1], LiveJsonContext.Default.LiveRunSummary);
         if (report is null) return (null, "rejected_report_invalid");
+        if (!R6V5QualityGate.ValidStatus(report.V5QualityCandidateStatus) ||
+            report.V5QualityCandidateStatus is { } status && status !=
+                R6V5QualityGate.Evaluate(report, declared.ToImmutableArray(),
+                    outcomes.ToImmutableArray()))
+            return (null, "rejected_report_invalid");
         if (report.Format != "r5-live-local-v1") return (null, "rejected_report_invalid");
         if (report.StopReason != "complete") return (null, "rejected_code");
         if (report.Scheduled != report.Attempted + report.Unattempted ||
@@ -614,6 +620,34 @@ internal static class R5CaseVerifier
             !d.IsCanonical()) ||
             report.AgentDiagnostics.Select(d => d.ScheduleIndex).Distinct().Count() != report.AgentDiagnostics.Length)
             return (null, "rejected_report_invalid");
+        if (report.RecoveryDiagnostics is { } recoveries)
+        {
+            if (recoveries.IsDefaultOrEmpty ||
+                recoveries.Length > report.Attempted * AgentLimits.ToolCalls)
+                return (null, "rejected_report_invalid");
+            var priorSchedule = -1;
+            var nextRejection = 0;
+            foreach (var recovery in recoveries)
+            {
+                if (recovery is null || !recovery.IsCanonical() ||
+                    recovery.ScheduleIndex >= report.Attempted ||
+                    outcomes[recovery.ScheduleIndex].ExecutionStatus is not
+                        (EvaluationStatus.Completed or EvaluationStatus.Failed))
+                    return (null, "rejected_report_invalid");
+                if (recovery.ScheduleIndex != priorSchedule)
+                {
+                    if (recovery.ScheduleIndex <= priorSchedule)
+                        return (null, "rejected_report_invalid");
+                    priorSchedule = recovery.ScheduleIndex;
+                    nextRejection = 0;
+                }
+
+                if (recovery.RejectionIndex != nextRejection++)
+                    return (null, "rejected_report_invalid");
+                if (recovery.RejectionIndex >= AgentLimits.ToolCalls)
+                    return (null, "rejected_report_invalid");
+            }
+        }
         var parity = SourceParity();
         parity["plan_sha256"] = report.PlanSha256;
         parity["corpus_sha256"] = corpusSha;

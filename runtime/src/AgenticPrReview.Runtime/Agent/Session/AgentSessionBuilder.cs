@@ -585,6 +585,9 @@ internal static class AgentSessionBuilder
             var callParts = new List<(
                 int Position,
                 AgentToolCallReferencePart Reference)>();
+            var recoveryParts = new List<(
+                int Position,
+                AgentRecoveryToolCallReferencePart Reference)>();
             for (var contentPosition = 0;
                 contentPosition < message.Contents.Length;
                 contentPosition++)
@@ -628,6 +631,10 @@ internal static class AgentSessionBuilder
                         callParts.Add((contentPosition, call));
                         contents.Add(null!);
                         break;
+                    case AgentRecoveryToolCallReferencePart recovery:
+                        recoveryParts.Add((contentPosition, recovery));
+                        contents.Add(null!);
+                        break;
                     default:
                         return false;
                 }
@@ -656,10 +663,108 @@ internal static class AgentSessionBuilder
 
             if (currentCandidates.Length != message.Contents.Count(part =>
                     part is AgentReasoningReferencePart) ||
-                callParts.Count is < 1 or >
+                callParts.Count > 0 && recoveryParts.Count > 0 ||
+                callParts.Count + recoveryParts.Count is < 1 or >
                     AgentLimits.ToolCallsPerResponse)
             {
                 return false;
+            }
+
+            if (recoveryParts.Count > 0)
+            {
+                var recoveryResults = new List<(
+                    AgentRecoveryToolCallEvent Call,
+                    AgentToolErrorEvent Error,
+                    string ResultJson)>(recoveryParts.Count);
+                foreach (var part in recoveryParts)
+                {
+                    if (eventIndex + 1 >= outcome.Events.Length ||
+                        outcome.Events[eventIndex] is not
+                            AgentRecoveryToolCallEvent call ||
+                        outcome.Events[eventIndex + 1] is not
+                            AgentToolErrorEvent error ||
+                        !StringComparer.Ordinal.Equals(
+                            part.Reference.CallId, call.CallId) ||
+                        !StringComparer.Ordinal.Equals(
+                            part.Reference.Name, call.Name) ||
+                        part.Reference.Rejected != call.Rejected ||
+                        !StringComparer.Ordinal.Equals(
+                            part.Reference.ArgumentsSha256,
+                            call.ArgumentsSha256) ||
+                        !StringComparer.Ordinal.Equals(
+                            call.ArgumentsSha256,
+                            AgentCanonical.HashRaw(
+                                call.SanitizedArguments.AsSpan())) ||
+                        !TryDecodeCanonicalBytes(
+                            call.SanitizedArguments.AsSpan(),
+                            out var argumentsJson) ||
+                        !StringComparer.Ordinal.Equals(
+                            error.CallId, call.CallId) ||
+                        !StringComparer.Ordinal.Equals(
+                            error.Name, call.Name) ||
+                        !StringComparer.Ordinal.Equals(
+                            error.ResultSha256,
+                            AgentCanonical.HashRaw(
+                                error.CanonicalResult.AsSpan())) ||
+                        !TryDecodeCanonicalBytes(
+                            error.CanonicalResult.AsSpan(),
+                            out var resultJson) ||
+                        !(call.Rejected
+                            ? StringComparer.Ordinal.Equals(
+                                resultJson,
+                                AgentRecoveryFeedback.ArgumentsInvalid) ||
+                                call.Name == AgentToolRegistry.ListFilesName &&
+                                AgentRecoveryFeedback.IsCanonicalPathError(
+                                    resultJson!)
+                            : StringComparer.Ordinal.Equals(
+                                resultJson,
+                                AgentRecoveryFeedback.BatchNotExecuted)))
+                    {
+                        return false;
+                    }
+
+                    contents[part.Position] =
+                        new AgentSessionRecoveryToolCallContent(
+                            part.Position,
+                            call.CallId,
+                            call.Name,
+                            argumentsJson!,
+                            call.Rejected);
+                    recoveryResults.Add((call, error, resultJson!));
+                    eventIndex += 2;
+                }
+
+                if (!recoveryResults.Any(entry => entry.Call.Rejected))
+                {
+                    return false;
+                }
+
+                records.Add(new AgentSessionAssistantMessageRecord(
+                    messageId,
+                    records.Count,
+                    messageOrdinal,
+                    contents.MoveToImmutable(),
+                    "assistant",
+                    "provider_message",
+                    "provider_data"));
+                messageOrdinal++;
+                foreach (var result in recoveryResults)
+                {
+                    records.Add(new AgentSessionToolErrorRecord(
+                        RecordId(runOrdinal, records.Count),
+                        records.Count,
+                        messageId,
+                        result.Call.CallId,
+                        result.Call.Name,
+                        result.ResultJson,
+                        "tool",
+                        "tool_error",
+                        "repository_feedback"));
+                }
+
+                expectedMessageIndex = checked(
+                    expectedMessageIndex + 1 + recoveryResults.Count);
+                continue;
             }
 
             var callEvents = new List<AgentToolCallEvent>();

@@ -142,6 +142,143 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     [Fact]
+    public async Task RecoveryBatchBuildsAndRestoresSanitizedHistory()
+    {
+        const string canary = "private-rejected-argument-canary";
+        var trusted = Trusted();
+        var run = new AgentRunRequest(
+            Identity(),
+            Materialize(trusted, prior: null),
+            "session0",
+            [.. Controls(trusted), User("review")]);
+        var responses = new Queue<ProjectChatResponse>([
+            new ProjectChatResponse(
+                new ProjectChatMessage("assistant", [
+                    new ProjectToolCallContent(
+                        "valid", "read_file", "{\"path\":\"a.txt\"}"),
+                    new ProjectToolCallContent(
+                        "invalid", "list_files",
+                        "{\"prefix\":\"../" + canary + "\"}"),
+                ]),
+                new ProjectChatUsage(1, 1),
+                1),
+            new ProjectChatResponse(
+                new ProjectChatMessage("assistant", [
+                    new ProjectToolCallContent(
+                        "finish", "finish_review", FinishJson),
+                ]),
+                new ProjectChatUsage(1, 1),
+                1),
+        ]);
+        var outcome = await new AgentLoop(
+            new QueueChatClient(responses),
+            new NeverToolExecutor()).RunAsync(run, CancellationToken.None);
+        Assert.True(outcome.CompletedSessionEligible);
+        Assert.Equal(2,
+            outcome.Events.OfType<AgentRecoveryToolCallEvent>().Count());
+        Assert.Equal(2,
+            outcome.Events.OfType<AgentToolErrorEvent>().Count());
+        Assert.Empty(outcome.Events.OfType<AgentToolResultEvent>());
+
+        var built = AgentSessionBuilder.Build(new AgentSessionBuildInput(
+            run,
+            outcome,
+            trusted,
+            run.InitialMessages.Length - 1,
+            SyntheticContinuationCodec.Instance,
+            Predecessor: null,
+            AgentSessionHeadTransition.SameHead));
+        Assert.True(built.Succeeded, built.FailureCode);
+        var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
+        Assert.DoesNotContain(
+            canary,
+            Encoding.UTF8.GetString(artifact.Plaintext),
+            StringComparison.Ordinal);
+        var errors = artifact.Document.CompletedRuns[0].Records
+            .OfType<AgentSessionToolErrorRecord>().ToArray();
+        Assert.Equal(2, errors.Length);
+        Assert.Equal(AgentRecoveryFeedback.BatchNotExecuted,
+            errors[0].ResultJson);
+        Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(
+            errors[1].ResultJson));
+
+        var restore = AgentSessionRestorer.Restore(
+            new AgentSessionRestoreInput(
+                AgentSessionLocatorFamily.Current,
+                AgentSessionRestoreIntent.Automatic,
+                ExplicitReset: false,
+                artifact.Plaintext,
+                new AgentSessionAcceptedState(
+                    0,
+                    artifact.SessionSha256,
+                    new string('e', 64),
+                    run.ReviewedIdentity.BaseSha,
+                    run.ReviewedIdentity.HeadSha,
+                    PredecessorStateSha256: null),
+                trusted,
+                run.SessionId,
+                run.ReviewedIdentity,
+                User("next"),
+                AgentSessionHeadTransition.SameHead,
+                SyntheticContinuationCodec.Instance));
+        Assert.True(restore.Succeeded, restore.Code);
+        var restoredCalls = restore.RunRequest!.InitialMessages
+                .SelectMany(message => message.Contents)
+                .OfType<ProjectRecoveryToolCallContent>().ToArray();
+        Assert.Equal(2, restoredCalls.Length);
+        Assert.False(restoredCalls[0].Rejected);
+        Assert.True(restoredCalls[1].Rejected);
+        Assert.Equal(AgentRecoveryFeedback.RejectedArguments,
+            restoredCalls[1].ArgumentsJson);
+        Assert.DoesNotContain(canary,
+            Encoding.UTF8.GetString(AgentRequestWriter.Write(
+                new ProjectChatRequest(
+                    restore.RunRequest.InitialMessages,
+                    AgentToolRegistry.Definitions.ToArray(),
+                    restore.RunRequest.Continuation,
+                    ThinkingRequired: true))),
+            StringComparison.Ordinal);
+
+        var completed = artifact.Document.CompletedRuns[0];
+        var errorIndex = Enumerable.Range(0, completed.Records.Length)
+            .First(index => completed.Records[index] is
+                AgentSessionToolErrorRecord);
+        var alteredError = completed.Records.SetItem(
+            errorIndex,
+            errors[0] with { ResultJson = "{\"status\":\"ok\"}" });
+        Assert.False(AgentSessionValidation.TryValidateRecords(
+            artifact.Document with
+            {
+                CompletedRuns = [completed with { Records = alteredError }],
+            },
+            SyntheticContinuationCodec.Instance,
+            out _));
+
+        var assistantIndex = Enumerable.Range(0, completed.Records.Length)
+            .First(index => completed.Records[index] is
+                AgentSessionAssistantMessageRecord);
+        var assistant = Assert.IsType<AgentSessionAssistantMessageRecord>(
+            completed.Records[assistantIndex]);
+        var alteredContents = assistant.Contents.SetItem(
+            1,
+            Assert.IsType<AgentSessionRecoveryToolCallContent>(
+                assistant.Contents[1]) with
+            {
+                ArgumentsJson = "{\"prefix\":\"../" + canary + "\"}",
+            });
+        var alteredCall = completed.Records.SetItem(
+            assistantIndex,
+            assistant with { Contents = alteredContents });
+        Assert.False(AgentSessionValidation.TryValidateRecords(
+            artifact.Document with
+            {
+                CompletedRuns = [completed with { Records = alteredCall }],
+            },
+            SyntheticContinuationCodec.Instance,
+            out _));
+    }
+
+    [Fact]
     public async Task GenerationsRetainPriorRunsAndAppendOnlyCurrentContinuation()
     {
         var trusted = Trusted();
@@ -3030,8 +3167,10 @@ public sealed partial class AgentSessionRoundTripTests
     {
         var trusted = Trusted();
         BuiltGeneration? predecessor = null;
+        BuiltGeneration? predecessorBeforeFinal = null;
         for (var index = 0; index < 19; index++)
         {
+            if (index == 18) predecessorBeforeFinal = predecessor;
             predecessor = await BuildGenerationWithContinuationCountAsync(
                 trusted,
                 predecessor,
@@ -3061,6 +3200,60 @@ public sealed partial class AgentSessionRoundTripTests
         Assert.Equal(
             predecessorBytes,
             validOverPredecessor.Artifact.Plaintext);
+
+        var nearRecoveryPredecessor = await BuildGenerationWithContinuationCountAsync(
+            trusted, predecessorBeforeFinal, "near-recovery", "finish-near", 8);
+        Assert.Equal(AgentLimits.SessionRecords - 5,
+            nearRecoveryPredecessor.Artifact.Document.CompletedRuns.Sum(run =>
+                run.Records.Length + run.Continuation.Items.Length));
+
+        Assert.True(AgentSessionRequestReconstruction.TryReconstructHistory(
+            nearRecoveryPredecessor.Artifact.Document,
+            SyntheticContinuationCodec.Instance,
+            Controls(trusted).Length,
+            out var recoveryHistory,
+            out var recoveryContinuation,
+            out var recoveryHistoryFailure), recoveryHistoryFailure);
+        var recoveryRun = new AgentRunRequest(
+            Identity(),
+            Materialize(trusted, nearRecoveryPredecessor.Artifact.SessionSha256),
+            "session0",
+            [.. Controls(trusted), .. recoveryHistory!, User("capacity recovery")],
+            recoveryContinuation);
+        var recoveryResponses = new Queue<ProjectChatResponse>([
+            new ProjectChatResponse(
+                new ProjectChatMessage("assistant", [
+                    new ProjectToolCallContent("invalid-capacity", "list_files",
+                        "{\"prefix\":\"../bad\"}"),
+                ]), new ProjectChatUsage(1, 1), 1),
+            new ProjectChatResponse(
+                new ProjectChatMessage("assistant", [
+                    new ProjectToolCallContent("finish-capacity", "finish_review", FinishJson),
+                ]), new ProjectChatUsage(1, 1), 1),
+        ]);
+        var recoveryOutcome = await new AgentLoop(
+            new QueueChatClient(recoveryResponses),
+            new NeverToolExecutor()).RunAsync(recoveryRun, CancellationToken.None);
+        Assert.True(recoveryOutcome.CompletedSessionEligible, recoveryOutcome.Diagnostic?.Code);
+        Assert.Single(recoveryOutcome.Events.OfType<AgentToolErrorEvent>());
+        var recoveryAppend = AgentSessionBuilder.Build(new AgentSessionBuildInput(
+            recoveryRun,
+            recoveryOutcome,
+            trusted,
+            recoveryRun.InitialMessages.Length - 1,
+            SyntheticContinuationCodec.Instance,
+            new AgentSessionPredecessor(
+                nearRecoveryPredecessor.Artifact.Plaintext,
+                nearRecoveryPredecessor.Artifact.SessionSha256,
+                nearRecoveryPredecessor.EnvelopeSha256,
+                nearRecoveryPredecessor.Artifact.Document.Generation,
+                nearRecoveryPredecessor.Artifact.Document.ProducerBaseSha,
+                nearRecoveryPredecessor.Artifact.Document.ProducerHeadSha,
+                nearRecoveryPredecessor.Artifact.Document.PredecessorStateSha256),
+            AgentSessionHeadTransition.SameHead));
+        Assert.Equal(AgentSessionCodes.ConstructionLimit, recoveryAppend.FailureCode);
+        Assert.Null(recoveryAppend.Artifact);
+        Assert.Equal(predecessorBytes, validOverPredecessor.Artifact.Plaintext);
 
         var exact = AddTerminalContinuationItems(
             validOverPredecessor.Artifact.Document,

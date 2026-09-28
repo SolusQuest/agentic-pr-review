@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Canonical;
@@ -584,8 +585,8 @@ internal sealed class VerifierProviderScript
         VerifierScenario.CanaryRouting => 2,
         VerifierScenario.ProviderHttpFailure or
             VerifierScenario.ProviderMalformedResponse or
-            VerifierScenario.ToolArgumentsInvalid or
             VerifierScenario.TerminalUngrounded => 1,
+        VerifierScenario.ToolArgumentsInvalid => 2,
         VerifierScenario.QualityFailedAfterCommit => 3,
         VerifierScenario.PublicResultCanary => 4,
         VerifierScenario.OuterAuthorizationDenied or
@@ -622,11 +623,7 @@ internal sealed class VerifierProviderScript
         VerifierScenario.ProviderHttpFailure => throw new VerifierWireException(
             "provider_http_injected"),
         VerifierScenario.ProviderMalformedResponse => "{}"u8.ToArray(),
-        VerifierScenario.ToolArgumentsInvalid => Tool(
-            "Attempt an invalid tool call.",
-            "negative_invalid_arguments",
-            AgentToolRegistry.ReadFileName,
-            "{\"path\":\"src/CacheGate.cs\",\"unknown\":true}"),
+        VerifierScenario.ToolArgumentsInvalid => ToolArgumentsRecovery(index, body),
         VerifierScenario.TerminalUngrounded => Finish(
             "Return an ungrounded terminal finding.",
             string.Concat(
@@ -641,6 +638,44 @@ internal sealed class VerifierProviderScript
         VerifierScenario.PublicResultCanary => MustNotFind(index, body),
         _ => throw new InvalidOperationException(),
     };
+
+    private static byte[] ToolArgumentsRecovery(int index, byte[] body)
+    {
+        if (index == 0)
+            return Tool("Attempt an invalid tool call.",
+                "negative_invalid_arguments", AgentToolRegistry.ReadFileName,
+                "{\"path\":\"src/CacheGate.cs\",\"unknown\":true}");
+        if (index != 1)
+            throw new VerifierWireException("recovery_request_count_invalid");
+
+        using var document = JsonDocument.Parse(body);
+        var messages = document.RootElement.GetProperty("messages")
+            .EnumerateArray().ToArray();
+        var assistant = messages.Where(message =>
+                message.GetProperty("role").GetString() == "assistant" &&
+                message.TryGetProperty("tool_calls", out _))
+            .ToArray();
+        var tools = messages.Where(message =>
+                message.GetProperty("role").GetString() == "tool")
+            .ToArray();
+        if (assistant.Length != 1 || tools.Length != 1)
+            throw new VerifierWireException("recovery_history_shape_invalid");
+        var calls = assistant[0].GetProperty("tool_calls").EnumerateArray().ToArray();
+        if (calls.Length != 1 ||
+            calls[0].GetProperty("id").GetString() != "negative_invalid_arguments" ||
+            calls[0].GetProperty("function").GetProperty("name").GetString() !=
+                AgentToolRegistry.ReadFileName ||
+            calls[0].GetProperty("function").GetProperty("arguments").GetString() !=
+                AgentRecoveryFeedback.RejectedArguments ||
+            tools[0].GetProperty("tool_call_id").GetString() !=
+                "negative_invalid_arguments" ||
+            tools[0].GetProperty("content").GetString() !=
+                AgentRecoveryFeedback.ArgumentsInvalid ||
+            body.AsSpan().IndexOf("unknown\":true"u8) >= 0)
+            throw new VerifierWireException("recovery_feedback_invalid");
+
+        throw new VerifierWireException("recovery_followup_injected");
+    }
 
     private byte[] MustFind(int index, byte[] body)
     {

@@ -32,7 +32,9 @@ internal static class LiveNormalizationCategories
 // arguments or exceptions is retained. Counts are independent of transport sends.
 internal sealed record LiveAgentDiagnostic(int ScheduleIndex, string Code, int? ModelCalls, int? ToolCalls,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tool = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Category = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Category = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PathField = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PathRule = null)
 {
     internal static LiveAgentDiagnostic Capture(int index, AgentDiagnostic? diagnostic,
         LiveToolRejectionProjection? rejection = null,
@@ -80,8 +82,21 @@ internal sealed record LiveAgentDiagnostic(int ScheduleIndex, string Code, int? 
             _ => false,
         };
         if (rejection.FailureCode == code && recognizedTool && recognizedCategory)
+        {
+            if (rejection.Tool == AgentToolRegistry.ListFilesName &&
+                rejection.Category == LiveToolRejectionProjector.ListPathInvalid)
+            {
+                if (LiveToolRejectionProjector.ValidPathDetail(
+                    rejection.PathField, rejection.PathRule))
+                    return new(index, code, diagnostic.ModelCalls, diagnostic.ToolCalls,
+                        rejection.Tool, rejection.Category,
+                        rejection.PathField, rejection.PathRule);
+                return new(index, code, diagnostic.ModelCalls, diagnostic.ToolCalls,
+                    "unknown", "unknown");
+            }
             return new(index, code, diagnostic.ModelCalls, diagnostic.ToolCalls,
                 rejection.Tool, rejection.Category);
+        }
         return new(index, code, diagnostic.ModelCalls, diagnostic.ToolCalls,
             "unknown", "unknown");
     }
@@ -93,7 +108,8 @@ internal sealed record LiveAgentDiagnostic(int ScheduleIndex, string Code, int? 
             : null;
         var rejection = Tool is null && Category is null
             ? null
-            : new LiveToolRejectionProjection(Code, Tool ?? string.Empty, Category ?? string.Empty);
+            : new LiveToolRejectionProjection(Code, Tool ?? string.Empty,
+                Category ?? string.Empty, PathField, PathRule);
         var reason = Category switch
         {
             LiveNormalizationCategories.RequestProjection => ProjectChatNormalizationReason.RequestProjection,

@@ -253,6 +253,18 @@ internal sealed record AgentToolResultReferencePart(
     string ResultSha256)
     : AgentMessagePart("tool_result_reference");
 
+internal sealed record AgentRecoveryToolCallReferencePart(
+    string CallId,
+    string Name,
+    string ArgumentsSha256,
+    bool Rejected)
+    : AgentMessagePart("recovery_tool_call_reference");
+
+internal sealed record AgentToolErrorReferencePart(
+    string CallId,
+    string ResultSha256)
+    : AgentMessagePart("tool_error_reference");
+
 internal sealed record AgentContinuationEvent(
     string ReadableSha256,
     string OpaqueSha256,
@@ -276,6 +288,21 @@ internal sealed record AgentToolResultEvent(
     string ResultSha256,
     ImmutableArray<byte> CanonicalResult)
     : AgentLogicalEvent("tool_result");
+
+internal sealed record AgentRecoveryToolCallEvent(
+    string CallId,
+    string Name,
+    string ArgumentsSha256,
+    ImmutableArray<byte> SanitizedArguments,
+    bool Rejected)
+    : AgentLogicalEvent("recovery_tool_call");
+
+internal sealed record AgentToolErrorEvent(
+    string CallId,
+    string Name,
+    string ResultSha256,
+    ImmutableArray<byte> CanonicalResult)
+    : AgentLogicalEvent("tool_error");
 
 internal sealed record AgentTerminalEvent(string TerminalSha256)
     : AgentLogicalEvent("terminal");

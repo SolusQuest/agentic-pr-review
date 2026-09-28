@@ -246,6 +246,7 @@ internal static class Program
                 VerifierScenario.LineageTampered => 0,
             VerifierScenario.QualityFailedAfterCommit => 3,
             VerifierScenario.PublicResultCanary => 4,
+            VerifierScenario.ToolArgumentsInvalid => 2,
             _ => 1,
         };
         var publicResultSafe = scenario != VerifierScenario.PublicResultCanary ||
@@ -258,6 +259,8 @@ internal static class Program
             invariant &&
             profile.ActivationCount == expectedActivation &&
             (wire?.RequestCount ?? 0) == expectedRequests &&
+            (scenario != VerifierScenario.ToolArgumentsInvalid ||
+                wire?.FailureCode == "recovery_followup_injected") &&
             product?.HandoffReady != true &&
             publicResultSafe &&
             (execution?.PublicResultCanaryInjected ??

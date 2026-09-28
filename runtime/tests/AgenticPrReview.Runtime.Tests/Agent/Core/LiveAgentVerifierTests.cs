@@ -177,7 +177,7 @@ public sealed class LiveAgentVerifierContractTests
                 "inner-authorization-denied\tpre_transport\tno_advance\tstate_access_denied",
                 "provider-http-failure\tpre_commit\tno_advance\tagent_chat_failed",
                 "provider-malformed-response\tpre_commit\tno_advance\tagent_response_invalid",
-                "tool-arguments-invalid\tpre_commit\tno_advance\tagent_tool_arguments_invalid",
+                "tool-arguments-invalid\tpre_commit\tno_advance\tagent_chat_failed",
                 "terminal-ungrounded\tpre_commit\tno_advance\tagent_terminal_invalid",
                 "transition-from-head-invalid\tpre_activation\tprior_unchanged\tsession_transition_rejected",
                 "lineage-authority-tampered\tpre_activation\tprior_unchanged\tstate_lineage_mismatch",
