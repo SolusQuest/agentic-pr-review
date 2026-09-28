@@ -552,6 +552,7 @@ internal static class VerifierEvidence
                 VerifierScenario.LineageTampered => 0,
             VerifierScenario.QualityFailedAfterCommit => 3,
             VerifierScenario.PublicResultCanary => 4,
+            VerifierScenario.ToolArgumentsInvalid => 2,
             _ => 1,
         };
         var unchanged = receipt.StateBeforeSha256 ==

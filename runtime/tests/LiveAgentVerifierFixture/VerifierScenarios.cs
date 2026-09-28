@@ -64,7 +64,7 @@ internal static class VerifierScenarioDomain
             "tool-arguments-invalid",
             "pre_commit",
             "no_advance",
-            AgentFailureCodes.ToolArgumentsInvalid,
+            AgentFailureCodes.ChatFailed,
             false),
         VerifierScenario.TerminalUngrounded => new(
             "terminal-ungrounded",

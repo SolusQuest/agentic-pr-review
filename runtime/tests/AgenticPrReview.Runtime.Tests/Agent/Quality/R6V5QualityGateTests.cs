@@ -57,6 +57,15 @@ public sealed class R6V5QualityGateTests
             summary with { AdjudicationStatus = "pending" }, Schedule, rows));
         Assert.Equal(R6V5QualityGate.Blocked, R6V5QualityGate.Evaluate(
             summary with { Completed = 4, Failed = 1 }, Schedule, rows));
+        var recovered = summary with
+        {
+            RecoveryDiagnostics = [new(1, 0, "read_file",
+                LiveRecoveryDiagnostic.ArgumentsInvalid)],
+        };
+        Assert.Equal(R6V5QualityGate.Blocked,
+            R6V5QualityGate.Evaluate(recovered, Schedule, rows));
+        Assert.Contains("recovery_diagnostics", JsonSerializer.Serialize(
+            recovered, LiveJsonContext.Default.LiveRunSummary), StringComparison.Ordinal);
         Assert.Equal(R6V5QualityGate.NotEvaluable, R6V5QualityGate.Evaluate(
             summary with { ExecutionKind = "loopback" }, Schedule, rows));
         Assert.Null(R6V5QualityGate.Evaluate(summary, Schedule.Reverse().ToImmutableArray(), rows));
@@ -113,6 +122,7 @@ public sealed class R6V5QualityGateTests
     {
         var earlier = JsonSerializer.Serialize(Summary(), LiveJsonContext.Default.LiveRunSummary);
         Assert.DoesNotContain("v5_quality_candidate_status", earlier, StringComparison.Ordinal);
+        Assert.DoesNotContain("recovery_diagnostics", earlier, StringComparison.Ordinal);
         var admitted = JsonSerializer.Deserialize(earlier, LiveJsonContext.Default.LiveRunSummary);
         Assert.NotNull(admitted);
         var projected = JsonSerializer.Serialize(admitted, LiveJsonContext.Default.LiveRunSummary);

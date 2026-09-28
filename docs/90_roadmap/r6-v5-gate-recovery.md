@@ -22,6 +22,10 @@ For a structurally valid response with an invalid argument to one of the five re
 
 Synthetic tests cover parser failures, mixed batches, finite repeated rejection, exact DeepSeek request projection, SESSION restore, privacy and capacity. The prefix observer now recognizes this transformed history; an error result never provides positive read evidence. DeepSeek acceptance of the transformed history remains to be established by a separately reviewed one-turn live protocol probe.
 
+Future live summaries also carry an optional `recovery_diagnostics` array when an Agent run actually rejects an argument. Each entry contains only schedule/rejection indexes, registered tool name, and a fixed category; `list_files` may add its fixed path field and lexical rule. It comes from the Agent's committed recovery/error event pair, including when a later model turn succeeds. The strict loopback reader admits only the closed fields, ordering and per-attempt bounds. Historical summaries without the field retain their serialized bytes. The frozen V5 candidate gate blocks whenever this field is present, including a fully completed, otherwise passing five-case population; an argument rejection followed by correction is still a rejection under that rule.
+
+The R3 deterministic negative case now admits the recovery request and inspects its exact placeholder and fixed error before injecting a follow-up transport failure. Its expected terminal code is `agent_chat_failed`, with two provider requests and no state advance. The case ID stays stable; the revised receipt proves the new argument behavior rather than the old immediate rejection.
+
 ## Correction and progression decision
 
 The earlier offline diagnostic and gate improvements alone did not change the provider-visible request or rejected path behavior. The new recovery contract does change the next provider-visible request. A one-turn live protocol probe can test whether DeepSeek accepts that transformed history after a finite plan and profile authority are reviewed. It is not a five-case V5 quality population. The earlier key authorization does not itself establish a new population profile.

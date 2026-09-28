@@ -35,6 +35,7 @@ internal static class R6V5QualityGate
             summary.SimulatedAdapterCalls != 0 || summary.ActualProviderCalls <= 0 ||
             summary.UsageUnknownCalls != 0 ||
             !summary.AgentDiagnostics.IsDefaultOrEmpty ||
+            summary.RecoveryDiagnostics is not null ||
             summary.AdjudicationStatus != "adjudicated" ||
             summary.HumanConfirmedCases < 0 || summary.AiAdjudicatedCases < 0 ||
             summary.HumanConfirmedCases + summary.AiAdjudicatedCases != Cases.Length ||

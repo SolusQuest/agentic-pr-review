@@ -819,6 +819,19 @@ public sealed class AgentLoopTests
             error.Result);
     }
 
+    [Fact]
+    public void InvalidUnicodePathRuleUsesExactCanonicalRecoveryFeedback()
+    {
+        var rule = RepositoryPath.Failure("a\ud800");
+        Assert.Equal(RepositoryPathFailure.InvalidUnicode, rule);
+        var feedback = AgentRecoveryFeedback.ListFilesPathInvalid(
+            new ListFilesPathRejection(ListFilesPathField.Prefix, rule));
+        Assert.Equal(
+            "{\"status\":\"error\",\"code\":\"list_files_path_invalid\",\"path_field\":\"prefix\",\"path_rule\":\"invalid_unicode\",\"retryable\":true}",
+            feedback);
+        Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(feedback));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

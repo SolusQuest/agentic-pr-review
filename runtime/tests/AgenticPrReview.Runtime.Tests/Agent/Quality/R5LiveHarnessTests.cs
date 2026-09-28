@@ -80,6 +80,21 @@ public sealed class R5LiveHarnessTests
         Assert.True(code == 0, verdict.ToJsonString());
         Assert.Equal("verified", verdict["code"]?.GetValue<string>());
 
+        var invalidRecovery = result.Summary with
+        {
+            RecoveryDiagnostics = [new(8, 0, AgentToolRegistry.ListFilesName,
+                LiveRecoveryDiagnostic.ListFilesPathInvalid, "prefix", "unrecognized")],
+        };
+        lines[^1] = JsonSerializer.Serialize(invalidRecovery,
+            LiveJsonContext.Default.LiveRunSummary);
+        File.WriteAllLines(reportPath, lines);
+        var (recoveryRejected, recoveryReason) = R5CaseVerifier.Run(
+            ["verify-cases", "--scenario", "live-plan", "--corpus", corpus,
+                "--forbid", Canary, "--report", reportPath]);
+        Assert.Equal(1, recoveryRejected);
+        Assert.Equal("rejected_report_invalid",
+            recoveryReason["reason"]?.GetValue<string>());
+
         var forged = result.Summary with
         {
             AgentDiagnostics = [.. result.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex == 8
@@ -156,12 +171,17 @@ public sealed class R5LiveHarnessTests
     }
 
     [Theory]
-    [InlineData("cs-safe", "{\"path\":null}", AgentFailureCodes.ToolArgumentsInvalid,
-        LiveToolRejectionProjector.InvalidContract)]
+    [InlineData("cs-safe", "{\"path\":null}", AgentToolRegistry.ReadFileName,
+        AgentFailureCodes.ToolArgumentsInvalid, LiveRecoveryDiagnostic.ArgumentsInvalid)]
     [InlineData("repository-rule", "{\"path\":\"src/APR251_PRIVATE_CONTENT_CANARY.cs\"}",
-        AgentFailureCodes.ToolPathNotTracked, LiveToolRejectionProjector.PathNotTracked)]
+        AgentToolRegistry.ReadFileName, AgentFailureCodes.ToolPathNotTracked,
+        LiveToolRejectionProjector.PathNotTracked)]
+    [InlineData("repository-rule", "{\"prefix\":\"../APR251_PRIVATE_CONTENT_CANARY\"}",
+        AgentToolRegistry.ListFilesName, AgentFailureCodes.ToolArgumentsInvalid,
+        LiveRecoveryDiagnostic.ListFilesPathInvalid)]
     public async Task FrozenR6LiveReportKeepsRejectionPrivate(
-        string caseId, string arguments, string expectedCode, string expectedCategory)
+        string caseId, string arguments, string toolName, string expectedCode,
+        string expectedCategory)
     {
         var corpus = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r6", "quality-sandbox");
         var admitted = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(corpus).Fixture);
@@ -190,7 +210,7 @@ public sealed class R5LiveHarnessTests
                 injected = true;
                 var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
                 var function = body["choices"]![0]!["message"]!["tool_calls"]![0]!["function"]!;
-                function["name"] = AgentToolRegistry.ReadFileName;
+                function["name"] = toolName;
                 function["arguments"] = arguments;
                 return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
             });
@@ -198,8 +218,32 @@ public sealed class R5LiveHarnessTests
 
         if (expectedCode == AgentFailureCodes.ToolArgumentsInvalid)
         {
-            Assert.Equal(1, result.Completed);
-            Assert.Empty(result.Summary.AgentDiagnostics);
+            Assert.Equal(1, result.Attempted);
+            // The one-turn replay for repository-rule may fail after feedback;
+            // recovery must still be visible in its final summary.
+            if (toolName == AgentToolRegistry.ReadFileName)
+            {
+                Assert.Equal(1, result.Completed);
+                Assert.Empty(result.Summary.AgentDiagnostics);
+            }
+            else
+            {
+                Assert.Equal(1, result.Failed);
+                Assert.Single(result.Summary.AgentDiagnostics);
+            }
+            var recovery = Assert.Single(result.Summary.RecoveryDiagnostics!.Value);
+            Assert.Equal(0, recovery.ScheduleIndex);
+            Assert.Equal(toolName, recovery.Tool);
+            Assert.Equal(expectedCategory, recovery.Category);
+            if (toolName == AgentToolRegistry.ListFilesName)
+            {
+                Assert.Equal("prefix", recovery.PathField);
+                Assert.Equal("dot_segment", recovery.PathRule);
+            }
+            Assert.True(recovery.IsCanonical());
+            Assert.Equal(recovery, Assert.Single(JsonSerializer.Deserialize(
+                lines[^1], LiveJsonContext.Default.LiveRunSummary)!
+                .RecoveryDiagnostics!.Value));
         }
         else
         {
@@ -213,6 +257,7 @@ public sealed class R5LiveHarnessTests
             Assert.Equal(diagnostic,
                 Assert.Single(JsonSerializer.Deserialize(lines[^1],
                     LiveJsonContext.Default.LiveRunSummary)!.AgentDiagnostics));
+            Assert.Null(result.Summary.RecoveryDiagnostics);
         }
         Assert.Equal(0, result.Summary.UsageUnknownCalls);
         Assert.DoesNotContain(Canary, string.Join('\n', lines), StringComparison.Ordinal);

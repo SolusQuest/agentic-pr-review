@@ -140,7 +140,9 @@ internal sealed record LiveRunSummary(
     LiveCacheUsageSummary? CacheUsage = null,
     UsageJournalDocument? UsageJournal = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string? V5QualityCandidateStatus = null);
+        string? V5QualityCandidateStatus = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ImmutableArray<LiveRecoveryDiagnostic>? RecoveryDiagnostics = null);
 
 // Known subtotals describe only measured observations, not billed campaign
 // totals. The fixed identity domain bounds the output independently of traffic.
@@ -193,5 +195,6 @@ internal sealed class LivePlan(
 [JsonSerializable(typeof(LivePlanInput))]
 [JsonSerializable(typeof(LivePlanDigestInput))]
 [JsonSerializable(typeof(LiveAgentDiagnostic))]
+[JsonSerializable(typeof(LiveRecoveryDiagnostic))]
 [JsonSerializable(typeof(LiveRunSummary))]
 internal sealed partial class LiveJsonContext : JsonSerializerContext;
