@@ -151,7 +151,8 @@ internal static class R6ProspectiveAssessment
 
             var citationClass = "invalid";
             if (isTrue && defect is not null)
-                citationClass = CitationClass(finding, subject.GroundedObservations, defect);
+                citationClass = CitationClass(finding, subject.GroundedObservations, defect,
+                    row.Verdict == TrueOffFocus);
             else if (isTrue)
                 citationClass = finding.Evidence.Any(e => ChangedPaths.Contains(e.Path) &&
                     e.EndLine - e.StartLine <= 2 &&
@@ -190,10 +191,10 @@ internal static class R6ProspectiveAssessment
     }
 
     internal static string KnownCitationClass(string groupId, AgentFinding finding,
-        ImmutableArray<EvaluationObservation> observations)
+        ImmutableArray<EvaluationObservation> observations, bool offFocus = false)
     {
         var defect = Defects.FirstOrDefault(item => item.GroupId == groupId);
-        return defect is null ? "invalid" : CitationClass(finding, observations, defect);
+        return defect is null ? "invalid" : CitationClass(finding, observations, defect, offFocus);
     }
 
     internal static string? PublicGroupId(string? scope, string? id) =>
@@ -203,10 +204,11 @@ internal static class R6ProspectiveAssessment
             : id;
 
     private static string CitationClass(AgentFinding finding,
-        ImmutableArray<EvaluationObservation> observations, Defect defect)
+        ImmutableArray<EvaluationObservation> observations, Defect defect, bool offFocus)
     {
         if (finding.Severity != defect.Severity ||
-            !defect.RequiredReads.All(read => observations.Any(o =>
+            !defect.RequiredReads.Where(read => !offFocus || read.Path != defect.Path)
+                .All(read => observations.Any(o =>
                 o.Tool == AgentToolRegistry.ReadFileName && o.Observation.Grounds(
                     new(o.Observation.ObservationId, read.Path, read.Start, read.End)))))
             return "invalid";
@@ -215,7 +217,10 @@ internal static class R6ProspectiveAssessment
             if (evidence.Path != defect.Path || evidence.StartLine > defect.Line ||
                 evidence.EndLine < defect.Line ||
                 (defect.Line - evidence.StartLine) + (evidence.EndLine - defect.Line) > 2 ||
-                !observations.Any(o => o.Observation.Grounds(evidence)))
+                offFocus && !defect.RequiredReads.Where(read => read.Path == defect.Path)
+                    .All(read => evidence.StartLine <= read.Start && evidence.EndLine >= read.End) ||
+                !observations.Any(o => (!offFocus || o.Tool is AgentToolRegistry.ReadFileName or
+                    AgentToolRegistry.ReadDiffName) && o.Observation.Grounds(evidence)))
                 continue;
             return evidence.StartLine == defect.Line && evidence.EndLine == defect.Line
                 ? "exact" : "bounded_context";
