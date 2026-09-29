@@ -1636,12 +1636,13 @@ public sealed class R6ProspectivePipelineTests
                     StringComparison.Ordinal));
                 var caseIndex = int.Parse(latest.Split(' ')[1],
                     System.Globalization.CultureInfo.InvariantCulture);
+                Assert.InRange(caseIndex, 0, 4);
                 PromptCaseIndices.Add(caseIndex);
-                var packetPath = System.IO.Path.Combine(Root,
+                var packetPath = System.IO.Path.Join(Root,
                     v2 ? "case-" + caseIndex + ".json" : "review.json");
                 LastPacket = File.ReadAllText(packetPath);
                 if (v2 && caseIndex > 0)
-                    PriorPacketsVisible |= File.Exists(System.IO.Path.Combine(Root,
+                    PriorPacketsVisible |= File.Exists(System.IO.Path.Join(Root,
                         "case-" + (caseIndex - 1) + ".json"));
                 if (injectPacketCanaries)
                 {
@@ -1653,7 +1654,7 @@ public sealed class R6ProspectivePipelineTests
                     File.WriteAllText(packetPath, privatePacket.ToJsonString());
                     LastPacket = File.ReadAllText(packetPath);
                 }
-                var annotationPath = System.IO.Path.Combine(Root,
+                var annotationPath = System.IO.Path.Join(Root,
                     v2 ? "case-" + caseIndex + "-annotation.json" : "annotation.json");
                 var annotation = JsonNode.Parse(File.ReadAllText(annotationPath))!.AsObject();
                 using var packet = JsonDocument.Parse(LastPacket);

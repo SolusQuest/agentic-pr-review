@@ -37,9 +37,11 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
             foreach (var item in cases.OrderBy(c => c.Index))
             {
                 deadline.Token.ThrowIfCancellationRequested();
+                if (item.Index is < 0 or >= 5)
+                    throw new InvalidOperationException("prospective_case_index_invalid");
                 var stem = v2 ? "case-" + item.Index : "review";
-                var packetPath = Path.Combine(root, stem + ".json");
-                var annotationPath = Path.Combine(root, v2 ? stem + "-annotation.json" :
+                var packetPath = Path.Join(root, stem + ".json");
+                var annotationPath = Path.Join(root, v2 ? stem + "-annotation.json" :
                     "annotation.json");
                 await WritePacketAsync(packetPath, item, rubric, deadline.Token);
                 var initial = new R6ProspectiveAnnotation(rubric.Id,
