@@ -325,6 +325,8 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal(5, result.Completed);
         Assert.Equal("adjudicated", result.Summary.AdjudicationStatus);
         Assert.Equal(R6ProspectiveRubric.V2Id, result.Summary.ProspectiveRubric?.Id);
+        Assert.Equal("not_evaluable",
+            result.Summary.ProspectiveQualityCandidate?.CostKnowledgeStatus);
         Assert.True(input.PriorPacketsVisible);
         Assert.False(Directory.Exists(input.Root));
         foreach (var receipt in result.Summary.ProspectiveCaseReceipts!.Value)
@@ -423,6 +425,7 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal(1, live.Summary.ProspectiveQualityCandidate?.TrueOffFocusFindings);
         Assert.Equal("failed", live.Summary.ProspectiveQualityCandidate?.LegacyStructuralStatus);
         Assert.Equal("passed", live.Summary.ProspectiveQualityCandidate?.SafetyStatus);
+        Assert.Equal("known", live.Summary.ProspectiveQualityCandidate?.CostKnowledgeStatus);
         Assert.Equal("candidate_pass", R6ProspectiveReportReader.Read(
             Encoding.UTF8.GetBytes(string.Join('\n', liveLines) + "\n")).Status);
         var receipts = live.Summary.ProspectiveCaseReceipts!.Value;
@@ -437,7 +440,29 @@ public sealed class R6ProspectivePipelineTests
         };
         Assert.Equal("rejected", R6ProspectiveReportReader.Read(
             WriteReport(forged, live.Outcomes)).Status);
+        Assert.Equal("rejected", R6ProspectiveReportReader.Read(WriteReport(
+            live.Summary with { ProspectiveQualityCandidate =
+                live.Summary.ProspectiveQualityCandidate! with
+                { CostKnowledgeStatus = "unknown" } }, live.Outcomes)).Status);
         Assert.False(Directory.Exists(liveInput.Root));
+    }
+
+    [Theory]
+    [InlineData("stop\n")]
+    [InlineData("")]
+    public async Task V2StoppedReviewIsExplicitlyIncomplete(string command)
+    {
+        using var plan = new PlanFile(v2: true);
+        using var prompts = new StringWriter();
+        using var input = new StringReader(command);
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal("review_incomplete", result.Summary.AdjudicationStatus);
+        Assert.Equal(0, result.Summary.AiAdjudicatedCases);
     }
 
     [Fact]

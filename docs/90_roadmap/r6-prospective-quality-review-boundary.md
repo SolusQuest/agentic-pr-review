@@ -40,6 +40,19 @@ population; `candidate_pass` is only a machine-checked candidate.
 | Within-case repeated causal defect                                                            | Reviewer establishes identity; confirmed repetition blocks. Cross-case repetition is recorded as cost.                                                                                             |
 | Recovery failure or excess recovery; any other structural failure                             | Blocks. A successful bounded non-dispatched argument recovery is recorded, not automatically failed.                                                                                               |
 
+The complete current public reason vocabulary maps into those rows:
+`rubric_identity_invalid`, `plan_binding_invalid`, `case_binding_invalid`,
+`origin_count_mismatch`, `finding_shape_invalid`, `case_receipts_missing` and
+`origin_invalid` protect identity or receipt integrity;
+`population_ineligible` protects completion, safety, privacy, cleanup and
+accounting; `keyless_run` marks a control rather than a live entry;
+`recovery_count_invalid` and `recovery_ineligible` protect bounded recovery;
+`finding_ineligible`, `expected_finding_missing`, `within_case_duplicate` and
+`prohibited_evidence_unexplained` protect the independently reviewed finding
+dispositions; `legacy_override_invalid` limits explanations to the two named
+old-scorer signals. A reviewed semantic decision never changes the reason
+vocabulary or grants a generic override.
+
 The scheduled focal credits remain exactly `cs-null-deref` in `cs-defect`,
 `ts-zero-timeout` in `ts-defect`, and `repository-token-log` in
 `repository-rule`; safe cases receive zero focal credits. An off-focus authored
@@ -55,13 +68,15 @@ also explicitly records whether severity is justified and the selected anchor
 is relevant. An accusation remains an accusation in the public receipt even
 when the reviewer confirms a true unrelated issue. The public report retains
 only closed verdicts, ordinals, counts and digests, never the private finding
-text or tool results.
+text or tool results. The v2 candidate also records cost knowledge separately
+as known, unknown, unverified or not evaluable; v1 has no such field.
 
 V2 retains prior case packets and accepted annotations inside the private
 directory until all five reviews finish, so the reviewer can compare causal
 groups across cases. The whole directory is then cleaned. One malformed
 annotation may be corrected while the same packet, subject and review deadline
-remain live. Accepted receipts cannot be reopened.
+remain live. A second invalid annotation, stop or timeout records
+`review_incomplete`; accepted receipts cannot be reopened.
 
 Select v2 in a separately reviewed finite plan with
 `"rubric":{"id":"r6-v5-semantic-v2","sha256":"e06ee430f2e8386d5b5dbe0849c168e2a8b40edc5c55230b9fcf21b9c3d4ece2"}`.

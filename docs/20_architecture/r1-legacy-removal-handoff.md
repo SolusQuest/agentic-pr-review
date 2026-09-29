@@ -118,6 +118,7 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-042      | R6 prospective quality decision                 | Current R5 structural-signal history retained beside the R6 rubric                    |
 | RR-043      | R6 evaluator and control tests                  | Narrow conformance for retained structural signals and bounded semantic precedence    |
 | RR-044      | R6 prospective quality observation              | Current public-safe reports and decision records retain the structural scoring field  |
+| RR-045      | R6 v2 independent review boundary               | Names the retained structural override reason without restoring a retired route       |
 
 Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
 

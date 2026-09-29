@@ -62,9 +62,12 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                         "; enter accept, skip or stop");
                     await prompts.FlushAsync(deadline.Token);
                     var command = await ReadCommandAsync(deadline.Token);
-                    if (command is null or "stop") { status = "pending"; break; }
-                    if (command == "skip") { status = "pending"; skipped = true; break; }
-                    if (command != "accept") { status = "input_invalid"; break; }
+                    if (command is null or "stop")
+                    { status = v2 ? "review_incomplete" : "pending"; break; }
+                    if (command == "skip")
+                    { status = v2 ? "review_incomplete" : "pending"; skipped = true; break; }
+                    if (command != "accept")
+                    { status = v2 ? "review_incomplete" : "input_invalid"; break; }
                     R6ProspectiveCaseReceipt? receipt = null;
                     var info = new FileInfo(annotationPath);
                     if (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) == 0 &&
@@ -101,9 +104,11 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                     File.Delete(annotationPath);
                 }
             }
-            if (status == "adjudicated" && receipts.Count != cases.Count) status = "pending";
+            if (status == "adjudicated" && receipts.Count != cases.Count)
+                status = v2 ? "review_incomplete" : "pending";
         }
-        catch (OperationCanceledException) { status = "cancelled"; }
+        catch (OperationCanceledException)
+        { status = v2 ? "review_incomplete" : "cancelled"; }
         catch { status = "failed"; }
         finally
         {

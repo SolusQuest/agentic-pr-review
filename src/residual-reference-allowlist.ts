@@ -332,4 +332,13 @@ export const residualReferenceRules = [
     'legacy names the retained structural scoring dimension beside the prospective semantic result, not a supported retired runtime',
     'an accepted successor observation must keep the historical scoring outcome distinct from its prospective candidate verdict',
   ),
+  narrowConformance(
+    'RR-045',
+    /legacy/iu,
+    /^docs\/90_roadmap\/r6-prospective-quality-review-boundary\.md$/u,
+    'R6 v2 independent review boundary owner',
+    'current prospective hard-gate and reviewed-semantic decision inventory',
+    'legacy_override_invalid is the retained structural signal limit, not a supported retired runtime route',
+    'an accepted rubric successor must preserve old-scoring outcomes and allow only the two named reviewed explanations',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];

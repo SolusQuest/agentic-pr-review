@@ -18,7 +18,9 @@ internal sealed record R6ProspectiveGateResult(
     [property: JsonRequired] string LegacyStructuralStatus,
     [property: JsonRequired] string ProspectiveSemanticStatus,
     [property: JsonRequired] string SafetyStatus,
-    [property: JsonRequired] string UsabilityStatus);
+    [property: JsonRequired] string UsabilityStatus,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CostKnowledgeStatus = null);
 
 // Recomputable candidate from public-safe, bounded rows. It verifies row
 // consistency and accounting, but semantic truth still depends on the actual
@@ -195,6 +197,8 @@ internal static class R6ProspectiveQualityGate
         ImmutableArray<EvaluationOutcome> outcomes)
     {
         if (summary.ProspectiveRubric is null) return null;
+        var v2 = R6ProspectiveRubric.IsV2(summary.ProspectiveRubric);
+        var costKnowledge = "unverified";
         var legacy = outcomes.Length != 5 ? "incomplete" :
             outcomes.Any(row => row.ScenarioStatus != AssertionStatus.Passed) ? "failed" : "passed";
         R6ProspectiveGateResult Block(string reason)
@@ -206,18 +210,21 @@ internal static class R6ProspectiveQualityGate
             var safety = reason is "finding_ineligible" or "finding_shape_invalid"
                 ? "failed" : semantic == "failed" ? "passed" : "not_evaluable";
             return new("blocked", reason, 0, 0, 0, 0, 0, 0, 0,
-                legacy, semantic, safety, "blocked");
+                legacy, semantic, safety, "blocked",
+                v2 ? costKnowledge : null);
         }
         var rubric = summary.ProspectiveRubric;
         if (!R6ProspectiveRubric.ValidSelection(rubric, summary.CorpusSha256,
                 R6ProspectiveRubric.Cases))
             return Block("rubric_identity_invalid");
-        var v2 = R6ProspectiveRubric.IsV2(rubric);
         if (summary.ExecutionKind != "live")
             return new("not_evaluable", "keyless_run", 0, 0, 0, 0, 0, 0, 0,
-                legacy, "not_evaluable", "not_evaluable", "not_evaluable");
+                legacy, "not_evaluable", "not_evaluable", "not_evaluable",
+                v2 ? "not_evaluable" : null);
         if (!ValidJournalBinding(summary, outcomes))
             return Block("plan_binding_invalid");
+        costKnowledge = summary.UsageUnknownCalls == 0 && !summary.AccountingViolation
+            ? "known" : "unknown";
         if (summary.Scheduled != 5 || summary.Attempted != 5 || summary.Completed != 5 ||
             summary.Failed != 0 || summary.Invalid != 0 || summary.Unattempted != 0 ||
             summary.StopReason != "complete" || summary.Cleanup != "cleaned" ||
@@ -379,9 +386,11 @@ internal static class R6ProspectiveQualityGate
             return new("blocked", blockedReason, expectedCredits, offFocus,
                 repeats, groups.Count, qualifiedRecoveries, ai, human, legacy,
                 semanticFailed ? "failed" : "passed",
-                safetyFailed ? "failed" : "passed", usability);
+                safetyFailed ? "failed" : "passed", usability,
+                v2 ? costKnowledge : null);
         return new("candidate_pass", "all_gates_passed", expectedCredits, offFocus,
             repeats, groups.Count, qualifiedRecoveries, ai, human,
-            legacy, "passed", "passed", usability);
+            legacy, "passed", "passed", usability,
+            v2 ? costKnowledge : null);
     }
 }
