@@ -323,4 +323,13 @@ export const residualReferenceRules = [
     'legacy names only the retained R5 scenario status and two bounded prospective override controls',
     'an accepted evaluator replacement must keep old outcomes immutable and verify the same hard-gate precedence',
   ),
+  narrowConformance(
+    'RR-044',
+    /legacy/iu,
+    /^(?:docs\/90_roadmap\/r6-prospective-quality-observation\.md|runtime\/tests\/fixtures\/agent\/r6\/quality-observation\/prospective-live-0dea1d0e\.jsonl)$/u,
+    'R6 prospective quality observation owner',
+    'current public-safe five-case report and decision record',
+    'legacy names the retained structural scoring dimension beside the prospective semantic result, not a supported retired runtime',
+    'an accepted successor observation must keep the historical scoring outcome distinct from its prospective candidate verdict',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];
