@@ -68,4 +68,25 @@ public sealed class R6ProspectiveRubricTests
         Assert.False(LivePlanAdmission.ValidProjection(v2 with
         { Rubric = v2.Rubric! with { Sha256 = R6ProspectiveRubric.Sha256 } }));
     }
+
+    [Fact]
+    public void V3SelectionIsForwardOnlyAndBoundToItsOwnDigest()
+    {
+        var old = Plan();
+        var v1 = old with { Rubric = new(R6ProspectiveRubric.Id,
+            R6ProspectiveRubric.Sha256) };
+        var v2 = old with { Rubric = new(R6ProspectiveRubric.V2Id,
+            R6ProspectiveRubric.V2Sha256) };
+        var v3 = old with { Rubric = new(R6ProspectiveRubric.V3Id,
+            R6ProspectiveRubric.V3Sha256) };
+        Assert.True(LivePlanAdmission.ValidProjection(v3));
+        Assert.Equal("929a6ef16bb8a508b7a31b87c8936cdc29f72624f6771fbd711f8aaa6f84db67",
+            R6ProspectiveRubric.V3Sha256);
+        Assert.NotEqual(LivePlanAdmission.Digest(v1), LivePlanAdmission.Digest(v3));
+        Assert.NotEqual(LivePlanAdmission.Digest(v2), LivePlanAdmission.Digest(v3));
+        Assert.False(LivePlanAdmission.ValidProjection(v3 with
+        { Rubric = v3.Rubric! with { Sha256 = R6ProspectiveRubric.V2Sha256 } }));
+        Assert.True(LivePlanAdmission.ValidProjection(v1));
+        Assert.True(LivePlanAdmission.ValidProjection(v2));
+    }
 }

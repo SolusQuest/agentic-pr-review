@@ -51,4 +51,9 @@ The manifest was admitted by `r5-plan`, and `live-local --dry-run --plan` ran al
 
 An independent pre-execution truth review in Relay session `6ab391e1-b638-83e8-9a25-76af9ead56d5` identified two admission gaps: TypeScript coverage initially omitted the line defining zero semantics, and exact positive severity lacked a general rubric. Both were corrected before any paid call. The targeted review task `952041d2-9ee7-4525-82a6-b49a0119ebcf` returned `SAMPLE_TRUTH_READY` for the corrected contract and manifest hash above. It did not assess live model outputs. The exact corpus and plan digest must be rechecked against the later committed source before paid execution.
 
+The prospective [v3 quality boundary](../90_roadmap/r6-prospective-quality-v3-boundary.md)
+is a later, forward-only admission rule for this frozen source. It does not
+change the #294 sample record, historical required `read_file` rule, or any
+prior run verdict.
+
 The R5 evaluation gate now includes this corpus as a separate `quality-sandbox` scenario in framework and Linux x64 Native AOT runs, with declared five-case verification and cross-mode parity. Focused tests pin the PR identity and check the source truths using actual returned tool lines. A later live population belongs to [R6-V5 issue #295](https://github.com/SolusQuest/agentic-pr-review/issues/295), which must predeclare its finite plan and separately assess model quality, safety, failure, reviewer origin and cleanup. Historical R5 and R6 evidence is unchanged.

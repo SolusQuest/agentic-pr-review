@@ -38,9 +38,10 @@ internal static class R6ProspectiveQualityGate
     {
         var rubric = selectedRubric ?? new LivePlanRubric(R6ProspectiveRubric.Id,
             R6ProspectiveRubric.Sha256);
-        if (!R6ProspectiveRubric.IsV1(rubric) && !R6ProspectiveRubric.IsV2(rubric))
+        if (!R6ProspectiveRubric.IsV1(rubric) &&
+            !R6ProspectiveRubric.HasIndependentReview(rubric))
             return false;
-        var v2 = R6ProspectiveRubric.IsV2(rubric);
+        var v2 = R6ProspectiveRubric.HasIndependentReview(rubric);
         if (finding is null || finding.FindingOrdinal != ordinal ||
             finding.SafeLineRole is not (R6ProspectiveAssessment.None or
                 R6ProspectiveAssessment.Comparison or R6ProspectiveAssessment.Accusation))
@@ -201,7 +202,8 @@ internal static class R6ProspectiveQualityGate
         ImmutableArray<EvaluationOutcome> outcomes)
     {
         if (summary.ProspectiveRubric is null) return null;
-        var v2 = R6ProspectiveRubric.IsV2(summary.ProspectiveRubric);
+        var v2 = R6ProspectiveRubric.HasIndependentReview(summary.ProspectiveRubric);
+        var v3 = R6ProspectiveRubric.IsV3(summary.ProspectiveRubric);
         var costKnowledge = "unverified";
         var legacy = outcomes.Length != 5 ? "incomplete" :
             outcomes.Any(row => row.ScenarioStatus != AssertionStatus.Passed) ? "failed" : "passed";
@@ -234,7 +236,8 @@ internal static class R6ProspectiveQualityGate
             summary.StopReason != "complete" || summary.Cleanup != "cleaned" ||
             !summary.SourceClean || summary.AccountingViolation ||
             summary.SimulatedAdapterCalls != 0 || summary.ActualProviderCalls <= 0 ||
-            summary.UsageUnknownCalls != 0 || !summary.AgentDiagnostics.IsDefaultOrEmpty ||
+            (!v3 && summary.UsageUnknownCalls != 0) ||
+            !summary.AgentDiagnostics.IsDefaultOrEmpty ||
             summary.AdjudicationStatus != "adjudicated" || outcomes.Length != 5)
             return Block("population_ineligible");
         if (summary.ProspectiveCaseReceipts is not { } receipts ||
@@ -286,6 +289,9 @@ internal static class R6ProspectiveQualityGate
                 caseReceipt.ExecutionSha256 != row.ExecutionSha256 ||
                 caseReceipt.Status != "assessed" ||
                 caseReceipt.Findings.IsDefault ||
+                (v3 ? caseReceipt.Attribution is not { } attribution ||
+                    !attribution.Valid(row.ToolObservationCount)
+                    : caseReceipt.Attribution is not null) ||
                 caseReceipt.FindingRowCount != row.FindingCount ||
                 caseReceipt.Findings.Length != row.FindingCount)
                 return Block("case_binding_invalid");
@@ -355,9 +361,9 @@ internal static class R6ProspectiveQualityGate
                 var group = (finding.DefectGroupScope!, finding.DefectGroupId!);
                 if (!localGroups.Add(group))
                 {
-                    blockedReason ??= "within_case_duplicate";
+                    if (!v3) blockedReason ??= "within_case_duplicate";
                     withinCaseDuplicate = true;
-                    semanticFailed = true;
+                    if (!v3) semanticFailed = true;
                     continue;
                 }
                 if (finding.Verdict == R6ProspectiveAssessment.Expected) focal++;
@@ -392,9 +398,11 @@ internal static class R6ProspectiveQualityGate
         if (recoveryReceipts.Sum(receipt => receipt.ObservedCount) > 1 ||
             recoveryDiagnostics.Length > 1)
             blockedReason ??= "recovery_count_invalid";
-        var usability = withinCaseDuplicate ? "blocked" :
-            repeats > 0 || qualifiedRecoveries > 0 || offFocus > 0
+        var usability = withinCaseDuplicate && !v3 ? "blocked" :
+            withinCaseDuplicate || repeats > 0 || qualifiedRecoveries > 0 || offFocus > 0
                 ? "cost_recorded" : "clean";
+        if (v3 && costKnowledge != "known")
+            blockedReason ??= "cost_unknown";
         if (blockedReason is not null)
             return new("blocked", blockedReason, expectedCredits, offFocus,
                 repeats, groups.Count, qualifiedRecoveries, ai, human, legacy,

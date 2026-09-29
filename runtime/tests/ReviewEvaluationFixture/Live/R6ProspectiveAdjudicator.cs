@@ -19,9 +19,10 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
         IReadOnlyList<LiveAdjudicationCase> cases, LivePlanRubric rubric,
         CancellationToken token)
     {
-        if (!R6ProspectiveRubric.IsV1(rubric) && !R6ProspectiveRubric.IsV2(rubric))
+        if (!R6ProspectiveRubric.IsV1(rubric) &&
+            !R6ProspectiveRubric.HasIndependentReview(rubric))
             throw new InvalidOperationException("prospective_rubric_invalid");
-        var v2 = R6ProspectiveRubric.IsV2(rubric);
+        var v2 = R6ProspectiveRubric.HasIndependentReview(rubric);
         string? root = null;
         var status = cases.Count == 0 ? "not_evaluable" : "adjudicated";
         var cleanup = "none";
@@ -61,6 +62,8 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                         " inspect " + Path.GetFileName(packetPath) + "; edit " +
                         Path.GetFileName(annotationPath) +
                         (v2 ? "; compare causes across findings and prior accepted case files; reuse one group id for the same cause; mark unresolved if uncertain" : "") +
+                        (R6ProspectiveRubric.IsV3(rubric)
+                            ? "; record observed outcome separately from causal attribution; use undetermined when evidence does not identify a cause" : "") +
                         "; enter accept, skip or stop");
                     await prompts.FlushAsync(deadline.Token);
                     var command = await ReadCommandAsync(deadline.Token);

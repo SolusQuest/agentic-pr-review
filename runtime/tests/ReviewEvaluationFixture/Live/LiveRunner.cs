@@ -395,7 +395,9 @@ internal static class LiveRunner
             options.ProspectiveReviewer is not null))
             subjects.Add(new(index, run, subject));
         return subject is not null
-            ? EvaluationScorer.Evaluate(run.Expected, subject)
+            ? EvaluationScorer.Evaluate(run.Expected, subject, equivalentObservation:
+                R6ProspectiveRubric.IsV3(prospectiveRubric)
+                    ? R6ProspectiveAssessment.EquivalentChangedRead : null)
             : EvaluationScorer.Failure(run.Expected, EvaluationFailure.Unknown, attempt);
     }
 
