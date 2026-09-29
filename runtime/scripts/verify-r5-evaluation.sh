@@ -30,7 +30,7 @@ DOTNET_CMD="${DOTNET_CMD:-dotnet}"
 
 CORPUS_CANARIES="APR242_TERMINAL_CANARY,APR242_CANDIDATE_CANARY,APR242_NOTES_CANARY,APR242_POLICY_CANARY,APR242_SOURCE_CANARY"
 LIVE_CANARY="APR251_PRIVATE_CONTENT_CANARY"
-FOCUSED_CLASSES="R5IncrementalReviewTests,R5SessionGrowthTests,R5CapacityResetTests,R5ResetHandoffTests,R5VerifierCoverageTests,R6QualitySandboxTests"
+FOCUSED_CLASSES="R5IncrementalReviewTests,R5SessionGrowthTests,R5CapacityResetTests,R5ResetHandoffTests,R5VerifierCoverageTests,R6QualitySandboxTests,R6ProspectivePipelineTests,R6ProspectiveRubricTests"
 
 _roots=()
 
@@ -114,6 +114,31 @@ _scenario() {
   printf 'r5_eval_gate mode=%s scenario=%s result=verified\n' "${mode}" "${name}"
 }
 
+# Exercise the selected prospective readback in both framework and AOT modes.
+# This is a keyless five-case dry run; a candidate pass requires a separate paid
+# population and independent semantic review.
+_prospective_scenario() {
+  local mode="$1"
+  local plan="${EVIDENCE}/${mode}/r6-prospective.plan.json"
+  local report="${EVIDENCE}/${mode}/r6-prospective.report.jsonl"
+  local verdict="${EVIDENCE}/${mode}/r6-prospective.verdict.txt"
+  "${RUNNER[@]}" r5-plan --corpus "${R6_QUALITY_SANDBOX}" --out "${plan}" --profile output65536 \
+      >"${EVIDENCE}/${mode}/r6-prospective.plan.out" ||
+    _fail "APR_R6_PROSPECTIVE_PLAN_FAILED ${mode}"
+  node -e 'const fs = require("node:fs"); const path = process.argv[1]; const plan = JSON.parse(fs.readFileSync(path, "utf8")); plan.rubric = { id: "r6-v5-semantic-v1", sha256: "b73cdcea42672134400a4eab4e77607e1311f1003d9c8bb7b1ee9e654f6adcab" }; fs.writeFileSync(path, JSON.stringify(plan));' "${plan}"
+  "${RUNNER[@]}" live-local --dry-run --plan "${plan}" >"${report}" \
+      2>"${report}.err" ||
+    _fail "APR_R6_PROSPECTIVE_RUN_FAILED ${mode}"
+  local verifier_status=0
+  "${RUNNER[@]}" r6-prospective-verify --report "${report}" >"${verdict}" \
+      2>"${verdict}.err" || verifier_status=$?
+  [[ ${verifier_status} -eq 1 && "$(cat "${verdict}")" == "r6_prospective_not_evaluable keyless_run" ]] ||
+    _fail "APR_R6_PROSPECTIVE_READBACK_FAILED ${mode}"
+  node -e 'const fs = require("node:fs"); const rows = fs.readFileSync(process.argv[1], "utf8").trimEnd().split("\n"); if (rows.length !== 7) process.exit(1); const summary = JSON.parse(rows[6]); if (summary.prospective_rubric?.id !== "r6-v5-semantic-v1" || summary.prospective_case_receipts?.length !== 5 || summary.prospective_recovery_receipts?.length !== 5 || summary.prospective_quality_candidate?.status !== "not_evaluable") process.exit(1);' "${report}" ||
+    _fail "APR_R6_PROSPECTIVE_SHAPE_FAILED ${mode}"
+  printf 'r5_eval_gate mode=%s scenario=r6-prospective result=verified\n' "${mode}"
+}
+
 _build_framework() {
   local log="${BUILD}/build-framework.log"
   "${DOTNET_CMD}" build "${PROJECT}" -c Release --nologo \
@@ -172,6 +197,7 @@ _run_scenarios() {
       >"${EVIDENCE}/${mode}/quality-sandbox.plan.out" ||
     _fail "APR_R5_EVAL_QUALITY_SANDBOX_PLAN_FAILED ${mode}"
   _scenario "${mode}" quality-sandbox live-local --dry-run --plan "${sandbox_plan}"
+  _prospective_scenario "${mode}"
   printf 'r5_eval_gate mode=%s artifact_sha256=%s\n' "${mode}" "${ARTIFACT_SHA}"
 }
 
@@ -182,7 +208,7 @@ _run_focused_tests() {
     trx_arg="$(cygpath -w "${trx}")"
   fi
   "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
-      --filter "FullyQualifiedName~R5IncrementalReviewTests|FullyQualifiedName~R5SessionGrowthTests|FullyQualifiedName~R5CapacityResetTests|FullyQualifiedName~R5ResetHandoffTests|FullyQualifiedName~R5VerifierCoverageTests|FullyQualifiedName~R6QualitySandboxTests" \
+      --filter "FullyQualifiedName~R5IncrementalReviewTests|FullyQualifiedName~R5SessionGrowthTests|FullyQualifiedName~R5CapacityResetTests|FullyQualifiedName~R5ResetHandoffTests|FullyQualifiedName~R5VerifierCoverageTests|FullyQualifiedName~R6QualitySandboxTests|FullyQualifiedName~R6ProspectivePipelineTests|FullyQualifiedName~R6ProspectiveRubricTests" \
       --logger "trx;LogFileName=${trx_arg}" >"${BUILD}/focused.log" 2>&1 ||
     _fail "APR_R5_EVAL_FOCUSED_TESTS_FAILED"
   "${RUNNER[@]}" verify-cases --trx "${trx}" --require "${FOCUSED_CLASSES}" ||
@@ -210,6 +236,10 @@ run_parity() {
       _fail "APR_R5_EVAL_PARITY_REJECTED ${name}"
     printf 'r5_eval_gate parity=%s result=verified\n' "${name}"
   done
+  cmp -s "${EVIDENCE}/framework/r6-prospective.verdict.txt" \
+      "${EVIDENCE}/aot/r6-prospective.verdict.txt" ||
+    _fail "APR_R6_PROSPECTIVE_PARITY_REJECTED"
+  printf 'r5_eval_gate parity=r6-prospective result=verified\n'
 }
 
 _assert_cleanup() {

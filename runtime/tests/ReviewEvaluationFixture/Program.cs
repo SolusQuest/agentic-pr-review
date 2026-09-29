@@ -27,6 +27,8 @@ internal static class Program
         try
         {
             if (args.Length > 0 && args[0] == "r6-gate") return await GateCommand.InvokeAsync(args);
+            if (args is ["r6-prospective-verify", "--report", { } prospectiveReport])
+                return R6ProspectiveReportReader.Invoke(prospectiveReport);
             if (args.SequenceEqual(["economics-child"])) return await EconomicsChild.MainAsync();
             if (args.Length > 0 && args[0] is "economics-live" or "economics-plan") return await EconomicsCommand.InvokeAsync(args);
             if (args.Length > 0 && args[0] == "economics-compare")
@@ -43,6 +45,18 @@ internal static class Program
                 return await LiveRunner.InvokeAsync(reviewDryPlan, execute: false, adjudicate: true);
             if (args is ["live-local", "--execute", "--plan", { } reviewPlan, "--adjudicate"])
                 return await LiveRunner.InvokeAsync(reviewPlan, execute: true, adjudicate: true);
+            if (args is ["live-local", "--dry-run", "--plan", { } prospectiveDryPlan,
+                "--prospective-ai-review"])
+                return await LiveRunner.InvokeAsync(prospectiveDryPlan, execute: false,
+                    prospectiveOrigin: R6ProspectiveAssessment.AiOrigin);
+            if (args is ["live-local", "--execute", "--plan", { } prospectivePlan,
+                "--prospective-ai-review"])
+                return await LiveRunner.InvokeAsync(prospectivePlan, execute: true,
+                    prospectiveOrigin: R6ProspectiveAssessment.AiOrigin);
+            if (args is ["live-local", "--execute", "--plan", { } humanProspectivePlan,
+                "--prospective-human-review"])
+                return await LiveRunner.InvokeAsync(humanProspectivePlan, execute: true,
+                    prospectiveOrigin: R6ProspectiveAssessment.HumanOrigin);
             if (args.Length > 0 && args[0] == "live-local")
             {
                 Console.Error.WriteLine("r5_evaluation_input_invalid");

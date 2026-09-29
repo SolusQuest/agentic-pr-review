@@ -38,6 +38,7 @@ internal sealed class LiveOptions
         run => new ReplayTransport(run.Script, ReplayFault.None);
     internal Action<string>? WriteLine { get; init; }
     internal LiveAdjudicator? Adjudicator { get; init; }
+    internal R6ProspectiveAdjudicator? ProspectiveReviewer { get; init; }
 }
 
 // Serial bounded scheduler over the admitted plan. Each expanded evaluation is
@@ -47,7 +48,8 @@ internal static class LiveRunner
 {
     internal const string BuildId = "r5-live-local";
 
-    internal static async Task<int> InvokeAsync(string planPath, bool execute, bool adjudicate = false)
+    internal static async Task<int> InvokeAsync(string planPath, bool execute, bool adjudicate = false,
+        string? prospectiveOrigin = null)
     {
         using var commandCancel = new CancellationTokenSource();
         ConsoleCancelEventHandler? handler = null;
@@ -59,8 +61,13 @@ internal static class LiveRunner
                 commandCancel.Cancel();
             };
             Console.CancelKeyPress += handler;
-            var result = await RunAsync(planPath, execute, adjudicate
-                ? new LiveOptions { Adjudicator = new LiveAdjudicator(Console.In, Console.Error) } : null,
+            var options = adjudicate
+                ? new LiveOptions { Adjudicator = new LiveAdjudicator(Console.In, Console.Error) }
+                : prospectiveOrigin is not null
+                    ? new LiveOptions { ProspectiveReviewer = new R6ProspectiveAdjudicator(
+                        Console.In, Console.Error, prospectiveOrigin) }
+                    : null;
+            var result = await RunAsync(planPath, execute, options,
                 commandCancel.Token);
             return result.StopReason == "complete" &&
                 result.Summary.AdjudicationStatus is "not_requested" or "adjudicated" ? 0 : 1;
@@ -92,6 +99,10 @@ internal static class LiveRunner
         options ??= new();
         var write = options.WriteLine ?? Console.WriteLine;
         var plan = LivePlanAdmission.Load(planPath, execute, token);
+        if (plan.Rubric is null && options.ProspectiveReviewer is not null ||
+            plan.Rubric is not null && options.Adjudicator is not null ||
+            execute && plan.Rubric is not null && options.ProspectiveReviewer is null)
+            throw new LivePlanRejected(LiveAdmissionCode.InvalidPlan);
         if (!LivePlanAdmission.TryProviderProfile(plan.Provider, out var profile))
             throw new InvalidOperationException("live_profile_invalid");
         var limitAuthority = DeepSeekAdapterContext.LimitAuthorityFor(profile);
@@ -121,13 +132,14 @@ internal static class LiveRunner
             EvaluationSource.Clean, BuildId, fixture.CorpusSha256, plan.Provider.ConfigurationSha256,
             plan.Digest, execute ? "live" : "loopback"),
             new(LiveLimits.PlanFormat, new(EvaluationSource.Commit, EvaluationSource.Tree, EvaluationSource.Clean),
-                fixture.CorpusSha256, plan.Provider, plan.Schedule, plan.Bounds));
+                fixture.CorpusSha256, plan.Provider, plan.Schedule, plan.Bounds, plan.Rubric));
         var journal = new UsageJournalCollector(expectation);
         var rows = ImmutableArray.CreateBuilder<ReadOnlyMemory<byte>>();
         var outcomes = ImmutableArray.CreateBuilder<EvaluationOutcome>();
         var subjects = new List<LiveAdjudicationCase>();
         var diagnostics = new List<LiveAgentDiagnostic>();
         var recoveries = new List<LiveRecoveryDiagnostic>();
+        var recoveryReceipts = new List<R6ProspectiveRecoveryReceipt>();
         var completed = 0;
         var failed = 0;
         var invalid = 0;
@@ -168,7 +180,8 @@ internal static class LiveRunner
                     {
                         outcome = await AttemptAsync(run, trusted, stable!, descriptor, attempt, runId,
                             execute, credential, options, accounting, scope, subjects, diagnostics,
-                            recoveries, index, deadline.Token);
+                            recoveries, recoveryReceipts, index, plan.Rubric is not null,
+                            deadline.Token);
                         switch (outcome.ExecutionStatus)
                         {
                             case EvaluationStatus.Completed: completed++; break;
@@ -221,9 +234,15 @@ internal static class LiveRunner
         // Provider execution has ended. Keep only admitted subjects, never SESSION
         // or provider bytes, while a maintainer reviews the private projections.
         credential = null;
-        var adjudication = options.Adjudicator is { } reviewer
+        R6ProspectiveReviewResult? prospective = null;
+        if (plan.Rubric is not null && options.ProspectiveReviewer is { } prospectiveReviewer)
+            prospective = await prospectiveReviewer.ReviewAsync(subjects, token);
+        var adjudication = plan.Rubric is null && options.Adjudicator is { } reviewer
             ? await reviewer.ReviewAsync(subjects, outcomes, token)
-            : new LiveAdjudicationStatus("not_requested", "none", 0);
+            : prospective is not null
+                ? new LiveAdjudicationStatus(prospective.Status, prospective.Cleanup,
+                    prospective.HumanCases, prospective.AiCases)
+                : new LiveAdjudicationStatus("not_requested", "none", 0);
         rows.Clear();
         foreach (var outcome in outcomes) rows.Add(EvaluationJson.Write(outcome));
         var report = EvaluationReport.Create(rows.ToImmutable());
@@ -233,6 +252,30 @@ internal static class LiveRunner
         if (!reportBytes.Succeeded || reportBytes.Value is null)
             throw new InvalidOperationException("live_report_invalid");
         var attempted = completed + failed + invalid;
+        ImmutableArray<R6ProspectiveCaseReceipt>? prospectiveCases = plan.Rubric is null ? null : Enumerable.Range(0, plan.Schedule.Length)
+            .Select(index =>
+            {
+                var row = index < outcomes.Count ? outcomes[index] : null;
+                return prospective?.Receipts.FirstOrDefault(receipt =>
+                    receipt.ScheduleIndex == index) ??
+                    new R6ProspectiveCaseReceipt(R6ProspectiveRubric.Id,
+                        R6ProspectiveRubric.Sha256, index, plan.Schedule[index],
+                        fixture.CorpusSha256, cases[plan.Schedule[index]].Expected.Sha256,
+                        row?.ConfigurationSha256, row?.ExecutionSha256,
+                        "none", "pending", row?.FindingCount ?? 0, []);
+            }).ToImmutableArray();
+        ImmutableArray<R6ProspectiveRecoveryReceipt>? prospectiveRecoveries = plan.Rubric is null ? null : Enumerable.Range(0,
+                plan.Schedule.Length)
+            .Select(index =>
+            {
+                var row = index < outcomes.Count ? outcomes[index] : null;
+                return recoveryReceipts.FirstOrDefault(receipt => receipt.ScheduleIndex == index) ??
+                    new R6ProspectiveRecoveryReceipt(R6ProspectiveRubric.Id,
+                        R6ProspectiveRubric.Sha256, index,
+                        cases[plan.Schedule[index]].Expected.Sha256,
+                        row?.ConfigurationSha256, row?.ExecutionSha256,
+                        0, R6ProspectiveRecoveryAudit.Blocked, "capture_missing");
+            }).ToImmutableArray();
         var summary = new LiveRunSummary("r5-live-local-v1", execute ? "live" : "loopback",
             plan.Digest, fixture.CorpusSha256, EvaluationSource.Commit, EvaluationSource.Tree,
             EvaluationSource.Clean, plan.Schedule.Length, attempted, completed, failed, invalid,
@@ -245,11 +288,16 @@ internal static class LiveRunner
             diagnostics.ToImmutableArray(),
             adjudication.Status, adjudication.ConfirmedCases, adjudication.AiCases,
             frozenAccounting.CacheUsage, frozenJournal.Document,
-            RecoveryDiagnostics: recoveries.Count == 0 ? null : recoveries.ToImmutableArray());
+            RecoveryDiagnostics: recoveries.Count == 0 ? null : recoveries.ToImmutableArray(),
+            ProspectiveRubric: plan.Rubric,
+            ProspectiveCaseReceipts: prospectiveCases,
+            ProspectiveRecoveryReceipts: prospectiveRecoveries);
         summary = summary with
         {
             V5QualityCandidateStatus = R6V5QualityGate.Evaluate(
                 summary, plan.Schedule, outcomes.ToImmutable()),
+            ProspectiveQualityCandidate = R6ProspectiveQualityGate.Evaluate(summary,
+                outcomes.ToImmutable()),
         };
         foreach (var row in rows) write(Encoding.UTF8.GetString(row.Span));
         write(Encoding.UTF8.GetString(reportBytes.Value));
@@ -287,7 +335,9 @@ internal static class LiveRunner
         DeepSeekCredential? credential, LiveOptions options, LiveAccounting accounting,
         UsageJournalCollector.AttemptScope journalAttempt,
         List<LiveAdjudicationCase> subjects, List<LiveAgentDiagnostic> diagnostics,
-        List<LiveRecoveryDiagnostic> recoveries, int index,
+        List<LiveRecoveryDiagnostic> recoveries,
+        List<R6ProspectiveRecoveryReceipt> recoveryReceipts, int index,
+        bool prospectiveSelected,
         CancellationToken token)
     {
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable.StablePlan, runId,
@@ -307,11 +357,19 @@ internal static class LiveRunner
         var outcome = await new AgentLoop(observed, executor, limitAuthority: trusted.LimitAuthority)
             .RunAsync(request, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
-        recoveries.AddRange(LiveRecoveryDiagnostic.Capture(index, outcome));
+        if (!prospectiveSelected)
+            recoveries.AddRange(LiveRecoveryDiagnostic.Capture(index, outcome));
         var rejection = observed.TakeRejection();
         var normalizationReason = observed.TakeNormalizationReason();
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)
         {
+            if (prospectiveSelected)
+            {
+                var capture = R6ProspectiveRecoveryAudit.Capture(index,
+                    run.Expected, outcome, null, attempt.ConfigurationSha256);
+                recoveryReceipts.Add(capture.Receipt);
+                recoveries.AddRange(capture.CanonicalDiagnostics);
+            }
             diagnostics.Add(LiveAgentDiagnostic.Capture(index, outcome.Diagnostic,
                 rejection ?? LiveToolRejectionProjection.Unknown(outcome.Diagnostic?.Code ?? "unknown"),
                 normalizationReason));
@@ -323,7 +381,15 @@ internal static class LiveRunner
         // A failed post-Agent admission has no typed Agent rejection. Preserve
         // its schedule position without inventing a reason or call counts.
         if (subject is null) diagnostics.Add(LiveAgentDiagnostic.Capture(index, null));
-        if (subject is not null && options.Adjudicator is not null)
+        if (prospectiveSelected)
+        {
+            var capture = R6ProspectiveRecoveryAudit.Capture(index,
+                run.Expected, outcome, subject, attempt.ConfigurationSha256);
+            recoveryReceipts.Add(capture.Receipt);
+            recoveries.AddRange(capture.CanonicalDiagnostics);
+        }
+        if (subject is not null && (options.Adjudicator is not null ||
+            options.ProspectiveReviewer is not null))
             subjects.Add(new(index, run, subject));
         return subject is not null
             ? EvaluationScorer.Evaluate(run.Expected, subject)

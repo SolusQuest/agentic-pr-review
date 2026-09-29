@@ -115,6 +115,8 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-039      | E1 architecture assertions                      | Permanent exact W3/W11 reference-set conformance; replace only with equivalent proof  |
 | RR-040      | E1 supervisor deletion assertions               | Permanent W6 absence and replacement evidence; replace only with equivalent proof     |
 | RR-041      | Git-object Codeload route and verifier fixtures | Permanent narrow production-shaped archive redirect and download conformance          |
+| RR-042      | R6 prospective quality decision                 | Current R5 structural-signal history retained beside the R6 rubric                    |
+| RR-043      | R6 evaluator and control tests                  | Narrow conformance for retained structural signals and bounded semantic precedence    |
 
 Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
 

@@ -69,11 +69,14 @@ internal static class LivePlanAdmission
             expanded.Length > bounds.MaxEvaluations ||
             !ValidBounds(bounds, expanded.Length, profile))
             throw new LivePlanRejected(LiveAdmissionCode.InvalidPlan);
+        if (!R6ProspectiveRubric.ValidSelection(input.Rubric, corpus.Sha256, expanded))
+            throw new LivePlanRejected(LiveAdmissionCode.InvalidPlan);
         if (bounds.SpendCeilingMicroUsd < perCall.MaxChargeMicroUsd)
             throw new LivePlanRejected(LiveAdmissionCode.Unpriceable);
 
-        var digest = Digest(new(LiveLimits.PlanFormat, source, corpus.Sha256, provider, expanded, bounds));
-        return new(corpus, provider, bounds, expanded, digest);
+        var digest = Digest(new(LiveLimits.PlanFormat, source, corpus.Sha256, provider, expanded,
+            bounds, input.Rubric));
+        return new(corpus, provider, bounds, expanded, digest, input.Rubric);
     }
 
     // Structural admission of the path-free normalized selection, also used
@@ -88,7 +91,9 @@ internal static class LivePlanAdmission
             !EvaluationLimits.Hash(input.CorpusSha256) || !TryProviderProfile(provider, out var profile) ||
             input.Schedule.IsDefaultOrEmpty || input.Schedule.Length > LiveLimits.ExpandedEvaluations ||
             input.Schedule.Any(id => !EvaluationLimits.Id(id)) ||
-            input.Schedule.Length > bounds.MaxEvaluations || !ValidBounds(bounds, input.Schedule.Length, profile))
+            input.Schedule.Length > bounds.MaxEvaluations ||
+            !R6ProspectiveRubric.ValidSelection(input.Rubric, input.CorpusSha256, input.Schedule) ||
+            !ValidBounds(bounds, input.Schedule.Length, profile))
             return false;
         return bounds.SpendCeilingMicroUsd >= bounds.PerCall.MaxChargeMicroUsd;
     }

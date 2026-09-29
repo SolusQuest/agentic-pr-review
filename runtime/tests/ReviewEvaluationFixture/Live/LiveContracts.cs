@@ -77,7 +77,13 @@ internal sealed record LivePlanInput(
     [property: JsonRequired] LivePlanCorpus Corpus,
     [property: JsonRequired] LivePlanProvider Provider,
     [property: JsonRequired] ImmutableArray<LivePlanScheduleEntry> Schedule,
-    [property: JsonRequired] LivePlanBounds Bounds);
+    [property: JsonRequired] LivePlanBounds Bounds,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        LivePlanRubric? Rubric = null);
+
+internal sealed record LivePlanRubric(
+    [property: JsonRequired] string Id,
+    [property: JsonRequired] string Sha256);
 
 // Path-free normalized projection. The journal carries this bounded selection
 // with its digest so an offline consumer can validate its structural claims.
@@ -87,7 +93,9 @@ internal sealed record LivePlanDigestInput(
     [property: JsonRequired] string CorpusSha256,
     [property: JsonRequired] LivePlanProvider Provider,
     [property: JsonRequired] ImmutableArray<string> Schedule,
-    [property: JsonRequired] LivePlanBounds Bounds);
+    [property: JsonRequired] LivePlanBounds Bounds,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        LivePlanRubric? Rubric = null);
 
 internal sealed record LiveTransportOutcomeCounts(
     int RequestRejected,
@@ -142,7 +150,15 @@ internal sealed record LiveRunSummary(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? V5QualityCandidateStatus = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        ImmutableArray<LiveRecoveryDiagnostic>? RecoveryDiagnostics = null);
+        ImmutableArray<LiveRecoveryDiagnostic>? RecoveryDiagnostics = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        LivePlanRubric? ProspectiveRubric = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ImmutableArray<R6ProspectiveCaseReceipt>? ProspectiveCaseReceipts = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ImmutableArray<R6ProspectiveRecoveryReceipt>? ProspectiveRecoveryReceipts = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        R6ProspectiveGateResult? ProspectiveQualityCandidate = null);
 
 // Known subtotals describe only measured observations, not billed campaign
 // totals. The fixed identity domain bounds the output independently of traffic.
@@ -180,13 +196,15 @@ internal sealed class LivePlan(
     LivePlanProvider provider,
     LivePlanBounds bounds,
     ImmutableArray<string> schedule,
-    string digest)
+    string digest,
+    LivePlanRubric? rubric)
 {
     internal LivePlanCorpus Corpus { get; } = corpus;
     internal LivePlanProvider Provider { get; } = provider;
     internal LivePlanBounds Bounds { get; } = bounds;
     internal ImmutableArray<string> Schedule { get; } = schedule;
     internal string Digest { get; } = digest;
+    internal LivePlanRubric? Rubric { get; } = rubric;
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
