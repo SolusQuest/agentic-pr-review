@@ -834,6 +834,40 @@ public sealed class R6ProspectivePipelineTests
         Assert.False(Directory.Exists(liveInput.Root));
     }
 
+    [Fact]
+    public async Task V3ConfirmedDuplicateIsRecordedAsUsabilityCost()
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile(v3: true);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var duplicate = WithMechanicalDuplicate(runs.Single(run =>
+            run.Input.CaseId == "cs-defect").Script);
+        var next = 0;
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            v2: true, v3: true);
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            SecretSource = new FakeSecret("APR317_DUPLICATE_SYNTHETIC_ONLY"),
+            TransportFactory = new FakeFactory(_ =>
+            {
+                var run = runs[next++];
+                return new ReplayTransport(run.Input.CaseId == "cs-defect"
+                    ? duplicate : run.Script, ReplayFault.None);
+            }),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal(EvaluationCode.DuplicateObservation, result.Outcomes[0].Code);
+        Assert.Equal("candidate_pass", result.Summary.ProspectiveQualityCandidate?.Status);
+        Assert.Equal("cost_recorded", result.Summary.ProspectiveQualityCandidate?.UsabilityStatus);
+        Assert.Equal("candidate_pass", R6ProspectiveReportReader.Read(
+            Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Status);
+        Assert.False(Directory.Exists(input.Root));
+    }
+
     [Theory]
     [InlineData("v2_retry", "adjudicated", 5)]
     [InlineData("v2_null_row", "adjudicated", 5)]
