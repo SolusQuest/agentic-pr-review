@@ -16,8 +16,12 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
     internal TimeSpan Timeout { get; init; } = TimeSpan.FromHours(1);
 
     internal async Task<R6ProspectiveReviewResult> ReviewAsync(
-        IReadOnlyList<LiveAdjudicationCase> cases, CancellationToken token)
+        IReadOnlyList<LiveAdjudicationCase> cases, LivePlanRubric rubric,
+        CancellationToken token)
     {
+        if (!R6ProspectiveRubric.IsV1(rubric) && !R6ProspectiveRubric.IsV2(rubric))
+            throw new InvalidOperationException("prospective_rubric_invalid");
+        var v2 = R6ProspectiveRubric.IsV2(rubric);
         string? root = null;
         var status = cases.Count == 0 ? "not_evaluable" : "adjudicated";
         var cleanup = "none";
@@ -33,39 +37,69 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
             foreach (var item in cases.OrderBy(c => c.Index))
             {
                 deadline.Token.ThrowIfCancellationRequested();
-                var packetPath = Path.Combine(root, "review.json");
-                var annotationPath = Path.Combine(root, "annotation.json");
-                await WritePacketAsync(packetPath, item, deadline.Token);
-                var initial = new R6ProspectiveAnnotation(R6ProspectiveRubric.Id,
-                    R6ProspectiveRubric.Sha256, item.Run.Expected.Input.CorpusSha256,
+                var stem = v2 ? "case-" + item.Index : "review";
+                var packetPath = Path.Combine(root, stem + ".json");
+                var annotationPath = Path.Combine(root, v2 ? stem + "-annotation.json" :
+                    "annotation.json");
+                await WritePacketAsync(packetPath, item, rubric, deadline.Token);
+                var initial = new R6ProspectiveAnnotation(rubric.Id,
+                    rubric.Sha256, item.Run.Expected.Input.CorpusSha256,
                     item.Run.Expected.Sha256, item.Subject.ConfigurationSha256,
                     item.Subject.ExecutionSha256,
                     item.Subject.Findings.Select((_, ordinal) => new R6ProspectiveFindingAnnotation(
-                        ordinal, R6ProspectiveAssessment.Unresolved, null, null, null, [])).ToImmutableArray());
+                        ordinal, R6ProspectiveAssessment.Unresolved, null, null, null, [],
+                        v2 ? [] : null)).ToImmutableArray());
                 await File.WriteAllBytesAsync(annotationPath,
                     R6ProspectiveAssessment.WriteAnnotation(initial), deadline.Token);
-                await prompts.WriteLineAsync("r6_review_case " + item.Index +
-                    " inspect review.json; edit annotation.json; enter accept, skip or stop");
-                await prompts.FlushAsync(deadline.Token);
-                var command = await ReadCommandAsync(deadline.Token);
-                if (command is null or "stop") { status = "pending"; break; }
-                if (command == "skip") { status = "pending"; continue; }
-                if (command != "accept") { status = "input_invalid"; break; }
-                var info = new FileInfo(annotationPath);
-                if ((info.Attributes & FileAttributes.ReparsePoint) != 0 ||
-                    info.Length is < 1 or > EvaluationLimits.InputBytes)
-                { status = "input_invalid"; break; }
-                var bytes = new byte[EvaluationLimits.InputBytes + 1];
-                int length;
-                using (var stream = new FileStream(annotationPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                    length = await stream.ReadAtLeastAsync(bytes, bytes.Length, false, deadline.Token);
-                var annotation = R6ProspectiveAssessment.ReadAnnotation(bytes.AsSpan(0, length));
-                var receipt = R6ProspectiveAssessment.Assess(item.Index, item.Run.Expected,
-                    item.Subject, annotation, origin);
-                if (receipt is null) { status = "input_invalid"; break; }
-                receipts.Add(receipt);
-                File.Delete(packetPath);
-                File.Delete(annotationPath);
+                var accepted = false;
+                var skipped = false;
+                for (var attempt = 0; attempt < (v2 ? 2 : 1); attempt++)
+                {
+                    await prompts.WriteLineAsync("r6_review_case " + item.Index +
+                        " inspect " + Path.GetFileName(packetPath) + "; edit " +
+                        Path.GetFileName(annotationPath) +
+                        (v2 ? "; prior accepted case files remain in this private directory" : "") +
+                        "; enter accept, skip or stop");
+                    await prompts.FlushAsync(deadline.Token);
+                    var command = await ReadCommandAsync(deadline.Token);
+                    if (command is null or "stop") { status = "pending"; break; }
+                    if (command == "skip") { status = "pending"; skipped = true; break; }
+                    if (command != "accept") { status = "input_invalid"; break; }
+                    R6ProspectiveCaseReceipt? receipt = null;
+                    var info = new FileInfo(annotationPath);
+                    if (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) == 0 &&
+                        info.Length is >= 1 and <= EvaluationLimits.InputBytes)
+                    {
+                        var bytes = new byte[EvaluationLimits.InputBytes + 1];
+                        int length;
+                        using (var stream = new FileStream(annotationPath, FileMode.Open,
+                            FileAccess.Read, FileShare.Read))
+                            length = await stream.ReadAtLeastAsync(bytes, bytes.Length, false,
+                                deadline.Token);
+                        var annotation = R6ProspectiveAssessment.ReadAnnotation(
+                            bytes.AsSpan(0, length));
+                        receipt = R6ProspectiveAssessment.Assess(item.Index, item.Run.Expected,
+                            item.Subject, annotation, origin, rubric);
+                    }
+                    if (receipt is not null)
+                    {
+                        receipts.Add(receipt);
+                        accepted = true;
+                        break;
+                    }
+                    if (attempt == (v2 ? 1 : 0))
+                        status = v2 ? "review_incomplete" : "input_invalid";
+                }
+                if (!accepted)
+                {
+                    if (skipped) continue;
+                    break;
+                }
+                if (!v2)
+                {
+                    File.Delete(packetPath);
+                    File.Delete(annotationPath);
+                }
             }
             if (status == "adjudicated" && receipts.Count != cases.Count) status = "pending";
         }
@@ -97,7 +131,7 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
     }
 
     private static async Task WritePacketAsync(string path, LiveAdjudicationCase item,
-        CancellationToken token)
+        LivePlanRubric rubric, CancellationToken token)
     {
         await LiveAdjudicator.WritePacketAsync(path, item, token);
         using var original = JsonDocument.Parse(await File.ReadAllBytesAsync(path, token));
@@ -107,8 +141,8 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
             writer.WriteStartObject();
             foreach (var property in original.RootElement.EnumerateObject())
                 property.WriteTo(writer);
-            writer.WriteString("rubric_id", R6ProspectiveRubric.Id);
-            writer.WriteString("rubric_sha256", R6ProspectiveRubric.Sha256);
+            writer.WriteString("rubric_id", rubric.Id);
+            writer.WriteString("rubric_sha256", rubric.Sha256);
             writer.WriteStartArray("returned_observations");
             foreach (var observed in item.Subject.GroundedObservations)
             {

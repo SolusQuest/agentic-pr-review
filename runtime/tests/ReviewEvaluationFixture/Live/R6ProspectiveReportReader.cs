@@ -114,7 +114,8 @@ internal static class R6ProspectiveReportReader
                         R6ProspectiveAssessment.HumanOrigin) ||
                     receipt.Findings.Length != receipt.FindingRowCount ||
                     receipt.Findings.Where((finding, ordinal) =>
-                        !R6ProspectiveQualityGate.ValidFindingShape(finding, index, ordinal)).Any())
+                        !R6ProspectiveQualityGate.ValidFindingShape(finding, index,
+                            ordinal, rubric)).Any())
                     return false;
             }
             else return false;
