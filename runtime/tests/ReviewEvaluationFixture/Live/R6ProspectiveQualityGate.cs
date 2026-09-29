@@ -304,7 +304,10 @@ internal static class R6ProspectiveQualityGate
             if (row.ProhibitedObservations > 0 &&
                 caseReceipt.Findings.Count(f => f.SafeLineRole ==
                     R6ProspectiveAssessment.Comparison) < row.ProhibitedObservations)
+            {
                 blockedReason ??= "prohibited_evidence_unexplained";
+                safetyFailed = true;
+            }
             if (focal > 0) expectedCredits++;
         }
         if (summary.AiAdjudicatedCases != ai || summary.HumanConfirmedCases != human)

@@ -576,6 +576,9 @@ public sealed class R6ProspectivePipelineTests
                 ModelStatus = ModelObservationStatus.Unadjudicated });
             Check(baseline with { ProspectiveCaseReceipts = accusedReceipts }, accusedRows,
                 "blocked", "finding_ineligible");
+            Assert.Equal("failed", R6ProspectiveQualityGate.Evaluate(
+                baseline with { ProspectiveCaseReceipts = accusedReceipts },
+                accusedRows)?.SafetyStatus);
         }
 
         var compared = offFocus with { SafeLineRole = "comparison" };
@@ -595,6 +598,36 @@ public sealed class R6ProspectivePipelineTests
             baseline with { ProspectiveCaseReceipts = comparedReceipts }, comparedRows)!;
         Assert.Equal("failed", comparedGate.LegacyStructuralStatus);
         Assert.Equal("passed", comparedGate.SafetyStatus);
+
+        // An unexplained legacy safe-line overlap must not publish a passing
+        // safety dimension, even when the public finding row is well formed.
+        foreach (var safeIndex in new[] { 1, 3 })
+        {
+            var unexplainedReceipts = receipts.SetItem(safeIndex,
+                receipts[safeIndex] with { FindingRowCount = 1, Findings = [offFocus] });
+            var unexplainedRows = outcomes.SetItem(safeIndex,
+                outcomes[safeIndex] with
+                {
+                    FindingCount = 1,
+                    UnadjudicatedFindings = 1,
+                    ModelStatus = ModelObservationStatus.Unadjudicated,
+                    Code = EvaluationCode.ProhibitedFinding,
+                    ScenarioStatus = AssertionStatus.Failed,
+                    ProhibitedObservations = 1,
+                });
+            var unexplainedSummary = baseline with
+            { ProspectiveCaseReceipts = unexplainedReceipts };
+            Check(unexplainedSummary, unexplainedRows,
+                "blocked", "prohibited_evidence_unexplained");
+            var unexplainedGate = Assert.IsType<R6ProspectiveGateResult>(
+                R6ProspectiveQualityGate.Evaluate(unexplainedSummary, unexplainedRows));
+            Assert.Equal("passed", unexplainedGate.ProspectiveSemanticStatus);
+            Assert.Equal("failed", unexplainedGate.SafetyStatus);
+            var read = R6ProspectiveReportReader.Read(WriteReport(
+                unexplainedSummary with { ProspectiveQualityCandidate = unexplainedGate },
+                unexplainedRows));
+            Assert.Equal("failed", read.Recomputed?.SafetyStatus);
+        }
 
         var recovery = new LiveRecoveryDiagnostic(0, 0, AgentToolRegistry.ListFilesName,
             LiveRecoveryDiagnostic.ArgumentsInvalid);
