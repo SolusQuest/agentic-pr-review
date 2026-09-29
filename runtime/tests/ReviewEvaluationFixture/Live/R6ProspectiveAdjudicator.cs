@@ -60,7 +60,7 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                     await prompts.WriteLineAsync("r6_review_case " + item.Index +
                         " inspect " + Path.GetFileName(packetPath) + "; edit " +
                         Path.GetFileName(annotationPath) +
-                        (v2 ? "; prior accepted case files remain in this private directory" : "") +
+                        (v2 ? "; compare causes across findings and prior accepted case files; reuse one group id for the same cause; mark unresolved if uncertain" : "") +
                         "; enter accept, skip or stop");
                     await prompts.FlushAsync(deadline.Token);
                     var command = await ReadCommandAsync(deadline.Token);

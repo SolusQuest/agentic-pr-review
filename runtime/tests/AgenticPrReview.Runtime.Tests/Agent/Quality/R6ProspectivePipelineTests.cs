@@ -340,6 +340,8 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal("not_evaluable",
             result.Summary.ProspectiveQualityCandidate?.CostKnowledgeStatus);
         Assert.True(input.PriorPacketsVisible);
+        Assert.Contains("reuse one group id for the same cause", prompts.ToString(),
+            StringComparison.Ordinal);
         Assert.False(Directory.Exists(input.Root));
         foreach (var receipt in result.Summary.ProspectiveCaseReceipts!.Value)
         {
@@ -604,6 +606,7 @@ public sealed class R6ProspectivePipelineTests
 
     [Theory]
     [InlineData("v2_retry", "adjudicated", 5)]
+    [InlineData("v2_null_row", "adjudicated", 5)]
     [InlineData("v2_retry_fail", "review_incomplete", 0)]
     public async Task V2CorrectionIsBoundedToTheSamePrivateCase(
         string corruption, string expectedStatus, int acceptedCases)
@@ -1740,6 +1743,7 @@ public sealed class R6ProspectivePipelineTests
         private int promptCount;
         private int position;
         private const string Command = "accept\n";
+        private JsonNode? originalFirstFinding;
         internal string? Root { get; private set; }
         internal string LastPacket { get; private set; } = "";
         internal string? OffFocusPacket { get; private set; }
@@ -1787,6 +1791,8 @@ public sealed class R6ProspectivePipelineTests
                 var annotationPath = System.IO.Path.Join(Root,
                     v2 ? "case-" + caseIndex + "-annotation.json" : "annotation.json");
                 var annotation = JsonNode.Parse(File.ReadAllText(annotationPath))!.AsObject();
+                if (current == 2 && corruption == "v2_null_row")
+                    annotation["findings"]![0] = originalFirstFinding!.DeepClone();
                 using var packet = JsonDocument.Parse(LastPacket);
                 var findings = packet.RootElement.GetProperty("findings");
                 var caseId = packet.RootElement.GetProperty("case").GetProperty("id").GetString();
@@ -1894,6 +1900,11 @@ public sealed class R6ProspectivePipelineTests
                         annotation[corruption] = new string('0', 64);
                     else if (corruption is "v2_retry" or "v2_retry_fail")
                         annotation["rubric_sha256"] = new string('0', 64);
+                    else if (corruption == "v2_null_row" && findings.GetArrayLength() > 0)
+                    {
+                        originalFirstFinding = annotation["findings"]![0]!.DeepClone();
+                        annotation["findings"]![0] = null;
+                    }
                     else if (corruption == "v2_semantic_rejected" &&
                         findings.GetArrayLength() > 0)
                     {

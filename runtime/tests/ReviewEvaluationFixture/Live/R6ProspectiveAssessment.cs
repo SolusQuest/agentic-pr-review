@@ -153,7 +153,8 @@ internal static class R6ProspectiveAssessment
             annotation.ExecutionSha256 != subject.ExecutionSha256 ||
             annotation.Findings.IsDefault ||
             annotation.Findings.Length != subject.Findings.Length ||
-            annotation.Findings.Length > EvaluationLimits.Defects)
+            annotation.Findings.Length > EvaluationLimits.Defects ||
+            annotation.Findings.Any(row => row is null))
             return false;
         var ordered = annotation.Findings.OrderBy(row => row.FindingOrdinal).ToArray();
         for (var index = 0; index < ordered.Length; index++)
