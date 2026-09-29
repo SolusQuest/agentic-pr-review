@@ -326,9 +326,9 @@ export const residualReferenceRules = [
   narrowConformance(
     'RR-044',
     /legacy/iu,
-    /^(?:docs\/90_roadmap\/r6-prospective-quality-observation\.md|runtime\/tests\/fixtures\/agent\/r6\/quality-observation\/prospective-live-0dea1d0e\.jsonl)$/u,
+    /^(?:docs\/90_roadmap\/r6-prospective-quality-(?:observation|postmerge)\.md|runtime\/tests\/fixtures\/agent\/r6\/quality-observation\/prospective-live-(?:0dea1d0e|96c9a797|a6657e18)\.jsonl)$/u,
     'R6 prospective quality observation owner',
-    'current public-safe five-case report and decision record',
+    'current public-safe five-case reports and decision records',
     'legacy names the retained structural scoring dimension beside the prospective semantic result, not a supported retired runtime',
     'an accepted successor observation must keep the historical scoring outcome distinct from its prospective candidate verdict',
   ),
