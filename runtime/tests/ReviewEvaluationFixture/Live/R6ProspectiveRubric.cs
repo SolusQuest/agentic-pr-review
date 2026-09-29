@@ -23,7 +23,8 @@ internal static class R6ProspectiveRubric
         "r6-v5-semantic-v2|grounded-one-observation|declared-read-file-facts|" +
         "reviewed-focal-anchor-and-severity|reviewed-protected-property|" +
         "evidence-ordinal-safe-use|three-scheduled-focal-defects|" +
-        "reviewed-off-focus|within-case-duplicate-block|cross-case-deduplicate|" +
+        "reviewed-off-focus|reviewed-mechanical-duplicate|" +
+        "within-case-duplicate-block|cross-case-deduplicate|" +
         "one-completed-argument-recovery|five-case-complete|known-usage|cleaned";
 
     internal static readonly string Sha256 = AgentCanonical.HashDomain(

@@ -134,6 +134,50 @@ internal static class R6ProspectiveAssessment
         JsonSerializer.SerializeToUtf8Bytes(annotation,
             R6ProspectiveJsonContext.Default.R6ProspectiveAnnotation);
 
+    // Only this editable envelope may be corrected. Evidence and semantic
+    // eligibility are assessed once after a bound annotation crosses it.
+    internal static bool ValidV2EditableEnvelope(int scheduleIndex, EvaluationCase testCase,
+        EvaluationSubject subject, R6ProspectiveAnnotation? annotation,
+        LivePlanRubric rubric)
+    {
+        if (!R6ProspectiveRubric.IsV2(rubric) || annotation is null ||
+            scheduleIndex is < 0 or >= 5 ||
+            testCase.Input.Id != R6ProspectiveRubric.Cases[scheduleIndex] ||
+            testCase.Input.CorpusSha256 != R6ProspectiveRubric.CorpusSha256 ||
+            testCase.Input.ReviewedIdentity.Runtime != subject.ReviewedIdentity ||
+            annotation.RubricId != rubric.Id ||
+            annotation.RubricSha256 != rubric.Sha256 ||
+            annotation.CorpusSha256 != testCase.Input.CorpusSha256 ||
+            annotation.CaseSha256 != testCase.Sha256 ||
+            annotation.ConfigurationSha256 != subject.ConfigurationSha256 ||
+            annotation.ExecutionSha256 != subject.ExecutionSha256 ||
+            annotation.Findings.IsDefault ||
+            annotation.Findings.Length != subject.Findings.Length ||
+            annotation.Findings.Length > EvaluationLimits.Defects)
+            return false;
+        var ordered = annotation.Findings.OrderBy(row => row.FindingOrdinal).ToArray();
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var row = ordered[index];
+            if (row is null || row.FindingOrdinal != index ||
+                row.Verdict is not (Expected or TrueOffFocus or FalseUnsafe or Unresolved) ||
+                row.ExpectedDefectId is not (null or "defect") ||
+                row.DefectGroupScope is not (null or Authored or Run))
+                return false;
+            var finding = subject.Findings[index];
+            var isTrue = row.Verdict is Expected or TrueOffFocus;
+            if (!ValidV2SafeLineAssessments(finding, row.SafeLineUses,
+                    row.SafeLineAssessments) ||
+                !ValidV2SemanticAssessments(isTrue, row.SeverityAssessment,
+                    row.AnchorAssessment) ||
+                isTrue && (row.AnchorEvidenceOrdinal is not { } ordinal ||
+                    ordinal < 0 || ordinal >= finding.Evidence.Length) ||
+                !isTrue && row.AnchorEvidenceOrdinal is not null)
+                return false;
+        }
+        return true;
+    }
+
     internal static R6ProspectiveCaseReceipt? Assess(int scheduleIndex, EvaluationCase testCase,
         EvaluationSubject subject, R6ProspectiveAnnotation? annotation, string origin,
         LivePlanRubric? selectedRubric = null)

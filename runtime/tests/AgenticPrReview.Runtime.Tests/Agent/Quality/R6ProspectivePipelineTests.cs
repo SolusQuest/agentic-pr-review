@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
@@ -118,6 +119,12 @@ public sealed class R6ProspectivePipelineTests
             "repository-token-log", finding with { Evidence =
                 [new AgentEvidence("upload", "src/Caller.cs", 1, 7)] },
             observed, false, 0));
+        Assert.Equal("reviewed_context", R6ProspectiveAssessment.ReviewedCitationClass(
+            "repository-token-log", finding, [upload with
+            { Tool = AgentToolRegistry.ReadDiffName }, rule], true, 0));
+        Assert.Equal("invalid", R6ProspectiveAssessment.ReviewedCitationClass(
+            "repository-token-log", finding, [upload with
+            { Tool = AgentToolRegistry.ReadDiffName }], true, 0));
         Assert.False(R6ProspectiveAssessment.ValidV2SemanticAssessments(true,
             "unresolved", "relevant"));
         Assert.False(R6ProspectiveAssessment.ValidV2SemanticAssessments(true,
@@ -249,6 +256,11 @@ public sealed class R6ProspectivePipelineTests
         { SafeLineRole = "comparison" }, 1, 0, rubric));
         Assert.False(R6ProspectiveQualityGate.ValidFindingShape(other with
         { AnchorEvidenceOrdinal = null }, 1, 0, rubric));
+        Assert.False(R6ProspectiveQualityGate.ValidFindingShape(other with
+        { AnchorEvidenceOrdinal = AgentLimits.EvidencePerFinding }, 1, 0, rubric));
+        Assert.False(R6ProspectiveQualityGate.ValidFindingShape(other with
+        { SafeLineAssessments = [new(AgentLimits.EvidencePerFinding,
+            "accusation", "confirmed_other_issue")] }, 1, 0, rubric));
         Assert.False(R6ProspectiveQualityGate.ValidFindingShape(other with
         { SeverityAssessment = null }, 1, 0, rubric));
         Assert.False(R6ProspectiveQualityGate.ValidFindingShape(other with
@@ -440,6 +452,33 @@ public sealed class R6ProspectivePipelineTests
         };
         Assert.Equal("rejected", R6ProspectiveReportReader.Read(
             WriteReport(forged, live.Outcomes)).Status);
+        var impossibleOrdinal = live.Summary with
+        {
+            ProspectiveCaseReceipts = receipts.SetItem(1, safeReceipt with
+            {
+                Findings = safeReceipt.Findings.SetItem(0,
+                    safeReceipt.Findings[0] with
+                    { AnchorEvidenceOrdinal = AgentLimits.EvidencePerFinding }),
+            }),
+        };
+        Assert.Equal("receipt_shape_invalid", R6ProspectiveReportReader.Read(
+            WriteReport(impossibleOrdinal, live.Outcomes)).Reason);
+        var impossibleSafeUse = live.Summary with
+        {
+            ProspectiveCaseReceipts = receipts.SetItem(1, safeReceipt with
+            {
+                Findings = safeReceipt.Findings.SetItem(0,
+                    safeReceipt.Findings[0] with
+                    {
+                        SafeLineAssessments = safeReceipt.Findings[0]
+                            .SafeLineAssessments!.Value.SetItem(1,
+                                new(AgentLimits.EvidencePerFinding, "accusation",
+                                    "confirmed_other_issue")),
+                    }),
+            }),
+        };
+        Assert.Equal("receipt_shape_invalid", R6ProspectiveReportReader.Read(
+            WriteReport(impossibleSafeUse, live.Outcomes)).Reason);
         Assert.Equal("rejected", R6ProspectiveReportReader.Read(WriteReport(
             live.Summary with { ProspectiveQualityCandidate =
                 live.Summary.ProspectiveQualityCandidate! with
@@ -513,6 +552,57 @@ public sealed class R6ProspectivePipelineTests
     }
 
     [Theory]
+    [InlineData(false, "within_case_duplicate")]
+    [InlineData(true, "all_gates_passed")]
+    public async Task V2MechanicalDuplicateRoutesToReviewedCausalGroups(
+        bool distinctCause, string expectedReason)
+    {
+        using var plan = new PlanFile(v2: true);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var duplicate = WithMechanicalDuplicate(runs.Single(run =>
+            run.Input.CaseId == "cs-defect").Script);
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            v2: true, approveDistinctDuplicate: distinctCause);
+        var keyless = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "cs-defect"
+                ? duplicate : run.Script, ReplayFault.None),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal(EvaluationCode.DuplicateObservation, keyless.Outcomes[0].Code);
+        Assert.Equal(1, keyless.Outcomes[0].DuplicateObservations);
+        Assert.Equal("adjudicated", keyless.Summary.AdjudicationStatus);
+        Assert.False(Directory.Exists(input.Root));
+
+        if (!IsCleanSource()) return;
+        var next = 0;
+        using var livePrompts = new StringWriter();
+        using var liveInput = new PacketReviewInput(livePrompts, approveExpected: true,
+            v2: true, approveDistinctDuplicate: distinctCause);
+        var lines = new List<string>();
+        var live = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            SecretSource = new FakeSecret("APR317_DUPLICATE_SYNTHETIC_ONLY"),
+            TransportFactory = new FakeFactory(_ =>
+            {
+                var run = runs[next++];
+                return new ReplayTransport(run.Input.CaseId == "cs-defect"
+                    ? duplicate : run.Script, ReplayFault.None);
+            }),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(liveInput,
+                livePrompts, R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal(expectedReason, live.Summary.ProspectiveQualityCandidate?.Reason);
+        Assert.Equal(expectedReason, R6ProspectiveReportReader.Read(
+            Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Reason);
+        Assert.False(Directory.Exists(liveInput.Root));
+    }
+
+    [Theory]
     [InlineData("v2_retry", "adjudicated", 5)]
     [InlineData("v2_retry_fail", "review_incomplete", 0)]
     public async Task V2CorrectionIsBoundedToTheSamePrivateCase(
@@ -536,6 +626,26 @@ public sealed class R6ProspectivePipelineTests
         Assert.False(Directory.Exists(input.Root));
         Assert.Equal("not_evaluable", R6ProspectiveReportReader.Read(
             Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Status);
+    }
+
+    [Fact]
+    public async Task V2BoundSemanticRejectionCannotBeRewrittenOnRetry()
+    {
+        using var plan = new PlanFile(v2: true);
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            v2: true, corruption: "v2_semantic_rejected");
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal(5, result.Completed);
+        Assert.Equal("review_incomplete", result.Summary.AdjudicationStatus);
+        Assert.Single(input.PromptCaseIndices);
+        Assert.Equal(0, input.PromptCaseIndices[0]);
+        Assert.False(Directory.Exists(input.Root));
     }
 
     [Fact]
@@ -1423,6 +1533,25 @@ public sealed class R6ProspectivePipelineTests
         }).ToImmutableArray(),
     };
 
+    // A synthetic structural overlap, not an assertion that the second
+    // finding is genuinely severe or independent in a future model run.
+    private static ReplayScript WithMechanicalDuplicate(ReplayScript script) => script with
+    {
+        Turns = script.Turns.Select(turn => turn with
+        {
+            ToolCalls = turn.ToolCalls.Select(call =>
+            {
+                if (call.Name != AgentToolRegistry.FinishReviewName) return call;
+                var terminal = JsonNode.Parse(call.ArgumentsJson)!.AsObject();
+                var second = terminal["findings"]![0]!.DeepClone();
+                second["title"] = "Synthetic second causal hypothesis";
+                second["message"] = "An independent reviewer must decide whether this is a distinct causal issue on the same returned line.";
+                terminal["findings"]!.AsArray().Add(second);
+                return call with { ArgumentsJson = terminal.ToJsonString() };
+            }).ToImmutableArray(),
+        }).ToImmutableArray(),
+    };
+
     private static ReplayScript WithOffFocusUploadDiff(ReplayScript script)
     {
         var terminal = script.Turns[^1] with
@@ -1605,7 +1734,8 @@ public sealed class R6ProspectivePipelineTests
     private sealed class PacketReviewInput(StringWriter prompts, bool approveExpected = false,
         string? corruption = null, bool injectPacketCanaries = false,
         bool approveOffFocusDiff = false, bool v2 = false,
-        bool approveSafeTrim = false, bool approveTsDefault = false) : TextReader
+        bool approveSafeTrim = false, bool approveTsDefault = false,
+        bool approveDistinctDuplicate = false) : TextReader
     {
         private int promptCount;
         private int position;
@@ -1727,6 +1857,16 @@ public sealed class R6ProspectivePipelineTests
                             "run-named-timeout-default";
                         annotation["findings"]![index]!["anchor_evidence_ordinal"] = 0;
                     }
+                    if (v2 && approveDistinctDuplicate && caseId == "cs-defect" &&
+                        index == 1)
+                    {
+                        annotation["findings"]![index]!["verdict"] = "true_off_focus";
+                        annotation["findings"]![index]!["expected_defect_id"] = null;
+                        annotation["findings"]![index]!["defect_group_scope"] = "run";
+                        annotation["findings"]![index]!["defect_group_id"] =
+                            "run-independent-caller-cause";
+                        annotation["findings"]![index]!["anchor_evidence_ordinal"] = 0;
+                    }
                     if (approveOffFocusDiff && caseId == "ts-safe")
                     {
                         annotation["findings"]![index]!["verdict"] = "true_off_focus";
@@ -1754,6 +1894,15 @@ public sealed class R6ProspectivePipelineTests
                         annotation[corruption] = new string('0', 64);
                     else if (corruption is "v2_retry" or "v2_retry_fail")
                         annotation["rubric_sha256"] = new string('0', 64);
+                    else if (corruption == "v2_semantic_rejected" &&
+                        findings.GetArrayLength() > 0)
+                    {
+                        var row = annotation["findings"]![0]!;
+                        row["verdict"] = "true_off_focus";
+                        row["expected_defect_id"] = null;
+                        row["defect_group_scope"] = "authored";
+                        row["defect_group_id"] = "ts-zero-timeout";
+                    }
                     else if (corruption == "false_explanation" && findings.GetArrayLength() > 0)
                     {
                         var row = annotation["findings"]![0]!;

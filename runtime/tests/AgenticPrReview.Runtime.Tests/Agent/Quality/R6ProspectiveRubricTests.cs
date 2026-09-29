@@ -62,7 +62,7 @@ public sealed class R6ProspectiveRubricTests
         Assert.True(LivePlanAdmission.ValidProjection(v1));
         Assert.True(LivePlanAdmission.ValidProjection(v2));
         Assert.NotEqual(R6ProspectiveRubric.Sha256, R6ProspectiveRubric.V2Sha256);
-        Assert.Equal("e06ee430f2e8386d5b5dbe0849c168e2a8b40edc5c55230b9fcf21b9c3d4ece2",
+        Assert.Equal("18a9fda0819fd58e8caae97b1be68226df74b1e03a5e5f6b60a4d8d47c7056fd",
             R6ProspectiveRubric.V2Sha256);
         Assert.NotEqual(LivePlanAdmission.Digest(v1), LivePlanAdmission.Digest(v2));
         Assert.False(LivePlanAdmission.ValidProjection(v2 with

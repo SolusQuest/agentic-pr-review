@@ -70,10 +70,14 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                     { status = v2 ? "review_incomplete" : "pending"; skipped = true; break; }
                     if (command != "accept")
                     { status = v2 ? "review_incomplete" : "input_invalid"; break; }
-                    R6ProspectiveCaseReceipt? receipt = null;
                     var info = new FileInfo(annotationPath);
-                    if (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) == 0 &&
-                        info.Length is >= 1 and <= EvaluationLimits.InputBytes)
+                    if (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        status = v2 ? "failed" : "input_invalid";
+                        break;
+                    }
+                    R6ProspectiveAnnotation? annotation = null;
+                    if (info.Exists && info.Length is >= 1 and <= EvaluationLimits.InputBytes)
                     {
                         var bytes = new byte[EvaluationLimits.InputBytes + 1];
                         int length;
@@ -81,19 +85,25 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                             FileAccess.Read, FileShare.Read))
                             length = await stream.ReadAtLeastAsync(bytes, bytes.Length, false,
                                 deadline.Token);
-                        var annotation = R6ProspectiveAssessment.ReadAnnotation(
+                        annotation = R6ProspectiveAssessment.ReadAnnotation(
                             bytes.AsSpan(0, length));
-                        receipt = R6ProspectiveAssessment.Assess(item.Index, item.Run.Expected,
-                            item.Subject, annotation, origin, rubric);
                     }
-                    if (receipt is not null)
+                    if (v2 && !R6ProspectiveAssessment.ValidV2EditableEnvelope(
+                            item.Index, item.Run.Expected, item.Subject, annotation, rubric))
                     {
-                        receipts.Add(receipt);
-                        accepted = true;
+                        if (attempt == 1) status = "review_incomplete";
+                        continue;
+                    }
+                    var receipt = R6ProspectiveAssessment.Assess(item.Index,
+                        item.Run.Expected, item.Subject, annotation, origin, rubric);
+                    if (receipt is null)
+                    {
+                        status = v2 ? "review_incomplete" : "input_invalid";
                         break;
                     }
-                    if (attempt == (v2 ? 1 : 0))
-                        status = v2 ? "review_incomplete" : "input_invalid";
+                    receipts.Add(receipt);
+                    accepted = true;
+                    break;
                 }
                 if (!accepted)
                 {

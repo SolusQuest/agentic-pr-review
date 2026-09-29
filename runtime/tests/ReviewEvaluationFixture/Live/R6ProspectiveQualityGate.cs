@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
@@ -51,12 +52,14 @@ internal static class R6ProspectiveQualityGate
                         R6ProspectiveAssessment.TrueOffFocus,
                     finding.SeverityAssessment, finding.AnchorAssessment))
                 return false;
-            if (finding.SafeLineAssessments is not { IsDefault: false } uses)
+            if (finding.SafeLineAssessments is not { IsDefault: false } uses ||
+                uses.Length > AgentLimits.EvidencePerFinding)
                 return false;
             for (var index = 0; index < uses.Length; index++)
             {
                 var item = uses[index];
-                if (item is null || item.EvidenceOrdinal < 0 ||
+                if (item is null || item.EvidenceOrdinal is < 0 or >=
+                        AgentLimits.EvidencePerFinding ||
                     index > 0 && item.EvidenceOrdinal <= uses[index - 1].EvidenceOrdinal ||
                     item.Use == R6ProspectiveAssessment.Comparison &&
                         item.Assessment != R6ProspectiveAssessment.ComparisonOnly ||
@@ -80,7 +83,8 @@ internal static class R6ProspectiveQualityGate
             R6ProspectiveAssessment.TrueOffFocus;
         if (!isTrue && finding.Verdict is not (R6ProspectiveAssessment.FalseUnsafe or
             R6ProspectiveAssessment.Unresolved)) return false;
-        if (v2 && (isTrue && finding.AnchorEvidenceOrdinal is not >= 0 ||
+        if (v2 && (isTrue && (finding.AnchorEvidenceOrdinal is not { } anchor ||
+                anchor < 0 || anchor >= AgentLimits.EvidencePerFinding) ||
             !isTrue && finding.AnchorEvidenceOrdinal is not null)) return false;
         if (isTrue)
         {
@@ -257,12 +261,21 @@ internal static class R6ProspectiveQualityGate
                     ? AssertionStatus.Passed : AssertionStatus.Failed) ||
                 row.FailureSource != EvaluationFailureSource.None ||
                 row.FailureKind != EvaluationFailureKind.None ||
-                row.DuplicateObservations != 0 ||
+                (!v2 && row.DuplicateObservations != 0 ||
+                 v2 && (row.DuplicateObservations < 0 ||
+                    row.DuplicateObservations > Math.Max(0, row.FindingCount - 1) ||
+                    row.DuplicateObservations > 0 && row.Code is not
+                        (EvaluationCode.DuplicateObservation or
+                         EvaluationCode.ProhibitedFinding) ||
+                    row.Code == EvaluationCode.DuplicateObservation &&
+                        (row.DuplicateObservations == 0 ||
+                         row.ProhibitedObservations != 0))) ||
                 row.SourceCommit != summary.SourceCommit ||
                 row.SourceTree != summary.SourceTree ||
                 row.SourceClean != summary.SourceClean ||
                 row.Code is not (EvaluationCode.Scored or EvaluationCode.ExpectedFindingMissing or
-                    EvaluationCode.ProhibitedFinding) ||
+                    EvaluationCode.ProhibitedFinding) &&
+                    (!v2 || row.Code != EvaluationCode.DuplicateObservation) ||
                 caseReceipt is null || caseReceipt.ScheduleIndex != index ||
                 caseReceipt.CaseId != row.CaseId ||
                 caseReceipt.RubricId != rubric.Id ||
