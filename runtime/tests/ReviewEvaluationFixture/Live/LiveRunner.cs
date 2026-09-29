@@ -180,7 +180,7 @@ internal static class LiveRunner
                     {
                         outcome = await AttemptAsync(run, trusted, stable!, descriptor, attempt, runId,
                             execute, credential, options, accounting, scope, subjects, diagnostics,
-                            recoveries, recoveryReceipts, index, plan.Rubric is not null,
+                            recoveries, recoveryReceipts, index, plan.Rubric,
                             deadline.Token);
                         switch (outcome.ExecutionStatus)
                         {
@@ -236,7 +236,7 @@ internal static class LiveRunner
         credential = null;
         R6ProspectiveReviewResult? prospective = null;
         if (plan.Rubric is not null && options.ProspectiveReviewer is { } prospectiveReviewer)
-            prospective = await prospectiveReviewer.ReviewAsync(subjects, token);
+            prospective = await prospectiveReviewer.ReviewAsync(subjects, plan.Rubric, token);
         var adjudication = plan.Rubric is null && options.Adjudicator is { } reviewer
             ? await reviewer.ReviewAsync(subjects, outcomes, token)
             : prospective is not null
@@ -258,8 +258,8 @@ internal static class LiveRunner
                 var row = index < outcomes.Count ? outcomes[index] : null;
                 return prospective?.Receipts.FirstOrDefault(receipt =>
                     receipt.ScheduleIndex == index) ??
-                    new R6ProspectiveCaseReceipt(R6ProspectiveRubric.Id,
-                        R6ProspectiveRubric.Sha256, index, plan.Schedule[index],
+                    new R6ProspectiveCaseReceipt(plan.Rubric!.Id,
+                        plan.Rubric.Sha256, index, plan.Schedule[index],
                         fixture.CorpusSha256, cases[plan.Schedule[index]].Expected.Sha256,
                         row?.ConfigurationSha256, row?.ExecutionSha256,
                         "none", "pending", row?.FindingCount ?? 0, []);
@@ -270,8 +270,8 @@ internal static class LiveRunner
             {
                 var row = index < outcomes.Count ? outcomes[index] : null;
                 return recoveryReceipts.FirstOrDefault(receipt => receipt.ScheduleIndex == index) ??
-                    new R6ProspectiveRecoveryReceipt(R6ProspectiveRubric.Id,
-                        R6ProspectiveRubric.Sha256, index,
+                    new R6ProspectiveRecoveryReceipt(plan.Rubric!.Id,
+                        plan.Rubric.Sha256, index,
                         cases[plan.Schedule[index]].Expected.Sha256,
                         row?.ConfigurationSha256, row?.ExecutionSha256,
                         0, R6ProspectiveRecoveryAudit.Blocked, "capture_missing");
@@ -337,9 +337,10 @@ internal static class LiveRunner
         List<LiveAdjudicationCase> subjects, List<LiveAgentDiagnostic> diagnostics,
         List<LiveRecoveryDiagnostic> recoveries,
         List<R6ProspectiveRecoveryReceipt> recoveryReceipts, int index,
-        bool prospectiveSelected,
+        LivePlanRubric? prospectiveRubric,
         CancellationToken token)
     {
+        var prospectiveSelected = prospectiveRubric is not null;
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable.StablePlan, runId,
             [.. stable.ControlMessages, new("user", [new ProjectTextContent(run.InitialContext)])]);
         var snapshot = run.CreateSnapshot(Directory.GetCurrentDirectory());
@@ -366,7 +367,8 @@ internal static class LiveRunner
             if (prospectiveSelected)
             {
                 var capture = R6ProspectiveRecoveryAudit.Capture(index,
-                    run.Expected, outcome, null, attempt.ConfigurationSha256);
+                    run.Expected, outcome, null, attempt.ConfigurationSha256,
+                    prospectiveRubric);
                 recoveryReceipts.Add(capture.Receipt);
                 recoveries.AddRange(capture.CanonicalDiagnostics);
             }
@@ -384,7 +386,8 @@ internal static class LiveRunner
         if (prospectiveSelected)
         {
             var capture = R6ProspectiveRecoveryAudit.Capture(index,
-                run.Expected, outcome, subject, attempt.ConfigurationSha256);
+                run.Expected, outcome, subject, attempt.ConfigurationSha256,
+                prospectiveRubric);
             recoveryReceipts.Add(capture.Receipt);
             recoveries.AddRange(capture.CanonicalDiagnostics);
         }

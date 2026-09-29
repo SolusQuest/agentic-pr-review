@@ -8,13 +8,26 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
+internal sealed record R6ProspectiveSafeUse(
+    [property: JsonRequired] int EvidenceOrdinal,
+    [property: JsonRequired] string Use,
+    [property: JsonRequired] string Assessment);
+
 internal sealed record R6ProspectiveFindingAnnotation(
     [property: JsonRequired] int FindingOrdinal,
     [property: JsonRequired] string Verdict,
     [property: JsonRequired] string? ExpectedDefectId,
     [property: JsonRequired] string? DefectGroupScope,
     [property: JsonRequired] string? DefectGroupId,
-    [property: JsonRequired] ImmutableArray<string> SafeLineUses);
+    [property: JsonRequired] ImmutableArray<string> SafeLineUses,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ImmutableArray<R6ProspectiveSafeUse>? SafeLineAssessments = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? AnchorEvidenceOrdinal = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? SeverityAssessment = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? AnchorAssessment = null);
 
 // Private operator input. Origin is deliberately absent and supplied by the
 // invoked review path, not by this editable sidecar.
@@ -35,7 +48,15 @@ internal sealed record R6ProspectiveFindingReceipt(
     [property: JsonRequired] string? DefectGroupId,
     [property: JsonRequired] string CitationClass,
     [property: JsonRequired] string SafeLineRole,
-    [property: JsonRequired] string Reason);
+    [property: JsonRequired] string Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ImmutableArray<R6ProspectiveSafeUse>? SafeLineAssessments = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? AnchorEvidenceOrdinal = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? SeverityAssessment = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? AnchorAssessment = null);
 
 internal sealed record R6ProspectiveCaseReceipt(
     [property: JsonRequired] string RubricId,
@@ -69,6 +90,13 @@ internal static class R6ProspectiveAssessment
     internal const string None = "none";
     internal const string Comparison = "comparison";
     internal const string Accusation = "accusation";
+    internal const string ComparisonOnly = "comparison_only";
+    internal const string ConfirmedOtherIssue = "confirmed_other_issue";
+    internal const string ProtectedPropertyAccusation = "protected_property_accusation";
+    internal const string SafeUseUnresolved = "unresolved";
+    internal const string Justified = "justified";
+    internal const string Relevant = "relevant";
+    internal const string Rejected = "rejected";
     internal const string AiOrigin = "ai-adjudicated";
     internal const string HumanOrigin = "human-confirmed";
 
@@ -106,15 +134,66 @@ internal static class R6ProspectiveAssessment
         JsonSerializer.SerializeToUtf8Bytes(annotation,
             R6ProspectiveJsonContext.Default.R6ProspectiveAnnotation);
 
-    internal static R6ProspectiveCaseReceipt? Assess(int scheduleIndex, EvaluationCase testCase,
-        EvaluationSubject subject, R6ProspectiveAnnotation? annotation, string origin)
+    // Only this editable envelope may be corrected. Evidence and semantic
+    // eligibility are assessed once after a bound annotation crosses it.
+    internal static bool ValidV2EditableEnvelope(int scheduleIndex, EvaluationCase testCase,
+        EvaluationSubject subject, R6ProspectiveAnnotation? annotation,
+        LivePlanRubric rubric)
     {
+        if (!R6ProspectiveRubric.IsV2(rubric) || annotation is null ||
+            scheduleIndex is < 0 or >= 5 ||
+            testCase.Input.Id != R6ProspectiveRubric.Cases[scheduleIndex] ||
+            testCase.Input.CorpusSha256 != R6ProspectiveRubric.CorpusSha256 ||
+            testCase.Input.ReviewedIdentity.Runtime != subject.ReviewedIdentity ||
+            annotation.RubricId != rubric.Id ||
+            annotation.RubricSha256 != rubric.Sha256 ||
+            annotation.CorpusSha256 != testCase.Input.CorpusSha256 ||
+            annotation.CaseSha256 != testCase.Sha256 ||
+            annotation.ConfigurationSha256 != subject.ConfigurationSha256 ||
+            annotation.ExecutionSha256 != subject.ExecutionSha256 ||
+            annotation.Findings.IsDefault ||
+            annotation.Findings.Length != subject.Findings.Length ||
+            annotation.Findings.Length > EvaluationLimits.Defects ||
+            annotation.Findings.Any(row => row is null))
+            return false;
+        var ordered = annotation.Findings.OrderBy(row => row.FindingOrdinal).ToArray();
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var row = ordered[index];
+            if (row is null || row.FindingOrdinal != index ||
+                row.Verdict is not (Expected or TrueOffFocus or FalseUnsafe or Unresolved) ||
+                row.ExpectedDefectId is not (null or "defect") ||
+                row.DefectGroupScope is not (null or Authored or Run))
+                return false;
+            var finding = subject.Findings[index];
+            var isTrue = row.Verdict is Expected or TrueOffFocus;
+            if (!ValidV2SafeLineAssessments(finding, row.SafeLineUses,
+                    row.SafeLineAssessments) ||
+                !ValidV2SemanticAssessments(isTrue, row.SeverityAssessment,
+                    row.AnchorAssessment) ||
+                isTrue && (row.AnchorEvidenceOrdinal is not { } ordinal ||
+                    ordinal < 0 || ordinal >= finding.Evidence.Length) ||
+                !isTrue && row.AnchorEvidenceOrdinal is not null)
+                return false;
+        }
+        return true;
+    }
+
+    internal static R6ProspectiveCaseReceipt? Assess(int scheduleIndex, EvaluationCase testCase,
+        EvaluationSubject subject, R6ProspectiveAnnotation? annotation, string origin,
+        LivePlanRubric? selectedRubric = null)
+    {
+        var rubric = selectedRubric ?? new LivePlanRubric(R6ProspectiveRubric.Id,
+            R6ProspectiveRubric.Sha256);
+        if (!R6ProspectiveRubric.IsV1(rubric) && !R6ProspectiveRubric.IsV2(rubric))
+            return null;
+        var v2 = R6ProspectiveRubric.IsV2(rubric);
         if (annotation is null || origin is not (AiOrigin or HumanOrigin) ||
             scheduleIndex is < 0 or >= 5 ||
             testCase.Input.CorpusSha256 != R6ProspectiveRubric.CorpusSha256 ||
             testCase.Input.Id != R6ProspectiveRubric.Cases[scheduleIndex] ||
-            annotation.RubricId != R6ProspectiveRubric.Id ||
-            annotation.RubricSha256 != R6ProspectiveRubric.Sha256 ||
+            annotation.RubricId != rubric.Id ||
+            annotation.RubricSha256 != rubric.Sha256 ||
             annotation.CorpusSha256 != testCase.Input.CorpusSha256 ||
             annotation.CaseSha256 != testCase.Sha256 ||
             annotation.ConfigurationSha256 != subject.ConfigurationSha256 ||
@@ -135,7 +214,13 @@ internal static class R6ProspectiveAssessment
             if (!finding.Evidence.All(e => subject.GroundedObservations.Any(o =>
                     o.Observation.Grounds(e)))) return null;
             var safeRole = DeriveSafeLineRole(finding, row.SafeLineUses);
-            if (safeRole is null) return null;
+            if (safeRole is null ||
+                v2 && !ValidV2SafeLineAssessments(finding, row.SafeLineUses,
+                    row.SafeLineAssessments) ||
+                !v2 && (row.SafeLineAssessments is not null ||
+                    row.AnchorEvidenceOrdinal is not null ||
+                    row.SeverityAssessment is not null ||
+                    row.AnchorAssessment is not null)) return null;
 
             var defect = Defects.FirstOrDefault(d => d.GroupId == row.DefectGroupId);
             var scopeValid = row.DefectGroupScope == Authored && defect is not null ||
@@ -143,6 +228,8 @@ internal static class R6ProspectiveAssessment
                 row.DefectGroupId is not null && EvaluationLimits.Id(row.DefectGroupId) &&
                 row.DefectGroupId.StartsWith("run-", StringComparison.Ordinal);
             var isTrue = row.Verdict is Expected or TrueOffFocus;
+            if (v2 && !ValidV2SemanticAssessments(isTrue,
+                    row.SeverityAssessment, row.AnchorAssessment)) return null;
             if (isTrue != scopeValid ||
                 !isTrue && (row.ExpectedDefectId is not null || row.DefectGroupScope is not null ||
                     row.DefectGroupId is not null) ||
@@ -151,13 +238,21 @@ internal static class R6ProspectiveAssessment
 
             var citationClass = "invalid";
             if (isTrue && defect is not null)
-                citationClass = CitationClass(finding, subject.GroundedObservations, defect,
-                    row.Verdict == TrueOffFocus);
+                citationClass = v2
+                    ? V2CitationClass(finding, subject.GroundedObservations, defect,
+                        row.Verdict == TrueOffFocus, row.AnchorEvidenceOrdinal)
+                    : CitationClass(finding, subject.GroundedObservations, defect,
+                        row.Verdict == TrueOffFocus);
             else if (isTrue)
-                citationClass = finding.Evidence.Any(e => ChangedPaths.Contains(e.Path) &&
-                    e.EndLine - e.StartLine <= 2 &&
-                    subject.GroundedObservations.Any(o => o.Observation.Grounds(e)))
-                    ? "reviewed_other" : "invalid";
+                citationClass = v2
+                    ? V2OtherCitationClass(finding, subject.GroundedObservations,
+                        row.AnchorEvidenceOrdinal)
+                    : finding.Evidence.Any(e => ChangedPaths.Contains(e.Path) &&
+                        e.EndLine - e.StartLine <= 2 &&
+                        subject.GroundedObservations.Any(o => o.Observation.Grounds(e)))
+                        ? "reviewed_other" : "invalid";
+            if (v2 && (isTrue && row.AnchorEvidenceOrdinal is null ||
+                !isTrue && row.AnchorEvidenceOrdinal is not null)) return null;
 
             // Authored off-focus identity must prove its selected frozen anchor.
             // A different reviewed defect may cite that anchor as context without
@@ -171,20 +266,31 @@ internal static class R6ProspectiveAssessment
                 (defect?.CaseId == testCase.Input.Id || row.ExpectedDefectId is not null))
                 return null;
 
+            var confirmedOtherSafeLine = v2 && ConfirmedOtherSafeLine(
+                row.Verdict, row.DefectGroupScope, citationClass, safeRole,
+                row.SafeLineAssessments);
+            if (v2 && row.SafeLineAssessments!.Value.Any(use =>
+                    use.Assessment == ConfirmedOtherIssue) &&
+                !confirmedOtherSafeLine) return null;
             var reason = row.Verdict switch
             {
                 FalseUnsafe => "review_rejected",
                 Unresolved => "review_pending",
-                _ when safeRole == Accusation => "safe_line_accusation",
+                _ when safeRole == Accusation && !confirmedOtherSafeLine =>
+                    "safe_line_accusation",
                 _ when citationClass == "invalid" => "citation_invalid",
                 Expected => "confirmed_expected",
                 _ => "confirmed_off_focus",
             };
             var publicGroupId = PublicGroupId(row.DefectGroupScope, row.DefectGroupId);
             receipts.Add(new(row.FindingOrdinal, row.Verdict, row.ExpectedDefectId,
-                row.DefectGroupScope, publicGroupId, citationClass, safeRole, reason));
+                row.DefectGroupScope, publicGroupId, citationClass, safeRole, reason,
+                v2 ? row.SafeLineAssessments : null,
+                v2 ? row.AnchorEvidenceOrdinal : null,
+                v2 ? row.SeverityAssessment : null,
+                v2 ? row.AnchorAssessment : null));
         }
-        return new(R6ProspectiveRubric.Id, R6ProspectiveRubric.Sha256, scheduleIndex,
+        return new(rubric.Id, rubric.Sha256, scheduleIndex,
             testCase.Input.Id, testCase.Input.CorpusSha256, testCase.Sha256,
             subject.ConfigurationSha256, subject.ExecutionSha256, origin, "assessed",
             receipts.Count, receipts.ToImmutable());
@@ -228,6 +334,50 @@ internal static class R6ProspectiveAssessment
         return "invalid";
     }
 
+    private static string V2CitationClass(AgentFinding finding,
+        ImmutableArray<EvaluationObservation> observations, Defect defect,
+        bool offFocus, int? anchorOrdinal)
+    {
+        if (anchorOrdinal is not { } ordinal ||
+            ordinal < 0 || ordinal >= finding.Evidence.Length ||
+            !defect.RequiredReads.Where(read => !offFocus || read.Path != defect.Path)
+                .All(read => observations.Any(o =>
+                    o.Tool == AgentToolRegistry.ReadFileName && o.Observation.Grounds(
+                        new(o.Observation.ObservationId, read.Path, read.Start, read.End)))))
+            return "invalid";
+        var evidence = finding.Evidence[ordinal];
+        if (evidence.Path != defect.Path || evidence.StartLine > defect.Line ||
+            evidence.EndLine < defect.Line ||
+            offFocus && !defect.RequiredReads.Where(read => read.Path == defect.Path)
+                .All(read => evidence.StartLine <= read.Start && evidence.EndLine >= read.End) ||
+            !observations.Any(o => (!offFocus || o.Tool is AgentToolRegistry.ReadFileName or
+                AgentToolRegistry.ReadDiffName) && o.Observation.Grounds(evidence)))
+            return "invalid";
+        var extra = defect.Line - evidence.StartLine + evidence.EndLine - defect.Line;
+        return extra == 0 ? "exact" : extra <= 2 ? "bounded_context" :
+            "reviewed_context";
+    }
+
+    internal static string ReviewedCitationClass(string defectGroupId, AgentFinding finding,
+        ImmutableArray<EvaluationObservation> observations, bool offFocus,
+        int? anchorOrdinal)
+    {
+        var defect = Defects.FirstOrDefault(item => item.GroupId == defectGroupId);
+        return defect is null ? "invalid" : V2CitationClass(finding, observations,
+            defect, offFocus, anchorOrdinal);
+    }
+
+    private static string V2OtherCitationClass(AgentFinding finding,
+        ImmutableArray<EvaluationObservation> observations, int? anchorOrdinal)
+    {
+        if (anchorOrdinal is not { } ordinal || ordinal < 0 ||
+            ordinal >= finding.Evidence.Length) return "invalid";
+        var evidence = finding.Evidence[ordinal];
+        return ChangedPaths.Contains(evidence.Path) &&
+            observations.Any(o => o.Observation.Grounds(evidence))
+            ? "reviewed_other" : "invalid";
+    }
+
     private static bool SafeLineCited(AgentEvidence evidence) =>
         evidence.Path == "src/SafeCaller.cs" && evidence.StartLine <= 5 && evidence.EndLine >= 5 ||
         evidence.Path == "src/safe-client.ts" && evidence.StartLine <= 2 && evidence.EndLine >= 2;
@@ -240,4 +390,43 @@ internal static class R6ProspectiveAssessment
             safeLineUses.Any(use => use is not (Comparison or Accusation))) return null;
         return count == 0 ? None : safeLineUses.Contains(Accusation) ? Accusation : Comparison;
     }
+
+    internal static bool ValidV2SafeLineAssessments(AgentFinding finding,
+        ImmutableArray<string> uses,
+        ImmutableArray<R6ProspectiveSafeUse>? assessments)
+    {
+        if (uses.IsDefault || assessments is not { IsDefault: false } values)
+            return false;
+        var safeOrdinals = finding.Evidence.Select((evidence, ordinal) =>
+            (evidence, ordinal)).Where(item => SafeLineCited(item.evidence))
+            .Select(item => item.ordinal).ToArray();
+        if (values.Length != safeOrdinals.Length || uses.Length != values.Length)
+            return false;
+        for (var index = 0; index < values.Length; index++)
+        {
+            var item = values[index];
+            if (item is null || item.EvidenceOrdinal != safeOrdinals[index] ||
+                item.Use != uses[index] ||
+                item.Use == Comparison && item.Assessment != ComparisonOnly ||
+                item.Use == Accusation && item.Assessment is not
+                    (ConfirmedOtherIssue or ProtectedPropertyAccusation or SafeUseUnresolved) ||
+                item.Use is not (Comparison or Accusation)) return false;
+        }
+        return true;
+    }
+
+    internal static bool ValidV2SemanticAssessments(bool isTrue,
+        string? severity, string? anchor) =>
+        (severity is Justified or Rejected or SafeUseUnresolved) &&
+        (anchor is Relevant or Rejected or SafeUseUnresolved) &&
+        (!isTrue || severity == Justified && anchor == Relevant);
+
+    internal static bool ConfirmedOtherSafeLine(string verdict, string? scope,
+        string citationClass, string role,
+        ImmutableArray<R6ProspectiveSafeUse>? assessments) =>
+        verdict == TrueOffFocus && scope == Run && citationClass == "reviewed_other" &&
+        role == Accusation && assessments is { IsDefault: false } values &&
+        values.Any(item => item.Use == Accusation) &&
+        values.All(item => item.Use != Accusation ||
+            item.Assessment == ConfirmedOtherIssue);
 }

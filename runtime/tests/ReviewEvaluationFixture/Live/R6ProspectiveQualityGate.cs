@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
@@ -18,7 +19,9 @@ internal sealed record R6ProspectiveGateResult(
     [property: JsonRequired] string LegacyStructuralStatus,
     [property: JsonRequired] string ProspectiveSemanticStatus,
     [property: JsonRequired] string SafetyStatus,
-    [property: JsonRequired] string UsabilityStatus);
+    [property: JsonRequired] string UsabilityStatus,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CostKnowledgeStatus = null);
 
 // Recomputable candidate from public-safe, bounded rows. It verifies row
 // consistency and accounting, but semantic truth still depends on the actual
@@ -31,16 +34,58 @@ internal static class R6ProspectiveQualityGate
     // Public rows are untrusted persisted evidence. Validate their complete
     // grammar before a blocking finding can short-circuit the gate decision.
     internal static bool ValidFindingShape(R6ProspectiveFindingReceipt? finding,
-        int caseIndex, int ordinal)
+        int caseIndex, int ordinal, LivePlanRubric? selectedRubric = null)
     {
+        var rubric = selectedRubric ?? new LivePlanRubric(R6ProspectiveRubric.Id,
+            R6ProspectiveRubric.Sha256);
+        if (!R6ProspectiveRubric.IsV1(rubric) && !R6ProspectiveRubric.IsV2(rubric))
+            return false;
+        var v2 = R6ProspectiveRubric.IsV2(rubric);
         if (finding is null || finding.FindingOrdinal != ordinal ||
             finding.SafeLineRole is not (R6ProspectiveAssessment.None or
                 R6ProspectiveAssessment.Comparison or R6ProspectiveAssessment.Accusation))
             return false;
+        if (v2)
+        {
+            if (!R6ProspectiveAssessment.ValidV2SemanticAssessments(
+                    finding.Verdict is R6ProspectiveAssessment.Expected or
+                        R6ProspectiveAssessment.TrueOffFocus,
+                    finding.SeverityAssessment, finding.AnchorAssessment))
+                return false;
+            if (finding.SafeLineAssessments is not { IsDefault: false } uses ||
+                uses.Length > AgentLimits.EvidencePerFinding)
+                return false;
+            for (var index = 0; index < uses.Length; index++)
+            {
+                var item = uses[index];
+                if (item is null || item.EvidenceOrdinal is < 0 or >=
+                        AgentLimits.EvidencePerFinding ||
+                    index > 0 && item.EvidenceOrdinal <= uses[index - 1].EvidenceOrdinal ||
+                    item.Use == R6ProspectiveAssessment.Comparison &&
+                        item.Assessment != R6ProspectiveAssessment.ComparisonOnly ||
+                    item.Use == R6ProspectiveAssessment.Accusation && item.Assessment is not
+                        (R6ProspectiveAssessment.ConfirmedOtherIssue or
+                         R6ProspectiveAssessment.ProtectedPropertyAccusation or
+                         R6ProspectiveAssessment.SafeUseUnresolved) ||
+                    item.Use is not (R6ProspectiveAssessment.Comparison or
+                        R6ProspectiveAssessment.Accusation)) return false;
+            }
+            var role = uses.Length == 0 ? R6ProspectiveAssessment.None :
+                uses.Any(item => item.Use == R6ProspectiveAssessment.Accusation)
+                    ? R6ProspectiveAssessment.Accusation : R6ProspectiveAssessment.Comparison;
+            if (finding.SafeLineRole != role) return false;
+        }
+        else if (finding.SafeLineAssessments is not null ||
+            finding.AnchorEvidenceOrdinal is not null ||
+            finding.SeverityAssessment is not null ||
+            finding.AnchorAssessment is not null) return false;
         var isTrue = finding.Verdict is R6ProspectiveAssessment.Expected or
             R6ProspectiveAssessment.TrueOffFocus;
         if (!isTrue && finding.Verdict is not (R6ProspectiveAssessment.FalseUnsafe or
             R6ProspectiveAssessment.Unresolved)) return false;
+        if (v2 && (isTrue && (finding.AnchorEvidenceOrdinal is not { } anchor ||
+                anchor < 0 || anchor >= AgentLimits.EvidencePerFinding) ||
+            !isTrue && finding.AnchorEvidenceOrdinal is not null)) return false;
         if (isTrue)
         {
             if (finding.DefectGroupScope is not (R6ProspectiveAssessment.Authored or
@@ -54,11 +99,13 @@ internal static class R6ProspectiveQualityGate
                      finding.DefectGroupId.Length != 68 ||
                      !EvaluationLimits.Hash(finding.DefectGroupId[4..])) ||
                 finding.CitationClass is not ("exact" or "bounded_context" or
-                    "reviewed_other" or "invalid") ||
+                    "reviewed_context" or "reviewed_other" or "invalid") ||
+                !v2 && finding.CitationClass == "reviewed_context" ||
                 finding.DefectGroupScope == R6ProspectiveAssessment.Authored &&
                     finding.CitationClass == "reviewed_other" ||
                 finding.DefectGroupScope == R6ProspectiveAssessment.Run &&
-                    finding.CitationClass is "exact" or "bounded_context")
+                    finding.CitationClass is "exact" or "bounded_context" or
+                        "reviewed_context")
                 return false;
             if (finding.Verdict == R6ProspectiveAssessment.Expected)
             {
@@ -74,11 +121,18 @@ internal static class R6ProspectiveQualityGate
         else if (finding.ExpectedDefectId is not null ||
             finding.DefectGroupScope is not null || finding.DefectGroupId is not null ||
             finding.CitationClass != "invalid") return false;
+        var confirmedOtherSafeLine = v2 && R6ProspectiveAssessment.ConfirmedOtherSafeLine(
+            finding.Verdict, finding.DefectGroupScope, finding.CitationClass,
+            finding.SafeLineRole, finding.SafeLineAssessments);
+        if (v2 && finding.SafeLineAssessments!.Value.Any(item =>
+                item.Assessment == R6ProspectiveAssessment.ConfirmedOtherIssue) &&
+            !confirmedOtherSafeLine) return false;
         var reason = finding.Verdict switch
         {
             R6ProspectiveAssessment.FalseUnsafe => "review_rejected",
             R6ProspectiveAssessment.Unresolved => "review_pending",
-            _ when finding.SafeLineRole == R6ProspectiveAssessment.Accusation =>
+            _ when finding.SafeLineRole == R6ProspectiveAssessment.Accusation &&
+                !confirmedOtherSafeLine =>
                 "safe_line_accusation",
             _ when finding.CitationClass == "invalid" => "citation_invalid",
             R6ProspectiveAssessment.Expected => "confirmed_expected",
@@ -94,8 +148,8 @@ internal static class R6ProspectiveQualityGate
         ImmutableArray<EvaluationOutcome> outcomes)
     {
         if (summary.ProspectiveRubric is not { } rubric ||
-            rubric.Id != R6ProspectiveRubric.Id ||
-            rubric.Sha256 != R6ProspectiveRubric.Sha256 ||
+            !R6ProspectiveRubric.ValidSelection(rubric, summary.CorpusSha256,
+                R6ProspectiveRubric.Cases) ||
             summary.UsageJournal is not { } journal ||
             UsageJournal.Admit(journal) is null ||
             journal.Plan.Rubric != rubric ||
@@ -147,6 +201,8 @@ internal static class R6ProspectiveQualityGate
         ImmutableArray<EvaluationOutcome> outcomes)
     {
         if (summary.ProspectiveRubric is null) return null;
+        var v2 = R6ProspectiveRubric.IsV2(summary.ProspectiveRubric);
+        var costKnowledge = "unverified";
         var legacy = outcomes.Length != 5 ? "incomplete" :
             outcomes.Any(row => row.ScenarioStatus != AssertionStatus.Passed) ? "failed" : "passed";
         R6ProspectiveGateResult Block(string reason)
@@ -158,17 +214,21 @@ internal static class R6ProspectiveQualityGate
             var safety = reason is "finding_ineligible" or "finding_shape_invalid"
                 ? "failed" : semantic == "failed" ? "passed" : "not_evaluable";
             return new("blocked", reason, 0, 0, 0, 0, 0, 0, 0,
-                legacy, semantic, safety, "blocked");
+                legacy, semantic, safety, "blocked",
+                v2 ? costKnowledge : null);
         }
-        if (summary.ProspectiveRubric.Id != R6ProspectiveRubric.Id ||
-            summary.ProspectiveRubric.Sha256 != R6ProspectiveRubric.Sha256 ||
-            summary.CorpusSha256 != R6ProspectiveRubric.CorpusSha256)
+        var rubric = summary.ProspectiveRubric;
+        if (!R6ProspectiveRubric.ValidSelection(rubric, summary.CorpusSha256,
+                R6ProspectiveRubric.Cases))
             return Block("rubric_identity_invalid");
         if (summary.ExecutionKind != "live")
             return new("not_evaluable", "keyless_run", 0, 0, 0, 0, 0, 0, 0,
-                legacy, "not_evaluable", "not_evaluable", "not_evaluable");
+                legacy, "not_evaluable", "not_evaluable", "not_evaluable",
+                v2 ? "not_evaluable" : null);
         if (!ValidJournalBinding(summary, outcomes))
             return Block("plan_binding_invalid");
+        costKnowledge = summary.UsageUnknownCalls == 0 && !summary.AccountingViolation
+            ? "known" : "unknown";
         if (summary.Scheduled != 5 || summary.Attempted != 5 || summary.Completed != 5 ||
             summary.Failed != 0 || summary.Invalid != 0 || summary.Unattempted != 0 ||
             summary.StopReason != "complete" || summary.Cleanup != "cleaned" ||
@@ -201,16 +261,25 @@ internal static class R6ProspectiveQualityGate
                     ? AssertionStatus.Passed : AssertionStatus.Failed) ||
                 row.FailureSource != EvaluationFailureSource.None ||
                 row.FailureKind != EvaluationFailureKind.None ||
-                row.DuplicateObservations != 0 ||
+                (!v2 && row.DuplicateObservations != 0 ||
+                 v2 && (row.DuplicateObservations < 0 ||
+                    row.DuplicateObservations > Math.Max(0, row.FindingCount - 1) ||
+                    row.DuplicateObservations > 0 && row.Code is not
+                        (EvaluationCode.DuplicateObservation or
+                         EvaluationCode.ProhibitedFinding) ||
+                    row.Code == EvaluationCode.DuplicateObservation &&
+                        (row.DuplicateObservations == 0 ||
+                         row.ProhibitedObservations != 0))) ||
                 row.SourceCommit != summary.SourceCommit ||
                 row.SourceTree != summary.SourceTree ||
                 row.SourceClean != summary.SourceClean ||
                 row.Code is not (EvaluationCode.Scored or EvaluationCode.ExpectedFindingMissing or
-                    EvaluationCode.ProhibitedFinding) ||
+                    EvaluationCode.ProhibitedFinding) &&
+                    (!v2 || row.Code != EvaluationCode.DuplicateObservation) ||
                 caseReceipt is null || caseReceipt.ScheduleIndex != index ||
                 caseReceipt.CaseId != row.CaseId ||
-                caseReceipt.RubricId != R6ProspectiveRubric.Id ||
-                caseReceipt.RubricSha256 != R6ProspectiveRubric.Sha256 ||
+                caseReceipt.RubricId != rubric.Id ||
+                caseReceipt.RubricSha256 != rubric.Sha256 ||
                 caseReceipt.CorpusSha256 != row.CorpusSha256 ||
                 caseReceipt.CaseSha256 != row.CaseSha256 ||
                 caseReceipt.ConfigurationSha256 != row.ConfigurationSha256 ||
@@ -222,8 +291,8 @@ internal static class R6ProspectiveQualityGate
                 return Block("case_binding_invalid");
             var audit = recoveryReceipts[index];
             var caseDiagnostics = recoveryDiagnostics.Where(d => d.ScheduleIndex == index).ToArray();
-            if (audit is null || audit.RubricId != R6ProspectiveRubric.Id ||
-                audit.RubricSha256 != R6ProspectiveRubric.Sha256 ||
+            if (audit is null || audit.RubricId != rubric.Id ||
+                audit.RubricSha256 != rubric.Sha256 ||
                 audit.ScheduleIndex != index || audit.CaseSha256 != row.CaseSha256 ||
                 audit.ConfigurationSha256 != row.ConfigurationSha256 ||
                 audit.ExecutionSha256 != row.ExecutionSha256 ||
@@ -235,7 +304,8 @@ internal static class R6ProspectiveQualityGate
             if (caseReceipt.Origin is not (R6ProspectiveAssessment.AiOrigin or
                 R6ProspectiveAssessment.HumanOrigin)) return Block("origin_invalid");
             for (var ordinal = 0; ordinal < caseReceipt.Findings.Length; ordinal++)
-                if (!ValidFindingShape(caseReceipt.Findings[ordinal], index, ordinal))
+                if (!ValidFindingShape(caseReceipt.Findings[ordinal], index, ordinal,
+                    rubric))
                     return Block("finding_shape_invalid");
         }
 
@@ -269,7 +339,11 @@ internal static class R6ProspectiveQualityGate
             {
                 if (finding.Verdict is R6ProspectiveAssessment.FalseUnsafe or
                     R6ProspectiveAssessment.Unresolved ||
-                    finding.SafeLineRole == R6ProspectiveAssessment.Accusation ||
+                    finding.SafeLineRole == R6ProspectiveAssessment.Accusation &&
+                        !(v2 && R6ProspectiveAssessment.ConfirmedOtherSafeLine(
+                            finding.Verdict, finding.DefectGroupScope,
+                            finding.CitationClass, finding.SafeLineRole,
+                            finding.SafeLineAssessments)) ||
                     finding.CitationClass == "invalid")
                 {
                     blockedReason ??= "finding_ineligible";
@@ -303,7 +377,10 @@ internal static class R6ProspectiveQualityGate
                 blockedReason ??= "legacy_override_invalid";
             if (row.ProhibitedObservations > 0 &&
                 caseReceipt.Findings.Count(f => f.SafeLineRole ==
-                    R6ProspectiveAssessment.Comparison) < row.ProhibitedObservations)
+                    R6ProspectiveAssessment.Comparison || v2 &&
+                    R6ProspectiveAssessment.ConfirmedOtherSafeLine(f.Verdict,
+                        f.DefectGroupScope, f.CitationClass, f.SafeLineRole,
+                        f.SafeLineAssessments)) < row.ProhibitedObservations)
             {
                 blockedReason ??= "prohibited_evidence_unexplained";
                 safetyFailed = true;
@@ -322,9 +399,11 @@ internal static class R6ProspectiveQualityGate
             return new("blocked", blockedReason, expectedCredits, offFocus,
                 repeats, groups.Count, qualifiedRecoveries, ai, human, legacy,
                 semanticFailed ? "failed" : "passed",
-                safetyFailed ? "failed" : "passed", usability);
+                safetyFailed ? "failed" : "passed", usability,
+                v2 ? costKnowledge : null);
         return new("candidate_pass", "all_gates_passed", expectedCredits, offFocus,
             repeats, groups.Count, qualifiedRecoveries, ai, human,
-            legacy, "passed", "passed", usability);
+            legacy, "passed", "passed", usability,
+            v2 ? costKnowledge : null);
     }
 }

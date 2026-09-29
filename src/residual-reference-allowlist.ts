@@ -320,7 +320,7 @@ export const residualReferenceRules = [
     /^runtime\/tests\/(?:AgenticPrReview\.Runtime\.Tests\/Agent\/Quality\/R6ProspectivePipelineTests|ReviewEvaluationFixture\/Live\/R6ProspectiveQualityGate)\.cs$/u,
     'R6 prospective quality-rubric evaluator and tests',
     'current explicit structural-versus-semantic conformance',
-    'legacy names only the retained R5 scenario status and two bounded prospective override controls',
+    'legacy names only the retained R5 scenario status and three bounded prospective review routes',
     'an accepted evaluator replacement must keep old outcomes immutable and verify the same hard-gate precedence',
   ),
   narrowConformance(
@@ -331,5 +331,14 @@ export const residualReferenceRules = [
     'current public-safe five-case reports and decision records',
     'legacy names the retained structural scoring dimension beside the prospective semantic result, not a supported retired runtime',
     'an accepted successor observation must keep the historical scoring outcome distinct from its prospective candidate verdict',
+  ),
+  narrowConformance(
+    'RR-045',
+    /legacy/iu,
+    /^docs\/90_roadmap\/r6-prospective-quality-review-boundary\.md$/u,
+    'R6 v2 independent review boundary owner',
+    'current prospective hard-gate and reviewed-semantic decision inventory',
+    'legacy_override_invalid is the retained structural signal limit, not a supported retired runtime route',
+    'an accepted rubric successor must preserve old-scoring outcomes and allow only the three named reviewed explanations',
   ),
 ] as const satisfies readonly ResidualReferenceRule[];
