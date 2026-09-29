@@ -83,6 +83,62 @@ public sealed class R6ProspectivePipelineTests
             { Tool = AgentToolRegistry.ReadDiffName }).ToImmutableArray()));
     }
 
+    [Theory]
+    [InlineData("cs-null-deref", "src/Caller.cs", 5, 5, "src/Lookup.cs", 5, 5, "high", "exact")]
+    [InlineData("ts-zero-timeout", "src/client.ts", 2, 2, "src/config.ts", 1, 2,
+        "medium", "exact")]
+    [InlineData("repository-token-log", "src/Upload.cs", 5, 6, "rules/review.md", 3, 3,
+        "high", "bounded_context")]
+    public void AuthoredOffFocusAcceptsGroundedDiffAnchorWithReturnedSupportingRead(
+        string group, string changedPath, int start, int end, string supportingPath,
+        int supportingStart, int supportingEnd, string severity, string expectedClass)
+    {
+        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture);
+        var identity = fixture.Runs.Single(run => run.Input.CaseId == "ts-safe")
+            .Input.ReviewedIdentity.Runtime;
+        var changed = new EvaluationObservation(AgentToolRegistry.ReadDiffName,
+            new AgentObservation("changed", identity,
+                ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(changedPath,
+                    Enumerable.Range(start, end - start + 1).ToImmutableHashSet())));
+        var support = new EvaluationObservation(AgentToolRegistry.ReadFileName,
+            new AgentObservation("support", identity,
+                ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(supportingPath,
+                    Enumerable.Range(supportingStart, supportingEnd - supportingStart + 1)
+                        .ToImmutableHashSet())));
+        var observations = ImmutableArray.Create(changed, support);
+        var finding = new AgentFinding(severity, "independently confirmed", "causal explanation",
+            [new AgentEvidence("changed", changedPath, start, end)]);
+
+        Assert.Equal(expectedClass, R6ProspectiveAssessment.KnownCitationClass(
+            group, finding, observations, offFocus: true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding, observations));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding, observations.RemoveAt(1), offFocus: true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding, observations.SetItem(1, support with
+            { Tool = AgentToolRegistry.ReadDiffName }), offFocus: true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding, observations.SetItem(0, changed with
+            { Tool = AgentToolRegistry.SearchTextName }), offFocus: true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding with { Severity = severity == "high" ? "medium" : "high" },
+            observations, offFocus: true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding with { Evidence = [new AgentEvidence("changed", supportingPath,
+                start, end)] }, observations, offFocus: true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding with { Evidence = [new AgentEvidence("not-returned", changedPath,
+                start, end)] }, observations, offFocus: true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+            group, finding with { Evidence = [new AgentEvidence("changed", changedPath,
+                Math.Max(1, start - 3), end + 3)] }, observations, offFocus: true));
+        if (end > start)
+            Assert.Equal("invalid", R6ProspectiveAssessment.KnownCitationClass(
+                group, finding with { Evidence = [new AgentEvidence("changed", changedPath,
+                    start, start)] }, observations, offFocus: true));
+    }
+
     [Fact]
     public void MixedSafeLineUsesAlwaysResolveToAccusation()
     {
@@ -202,6 +258,137 @@ public sealed class R6ProspectivePipelineTests
                 StringComparison.Ordinal);
         }
         Assert.Equal("not_evaluable", R6ProspectiveReportReader.Read(publicBytes).Status);
+    }
+
+    [Fact]
+    public async Task SelectedCaseKeepsItsReadsWhileAuthoredOffFocusUsesReturnedDiff()
+    {
+        using var plan = new PlanFile();
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            approveOffFocusDiff: true);
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-safe"
+                ? WithOffFocusUploadDiff(run.Script) : run.Script, ReplayFault.None),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+
+        Assert.Equal(5, result.Completed);
+        Assert.Equal("adjudicated", result.Summary.AdjudicationStatus);
+        Assert.Equal("cleaned", result.Summary.Cleanup);
+        var receipt = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            result.Summary.ProspectiveCaseReceipts)[3];
+        var finding = Assert.Single(receipt.Findings);
+        Assert.Equal("true_off_focus", finding.Verdict);
+        Assert.Equal("repository-token-log", finding.DefectGroupId);
+        Assert.Equal("bounded_context", finding.CitationClass);
+        Assert.Equal("confirmed_off_focus", finding.Reason);
+        Assert.Equal("none", finding.SafeLineRole);
+
+        using var packet = JsonDocument.Parse(Assert.IsType<string>(input.OffFocusPacket));
+        var returned = packet.RootElement.GetProperty("returned_observations")
+            .EnumerateArray().ToArray();
+        Assert.Contains(returned, observation => observation.GetProperty("tool").GetString() ==
+            AgentToolRegistry.ReadDiffName && observation.GetProperty("returned_lines")
+                .TryGetProperty("src/Upload.cs", out _));
+        Assert.DoesNotContain(returned, observation => observation.GetProperty("tool").GetString() ==
+            AgentToolRegistry.ReadFileName && observation.GetProperty("returned_lines")
+                .TryGetProperty("src/Upload.cs", out _));
+        Assert.Equal("not_evaluable", R6ProspectiveReportReader.Read(
+            Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Status);
+        Assert.False(Directory.Exists(input.Root));
+    }
+
+    [Fact]
+    public async Task CleanSyntheticLiveRunRecomputesAuthoredOffFocusDiffCredit()
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile();
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            approveOffFocusDiff: true);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var next = 0;
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            SecretSource = new FakeSecret("APR314_SYNTHETIC_CREDENTIAL_CANARY"),
+            TransportFactory = new FakeFactory(_ =>
+            {
+                var run = runs[next++];
+                return new ReplayTransport(run.Input.CaseId == "ts-safe"
+                    ? WithOffFocusUploadDiff(run.Script) : run.Script, ReplayFault.None);
+            }),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+
+        Assert.Equal(5, result.Completed);
+        var gate = Assert.IsType<R6ProspectiveGateResult>(
+            result.Summary.ProspectiveQualityCandidate);
+        Assert.Equal("candidate_pass", gate.Status);
+        Assert.Equal(3, gate.ExpectedCredits);
+        Assert.Equal(1, gate.TrueOffFocusFindings);
+        Assert.Equal(1, gate.CrossCaseRepeats);
+        Assert.Equal("passed", gate.LegacyStructuralStatus);
+        Assert.Equal("passed", gate.ProspectiveSemanticStatus);
+        Assert.Equal("passed", gate.SafetyStatus);
+        Assert.Equal("cost_recorded", gate.UsabilityStatus);
+        var read = R6ProspectiveReportReader.Read(
+            Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n"));
+        Assert.Equal("candidate_pass", read.Status);
+        Assert.Equal(gate, read.Recomputed);
+        Assert.DoesNotContain("APR314_SYNTHETIC_CREDENTIAL_CANARY", string.Join('\n', lines));
+        Assert.False(Directory.Exists(input.Root));
+    }
+
+    [Fact]
+    public async Task OffFocusDiffCannotReplaceScheduledCaseRequiredRead()
+    {
+        using var plan = new PlanFile();
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            approveOffFocusDiff: true);
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            DryRunTransport = run =>
+            {
+                if (run.Input.CaseId != "ts-safe")
+                    return new ReplayTransport(run.Script, ReplayFault.None);
+                var script = WithOffFocusUploadDiff(run.Script);
+                return new ReplayTransport(script with
+                {
+                    Turns = script.Turns.Select(turn => turn with
+                    {
+                        ToolCalls = turn.ToolCalls.Select(call =>
+                            call.Name == AgentToolRegistry.ReadFileName &&
+                            call.ArgumentsJson.Contains("src/safe-client.ts", StringComparison.Ordinal)
+                                ? call with
+                                {
+                                    Name = AgentToolRegistry.ReadDiffName,
+                                    ArgumentsJson = "{\"path\":\"src/safe-client.ts\"}",
+                                }
+                                : call).ToImmutableArray(),
+                    }).ToImmutableArray(),
+                }, ReplayFault.None);
+            },
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+
+        Assert.Equal(5, result.Completed);
+        Assert.Equal("input_invalid", result.Summary.AdjudicationStatus);
+        Assert.Equal("pending", result.Summary.ProspectiveCaseReceipts!.Value[3].Status);
+        Assert.Equal("not_evaluable", R6ProspectiveReportReader.Read(
+            Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Status);
+        Assert.False(Directory.Exists(input.Root));
     }
 
     [Fact]
@@ -817,6 +1004,42 @@ public sealed class R6ProspectivePipelineTests
         }).ToImmutableArray(),
     };
 
+    private static ReplayScript WithOffFocusUploadDiff(ReplayScript script)
+    {
+        var terminal = script.Turns[^1] with
+        {
+            ToolCalls = script.Turns[^1].ToolCalls.Select(call =>
+            {
+                var review = JsonNode.Parse(call.ArgumentsJson)!.AsObject();
+                review["findings"] = new JsonArray(new JsonObject
+                {
+                    ["severity"] = "high",
+                    ["title"] = "Synthetic off-focus token log",
+                    ["message"] = "Upload passes its token to stderr against the repository rule.",
+                    ["evidence"] = new JsonArray(new JsonObject
+                    {
+                        ["observation_id"] =
+                            "5870f083ee1dc9c29e794d6f090827aa1fe92b541081d8494d32c37a46f4cafe",
+                        ["path"] = "src/Upload.cs",
+                        ["start_line"] = 5,
+                        ["end_line"] = 6,
+                    }),
+                });
+                return call with { ArgumentsJson = review.ToJsonString() };
+            }).ToImmutableArray(),
+        };
+        return script with
+        {
+            Turns = script.Turns.RemoveAt(script.Turns.Length - 1)
+                .Add(new ReplayScriptTurn([new ReplayToolCall("off-diff",
+                    AgentToolRegistry.ReadDiffName, "{\"path\":\"src/Upload.cs\"}")], ""))
+                .Add(new ReplayScriptTurn([new ReplayToolCall("off-rule",
+                    AgentToolRegistry.ReadFileName,
+                    "{\"path\":\"rules/review.md\",\"start_line\":1,\"line_count\":20}")], ""))
+                .Add(terminal),
+        };
+    }
+
     // Mechanical grouping test: the synthetic second line is not a claim that
     // this fixture contains another real defect. The independent reviewer owns
     // that causal judgment; the parser must not infer it from contextual overlap.
@@ -960,13 +1183,15 @@ public sealed class R6ProspectivePipelineTests
     }
 
     private sealed class PacketReviewInput(StringWriter prompts, bool approveExpected = false,
-        string? corruption = null, bool injectPacketCanaries = false) : TextReader
+        string? corruption = null, bool injectPacketCanaries = false,
+        bool approveOffFocusDiff = false) : TextReader
     {
         private int promptCount;
         private int position;
         private const string Command = "accept\n";
         internal string? Root { get; private set; }
         internal string LastPacket { get; private set; } = "";
+        internal string? OffFocusPacket { get; private set; }
 
         public override ValueTask<int> ReadAsync(Memory<char> buffer,
             CancellationToken cancellationToken = default)
@@ -1000,6 +1225,7 @@ public sealed class R6ProspectivePipelineTests
                 using var packet = JsonDocument.Parse(LastPacket);
                 var findings = packet.RootElement.GetProperty("findings");
                 var caseId = packet.RootElement.GetProperty("case").GetProperty("id").GetString();
+                if (caseId == "ts-safe" && approveOffFocusDiff) OffFocusPacket = LastPacket;
                 for (var index = 0; index < findings.GetArrayLength(); index++)
                 {
                     var uses = new JsonArray();
@@ -1029,6 +1255,13 @@ public sealed class R6ProspectivePipelineTests
                             annotation["findings"]![index]!["defect_group_scope"] = "authored";
                             annotation["findings"]![index]!["defect_group_id"] = group;
                         }
+                    }
+                    if (approveOffFocusDiff && caseId == "ts-safe")
+                    {
+                        annotation["findings"]![index]!["verdict"] = "true_off_focus";
+                        annotation["findings"]![index]!["defect_group_scope"] = "authored";
+                        annotation["findings"]![index]!["defect_group_id"] =
+                            "repository-token-log";
                     }
                 }
                 if (current == 1)
