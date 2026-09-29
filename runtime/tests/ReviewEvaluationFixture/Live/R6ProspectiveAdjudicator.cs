@@ -63,7 +63,7 @@ internal sealed class R6ProspectiveAdjudicator(TextReader input, TextWriter prom
                         Path.GetFileName(annotationPath) +
                         (v2 ? "; compare causes across findings and prior accepted case files; reuse one group id for the same cause; mark unresolved if uncertain" : "") +
                         (R6ProspectiveRubric.IsV3(rubric)
-                            ? "; record observed outcome separately from causal attribution; use undetermined when evidence does not identify a cause" : "") +
+                            ? "; set attribution in the annotation: causes=model_behavior|harness|test_contract|provider_transport (or []), confidence=confirmed|probable|undetermined, basis=returned_observation|runtime_diagnostic|test_contract|provider_receipt|independent_review|insufficient, observation_ordinals=run-local evidence indexes; use causes=[], confidence=undetermined, basis=insufficient and observation_ordinals=[] when cause is unknown" : "") +
                         "; enter accept, skip or stop");
                     await prompts.FlushAsync(deadline.Token);
                     var command = await ReadCommandAsync(deadline.Token);

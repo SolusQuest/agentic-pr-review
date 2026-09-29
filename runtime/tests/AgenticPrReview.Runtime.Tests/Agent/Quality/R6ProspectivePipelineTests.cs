@@ -447,18 +447,20 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal(5, result.Completed);
         Assert.Equal("adjudicated", result.Summary.AdjudicationStatus);
         Assert.Equal(R6ProspectiveRubric.V3Id, result.Summary.ProspectiveRubric?.Id);
-        Assert.All(result.Summary.ProspectiveCaseReceipts!.Value,
+        var receipts = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            result.Summary.ProspectiveCaseReceipts);
+        Assert.All(receipts,
             receipt => Assert.Equal(R6ProspectiveRubric.V3Id, receipt.RubricId));
         var report = Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n");
         var readback = R6ProspectiveReportReader.Read(report);
         Assert.Equal("not_evaluable", readback.Status);
         Assert.Equal("keyless_run", readback.Reason);
-        var receipt = result.Summary.ProspectiveCaseReceipts!.Value[2];
+        var receipt = receipts[2];
         Assert.Equal("undetermined", receipt.Attribution?.Confidence);
         Assert.Equal("receipt_shape_invalid", R6ProspectiveReportReader.Read(WriteReport(
             result.Summary with
             {
-                ProspectiveCaseReceipts = result.Summary.ProspectiveCaseReceipts.Value.SetItem(
+                ProspectiveCaseReceipts = receipts.SetItem(
                     2, receipt with { Attribution = null }),
             }, result.Outcomes)).Reason);
         Assert.False(Directory.Exists(input.Root));
@@ -525,11 +527,13 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal(3, result.Summary.ProspectiveQualityCandidate?.ExpectedCredits);
         var report = Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n");
         Assert.Equal("candidate_pass", R6ProspectiveReportReader.Read(report).Status);
-        var receipt = result.Summary.ProspectiveCaseReceipts!.Value[2];
+        var receipts = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            result.Summary.ProspectiveCaseReceipts);
+        var receipt = receipts[2];
         Assert.Equal("receipt_shape_invalid", R6ProspectiveReportReader.Read(WriteReport(
             result.Summary with
             {
-                ProspectiveCaseReceipts = result.Summary.ProspectiveCaseReceipts.Value.SetItem(
+                ProspectiveCaseReceipts = receipts.SetItem(
                     2, receipt with
                     {
                         Attribution = new(["model_behavior"], "confirmed",
@@ -575,8 +579,10 @@ public sealed class R6ProspectivePipelineTests
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
         Assert.Equal(AssertionStatus.Passed, v3.Outcomes[2].EvidenceStatus);
-        Assert.Equal("assessed", v3.Summary.ProspectiveCaseReceipts!.Value[2].Status);
-        Assert.Equal("expected", Assert.Single(v3.Summary.ProspectiveCaseReceipts.Value[2]
+        var v3Receipts = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            v3.Summary.ProspectiveCaseReceipts);
+        Assert.Equal("assessed", v3Receipts[2].Status);
+        Assert.Equal("expected", Assert.Single(v3Receipts[2]
             .Findings).Verdict);
 
         using var v2Plan = new PlanFile(v2: true);

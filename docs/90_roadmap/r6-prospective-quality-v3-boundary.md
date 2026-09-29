@@ -39,6 +39,13 @@ array may contain `model_behavior`, `harness`, `test_contract` and
 the kind of supporting evidence, and bounded observation ordinals can point
 back to returned observations without exposing their contents. Empty causes
 with `undetermined` and `insufficient` are valid and preferred to a guess.
+Supported `basis` values for an assigned cause are `returned_observation`,
+`runtime_diagnostic`, `test_contract`, `provider_receipt` and
+`independent_review`. The `observation_ordinals` array contains distinct,
+ascending indexes into the run-local returned observations; it is required
+for `returned_observation` and may be empty for the other bases. A cause that
+cannot be supported uses `{"causes":[],"confidence":"undetermined",
+"basis":"insufficient","observation_ordinals":[]}`.
 The editable v3 sidecar leaves attribution absent until the independent
 reviewer explicitly selects a closed value, including `undetermined` when
 appropriate. V1/v2 omit this field. A completed case's reviewer records it;
