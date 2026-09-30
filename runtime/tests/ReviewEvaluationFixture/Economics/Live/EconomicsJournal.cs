@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
@@ -14,7 +16,8 @@ internal static class EconomicsJournal
     internal static bool ValidReceipt(EconomicsChildInput input, EconomicsChildReady? ready,
         EconomicsReceipt receipt, EconomicsPlan plan, AdmittedReplayRun run)
     {
-        if (ready is null || !EconomicsProcess.ValidReady(input, ready, receipt.ProcessId) ||
+        if (!ValidTerminalReason(receipt.Diagnostic, receipt.TerminalReason) ||
+            ready is null || !EconomicsProcess.ValidReady(input, ready, receipt.ProcessId) ||
             receipt.Operation != input.Operation || receipt.PlanSha256 != input.PlanSha256 ||
             receipt.WorkloadSha256 != input.WorkloadSha256 || receipt.Index != input.Slot.Index ||
             receipt.LeaseId != input.Lease.Id || receipt.Startup != ready.Startup || receipt.Transport != input.Transport ||
@@ -80,7 +83,10 @@ internal static class EconomicsJournal
 
     internal static EconomicsObservation Observe(EconomicsReceipt receipt) => new(receipt.Code, receipt.Stage,
         receipt.Diagnostic, receipt.AgentStatus, receipt.Calls, receipt.Accounting.Sends, receipt.Measurement,
-        receipt.InitialPrefixSha256!, receipt.CompletedSessionSha256);
+        receipt.InitialPrefixSha256!, receipt.CompletedSessionSha256, receipt.TerminalReason);
+
+    internal static bool ValidTerminalReason(string? diagnostic, string? reason) =>
+        reason is null || diagnostic == AgentFailureCodes.TerminalInvalid && TerminalReviewValidator.IsReason(reason);
 
     // Admission of the known prefix is internal. A missing child is never published
     // as an unattempted slot in a replacement full-campaign journal.
@@ -136,7 +142,8 @@ internal static class EconomicsJournal
 
     internal static bool ValidObservation(EconomicsObservation? observation, EconomicsStep step)
     {
-        if (observation is not { Measurement: { } counts } value || value.Calls.IsDefault ||
+        if (observation is not { Measurement: { } counts } value ||
+            !ValidTerminalReason(value.Diagnostic, value.TerminalReason) || value.Calls.IsDefault ||
             value.Calls.Length is < 1 or > 8 || counts.Calls != value.Calls.Length || value.Reservations is < 0 or > 8 ||
             !EvaluationLimits.Hash(value.InitialPrefixSha256) ||
             counts.LastProjectRequestBytes is < 1 or > AgentLimits.RequestBytes || counts.LastMessages is < 1 or > AgentLimits.Messages ||

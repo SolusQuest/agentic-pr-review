@@ -163,7 +163,7 @@ internal static class EconomicsChild
                 predecessor?.SessionSha256, code, stage, diagnostic, predecessor is not null,
                 outcome.Succeeded ? "succeeded" : "failed", evaluation, prepared, callRows, accounting.Seal(),
                 outcome.Events.OfType<AgentToolResultEvent>().Count(), baseline.Provider.Whole.Sha256, sessionSha, measurement.Counts,
-                credentialProof);
+                credentialProof, outcome.Diagnostic?.TerminalReason);
             if (prepared is not null && input.Fault == EconomicsFault.AfterPrepareCrash) return 9;
             if (input.Fault == EconomicsFault.PartialReply) { Console.Write("partial"); return 0; }
             if (input.Fault == EconomicsFault.OversizedReply)
@@ -216,6 +216,8 @@ internal sealed class EconomicsLoopback : IDeepSeekTransport
     internal EconomicsLoopback(ReplayScript script, EconomicsFault fault, long inputBasis, long? expectedOutputCap = null)
     {
         this.fault = fault; this.inputBasis = inputBasis; this.expectedOutputCap = expectedOutputCap;
+        if (fault == EconomicsFault.TerminalArguments)
+            script = new([new([new("invalid-terminal", "finish_review", "{\"summary\":\"PRIVATE_CANARY\",\"findings\":[null]}")], "")]);
         if (fault is EconomicsFault.ThreeCalls or EconomicsFault.EightCalls)
         {
             var first = script.Turns[0];

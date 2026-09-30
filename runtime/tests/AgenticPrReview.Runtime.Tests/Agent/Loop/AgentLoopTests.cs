@@ -618,6 +618,7 @@ public sealed class AgentLoopTests
 
         AssertFailure(outcome, "agent_terminal_invalid");
         Assert.IsType<AgentFailureEvent>(outcome.Events[^1]);
+        Assert.Equal("arguments_invalid", outcome.Diagnostic!.TerminalReason);
     }
 
     [Fact]
@@ -643,6 +644,7 @@ public sealed class AgentLoopTests
 
         AssertFailure(outcome, "agent_terminal_invalid");
         Assert.IsType<AgentFailureEvent>(outcome.Events[^1]);
+        Assert.Equal("arguments_invalid", outcome.Diagnostic!.TerminalReason);
     }
 
     [Theory]
@@ -1342,7 +1344,9 @@ public sealed class AgentLoopTests
         }
 
         Assert.True((await RunAsync(1)).Succeeded);
-        AssertFailure(await RunAsync(2), "agent_terminal_invalid");
+        var invalid = await RunAsync(2);
+        AssertFailure(invalid, "agent_terminal_invalid");
+        Assert.Equal("evidence_lines_unobserved", invalid.Diagnostic!.TerminalReason);
     }
 
     [Fact]

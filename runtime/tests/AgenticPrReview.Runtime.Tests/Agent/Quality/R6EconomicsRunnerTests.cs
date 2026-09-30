@@ -29,6 +29,33 @@ public sealed class R6EconomicsRunnerTests
     private const string Canary = "APR278_PRIVATE_CANARY";
 
     [Fact]
+    public async Task TerminalReasonSurvivesChildReceiptAndStrictReportWithoutProviderText()
+    {
+        using var files = new Inputs();
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false,
+            new() { Fault = EconomicsFault.TerminalArguments, FaultIndex = 1 });
+        Assert.Equal("representative_history_insufficient", result.StopReason);
+        Assert.Equal(0, result.ReceiptMissing);
+        Assert.Equal("agent_terminal_invalid", result.Steps[1].Observation!.Diagnostic);
+        Assert.Equal("arguments_invalid", result.Steps[1].Observation!.TerminalReason);
+        var bytes = EconomicsReportJson.Write(result);
+        Assert.DoesNotContain("PRIVATE_CANARY", Encoding.UTF8.GetString(bytes));
+        Assert.NotNull(EconomicsReportJson.Read(bytes));
+        foreach (var reason in new[] { "PRIVATE_CANARY", "unknown_reason" })
+        {
+            var changed = JsonNode.Parse(bytes)!;
+            changed["steps"]![1]!["observation"]!["terminal_reason"] = reason;
+            Assert.Null(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(changed.ToJsonString())));
+        }
+        var wrongCode = JsonNode.Parse(bytes)!;
+        wrongCode["steps"]![0]!["observation"]!["terminal_reason"] = "arguments_invalid";
+        Assert.Null(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(wrongCode.ToJsonString())));
+        var historical = JsonNode.Parse(bytes)!;
+        historical["steps"]![1]!["observation"]!.AsObject().Remove("terminal_reason");
+        Assert.NotNull(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(historical.ToJsonString())));
+    }
+
+    [Fact]
     public async Task FreshChildrenRestoreActualCompletedHistoryAndReachUnchangedReaders()
     {
         using var files = new Inputs();

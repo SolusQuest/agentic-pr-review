@@ -156,7 +156,8 @@ internal sealed record AgentTerminalReview(
 internal sealed record AgentDiagnostic(
     string Code,
     int ModelCalls,
-    int ToolCalls);
+    int ToolCalls,
+    string? TerminalReason = null);
 
 internal sealed record AgentRunOutcome(
     bool Succeeded,
@@ -180,12 +181,13 @@ internal sealed record AgentRunOutcome(
         string code,
         int modelCalls,
         int toolCalls,
-        ImmutableArray<AgentLogicalEvent> events) =>
+        ImmutableArray<AgentLogicalEvent> events,
+        string? terminalReason = null) =>
         new(
             false,
             null,
             null,
-            new AgentDiagnostic(code, modelCalls, toolCalls),
+            new AgentDiagnostic(code, modelCalls, toolCalls, terminalReason),
             events,
             null);
 }

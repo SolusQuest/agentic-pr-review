@@ -229,7 +229,8 @@ internal sealed class AgentLoop(
                     admissionFailure,
                     modelCalls,
                     toolCalls,
-                    events);
+                    events,
+                    admissionFailure == AgentFailureCodes.TerminalInvalid ? "arguments_invalid" : null);
             }
 
             var terminalResponse = preparedCalls[0] is PreparedFinishReviewCall;
@@ -275,13 +276,15 @@ internal sealed class AgentLoop(
                         terminal.Arguments,
                         run.ReviewedIdentity,
                         observations,
-                        out var review))
+                        out var review,
+                        out var terminalReason))
                 {
                     return Failure(
                         AgentFailureCodes.TerminalInvalid,
                         modelCalls,
                         toolCalls,
-                        events);
+                        events,
+                        terminalReason);
                 }
 
                 events.Add(new AgentTerminalEvent(review!.TerminalSha256));
@@ -1718,14 +1721,16 @@ internal sealed class AgentLoop(
         string code,
         int modelCalls,
         int toolCalls,
-        ImmutableArray<AgentLogicalEvent>.Builder events)
+        ImmutableArray<AgentLogicalEvent>.Builder events,
+        string? terminalReason = null)
     {
         events.Add(new AgentFailureEvent(code));
         return AgentRunOutcome.Failure(
             code,
             modelCalls,
             toolCalls,
-            events.ToImmutable());
+            events.ToImmutable(),
+            terminalReason);
     }
 }
 
