@@ -17,9 +17,18 @@ internal static class TerminalReviewValidator
         FinishReviewArguments arguments,
         ReviewedIdentity expectedIdentity,
         IReadOnlyList<AgentObservation> observations,
-        out AgentTerminalReview? review)
+        out AgentTerminalReview? review) =>
+        TryValidate(arguments, expectedIdentity, observations, out review, out _);
+
+    internal static bool TryValidate(
+        FinishReviewArguments arguments,
+        ReviewedIdentity expectedIdentity,
+        IReadOnlyList<AgentObservation> observations,
+        out AgentTerminalReview? review,
+        out string? reason)
     {
         review = null;
+        reason = "terminal_bounds_invalid";
         if (!NonWhitespaceWithin(arguments.Summary, AgentLimits.SummaryBytes) ||
             arguments.Findings.Length > AgentLimits.Findings ||
             arguments.CanonicalBytes.Length > AgentLimits.TerminalBytes)
@@ -30,6 +39,7 @@ internal static class TerminalReviewValidator
         var findingKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var finding in arguments.Findings)
         {
+            reason = "finding_fields_invalid";
             if (!Severities.Contains(finding.Severity, StringComparer.Ordinal) ||
                 !NonWhitespaceWithin(finding.Title, AgentLimits.FindingTitleBytes) ||
                 !NonWhitespaceWithin(finding.Message, AgentLimits.FindingMessageBytes) ||
@@ -41,6 +51,7 @@ internal static class TerminalReviewValidator
             var evidenceKeys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var evidence in finding.Evidence)
             {
+                reason = "evidence_fields_invalid";
                 if (!IsLowerHex(evidence.ObservationId, 64) ||
                     !RepositoryPath.IsValid(evidence.Path) ||
                     evidence.StartLine < 1 ||
@@ -59,6 +70,7 @@ internal static class TerminalReviewValidator
                     evidence.EndLine);
                 if (!evidenceKeys.Add(key))
                 {
+                    reason = "evidence_duplicate";
                     return false;
                 }
 
@@ -67,6 +79,13 @@ internal static class TerminalReviewValidator
                     observation.Grounds(evidence));
                 if (!grounded)
                 {
+                    var named = observations.Where(observation =>
+                        StringComparer.Ordinal.Equals(observation.ObservationId, evidence.ObservationId)).ToArray();
+                    var current = named.Where(observation => observation.Identity == expectedIdentity).ToArray();
+                    reason = named.Length == 0 ? "evidence_observation_unknown" :
+                        current.Length == 0 ? "evidence_identity_mismatch" :
+                        !current.Any(observation => observation.ReturnedLines.ContainsKey(evidence.Path))
+                            ? "evidence_path_unobserved" : "evidence_lines_unobserved";
                     return false;
                 }
             }
@@ -76,6 +95,7 @@ internal static class TerminalReviewValidator
                 [finding]);
             if (!findingKeys.Add(AgentCanonical.HashRaw(findingBytes)))
             {
+                reason = "finding_duplicate";
                 return false;
             }
         }
@@ -88,8 +108,15 @@ internal static class TerminalReviewValidator
             arguments.Findings,
             terminalSha256,
             arguments.CanonicalBytes);
+        reason = null;
         return true;
     }
+
+    // Fixed diagnostic vocabulary only; never carry provider text through this boundary.
+    internal static bool IsReason(string? reason) => reason is "arguments_invalid" or
+        "terminal_bounds_invalid" or "finding_fields_invalid" or "evidence_fields_invalid" or
+        "evidence_duplicate" or "evidence_observation_unknown" or "evidence_identity_mismatch" or
+        "evidence_path_unobserved" or "evidence_lines_unobserved" or "finding_duplicate";
 
     private static bool NonWhitespaceWithin(string value, int maximumBytes)
     {

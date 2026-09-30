@@ -193,12 +193,13 @@ internal sealed class AgentLoop(
                 out var preparedCalls,
                 out var admittedMessage,
                 out var messageEvent,
-                out var admittedParts);
+                out var admittedParts,
+                out var preflightErrors);
             if (admissionFailure is not null)
             {
                 if (StringComparer.Ordinal.Equals(
                         admissionFailure,
-                        AgentFailureCodes.ToolArgumentsInvalid))
+                        AgentFailureCodes.ToolArgumentsInvalid) || preflightErrors.Count > 0)
                 {
                     var recoveryFailure = TryRecoverResponse(
                         response,
@@ -216,7 +217,8 @@ internal sealed class AgentLoop(
                         ref contentParts,
                         ref toolBudgetCalls,
                         started,
-                        cancellationToken);
+                        cancellationToken,
+                        preflightErrors);
                     if (recoveryFailure is null)
                     {
                         continue;
@@ -229,7 +231,8 @@ internal sealed class AgentLoop(
                     admissionFailure,
                     modelCalls,
                     toolCalls,
-                    events);
+                    events,
+                    admissionFailure == AgentFailureCodes.TerminalInvalid ? "arguments_invalid" : null);
             }
 
             var terminalResponse = preparedCalls[0] is PreparedFinishReviewCall;
@@ -275,13 +278,15 @@ internal sealed class AgentLoop(
                         terminal.Arguments,
                         run.ReviewedIdentity,
                         observations,
-                        out var review))
+                        out var review,
+                        out var terminalReason))
                 {
                     return Failure(
                         AgentFailureCodes.TerminalInvalid,
                         modelCalls,
                         toolCalls,
-                        events);
+                        events,
+                        terminalReason);
                 }
 
                 events.Add(new AgentTerminalEvent(review!.TerminalSha256));
@@ -458,10 +463,10 @@ internal sealed class AgentLoop(
         ref int contentParts,
         ref int toolBudgetCalls,
         long started,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string> preflightErrors)
     {
-        // AdmitResponse already checked the outer envelope, usage, message
-        // shape, count and ordinary limits before reaching an argument error.
+        // AdmitResponse checked the envelope, usage, shape and ordinary limits.
         // Re-parse the complete batch so a later unknown tool or bad ID cannot
         // turn a partially inspected response into recoverable history.
         var calls = response.Message.Contents
@@ -560,6 +565,9 @@ internal sealed class AgentLoop(
                     return AgentFailureCodes.UnknownTool;
             }
 
+            // Reuse the single preflight classification; never call the executor
+            // from recovery. Argument recovery has an empty preflight map.
+            if (error is null && preflightErrors.TryGetValue(call.CallId, out var denied)) error = denied;
             anyInvalid |= error is not null;
             members.Add((call, prepared, error));
         }
@@ -747,12 +755,14 @@ internal sealed class AgentLoop(
         out ImmutableArray<PreparedAgentToolCall> preparedCalls,
         out ProjectChatMessage admittedMessage,
         out AgentMessageEvent messageEvent,
-        out int admittedParts)
+        out int admittedParts,
+        out IReadOnlyDictionary<string, string> preflightErrors)
     {
         preparedCalls = [];
         admittedMessage = new ProjectChatMessage("assistant", []);
         messageEvent = new AgentMessageEvent(currentMessages, "assistant", []);
         admittedParts = 0;
+        preflightErrors = ImmutableDictionary<string, string>.Empty;
         if (response is null ||
             response.CapturedResponseBodyBytes is null ||
             response.CapturedResponseBodyBytes < 0)
@@ -943,6 +953,8 @@ internal sealed class AgentLoop(
             }
         }
 
+        var recoverable = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? firstRecoverable = null;
         foreach (var call in prepared)
         {
             if (call is PreparedFinishReviewCall)
@@ -962,11 +974,24 @@ internal sealed class AgentLoop(
 
             if (preflightFailure is not null)
             {
+                var feedback = AgentRecoveryFeedback.ForPreflight(call, preflightFailure);
+                if (feedback is not null)
+                {
+                    firstRecoverable ??= preflightFailure;
+                    recoverable.Add(call.CallId, feedback);
+                    continue;
+                }
                 return AgentToolResultAdmission.IsFrozenFailureCode(
                     preflightFailure)
                     ? preflightFailure
                     : AgentFailureCodes.ToolIoFailed;
             }
+        }
+
+        if (firstRecoverable is not null)
+        {
+            preflightErrors = recoverable;
+            return firstRecoverable;
         }
 
         cumulativeInput = newInput;
@@ -1326,12 +1351,7 @@ internal sealed class AgentLoop(
                             !AgentValueDomains.IsUtf8(
                                 error.Result, 1, AgentLimits.ToolResultBytes) ||
                             !(expected.Rejected
-                                ? StringComparer.Ordinal.Equals(
-                                    error.Result,
-                                    AgentRecoveryFeedback.ArgumentsInvalid) ||
-                                    expected.Name == AgentToolRegistry.ListFilesName &&
-                                    AgentRecoveryFeedback.IsCanonicalPathError(
-                                        error.Result)
+                                ? AgentRecoveryFeedback.IsRejectedError(expected.Name, error.Result)
                                 : StringComparer.Ordinal.Equals(
                                     error.Result,
                                     AgentRecoveryFeedback.BatchNotExecuted)))
@@ -1718,14 +1738,16 @@ internal sealed class AgentLoop(
         string code,
         int modelCalls,
         int toolCalls,
-        ImmutableArray<AgentLogicalEvent>.Builder events)
+        ImmutableArray<AgentLogicalEvent>.Builder events,
+        string? terminalReason = null)
     {
         events.Add(new AgentFailureEvent(code));
         return AgentRunOutcome.Failure(
             code,
             modelCalls,
             toolCalls,
-            events.ToImmutable());
+            events.ToImmutable(),
+            terminalReason);
     }
 }
 

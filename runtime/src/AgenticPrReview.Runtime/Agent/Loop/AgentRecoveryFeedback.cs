@@ -1,9 +1,10 @@
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Agent.Core;
 
 namespace AgenticPrReview.Runtime.Agent.Loop;
 
 // These are the complete repository-authored bytes shown to the model for an
-// argument-rejected batch. Provider arguments and exceptions are never inputs
+// rejected batch before execution. Provider arguments and exceptions are never inputs
 // to the writer.
 internal static class AgentRecoveryFeedback
 {
@@ -12,6 +13,29 @@ internal static class AgentRecoveryFeedback
         "{\"status\":\"error\",\"code\":\"arguments_invalid\",\"retryable\":true}";
     internal const string BatchNotExecuted =
         "{\"status\":\"error\",\"code\":\"batch_not_executed\",\"retryable\":true}";
+    internal const string TrackedPathMissing =
+        "{\"status\":\"error\",\"code\":\"path_not_tracked\",\"domain\":\"current_tracked_files\",\"retryable\":true}";
+    internal const string ChangedPathMissing =
+        "{\"status\":\"error\",\"code\":\"path_not_tracked\",\"domain\":\"current_changed_files\",\"retryable\":true}";
+    internal const string CursorInvalid =
+        "{\"status\":\"error\",\"code\":\"cursor_invalid\",\"action\":\"restart_listing\",\"retryable\":true}";
+
+    internal static string? ForPreflight(PreparedAgentToolCall call, string failure) => (call, failure) switch
+    {
+        (PreparedReadFileCall or PreparedSearchTextCall { Arguments.Path: not null },
+            AgentFailureCodes.ToolPathNotTracked) => TrackedPathMissing,
+        (PreparedReadDiffCall, AgentFailureCodes.ToolPathNotTracked) => ChangedPathMissing,
+        (PreparedListFilesCall { Arguments.After: not null } or
+            PreparedListChangedFilesCall { Arguments.After: not null }, AgentFailureCodes.ToolCursorInvalid) => CursorInvalid,
+        _ => null,
+    };
+
+    internal static bool IsRejectedError(string name, string value) =>
+        StringComparer.Ordinal.Equals(value, ArgumentsInvalid) ||
+        name == AgentToolRegistry.ListFilesName && IsCanonicalPathError(value) ||
+        name is AgentToolRegistry.ReadFileName or AgentToolRegistry.SearchTextName && value == TrackedPathMissing ||
+        name == AgentToolRegistry.ReadDiffName && value == ChangedPathMissing ||
+        name is AgentToolRegistry.ListFilesName or AgentToolRegistry.ListChangedFilesName && value == CursorInvalid;
 
     internal static string ListFilesPathInvalid(ListFilesPathRejection rejection) =>
         "{\"status\":\"error\",\"code\":\"list_files_path_invalid\",\"path_field\":\"" +
@@ -21,6 +45,7 @@ internal static class AgentRecoveryFeedback
     internal static bool IsCanonicalError(string value) =>
         StringComparer.Ordinal.Equals(value, ArgumentsInvalid) ||
         StringComparer.Ordinal.Equals(value, BatchNotExecuted) ||
+        value is TrackedPathMissing or ChangedPathMissing or CursorInvalid ||
         AllPathErrors.Contains(value);
 
     internal static bool IsCanonicalPathError(string value) =>

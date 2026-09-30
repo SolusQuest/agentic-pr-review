@@ -22,6 +22,8 @@ internal sealed record LiveRecoveryDiagnostic(
 {
     internal const string ArgumentsInvalid = "arguments_invalid";
     internal const string ListFilesPathInvalid = "list_files_path_invalid";
+    internal const string PathNotTracked = "path_not_tracked";
+    internal const string CursorInvalid = "cursor_invalid";
 
     internal static ImmutableArray<LiveRecoveryDiagnostic> Capture(
         int scheduleIndex, AgentRunOutcome outcome)
@@ -55,6 +57,13 @@ internal sealed record LiveRecoveryDiagnostic(
                     root.GetProperty("path_field").GetString(),
                     root.GetProperty("path_rule").GetString());
             }
+            else if (AgentRecoveryFeedback.IsRejectedError(call.Name, fixedError) &&
+                fixedError is AgentRecoveryFeedback.TrackedPathMissing or AgentRecoveryFeedback.ChangedPathMissing or
+                    AgentRecoveryFeedback.CursorInvalid)
+            {
+                diagnostic = new(scheduleIndex, found.Count, call.Name,
+                    fixedError == AgentRecoveryFeedback.CursorInvalid ? CursorInvalid : PathNotTracked);
+            }
             else
             {
                 throw new InvalidOperationException("recovery_error_invalid");
@@ -79,5 +88,9 @@ internal sealed record LiveRecoveryDiagnostic(
          Category == ListFilesPathInvalid &&
              Tool == AgentToolRegistry.ListFilesName &&
              PathField is not null && PathRule is not null &&
-             LiveToolRejectionProjector.ValidPathDetail(PathField, PathRule));
+             LiveToolRejectionProjector.ValidPathDetail(PathField, PathRule) ||
+         Category == PathNotTracked && PathField is null && PathRule is null &&
+             Tool is AgentToolRegistry.ReadFileName or AgentToolRegistry.SearchTextName or AgentToolRegistry.ReadDiffName ||
+         Category == CursorInvalid && PathField is null && PathRule is null &&
+             Tool is AgentToolRegistry.ListFilesName or AgentToolRegistry.ListChangedFilesName);
 }

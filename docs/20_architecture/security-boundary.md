@@ -142,6 +142,8 @@ Successful tool execution has one authoritative canonical UTF-8 byte sequence. T
 
 The model cannot ask a tool to change the root, revision, allowlist, or head identity.
 
+Canonical calls denied only for current path membership or an invalid supplied listing cursor may receive the fixed feedback defined by [bounded tool-call recovery](agent-loop-contract.md#bounded-tool-call-recovery). Preflight is validation-only and the Agent classifies each prepared member once. Any other failure dominates recovery, with deterministic provider-order precedence among fatal failures. A recoverable batch executes no member, retains no rejected argument or raw-derived digest, and produces no observation. The model may propose a new call within the same limits; that call must independently pass the current snapshot checks. No timeout, quota or caller cancellation is reset. The [failure-policy audit](agent-tool-failure-policy.md) separates capability rejection from whole-run termination and records the remaining execution/terminal recovery boundaries.
+
 ## Untrusted Content Classification Boundary
 
 Repository, pull-request title/body, diff, file, search-result, and tool-result content is always untrusted data. Text in those sources may resemble system or developer instructions, policy, tool definitions, provider configuration, endpoint selection, or credential-handling directions; resemblance does not grant control-plane authority.

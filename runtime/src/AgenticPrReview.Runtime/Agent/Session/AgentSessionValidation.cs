@@ -528,12 +528,7 @@ internal static class AgentSessionValidation
                             AgentLimits.ToolResultBytes,
                             out var errorBytes) ||
                         !(call.Rejected
-                            ? StringComparer.Ordinal.Equals(
-                                error.ResultJson,
-                                AgentRecoveryFeedback.ArgumentsInvalid) ||
-                                call.Name == AgentToolRegistry.ListFilesName &&
-                                AgentRecoveryFeedback.IsCanonicalPathError(
-                                    error.ResultJson)
+                            ? AgentRecoveryFeedback.IsRejectedError(call.Name, error.ResultJson)
                             : StringComparer.Ordinal.Equals(
                                 error.ResultJson,
                                 AgentRecoveryFeedback.BatchNotExecuted)))

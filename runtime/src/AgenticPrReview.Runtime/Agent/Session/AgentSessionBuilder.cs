@@ -710,12 +710,7 @@ internal static class AgentSessionBuilder
                             error.CanonicalResult.AsSpan(),
                             out var resultJson) ||
                         !(call.Rejected
-                            ? StringComparer.Ordinal.Equals(
-                                resultJson,
-                                AgentRecoveryFeedback.ArgumentsInvalid) ||
-                                call.Name == AgentToolRegistry.ListFilesName &&
-                                AgentRecoveryFeedback.IsCanonicalPathError(
-                                    resultJson!)
+                            ? AgentRecoveryFeedback.IsRejectedError(call.Name, resultJson!)
                             : StringComparer.Ordinal.Equals(
                                 resultJson,
                                 AgentRecoveryFeedback.BatchNotExecuted)))
@@ -1269,6 +1264,24 @@ internal static class AgentSessionBuilder
                     StringComparer.Ordinal.Equals(
                         part.ArgumentsSha256,
                         ToolCallHash(call)),
+                (
+                    ProjectRecoveryToolCallContent call,
+                    AgentRecoveryToolCallReferencePart part
+                ) =>
+                    StringComparer.Ordinal.Equals(call.CallId, part.CallId) &&
+                    StringComparer.Ordinal.Equals(call.Name, part.Name) &&
+                    call.Rejected == part.Rejected &&
+                    StringComparer.Ordinal.Equals(
+                        part.ArgumentsSha256,
+                        AgentCanonical.HashRaw(StrictUtf8.GetBytes(call.ArgumentsJson))),
+                (
+                    ProjectToolErrorContent error,
+                    AgentToolErrorReferencePart part
+                ) =>
+                    StringComparer.Ordinal.Equals(error.CallId, part.CallId) &&
+                    StringComparer.Ordinal.Equals(
+                        part.ResultSha256,
+                        AgentCanonical.HashRaw(StrictUtf8.GetBytes(error.Result))),
                 (
                     ProjectToolResultContent result,
                     AgentToolResultReferencePart part

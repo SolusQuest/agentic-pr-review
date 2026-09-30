@@ -182,10 +182,10 @@ public sealed class R5CompletedReplayTests
     }
 
     [Theory]
-    [InlineData(1, false, "tool_failed")]
-    [InlineData(2, false, "tool_failed")]
+    [InlineData(1, false, "assertion_failed")]
+    [InlineData(2, false, "assertion_failed")]
     [InlineData(1, true, "assertion_failed")]
-    public async Task RealToolRejectionRetainsFailureSourceAndPredecessor(int phase, bool invalidArguments, string expected)
+    public async Task RecoveryWithoutReplacementEvidenceRetainsFailedReplayAndPredecessor(int phase, bool invalidArguments, string expected)
     {
         using var bundle = new MutableBundle();
         bundle.EditJson($"script-{phase}.json", script =>
@@ -198,6 +198,9 @@ public sealed class R5CompletedReplayTests
         });
         Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture);
         var result = await ReplayRunner.RunAsync(bundle.Root);
+        // Both parser and membership denials now recover. This unchanged script
+        // finishes without obtaining the denied observation, so the replay's
+        // required evidence still fails; recovery must not manufacture it.
         Assert.Equal(expected, result.Code);
         Assert.Equal("cleaned", result.Cleanup);
         Assert.Equal(phase + 1, result.Steps.Length);

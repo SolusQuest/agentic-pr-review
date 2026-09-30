@@ -233,49 +233,33 @@ public sealed class R5LiveHarnessTests
             });
         }), CancellationToken.None);
 
-        if (expectedCode == AgentFailureCodes.ToolArgumentsInvalid)
+        Assert.Contains(expectedCode, new[] { AgentFailureCodes.ToolArgumentsInvalid, AgentFailureCodes.ToolPathNotTracked });
+        Assert.Equal(1, result.Attempted);
+        // The one-turn replay for repository-rule may fail after feedback;
+        // recovery must still be visible in its final summary.
+        if (caseId == "cs-safe")
         {
-            Assert.Equal(1, result.Attempted);
-            // The one-turn replay for repository-rule may fail after feedback;
-            // recovery must still be visible in its final summary.
-            if (toolName == AgentToolRegistry.ReadFileName)
-            {
-                Assert.Equal(1, result.Completed);
-                Assert.Empty(result.Summary.AgentDiagnostics);
-            }
-            else
-            {
-                Assert.Equal(1, result.Failed);
-                Assert.Single(result.Summary.AgentDiagnostics);
-            }
-            var recovery = Assert.Single(result.Summary.RecoveryDiagnostics!.Value);
-            Assert.Equal(0, recovery.ScheduleIndex);
-            Assert.Equal(toolName, recovery.Tool);
-            Assert.Equal(expectedCategory, recovery.Category);
-            if (toolName == AgentToolRegistry.ListFilesName)
-            {
-                Assert.Equal("prefix", recovery.PathField);
-                Assert.Equal("dot_segment", recovery.PathRule);
-            }
-            Assert.True(recovery.IsCanonical());
-            Assert.Equal(recovery, Assert.Single(JsonSerializer.Deserialize(
-                lines[^1], LiveJsonContext.Default.LiveRunSummary)!
-                .RecoveryDiagnostics!.Value));
+            Assert.Equal(1, result.Completed);
+            Assert.Empty(result.Summary.AgentDiagnostics);
         }
         else
         {
             Assert.Equal(1, result.Failed);
-            Assert.Equal(0, result.Completed);
-            var diagnostic = Assert.Single(result.Summary.AgentDiagnostics);
-            Assert.Equal(expectedCode, diagnostic.Code);
-            Assert.Equal(AgentToolRegistry.ReadFileName, diagnostic.Tool);
-            Assert.Equal(expectedCategory, diagnostic.Category);
-            Assert.Equal(0, diagnostic.ToolCalls);
-            Assert.Equal(diagnostic,
-                Assert.Single(JsonSerializer.Deserialize(lines[^1],
-                    LiveJsonContext.Default.LiveRunSummary)!.AgentDiagnostics));
-            Assert.Null(result.Summary.RecoveryDiagnostics);
+            Assert.Equal(AgentFailureCodes.ChatFailed, Assert.Single(result.Summary.AgentDiagnostics).Code);
         }
+        var recovery = Assert.Single(result.Summary.RecoveryDiagnostics!.Value);
+        Assert.Equal(0, recovery.ScheduleIndex);
+        Assert.Equal(toolName, recovery.Tool);
+        Assert.Equal(expectedCategory, recovery.Category);
+        if (toolName == AgentToolRegistry.ListFilesName)
+        {
+            Assert.Equal("prefix", recovery.PathField);
+            Assert.Equal("dot_segment", recovery.PathRule);
+        }
+        Assert.True(recovery.IsCanonical());
+        Assert.Equal(recovery, Assert.Single(JsonSerializer.Deserialize(
+            lines[^1], LiveJsonContext.Default.LiveRunSummary)!
+            .RecoveryDiagnostics!.Value));
         Assert.Equal(0, result.Summary.UsageUnknownCalls);
         Assert.DoesNotContain(Canary, string.Join('\n', lines), StringComparison.Ordinal);
     }
