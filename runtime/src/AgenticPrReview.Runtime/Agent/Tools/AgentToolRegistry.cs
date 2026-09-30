@@ -25,11 +25,20 @@ internal static class AgentToolRegistry
         "This metadata contains no source lines; its observation_id cannot ground finding evidence. " +
         "Use read_diff or read_file to obtain evidence for a finding.";
     internal const string ReadDiffDescription =
-        "Read bounded complete diff hunks for one changed path in the reviewed snapshot.";
+        "Read bounded complete diff hunks for one changed path in the reviewed snapshot. " +
+        "Use the exact path from the current list_changed_files result, not previous_path. " +
+        "A tracked but unchanged file is not a changed path; a removed file can still have a diff. " +
+        "Historical changed paths do not establish membership in the current changed-file set.";
     internal const string ReadFileDescription =
-        "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.";
+        "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot. " +
+        "When current path membership is unknown, use list_files first and copy the exact path. " +
+        "A path in accepted history may have been removed or renamed after the head changed; " +
+        "historical observations do not establish current tracked-file membership.";
     internal const string SearchTextDescription =
-        "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot.";
+        "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot. " +
+        "Omit path to search the current tracked files. If specifying path, use an exact current " +
+        "tracked path; use list_files first when membership is unknown. Historical paths may " +
+        "have been removed or renamed and do not establish current membership.";
     internal const string FinishReviewDescription =
         "Finish the review with validated grounded findings. For each evidence item, copy observation_id " +
         "from the successful read_file, read_diff, or search_text result that returned that exact path " +

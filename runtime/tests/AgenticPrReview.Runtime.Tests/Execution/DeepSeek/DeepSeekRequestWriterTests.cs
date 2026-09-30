@@ -116,20 +116,20 @@ public sealed class DeepSeekRequestWriterTests
                 "\"additionalProperties\":false}"),
             (
                 "read_diff",
-                "Read bounded complete diff hunks for one changed path in the reviewed snapshot.",
+                "Read bounded complete diff hunks for one changed path in the reviewed snapshot. Use the exact path from the current list_changed_files result, not previous_path. A tracked but unchanged file is not a changed path; a removed file can still have a diff. Historical changed paths do not establish membership in the current changed-file set.",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}," +
                 "\"start_hunk\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647}," +
                 "\"hunk_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}}," +
                 "\"required\":[\"path\"],\"additionalProperties\":false}"),
             (
                 "search_text",
-                "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot.",
+                "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot. Omit path to search the current tracked files. If specifying path, use an exact current tracked path; use list_files first when membership is unknown. Historical paths may have been removed or renamed and do not establish current membership.",
                 "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," +
                 "\"path\":{\"type\":\"string\"}},\"required\":[\"query\"]," +
                 "\"additionalProperties\":false}"),
             (
                 "read_file",
-                "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.",
+                "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot. When current path membership is unknown, use list_files first and copy the exact path. A path in accepted history may have been removed or renamed after the head changed; historical observations do not establish current tracked-file membership.",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}," +
                 "\"start_line\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647}," +
                 "\"line_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":400}}," +

@@ -187,7 +187,7 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("read_diff", diff.Name);
                 Assert.Equal(
-                    "Read bounded complete diff hunks for one changed path in the reviewed snapshot.",
+                    "Read bounded complete diff hunks for one changed path in the reviewed snapshot. Use the exact path from the current list_changed_files result, not previous_path. A tracked but unchanged file is not a changed path; a removed file can still have a diff. Historical changed paths do not establish membership in the current changed-file set.",
                     diff.Description);
                 Assert.Equal(AgentToolRegistry.ReadDiffSchema, diff.SchemaJson);
             },
@@ -195,7 +195,7 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("search_text", search.Name);
                 Assert.Equal(
-                    "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot.",
+                    "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot. Omit path to search the current tracked files. If specifying path, use an exact current tracked path; use list_files first when membership is unknown. Historical paths may have been removed or renamed and do not establish current membership.",
                     search.Description);
                 Assert.Equal(AgentToolRegistry.SearchTextSchema, search.SchemaJson);
             },
@@ -203,7 +203,7 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("read_file", read.Name);
                 Assert.Equal(
-                    "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.",
+                    "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot. When current path membership is unknown, use list_files first and copy the exact path. A path in accepted history may have been removed or renamed after the head changed; historical observations do not establish current tracked-file membership.",
                     read.Description);
                 Assert.Equal(AgentToolRegistry.ReadFileSchema, read.SchemaJson);
             },
@@ -226,7 +226,7 @@ public sealed class AgentContractTests
             "587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
-            "94e86f40944646df5140c68b2a51bc0f8bb25b5a1082d377e8c99f718da680f5",
+            "39b7291fbde316c6b0081c153fa960303d1d0e0ddeb9fc565bc0cbf821b5b502",
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions));
 
         var original = AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);
