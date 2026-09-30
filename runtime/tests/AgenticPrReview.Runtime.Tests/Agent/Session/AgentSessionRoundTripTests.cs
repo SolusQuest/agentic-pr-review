@@ -71,7 +71,7 @@ public sealed partial class AgentSessionRoundTripTests
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.Equal(
-            "9699adfa33428402d64eab672fc857babc23ec46e2b76d1af3799c2f7d0801f3",
+            "023aa240e80c1d6a0628f2609ec3f01d73fcc5cfdc7c92ed23d16e65e2db2ec0",
             artifact.SessionSha256);
         Assert.Equal(2627, artifact.Plaintext.Length);
         Assert.Equal("APRSES01", Encoding.ASCII.GetString(
@@ -306,13 +306,13 @@ public sealed partial class AgentSessionRoundTripTests
             [
                 (
                     2607,
-                    "f140246e6429af2678ebc475166350a70fb5570c4a1e8335edf4c412d7bfa11e"),
+                    "52d2102442383e380061fb3461db48241be7452db94bd7cb6919769581869179"),
                 (
                     4162,
-                    "0c6a4673116715bcdea4cd8b7cc6f5846a98b6e0406954d018ac39c47243ca64"),
+                    "f20b45eb7b30a2e398bddaf4f0e4d055fa1a820492b03ff143fbe060fcd4adc3"),
                 (
                     6015,
-                    "02749cdf53161a4da4243dee7f59e06276c16a5e6eac629d6a8ec364e39d31d5"),
+                    "1d984fb567e08f8ba9c795c2c820232dfb81b9ca9b57353605073fbfbb48ce38"),
             ],
             new[]
             {

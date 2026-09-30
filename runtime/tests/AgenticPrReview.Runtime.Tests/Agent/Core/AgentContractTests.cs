@@ -166,7 +166,8 @@ public sealed class AgentContractTests
                     "truncated is true, call list_files again with after set to next_after and " +
                     "the same prefix, if any, until truncated is false. prefix and after are " +
                     "optional repository-relative path strings; omit either field when unused " +
-                    "and never pass null or an empty string. Use read_file to read file contents.",
+                    "and never pass null or an empty string. Use read_file to read file contents. " +
+                    "This listing contains no source lines; its observation_id cannot ground finding evidence.",
                     list.Description);
                 Assert.Equal(AgentToolRegistry.ListFilesSchema, list.SchemaJson);
             },
@@ -174,7 +175,9 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("list_changed_files", changed.Name);
                 Assert.Equal(
-                    "List bounded changed-file metadata from the reviewed snapshot in ordinal path order.",
+                    "List bounded changed-file metadata from the reviewed snapshot in ordinal path order. " +
+                    "This metadata contains no source lines; its observation_id cannot ground finding evidence. " +
+                    "Use read_diff or read_file to obtain evidence for a finding.",
                     changed.Description);
                 Assert.Equal(
                     AgentToolRegistry.ListChangedFilesSchema,
@@ -208,7 +211,13 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("finish_review", finish.Name);
                 Assert.Equal(
-                    "Finish the review with validated grounded findings.",
+                    "Finish the review with validated grounded findings. For each evidence item, copy observation_id " +
+                    "from the successful read_file, read_diff, or search_text result that returned that exact path " +
+                    "and every line in the cited range. Do not combine an observation_id from one result with paths " +
+                    "or lines from another. read_diff evidence uses new-side context or addition line numbers, never " +
+                    "deleted old-side lines. list_files and list_changed_files provide metadata only and cannot " +
+                    "ground evidence. If the needed lines were not returned, read them before finishing. " +
+                    "Return findings: [] when there are no supported findings; do not invent evidence.",
                     finish.Description);
                 Assert.Equal(AgentToolRegistry.FinishReviewSchema, finish.SchemaJson);
             });
@@ -217,7 +226,7 @@ public sealed class AgentContractTests
             "587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
-            "af603105885091849be62d9b657014416281cc5e17983f9a02fca9808113efb9",
+            "94e86f40944646df5140c68b2a51bc0f8bb25b5a1082d377e8c99f718da680f5",
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions));
 
         var original = AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);

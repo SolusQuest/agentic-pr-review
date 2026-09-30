@@ -70,7 +70,7 @@ public sealed class ActionHostTrustedPolicyTests
         Assert.Equal(policy.PayloadSha256,
             policy.PayloadContinuitySha256);
         Assert.Equal(
-            "5837abd0c6197e11de1e84dedd5a78bf9751bb80569712ec6b5e11727826ded5",
+            "5b9cd6b908c9fa54cdae1e189b76ea492010b4cf830b589f19d9bb9414817e9c",
             policy.PolicySha256);
         Assert.All(transport.Calls, call => Assert.DoesNotContain(
             ActionHostAuthorizationScenario.HeadSha,
