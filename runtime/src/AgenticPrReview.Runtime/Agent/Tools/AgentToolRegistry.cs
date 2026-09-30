@@ -18,9 +18,12 @@ internal static class AgentToolRegistry
         "truncated is true, call list_files again with after set to next_after and " +
         "the same prefix, if any, until truncated is false. prefix and after are " +
         "optional repository-relative path strings; omit either field when unused " +
-        "and never pass null or an empty string. Use read_file to read file contents.";
+        "and never pass null or an empty string. Use read_file to read file contents. " +
+        "This listing contains no source lines; its observation_id cannot ground finding evidence.";
     internal const string ListChangedFilesDescription =
-        "List bounded changed-file metadata from the reviewed snapshot in ordinal path order.";
+        "List bounded changed-file metadata from the reviewed snapshot in ordinal path order. " +
+        "This metadata contains no source lines; its observation_id cannot ground finding evidence. " +
+        "Use read_diff or read_file to obtain evidence for a finding.";
     internal const string ReadDiffDescription =
         "Read bounded complete diff hunks for one changed path in the reviewed snapshot.";
     internal const string ReadFileDescription =
@@ -28,7 +31,13 @@ internal static class AgentToolRegistry
     internal const string SearchTextDescription =
         "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot.";
     internal const string FinishReviewDescription =
-        "Finish the review with validated grounded findings.";
+        "Finish the review with validated grounded findings. For each evidence item, copy observation_id " +
+        "from the successful read_file, read_diff, or search_text result that returned that exact path " +
+        "and every line in the cited range. Do not combine an observation_id from one result with paths " +
+        "or lines from another. read_diff evidence uses new-side context or addition line numbers, never " +
+        "deleted old-side lines. list_files and list_changed_files provide metadata only and cannot " +
+        "ground evidence. If the needed lines were not returned, read them before finishing. " +
+        "Return findings: [] when there are no supported findings; do not invent evidence.";
 
     internal const string ListFilesSchema =
         "{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"},\"after\":{\"type\":\"string\"}},\"additionalProperties\":false}";

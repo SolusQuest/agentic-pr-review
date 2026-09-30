@@ -47,4 +47,33 @@ public sealed class TerminalDiagnosticTests
         Assert.True(EconomicsJournal.ValidTerminalReason(AgentFailureCodes.TerminalInvalid, "arguments_invalid"));
         Assert.True(EconomicsJournal.ValidTerminalReason(AgentFailureCodes.TerminalInvalid, null));
     }
+
+    [Fact]
+    public void EvidenceCannotBorrowPathsOrLinesFromAnotherObservation()
+    {
+        var identity = new ReviewedIdentity("repo", 1, new('a', 40), new('b', 40));
+        var metadataId = new string('c', 64);
+        var readId = new string('d', 64);
+        var otherId = new string('e', 64);
+        var observations = new[]
+        {
+            new AgentObservation(metadataId, identity, ImmutableDictionary<string, ImmutableHashSet<int>>.Empty),
+            new AgentObservation(readId, identity, ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add("a.txt", [1])),
+            new AgentObservation(otherId, identity, ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add("b.txt", [1, 2])),
+        };
+        foreach (var (id, path, end, expected) in new[]
+        {
+            (metadataId, "a.txt", 1, "evidence_path_unobserved"),
+            (readId, "b.txt", 1, "evidence_path_unobserved"),
+            (readId, "a.txt", 2, "evidence_lines_unobserved"),
+            (readId, "a.txt", 1, (string?)null),
+            (otherId, "b.txt", 2, (string?)null),
+        })
+        {
+            ImmutableArray<AgentFinding> findings = [new("high", "title", "message", [new(id, path, 1, end)])];
+            var arguments = new FinishReviewArguments("done", findings, AgentToolArguments.WriteFinishReview("done", findings));
+            Assert.Equal(expected is null, TerminalReviewValidator.TryValidate(arguments, identity, observations, out _, out var reason));
+            Assert.Equal(expected, reason);
+        }
+    }
 }
