@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
@@ -12,6 +13,40 @@ internal sealed record R6ProspectiveSafeUse(
     [property: JsonRequired] int EvidenceOrdinal,
     [property: JsonRequired] string Use,
     [property: JsonRequired] string Assessment);
+
+// Diagnostic causal assessment, separate from the observed case outcome.
+// Empty causes explicitly mean that available evidence cannot assign one.
+internal sealed record R6ProspectiveAttribution(
+    [property: JsonRequired] ImmutableArray<string> Causes,
+    [property: JsonRequired] string Confidence,
+    [property: JsonRequired] string Basis,
+    [property: JsonRequired] ImmutableArray<int> ObservationOrdinals)
+{
+    internal static R6ProspectiveAttribution Undetermined { get; } =
+        new([], "undetermined", "insufficient", []);
+
+    internal bool Valid(int observationCount)
+    {
+        if (Causes.IsDefault || ObservationOrdinals.IsDefault ||
+            observationCount is < 0 or > AgentLimits.ToolCalls ||
+            Causes.Length > 4 || ObservationOrdinals.Length > observationCount ||
+            Causes.Any(cause => cause is not ("model_behavior" or "harness" or
+                "test_contract" or "provider_transport")) ||
+            !Causes.SequenceEqual(Causes.Order(StringComparer.Ordinal)) ||
+            Causes.Distinct(StringComparer.Ordinal).Count() != Causes.Length ||
+            ObservationOrdinals.Any(ordinal => ordinal < 0 || ordinal >= observationCount) ||
+            !ObservationOrdinals.SequenceEqual(ObservationOrdinals.Order()) ||
+            ObservationOrdinals.Distinct().Count() != ObservationOrdinals.Length)
+            return false;
+        if (Causes.Length == 0)
+            return Confidence == "undetermined" && Basis == "insufficient" &&
+                ObservationOrdinals.Length == 0;
+        return Confidence is "confirmed" or "probable" &&
+            Basis is "returned_observation" or "runtime_diagnostic" or
+                "test_contract" or "provider_receipt" or "independent_review" &&
+            (Basis != "returned_observation" || ObservationOrdinals.Length > 0);
+    }
+}
 
 internal sealed record R6ProspectiveFindingAnnotation(
     [property: JsonRequired] int FindingOrdinal,
@@ -38,7 +73,9 @@ internal sealed record R6ProspectiveAnnotation(
     [property: JsonRequired] string CaseSha256,
     [property: JsonRequired] string ConfigurationSha256,
     [property: JsonRequired] string ExecutionSha256,
-    [property: JsonRequired] ImmutableArray<R6ProspectiveFindingAnnotation> Findings);
+    [property: JsonRequired] ImmutableArray<R6ProspectiveFindingAnnotation> Findings,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    R6ProspectiveAttribution? Attribution = null);
 
 internal sealed record R6ProspectiveFindingReceipt(
     [property: JsonRequired] int FindingOrdinal,
@@ -70,7 +107,9 @@ internal sealed record R6ProspectiveCaseReceipt(
     [property: JsonRequired] string Origin,
     [property: JsonRequired] string Status,
     [property: JsonRequired] int FindingRowCount,
-    [property: JsonRequired] ImmutableArray<R6ProspectiveFindingReceipt> Findings);
+    [property: JsonRequired] ImmutableArray<R6ProspectiveFindingReceipt> Findings,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    R6ProspectiveAttribution? Attribution = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     PropertyNameCaseInsensitive = false, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
@@ -116,6 +155,32 @@ internal static class R6ProspectiveAssessment
     private static readonly ImmutableHashSet<string> ChangedPaths =
         ["src/Caller.cs", "src/SafeCaller.cs", "src/Upload.cs", "src/client.ts", "src/safe-client.ts"];
 
+    internal static bool EquivalentChangedRead(RequiredObservation required,
+        EvaluationSubject subject) => EquivalentChangedRead(required,
+            subject.GroundedObservations, subject.ReviewedIdentity);
+
+    internal static bool EquivalentChangedRead(RequiredObservation required,
+        ImmutableArray<EvaluationObservation> observations, ReviewedIdentity identity)
+    {
+        if (required is not { Tool: AgentToolRegistry.ReadFileName,
+                Coverage: { } coverage } || !ChangedPaths.Contains(coverage.Path))
+            return false;
+        return observations.Any(observed =>
+            observed.Tool == AgentToolRegistry.ReadDiffName && observed.CompleteDiff &&
+            observed.Observation.Identity == identity &&
+            observed.Observation.Grounds(new(observed.Observation.ObservationId,
+                coverage.Path, coverage.StartLine, coverage.EndLine)));
+    }
+
+    private static bool SupportsRead((string Path, int Start, int End) read,
+        ImmutableArray<EvaluationObservation> observations, bool equivalentChangedDiff) =>
+        observations.Any(observed =>
+            (observed.Tool == AgentToolRegistry.ReadFileName ||
+             equivalentChangedDiff && ChangedPaths.Contains(read.Path) &&
+             observed.Tool == AgentToolRegistry.ReadDiffName && observed.CompleteDiff) &&
+            observed.Observation.Grounds(new(observed.Observation.ObservationId,
+                read.Path, read.Start, read.End)));
+
     internal static R6ProspectiveAnnotation? ReadAnnotation(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length is < 1 or > EvaluationLimits.InputBytes) return null;
@@ -140,7 +205,7 @@ internal static class R6ProspectiveAssessment
         EvaluationSubject subject, R6ProspectiveAnnotation? annotation,
         LivePlanRubric rubric)
     {
-        if (!R6ProspectiveRubric.IsV2(rubric) || annotation is null ||
+        if (!R6ProspectiveRubric.HasIndependentReview(rubric) || annotation is null ||
             scheduleIndex is < 0 or >= 5 ||
             testCase.Input.Id != R6ProspectiveRubric.Cases[scheduleIndex] ||
             testCase.Input.CorpusSha256 != R6ProspectiveRubric.CorpusSha256 ||
@@ -154,7 +219,11 @@ internal static class R6ProspectiveAssessment
             annotation.Findings.IsDefault ||
             annotation.Findings.Length != subject.Findings.Length ||
             annotation.Findings.Length > EvaluationLimits.Defects ||
-            annotation.Findings.Any(row => row is null))
+            annotation.Findings.Any(row => row is null) ||
+            (R6ProspectiveRubric.IsV3(rubric)
+                ? annotation.Attribution is not { } attribution ||
+                    !attribution.Valid(subject.GroundedObservations.Length)
+                : annotation.Attribution is not null))
             return false;
         var ordered = annotation.Findings.OrderBy(row => row.FindingOrdinal).ToArray();
         for (var index = 0; index < ordered.Length; index++)
@@ -185,9 +254,11 @@ internal static class R6ProspectiveAssessment
     {
         var rubric = selectedRubric ?? new LivePlanRubric(R6ProspectiveRubric.Id,
             R6ProspectiveRubric.Sha256);
-        if (!R6ProspectiveRubric.IsV1(rubric) && !R6ProspectiveRubric.IsV2(rubric))
+        if (!R6ProspectiveRubric.IsV1(rubric) &&
+            !R6ProspectiveRubric.HasIndependentReview(rubric))
             return null;
-        var v2 = R6ProspectiveRubric.IsV2(rubric);
+        var v2 = R6ProspectiveRubric.HasIndependentReview(rubric);
+        var v3 = R6ProspectiveRubric.IsV3(rubric);
         if (annotation is null || origin is not (AiOrigin or HumanOrigin) ||
             scheduleIndex is < 0 or >= 5 ||
             testCase.Input.CorpusSha256 != R6ProspectiveRubric.CorpusSha256 ||
@@ -200,8 +271,12 @@ internal static class R6ProspectiveAssessment
             annotation.ExecutionSha256 != subject.ExecutionSha256 ||
             annotation.Findings.IsDefault || annotation.Findings.Length != subject.Findings.Length ||
             annotation.Findings.Length > EvaluationLimits.Defects ||
+            (v3 ? annotation.Attribution is not { } attribution ||
+                !attribution.Valid(subject.GroundedObservations.Length)
+                : annotation.Attribution is not null) ||
             testCase.Input.ReviewedIdentity.Runtime != subject.ReviewedIdentity ||
-            EvaluationScorer.Evaluate(testCase, subject).EvidenceStatus != AssertionStatus.Passed)
+            EvaluationScorer.Evaluate(testCase, subject, equivalentObservation:
+                v3 ? EquivalentChangedRead : null).EvidenceStatus != AssertionStatus.Passed)
             return null;
 
         var ordered = annotation.Findings.OrderBy(row => row.FindingOrdinal).ToArray();
@@ -240,7 +315,7 @@ internal static class R6ProspectiveAssessment
             if (isTrue && defect is not null)
                 citationClass = v2
                     ? V2CitationClass(finding, subject.GroundedObservations, defect,
-                        row.Verdict == TrueOffFocus, row.AnchorEvidenceOrdinal)
+                        row.Verdict == TrueOffFocus, row.AnchorEvidenceOrdinal, v3)
                     : CitationClass(finding, subject.GroundedObservations, defect,
                         row.Verdict == TrueOffFocus);
             else if (isTrue)
@@ -293,7 +368,7 @@ internal static class R6ProspectiveAssessment
         return new(rubric.Id, rubric.Sha256, scheduleIndex,
             testCase.Input.Id, testCase.Input.CorpusSha256, testCase.Sha256,
             subject.ConfigurationSha256, subject.ExecutionSha256, origin, "assessed",
-            receipts.Count, receipts.ToImmutable());
+            receipts.Count, receipts.ToImmutable(), v3 ? annotation.Attribution : null);
     }
 
     internal static string KnownCitationClass(string groupId, AgentFinding finding,
@@ -336,22 +411,22 @@ internal static class R6ProspectiveAssessment
 
     private static string V2CitationClass(AgentFinding finding,
         ImmutableArray<EvaluationObservation> observations, Defect defect,
-        bool offFocus, int? anchorOrdinal)
+        bool offFocus, int? anchorOrdinal, bool equivalentChangedDiff = false)
     {
         if (anchorOrdinal is not { } ordinal ||
             ordinal < 0 || ordinal >= finding.Evidence.Length ||
             !defect.RequiredReads.Where(read => !offFocus || read.Path != defect.Path)
-                .All(read => observations.Any(o =>
-                    o.Tool == AgentToolRegistry.ReadFileName && o.Observation.Grounds(
-                        new(o.Observation.ObservationId, read.Path, read.Start, read.End)))))
+                .All(read => SupportsRead(read, observations, equivalentChangedDiff)))
             return "invalid";
         var evidence = finding.Evidence[ordinal];
         if (evidence.Path != defect.Path || evidence.StartLine > defect.Line ||
             evidence.EndLine < defect.Line ||
             offFocus && !defect.RequiredReads.Where(read => read.Path == defect.Path)
                 .All(read => evidence.StartLine <= read.Start && evidence.EndLine >= read.End) ||
-            !observations.Any(o => (!offFocus || o.Tool is AgentToolRegistry.ReadFileName or
-                AgentToolRegistry.ReadDiffName) && o.Observation.Grounds(evidence)))
+            !observations.Any(o => (!offFocus || o.Tool == AgentToolRegistry.ReadFileName ||
+                o.Tool == AgentToolRegistry.ReadDiffName &&
+                (!equivalentChangedDiff || o.CompleteDiff)) &&
+                o.Observation.Grounds(evidence)))
             return "invalid";
         var extra = defect.Line - evidence.StartLine + evidence.EndLine - defect.Line;
         return extra == 0 ? "exact" : extra <= 2 ? "bounded_context" :
@@ -360,11 +435,11 @@ internal static class R6ProspectiveAssessment
 
     internal static string ReviewedCitationClass(string defectGroupId, AgentFinding finding,
         ImmutableArray<EvaluationObservation> observations, bool offFocus,
-        int? anchorOrdinal)
+        int? anchorOrdinal, bool equivalentChangedDiff = false)
     {
         var defect = Defects.FirstOrDefault(item => item.GroupId == defectGroupId);
         return defect is null ? "invalid" : V2CitationClass(finding, observations,
-            defect, offFocus, anchorOrdinal);
+            defect, offFocus, anchorOrdinal, equivalentChangedDiff);
     }
 
     private static string V2OtherCitationClass(AgentFinding finding,

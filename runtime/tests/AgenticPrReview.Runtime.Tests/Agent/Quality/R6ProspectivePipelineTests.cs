@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture;
@@ -129,6 +130,75 @@ public sealed class R6ProspectivePipelineTests
             "unresolved", "relevant"));
         Assert.False(R6ProspectiveAssessment.ValidV2SemanticAssessments(true,
             "justified", "unresolved"));
+    }
+
+    [Theory]
+    [InlineData(false, false, 1, 1, true)]
+    [InlineData(true, false, 1, 1, false)]
+    [InlineData(false, true, 1, 1, false)]
+    [InlineData(false, false, 2, 2, false)]
+    public void V3DiffMetadataMustProveWholeUntruncatedPatch(bool sourceTruncated,
+        bool pageTruncated, int requestedStart, int returnedStart, bool expected)
+    {
+        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture);
+        var identity = fixture.Runs[0].Input.ReviewedIdentity.Runtime;
+        var json = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            status = "ok",
+            source_truncated = sourceTruncated,
+            truncated = pageTruncated,
+            requested_start_hunk = requestedStart,
+            returned_start_hunk = returnedStart,
+        });
+        var captured = new R3QualityToolObservation("call", AgentToolRegistry.ReadDiffName,
+            [], ImmutableArray.CreateRange(json), new AgentObservation("changed", identity,
+                ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(
+                    "src/client.ts", [1, 2])));
+        Assert.Equal(expected, EvaluationObservation.From(captured).CompleteDiff);
+    }
+
+    [Fact]
+    public void V3EquivalentChangedReadDoesNotWaiveUnchangedSupportOrIdentity()
+    {
+        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture);
+        var identity = fixture.Runs.Single(run => run.Input.CaseId == "ts-defect")
+            .Input.ReviewedIdentity.Runtime;
+        var changed = new EvaluationObservation(AgentToolRegistry.ReadDiffName,
+            new AgentObservation("changed", identity,
+                ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(
+                    "src/client.ts", [1, 2])), true);
+        var support = new EvaluationObservation(AgentToolRegistry.ReadFileName,
+            new AgentObservation("support", identity,
+                ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(
+                    "src/config.ts", [1, 2])));
+        var client = new RequiredObservation(AgentToolRegistry.ReadFileName, null,
+            new("src/client.ts", 2, 2));
+        var config = new RequiredObservation(AgentToolRegistry.ReadFileName, null,
+            new("src/config.ts", 1, 2));
+        Assert.True(R6ProspectiveAssessment.EquivalentChangedRead(client, [changed], identity));
+        Assert.False(R6ProspectiveAssessment.EquivalentChangedRead(config, [changed], identity));
+        Assert.False(R6ProspectiveAssessment.EquivalentChangedRead(client,
+            [changed with { CompleteDiff = false }], identity));
+        Assert.False(R6ProspectiveAssessment.EquivalentChangedRead(client,
+            [changed with { Tool = AgentToolRegistry.SearchTextName }], identity));
+        Assert.False(R6ProspectiveAssessment.EquivalentChangedRead(client,
+            [changed with { Observation = changed.Observation with
+            { Identity = identity with { ReviewTarget = identity.ReviewTarget + 1 } } }], identity));
+        Assert.False(R6ProspectiveAssessment.EquivalentChangedRead(client,
+            [changed with { Observation = changed.Observation with
+            { ReturnedLines = ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(
+                "src/client.ts", [1]) } }], identity));
+        var finding = new AgentFinding("medium", "zero is lost", "truthy fallback",
+            [new AgentEvidence("changed", "src/client.ts", 2, 2)]);
+        Assert.Equal("exact", R6ProspectiveAssessment.ReviewedCitationClass(
+            "ts-zero-timeout", finding, [changed, support], false, 0, true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.ReviewedCitationClass(
+            "ts-zero-timeout", finding, [changed], false, 0, true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.ReviewedCitationClass(
+            "ts-zero-timeout", finding, [changed with { CompleteDiff = false }, support],
+            false, 0, true));
+        Assert.Equal("invalid", R6ProspectiveAssessment.ReviewedCitationClass(
+            "ts-zero-timeout", finding, [changed, support], false, 0));
     }
 
     [Theory]
@@ -358,6 +428,172 @@ public sealed class R6ProspectivePipelineTests
         foreach (var canary in PrivateCanaries)
             Assert.DoesNotContain(canary, Encoding.UTF8.GetString(report),
                 StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task V3KeylessFiveCaseControlBindsNewRubricWithoutLiveCredit()
+    {
+        using var plan = new PlanFile(v3: true);
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true, v2: true,
+            v3: true);
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal(5, result.Completed);
+        Assert.Equal("adjudicated", result.Summary.AdjudicationStatus);
+        Assert.Equal(R6ProspectiveRubric.V3Id, result.Summary.ProspectiveRubric?.Id);
+        var receipts = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            result.Summary.ProspectiveCaseReceipts);
+        Assert.All(receipts,
+            receipt => Assert.Equal(R6ProspectiveRubric.V3Id, receipt.RubricId));
+        var report = Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n");
+        var readback = R6ProspectiveReportReader.Read(report);
+        Assert.Equal("not_evaluable", readback.Status);
+        Assert.Equal("keyless_run", readback.Reason);
+        var receipt = receipts[2];
+        Assert.Equal("undetermined", receipt.Attribution?.Confidence);
+        Assert.Equal("receipt_shape_invalid", R6ProspectiveReportReader.Read(WriteReport(
+            result.Summary with
+            {
+                ProspectiveCaseReceipts = receipts.SetItem(
+                    2, receipt with { Attribution = null }),
+            }, result.Outcomes)).Reason);
+        Assert.False(Directory.Exists(input.Root));
+    }
+
+    [Fact]
+    public void V3AttributionRecordsMixedOrUncertainCauseWithoutGuessing()
+    {
+        Assert.True(R6ProspectiveAttribution.Undetermined.Valid(3));
+        var mixed = new R6ProspectiveAttribution(
+            ["harness", "test_contract"], "probable", "returned_observation", [0, 2]);
+        Assert.True(mixed.Valid(3));
+        Assert.True(new R6ProspectiveAttribution(["model_behavior"], "confirmed",
+            "independent_review", []).Valid(0));
+        Assert.True(new R6ProspectiveAttribution(["provider_transport"], "probable",
+            "provider_receipt", []).Valid(0));
+        Assert.False((mixed with { Causes = ["test_contract", "harness"] }).Valid(3));
+        Assert.False((mixed with { ObservationOrdinals = [2, 0] }).Valid(3));
+        Assert.False((mixed with { ObservationOrdinals = [0, 3] }).Valid(3));
+        Assert.False((mixed with { Basis = "insufficient" }).Valid(3));
+        Assert.False((mixed with { Causes = [] }).Valid(3));
+        Assert.False((R6ProspectiveAttribution.Undetermined with
+        { Confidence = "confirmed" }).Valid(3));
+    }
+
+    [Fact]
+    public async Task V3ReviewerMustExplicitlyChooseAttributionEvenWhenUndetermined()
+    {
+        using var plan = new PlanFile(v3: true);
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true, v2: true);
+        var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal("review_incomplete", result.Summary.AdjudicationStatus);
+        Assert.Equal(0, result.Summary.AiAdjudicatedCases);
+        Assert.False(Directory.Exists(input.Root));
+    }
+
+    [Fact]
+    public async Task V3SyntheticLiveCandidateAndStrictReadbackBindAttribution()
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile(v3: true);
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            v2: true, v3: true);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var next = 0;
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            SecretSource = new FakeSecret("APR317_SYNTHETIC_ONLY"),
+            TransportFactory = new FakeFactory(_ =>
+                new ReplayTransport(runs[next++].Script, ReplayFault.None)),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal("candidate_pass", result.Summary.ProspectiveQualityCandidate?.Status);
+        Assert.Equal(3, result.Summary.ProspectiveQualityCandidate?.ExpectedCredits);
+        var report = Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n");
+        Assert.Equal("candidate_pass", R6ProspectiveReportReader.Read(report).Status);
+        var receipts = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            result.Summary.ProspectiveCaseReceipts);
+        var receipt = receipts[2];
+        Assert.Equal("receipt_shape_invalid", R6ProspectiveReportReader.Read(WriteReport(
+            result.Summary with
+            {
+                ProspectiveCaseReceipts = receipts.SetItem(
+                    2, receipt with
+                    {
+                        Attribution = new(["model_behavior"], "confirmed",
+                            "returned_observation", [int.MaxValue]),
+                    }),
+            }, result.Outcomes)).Reason);
+        Assert.False(Directory.Exists(input.Root));
+    }
+
+    [Fact]
+    public async Task V3ReviewsChangedFileFromCompleteDiffWhileV2KeepsOldReadRule()
+    {
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var ts = runs.Single(run => run.Input.CaseId == "ts-defect");
+        var discovery = WithTsChangedDiff(ts.Script, null);
+        using var v3Plan = new PlanFile(v3: true);
+        using var firstPrompts = new StringWriter();
+        using var firstInput = new PacketReviewInput(firstPrompts, approveExpected: true,
+            v2: true, v3: true);
+        await LiveRunner.RunAsync(v3Plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-defect"
+                ? discovery : run.Script, ReplayFault.None),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(firstInput, firstPrompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        var packet = JsonNode.Parse(firstInput.PacketsByCase["ts-defect"])!.AsObject();
+        var diffId = packet["returned_observations"]!.AsArray().Single(item =>
+            item!["tool"]!.GetValue<string>() == AgentToolRegistry.ReadDiffName &&
+            item["returned_lines"]!.AsObject().ContainsKey("src/client.ts"))!
+            ["observation_id"]!.GetValue<string>();
+        var reviewed = WithTsChangedDiff(ts.Script, diffId);
+        using var v3Prompts = new StringWriter();
+        using var v3Input = new PacketReviewInput(v3Prompts, approveExpected: true,
+            v2: true, v3: true);
+        var v3 = await LiveRunner.RunAsync(v3Plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-defect"
+                ? reviewed : run.Script, ReplayFault.None),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(v3Input, v3Prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal(AssertionStatus.Passed, v3.Outcomes[2].EvidenceStatus);
+        var v3Receipts = Assert.IsType<ImmutableArray<R6ProspectiveCaseReceipt>>(
+            v3.Summary.ProspectiveCaseReceipts);
+        Assert.Equal("assessed", v3Receipts[2].Status);
+        Assert.Equal("expected", Assert.Single(v3Receipts[2]
+            .Findings).Verdict);
+
+        using var v2Plan = new PlanFile(v2: true);
+        var v2 = await LiveRunner.RunAsync(v2Plan.Path, false, new LiveOptions
+        {
+            WriteLine = _ => { },
+            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-defect"
+                ? reviewed : run.Script, ReplayFault.None),
+        }, CancellationToken.None);
+        Assert.Equal(AssertionStatus.Failed, v2.Outcomes[2].EvidenceStatus);
+        Assert.Equal(EvaluationCode.RequiredObservationMissing, v2.Outcomes[2].Code);
     }
 
     [Fact]
@@ -602,6 +838,40 @@ public sealed class R6ProspectivePipelineTests
         Assert.Equal(expectedReason, R6ProspectiveReportReader.Read(
             Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Reason);
         Assert.False(Directory.Exists(liveInput.Root));
+    }
+
+    [Fact]
+    public async Task V3ConfirmedDuplicateIsRecordedAsUsabilityCost()
+    {
+        if (!IsCleanSource()) return;
+        using var plan = new PlanFile(v3: true);
+        var runs = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs;
+        var duplicate = WithMechanicalDuplicate(runs.Single(run =>
+            run.Input.CaseId == "cs-defect").Script);
+        var next = 0;
+        using var prompts = new StringWriter();
+        using var input = new PacketReviewInput(prompts, approveExpected: true,
+            v2: true, v3: true);
+        var lines = new List<string>();
+        var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
+        {
+            WriteLine = lines.Add,
+            SecretSource = new FakeSecret("APR317_DUPLICATE_SYNTHETIC_ONLY"),
+            TransportFactory = new FakeFactory(_ =>
+            {
+                var run = runs[next++];
+                return new ReplayTransport(run.Input.CaseId == "cs-defect"
+                    ? duplicate : run.Script, ReplayFault.None);
+            }),
+            ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
+                R6ProspectiveAssessment.AiOrigin),
+        }, CancellationToken.None);
+        Assert.Equal(EvaluationCode.DuplicateObservation, result.Outcomes[0].Code);
+        Assert.Equal("candidate_pass", result.Summary.ProspectiveQualityCandidate?.Status);
+        Assert.Equal("cost_recorded", result.Summary.ProspectiveQualityCandidate?.UsabilityStatus);
+        Assert.Equal("candidate_pass", R6ProspectiveReportReader.Read(
+            Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")).Status);
+        Assert.False(Directory.Exists(input.Root));
     }
 
     [Theory]
@@ -1467,6 +1737,30 @@ public sealed class R6ProspectivePipelineTests
         };
     }
 
+    private static ReplayScript WithTsChangedDiff(ReplayScript script, string? observationId) =>
+        script with
+        {
+            Turns = script.Turns.Select(turn => turn with
+            {
+                ToolCalls = turn.ToolCalls.Select(call =>
+                {
+                    if (call.Name == AgentToolRegistry.ReadFileName &&
+                        call.ArgumentsJson.Contains("src/client.ts", StringComparison.Ordinal))
+                        return call with
+                        {
+                            Name = AgentToolRegistry.ReadDiffName,
+                            ArgumentsJson = "{\"path\":\"src/client.ts\"}",
+                        };
+                    if (call.Name != AgentToolRegistry.FinishReviewName) return call;
+                    var terminal = JsonNode.Parse(call.ArgumentsJson)!.AsObject();
+                    if (observationId is null) terminal["findings"] = new JsonArray();
+                    else terminal["findings"]![0]!["evidence"]![0]!["observation_id"] =
+                        observationId;
+                    return call with { ArgumentsJson = terminal.ToJsonString() };
+                }).ToImmutableArray(),
+            }).ToImmutableArray(),
+        };
+
     private static ReplayScript WithSafeTrimFinding(ReplayScript script,
         string safeFile, string lookup, string safeDiff) => script with
     {
@@ -1715,17 +2009,19 @@ public sealed class R6ProspectivePipelineTests
             Guid.NewGuid().ToString("N"));
         internal string Path { get; }
 
-        internal PlanFile(Action<JsonObject>? edit = null, bool v2 = false)
+        internal PlanFile(Action<JsonObject>? edit = null, bool v2 = false, bool v3 = false)
         {
+            Assert.False(v2 && v3);
             Directory.CreateDirectory(root);
             Path = System.IO.Path.Combine(root, "plan.json");
             Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus, Path).Item1);
             var document = JsonNode.Parse(File.ReadAllText(Path))!.AsObject();
             document["rubric"] = new JsonObject
             {
-                ["id"] = v2 ? R6ProspectiveRubric.V2Id : R6ProspectiveRubric.Id,
-                ["sha256"] = v2 ? R6ProspectiveRubric.V2Sha256 :
-                    R6ProspectiveRubric.Sha256,
+                ["id"] = v3 ? R6ProspectiveRubric.V3Id :
+                    v2 ? R6ProspectiveRubric.V2Id : R6ProspectiveRubric.Id,
+                ["sha256"] = v3 ? R6ProspectiveRubric.V3Sha256 :
+                    v2 ? R6ProspectiveRubric.V2Sha256 : R6ProspectiveRubric.Sha256,
             };
             edit?.Invoke(document);
             File.WriteAllText(Path, document.ToJsonString());
@@ -1738,7 +2034,7 @@ public sealed class R6ProspectivePipelineTests
         string? corruption = null, bool injectPacketCanaries = false,
         bool approveOffFocusDiff = false, bool v2 = false,
         bool approveSafeTrim = false, bool approveTsDefault = false,
-        bool approveDistinctDuplicate = false) : TextReader
+        bool approveDistinctDuplicate = false, bool v3 = false) : TextReader
     {
         private int promptCount;
         private int position;
@@ -1791,6 +2087,13 @@ public sealed class R6ProspectivePipelineTests
                 var annotationPath = System.IO.Path.Join(Root,
                     v2 ? "case-" + caseIndex + "-annotation.json" : "annotation.json");
                 var annotation = JsonNode.Parse(File.ReadAllText(annotationPath))!.AsObject();
+                if (v3) annotation["attribution"] = new JsonObject
+                {
+                    ["causes"] = new JsonArray(),
+                    ["confidence"] = "undetermined",
+                    ["basis"] = "insufficient",
+                    ["observation_ordinals"] = new JsonArray(),
+                };
                 if (current == 2 && corruption == "v2_null_row")
                     annotation["findings"]![0] = originalFirstFinding!.DeepClone();
                 using var packet = JsonDocument.Parse(LastPacket);

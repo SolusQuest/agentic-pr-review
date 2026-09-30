@@ -105,7 +105,25 @@ internal sealed class EvaluationAttempt
     public override string ToString() => "evaluation_attempt";
 }
 
-internal sealed record EvaluationObservation(string Tool, AgentObservation Observation);
+internal sealed record EvaluationObservation(string Tool, AgentObservation Observation,
+    bool CompleteDiff = false)
+{
+    internal static EvaluationObservation From(R3QualityToolObservation value)
+    {
+        if (value.Name != AgentToolRegistry.ReadDiffName)
+            return new(value.Name, value.Observation);
+        // The canonical result was admitted by the runtime. A returned line
+        // alone does not prove that the diff's source or pagination was complete.
+        using var json = JsonDocument.Parse(value.CanonicalResult.ToArray());
+        var root = json.RootElement;
+        var complete = root.GetProperty("status").GetString() == "ok" &&
+            !root.GetProperty("source_truncated").GetBoolean() &&
+            !root.GetProperty("truncated").GetBoolean() &&
+            root.GetProperty("requested_start_hunk").GetInt32() == 1 &&
+            root.GetProperty("returned_start_hunk").GetInt32() == 1;
+        return new(value.Name, value.Observation, complete);
+    }
+}
 
 internal sealed class EvaluationSubject
 {
@@ -115,7 +133,8 @@ internal sealed class EvaluationSubject
         ReviewedIdentity = admitted.ReviewedIdentity!;
         Findings = admitted.Review!.Findings;
         Observations = admitted.ToolObservations.Select(o => new RequiredObservation(o.Name, o.Observation.ObservationId)).ToImmutableArray();
-        GroundedObservations = admitted.ToolObservations.Select(o => new EvaluationObservation(o.Name, o.Observation)).ToImmutableArray();
+        GroundedObservations = admitted.ToolObservations.Select(EvaluationObservation.From)
+            .ToImmutableArray();
         ExecutionSha256 = execution;
     }
 

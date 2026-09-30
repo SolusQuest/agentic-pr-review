@@ -50,7 +50,8 @@ internal sealed record EvaluationOutcome(
 internal static class EvaluationScorer
 {
     internal static EvaluationOutcome Evaluate(
-        EvaluationCase testCase, EvaluationSubject? subject, EvaluationAdjudication? adjudication = null)
+        EvaluationCase testCase, EvaluationSubject? subject, EvaluationAdjudication? adjudication = null,
+        Func<RequiredObservation, EvaluationSubject, bool>? equivalentObservation = null)
     {
         if (subject is null) return Failure(testCase, EvaluationFailure.Invalid, code: EvaluationCode.SubjectInvalid);
         var spec = testCase.Input;
@@ -58,6 +59,7 @@ internal static class EvaluationScorer
             return CompletedRejection(testCase, subject, EvaluationCode.WrongSnapshot);
         foreach (var required in spec.RequiredObservations)
         {
+            if (equivalentObservation?.Invoke(required, subject) == true) continue;
             if (!subject.Observations.Any(o => o.Tool == required.Tool))
                 return CompletedRejection(testCase, subject, EvaluationCode.RequiredToolMissing);
             if (!subject.GroundedObservations.Any(o => required.Matches(o.Tool, o.Observation)))

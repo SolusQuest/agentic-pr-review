@@ -106,12 +106,17 @@ internal static class R6ProspectiveReportReader
                 return false;
             if (receipt.Status == "pending")
             {
-                if (receipt.Origin != "none" || receipt.Findings.Length != 0) return false;
+                if (receipt.Origin != "none" || receipt.Findings.Length != 0 ||
+                    receipt.Attribution is not null) return false;
             }
             else if (receipt.Status == "assessed")
             {
                 if (receipt.Origin is not (R6ProspectiveAssessment.AiOrigin or
                         R6ProspectiveAssessment.HumanOrigin) ||
+                    (R6ProspectiveRubric.IsV3(rubric)
+                        ? receipt.Attribution is not { } attribution ||
+                            !attribution.Valid(outcome.ToolObservationCount)
+                        : receipt.Attribution is not null) ||
                     receipt.Findings.Length != receipt.FindingRowCount ||
                     receipt.Findings.Where((finding, ordinal) =>
                         !R6ProspectiveQualityGate.ValidFindingShape(finding, index,
