@@ -10,7 +10,7 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Loop;
 
-public sealed class AgentLoopTests
+public sealed partial class AgentLoopTests
 {
     private static readonly ReviewedIdentity Identity = new(
         "repo",
@@ -1081,16 +1081,16 @@ public sealed class AgentLoopTests
             preflight: call =>
                 call.CallId == "two" ? "tool_path_not_tracked" : null);
         var outcome = await new AgentLoop(
-            new ScriptedChatClient([response]),
+            new ScriptedChatClient([response, Response(TerminalCall("finish", "done"), 1, 1)]),
             executor).RunAsync(Request(), CancellationToken.None);
 
-        AssertFailure(outcome, "tool_path_not_tracked");
+        Assert.True(outcome.Succeeded);
         Assert.Equal(["one", "two"], executor.PreflightOrder);
         Assert.Empty(executor.Order);
     }
 
     [Fact]
-    public async Task LaterInvalidListCursorFailsBeforeAnEarlierSiblingDispatch()
+    public async Task LaterInvalidListCursorRecoversWithoutEarlierSiblingDispatch()
     {
         var response = new ProjectChatResponse(
             new ProjectChatMessage(
@@ -1112,16 +1112,16 @@ public sealed class AgentLoopTests
                 call.CallId == "two" ? "tool_cursor_invalid" : null);
 
         var outcome = await new AgentLoop(
-            new ScriptedChatClient([response]),
+            new ScriptedChatClient([response, Response(TerminalCall("finish", "done"), 1, 1)]),
             executor).RunAsync(Request(), CancellationToken.None);
 
-        AssertFailure(outcome, "tool_cursor_invalid");
+        Assert.True(outcome.Succeeded);
         Assert.Equal(["one", "two"], executor.PreflightOrder);
         Assert.Empty(executor.Order);
     }
 
     [Fact]
-    public async Task LaterInvalidChangedCursorFailsBeforeAnEarlierSiblingDispatch()
+    public async Task LaterInvalidChangedCursorRecoversWithoutEarlierSiblingDispatch()
     {
         var response = new ProjectChatResponse(
             new ProjectChatMessage(
@@ -1143,16 +1143,16 @@ public sealed class AgentLoopTests
                 call.CallId == "two" ? "tool_cursor_invalid" : null);
 
         var outcome = await new AgentLoop(
-            new ScriptedChatClient([response]),
+            new ScriptedChatClient([response, Response(TerminalCall("finish", "done"), 1, 1)]),
             executor).RunAsync(Request(), CancellationToken.None);
 
-        AssertFailure(outcome, "tool_cursor_invalid");
+        Assert.True(outcome.Succeeded);
         Assert.Equal(["one", "two"], executor.PreflightOrder);
         Assert.Empty(executor.Order);
     }
 
     [Fact]
-    public async Task LaterInvalidReadDiffPathFailsBeforeAnEarlierSiblingDispatch()
+    public async Task LaterInvalidReadDiffPathRecoversWithoutEarlierSiblingDispatch()
     {
         var response = new ProjectChatResponse(
             new ProjectChatMessage(
@@ -1174,10 +1174,10 @@ public sealed class AgentLoopTests
                 call.CallId == "two" ? "tool_path_not_tracked" : null);
 
         var outcome = await new AgentLoop(
-            new ScriptedChatClient([response]),
+            new ScriptedChatClient([response, Response(TerminalCall("finish", "done"), 1, 1)]),
             executor).RunAsync(Request(), CancellationToken.None);
 
-        AssertFailure(outcome, "tool_path_not_tracked");
+        Assert.True(outcome.Succeeded);
         Assert.Equal(["one", "two"], executor.PreflightOrder);
         Assert.Empty(executor.Order);
     }

@@ -104,17 +104,19 @@ internal static class EconomicsChild
             using var metered = new LiveMeteredTransport(underlying, accounting, calls);
             var backend = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId,
                 state.Trusted.AdapterId, input.Session), metered);
-            var observer = new LiveChatObserver(backend, accounting, calls);
+            Directory.CreateDirectory(Path.Combine(input.Root, "reviewed"));
+            var snapshot = run.CreateSnapshot(Path.Combine(input.Root, "reviewed"));
+            var executor = new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot));
+            var observer = new LiveChatObserver(backend, accounting, calls,
+                response => LiveToolRejectionProjector.Project(response, executor));
             IProjectChatClient chat = input.Fault == EconomicsFault.CancelAfterUsage ? new CancelAfterUsage(observer, deadline) : observer;
             var measurement = new GrowthChatMeasurement(chat);
             var history = new HistoryChatClient(boundary, measurement, baseline);
-            Directory.CreateDirectory(Path.Combine(input.Root, "reviewed"));
-            var snapshot = run.CreateSnapshot(Path.Combine(input.Root, "reviewed"));
             var descriptor = new EvaluationRunInput(input.Campaign + "-" + (input.Slot.Index + 1),
                 input.Transport == "live" ? "live" : "deterministic", EvaluationSource.Commit, EvaluationSource.Tree,
                 EvaluationSource.Clean, input.Plan.Provider.ConfigurationSha256);
             var attempt = EvaluationAttempt.Admit(state.Trusted, descriptor) ?? throw new IOException();
-            var outcome = await new AgentLoop(history, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)),
+            var outcome = await new AgentLoop(history, executor,
                 limitAuthority: state.Trusted.LimitAuthority)
                 .RunAsync(request, deadline.Token);
             EvaluationOutcome evaluation;
@@ -158,12 +160,15 @@ internal static class EconomicsChild
             // Finish and seal before publishing a receipt. Late callbacks retain the
             // same call handles and cannot alter either accounting snapshot.
             var callRows = calls.Seal(deadline.IsCancellationRequested);
+            var recoveries = LiveRecoveryDiagnostic.Capture(input.Slot.Index, outcome);
             var receipt = new EconomicsReceipt(input.Operation, plan.Sha256, plan.WorkloadSha256, input.Slot.Index,
                 input.Lease.Id, Environment.ProcessId, startup, input.Transport, input.Session,
                 predecessor?.SessionSha256, code, stage, diagnostic, predecessor is not null,
                 outcome.Succeeded ? "succeeded" : "failed", evaluation, prepared, callRows, accounting.Seal(),
                 outcome.Events.OfType<AgentToolResultEvent>().Count(), baseline.Provider.Whole.Sha256, sessionSha, measurement.Counts,
-                credentialProof, outcome.Diagnostic?.TerminalReason);
+                credentialProof, outcome.Diagnostic?.TerminalReason,
+                EconomicsToolRejection.Capture(diagnostic, observer.TakeRejection()),
+                recoveries.Length == 0 ? null : recoveries);
             if (prepared is not null && input.Fault == EconomicsFault.AfterPrepareCrash) return 9;
             if (input.Fault == EconomicsFault.PartialReply) { Console.Write("partial"); return 0; }
             if (input.Fault == EconomicsFault.OversizedReply)
@@ -218,6 +223,16 @@ internal sealed class EconomicsLoopback : IDeepSeekTransport
         this.fault = fault; this.inputBasis = inputBasis; this.expectedOutputCap = expectedOutputCap;
         if (fault == EconomicsFault.TerminalArguments)
             script = new([new([new("invalid-terminal", "finish_review", "{\"summary\":\"PRIVATE_CANARY\",\"findings\":[null]}")], "")]);
+        if (fault is EconomicsFault.UntrackedRead or EconomicsFault.UntrackedSearch or EconomicsFault.UnchangedDiff)
+        {
+            var (tool, arguments) = fault switch
+            {
+                EconomicsFault.UntrackedRead => ("read_file", "{\"path\":\"PRIVATE_CANARY.txt\"}"),
+                EconomicsFault.UntrackedSearch => ("search_text", "{\"query\":\"fact\",\"path\":\"PRIVATE_CANARY.txt\"}"),
+                _ => ("read_diff", "{\"path\":\"PRIVATE_CANARY.txt\"}"),
+            };
+            script = new(script.Turns.Insert(0, new([new("rejected-path", tool, arguments)], "")));
+        }
         if (fault is EconomicsFault.ThreeCalls or EconomicsFault.EightCalls)
         {
             var first = script.Turns[0];

@@ -48,6 +48,8 @@ internal sealed record AgentToolExecution(
 
 internal interface IAgentToolExecutor
 {
+    // Validation only: no repository reads, dispatch or state mutation. The Agent
+    // classifies each prepared member at most once per response before execution.
     string? Preflight(PreparedAgentToolCall call);
 
     ValueTask<AgentToolExecution> ExecuteAsync(

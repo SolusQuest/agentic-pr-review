@@ -28,6 +28,49 @@ public sealed class R6EconomicsRunnerTests
 {
     private const string Canary = "APR278_PRIVATE_CANARY";
 
+    [Theory]
+    [InlineData((int)EconomicsFault.UntrackedRead, "read_file")]
+    [InlineData((int)EconomicsFault.UntrackedSearch, "search_text")]
+    [InlineData((int)EconomicsFault.UnchangedDiff, "read_diff")]
+    public async Task RejectedToolAttributionSurvivesRealChildAndStrictReadback(int fault, string tool)
+    {
+        using var files = new Inputs();
+        var receipts = new List<EconomicsReceipt>();
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false,
+            new() { Fault = (EconomicsFault)fault, FaultIndex = 1, ObservedReceipt = receipts.Add });
+        Assert.Equal(0, result.ReceiptMissing);
+        Assert.Equal("complete", result.StopReason);
+        var rejected = Assert.Single(result.Steps[1].Observation!.Recoveries!.Value);
+        Assert.Equal(new LiveRecoveryDiagnostic(1, 0, tool, "path_not_tracked"), rejected);
+        Assert.Equal(rejected, Assert.Single(receipts[1].Recoveries!.Value));
+        Assert.Null(receipts[1].ToolRejection);
+        Assert.True(result.Steps[1].Accepted);
+        var bytes = EconomicsReportJson.Write(result);
+        Assert.NotNull(EconomicsReportJson.Read(bytes));
+        Assert.DoesNotContain("PRIVATE_CANARY", Encoding.UTF8.GetString(bytes));
+        Assert.DoesNotContain("PRIVATE_CANARY", JsonSerializer.Serialize(receipts[1], EconomicsLiveJson.Default.EconomicsReceipt));
+        foreach (var (field, value) in new[] { ("tool", "PRIVATE_CANARY"), ("tool", "list_files"),
+                     ("category", "arguments_contract_invalid"), ("category", "PRIVATE_CANARY") })
+        {
+            var changed = JsonNode.Parse(bytes)!;
+            changed["steps"]![1]!["observation"]!["recoveries"]![0]![field] = value;
+            Assert.Null(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(changed.ToJsonString())));
+        }
+        var wrongCode = JsonNode.Parse(bytes)!;
+        wrongCode["steps"]![0]!["observation"]!["tool_rejection"] =
+            JsonNode.Parse("{\"tool\":\"read_file\",\"category\":\"path_not_tracked\"}");
+        Assert.Null(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(wrongCode.ToJsonString())));
+        var historical = JsonNode.Parse(bytes)!;
+        historical["steps"]![1]!["observation"]!.AsObject().Remove("recoveries");
+        Assert.NotNull(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(historical.ToJsonString())));
+        foreach (var (field, value) in new[] { ("schedule_index", 0), ("rejection_index", 1) })
+        {
+            var changed = JsonNode.Parse(bytes)!;
+            changed["steps"]![1]!["observation"]!["recoveries"]![0]![field] = value;
+            Assert.Null(EconomicsReportJson.Read(Encoding.UTF8.GetBytes(changed.ToJsonString())));
+        }
+    }
+
     [Fact]
     public async Task TerminalReasonSurvivesChildReceiptAndStrictReportWithoutProviderText()
     {

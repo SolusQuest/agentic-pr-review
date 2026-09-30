@@ -710,12 +710,7 @@ internal static class AgentSessionBuilder
                             error.CanonicalResult.AsSpan(),
                             out var resultJson) ||
                         !(call.Rejected
-                            ? StringComparer.Ordinal.Equals(
-                                resultJson,
-                                AgentRecoveryFeedback.ArgumentsInvalid) ||
-                                call.Name == AgentToolRegistry.ListFilesName &&
-                                AgentRecoveryFeedback.IsCanonicalPathError(
-                                    resultJson!)
+                            ? AgentRecoveryFeedback.IsRejectedError(call.Name, resultJson!)
                             : StringComparer.Ordinal.Equals(
                                 resultJson,
                                 AgentRecoveryFeedback.BatchNotExecuted)))
