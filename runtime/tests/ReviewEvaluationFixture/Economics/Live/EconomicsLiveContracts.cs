@@ -65,7 +65,8 @@ internal enum EconomicsFault
     None, WrongSource, WrongBuild, WrongPredecessor, BeforeReadyCrash, AfterPrepareCrash,
     PartialReply, OversizedReply, WrongReply, RateLimit, ProviderFailure, UsageViolation,
     CancelAfterUsage, CancelAfterPrepare, RejectAccept, CorruptState, CleanupFailure,
-    StartFailure, Hang, ThreeCalls, EightCalls, PrepareWriteFailure, CredentialProbe,
+    StartFailure, Hang, ThreeCalls, EightCalls, PrepareWriteFailure, CredentialProbe, TerminalArguments,
+    UntrackedRead, UntrackedSearch, UnchangedDiff,
 }
 
 // These types are private pipe frames. Never serialize them into a public report.
@@ -83,14 +84,20 @@ internal sealed record EconomicsCall(int Ordinal, bool Dispatched, string Transp
 // Public scoped evidence only: no private IPC identities, state keys or candidate locators.
 internal sealed record EconomicsObservation(string Code, string? Stage, string? Diagnostic, string AgentStatus,
     ImmutableArray<EconomicsCall> Calls, long Reservations, GrowthChatCounts Measurement,
-    string InitialPrefixSha256, string? CompletedSessionSha256);
+    string InitialPrefixSha256, string? CompletedSessionSha256,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TerminalReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EconomicsToolRejection? ToolRejection = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ImmutableArray<LiveRecoveryDiagnostic>? Recoveries = null);
 internal sealed record EconomicsReceipt(string Operation, string PlanSha256, string WorkloadSha256,
     int Index, string LeaseId, int ProcessId, string Startup, string Transport, string Session,
     string? PredecessorSha256, string Code, string? Stage, string? Diagnostic, bool Restored,
     string AgentStatus, EvaluationOutcome? Evaluation, PreparedStateReceipt? Prepared,
     ImmutableArray<EconomicsCall> Calls, LiveAccountingSnapshot Accounting, int ToolCalls,
     string? InitialPrefixSha256, string? CompletedSessionSha256, GrowthChatCounts Measurement,
-    EconomicsCredentialProof? CredentialProof = null);
+    EconomicsCredentialProof? CredentialProof = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TerminalReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EconomicsToolRejection? ToolRejection = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ImmutableArray<LiveRecoveryDiagnostic>? Recoveries = null);
 
 internal sealed record EconomicsStep(int Index, string CaseId, string Code, string ReceiptCoverage,
     bool Allocated, string? AttemptSha256, string? EvaluationStatus, bool Restored,

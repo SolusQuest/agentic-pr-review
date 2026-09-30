@@ -71,7 +71,7 @@ public sealed partial class AgentSessionRoundTripTests
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.Equal(
-            "9699adfa33428402d64eab672fc857babc23ec46e2b76d1af3799c2f7d0801f3",
+            "8041e6f179379b613c469f877cbf994bf8e4ec70da45e6fe5b43e7e1a31b94f6",
             artifact.SessionSha256);
         Assert.Equal(2627, artifact.Plaintext.Length);
         Assert.Equal("APRSES01", Encoding.ASCII.GetString(
@@ -239,6 +239,8 @@ public sealed partial class AgentSessionRoundTripTests
                     ThinkingRequired: true))),
             StringComparison.Ordinal);
 
+        await AssertRecoveryHistoryRebuildsAsync(artifact, trusted, canary);
+
         var completed = artifact.Document.CompletedRuns[0];
         var errorIndex = Enumerable.Range(0, completed.Records.Length)
             .First(index => completed.Records[index] is
@@ -304,13 +306,13 @@ public sealed partial class AgentSessionRoundTripTests
             [
                 (
                     2607,
-                    "f140246e6429af2678ebc475166350a70fb5570c4a1e8335edf4c412d7bfa11e"),
+                    "7bcfac058b0aa5179160b8dfbef38d6e30947241a2d39577a8200c5092e43a8c"),
                 (
                     4162,
-                    "0c6a4673116715bcdea4cd8b7cc6f5846a98b6e0406954d018ac39c47243ca64"),
+                    "f744b7173b6eef62da935abb37e91ecf407bbb78e830070e39fb31debdbb71b9"),
                 (
                     6015,
-                    "02749cdf53161a4da4243dee7f59e06276c16a5e6eac629d6a8ec364e39d31d5"),
+                    "0e25cac9f247b82a45e33caa5ebf01771fa1ffeb17247f5555f470b25abe95d3"),
             ],
             new[]
             {

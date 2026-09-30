@@ -820,15 +820,8 @@ internal static class NegativeProofRunner
             string.Concat("issue88-negative-", command.Case));
         await using var server = StrictLoopbackServer.Start(
             providerCanary,
-            [
-                unknownTool
-                    ? ProviderScripts.UnknownTool
-                    : body => ProviderScripts.ReadCalls(
-                        body,
-                        "untracked.txt",
-                        0,
-                        1),
-            ]);
+            unknownTool ? [ProviderScripts.UnknownTool] :
+            [body => ProviderScripts.ReadCalls(body, "untracked.txt", 0, 1), ProviderScripts.InvalidTerminal]);
         using var backend = new LoopbackProviderBackend(
             server.Endpoint,
             providerCanary);
@@ -848,10 +841,14 @@ internal static class NegativeProofRunner
                 outcome,
                 unknownTool
                     ? AgentFailureCodes.UnknownTool
-                    : AgentFailureCodes.ToolPathNotTracked,
-                modelCalls: 1,
-                toolCalls: 0) &&
-            server.Captures.Count == 1 &&
+                    : AgentFailureCodes.TerminalInvalid,
+                modelCalls: unknownTool ? 1 : 2,
+                toolCalls: unknownTool ? 0 : 1) &&
+            server.Captures.Count == (unknownTool ? 1 : 2) &&
+            !outcome.Events.OfType<AgentToolResultEvent>().Any() &&
+            (unknownTool || outcome.Events.OfType<AgentRecoveryToolCallEvent>().Single().Rejected &&
+                Encoding.UTF8.GetString(outcome.Events.OfType<AgentToolErrorEvent>().Single().CanonicalResult.AsSpan()) ==
+                    AgentRecoveryFeedback.TrackedPathMissing) &&
             !File.Exists(ProofPaths.Lineage(command)) &&
             !Directory.Exists(ProofPaths.StateRoot(command));
     }
