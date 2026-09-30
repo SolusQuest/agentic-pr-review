@@ -239,6 +239,8 @@ public sealed partial class AgentSessionRoundTripTests
                     ThinkingRequired: true))),
             StringComparison.Ordinal);
 
+        await AssertRecoveryHistoryRebuildsAsync(artifact, trusted, canary);
+
         var completed = artifact.Document.CompletedRuns[0];
         var errorIndex = Enumerable.Range(0, completed.Records.Length)
             .First(index => completed.Records[index] is
