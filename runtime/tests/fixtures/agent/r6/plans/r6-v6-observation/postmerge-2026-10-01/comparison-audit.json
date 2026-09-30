@@ -1,0 +1,12 @@
+{
+  "format": "apr.r6.v6-comparison-audit.v1",
+  "comparison_raw_sha256": "7b6cb23cff7536cf917864c3d04e4ff0c3288cf30aff0d895560bd1e37b0d6f7",
+  "full_left_outcomes": 6,
+  "full_right_outcomes": 6,
+  "left_nano_usd": "8778540",
+  "right_nano_usd": "25493712",
+  "right_minus_left_nano_usd": "16715172",
+  "native_status": "comparable",
+  "direction": "increased",
+  "formal_regression": "inconclusive"
+}

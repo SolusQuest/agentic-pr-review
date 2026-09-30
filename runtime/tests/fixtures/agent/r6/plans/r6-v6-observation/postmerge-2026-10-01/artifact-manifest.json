@@ -1,0 +1,93 @@
+{
+  "format": "apr.r6.v6-artifact-manifest.v1",
+  "hash_algorithm": "sha256",
+  "scope": "Sibling JSON artifacts; manifest and narrative excluded. Captures identify retained original operator bytes; null means derived evidence. Full native reports are parsed-data equal after formatting.",
+  "evidence_limit": "Operator commitments do not authenticate provider billing or independently attest producer origin.",
+  "artifacts": [
+    {
+      "file": "campaign-a-dry-run.json",
+      "captured_raw_sha256": "cc3bebf26344b721276357bd8b36f9902a635033016da7c44bb9aef27938bc78",
+      "repository_file_sha256": "8074bd587124695e94561cf156d82b312fc02c060b4d05b52ee74bfe05ea7d0f"
+    },
+    {
+      "file": "campaign-b-dry-run.json",
+      "captured_raw_sha256": "2866184383cd1f5479b5513fdc06de7452117788cd3ec29f552aa4bbbee3a3f7",
+      "repository_file_sha256": "446a239a457aab4271c1780b8622b80f6c2531e97a9b643cb1c66a152bf7c345"
+    },
+    {
+      "file": "campaign-a-live.json",
+      "captured_raw_sha256": "2fc683373ce1dcc140a70a702681b2be8629314a823b36f0500b7f879aa87db7",
+      "repository_file_sha256": "d8a035279eac8eefbc090477365f3ccc00dc839b7f908b6def47c29c90eaf9c2"
+    },
+    {
+      "file": "campaign-a-audit.json",
+      "captured_raw_sha256": "83a450fb4334fc7f5e834e17aa375a6873ba2deb5cf52896d8480b3f7f451ea6",
+      "repository_file_sha256": "83a450fb4334fc7f5e834e17aa375a6873ba2deb5cf52896d8480b3f7f451ea6"
+    },
+    {
+      "file": "campaign-a-gate.json",
+      "captured_raw_sha256": "98ab7c7e12f6bde5bda1ccff01e61c982fd1d2ccfc9ac37e8a5dd4f8593bf0ef",
+      "repository_file_sha256": "98ab7c7e12f6bde5bda1ccff01e61c982fd1d2ccfc9ac37e8a5dd4f8593bf0ef"
+    },
+    {
+      "file": "campaign-b-live.json",
+      "captured_raw_sha256": "e0b585ea33d29faacf49787e8240f026e9d6234a415be67a017c280821035f95",
+      "repository_file_sha256": "6067898ed61142df9ce80e692f47ef23bb8b9c5c09050fa05c556021b7ea562c"
+    },
+    {
+      "file": "campaign-b-audit.json",
+      "captured_raw_sha256": "67874747d239590db8ccfc13b813039db34912f5fcddebfad4522a13cc206e44",
+      "repository_file_sha256": "67874747d239590db8ccfc13b813039db34912f5fcddebfad4522a13cc206e44"
+    },
+    {
+      "file": "campaign-b-gate.json",
+      "captured_raw_sha256": "bd095be74d816efc1c6d4fd8c3f1f880285ddb1388558eba4218b34306e979b7",
+      "repository_file_sha256": "bd095be74d816efc1c6d4fd8c3f1f880285ddb1388558eba4218b34306e979b7"
+    },
+    {
+      "file": "tariff.json",
+      "captured_raw_sha256": "f084de78913f1a26780c41ecf3b3c8afeeebb10ea683ba3b3d967bf9dbf19b5d",
+      "repository_file_sha256": "217b01be25247a69ec4f48537bbf1fece9fe0d77bf232f599a692b6c5d8d51be"
+    },
+    {
+      "file": "prior-populations-audit.json",
+      "captured_raw_sha256": "8959484255ed7201dbb6f9e180345a780367aa35800d979c8363bc659e41a21a",
+      "repository_file_sha256": "8959484255ed7201dbb6f9e180345a780367aa35800d979c8363bc659e41a21a"
+    },
+    {
+      "file": "preexecution.json",
+      "captured_raw_sha256": null,
+      "repository_file_sha256": "3e536894d2213a5eca51ecccfa7e9f019c8494ab7d9e0e21b4edb8690b336642"
+    },
+    {
+      "file": "operator-evidence.json",
+      "captured_raw_sha256": null,
+      "repository_file_sha256": "5baeab1091831022dba5410bac30a90006f7dd3a5b31aa0042bd34171ae4f1db"
+    },
+    {
+      "file": "campaign-a.bundle.json",
+      "captured_raw_sha256": "2b628f77ba98eeecd0c5d9560000b2f642b44cfdbd944cc4b85e38b3b58b91db",
+      "repository_file_sha256": "57c2303069cb0cd4b0ddd795ab78b314b307ea529d1527e0ff1f73ba8908ca35"
+    },
+    {
+      "file": "campaign-b.bundle.json",
+      "captured_raw_sha256": "1fe48f83d11810a3220b433119ab88f354cf8626169644e06ae88b079ff9e441",
+      "repository_file_sha256": "2fc829a2032804ffefb9655109fecbdc23b71dc0ffbf92cd276a2605fa6d9cf0"
+    },
+    {
+      "file": "campaign-a-vs-b.json",
+      "captured_raw_sha256": "7b6cb23cff7536cf917864c3d04e4ff0c3288cf30aff0d895560bd1e37b0d6f7",
+      "repository_file_sha256": "53d2e9db73184caa9f3e542ced32ffc538a6084e3b60cd7f2f0ce1b7c3e485f3"
+    },
+    {
+      "file": "comparison-audit.json",
+      "captured_raw_sha256": "9059c613ef74569f3bc1db2cf36fbdb9940194fe4f8002f1a76d62c627a5f55f",
+      "repository_file_sha256": "9059c613ef74569f3bc1db2cf36fbdb9940194fe4f8002f1a76d62c627a5f55f"
+    },
+    {
+      "file": "campaign-c-dry-run.json",
+      "captured_raw_sha256": "9ae58c076511b2a91510acf91bf7deca1a67c9e2e4c41eb567fde0a28ac321ec",
+      "repository_file_sha256": "6d19f8da6cc09cba96d867673bf5308737d480d5d855063cd883e99c69586540"
+    }
+  ]
+}

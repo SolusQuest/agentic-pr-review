@@ -1,0 +1,83 @@
+{
+  "format": "apr.r6.v6-postmerge-preexecution.v1",
+  "declaration_url": "https://github.com/SolusQuest/agentic-pr-review/issues/296#issuecomment-5915736618",
+  "source": {
+    "commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+    "tree": "82e9b2d84e50dd3af019f2a881a0516e143c841b",
+    "clean": true
+  },
+  "build_sha256": "71a2f8d39d0c5da7bdc19b8a62a66104db33839978157ad2f1949416d21e4a6b",
+  "tariff_sha256": "fe739a1028367430c322da7cbd1f411579dd4566ed17b7319354010d90495319",
+  "artifacts": {
+    "fixture_dll_sha256": "1637ec01b1d52ff31c43e69a9b882b848834065c2c45db409df64b5f14efd25f",
+    "runtime_dll_sha256": "2608e31cec4d03eb3c09d344f0534fe1cf4faa5fe2825a240708e2e73b6e8f2c",
+    "fixture_deps_sha256": "931d9ca96b5f8fb3d4720308c2b5e416aa5808412df85a9d9348e9f8700283d1"
+  },
+  "launcher_sha256": "fca93397de954b772a78b7440fa4ea1d4a5359bc30d282a6a2c483194f0cec1c",
+  "authorization_sha256": "2001be01d67b4d4c0d9916e1bfcb96519053de2905861fef7eff424b1e1b81d3",
+  "campaigns": [
+    {
+      "id": "a",
+      "plan_raw_sha256": "bff2b2a8f6998329712d3c086a054db70d8a9860c88c528482cffbbddcfc96a9",
+      "plan_sha256": "9419867e4e7b0caf1eeff10906ed68ddcd99faeb45bbfea3a4b916d9c48bc717",
+      "workload_sha256": "5445ec154b473f04ff3532b8ecb77ad02907c2e8a212e7596b20249a05b6cd70",
+      "keyless_report_sha256": "cc3bebf26344b721276357bd8b36f9902a635033016da7c44bb9aef27938bc78",
+      "scheduled": 6
+    },
+    {
+      "id": "b",
+      "plan_raw_sha256": "bff2b2a8f6998329712d3c086a054db70d8a9860c88c528482cffbbddcfc96a9",
+      "plan_sha256": "9419867e4e7b0caf1eeff10906ed68ddcd99faeb45bbfea3a4b916d9c48bc717",
+      "workload_sha256": "5445ec154b473f04ff3532b8ecb77ad02907c2e8a212e7596b20249a05b6cd70",
+      "keyless_report_sha256": "2866184383cd1f5479b5513fdc06de7452117788cd3ec29f552aa4bbbee3a3f7",
+      "scheduled": 6
+    }
+  ],
+  "review": {
+    "task_id": "d9a7dd83-2d0f-40e2-b6ab-efe1b1dd1d4f",
+    "reply_sha256": "c3379d1a2e269ced05726476edcabc18b1b3a75837a232e2a4c731b0389223cd",
+    "status": "approved"
+  },
+  "authorization": {
+    "issue": "https://github.com/SolusQuest/agentic-pr-review/issues/296",
+    "authorized_on": "2026-10-01",
+    "relay_session": "6abc8e3c-9814-83e8-adeb-f8cc76f010ec",
+    "max_campaigns_including_failures": 2,
+    "max_reserved_micro_usd": 9600000,
+    "max_live_plan_seconds": 3720,
+    "provider": "deepseek",
+    "requested_model": "deepseek-v4-flash",
+    "profile": "Output65536",
+    "automatic_in_population_retry": false,
+    "merge_release_closure_authorized": false,
+    "campaigns": ["a", "b"],
+    "purpose": "Fresh formal postmerge replay A/B populations using the two remaining slots of the original three-campaign authority. No growth execution authorized by this envelope.",
+    "source_commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+    "authorization_basis": "Original #296 max 3 campaigns including failures / USD50 / 28800 seconds and latest user instruction merged, continue validation. Original failed formal A consumes one slot. Five separately authorized PR321 branch populations remain separate. Relay reviews execution safety, not spending authority.",
+    "original_formal_limits": {
+      "campaigns": 3,
+      "reserved_micro_usd": 50000000,
+      "seconds": 28800
+    },
+    "prior_formal": {
+      "campaigns": 1,
+      "reserved_micro_usd": 4800000,
+      "seconds": 1860
+    },
+    "prior_branch": {
+      "campaigns": 5,
+      "reserved_micro_usd": 24000000,
+      "seconds": 9300
+    },
+    "formal_after_this_envelope": {
+      "campaigns": 3,
+      "reserved_micro_usd": 14400000,
+      "seconds": 5580
+    },
+    "all_populations_after_this_envelope": {
+      "campaigns": 8,
+      "reserved_micro_usd": 38400000,
+      "seconds": 14880
+    }
+  }
+}

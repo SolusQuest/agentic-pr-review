@@ -1,0 +1,21 @@
+{
+  "campaign": "c2-db109e41f4c146788f85",
+  "source": {
+    "commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+    "tree": "82e9b2d84e50dd3af019f2a881a0516e143c841b",
+    "clean": true
+  },
+  "checks": {
+    "live_complete": true,
+    "usage_accounting": true,
+    "tool_bearing_bootstraps": true,
+    "lineage": true,
+    "operator": true,
+    "exact_identity": true
+  },
+  "bounded_live_gate": "pass",
+  "targeted_live_recovery_occurrence": "not_observable",
+  "formal_postmerge_acceptance": "replay_population_pass",
+  "reference_usd": 0.025493712,
+  "actual_billing": "unknown"
+}
