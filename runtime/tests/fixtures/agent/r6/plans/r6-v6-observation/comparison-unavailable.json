@@ -1,0 +1,7 @@
+{
+  "format": "apr.r6.v6-comparison-unavailable.v1",
+  "preselected_pair": ["a", "b"],
+  "status": "unavailable",
+  "reason": "The preselected A population completed 1 of 6 slots, failed 1 and left 4 unattempted. B was not launched after A's restored-stage SESSION build failed with session_record_invalid. There is no complete preselected pair; C and historical populations are not substituted.",
+  "c_subpopulation_substitution": false
+}
