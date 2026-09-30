@@ -57,26 +57,20 @@ public sealed class R6QualitySandboxTests
         var script = new ReplayScript(run.Script.Turns.SetItem(0, first));
         var derived = run.Derive(run.Input, script, fixture.CorpusSha256);
         var result = await QualityRunner.ExecuteAsync(derived, Truth(caseId));
-        if (expectedCode == AgentFailureCodes.ToolArgumentsInvalid)
-        {
-            Assert.True(result.AgentOutcome.Succeeded);
-            Assert.Equal(["first", "second"], result.AgentOutcome.Events
-                .OfType<AgentRecoveryToolCallEvent>()
-                .Select(call => call.CallId));
-            Assert.DoesNotContain(result.AgentOutcome.Events
-                .OfType<AgentToolCallEvent>(), call =>
-                    call.CallId is "first" or "second");
-            Assert.DoesNotContain(result.AgentOutcome.Events
-                .OfType<AgentToolResultEvent>(), value =>
-                    value.CallId is "first" or "second");
-        }
-        else
-        {
-            Assert.False(result.AgentOutcome.Succeeded);
-            Assert.Equal(expectedCode, result.AgentOutcome.Diagnostic?.Code);
-            Assert.Equal(0, result.AgentOutcome.Diagnostic?.ToolCalls);
-            Assert.Empty(result.AgentOutcome.Events.OfType<AgentToolResultEvent>());
-        }
+        Assert.True(result.AgentOutcome.Succeeded);
+        Assert.Equal(["first", "second"], result.AgentOutcome.Events
+            .OfType<AgentRecoveryToolCallEvent>()
+            .Select(call => call.CallId));
+        Assert.DoesNotContain(result.AgentOutcome.Events
+            .OfType<AgentToolCallEvent>(), call =>
+                call.CallId is "first" or "second");
+        Assert.DoesNotContain(result.AgentOutcome.Events
+            .OfType<AgentToolResultEvent>(), value =>
+                value.CallId is "first" or "second");
+        var denial = result.AgentOutcome.Events.OfType<AgentToolErrorEvent>().Last();
+        Assert.Equal(expectedCode == AgentFailureCodes.ToolArgumentsInvalid
+            ? AgentRecoveryFeedback.ArgumentsInvalid : AgentRecoveryFeedback.TrackedPathMissing,
+            System.Text.Encoding.UTF8.GetString(denial.CanonicalResult.AsSpan()));
     }
 
     private static QualityCaseSpec Truth(string id)

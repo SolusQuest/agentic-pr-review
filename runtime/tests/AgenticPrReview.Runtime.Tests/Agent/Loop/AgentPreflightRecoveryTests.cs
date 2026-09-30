@@ -10,6 +10,38 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Loop;
 public sealed partial class AgentLoopTests
 {
     [Theory]
+    [InlineData(1, AgentFailureCodes.ModelLimit, 8)]
+    [InlineData(8, AgentFailureCodes.ToolLimit, 3)]
+    public async Task RepeatedDenialsConsumeExistingModelAndToolCaps(int batchSize, string code, int admittedBatches)
+    {
+        var responses = Enumerable.Range(0, AgentLimits.ModelCalls).Select(turn =>
+            new ProjectChatResponse(new("assistant", Enumerable.Range(0, batchSize)
+                .Select(index => (ProjectChatContent)new ProjectToolCallContent($"call-{turn}-{index}",
+                    "read_file", "{\"path\":\"absent\"}")).ToArray()), new(1, 1), 1));
+        var executor = new ScriptedToolExecutor(preflight: _ => AgentFailureCodes.ToolPathNotTracked);
+        var outcome = await new AgentLoop(new ScriptedChatClient(responses), executor).RunAsync(Request(), default);
+        AssertFailure(outcome, code);
+        Assert.Equal(admittedBatches * batchSize, executor.PreflightOrder.Count);
+        Assert.Equal(admittedBatches * batchSize, outcome.Events.OfType<AgentRecoveryToolCallEvent>().Count());
+        Assert.Empty(executor.Order);
+    }
+
+    [Theory]
+    [InlineData(AgentFailureCodes.ToolPathNotTracked)]
+    [InlineData(AgentFailureCodes.ToolCursorInvalid)]
+    public async Task SameCodeAfterExecutionDoesNotBecomePreflightRecovery(string code)
+    {
+        var executor = new ScriptedToolExecutor(_ => AgentToolExecution.Failure(code));
+        var outcome = await new AgentLoop(new ScriptedChatClient([
+            Response(new("read", "read_file", "{\"path\":\"a.txt\"}"), 1, 1),
+        ]), executor).RunAsync(Request(), default);
+        AssertFailure(outcome, code);
+        Assert.Equal(1, outcome.Diagnostic!.ToolCalls);
+        Assert.Single(executor.Order);
+        Assert.Empty(outcome.Events.OfType<AgentRecoveryToolCallEvent>());
+    }
+
+    [Theory]
     [InlineData("read_file", "{\"path\":\"PRIVATE_CANARY\"}", "tool_path_not_tracked")]
     [InlineData("search_text", "{\"query\":\"x\",\"path\":\"PRIVATE_CANARY\"}", "tool_path_not_tracked")]
     [InlineData("read_diff", "{\"path\":\"PRIVATE_CANARY\"}", "tool_path_not_tracked")]
