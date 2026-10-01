@@ -1,0 +1,25 @@
+{
+  "execution_source": "616a0a8cee9033b92956d519b8b232a577507dd1",
+  "artifacts": [
+    {
+      "file": "live-audit.json",
+      "sha256": "9c2329ec1735b6270b5f6dc764433834f4f170f0c2c993afba38ba93e432bf72"
+    },
+    {
+      "file": "live-report.json",
+      "sha256": "a5a272f5dcb5b65f0293fb8e63b14a5979fb95220698ec29fd5deee59ed0b616"
+    },
+    {
+      "file": "operator-evidence.json",
+      "sha256": "23700aa1750fe3e83dc21ab22b4ef2f8aca060195fb67594f81a8e862a007ac8"
+    },
+    {
+      "file": "preexecution-manifest.json",
+      "sha256": "66e78f57ce5d6e64559b7f186667c801f59463b91821b98ce41d76e6155dedda"
+    },
+    {
+      "file": "tariff.json",
+      "sha256": "217b01be25247a69ec4f48537bbf1fece9fe0d77bf232f599a692b6c5d8d51be"
+    }
+  ]
+}

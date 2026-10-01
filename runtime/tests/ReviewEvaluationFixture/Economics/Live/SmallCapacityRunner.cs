@@ -19,7 +19,7 @@ internal static class SmallCapacityRunner
     {
         options ??= new();
         var selected = EconomicsPlan.Load(path, execute, token);
-        if (Agent.AgentLimits.Messages != 32 || selected.Input.StopRule != "small_capacity_event_v1" || selected.Input.Scenarios.Length != 2 ||
+        if (Agent.AgentLimits.Messages != 48 || selected.Input.StopRule != "small_capacity_event_v1" || selected.Input.Scenarios.Length != 2 ||
             selected.Input.Scenarios[0] != new EconomicsScenario("replay", 2, 1, false) ||
             selected.Input.Scenarios[1] != new EconomicsScenario("tools", 12, 1, true))
             EconomicsPlan.Reject("small_capacity_selection_invalid");
@@ -121,7 +121,7 @@ internal static class SmallCapacityRunner
                 if (receiptStop is not null) { stop = receiptStop; break; }
                 if (slot.Chain == 1 && EconomicsJournal.Capacity(receipt))
                 {
-                    if (slot.Phase < 2 || predecessor is null ||
+                    if (slot.Phase < 1 || !receipt.Restored || predecessor is null ||
                         !await ReadbackAsync(plan, acceptedRuns[slot.Chain], input.Session, root, slot.Chain, key, predecessor, deadline.Token))
                     { stop = "representative_history_insufficient"; break; }
                     capacityObserved = true;

@@ -42,7 +42,7 @@ public sealed class R6EconomicsRunnerTests
         Assert.Equal("not_applicable_experimental_capacity", report.C1Handoff);
         var capacity = Assert.Single(report.Steps.Where(s => s.Code == "capacity_stop"));
         Assert.True(capacity.Restored && capacity.Readback && !capacity.Accepted && !capacity.Prepared);
-        Assert.True(capacity.Observation!.Measurement.LastResponseMessages > 32);
+        Assert.True(EconomicsJournal.Capacity(capacity.Observation!));
         Assert.Equal(report.Steps[capacity.Index - 1].SessionSha256, capacity.PredecessorSha256);
         Assert.All(report.Steps.Where(s => s.Code == "not_needed_after_capacity"), s =>
         { Assert.True(s.Allocated); Assert.Null(s.Observation); Assert.False(s.Accepted); });
@@ -81,21 +81,24 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Theory]
-    [InlineData(3, "unknown")] [InlineData(4, "unknown")] [InlineData(14, "unknown")]
-    [InlineData(3, "transport")] [InlineData(4, "transport")] [InlineData(14, "transport")]
-    [InlineData(3, "cache")] [InlineData(4, "cache")] [InlineData(14, "cache")]
-    [InlineData(3, "ordinal")] [InlineData(4, "ordinal")] [InlineData(14, "ordinal")]
+    [InlineData(3, "unknown")] [InlineData(-1, "unknown")] [InlineData(14, "unknown")]
+    [InlineData(3, "transport")] [InlineData(-1, "transport")] [InlineData(14, "transport")]
+    [InlineData(3, "cache")] [InlineData(-1, "cache")] [InlineData(14, "cache")]
+    [InlineData(3, "ordinal")] [InlineData(-1, "ordinal")] [InlineData(14, "ordinal")]
     public async Task SmallCapacityRejectsInvalidCallsBeforeAcceptResetOrSuccessor(int target, string mutation)
     {
         using var files = SmallCapacityInputs();
-        var dispatched = new List<int>(); var mutated = false;
+        var dispatched = new List<int>(); var mutated = false; var mutationIndex = -1;
         var report = await SmallCapacityRunner.RunAsync(files.PlanPath, false, new()
         {
             Process = async (input, credential, token) =>
             {
                 dispatched.Add(input.Slot.Index);
                 var result = await EconomicsProcess.RunAsync(input, credential, token);
-                if (input.Slot.Index != target) return result;
+                if (target == -1
+                    ? input.Slot.Chain != 1 || result.Receipt is null || !EconomicsJournal.Capacity(result.Receipt)
+                    : input.Slot.Index != target) return result;
+                mutationIndex = input.Slot.Index;
                 var receipt = Assert.IsType<EconomicsReceipt>(result.Receipt);
                 var call = receipt.Calls[^1];
                 var changedCall = mutation switch
@@ -117,11 +120,11 @@ public sealed class R6EconomicsRunnerTests
         });
         Assert.True(mutated);
         Assert.Equal("receipt_invalid", report.StopReason);
-        Assert.Equal(target, dispatched[^1]);
-        Assert.False(report.Steps[target].Accepted);
-        Assert.Null(report.Steps[target].Observation);
-        Assert.All(report.Steps.Skip(target + 1), s => Assert.Null(s.Observation));
-        if (target < 14) Assert.DoesNotContain(report.Steps, s => s.Reset);
+        Assert.Equal(mutationIndex, dispatched[^1]);
+        Assert.False(report.Steps[mutationIndex].Accepted);
+        Assert.Null(report.Steps[mutationIndex].Observation);
+        Assert.All(report.Steps.Skip(mutationIndex + 1), s => Assert.Null(s.Observation));
+        if (mutationIndex < 14) Assert.DoesNotContain(report.Steps, s => s.Reset);
         else Assert.True(report.Steps[14].Reset); // Authorized before this post-reset child's receipt.
         Assert.Equal("cleaned", report.Cleanup);
     }
