@@ -1,6 +1,6 @@
 # Reduced32 capacity observation E
 
-This immutable independent experiment executed source616a0a8cee9033b92956d519b8b232a577507dd1 with message cap32 (production64). It stopped with representative_history_insufficient before the selected growth/reset stages:16scheduled,2attempted,1accepted,1restored,0reset,14unattempted. Both Agent invocations succeeded; the journal retains one completed evaluation and one failed evaluation because the second SESSION build failed with session_construction_limit, so the failed build was not accepted.
+This immutable independent experiment executed source616a0a8cee9033b92956d519b8b232a577507dd1 with message cap32 (production64). It stopped with representative_history_insufficient before the selected growth/reset stages:16scheduled,2attempted,1accepted,1restored,0reset,14unattempted. Both Agent invocations succeeded; the report outcomes retain one completed evaluation and one failed evaluation because the second SESSION build failed with session_construction_limit, so the failed build was not accepted.
 
 The bootstrap used6sends/9tools and ended at17response messages. The restored replay used4sends/9tools and ended at32response messages with29820continuation bytes. The builder checks both construction bounds and capacity for a reconstructible NEXT request, so Agent success at the current message bound does not imply a persistable successor. The bounded diagnostic does not expose which internal builder check rejected; no exact internal trigger is asserted.
 

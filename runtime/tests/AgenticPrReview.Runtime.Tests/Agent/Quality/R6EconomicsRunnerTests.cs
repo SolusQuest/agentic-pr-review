@@ -36,8 +36,8 @@ public sealed class R6EconomicsRunnerTests
         Assert.Equal(0, secrets.Reads);
         Assert.Equal("complete", report.StopReason);
         Assert.Equal("cleaned", report.Cleanup);
-        Assert.Equal(16, report.Scheduled);
-        Assert.Equal(16, report.Allocations.Attempts);
+        Assert.Equal(14, report.Scheduled);
+        Assert.Equal(14, report.Allocations.Attempts);
         Assert.Null(report.Journal); Assert.Null(report.Pricing);
         Assert.Equal("not_applicable_experimental_capacity", report.C1Handoff);
         var capacity = Assert.Single(report.Steps.Where(s => s.Code == "capacity_stop"));
@@ -65,10 +65,10 @@ public sealed class R6EconomicsRunnerTests
     {
         using var files = SmallCapacityInputs();
         var report = await SmallCapacityRunner.RunAsync(files.PlanPath, false,
-            new() { Fault = (EconomicsFault)fault, FaultIndex = 3 });
+            new() { Fault = (EconomicsFault)fault, FaultIndex = 1 });
         Assert.NotEqual("complete", report.StopReason);
         Assert.DoesNotContain(report.Steps, s => s.Reset);
-        Assert.True(report.Steps[2].Accepted);
+        Assert.True(report.Steps[0].Accepted);
         Assert.Equal("cleaned", report.Cleanup);
     }
 
@@ -81,10 +81,10 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Theory]
-    [InlineData(3, "unknown")] [InlineData(-1, "unknown")] [InlineData(14, "unknown")]
-    [InlineData(3, "transport")] [InlineData(-1, "transport")] [InlineData(14, "transport")]
-    [InlineData(3, "cache")] [InlineData(-1, "cache")] [InlineData(14, "cache")]
-    [InlineData(3, "ordinal")] [InlineData(-1, "ordinal")] [InlineData(14, "ordinal")]
+    [InlineData(1, "unknown")] [InlineData(-1, "unknown")] [InlineData(12, "unknown")]
+    [InlineData(1, "transport")] [InlineData(-1, "transport")] [InlineData(12, "transport")]
+    [InlineData(1, "cache")] [InlineData(-1, "cache")] [InlineData(12, "cache")]
+    [InlineData(1, "ordinal")] [InlineData(-1, "ordinal")] [InlineData(12, "ordinal")]
     public async Task SmallCapacityRejectsInvalidCallsBeforeAcceptResetOrSuccessor(int target, string mutation)
     {
         using var files = SmallCapacityInputs();
@@ -96,7 +96,7 @@ public sealed class R6EconomicsRunnerTests
                 dispatched.Add(input.Slot.Index);
                 var result = await EconomicsProcess.RunAsync(input, credential, token);
                 if (target == -1
-                    ? input.Slot.Chain != 1 || result.Receipt is null || !EconomicsJournal.Capacity(result.Receipt)
+                    ? input.Slot.Chain != 0 || result.Receipt is null || !EconomicsJournal.Capacity(result.Receipt)
                     : input.Slot.Index != target) return result;
                 mutationIndex = input.Slot.Index;
                 var receipt = Assert.IsType<EconomicsReceipt>(result.Receipt);
@@ -124,8 +124,8 @@ public sealed class R6EconomicsRunnerTests
         Assert.False(report.Steps[mutationIndex].Accepted);
         Assert.Null(report.Steps[mutationIndex].Observation);
         Assert.All(report.Steps.Skip(mutationIndex + 1), s => Assert.Null(s.Observation));
-        if (mutationIndex < 14) Assert.DoesNotContain(report.Steps, s => s.Reset);
-        else Assert.True(report.Steps[14].Reset); // Authorized before this post-reset child's receipt.
+        if (mutationIndex < 12) Assert.DoesNotContain(report.Steps, s => s.Reset);
+        else Assert.True(report.Steps[12].Reset); // Authorized before this post-reset child's receipt.
         Assert.Equal("cleaned", report.Cleanup);
     }
 
@@ -133,7 +133,7 @@ public sealed class R6EconomicsRunnerTests
     {
         var files = new Inputs();
         files.Write(EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
-            [new("replay", 2, 1, false), new("tools", 12, 1, true)]) with { StopRule = "small_capacity_event_v1" });
+            [new("tools", 12, 1, true)]) with { StopRule = "small_capacity_growth_v2" });
         return files;
     }
 

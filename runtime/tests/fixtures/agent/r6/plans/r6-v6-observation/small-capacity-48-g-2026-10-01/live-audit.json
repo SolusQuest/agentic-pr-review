@@ -1,0 +1,31 @@
+{
+  "format": "apr.r6.small-capacity-audit.v1",
+  "report_sha256": "2184bfa0753c5fc3f8594f457f4c90efd13dd879d55a78030538df2ba19a33ec",
+  "source": {
+    "commit": "5b9dc694354d9dcca9928355a9cedaffdf7860b7",
+    "tree": "e85711c33ffa4951cd087bfc61862be10ab33e96",
+    "clean": true
+  },
+  "execution_kind": "live",
+  "capacity_messages": 48,
+  "scheduled": 16,
+  "attempted": 2,
+  "accepted": 1,
+  "restored": 1,
+  "reset": 0,
+  "capacity_index": null,
+  "capacity_measurement": null,
+  "not_needed": 0,
+  "stop_reason": "representative_history_insufficient",
+  "cleanup": "cleaned",
+  "experiment_path_passed": false,
+  "sends": 12,
+  "unknown_usage_or_cache": 0,
+  "input_tokens": 45344,
+  "output_tokens": 1792,
+  "cache_read_input_tokens": 41472,
+  "uncached_input_tokens": 3872,
+  "reference_usd": 0.003560832,
+  "actual_billing": "unknown",
+  "production_capacity_verified": false
+}

@@ -19,9 +19,8 @@ internal static class SmallCapacityRunner
     {
         options ??= new();
         var selected = EconomicsPlan.Load(path, execute, token);
-        if (Agent.AgentLimits.Messages != 48 || selected.Input.StopRule != "small_capacity_event_v1" || selected.Input.Scenarios.Length != 2 ||
-            selected.Input.Scenarios[0] != new EconomicsScenario("replay", 2, 1, false) ||
-            selected.Input.Scenarios[1] != new EconomicsScenario("tools", 12, 1, true))
+        if (Agent.AgentLimits.Messages != 32 || selected.Input.StopRule != "small_capacity_growth_v2" || selected.Input.Scenarios.Length != 1 ||
+            selected.Input.Scenarios[0] != new EconomicsScenario("tools", 12, 1, true))
             EconomicsPlan.Reject("small_capacity_selection_invalid");
         var tariff = selected.LoadTariff(token);
         _ = EconomicsWorkload.Load(selected, token);
@@ -59,7 +58,7 @@ internal static class SmallCapacityRunner
             foreach (var slot in plan.Slots)
             {
                 deadline.Token.ThrowIfCancellationRequested();
-                if (slot.Chain == 1 && capacityObserved)
+                if (slot.Chain == 0 && capacityObserved)
                 {
                     steps[slot.Index] = steps[slot.Index] with { Code = "not_needed_after_capacity", Allocated = true };
                     continue;
@@ -119,7 +118,7 @@ internal static class SmallCapacityRunner
                     Observation = EconomicsJournal.Observe(receipt) };
                 steps[slot.Index] = step;
                 if (receiptStop is not null) { stop = receiptStop; break; }
-                if (slot.Chain == 1 && EconomicsJournal.Capacity(receipt))
+                if (slot.Chain == 0 && EconomicsJournal.Capacity(receipt))
                 {
                     if (slot.Phase < 1 || !receipt.Restored || predecessor is null ||
                         !await ReadbackAsync(plan, acceptedRuns[slot.Chain], input.Session, root, slot.Chain, key, predecessor, deadline.Token))
@@ -129,7 +128,7 @@ internal static class SmallCapacityRunner
                     continue;
                 }
                 if (receipt.Code != "prepared" || receipt.Prepared is null)
-                { stop = slot.Index < 2 ? "representative_history_insufficient" : receipt.Code; break; }
+                { stop = receipt.Code; break; }
                 if (fault == EconomicsFault.CancelAfterPrepare) { stop = "caller_cancelled"; break; }
                 options.BeforeAccept?.Invoke(); deadline.Token.ThrowIfCancellationRequested();
                 if (fault == EconomicsFault.RejectAccept) { stop = "state_failed"; break; }

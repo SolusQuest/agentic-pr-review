@@ -1,0 +1,30 @@
+{
+  "format": "apr.r6.small-capacity-artifacts.v1",
+  "execution_source": {
+    "commit": "5b9dc694354d9dcca9928355a9cedaffdf7860b7",
+    "tree": "e85711c33ffa4951cd087bfc61862be10ab33e96",
+    "clean": true
+  },
+  "artifacts": [
+    {
+      "file": "live-audit.json",
+      "sha256": "9bcfe2e16f56f97a1392814454bd2ab56cfc6cedf0d858e73a49c2c0c0ac12d5"
+    },
+    {
+      "file": "live-report.json",
+      "sha256": "5b284ca2bf165c9df77e185cd9f0402b3bfdcf1248b726251b3089fdb13fda34"
+    },
+    {
+      "file": "operator-evidence.json",
+      "sha256": "ddfa1c99b5c7de75251adf69347fe0e1e58e20b2f80ca9e2c38718c209354382"
+    },
+    {
+      "file": "preexecution-manifest.json",
+      "sha256": "5fca06299ce6c1d2ef3e45d91792c39f9559a2b3ada3a31ef517e50a9042cbba"
+    },
+    {
+      "file": "tariff.json",
+      "sha256": "217b01be25247a69ec4f48537bbf1fece9fe0d77bf232f599a692b6c5d8d51be"
+    }
+  ]
+}
