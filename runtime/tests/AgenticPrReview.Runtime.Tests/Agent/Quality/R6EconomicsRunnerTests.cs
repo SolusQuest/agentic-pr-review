@@ -77,6 +77,8 @@ public sealed class R6EconomicsRunnerTests
     {
         using var files = new Inputs(); var secrets = new Secrets();
         await Assert.ThrowsAsync<EconomicsRejected>(() => SmallCapacityRunner.RunAsync(files.PlanPath, false, new() { Secrets = secrets }));
+        Assert.Throws<EconomicsRejected>(() => EconomicsCommand.Prepare(files.Plan.Replay.Path,
+            files.Plan.Growth.Path, files.Plan.TariffPath, [new("tools", 12, 1, true)]));
         Assert.Equal(0, secrets.Reads);
     }
 
@@ -133,7 +135,7 @@ public sealed class R6EconomicsRunnerTests
     {
         var files = new Inputs();
         files.Write(EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
-            [new("tools", 12, 1, true)]) with { StopRule = "small_capacity_growth_v2" });
+            [new("tools", 12, 1, true)], stopRule: "small_capacity_growth_v2"));
         return files;
     }
 

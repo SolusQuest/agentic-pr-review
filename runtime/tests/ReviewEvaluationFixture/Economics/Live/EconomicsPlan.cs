@@ -84,7 +84,7 @@ internal sealed class EconomicsPlan
             input.Scenarios.Length > EconomicsLiveLimits.Scenarios || !PathValue(input.Replay.Path) ||
             !PathValue(input.Growth.Path) || !PathValue(input.TariffPath)) Reject("plan_invalid");
         if (!LivePlanAdmission.TryProviderProfile(input!.Provider, out var profile)) Reject("plan_invalid");
-        var plan = new EconomicsPlan(input, Expand(input.Scenarios), profile);
+        var plan = new EconomicsPlan(input, Expand(input.Scenarios, input.StopRule == "small_capacity_growth_v2"), profile);
         if (!LivePlanAdmission.ValidProjection(plan.Projection)) Reject("plan_invalid");
         if (currentBuild && (input.Source.Commit != EvaluationSource.Commit || input.Source.Tree != EvaluationSource.Tree ||
                 input.Source.Clean != EvaluationSource.Clean || input.BuildSha256 != EconomicsBuild.Current()) ||
@@ -115,9 +115,11 @@ internal sealed class EconomicsPlan
         return tariff;
     }
 
-    internal static ImmutableArray<EconomicsSlot> Expand(ImmutableArray<EconomicsScenario> scenarios)
+    internal static ImmutableArray<EconomicsSlot> Expand(ImmutableArray<EconomicsScenario> scenarios, bool growthExperiment = false)
     {
-        if (scenarios.IsDefaultOrEmpty || scenarios.Length > 16 || scenarios[0] is not { Profile: "replay", Phases: >= 2 })
+        if (scenarios.IsDefaultOrEmpty || scenarios.Length > 16 || (growthExperiment
+                ? scenarios.Length != 1 || scenarios[0] != new EconomicsScenario("tools", 12, 1, true)
+                : scenarios[0] is not { Profile: "replay", Phases: >= 2 }))
             throw new EconomicsRejected("r6_economics_plan_invalid");
         var slots = ImmutableArray.CreateBuilder<EconomicsSlot>();
         var chain = 0;

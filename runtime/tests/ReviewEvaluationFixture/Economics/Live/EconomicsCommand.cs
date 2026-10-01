@@ -62,14 +62,15 @@ internal static class EconomicsCommand
     }
 
     internal static EconomicsPlanInput Prepare(string replay, string growth, string tariff,
-        ImmutableArray<EconomicsScenario> scenarios = default, int childSeconds = 30, int spacingMilliseconds = 0)
+        ImmutableArray<EconomicsScenario> scenarios = default, int childSeconds = 30, int spacingMilliseconds = 0,
+        string stopRule = "stop_remaining_tail")
     {
         if (scenarios.IsDefault) scenarios = [new("replay", 3, 1, false), new("tools", 6, 1, true), new("continuation", 7, 1, true)];
         var replayFixture = ReplayAdmission.Load(replay).Fixture ?? throw new EconomicsRejected("r6_economics_corpus_invalid");
         var growthFixture = ReplayAdmission.Load(growth).Fixture ?? throw new EconomicsRejected("r6_economics_corpus_invalid");
         var price = AdmittedTariff.Read(EconomicsPlan.ReadFile(tariff, PricingLimits.TariffBytes, default), out _) ??
             throw new EconomicsRejected("r6_economics_tariff_invalid");
-        var count = EconomicsPlan.Expand(scenarios).Length;
+        var count = EconomicsPlan.Expand(scenarios, stopRule == "small_capacity_growth_v2").Length;
         // This is a conservative preparation ceiling, not a current billing quote or execution grant.
         var per = new LivePlanPerCall(32768, 4096, 1_000_000);
         var calls = count * 8L;
@@ -80,7 +81,7 @@ internal static class EconomicsCommand
             new(Path.GetFullPath(replay), replayFixture.CorpusSha256), new(Path.GetFullPath(growth), growthFixture.CorpusSha256),
             new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
                 LivePlanAdmission.ProviderConfigurationSha256()), "high", Path.GetFullPath(tariff), price.Sha256,
-            scenarios, childSeconds, spacingMilliseconds, "stop_remaining_tail",
+            scenarios, childSeconds, spacingMilliseconds, stopRule,
             new(count, calls, calls * per.MaxInputTokens, calls * per.MaxOutputTokens,
                 calls * (per.MaxInputTokens + per.MaxOutputTokens), checked((milliseconds + 999) / 1000),
                 calls * per.MaxChargeMicroUsd, per));
