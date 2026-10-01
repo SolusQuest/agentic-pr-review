@@ -107,7 +107,8 @@ internal static class SmallCapacityRunner
                 // Receipt identities and accounting are checked independently of the experimental schedule.
                 var receiptStop = EconomicsJournal.Stop(receipt, plan);
                 // Accept the one-time allocation receipt before it can affect accepted state.
-                if (!ledger.Receipt(lease))
+                if (!SmallCapacityAdmission.Valid(plan, campaign, transport, receipts.Append(receipt).ToArray(),
+                        receiptStop ?? "infrastructure_failed") || !ledger.Receipt(lease))
                 { stop = "receipt_invalid"; steps[slot.Index] = steps[slot.Index] with { Code = stop }; break; }
                 receipts.Add(receipt); missing--;
                 options.ObservedReceipt?.Invoke(receipt);

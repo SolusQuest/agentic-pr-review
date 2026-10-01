@@ -80,6 +80,52 @@ public sealed class R6EconomicsRunnerTests
         Assert.Equal(0, secrets.Reads);
     }
 
+    [Theory]
+    [InlineData(3, "unknown")] [InlineData(4, "unknown")] [InlineData(14, "unknown")]
+    [InlineData(3, "transport")] [InlineData(4, "transport")] [InlineData(14, "transport")]
+    [InlineData(3, "cache")] [InlineData(4, "cache")] [InlineData(14, "cache")]
+    [InlineData(3, "ordinal")] [InlineData(4, "ordinal")] [InlineData(14, "ordinal")]
+    public async Task SmallCapacityRejectsInvalidCallsBeforeAcceptResetOrSuccessor(int target, string mutation)
+    {
+        using var files = SmallCapacityInputs();
+        var dispatched = new List<int>(); var mutated = false;
+        var report = await SmallCapacityRunner.RunAsync(files.PlanPath, false, new()
+        {
+            Process = async (input, credential, token) =>
+            {
+                dispatched.Add(input.Slot.Index);
+                var result = await EconomicsProcess.RunAsync(input, credential, token);
+                if (input.Slot.Index != target) return result;
+                var receipt = Assert.IsType<EconomicsReceipt>(result.Receipt);
+                var call = receipt.Calls[^1];
+                var changedCall = mutation switch
+                {
+                    "unknown" => call with { UsageStatus = "unknown", Usage = null },
+                    "transport" => call with { TransportOutcome = "http500", ChatOutcome = "returned" },
+                    "cache" => call with { Usage = call.Usage! with
+                        { Cache = call.Usage.Cache! with { UncachedInputTokens = call.Usage.Cache.UncachedInputTokens + 1 } } },
+                    _ => call with { Ordinal = call.Ordinal + 1 },
+                };
+                var changed = receipt with { Calls = receipt.Calls.SetItem(receipt.Calls.Length - 1, changedCall) };
+                var plan = EconomicsPlan.Admit(input.Plan, false);
+                var run = EconomicsWorkload.Load(plan, token).Run(input.Slot, input.Campaign);
+                // Prove these hostile rows pass the older envelope-only check.
+                Assert.True(EconomicsJournal.ValidReceipt(input, result.Ready, changed, plan, run));
+                mutated = true;
+                return result with { Receipt = changed };
+            },
+        });
+        Assert.True(mutated);
+        Assert.Equal("receipt_invalid", report.StopReason);
+        Assert.Equal(target, dispatched[^1]);
+        Assert.False(report.Steps[target].Accepted);
+        Assert.Null(report.Steps[target].Observation);
+        Assert.All(report.Steps.Skip(target + 1), s => Assert.Null(s.Observation));
+        if (target < 14) Assert.DoesNotContain(report.Steps, s => s.Reset);
+        else Assert.True(report.Steps[14].Reset); // Authorized before this post-reset child's receipt.
+        Assert.Equal("cleaned", report.Cleanup);
+    }
+
     private static Inputs SmallCapacityInputs()
     {
         var files = new Inputs();
