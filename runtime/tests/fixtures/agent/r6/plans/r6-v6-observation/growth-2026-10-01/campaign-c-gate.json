@@ -1,0 +1,40 @@
+{
+  "campaign": "c2-9bc35eae034542218790",
+  "source": {
+    "commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+    "tree": "82e9b2d84e50dd3af019f2a881a0516e143c841b",
+    "clean": true
+  },
+  "checks": {
+    "full_authored_schedule": false,
+    "usage_accounting": true,
+    "tool_bearing_bootstraps": false,
+    "lineage": false,
+    "operator": true,
+    "reported_exit": true,
+    "observed_lineage": true,
+    "exact_identity": true
+  },
+  "reasons": {
+    "full_authored_schedule": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'representative_history_insufficient'\n- 'complete'\n",
+    "tool_bearing_bootstraps": "bootstrap_12",
+    "lineage": "Expected values to be strictly equal:\n\nfalse !== true\n"
+  },
+  "bounded_growth_coverage": "insufficient",
+  "actual_steps": {
+    "scheduled": 23,
+    "attempted": 12,
+    "step_codes": {
+      "completed": 11,
+      "prepared": 1,
+      "unattempted": 11
+    },
+    "readback": 11,
+    "restored": 9,
+    "reset": 0
+  },
+  "reference_usd": 0.013211016,
+  "actual_billing": "unknown",
+  "c1_use": "excluded_from_formal_AB",
+  "quality": "not_independently_adjudicated"
+}
