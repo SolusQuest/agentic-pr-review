@@ -80,7 +80,7 @@ internal sealed class EconomicsPlan
             !EvaluationLimits.Hash(input.Replay.Sha256) || !EvaluationLimits.Hash(input.Growth.Sha256) ||
             !EvaluationLimits.Hash(input.TariffSha256) || input.Thinking != "high" ||
             input.ChildSeconds is < 1 or > 300 || input.SpacingMilliseconds is < 0 or > 60000 ||
-            input.StopRule != "stop_remaining_tail" || input.Scenarios.IsDefaultOrEmpty ||
+            input.StopRule is not ("stop_remaining_tail" or "small_capacity_event_v1") || input.Scenarios.IsDefaultOrEmpty ||
             input.Scenarios.Length > EconomicsLiveLimits.Scenarios || !PathValue(input.Replay.Path) ||
             !PathValue(input.Growth.Path) || !PathValue(input.TariffPath)) Reject("plan_invalid");
         if (!LivePlanAdmission.TryProviderProfile(input!.Provider, out var profile)) Reject("plan_invalid");

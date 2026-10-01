@@ -43,7 +43,8 @@ internal static class AgentLimits
     internal const long Combined65536Tokens = 786_432;
     internal const int RequestBytes = 1 * 1024 * 1024;
     internal const int ResponseBytes = 1 * 1024 * 1024;
-    internal const int Messages = 64;
+    // Isolated #296 experimental build only. Never merge this branch into production.
+    internal const int Messages = 32;
     internal const int PartsPerMessage = 32;
     internal const int PartsTotal = 256;
     internal const int ContentBytes = 64 * 1024;

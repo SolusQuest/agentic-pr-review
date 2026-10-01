@@ -24,6 +24,8 @@ internal static class EconomicsCommand
                 Console.WriteLine("r6_economics_preparation_only");
                 return 0;
             }
+            var experimental = args.Length > 0 && args[0] == "small-capacity";
+            if (experimental) args = ["economics-live", .. args.Skip(1)];
             var execute = false;
             string? path = null;
             if (args is ["economics-live", "--plan", var defaultPlan]) path = defaultPlan;
@@ -41,8 +43,12 @@ internal static class EconomicsCommand
                         ready => Console.Error.WriteLine($"r6_economics_child_ready {ready.Index} {ready.ProcessId}")),
                     Completed = index => Console.Error.WriteLine($"r6_economics_step_completed {index}"),
                 };
-                var report = await EconomicsRunner.RunAsync(path, execute, options, cancellation.Token);
-                var outputBytes = EconomicsReportJson.Write(report);
+                var report = experimental
+                    ? await SmallCapacityRunner.RunAsync(path, execute, options, cancellation.Token)
+                    : await EconomicsRunner.RunAsync(path, execute, options, cancellation.Token);
+                var outputBytes = experimental
+                    ? JsonSerializer.SerializeToUtf8Bytes(report, EconomicsLiveJson.Default.EconomicsReport)
+                    : EconomicsReportJson.Write(report);
                 Console.WriteLine(Encoding.UTF8.GetString(outputBytes));
                 return report.StopReason == "complete" && report.Cleanup == "cleaned" ? 0 : 1;
             }

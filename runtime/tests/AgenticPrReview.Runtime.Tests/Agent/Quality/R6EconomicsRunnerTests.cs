@@ -26,6 +26,68 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 [Collection(ProcessEnvironmentCollection.Name)]
 public sealed class R6EconomicsRunnerTests
 {
+
+    [Fact]
+    public async Task SmallCapacityCompletesMeasuredResetWithoutCompletingSkippedSlots()
+    {
+        using var files = SmallCapacityInputs();
+        var secrets = new Secrets();
+        var report = await SmallCapacityRunner.RunAsync(files.PlanPath, false, new() { Secrets = secrets });
+        Assert.Equal(0, secrets.Reads);
+        Assert.Equal("complete", report.StopReason);
+        Assert.Equal("cleaned", report.Cleanup);
+        Assert.Equal(16, report.Scheduled);
+        Assert.Equal(16, report.Allocations.Attempts);
+        Assert.Null(report.Journal); Assert.Null(report.Pricing);
+        Assert.Equal("not_applicable_experimental_capacity", report.C1Handoff);
+        var capacity = Assert.Single(report.Steps.Where(s => s.Code == "capacity_stop"));
+        Assert.True(capacity.Restored && capacity.Readback && !capacity.Accepted && !capacity.Prepared);
+        Assert.True(capacity.Observation!.Measurement.LastResponseMessages > 32);
+        Assert.Equal(report.Steps[capacity.Index - 1].SessionSha256, capacity.PredecessorSha256);
+        Assert.All(report.Steps.Where(s => s.Code == "not_needed_after_capacity"), s =>
+        { Assert.True(s.Allocated); Assert.Null(s.Observation); Assert.False(s.Accepted); });
+        var fresh = report.Steps[^2]; var continued = report.Steps[^1];
+        Assert.True(fresh.Reset && fresh.Accepted && fresh.Readback && !fresh.Restored);
+        Assert.Null(fresh.PredecessorSha256);
+        Assert.True(continued.Restored && continued.Accepted && continued.Readback);
+        Assert.Equal(fresh.SessionSha256, continued.PredecessorSha256);
+        Assert.Equal(report.Attempted, report.Outcomes.Length);
+        Assert.Equal(report.Attempted, report.Steps.Count(s => s.Observation is not null));
+        Assert.Null(EconomicsReportJson.Read(JsonSerializer.SerializeToUtf8Bytes(report, EconomicsLiveJson.Default.EconomicsReport)));
+    }
+
+    [Theory]
+    [InlineData((int)EconomicsFault.ProviderFailure)]
+    [InlineData((int)EconomicsFault.WrongReply)]
+    [InlineData((int)EconomicsFault.RejectAccept)]
+    [InlineData((int)EconomicsFault.CancelAfterPrepare)]
+    public async Task SmallCapacityUnrelatedFailureNeverResets(int fault)
+    {
+        using var files = SmallCapacityInputs();
+        var report = await SmallCapacityRunner.RunAsync(files.PlanPath, false,
+            new() { Fault = (EconomicsFault)fault, FaultIndex = 3 });
+        Assert.NotEqual("complete", report.StopReason);
+        Assert.DoesNotContain(report.Steps, s => s.Reset);
+        Assert.True(report.Steps[2].Accepted);
+        Assert.Equal("cleaned", report.Cleanup);
+    }
+
+    [Fact]
+    public async Task SmallCapacityRejectsDifferentSelectionBeforeSecretAccess()
+    {
+        using var files = new Inputs(); var secrets = new Secrets();
+        await Assert.ThrowsAsync<EconomicsRejected>(() => SmallCapacityRunner.RunAsync(files.PlanPath, false, new() { Secrets = secrets }));
+        Assert.Equal(0, secrets.Reads);
+    }
+
+    private static Inputs SmallCapacityInputs()
+    {
+        var files = new Inputs();
+        files.Write(EconomicsCommand.Prepare(files.Plan.Replay.Path, files.Plan.Growth.Path, files.Plan.TariffPath,
+            [new("replay", 2, 1, false), new("tools", 12, 1, true)]) with { StopRule = "small_capacity_event_v1" });
+        return files;
+    }
+
     private const string Canary = "APR278_PRIVATE_CANARY";
 
     [Theory]

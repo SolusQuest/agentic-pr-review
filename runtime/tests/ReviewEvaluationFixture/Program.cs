@@ -30,7 +30,7 @@ internal static class Program
             if (args is ["r6-prospective-verify", "--report", { } prospectiveReport])
                 return R6ProspectiveReportReader.Invoke(prospectiveReport);
             if (args.SequenceEqual(["economics-child"])) return await EconomicsChild.MainAsync();
-            if (args.Length > 0 && args[0] is "economics-live" or "economics-plan") return await EconomicsCommand.InvokeAsync(args);
+            if (args.Length > 0 && args[0] is "economics-live" or "economics-plan" or "small-capacity") return await EconomicsCommand.InvokeAsync(args);
             if (args.Length > 0 && args[0] == "economics-compare")
                 return ComparisonCommand.Invoke(args);
             if (args.Length > 0 && args[0] == "economics-price")
