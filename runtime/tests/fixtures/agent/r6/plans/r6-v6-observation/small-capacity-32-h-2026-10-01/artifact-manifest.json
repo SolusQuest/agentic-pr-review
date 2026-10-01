@@ -1,0 +1,42 @@
+{
+  "format": "apr.r6.small-capacity-artifacts.v1",
+  "execution_source": {
+    "commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+    "tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+    "clean": true
+  },
+  "artifacts": [
+    {
+      "file": "keyless-audit.json",
+      "sha256": "010aa395fbc264cd3f9dd02b0c04ac94be35ec5041b30880d4c3a5da361acf4f"
+    },
+    {
+      "file": "keyless-report.json",
+      "sha256": "838626e77155d1407dec66d6aafe31d0c9e0af41ae5f8c5bac868d0e6c6f9b4f"
+    },
+    {
+      "file": "live-audit.json",
+      "sha256": "be6ff89cf4f891185ff69bf41de72cbd1449a3178dfdf84cdb7332b7359d4106"
+    },
+    {
+      "file": "live-report.json",
+      "sha256": "cb9bd86da327f3720eae67966198ff163f8030f7249d1b5b06de25687879b5d6"
+    },
+    {
+      "file": "operator-evidence.json",
+      "sha256": "59851c0680278c47ebc60dfa5c1fb7fff650ec799feb0a5232684f02e63b4f8c"
+    },
+    {
+      "file": "preexecution-manifest.json",
+      "sha256": "3eb0e988e237823564edcc44d02ce345411ab7a05ee86d74dffd8532102d9f83"
+    },
+    {
+      "file": "review-evidence.json",
+      "sha256": "0a72b45feae3d8389d79ad7b721265bc58218170a85dfb080a8669203c12cc41"
+    },
+    {
+      "file": "tariff.json",
+      "sha256": "217b01be25247a69ec4f48537bbf1fece9fe0d77bf232f599a692b6c5d8d51be"
+    }
+  ]
+}

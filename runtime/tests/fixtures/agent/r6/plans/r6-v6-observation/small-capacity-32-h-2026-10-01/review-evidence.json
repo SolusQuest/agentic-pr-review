@@ -1,0 +1,14 @@
+{
+  "format": "apr.r6.experiment-review.v1",
+  "session": "6abc8e3c-9814-83e8-adeb-f8cc76f010ec",
+  "task_id": "a7f7f56e-c862-4c1f-b76f-9b90a280beea",
+  "disposition": "APPROVE_PREEXEC",
+  "reply_sha256": "6c97ac4ec3292cb0b5c649c7a205c9e67a02647439e0ff0ad350dee13fd8855c",
+  "scope": "Exactly one H32 invocation through reviewed small-capacity launcher; ordinary economics-live invocation not covered.",
+  "launcher_sha256": "5440de21b0904b65e6d82b28b8282a59dca3dc2b9de31035a54bc509292d54a5",
+  "source": {
+    "commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+    "tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+    "clean": true
+  }
+}

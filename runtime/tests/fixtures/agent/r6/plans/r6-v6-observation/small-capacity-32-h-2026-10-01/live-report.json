@@ -1,0 +1,1006 @@
+{
+  "format": "apr.r6.small-capacity-experiment.v1",
+  "execution_kind": "live",
+  "plan": {
+    "format": "apr.r6.economics-plan.v1",
+    "source": {
+      "commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "clean": true
+    },
+    "build_sha256": "8a6eba136c61e9e3a137526dc4c6c1cde57e0ca2d664316fd98a292e739073fc",
+    "workload": {
+      "replay_sha256": "f32f29e8c121ca3bca94e59c2f6cfaabaaff3fea2755fd24319ce8233aeb3c68",
+      "growth_sha256": "7db3bb53f2a9453556307b2d11d00be106253c004cd29a7c5796b790b763f333",
+      "scenarios": [
+        {
+          "profile": "tools",
+          "phases": 12,
+          "repeats": 1,
+          "reset_after_capacity": true
+        }
+      ],
+      "child_seconds": 300,
+      "spacing_milliseconds": 5000,
+      "stop_rule": "small_capacity_growth_v2"
+    },
+    "provider": {
+      "provider_id": "deepseek",
+      "model_id": "deepseek-v4-flash",
+      "adapter_id": "d0be64c5ac080a3b0308d40a2f1bf33bfa249651c063e37986679875d660093f",
+      "configuration_sha256": "95d664702348d1f99437f05900fac965140f51abff63886dca93d45ac0cf2407"
+    },
+    "thinking": "high",
+    "tariff_sha256": "fe739a1028367430c322da7cbd1f411579dd4566ed17b7319354010d90495319",
+    "bounds": {
+      "max_evaluations": 14,
+      "max_model_calls": 112,
+      "max_input_tokens": 3670016,
+      "max_output_tokens": 7340032,
+      "max_combined_tokens": 11010048,
+      "max_seconds": 4340,
+      "spend_ceiling_micro_usd": 11200000,
+      "per_call": {
+        "max_input_tokens": 32768,
+        "max_output_tokens": 65536,
+        "max_charge_micro_usd": 100000
+      }
+    }
+  },
+  "plan_sha256": "39814fdddd63c8e4d784dd61bfb447bfae76854a40e4d46c372fe7a257695f3e",
+  "workload_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+  "campaign": "c2-11663a96ec03458ea930",
+  "stop_reason": "complete",
+  "cleanup": "cleaned",
+  "allocations": {
+    "attempts": 14,
+    "calls": 112,
+    "input_tokens": 3670016,
+    "output_tokens": 7340032,
+    "combined_tokens": 11010048,
+    "spend_micro_usd": 11200000,
+    "milliseconds": 4200000
+  },
+  "scheduled": 14,
+  "attempted": 7,
+  "receipt_missing": 0,
+  "usage_complete": true,
+  "monetary_complete": false,
+  "c1_handoff": "not_applicable_experimental_capacity",
+  "steps": [
+    {
+      "index": 0,
+      "case_id": "c2-tools-0",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "f42f6b41d29cbecc30e2bda21a7140e9c14cc751e9cb893aa9f7cc70716d2f12",
+      "evaluation_status": "completed",
+      "restored": false,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": false,
+      "process_id": 47488,
+      "startup": "bc41ab60e66447dab202e7a8218332c2",
+      "started_milliseconds": 71,
+      "finished_milliseconds": 4311,
+      "interval_milliseconds": null,
+      "session_sha256": "98c8e28982c297f8b999d8aa3cc382650dcf9129ecf8ba20750642bda3b7b41b",
+      "predecessor_sha256": null,
+      "tool_calls": 3,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 1316,
+              "output_tokens": 30,
+              "combined_tokens": 1346,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1152,
+                "uncached_input_tokens": 164
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 1487,
+              "output_tokens": 103,
+              "combined_tokens": 1590,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1280,
+                "uncached_input_tokens": 207
+              }
+            }
+          },
+          {
+            "ordinal": 3,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 1942,
+              "output_tokens": 218,
+              "combined_tokens": 2160,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1536,
+                "uncached_input_tokens": 406
+              }
+            }
+          }
+        ],
+        "reservations": 3,
+        "measurement": {
+          "calls": 3,
+          "last_project_request_bytes": 7645,
+          "last_messages": 7,
+          "last_response_messages": 8,
+          "last_continuation_before_bytes": 383,
+          "last_continuation_after_bytes": 760
+        },
+        "initial_prefix_sha256": "e0099f04a7dbb54ef900cb1e009d86d307404f39e794069ee2b5bb4ff010c24c",
+        "completed_session_sha256": "98c8e28982c297f8b999d8aa3cc382650dcf9129ecf8ba20750642bda3b7b41b"
+      }
+    },
+    {
+      "index": 1,
+      "case_id": "c2-tools-1",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "63d44b8a192d3a3613a8f7669336c8d66ff2b5115be48edfa702341ac50f41c8",
+      "evaluation_status": "completed",
+      "restored": true,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": false,
+      "process_id": 54624,
+      "startup": "81d837a403e34e06ae630b3085b982bf",
+      "started_milliseconds": 9318,
+      "finished_milliseconds": 13001,
+      "interval_milliseconds": 5007,
+      "session_sha256": "43492782b03e24d19fcd2bc76dd502745eaa4b1d18da63802d3b8f373d75ed4f",
+      "predecessor_sha256": "98c8e28982c297f8b999d8aa3cc382650dcf9129ecf8ba20750642bda3b7b41b",
+      "tool_calls": 3,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 2174,
+              "output_tokens": 123,
+              "combined_tokens": 2297,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1920,
+                "uncached_input_tokens": 254
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 2566,
+              "output_tokens": 85,
+              "combined_tokens": 2651,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 2176,
+                "uncached_input_tokens": 390
+              }
+            }
+          },
+          {
+            "ordinal": 3,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 2875,
+              "output_tokens": 180,
+              "combined_tokens": 3055,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 2560,
+                "uncached_input_tokens": 315
+              }
+            }
+          }
+        ],
+        "reservations": 3,
+        "measurement": {
+          "calls": 3,
+          "last_project_request_bytes": 11895,
+          "last_messages": 15,
+          "last_response_messages": 16,
+          "last_continuation_before_bytes": 1497,
+          "last_continuation_after_bytes": 1640
+        },
+        "initial_prefix_sha256": "af3d0070e9420c6e187ccd6003985ed1dfe1fe07adf121fb6bcd0ff61182a407",
+        "completed_session_sha256": "43492782b03e24d19fcd2bc76dd502745eaa4b1d18da63802d3b8f373d75ed4f"
+      }
+    },
+    {
+      "index": 2,
+      "case_id": "c2-tools-2",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "b92b633bc24ad946750b666e17ce404c238b264ab65c89afdce1ebcdfab54cd7",
+      "evaluation_status": "completed",
+      "restored": true,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": false,
+      "process_id": 40292,
+      "startup": "0951dc4107b14eeab80c1c63816a160c",
+      "started_milliseconds": 18014,
+      "finished_milliseconds": 20404,
+      "interval_milliseconds": 5013,
+      "session_sha256": "b253066608b035a22fc2ae0c7ddbd6daf80ad935ed9f25d6a534ad7bd2be20ab",
+      "predecessor_sha256": "43492782b03e24d19fcd2bc76dd502745eaa4b1d18da63802d3b8f373d75ed4f",
+      "tool_calls": 2,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3069,
+              "output_tokens": 45,
+              "combined_tokens": 3114,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 2816,
+                "uncached_input_tokens": 253
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3383,
+              "output_tokens": 145,
+              "combined_tokens": 3528,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 3072,
+                "uncached_input_tokens": 311
+              }
+            }
+          }
+        ],
+        "reservations": 2,
+        "measurement": {
+          "calls": 2,
+          "last_project_request_bytes": 14477,
+          "last_messages": 21,
+          "last_response_messages": 22,
+          "last_continuation_before_bytes": 1819,
+          "last_continuation_after_bytes": 1962
+        },
+        "initial_prefix_sha256": "d96e24dcd9edb9dcfc52ddd24731305cffe2d5925f9b696c417f636f9d3f96d7",
+        "completed_session_sha256": "b253066608b035a22fc2ae0c7ddbd6daf80ad935ed9f25d6a534ad7bd2be20ab"
+      }
+    },
+    {
+      "index": 3,
+      "case_id": "c2-tools-3",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "d68b4fa40cc827988002d5c9d9757825ec68ecd70801a59556f693016b269c95",
+      "evaluation_status": "completed",
+      "restored": true,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": false,
+      "process_id": 57672,
+      "startup": "680313cdae0f43aa8fd494ad3e3aea39",
+      "started_milliseconds": 25419,
+      "finished_milliseconds": 28313,
+      "interval_milliseconds": 5015,
+      "session_sha256": "ee20f8b84033d10a337a1f9788d40bc036b5c288dab4af188e04df0e0db515b6",
+      "predecessor_sha256": "b253066608b035a22fc2ae0c7ddbd6daf80ad935ed9f25d6a534ad7bd2be20ab",
+      "tool_calls": 2,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3542,
+              "output_tokens": 68,
+              "combined_tokens": 3610,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 3328,
+                "uncached_input_tokens": 214
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 3879,
+              "output_tokens": 137,
+              "combined_tokens": 4016,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 3584,
+                "uncached_input_tokens": 295
+              }
+            }
+          }
+        ],
+        "reservations": 2,
+        "measurement": {
+          "calls": 2,
+          "last_project_request_bytes": 17010,
+          "last_messages": 27,
+          "last_response_messages": 28,
+          "last_continuation_before_bytes": 2263,
+          "last_continuation_after_bytes": 2406
+        },
+        "initial_prefix_sha256": "c34ae79fb35f4f4b9465c8a89849075699a73cc65202aefa497b2c2bfffcbb0a",
+        "completed_session_sha256": "ee20f8b84033d10a337a1f9788d40bc036b5c288dab4af188e04df0e0db515b6"
+      }
+    },
+    {
+      "index": 4,
+      "case_id": "c2-tools-4",
+      "code": "capacity_stop",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "d0a81e3b6e15d0aa1b11523b700e51a458ab83abb036a72b76f74aa08e546373",
+      "evaluation_status": "failed",
+      "restored": true,
+      "prepared": false,
+      "accepted": false,
+      "readback": true,
+      "reset": false,
+      "process_id": 15484,
+      "startup": "7b58ee72c95b41f49e0cbab53c3401ac",
+      "started_milliseconds": 33315,
+      "finished_milliseconds": 34875,
+      "interval_milliseconds": 5002,
+      "session_sha256": null,
+      "predecessor_sha256": "ee20f8b84033d10a337a1f9788d40bc036b5c288dab4af188e04df0e0db515b6",
+      "tool_calls": 0,
+      "observation": {
+        "code": "agent_failed",
+        "stage": "agent",
+        "diagnostic": "agent_response_invalid",
+        "agent_status": "failed",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 4030,
+              "output_tokens": 61,
+              "combined_tokens": 4091,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 3840,
+                "uncached_input_tokens": 190
+              }
+            }
+          }
+        ],
+        "reservations": 1,
+        "measurement": {
+          "calls": 1,
+          "last_project_request_bytes": 17908,
+          "last_messages": 30,
+          "last_response_messages": 33,
+          "last_continuation_before_bytes": 2406,
+          "last_continuation_after_bytes": 2671
+        },
+        "initial_prefix_sha256": "c555a89715a50065c79115b7cffbc68917a0022ec7ced541dee64baa8feada69",
+        "completed_session_sha256": null
+      }
+    },
+    {
+      "index": 5,
+      "case_id": "c2-tools-5",
+      "code": "not_needed_after_capacity",
+      "receipt_coverage": "unattempted",
+      "allocated": true,
+      "attempt_sha256": null,
+      "evaluation_status": null,
+      "restored": false,
+      "prepared": false,
+      "accepted": false,
+      "readback": false,
+      "reset": false,
+      "process_id": null,
+      "startup": null,
+      "started_milliseconds": 0,
+      "finished_milliseconds": 0,
+      "interval_milliseconds": null,
+      "session_sha256": null,
+      "predecessor_sha256": null,
+      "tool_calls": null,
+      "observation": null
+    },
+    {
+      "index": 6,
+      "case_id": "c2-tools-6",
+      "code": "not_needed_after_capacity",
+      "receipt_coverage": "unattempted",
+      "allocated": true,
+      "attempt_sha256": null,
+      "evaluation_status": null,
+      "restored": false,
+      "prepared": false,
+      "accepted": false,
+      "readback": false,
+      "reset": false,
+      "process_id": null,
+      "startup": null,
+      "started_milliseconds": 0,
+      "finished_milliseconds": 0,
+      "interval_milliseconds": null,
+      "session_sha256": null,
+      "predecessor_sha256": null,
+      "tool_calls": null,
+      "observation": null
+    },
+    {
+      "index": 7,
+      "case_id": "c2-tools-7",
+      "code": "not_needed_after_capacity",
+      "receipt_coverage": "unattempted",
+      "allocated": true,
+      "attempt_sha256": null,
+      "evaluation_status": null,
+      "restored": false,
+      "prepared": false,
+      "accepted": false,
+      "readback": false,
+      "reset": false,
+      "process_id": null,
+      "startup": null,
+      "started_milliseconds": 0,
+      "finished_milliseconds": 0,
+      "interval_milliseconds": null,
+      "session_sha256": null,
+      "predecessor_sha256": null,
+      "tool_calls": null,
+      "observation": null
+    },
+    {
+      "index": 8,
+      "case_id": "c2-tools-8",
+      "code": "not_needed_after_capacity",
+      "receipt_coverage": "unattempted",
+      "allocated": true,
+      "attempt_sha256": null,
+      "evaluation_status": null,
+      "restored": false,
+      "prepared": false,
+      "accepted": false,
+      "readback": false,
+      "reset": false,
+      "process_id": null,
+      "startup": null,
+      "started_milliseconds": 0,
+      "finished_milliseconds": 0,
+      "interval_milliseconds": null,
+      "session_sha256": null,
+      "predecessor_sha256": null,
+      "tool_calls": null,
+      "observation": null
+    },
+    {
+      "index": 9,
+      "case_id": "c2-tools-9",
+      "code": "not_needed_after_capacity",
+      "receipt_coverage": "unattempted",
+      "allocated": true,
+      "attempt_sha256": null,
+      "evaluation_status": null,
+      "restored": false,
+      "prepared": false,
+      "accepted": false,
+      "readback": false,
+      "reset": false,
+      "process_id": null,
+      "startup": null,
+      "started_milliseconds": 0,
+      "finished_milliseconds": 0,
+      "interval_milliseconds": null,
+      "session_sha256": null,
+      "predecessor_sha256": null,
+      "tool_calls": null,
+      "observation": null
+    },
+    {
+      "index": 10,
+      "case_id": "c2-tools-10",
+      "code": "not_needed_after_capacity",
+      "receipt_coverage": "unattempted",
+      "allocated": true,
+      "attempt_sha256": null,
+      "evaluation_status": null,
+      "restored": false,
+      "prepared": false,
+      "accepted": false,
+      "readback": false,
+      "reset": false,
+      "process_id": null,
+      "startup": null,
+      "started_milliseconds": 0,
+      "finished_milliseconds": 0,
+      "interval_milliseconds": null,
+      "session_sha256": null,
+      "predecessor_sha256": null,
+      "tool_calls": null,
+      "observation": null
+    },
+    {
+      "index": 11,
+      "case_id": "c2-tools-11",
+      "code": "not_needed_after_capacity",
+      "receipt_coverage": "unattempted",
+      "allocated": true,
+      "attempt_sha256": null,
+      "evaluation_status": null,
+      "restored": false,
+      "prepared": false,
+      "accepted": false,
+      "readback": false,
+      "reset": false,
+      "process_id": null,
+      "startup": null,
+      "started_milliseconds": 0,
+      "finished_milliseconds": 0,
+      "interval_milliseconds": null,
+      "session_sha256": null,
+      "predecessor_sha256": null,
+      "tool_calls": null,
+      "observation": null
+    },
+    {
+      "index": 12,
+      "case_id": "c2-tools-reset-0",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "71df7c994aeb98f8873da39e97b01f295d43e2de5abb6cba3804d387c4f55ed0",
+      "evaluation_status": "completed",
+      "restored": false,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": true,
+      "process_id": 35068,
+      "startup": "1ef56ab525594802a1d2125a981ac867",
+      "started_milliseconds": 39931,
+      "finished_milliseconds": 43525,
+      "interval_milliseconds": 5056,
+      "session_sha256": "62e2a1f25f83cfd7334c0f4fdb66b369937cce7868f8fb0e2edbddc714557a5e",
+      "predecessor_sha256": null,
+      "tool_calls": 3,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 1316,
+              "output_tokens": 48,
+              "combined_tokens": 1364,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1152,
+                "uncached_input_tokens": 164
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 1633,
+              "output_tokens": 65,
+              "combined_tokens": 1698,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1280,
+                "uncached_input_tokens": 353
+              }
+            }
+          },
+          {
+            "ordinal": 3,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 1956,
+              "output_tokens": 143,
+              "combined_tokens": 2099,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1664,
+                "uncached_input_tokens": 292
+              }
+            }
+          }
+        ],
+        "reservations": 3,
+        "measurement": {
+          "calls": 3,
+          "last_project_request_bytes": 7706,
+          "last_messages": 7,
+          "last_response_messages": 8,
+          "last_continuation_before_bytes": 444,
+          "last_continuation_after_bytes": 756
+        },
+        "initial_prefix_sha256": "e0099f04a7dbb54ef900cb1e009d86d307404f39e794069ee2b5bb4ff010c24c",
+        "completed_session_sha256": "62e2a1f25f83cfd7334c0f4fdb66b369937cce7868f8fb0e2edbddc714557a5e"
+      }
+    },
+    {
+      "index": 13,
+      "case_id": "c2-tools-reset-1",
+      "code": "completed",
+      "receipt_coverage": "complete",
+      "allocated": true,
+      "attempt_sha256": "3e8cfa2fab0e59e82d16a3afa20cf3a50e948223dd3ccbb89924530bf87fe602",
+      "evaluation_status": "completed",
+      "restored": true,
+      "prepared": true,
+      "accepted": true,
+      "readback": true,
+      "reset": false,
+      "process_id": 25892,
+      "startup": "e9976a4e25654bf38ee885b253a1ba1c",
+      "started_milliseconds": 48537,
+      "finished_milliseconds": 51221,
+      "interval_milliseconds": 5012,
+      "session_sha256": "298fa3defd2145386f8093ec4940f302d5dd335c1c9f95bae695d896c381c07d",
+      "predecessor_sha256": "62e2a1f25f83cfd7334c0f4fdb66b369937cce7868f8fb0e2edbddc714557a5e",
+      "tool_calls": 2,
+      "observation": {
+        "code": "prepared",
+        "stage": "prepare",
+        "diagnostic": "state_prepared",
+        "agent_status": "succeeded",
+        "calls": [
+          {
+            "ordinal": 1,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 2113,
+              "output_tokens": 135,
+              "combined_tokens": 2248,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 1920,
+                "uncached_input_tokens": 193
+              }
+            }
+          },
+          {
+            "ordinal": 2,
+            "dispatched": true,
+            "transport_outcome": "success",
+            "chat_outcome": "returned",
+            "usage_status": "known",
+            "usage": {
+              "input_tokens": 2517,
+              "output_tokens": 123,
+              "combined_tokens": 2640,
+              "cache": {
+                "response_model": "deepseek-flash",
+                "cache_read_input_tokens": 2176,
+                "uncached_input_tokens": 341
+              }
+            }
+          }
+        ],
+        "reservations": 2,
+        "measurement": {
+          "calls": 2,
+          "last_project_request_bytes": 10503,
+          "last_messages": 13,
+          "last_response_messages": 14,
+          "last_continuation_before_bytes": 1348,
+          "last_continuation_after_bytes": 1558
+        },
+        "initial_prefix_sha256": "1990958318c97e615585553d26593507e0fb46a3e00a6233227ea37b1631b097",
+        "completed_session_sha256": "298fa3defd2145386f8093ec4940f302d5dd335c1c9f95bae695d896c381c07d"
+      }
+    }
+  ],
+  "outcomes": [
+    {
+      "case_id": "c2-tools-0",
+      "corpus_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+      "case_sha256": "ccfd250b77e10813904ab64a239113fbdcc8b006784bc8ccf3192f277d0f79fe",
+      "configuration_sha256": "6eba03622736ea4eaa206f665b2c24e9a23e62c3ef7e9ccfb48dd842377743a0",
+      "attempt_sha256": "f42f6b41d29cbecc30e2bda21a7140e9c14cc751e9cb893aa9f7cc70716d2f12",
+      "execution_sha256": "f0a58165726ede9d00095831bb63b203d12424906ec77fac106db770085fabc5",
+      "source_commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "source_tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "source_clean": true,
+      "mode": "live",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 3,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    },
+    {
+      "case_id": "c2-tools-1",
+      "corpus_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+      "case_sha256": "ab5a94ac399890229f789684ed7b0d96c6174c0542e7d4067f80646497b16fbb",
+      "configuration_sha256": "6eba03622736ea4eaa206f665b2c24e9a23e62c3ef7e9ccfb48dd842377743a0",
+      "attempt_sha256": "63d44b8a192d3a3613a8f7669336c8d66ff2b5115be48edfa702341ac50f41c8",
+      "execution_sha256": "dc31a6413195e2ade18935544c1ec5b18e9336d019fb34314992c21a91fb0b83",
+      "source_commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "source_tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "source_clean": true,
+      "mode": "live",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 3,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    },
+    {
+      "case_id": "c2-tools-2",
+      "corpus_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+      "case_sha256": "049c73c9fc764254e9a3628195f102d243a2c2f330d6505e815ef9d86ba66727",
+      "configuration_sha256": "6eba03622736ea4eaa206f665b2c24e9a23e62c3ef7e9ccfb48dd842377743a0",
+      "attempt_sha256": "b92b633bc24ad946750b666e17ce404c238b264ab65c89afdce1ebcdfab54cd7",
+      "execution_sha256": "c27050ff19bcf807c72d6f021358821578c8da6ccd46703833ac56848a7bf360",
+      "source_commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "source_tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "source_clean": true,
+      "mode": "live",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 2,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    },
+    {
+      "case_id": "c2-tools-3",
+      "corpus_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+      "case_sha256": "027f6ca266f0dd5bd72258d6739e282f21663638eb4ebb7e2fffa6dcdc7dac2e",
+      "configuration_sha256": "6eba03622736ea4eaa206f665b2c24e9a23e62c3ef7e9ccfb48dd842377743a0",
+      "attempt_sha256": "d68b4fa40cc827988002d5c9d9757825ec68ecd70801a59556f693016b269c95",
+      "execution_sha256": "0ad1af3c4203b89dcb22a482b8cfe8b28706bb9f73f2845064655238954a8ce9",
+      "source_commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "source_tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "source_clean": true,
+      "mode": "live",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 2,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    },
+    {
+      "case_id": "c2-tools-4",
+      "corpus_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+      "case_sha256": "d5b284bbe51c581a6b9ef9d28944b9da37088a49e2c473686eed6dbbeea99a23",
+      "configuration_sha256": "6eba03622736ea4eaa206f665b2c24e9a23e62c3ef7e9ccfb48dd842377743a0",
+      "attempt_sha256": "d0a81e3b6e15d0aa1b11523b700e51a458ab83abb036a72b76f74aa08e546373",
+      "execution_sha256": null,
+      "source_commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "source_tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "source_clean": true,
+      "mode": "live",
+      "execution_status": "Failed",
+      "evidence_status": "NotEvaluated",
+      "scenario_status": "NotEvaluated",
+      "model_status": "NotEvaluated",
+      "code": "ExecutionFailed",
+      "failure_source": "Unknown",
+      "failure_kind": "MalformedOutput",
+      "finding_count": 0,
+      "tool_observation_count": 0,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    },
+    {
+      "case_id": "c2-tools-reset-0",
+      "corpus_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+      "case_sha256": "dd579ab1ea0539a1ebe511a8c7fbc1aefeb156d00751aca90724da6910f8859b",
+      "configuration_sha256": "6eba03622736ea4eaa206f665b2c24e9a23e62c3ef7e9ccfb48dd842377743a0",
+      "attempt_sha256": "71df7c994aeb98f8873da39e97b01f295d43e2de5abb6cba3804d387c4f55ed0",
+      "execution_sha256": "439f19161c8df19d69af716ea7f0c76952d51e11a2ea048748215026a5cce238",
+      "source_commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "source_tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "source_clean": true,
+      "mode": "live",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 3,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    },
+    {
+      "case_id": "c2-tools-reset-1",
+      "corpus_sha256": "552658e91f6665d5e9e366f531e489f12e7f1be93b4782fcf1d888052c831eb0",
+      "case_sha256": "54a08ff5f9741c0a9a7b257457334d57dbb351b86a34b2a02eb6085f6fb873fd",
+      "configuration_sha256": "6eba03622736ea4eaa206f665b2c24e9a23e62c3ef7e9ccfb48dd842377743a0",
+      "attempt_sha256": "3e8cfa2fab0e59e82d16a3afa20cf3a50e948223dd3ccbb89924530bf87fe602",
+      "execution_sha256": "9e2438d4db18208110ec07d30c71afc63052db70d645cf3885c59be1215eeabf",
+      "source_commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "source_tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "source_clean": true,
+      "mode": "live",
+      "execution_status": "Completed",
+      "evidence_status": "Passed",
+      "scenario_status": "Passed",
+      "model_status": "Adjudicated",
+      "code": "Scored",
+      "failure_source": "None",
+      "failure_kind": "None",
+      "finding_count": 0,
+      "tool_observation_count": 2,
+      "expected_defects": 0,
+      "structural_matches": 0,
+      "structurally_missing_defects": 0,
+      "duplicate_observations": 0,
+      "prohibited_observations": 0,
+      "adjudicated_true": 0,
+      "adjudicated_false": 0,
+      "adjudicated_defects": 0,
+      "unadjudicated_findings": 0
+    }
+  ],
+  "journal": null,
+  "pricing": null
+}

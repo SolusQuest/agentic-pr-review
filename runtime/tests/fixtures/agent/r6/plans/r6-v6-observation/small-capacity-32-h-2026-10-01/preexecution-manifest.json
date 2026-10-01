@@ -1,0 +1,69 @@
+{
+  "source": {
+    "commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+    "tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+    "clean": true
+  },
+  "build_sha256": "8a6eba136c61e9e3a137526dc4c6c1cde57e0ca2d664316fd98a292e739073fc",
+  "message_limit": 32,
+  "production_message_limit": 64,
+  "never_merge": true,
+  "launcher_sha256": "5440de21b0904b65e6d82b28b8282a59dca3dc2b9de31035a54bc509292d54a5",
+  "authorization_sha256": "f0c0a26a0670c0d7aa8bfc396751cc84c09f81af143b833f79c892392e3457e4",
+  "plan_raw_sha256": "5fc4f909b415550dcc43f549fa9faabf93f4dd915954532e48de37b472f1c1d5",
+  "tariff_sha256": "fe739a1028367430c322da7cbd1f411579dd4566ed17b7319354010d90495319",
+  "keyless_report_sha256": "a6205d553b5a707c2806fa583e7f8928b77df86d7bab3fafbe2df9f038bbd12f",
+  "artifacts": {
+    "fixture_dll_sha256": "c1d06fa0a20fd2c39c6a92673170ceae5c178df44d3bebc4cc12626644e4b9d0",
+    "runtime_dll_sha256": "67555afe296cf3ba4e2c1b41209809b6e0f11ed93903c9c36f79a6f24c81b523",
+    "fixture_deps_sha256": "931d9ca96b5f8fb3d4720308c2b5e416aa5808412df85a9d9348e9f8700283d1"
+  },
+  "validation": {
+    "applicable_tests": 69,
+    "passed": 69,
+    "failed": 0,
+    "skipped": 0,
+    "hostile_receipt_cases": 12,
+    "trx_sha256": "f254dcd6e40ac5f1bfd2404f75e52a32f9948c9a5d5b3e11b08eb78e30eb5c4c",
+    "excluded_nonapplicable": "Three original fixed19-history cumulative-record cases; earlier failures retained, not claimed passing under cap32.",
+    "tamper_rejections": 15
+  },
+  "keyless": {
+    "format": "apr.r6.small-capacity-audit.v1",
+    "report_sha256": "a6205d553b5a707c2806fa583e7f8928b77df86d7bab3fafbe2df9f038bbd12f",
+    "source": {
+      "commit": "a72339860c1b4e104e3e2cb4bb7acaaceb1d62d3",
+      "tree": "dff263b164b22ae7eb4275a0da6527e178a2688d",
+      "clean": true
+    },
+    "execution_kind": "loopback",
+    "capacity_messages": 32,
+    "scheduled": 14,
+    "attempted": 5,
+    "accepted": 4,
+    "restored": 3,
+    "reset": 1,
+    "capacity_index": 2,
+    "capacity_measurement": {
+      "calls": 1,
+      "last_project_request_bytes": 19890,
+      "last_messages": 26,
+      "last_response_messages": 35,
+      "last_continuation_before_bytes": 591,
+      "last_continuation_after_bytes": 738
+    },
+    "not_needed": 9,
+    "stop_reason": "complete",
+    "cleanup": "cleaned",
+    "experiment_path_passed": true,
+    "sends": 9,
+    "unknown_usage_or_cache": 0,
+    "input_tokens": 27,
+    "output_tokens": 18,
+    "cache_read_input_tokens": 0,
+    "uncached_input_tokens": 27,
+    "reference_usd": 0.0000297,
+    "actual_billing": "unknown",
+    "production_capacity_verified": false
+  }
+}
