@@ -22,7 +22,11 @@ internal static class SmallCapacityAdmission
             return false;
         var projection = plan.Projection with
         {
-            Schedule = receipts.Select(r => plan.Slots[r.Index].CaseId).ToImmutableArray(),
+            // Keep the original full bounds and all case identities. Only this private
+            // validator projection moves unobserved slots behind observed receipts.
+            Schedule = receipts.Select(r => plan.Slots[r.Index].CaseId)
+                .Concat(plan.Slots.Where(s => receipts.All(r => r.Index != s.Index)).Select(s => s.CaseId))
+                .ToImmutableArray(),
         };
         var provenance = plan.Expectation(campaign, transport).Provenance with
         {
@@ -44,6 +48,9 @@ internal static class SmallCapacityAdmission
                     call.Ordinal, call.Dispatched, call.TransportOutcome, call.ChatOutcome, call.UsageStatus, call.Usage));
             reservations = checked(reservations + receipt.Accounting.Sends);
         }
+        for (var index = receipts.Count; index < projection.Schedule.Length; index++)
+            attempts.Add(new(expected.BindingSha256, expected.AttemptId(index), index, projection.Schedule[index],
+                "unattempted", "not_started", null, 0, 0, 0));
         var per = plan.Input.Bounds.PerCall;
         var rows = attempts.ToImmutable(); var callRows = calls.ToImmutable();
         return UsageJournal.Admit(new(expected.Provenance, projection, expected.BindingSha256, stop,

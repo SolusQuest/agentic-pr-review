@@ -31,7 +31,7 @@ internal static class SmallCapacityRunner
         var operation = Guid.NewGuid().ToString("N");
         var ledger = new EconomicsLedger(selected.Ceiling);
         var receipts = new List<EconomicsReceipt>();
-        var steps = selected.Slots.Select(slot => Empty(slot)).ToArray();
+        var steps = selected.Slots.Select(slot => Empty(slot) with { Allocated = true }).ToArray();
         var sessions = selected.Slots.Select(slot => slot.Chain).Distinct().ToDictionary(chain => chain, _ => Guid.NewGuid().ToString("N"));
         var lineages = new Dictionary<int, AcceptedLineage>();
         var acceptedRuns = new Dictionary<int, AdmittedReplayRun>();
