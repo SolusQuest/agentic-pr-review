@@ -1,0 +1,96 @@
+{
+  "format": "apr.r6.v6-growth-preexecution.v1",
+  "declaration_url": "https://github.com/SolusQuest/agentic-pr-review/issues/296#issuecomment-5924734866",
+  "source": {
+    "commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+    "tree": "82e9b2d84e50dd3af019f2a881a0516e143c841b",
+    "clean": true
+  },
+  "build_sha256": "71a2f8d39d0c5da7bdc19b8a62a66104db33839978157ad2f1949416d21e4a6b",
+  "tariff_sha256": "fe739a1028367430c322da7cbd1f411579dd4566ed17b7319354010d90495319",
+  "artifacts": {
+    "fixture_dll_sha256": "1637ec01b1d52ff31c43e69a9b882b848834065c2c45db409df64b5f14efd25f",
+    "runtime_dll_sha256": "2608e31cec4d03eb3c09d344f0534fe1cf4faa5fe2825a240708e2e73b6e8f2c",
+    "fixture_deps_sha256": "931d9ca96b5f8fb3d4720308c2b5e416aa5808412df85a9d9348e9f8700283d1"
+  },
+  "launcher_sha256": "f002fdf1f73f5c185495a40fbbab0ff951002713c798075744499a8a87655f59",
+  "authorization_sha256": "eae4770a594c74915eb211116765669dee392685623fdc2921301d7cda5cc002",
+  "campaigns": [
+    {
+      "id": "c",
+      "plan_raw_sha256": "b38e3574ace1be9a5f95ceed643505030ff0bd5bcf5751cf48be2abe4b9fb041",
+      "plan_sha256": "8cb5fd4c22f97d7d50a6ecbb0a66e96a72ebeef470b7fdea9f1e6000b0ac4f76",
+      "workload_sha256": "97c1e7cca0f77348de0e62864865a4b57a3fdbcd53441a34f262a8ab22246208",
+      "keyless_report_sha256": "a2f26d973de21b1e359b4073eb6f0e07c4194d64d3c9c314bf6ea1fba0464e2e",
+      "scheduled": 23
+    }
+  ],
+  "predeclared": {
+    "scheduled": 23,
+    "expected_completed": 21,
+    "expected_capacity_indices": [11, 20],
+    "expected_reset_indices": [12, 21],
+    "fresh_chain_indices": [0, 3, 6, 12, 14, 21],
+    "expected_readbacks": 23,
+    "expected_restorations": 17,
+    "comparison": "C excluded from A/B C1; expected capacity attempts remain failed evaluations",
+    "live_variation": "Unexpected failure, early capacity or absent authored-boundary capacity produces bounded insufficiency and preserved full tail; no reset movement, retry, trimming or tuning within this population.",
+    "tool_history": "Record actual tool-bearing bootstrap/restoration and prefix/cache telemetry; missing coverage remains unproven, not redefined as pass.",
+    "operator": "Require exact native admission, complete usage/price reconciliation and clean capture/workers/private TEMP/credential scan."
+  },
+  "review": {
+    "status": "approved",
+    "launcher_sha256": "f002fdf1f73f5c185495a40fbbab0ff951002713c798075744499a8a87655f59",
+    "prompt_sha256": "1ccea2de7212f20ca65d3f72fe9082583da009b8c2506cca3d8f13556541f978",
+    "task_id": "46eaff7b-ba7f-4b6c-91b4-062ba1bcc027",
+    "reply_sha256": "8a825c4d96f609642edd9ebe929fcdf95176375fbb221933c506485f094d0449",
+    "assessed_by_operator": true
+  },
+  "authorization": {
+    "issue": "https://github.com/SolusQuest/agentic-pr-review/issues/296",
+    "authorized_on": "2026-10-01",
+    "relay_session": "6abc8e3c-9814-83e8-adeb-f8cc76f010ec",
+    "max_campaigns_including_failures": 1,
+    "max_reserved_micro_usd": 18400000,
+    "max_live_plan_seconds": 7130,
+    "provider": "deepseek",
+    "requested_model": "deepseek-v4-flash",
+    "profile": "Output65536",
+    "automatic_in_population_retry": false,
+    "merge_release_closure_authorized": false,
+    "campaigns": ["c"],
+    "purpose": "Formal postmerge C growth/reset observation, one immutable bounded population under continuing user authorization.",
+    "source_commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+    "status": "authorized",
+    "authorization_basis": "User explicitly authorized additional ongoing usage with the existing API key after the prior three-formal-campaign cap. This supersedes earlier aggregate campaign/spend/time authority caps; one finite envelope is still reserved and diagnosed at a time. No repeat requires new human spending permission for this task.",
+    "standing_usage_authority": {
+      "aggregate_campaign_limit": null,
+      "aggregate_spend_limit": null,
+      "aggregate_time_limit": null,
+      "provider_key_cap": "user_reported_configured_not_independently_verified",
+      "billing": "unknown_not_inferred_from_absence_of_errors",
+      "stop_and_diagnose_on_error": true
+    },
+    "per_round_limits_are": "operator_safety_bounds_not_a_new_human_authorization_requirement",
+    "original_formal_limits_superseded": {
+      "campaigns": 3,
+      "reserved_micro_usd": 50000000,
+      "seconds": 28800
+    },
+    "prior_formal": {
+      "campaigns": 3,
+      "reserved_micro_usd": 14400000,
+      "seconds": 5580
+    },
+    "prior_branch": {
+      "campaigns": 5,
+      "reserved_micro_usd": 24000000,
+      "seconds": 9300
+    },
+    "all_populations_after_this_envelope": {
+      "campaigns": 9,
+      "reserved_micro_usd": 56800000,
+      "seconds": 22010
+    }
+  }
+}

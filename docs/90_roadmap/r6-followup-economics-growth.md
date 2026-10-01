@@ -1,0 +1,68 @@
+# R6 postmerge growth observations
+
+The completed [formal A/B replay comparison](r6-followup-economics-postmerge.md) remains unchanged. The subsequent C and D growth campaigns ended with **bounded coverage insufficiency**: the Agent succeeded at each authored capacity position without reaching capacity. Neither selected schedule completed, and no reset was observed. This result is permitted by [#296](https://github.com/SolusQuest/agentic-pr-review/issues/296); it does not establish complete growth/reset coverage or R6 exit.
+
+## Authority and provenance
+
+The maintainer explicitly authorized ongoing additional paid usage for this task on 2026-10-01, superseding the earlier aggregate campaign/spend/time ceilings. Each new population still has a separately admitted finite plan, durable whole-plan reservation before credential access, keyless rehearsal, exact provenance, operator cleanup and a failure diagnosis before a later round. The provider-side key cap is maintainer-reported, not independently verified. Neither the reservation nor the absence of an API error proves actual billing.
+
+Both growth observations use clean merged source `bf9bb8f8f226f9742c55d3b1788819326716ebed`, tree `82e9b2d84e50dd3af019f2a881a0516e143c841b` and build `71a2f8d39d0c5da7bdc19b8a62a66104db33839978157ad2f1949416d21e4a6b`. The provider request remains DeepSeek `deepseek-v4-flash`, thinking high and Output65536. A/B/C/D response telemetry labels the model `deepseek-flash`; this is recorded as returned, without asserting an independently verified backend identity or alias equivalence. The frozen 2026-09-30 reference tariff remains unchanged, with execution-time applicability unknown and invoice evidence absent.
+
+The [C predeclaration](https://github.com/SolusQuest/agentic-pr-review/issues/296#issuecomment-5924734866) binds the complete 23-slot plan, final launcher and authorization. Its finite reservation is 184 calls, USD 18.40 and 7,130 seconds. Workers retain eight calls / 300 seconds, at least 5,000 ms between stages, and uniform per-call reservations of 32,768 input tokens, 65,536 output tokens and USD 0.10. Native keyless rehearsal attempted all 23 stages, with 21 completed evaluations, two expected failed capacity evaluations, two resets, 23 readbacks and 17 restorations. Those rehearsal results are synthetic.
+
+## C: model success without the authored capacity boundary
+
+Campaign `c2-9bc35eae034542218790` attempted 12 of 23 slots. The native journal records **12 completed evaluations, zero failed or invalid evaluations, and 11 unattempted evaluations**. The SESSION lifecycle separately records **11 completed/accepted/read-back stages, one prepared but unaccepted stage, nine restorations and zero resets**. These denominators describe different boundaries and must not be collapsed into a claim of 12 accepted stages.
+
+At index 11 (`c2-tools-5`), the Agent succeeded, made two tool calls and prepared a SESSION. Its final response contained 41 messages, below the 64-message limit, and 3,923 continuation bytes, below the 262,144-byte limit. The authored schedule required a capacity stop at that position. `EconomicsRunner` therefore returned `representative_history_insufficient` before accepting that prepared SESSION; it retained indices 12–22 as unattempted. This was neither a provider error nor a terminal tool-argument failure. No reset position was moved, and no historical state was truncated or retried.
+
+The tools-growth stages at indices 6–11 returned successful tool counts of 3, 2, 2, 2, 2 and 2. Their final message counts grew through 11, 17, 23, 29, 35 and 41; continuation bytes grew through 886, 1,758, 2,245, 2,644, 3,428 and 3,923. The live model produced a different growth rate from the deterministic fixture, so the fixture's authored capacity position did not occur. This is an observation about this fixed workload and population, not proof of a runtime defect or a generalized growth rate.
+
+Seven rejected tool calls recovered within existing budgets: two `read_diff / path_not_tracked` calls at index 1, one `list_files` prefix rejection at index 2, three `read_diff / path_not_tracked` calls at index 5, and one `list_files` prefix rejection at index 6. Those stages still succeeded. Rejected calls are not successful tool results or separate provider retry rounds.
+
+C made 40 sends, all with known usage: 152,298 input tokens, including 139,136 cache-read and 13,162 uncached; 7,023 output tokens; 159,321 combined tokens. The fixed-reference total is **USD 0.013211016**, and the same-token all-miss counterfactual is USD 0.054117000. Neither is an invoice or a causal savings estimate. Complete [native report](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/growth-2026-10-01/campaign-c-live.json), [independent audit](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/growth-2026-10-01/campaign-c-audit.json), [coverage disposition](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/growth-2026-10-01/campaign-c-gate.json) and [growth telemetry](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/growth-2026-10-01/growth-observations.json) retain the entire denominator.
+
+Native exit 1 is the command's expected representation of an incomplete campaign. The operator receipt independently confirms complete capture, no invocation or launch failure, owned workers gone, private TEMP empty/deleted and credential absence from output. The initial private derived gate incorrectly grouped an exit-0 expectation with cleanup; that projection was preserved and corrected to report native exit status separately. **Growth coverage remains insufficient.** The original native report, usage, reservation and receipt were not rewritten.
+
+## Independent continuation observation
+
+The subsequent D population is selected independently to observe the continuation profile that C never reached. It is not a resumed C tail or a replacement for C's missing stages. A continuation-only keyless proposal was rejected by native plan admission before worker launch, reservation or credential access, because every native economics plan must begin with at least two replay phases. D therefore retains that required minimum entry and the unchanged seven-phase continuation profile followed by its authored reset and two fresh phases. It does not repeat the tools-growth profile or the complete A/B schedules.
+
+D's [predeclared final plan](https://github.com/SolusQuest/agentic-pr-review/issues/296#issuecomment-5924876177) selects 11 slots, 88 calls, USD 8.80 and 3,410 seconds. The expected capacity position is index 8, reset begins at index 9, and fresh chains begin at 0, 2 and 9. Its keyless rehearsal completed the full schedule with ten completed evaluations, one expected failed capacity evaluation, one reset, 11 readbacks and eight restorations. These remain synthetic results.
+
+Live D, campaign `c2-31bd2900fbab4693b7b0`, attempted nine slots and ended with `representative_history_insufficient`. Its native journal contains nine completed evaluations, zero failed/invalid evaluations and two unattempted evaluations. Eight stages were accepted/read back, and the final restored stage prepared a SESSION that the capacity-dependent runner did not accept. Seven stages restored prior history; no reset occurred. All attempted bootstrap chains used tools.
+
+| Continuation phase | Schedule index | Successful tools | Final message count | Final continuation bytes |
+| ------------------ | -------------- | ---------------- | ------------------- | ------------------------ |
+| 0                  | 2              | 3                | 8                   | 768                      |
+| 1                  | 3              | 3                | 16                  | 1518                     |
+| 2                  | 4              | 3                | 24                  | 2037                     |
+| 3                  | 5              | 3                | 32                  | 2742                     |
+| 4                  | 6              | 2                | 38                  | 3201                     |
+| 5                  | 7              | 3                | 46                  | 3745                     |
+| 6                  | 8              | 2                | 52                  | 4193                     |
+
+At the expected capacity position, 52 messages and 4,193 continuation bytes were still below the unchanged limits. The model succeeded; the missing authored boundary stopped the runner before indices 9–10. There were no recorded recovered tool-call rejections in D. Its 27 sends all have known usage: 109,093 input tokens (100,736 cache-read, 8,357 uncached), 9,068 output tokens and 118,161 combined. Fixed-reference usage is **USD 0.013993116**; the same-token all-miss counterfactual is USD 0.043609500. [Full native D report](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/continuation-2026-10-01/campaign-d-live.json), [audit](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/continuation-2026-10-01/campaign-d-audit.json), [coverage disposition](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/continuation-2026-10-01/campaign-d-gate.json) and [telemetry](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/continuation-2026-10-01/growth-observations.json) preserve the entire eleven-slot denominator.
+
+## Accounting and validation
+
+| Population | Scheduled / attempted | Journal completed / failed / unattempted | Accepted / read back | Restored | Resets | Sends | Fixed-reference USD |
+| ---------- | --------------------- | ---------------------------------------- | -------------------- | -------- | ------ | ----- | ------------------- |
+| C          | 23 / 12               | 12 / 0 / 11                              | 11 / 11              | 9        | 0      | 40    | 0.013211016         |
+| D          | 11 / 9                | 9 / 0 / 2                                | 8 / 8                | 7        | 0      | 27    | 0.013993116         |
+
+The two new populations account for 67 sends and USD 0.027204132 fixed-reference usage. Across the ten paid populations in this #296 task, including the six earlier populations and formal A/B, [cumulative accounting](../../runtime/tests/fixtures/agent/r6/plans/r6-v6-observation/continuation-2026-10-01/all-populations-audit.json) retains 82 scheduled, 52 attempted, 47 completed, five failed and 30 unattempted evaluations; 175 sends with known usage; and **USD 0.086284200** fixed-reference usage. This is a heterogeneous accounting total, not a C1 comparison. It does not absorb or rewrite older #280/#291 populations. Conservative reservations total USD 65.60 and 25,420 seconds; actual billing remains unknown.
+
+Both live captures passed the merged native economics/pricing reader and denominator-tamper rejection. Independent auditing reconciled every scheduled outcome, call, token/cache partition and price component using integer arithmetic. Both operator receipts report native incomplete exit 1, complete capture, no invocation/launch failure, workers gone, private TEMP empty/deleted and credential absence from output. The failed continuation-only keyless proposal made no paid calls and consumed no live reservation.
+
+Exact-launcher Relay pre-execution review passed for C and D. In each case an initial transport task failed without a send acknowledgment and surfaced an older reply; those replies were rejected as stale, the terminal failures were retained, and one bounded resubmission obtained a new exact-launcher approval. No stale reply was used as execution authority. Later report review and evidence validation are recorded in the PR.
+
+The evidence update passed whole-checkout formatting, TypeScript checks and Vitest: 732 tests passed, 32 Windows skips and zero failures. The npm CLI was unavailable locally, so its three default check phases ran directly through Node. All four formatted C/D keyless/live reports passed the native strict reader and denominator-tamper check; report data remained equal to the original captures, and artifact hashes were independently checked. No runtime or distribution code changed.
+
+## Evidence boundaries
+
+C and D are separate full populations and remain excluded from the completed A/B C1 comparison. Combining successful stages across populations would not repair either incomplete schedule. Prefix digests, lineage and response cache counts are recorded, but they do not prove native history equivalence, lifecycle association or prefix-segment cache attribution. Quality/safety evaluation remains independent. No cache-policy change, request tuning, model-default promotion, R6 exit, R7 promotion, PR merge or issue closure follows from these observations.
+
+All 27 JSON evidence files already committed at `cadad59057983741f197b7fe5684cba7d7e2571c`, including the initial failed formal population, historical branch population audit, formal A/B and earlier C keyless preparation, remain byte-identical. New artifacts distinguish original capture hashes from formatted repository-file hashes. The original paid failures remain failures; unknown or missing observations are not converted into zero.
+
+The remaining live coverage gap is capacity-triggered reset and post-reset continuation. Repeating these same short fixed-stage schedules does not establish that boundary. A follow-up would need a separately specified bounded live-growth method that can observe the actual capacity event, while preserving the current populations and all existing state/call/privacy limits. These observations do not change that method or the product runtime.

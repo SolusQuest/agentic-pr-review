@@ -1,0 +1,172 @@
+{
+  "format": "apr.r6.v6-growth-operator-evidence.v1",
+  "assertions_are_operator_evidence": true,
+  "ledger": {
+    "format": "apr.r6.reservation-ledger.v1",
+    "authorization_sha256": "eae4770a594c74915eb211116765669dee392685623fdc2921301d7cda5cc002",
+    "campaigns": [
+      {
+        "campaign": "c",
+        "plan_raw_sha256": "b38e3574ace1be9a5f95ceed643505030ff0bd5bcf5751cf48be2abe4b9fb041",
+        "reserved_micro_usd": 18400000,
+        "reserved_seconds": 7130,
+        "reserved_utc": "2026-10-01T04:27:03.1351498+00:00",
+        "outcome": "reserved_before_credential_read"
+      }
+    ]
+  },
+  "receipts": [
+    {
+      "format": "apr.r6.operator-receipt.v1",
+      "mode": "dry-run",
+      "campaign": "c",
+      "start_utc": "2026-10-01T04:15:37.8628873+00:00",
+      "end_utc": "2026-10-01T04:17:48.8764841+00:00",
+      "plan_raw_sha256": "b38e3574ace1be9a5f95ceed643505030ff0bd5bcf5751cf48be2abe4b9fb041",
+      "source_commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+      "source_tree": "82e9b2d84e50dd3af019f2a881a0516e143c841b",
+      "fixture_dll_sha256": "1637ec01b1d52ff31c43e69a9b882b848834065c2c45db409df64b5f14efd25f",
+      "runtime_dll_sha256": "2608e31cec4d03eb3c09d344f0534fe1cf4faa5fe2825a240708e2e73b6e8f2c",
+      "fixture_deps_sha256": "931d9ca96b5f8fb3d4720308c2b5e416aa5808412df85a9d9348e9f8700283d1",
+      "launcher_sha256": "f002fdf1f73f5c185495a40fbbab0ff951002713c798075744499a8a87655f59",
+      "credential_read_after_reservation": false,
+      "credential_absent_from_outputs": null,
+      "launch_failure": null,
+      "reservation": null,
+      "process_exit": 0,
+      "outer_stop": "none",
+      "elapsed_seconds": 130.932,
+      "ready_worker_count": 23,
+      "ready_workers_gone": true,
+      "observed_children_gone": true,
+      "private_temp_empty": true,
+      "parent_environment_allowlisted": true,
+      "github_environment_absent": true,
+      "report_raw_sha256": "a2f26d973de21b1e359b4073eb6f0e07c4194d64d3c9c314bf6ea1fba0464e2e",
+      "stderr_raw_sha256": "c19bf58a64caa63c6f5b4a51000b3276430df8c5aaeda8d40f8eaf1197018d18",
+      "report_counters": {
+        "execution_kind": "loopback",
+        "stop_reason": "complete",
+        "cleanup": "cleaned",
+        "scheduled": 23,
+        "attempted": 23,
+        "receipt_missing": 0,
+        "usage_complete": true,
+        "monetary_complete": true
+      },
+      "capture_status": "complete",
+      "worker_reap_status": "gone",
+      "observed_worker_handles": 24,
+      "invoke_failure": null,
+      "report_capture_metadata_status": "available",
+      "stderr_capture_metadata_status": "available",
+      "private_temp_delete_status": "deleted"
+    },
+    {
+      "format": "apr.r6.operator-receipt.v1",
+      "mode": "execute",
+      "campaign": "c",
+      "start_utc": "2026-10-01T04:27:03.1650466+00:00",
+      "end_utc": "2026-10-01T04:28:56.1311352+00:00",
+      "plan_raw_sha256": "b38e3574ace1be9a5f95ceed643505030ff0bd5bcf5751cf48be2abe4b9fb041",
+      "source_commit": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+      "source_tree": "82e9b2d84e50dd3af019f2a881a0516e143c841b",
+      "fixture_dll_sha256": "1637ec01b1d52ff31c43e69a9b882b848834065c2c45db409df64b5f14efd25f",
+      "runtime_dll_sha256": "2608e31cec4d03eb3c09d344f0534fe1cf4faa5fe2825a240708e2e73b6e8f2c",
+      "fixture_deps_sha256": "931d9ca96b5f8fb3d4720308c2b5e416aa5808412df85a9d9348e9f8700283d1",
+      "launcher_sha256": "f002fdf1f73f5c185495a40fbbab0ff951002713c798075744499a8a87655f59",
+      "credential_read_after_reservation": true,
+      "credential_absent_from_outputs": true,
+      "launch_failure": null,
+      "reservation": {
+        "campaign": "c",
+        "plan_raw_sha256": "b38e3574ace1be9a5f95ceed643505030ff0bd5bcf5751cf48be2abe4b9fb041",
+        "reserved_micro_usd": 18400000,
+        "reserved_seconds": 7130,
+        "reserved_utc": "2026-10-01T04:27:03.1351498+00:00",
+        "outcome": "reserved_before_credential_read"
+      },
+      "process_exit": 1,
+      "outer_stop": "none",
+      "elapsed_seconds": 112.897,
+      "ready_worker_count": 12,
+      "ready_workers_gone": true,
+      "observed_children_gone": true,
+      "private_temp_empty": true,
+      "parent_environment_allowlisted": true,
+      "github_environment_absent": true,
+      "report_raw_sha256": "11c531faa2437f8f012f3e47d80e0f34301fb20e15fc41d3aebbfae4072e39f5",
+      "stderr_raw_sha256": "44fe84e5ac5f949964ad8d187c59907250e6b321ca1c8c37dec9bf1db3cf6a65",
+      "report_counters": {
+        "execution_kind": "live",
+        "stop_reason": "representative_history_insufficient",
+        "cleanup": "cleaned",
+        "scheduled": 23,
+        "attempted": 12,
+        "receipt_missing": 0,
+        "usage_complete": true,
+        "monetary_complete": true
+      },
+      "capture_status": "complete",
+      "worker_reap_status": "gone",
+      "observed_worker_handles": 13,
+      "invoke_failure": null,
+      "report_capture_metadata_status": "available",
+      "stderr_capture_metadata_status": "available",
+      "private_temp_delete_status": "deleted"
+    }
+  ],
+  "execution_source_ci": [
+    {
+      "conclusion": "success",
+      "databaseId": 36752473443,
+      "headSha": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+      "status": "completed",
+      "workflowName": "R4 trusted proof"
+    },
+    {
+      "conclusion": "success",
+      "databaseId": 36744212328,
+      "headSha": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+      "status": "completed",
+      "workflowName": "R4 trusted proof"
+    },
+    {
+      "conclusion": "success",
+      "databaseId": 36744088981,
+      "headSha": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+      "status": "completed",
+      "workflowName": "CI"
+    },
+    {
+      "conclusion": "success",
+      "databaseId": 36744088791,
+      "headSha": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+      "status": "completed",
+      "workflowName": "Runtime CI"
+    },
+    {
+      "conclusion": "success",
+      "databaseId": 36744087490,
+      "headSha": "bf9bb8f8f226f9742c55d3b1788819326716ebed",
+      "status": "completed",
+      "workflowName": "CodeQL - Code Quality"
+    }
+  ],
+  "earlier_artifacts": "All 27 JSON files committed under r6-v6-observation at cadad590 remain byte-identical; verified separately.",
+  "relay_transport": {
+    "first_task": "f7caff3c-b4b0-4dce-ae05-40656899f75e",
+    "first_status": "failed",
+    "error": "submission_outcome_unknown",
+    "send_acknowledged": false,
+    "stale_old_AB_late_reply_not_approval": true,
+    "bounded_retry_task": "46eaff7b-ba7f-4b6c-91b4-062ba1bcc027",
+    "bounded_retry_status": "approved"
+  },
+  "validation": {
+    "native_strict_readback": true,
+    "denominator_tamper_rejected": true,
+    "independent_integer_accounting": true,
+    "reference_is_not_invoice": true
+  }
+}

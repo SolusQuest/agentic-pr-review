@@ -1,0 +1,63 @@
+{
+  "format": "apr.r6.v6-artifact-manifest.v1",
+  "hash_algorithm": "sha256",
+  "scope": "Sibling JSON artifacts excluding this manifest; original captures are distinguished from formatted repository bytes.",
+  "evidence_limit": "Operator commitments are not billing or independent producer attestation.",
+  "prior_preservation": {
+    "head": "cadad59057983741f197b7fe5684cba7d7e2571c",
+    "files": 27,
+    "byte_equal": true
+  },
+  "artifacts": [
+    {
+      "file": "campaign-c-dry-run.json",
+      "captured_raw_sha256": "a2f26d973de21b1e359b4073eb6f0e07c4194d64d3c9c314bf6ea1fba0464e2e",
+      "repository_file_sha256": "173a4fe3613c6595af169d60627314f6c5f51d29f18ca4453ee394f5f7957b79"
+    },
+    {
+      "file": "campaign-c-live.json",
+      "captured_raw_sha256": "11c531faa2437f8f012f3e47d80e0f34301fb20e15fc41d3aebbfae4072e39f5",
+      "repository_file_sha256": "f7fb9efca9d20329fe4ef1f10de6d8801895e1f8488ea4c436dec282c8a84266"
+    },
+    {
+      "file": "campaign-c-dry-audit.json",
+      "captured_raw_sha256": "b943fe87224cf56a80dd65346fc294de8b438edeb72ba08f85092d7a5c1a3c1d",
+      "repository_file_sha256": "b943fe87224cf56a80dd65346fc294de8b438edeb72ba08f85092d7a5c1a3c1d"
+    },
+    {
+      "file": "campaign-c-audit.json",
+      "captured_raw_sha256": "ba5186ed809bc2f2d0dbaa63e0e9f32f3ffc74280b2c920ca5170ef4c1f9e59a",
+      "repository_file_sha256": "ba5186ed809bc2f2d0dbaa63e0e9f32f3ffc74280b2c920ca5170ef4c1f9e59a"
+    },
+    {
+      "file": "campaign-c-gate.json",
+      "captured_raw_sha256": "21759f0c4b5ea67735379186344893bff516cf32fbfac7da697d0f63c7727358",
+      "repository_file_sha256": "21759f0c4b5ea67735379186344893bff516cf32fbfac7da697d0f63c7727358"
+    },
+    {
+      "file": "tariff.json",
+      "captured_raw_sha256": "f084de78913f1a26780c41ecf3b3c8afeeebb10ea683ba3b3d967bf9dbf19b5d",
+      "repository_file_sha256": "217b01be25247a69ec4f48537bbf1fece9fe0d77bf232f599a692b6c5d8d51be"
+    },
+    {
+      "file": "preexecution.json",
+      "captured_raw_sha256": null,
+      "repository_file_sha256": "a79f738ed38eedd3cbc6923b9b7155ceb636ef8e725f3bf780fb44ab80a010f7"
+    },
+    {
+      "file": "operator-evidence.json",
+      "captured_raw_sha256": null,
+      "repository_file_sha256": "a40d9da28d7a4ea826749b0936d967e65b0389f895f706265e6da986738f49c7"
+    },
+    {
+      "file": "all-populations-audit.json",
+      "captured_raw_sha256": null,
+      "repository_file_sha256": "d38e5b93d4c0573b414c4d83686fdb5ec92c9e3874f1242eb4a56470107ae902"
+    },
+    {
+      "file": "growth-observations.json",
+      "captured_raw_sha256": null,
+      "repository_file_sha256": "11fae9d692fe4688261a24e5b079a3562790828ab772405f9ebf8d4ee7cbca92"
+    }
+  ]
+}
