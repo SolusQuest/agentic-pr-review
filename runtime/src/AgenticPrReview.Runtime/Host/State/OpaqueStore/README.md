@@ -2,6 +2,8 @@
 
 R7-C2 admits opaque synthetic objects independently of SESSION. `OpaqueStoreCapacity` and the Node artifact bridge derive the same carrier bounds. R7-C3 owns larger SESSION construction, encryption, transaction composition, projection, and restore; these allowances do not activate those semantics.
 
+Snapshot consumers retain independent admission: candidate envelopes remain 2 MiB, and transaction index envelopes remain bounded by 256 KiB plaintext plus 122 bytes of existing framing. Index metadata and authenticated accepted/staging candidate metadata are rejected before download when they exceed those bounds. Returned bodies are length-checked before hashing, decoding, or copying; predecessor index metadata uses the same index bound. `RestrictedStateSnapshotCapacityTests` covers neighboring sizes, authenticated malformed metadata, body-access probes, and admitted restore/envelope roundtrips.
+
 ## Derivation
 
 All values below are bytes. E through C are future sizing allowances; O, J, and A are active transport admission limits.

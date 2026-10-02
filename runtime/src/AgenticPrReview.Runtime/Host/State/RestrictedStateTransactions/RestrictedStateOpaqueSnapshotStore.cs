@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using OpaqueStateStore =
@@ -450,7 +451,9 @@ internal class RestrictedStateOpaqueSnapshotStore
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!metadata.Succeeded ||
-                metadata.Metadata!.Reference != reference)
+                metadata.Metadata!.Reference != reference ||
+                metadata.Metadata.Size >
+                    RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes)
             {
                 return RestrictedStateSnapshotReadCore.Fail(
                     metadata.Succeeded
@@ -461,14 +464,16 @@ internal class RestrictedStateOpaqueSnapshotStore
             var download = await store.DownloadAsync(
                     new OpaqueStoreDownloadRequest(
                         metadata.Metadata!,
-                        OpaqueStoreLimits.MaximumObjectBytes),
+                        RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (!download.Succeeded ||
+            if (download.EncryptedBytes.Length >
+                    RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes ||
+                !download.Succeeded ||
                 download.Metadata != metadata.Metadata)
             {
                 return RestrictedStateSnapshotReadCore.Fail(
-                    download.Succeeded
+                    download.Failure == OpaqueStoreFailure.None
                         ? RestrictedStateStoreFailure.Invalid
                         : MapFailure(download.Failure));
             }
@@ -692,17 +697,24 @@ internal class RestrictedStateOpaqueSnapshotStore
         RestrictedStateIndexedCandidate indexed,
         CancellationToken cancellationToken)
     {
+        if (indexed.Transport.Size is < 1 or > AgentLimits.StateEnvelopeBytes)
+        {
+            return RestrictedStateCandidateLoad.Fail(
+                RestrictedStateStoreFailure.Invalid);
+        }
+
         var download = await store.DownloadAsync(
                 new OpaqueStoreDownloadRequest(
                     indexed.Transport,
-                    OpaqueStoreLimits.MaximumObjectBytes),
+                    AgentLimits.StateEnvelopeBytes),
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!download.Succeeded ||
+        if (download.EncryptedBytes.Length > AgentLimits.StateEnvelopeBytes ||
+            !download.Succeeded ||
             download.Metadata != indexed.Transport)
         {
             return RestrictedStateCandidateLoad.Fail(
-                download.Succeeded
+                download.Failure == OpaqueStoreFailure.None
                     ? RestrictedStateStoreFailure.Invalid
                     : MapFailure(download.Failure));
         }
