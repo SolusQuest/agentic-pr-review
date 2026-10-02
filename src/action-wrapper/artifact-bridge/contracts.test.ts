@@ -22,9 +22,27 @@ const metadata = {
 };
 
 describe('artifact bridge command contract', () => {
+  it.each(['0', '-1', '01', '34049553', null, 32])(
+    'rejects invalid metadata read cap %s',
+    (maximum_bytes) => {
+      expect(
+        parseArtifactBridgeCommandEnvelope({
+          build_discriminator: 'build-1',
+          payload: {
+            operation: 'metadata',
+            correlation_id: 'bounded',
+            name: 'state',
+            object_id: '42',
+            maximum_bytes,
+          },
+        }),
+      ).toBeUndefined();
+    },
+  );
   it.each([
     { operation: 'list_exact', name: 'state', maximum_objects: '256' },
     { operation: 'metadata', name: 'state', object_id: '42' },
+    { operation: 'metadata', name: 'state', object_id: '42', maximum_bytes: '262266' },
     {
       operation: 'download',
       expected: metadata,

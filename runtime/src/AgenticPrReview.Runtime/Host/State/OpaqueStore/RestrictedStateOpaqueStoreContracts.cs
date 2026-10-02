@@ -41,7 +41,7 @@ internal static class OpaqueStoreLimits
     internal const int MaximumIdentityBytes = 256;
     internal const int MaximumCorrelationBytes = 256;
     internal const int MaximumObjects = 256;
-    internal const int MaximumObjectBytes = 2 * 1024 * 1024;
+    internal const int MaximumObjectBytes = OpaqueStoreCapacity.MaximumObjectBytes;
 }
 
 internal enum OpaqueStoreFailure
@@ -93,12 +93,16 @@ internal sealed record OpaqueStoreObjectMetadata(
     long ExpiresAtUnixSeconds,
     long Size);
 
+// MaximumBytes bounds content reads by adapters that materialize records while
+// listing. Reference-only enumeration does not need to fetch object contents.
 internal sealed record OpaqueStoreListRequest(
     OpaqueStoreName Name,
-    int MaximumObjects);
+    int MaximumObjects,
+    int MaximumBytes = OpaqueStoreLimits.MaximumObjectBytes);
 
 internal sealed record OpaqueStoreMetadataRequest(
-    OpaqueStoreObjectReference Reference);
+    OpaqueStoreObjectReference Reference,
+    int MaximumBytes = OpaqueStoreLimits.MaximumObjectBytes);
 
 internal sealed record OpaqueStoreDownloadRequest(
     OpaqueStoreObjectMetadata Expected,
@@ -267,10 +271,12 @@ internal static class OpaqueStoreValidation
     internal static bool IsValid(OpaqueStoreListRequest? value) =>
         value is not null &&
         IsValid(value.Name) &&
-        value.MaximumObjects is > 0 and <= OpaqueStoreLimits.MaximumObjects;
+        value.MaximumObjects is > 0 and <= OpaqueStoreLimits.MaximumObjects &&
+        value.MaximumBytes is > 0 and <= OpaqueStoreLimits.MaximumObjectBytes;
 
     internal static bool IsValid(OpaqueStoreMetadataRequest? value) =>
-        value is not null && IsValid(value.Reference);
+        value is not null && IsValid(value.Reference) &&
+        value.MaximumBytes is > 0 and <= OpaqueStoreLimits.MaximumObjectBytes;
 
     internal static bool IsValid(OpaqueStoreDownloadRequest? value) =>
         value is not null &&

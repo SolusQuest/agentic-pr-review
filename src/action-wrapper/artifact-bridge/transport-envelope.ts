@@ -6,12 +6,22 @@ import {
   ARTIFACT_BRIDGE_LIMITS,
   ARTIFACT_ENVELOPE_DISCRIMINATOR,
   ARTIFACT_ENVELOPE_ENTRY,
+  artifactReadLimits,
 } from './limits.js';
 import {
   ArtifactBridgeDeadlineError,
   type ArtifactBridgeOperationBudget,
 } from './operation-budget.js';
-import { strictParseArtifactBridgeJson } from './strict-json.js';
+import { strictParseFlatStringObject } from './strict-json.js';
+
+const ENVELOPE_KEYS = [
+  'discriminator',
+  'producing_run_id',
+  'producing_run_attempt',
+  'encrypted_object_digest',
+  'encrypted_object_size',
+  'encrypted_object_base64',
+] as const;
 
 export interface ArtifactTransportEnvelopeMetadata {
   readonly producingRunId: string;
@@ -39,25 +49,31 @@ export function encodeArtifactTransportEnvelope(
   budget: ArtifactBridgeOperationBudget,
 ): Buffer {
   budget.throwIfExpired();
-  const digest = digestBytes(encryptedBytes);
   if (
     !safePositiveDecimal(producingRunId) ||
     !safePositiveDecimal(producingRunAttempt) ||
     !sha256(encryptedObjectDigest) ||
-    digest !== encryptedObjectDigest ||
     encryptedBytes.length < 1 ||
     encryptedBytes.length > ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes
   ) {
     throw new ArtifactTransportEnvelopeError();
   }
+  if (digestBytes(encryptedBytes) !== encryptedObjectDigest)
+    throw new ArtifactTransportEnvelopeError();
   const document = {
     discriminator: ARTIFACT_ENVELOPE_DISCRIMINATOR,
     producing_run_id: producingRunId,
     producing_run_attempt: producingRunAttempt,
     encrypted_object_digest: encryptedObjectDigest,
     encrypted_object_size: String(encryptedBytes.length),
-    encrypted_object_base64: encryptedBytes.toString('base64'),
+    encrypted_object_base64: '',
   };
+  const expandedSize =
+    Buffer.byteLength(JSON.stringify(document), 'utf8') + 4 * Math.ceil(encryptedBytes.length / 3);
+  if (expandedSize > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
+    throw new ArtifactTransportEnvelopeError();
+  }
+  document.encrypted_object_base64 = encryptedBytes.toString('base64');
   const encoded = Buffer.from(JSON.stringify(document), 'utf8');
   try {
     if (encoded.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
@@ -76,20 +92,26 @@ export async function readArtifactArchive(
   archive: Buffer,
   expectedArchiveDigest: string,
   budget: ArtifactBridgeOperationBudget,
+  maximumBytes: number = ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes,
 ): Promise<DecodedArtifactTransportEnvelope> {
   budget.throwIfExpired();
   if (!sha256(expectedArchiveDigest)) {
     throw new ArtifactTransportEnvelopeError();
   }
-  if (archive.length < 1 || archive.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
+  const limits = artifactReadLimits(maximumBytes);
+  if (archive.length < 1 || archive.length > limits.maximumArchiveBytes) {
     throw new ArtifactTransportEnvelopeError();
   }
   if (digestBytes(archive) !== expectedArchiveDigest) {
     throw new ArtifactTransportEnvelopeError();
   }
   budget.throwIfExpired();
-  const envelopeBytes = await extractOneBoundedEntry(archive, budget);
-  return decodeEnvelope(envelopeBytes, budget);
+  const envelopeBytes = await extractOneBoundedEntry(archive, budget, limits);
+  try {
+    return decodeEnvelope(envelopeBytes, budget, limits);
+  } finally {
+    envelopeBytes.fill(0);
+  }
 }
 
 export function digestBytes(bytes: Uint8Array): string {
@@ -99,6 +121,7 @@ export function digestBytes(bytes: Uint8Array): string {
 async function extractOneBoundedEntry(
   archive: Buffer,
   budget: ArtifactBridgeOperationBudget,
+  limits: ReturnType<typeof artifactReadLimits>,
 ): Promise<Buffer> {
   budget.throwIfExpired();
   const eocd = findEndOfCentralDirectory(archive);
@@ -131,8 +154,9 @@ async function extractOneBoundedEntry(
     centralEnd !== eocd ||
     ![0, 0x8, 0x800, 0x808].includes(flags) ||
     (method !== 0 && method !== 8) ||
-    uncompressedSize > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes ||
-    compressedSize > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes ||
+    uncompressedSize > limits.maximumStagingFileBytes ||
+    compressedSize > limits.maximumArchiveBytes ||
+    (method === 0 && compressedSize !== uncompressedSize) ||
     localOffset !== 0 ||
     localOffset + 30 > centralOffset ||
     extraLength !== 0 ||
@@ -205,34 +229,60 @@ async function extractOneBoundedEntry(
   const output =
     method === 0
       ? Buffer.from(compressed)
-      : await inflateBounded(compressed, ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes, budget);
-  budget.throwIfExpired();
-  if (
-    output.length !== uncompressedSize ||
-    crc32(output, budget) !== expectedCrc ||
-    output.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes
-  ) {
-    throw new ArtifactTransportEnvelopeError();
+      : await inflateBounded(compressed, uncompressedSize, budget);
+  try {
+    budget.throwIfExpired();
+    if (
+      output.length !== uncompressedSize ||
+      crc32(output, budget) !== expectedCrc ||
+      output.length > limits.maximumStagingFileBytes
+    ) {
+      throw new ArtifactTransportEnvelopeError();
+    }
+    return output;
+  } catch (error) {
+    output.fill(0);
+    throw error;
   }
-  return output;
 }
 
 function decodeEnvelope(
   bytes: Buffer,
   budget: ArtifactBridgeOperationBudget,
+  limits: ReturnType<typeof artifactReadLimits>,
 ): DecodedArtifactTransportEnvelope {
   budget.throwIfExpired();
   let parsed: unknown;
   try {
-    parsed = strictParseArtifactBridgeJson(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  } catch {
+    parsed = strictParseFlatStringObject(
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+      ENVELOPE_KEYS,
+      () => budget.throwIfExpired(),
+    );
+  } catch (error) {
+    if (error instanceof ArtifactBridgeDeadlineError) throw error;
     throw new ArtifactTransportEnvelopeError();
   }
   if (!isExactEnvelope(parsed)) throw new ArtifactTransportEnvelopeError();
   const size = Number(parsed.encrypted_object_size);
+  if (size > limits.maximumEncryptedObjectBytes) throw new ArtifactTransportEnvelopeError();
   const encoded = parsed.encrypted_object_base64;
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)) {
+  if (encoded.length !== 4 * Math.ceil(size / 3) || encoded.length > limits.maximumBase64Bytes) {
     throw new ArtifactTransportEnvelopeError();
+  }
+  const padding = (3 - (size % 3)) % 3;
+  for (let index = 0; index < encoded.length; index += 1) {
+    if ((index & 0xffff) === 0) budget.throwIfExpired();
+    const character = encoded.charCodeAt(index);
+    const valid =
+      index >= encoded.length - padding
+        ? character === 61
+        : (character >= 65 && character <= 90) ||
+          (character >= 97 && character <= 122) ||
+          (character >= 48 && character <= 57) ||
+          character === 43 ||
+          character === 47;
+    if (!valid) throw new ArtifactTransportEnvelopeError();
   }
   const encryptedBytes = Buffer.from(encoded, 'base64');
   try {
@@ -240,7 +290,7 @@ function decodeEnvelope(
     if (
       encryptedBytes.length !== size ||
       encryptedBytes.length < 1 ||
-      encryptedBytes.length > ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes ||
+      encryptedBytes.length > limits.maximumEncryptedObjectBytes ||
       encryptedBytes.toString('base64') !== encoded ||
       digestBytes(encryptedBytes) !== parsed.encrypted_object_digest
     ) {
@@ -272,14 +322,7 @@ function isExactEnvelope(value: unknown): value is {
     return false;
   }
   const record = value as Record<string, unknown>;
-  const keys = [
-    'discriminator',
-    'producing_run_id',
-    'producing_run_attempt',
-    'encrypted_object_digest',
-    'encrypted_object_size',
-    'encrypted_object_base64',
-  ];
+  const keys = ENVELOPE_KEYS;
   return (
     Object.keys(record).length === keys.length &&
     keys.every((key) => key in record) &&
@@ -340,11 +383,13 @@ async function inflateBounded(
       try {
         budget.throwIfExpired();
       } catch (error) {
+        chunk.fill(0);
         inflater.destroy(error as Error);
         return;
       }
       total += chunk.length;
       if (total > maximum) {
+        chunk.fill(0);
         inflater.destroy(new ArtifactTransportEnvelopeError());
         return;
       }
@@ -352,13 +397,21 @@ async function inflateBounded(
     });
     inflater.once('error', (error) => {
       budget.signal.removeEventListener('abort', abort);
+      for (const chunk of chunks) chunk.fill(0);
       reject(
         error instanceof ArtifactBridgeDeadlineError ? error : new ArtifactTransportEnvelopeError(),
       );
     });
     inflater.once('end', () => {
       budget.signal.removeEventListener('abort', abort);
-      resolve(Buffer.concat(chunks, total));
+      try {
+        budget.throwIfExpired();
+        resolve(Buffer.concat(chunks, total));
+      } catch (error) {
+        reject(error);
+      } finally {
+        for (const chunk of chunks) chunk.fill(0);
+      }
     });
     inflater.end(compressed);
   });

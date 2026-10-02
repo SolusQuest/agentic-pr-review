@@ -92,9 +92,8 @@ public sealed class RestrictedStateArchitectureTests
     {
         var store = typeof(IRestrictedStateStore);
         Assert.True(store.IsNotPublic);
-        Assert.Equal(
-            AgentLimits.StateEnvelopeBytes,
-            OpaqueStoreLimits.MaximumObjectBytes);
+        Assert.Equal(2 * 1024 * 1024, AgentLimits.StateEnvelopeBytes);
+        Assert.True(AgentLimits.StateEnvelopeBytes < OpaqueStoreLimits.MaximumObjectBytes);
         var methods = store.GetMethods()
             .OrderBy(method => method.Name, StringComparer.Ordinal)
             .ToArray();

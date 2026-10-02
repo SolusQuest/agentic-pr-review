@@ -8,6 +8,7 @@ import {
   type ArtifactMetadataWire,
 } from './contracts.js';
 import type { ArtifactBridgeExecutor } from './official-artifact-operations.js';
+import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 import { ArtifactBridgeStaging } from './staging.js';
 import { digestBytes } from './transport-envelope.js';
 
@@ -55,6 +56,13 @@ class SyntheticArtifactExecutor implements ArtifactBridgeExecutor {
       }
       case 'metadata': {
         const value = this.objects.get(command.object_id);
+        if (
+          value &&
+          value.bytes.length >
+            Number(command.maximum_bytes ?? ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes)
+        ) {
+          return failure(command, 'invalid');
+        }
         return value && value.metadata.name === command.name
           ? success(command, value.metadata)
           : failure(command, 'not_found');

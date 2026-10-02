@@ -18,10 +18,11 @@ public sealed class ArtifactBridgeContractTests
         Assert.Equal(256, ArtifactBridgeLimits.MaximumNameBytes);
         Assert.Equal(256, ArtifactBridgeLimits.MaximumCorrelationBytes);
         Assert.Equal(1_024, ArtifactBridgeLimits.MaximumRelativePathBytes);
-        Assert.Equal(2 * 1024 * 1024,
+        Assert.Equal(34_049_552,
             ArtifactBridgeLimits.MaximumEncryptedObjectBytes);
-        Assert.Equal(4 * 1024 * 1024,
+        Assert.Equal(45_399_694,
             ArtifactBridgeLimits.MaximumStagingFileBytes);
+        Assert.Equal(45_413_722, ArtifactBridgeLimits.MaximumArchiveBytes);
         Assert.Equal(256 * 1024,
             ArtifactBridgeLimits.MaximumDocumentBytes);
         Assert.Equal(100, ArtifactBridgeLimits.RecordsPerPage);
@@ -161,7 +162,7 @@ public sealed class ArtifactBridgeContractTests
         try
         {
             var staging = new ArtifactBridgeStaging(root);
-            var maximum = new byte[2 * 1024 * 1024];
+            var maximum = new byte[OpaqueStoreLimits.MaximumObjectBytes];
             maximum[0] = 1;
             maximum[^1] = 2;
             var scope = await staging.StageUploadAsync(
@@ -176,7 +177,7 @@ public sealed class ArtifactBridgeContractTests
 
             await Assert.ThrowsAsync<IOException>(() =>
                 staging.StageUploadAsync(
-                    new byte[(2 * 1024 * 1024) + 1],
+                    new byte[OpaqueStoreLimits.MaximumObjectBytes + 1],
                     CancellationToken.None));
         }
         finally

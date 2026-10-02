@@ -33,8 +33,10 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Assert.Equal(ArtifactBridgeLimits.MaximumNameBytes, EvidenceLimits.MaximumNameBytes);
         Assert.Equal(ArtifactBridgeLimits.MaximumCorrelationBytes, EvidenceLimits.MaximumCorrelationBytes);
         Assert.Equal(ArtifactBridgeLimits.MaximumRelativePathBytes, EvidenceLimits.MaximumRelativePathBytes);
-        Assert.Equal(ArtifactBridgeLimits.MaximumEncryptedObjectBytes, EvidenceLimits.MaximumEncryptedObjectBytes);
-        Assert.Equal(ArtifactBridgeLimits.MaximumStagingFileBytes, EvidenceLimits.MaximumArchiveBytes);
+        Assert.Equal(2 * 1024 * 1024, EvidenceLimits.MaximumEncryptedObjectBytes);
+        Assert.Equal(4 * 1024 * 1024, EvidenceLimits.MaximumArchiveBytes);
+        Assert.True(EvidenceLimits.MaximumEncryptedObjectBytes <= ArtifactBridgeLimits.MaximumEncryptedObjectBytes);
+        Assert.True(EvidenceLimits.MaximumArchiveBytes <= ArtifactBridgeLimits.MaximumArchiveBytes);
         Assert.Equal(ArtifactBridgeLimits.MaximumDocumentBytes, EvidenceLimits.MaximumDocumentBytes);
         Assert.Equal(ArtifactBridgeLimits.RecordsPerPage, EvidenceLimits.RecordsPerPage);
         Assert.Equal(ArtifactBridgeLimits.MaximumPages, EvidenceLimits.MaximumPages);

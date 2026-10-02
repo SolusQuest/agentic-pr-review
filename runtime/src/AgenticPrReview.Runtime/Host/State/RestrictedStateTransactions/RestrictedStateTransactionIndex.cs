@@ -203,7 +203,9 @@ internal static class RestrictedStateTransactionIndexCodec
             (value.PredecessorVersion.Exists !=
                 (value.PredecessorIndex is not null)) ||
             (value.PredecessorIndex is not null &&
-                !OpaqueStoreValidation.IsValid(value.PredecessorIndex)) ||
+                (!OpaqueStoreValidation.IsValid(value.PredecessorIndex) ||
+                    value.PredecessorIndex.Size >
+                        RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes)) ||
             (value.Staging is not null && !IsValid(value.Staging)))
         {
             return false;
@@ -235,7 +237,8 @@ internal static class RestrictedStateTransactionIndexCodec
         RestrictedStateValidation.IsLowerHex(value.SessionSha256, 64) &&
         RestrictedStateValidation.IsLowerHex(value.EnvelopeSha256, 64) &&
         RestrictedStateValidation.IsLowerHex(value.ObjectIdentity, 64) &&
-        OpaqueStoreValidation.IsValid(value.Transport);
+        OpaqueStoreValidation.IsValid(value.Transport) &&
+        value.Transport.Size <= AgentLimits.StateEnvelopeBytes;
 
     private static RestrictedStateTransactionIndexDocument ToDocument(
         RestrictedStateTransactionIndex value) =>
@@ -479,6 +482,13 @@ internal static class RestrictedStateTransactionIndexCodec
 
 internal static class RestrictedStateTransactionIndexEnvelope
 {
+    // Existing wire framing: magic, version/algorithm, length-prefixed key ID,
+    // expiry, length-prefixed nonce, ciphertext length, and length-prefixed tag.
+    // Carrier capacity must not widen this snapshot semantic envelope.
+    internal const int MaximumEnvelopeBytes =
+        RestrictedStateTransactionIndexCodec.MaximumPlaintextBytes +
+        8 + 2 + 2 + 2 + 64 + 8 + 2 + RestrictedStateFormat.NonceBytes +
+        4 + 2 + RestrictedStateFormat.TagBytes;
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes("APRRTX01");
     private static readonly byte[] AadPrefix =
         Encoding.ASCII.GetBytes("APR-STATE-TRANSACTION-INDEX-AAD-1\0");
@@ -551,7 +561,7 @@ internal static class RestrictedStateTransactionIndexEnvelope
                 Write(writer, ciphertext);
                 WriteUInt16(writer, RestrictedStateFormat.TagBytes);
                 Write(writer, tag);
-                if (writer.WrittenCount > OpaqueStoreLimits.MaximumObjectBytes)
+                if (writer.WrittenCount > MaximumEnvelopeBytes)
                 {
                     CryptographicOperations.ZeroMemory(ciphertext);
                     return false;
@@ -649,7 +659,7 @@ internal static class RestrictedStateTransactionIndexEnvelope
         out RestrictedStateParsedTransactionIndexEnvelope? parsed)
     {
         parsed = null;
-        if (envelope.Length is < 1 or > OpaqueStoreLimits.MaximumObjectBytes)
+        if (envelope.Length is < 1 or > MaximumEnvelopeBytes)
         {
             return false;
         }

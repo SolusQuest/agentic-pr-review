@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using OpaqueStateStore =
@@ -424,7 +425,8 @@ internal class RestrictedStateOpaqueSnapshotStore
         var listed = await store.ListExactAsync(
                 new OpaqueStoreListRequest(
                     names.Index,
-                    MaximumIndexObjects),
+                    MaximumIndexObjects,
+                    RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
                 cancellationToken)
             .ConfigureAwait(false);
         if (!listed.Succeeded ||
@@ -446,11 +448,14 @@ internal class RestrictedStateOpaqueSnapshotStore
         foreach (var reference in listed.Objects)
         {
             var metadata = await store.ReadMetadataAsync(
-                    new OpaqueStoreMetadataRequest(reference),
+                    new OpaqueStoreMetadataRequest(reference,
+                        RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!metadata.Succeeded ||
-                metadata.Metadata!.Reference != reference)
+                metadata.Metadata!.Reference != reference ||
+                metadata.Metadata.Size >
+                    RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes)
             {
                 return RestrictedStateSnapshotReadCore.Fail(
                     metadata.Succeeded
@@ -461,14 +466,16 @@ internal class RestrictedStateOpaqueSnapshotStore
             var download = await store.DownloadAsync(
                     new OpaqueStoreDownloadRequest(
                         metadata.Metadata!,
-                        OpaqueStoreLimits.MaximumObjectBytes),
+                        RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (!download.Succeeded ||
+            if (download.EncryptedBytes.Length >
+                    RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes ||
+                !download.Succeeded ||
                 download.Metadata != metadata.Metadata)
             {
                 return RestrictedStateSnapshotReadCore.Fail(
-                    download.Succeeded
+                    download.Failure == OpaqueStoreFailure.None
                         ? RestrictedStateStoreFailure.Invalid
                         : MapFailure(download.Failure));
             }
@@ -692,17 +699,24 @@ internal class RestrictedStateOpaqueSnapshotStore
         RestrictedStateIndexedCandidate indexed,
         CancellationToken cancellationToken)
     {
+        if (indexed.Transport.Size is < 1 or > AgentLimits.StateEnvelopeBytes)
+        {
+            return RestrictedStateCandidateLoad.Fail(
+                RestrictedStateStoreFailure.Invalid);
+        }
+
         var download = await store.DownloadAsync(
                 new OpaqueStoreDownloadRequest(
                     indexed.Transport,
-                    OpaqueStoreLimits.MaximumObjectBytes),
+                    AgentLimits.StateEnvelopeBytes),
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!download.Succeeded ||
+        if (download.EncryptedBytes.Length > AgentLimits.StateEnvelopeBytes ||
+            !download.Succeeded ||
             download.Metadata != indexed.Transport)
         {
             return RestrictedStateCandidateLoad.Fail(
-                download.Succeeded
+                download.Failure == OpaqueStoreFailure.None
                     ? RestrictedStateStoreFailure.Invalid
                     : MapFailure(download.Failure));
         }
@@ -802,14 +816,14 @@ internal class RestrictedStateOpaqueSnapshotStore
         var names = Names(access.Scope);
         var metadata = ImmutableArray.CreateBuilder<
             OpaqueStoreObjectMetadata>();
-        foreach (var (name, limit) in new[]
+        foreach (var (name, limit, maximumBytes) in new[]
         {
-            (names.Index, MaximumIndexObjects),
-            (names.Candidate, MaximumCandidateObjects),
+            (names.Index, MaximumIndexObjects, RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
+            (names.Candidate, MaximumCandidateObjects, AgentLimits.StateEnvelopeBytes),
         })
         {
             var listed = await store.ListExactAsync(
-                    new OpaqueStoreListRequest(name, limit),
+                    new OpaqueStoreListRequest(name, limit, maximumBytes),
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!listed.Succeeded ||
@@ -824,11 +838,12 @@ internal class RestrictedStateOpaqueSnapshotStore
             foreach (var reference in listed.Objects)
             {
                 var read = await store.ReadMetadataAsync(
-                        new OpaqueStoreMetadataRequest(reference),
+                        new OpaqueStoreMetadataRequest(reference, maximumBytes),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (!read.Succeeded ||
-                    read.Metadata!.Reference != reference)
+                    read.Metadata!.Reference != reference ||
+                    read.Metadata.Size > maximumBytes)
                 {
                     return RestrictedStateRawReadCore.Fail(
                         read.Succeeded

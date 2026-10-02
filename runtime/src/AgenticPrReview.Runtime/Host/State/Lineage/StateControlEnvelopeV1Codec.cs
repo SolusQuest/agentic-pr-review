@@ -172,9 +172,9 @@ internal static class StateControlEnvelopeV1Codec
             if (!plaintextReader.TryReadBytes(
                     LineageFormat.MaximumHeaderBytes,
                     out var headerBytes) ||
-                !plaintextReader.TryReadBytes(
+                !plaintextReader.TryReadByteSpan(
                     LineageFormat.MaximumReaderPayloadBytes,
-                    out payload) ||
+                    out var payloadSpan) ||
                 !plaintextReader.IsComplete)
             {
                 CryptographicOperations.ZeroMemory(headerBytes);
@@ -188,7 +188,7 @@ internal static class StateControlEnvelopeV1Codec
             {
                 if (!StateControlHeaderV1Codec.TryDecode(
                         headerBytes,
-                        payload,
+                        payloadSpan,
                         out header) ||
                     header is null ||
                     !StringComparer.Ordinal.Equals(header.KeyId, keyId))
@@ -198,6 +198,10 @@ internal static class StateControlEnvelopeV1Codec
                     code = LineageCodes.AuthenticationFailed;
                     return false;
                 }
+
+                // Header validation applies the existing class-specific limit
+                // and authenticates the identity before retaining a payload copy.
+                payload = payloadSpan.ToArray();
             }
             finally
             {

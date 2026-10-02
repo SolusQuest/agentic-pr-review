@@ -1,4 +1,9 @@
 import { deflateRawSync } from 'node:zlib';
+import { randomFillSync } from 'node:crypto';
+import { mkdtemp, writeFile, stat, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createZipUploadStream } from '../../../node_modules/@actions/artifact/lib/internal/upload/zip.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -11,6 +16,29 @@ import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import { ArtifactBridgeDeadlineError, ArtifactBridgeOperationBudget } from './operation-budget.js';
 
 describe('private artifact transport envelope', () => {
+  it('rejects semantic expanded-entry overflow before inflate or JSON/base64 decode', async () => {
+    const encrypted = Buffer.alloc(4096, 1);
+    const envelope = encodeArtifactTransportEnvelope(
+      '7001',
+      '2',
+      encrypted,
+      digestBytes(encrypted),
+      testBudget(),
+    );
+    const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+    const concat = vi.spyOn(Buffer, 'concat');
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      await expect(
+        readArtifactArchive(archive, digestBytes(archive), testBudget(), 1024),
+      ).rejects.toThrow(ArtifactTransportEnvelopeError);
+      expect(concat).not.toHaveBeenCalled();
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      concat.mockRestore();
+      parse.mockRestore();
+    }
+  });
   it('round-trips one fixed envelope through a bounded raw ZIP', async () => {
     const encrypted = Buffer.from([0, 7, 255, 0, 9]);
     const envelope = encodeArtifactTransportEnvelope(
@@ -66,21 +94,39 @@ describe('private artifact transport envelope', () => {
     });
   });
 
-  it('accepts the 2 MiB encrypted-object boundary and rejects cap plus one', async () => {
-    const atCap = Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes, 0xa5);
+  it('round-trips the carrier maximum through the pinned SDK ZIP producer and rejects plus one', async () => {
+    const atCap = randomFillSync(Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes));
     const encoded = encodeArtifactTransportEnvelope(
-      '1',
-      '1',
+      String(Number.MAX_SAFE_INTEGER),
+      String(Number.MAX_SAFE_INTEGER),
       atCap,
       digestBytes(atCap),
       testBudget(),
     );
-    expect(encoded.length).toBeLessThanOrEqual(ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes);
+    expect(encoded.length).toBe(ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes);
+    const root = await mkdtemp(path.join(os.tmpdir(), 'apr-capacity-zip-'));
+    try {
+      const sourcePath = path.join(root, ARTIFACT_ENVELOPE_ENTRY);
+      await writeFile(sourcePath, encoded);
+      const stream = await createZipUploadStream(
+        [{ sourcePath, destinationPath: ARTIFACT_ENVELOPE_ENTRY, stats: await stat(sourcePath) }],
+        0,
+      );
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      const archive = Buffer.concat(chunks);
+      expect(archive.length).toBe(encoded.length + 158);
+      expect(archive.length).toBeLessThanOrEqual(ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes);
+      const decoded = await readArtifactArchive(archive, digestBytes(archive), testBudget());
+      expect(decoded.encryptedBytes.equals(atCap)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
     const aboveCap = Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes + 1);
     expect(() =>
       encodeArtifactTransportEnvelope('1', '1', aboveCap, digestBytes(aboveCap), testBudget()),
     ).toThrow(ArtifactTransportEnvelopeError);
-  });
+  }, 60_000);
 
   it.each([
     [
@@ -129,13 +175,47 @@ describe('private artifact transport envelope', () => {
     ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
   });
 
-  it('rejects compressed expansion beyond 4 MiB before accepting output', async () => {
+  it('rejects compressed expansion beyond the derived JSON cap before accepting output', async () => {
     const expanded = Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes + 1, 0);
     const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: expanded }]);
     expect(archive.length).toBeLessThan(ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes);
     await expect(
       readArtifactArchive(archive, digestBytes(archive), testBudget()),
     ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
+  });
+
+  it('stops inflation at the declared entry length, including a lying declaration', async () => {
+    const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: Buffer.alloc(100_000, 0x61) }]);
+    const central = archive.readUInt32LE(archive.length - 6);
+    archive.writeUInt32LE(16, 22);
+    archive.writeUInt32LE(16, central + 24);
+    await expect(
+      readArtifactArchive(archive, digestBytes(archive), testBudget()),
+    ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
+  });
+
+  it('rejects inconsistent base64 lengths before allocating decoded bytes', async () => {
+    const encrypted = Buffer.from('length-check');
+    const document = JSON.parse(
+      encodeArtifactTransportEnvelope(
+        '1',
+        '1',
+        encrypted,
+        digestBytes(encrypted),
+        testBudget(),
+      ).toString('utf8'),
+    );
+    document.encrypted_object_size = '1';
+    const archive = zip([
+      { name: ARTIFACT_ENVELOPE_ENTRY, data: Buffer.from(JSON.stringify(document)) },
+    ]);
+    const from = vi.spyOn(Buffer, 'from');
+    await expect(
+      readArtifactArchive(archive, digestBytes(archive), testBudget()),
+    ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
+    expect((from.mock.calls as readonly unknown[][]).some((call) => call[1] === 'base64')).toBe(
+      false,
+    );
   });
 
   it('zeroes newly decoded encrypted bytes when post-allocation validation fails', async () => {

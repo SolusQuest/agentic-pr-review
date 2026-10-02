@@ -157,6 +157,18 @@ internal ref struct LineageBinaryReader
     internal bool TryReadBytes(int maximumBytes, out byte[] value)
     {
         value = [];
+        if (!TryReadByteSpan(maximumBytes, out var span))
+        {
+            return false;
+        }
+
+        value = span.ToArray();
+        return true;
+    }
+
+    internal bool TryReadByteSpan(int maximumBytes, out ReadOnlySpan<byte> value)
+    {
+        value = default;
         if (!TryReadUInt32(out var length) ||
             length > maximumBytes ||
             length > bytes.Length - offset)
@@ -164,7 +176,7 @@ internal ref struct LineageBinaryReader
             return false;
         }
 
-        value = bytes.Slice(offset, checked((int)length)).ToArray();
+        value = bytes.Slice(offset, checked((int)length));
         offset += checked((int)length);
         return true;
     }

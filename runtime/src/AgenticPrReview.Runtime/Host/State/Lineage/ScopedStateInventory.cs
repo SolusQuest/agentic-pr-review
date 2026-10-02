@@ -74,7 +74,8 @@ internal sealed class ScopedStateInventory
                 var list = await store.ListExactAsync(
                         new OpaqueStoreListRequest(
                             name,
-                            LineageFormat.MaximumPhysicalPerClass),
+                            LineageFormat.MaximumPhysicalPerClass,
+                            LineageFormat.MaximumEnvelopeBytesForClass(objectClass)),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (list.Failure == OpaqueStoreFailure.Incomplete ||
@@ -102,7 +103,8 @@ internal sealed class ScopedStateInventory
                     StringComparer.Ordinal))
                 {
                     var metadata = await store.ReadMetadataAsync(
-                            new OpaqueStoreMetadataRequest(reference),
+                            new OpaqueStoreMetadataRequest(reference,
+                                LineageFormat.MaximumEnvelopeBytesForClass(objectClass)),
                             cancellationToken)
                         .ConfigureAwait(false);
                     if (!metadata.Succeeded ||
@@ -112,6 +114,12 @@ internal sealed class ScopedStateInventory
                         return ScopedStateInventoryResult.Fail(
                             MapFailure(metadata.Failure),
                             DiagnosticTerminal(metadata.Failure));
+                    }
+
+                    if (metadata.Metadata.Size >
+                        LineageFormat.MaximumEnvelopeBytesForClass(objectClass))
+                    {
+                        return ScopedStateInventoryResult.Fail(LineageCodes.Unavailable);
                     }
 
                     references.Add((objectClass, metadata.Metadata));
@@ -135,7 +143,7 @@ internal sealed class ScopedStateInventory
                 var download = await store.DownloadAsync(
                         new OpaqueStoreDownloadRequest(
                             item.Metadata,
-                            LineageFormat.MaximumEnvelopeBytes),
+                            LineageFormat.MaximumEnvelopeBytesForClass(item.ObjectClass)),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (!download.Succeeded || download.Metadata != item.Metadata)

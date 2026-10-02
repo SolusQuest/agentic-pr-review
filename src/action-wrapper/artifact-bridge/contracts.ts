@@ -59,6 +59,7 @@ export interface MetadataCommand extends ArtifactCommandBase {
   readonly operation: 'metadata';
   readonly name: string;
   readonly object_id: string;
+  readonly maximum_bytes?: string;
 }
 
 export interface DownloadCommand extends ArtifactCommandBase {
@@ -240,17 +241,31 @@ function parseCommand(value: unknown): ArtifactBridgeCommand | undefined {
         : undefined;
     }
     case 'metadata': {
-      if (!isRecordWithKeys(value, ['operation', 'correlation_id', 'name', 'object_id'])) {
+      const keys = ['operation', 'correlation_id', 'name', 'object_id'];
+      if (
+        !isRecordWithKeys(
+          value,
+          value.maximum_bytes === undefined ? keys : [...keys, 'maximum_bytes'],
+        )
+      ) {
         return undefined;
       }
       const name = opaqueName(value.name);
       const objectId = safePositiveDecimal(value.object_id);
-      return name && objectId
+      const maximum =
+        value.maximum_bytes === undefined
+          ? undefined
+          : boundedPositiveDecimal(
+              value.maximum_bytes,
+              ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes,
+            );
+      return name && objectId && (value.maximum_bytes === undefined || maximum !== undefined)
         ? {
             operation: value.operation,
             correlation_id: correlation,
             name,
             object_id: objectId,
+            ...(maximum === undefined ? {} : { maximum_bytes: maximum }),
           }
         : undefined;
     }

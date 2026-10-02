@@ -9,7 +9,7 @@ import {
   safePositiveDecimal,
   sha256,
 } from './contracts.js';
-import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
+import { ARTIFACT_BRIDGE_LIMITS, artifactReadLimits } from './limits.js';
 import { artifactFamily, physicalArtifactMember, physicalArtifactName } from './physical-name.js';
 import {
   OfficialCallError,
@@ -369,7 +369,11 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
   ): Promise<ArtifactBridgeResult> {
     const platform = await this.loadPlatformArtifact(command.name, command.object_id, budget);
     this.assertNotExpired(platform);
-    const record = await this.readRecord(platform, budget);
+    const record = await this.readRecord(
+      platform,
+      budget,
+      Number(command.maximum_bytes ?? ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes),
+    );
     try {
       return successWithMetadata(command, record.metadata);
     } finally {
@@ -388,7 +392,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     );
     this.assertExpectedPlatform(command.expected, platform);
     this.assertNotExpired(platform);
-    const record = await this.readRecord(platform, budget);
+    const record = await this.readRecord(platform, budget, Number(command.maximum_bytes));
     try {
       try {
         assertMetadata(command.expected, record.metadata);
@@ -747,7 +751,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       typeof artifact.expired !== 'boolean' ||
       !Number.isSafeInteger(artifact.size_in_bytes) ||
       artifact.size_in_bytes < 1 ||
-      artifact.size_in_bytes > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes
+      artifact.size_in_bytes > ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes
     ) {
       this.invalidatePlatformRepresentation(expectedName, objectId);
       throw new BridgeOperationFailure('invalid');
@@ -767,7 +771,12 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
   private async readRecord(
     platform: PlatformArtifact,
     budget: ArtifactBridgeOperationBudget,
+    maximumBytes: number = ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes,
   ): Promise<VerifiedArtifactRecord> {
+    const limits = artifactReadLimits(maximumBytes);
+    if (platform.archiveSize > limits.maximumArchiveBytes) {
+      throw new BridgeOperationFailure('invalid');
+    }
     // Every caller first obtains a fresh platform observation. GitHub artifact
     // archives are immutable, so an exact observed platform identity may reuse
     // a prior fully verified envelope without weakening that observation.
@@ -775,7 +784,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     // every cache lookup even when the descriptor came from an authenticated
     // 304 reconstruction.
     this.assertNotExpired(platform);
-    const cached = this.verifiedRecords.get(platform);
+    const cached = this.verifiedRecords.get(platform, maximumBytes);
     if (cached) return cached;
     const response = await this.callOfficial(
       (requestSignal) =>
@@ -784,7 +793,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
             owner: this.context.owner,
             repo: this.context.repository,
             artifact_id: Number(platform.id),
-            maximum_bytes: ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes,
+            maximum_bytes: limits.maximumArchiveBytes,
           },
           requestSignal,
           budget.latestHttpAttemptStartAt(),
@@ -795,18 +804,25 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       throw new BridgeOperationFailure('io');
     }
     budget.throwIfExpired();
+    if (
+      response.data.byteLength < 1 ||
+      response.data.byteLength !== platform.archiveSize ||
+      response.data.byteLength > limits.maximumArchiveBytes
+    ) {
+      throw new BridgeOperationFailure('digest_mismatch');
+    }
     const archive = Buffer.from(response.data);
     let envelope: Awaited<ReturnType<typeof readArtifactArchive>> | undefined;
     try {
       if (
         archive.length < 1 ||
         archive.length !== platform.archiveSize ||
-        archive.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes ||
+        archive.length > limits.maximumArchiveBytes ||
         digestBytes(archive) !== platform.archiveDigest
       ) {
         throw new BridgeOperationFailure('digest_mismatch');
       }
-      envelope = await readArtifactArchive(archive, platform.archiveDigest, budget);
+      envelope = await readArtifactArchive(archive, platform.archiveDigest, budget, maximumBytes);
       if (
         platform.physicalName !==
         physicalArtifactName(platform.name, envelope.encryptedObjectDigest)
@@ -1026,10 +1042,11 @@ class VerifiedArtifactRecordCache {
 
   constructor(private readonly ledger: ArtifactCacheLedger) {}
 
-  get(platform: PlatformArtifact): VerifiedArtifactRecord | undefined {
+  get(platform: PlatformArtifact, maximumBytes: number): VerifiedArtifactRecord | undefined {
     const key = recordKey(platform);
     const entry = this.entries.get(key);
     if (!entry) return undefined;
+    if (entry.record.bytes.length > maximumBytes) throw new BridgeOperationFailure('invalid');
     this.entries.delete(key);
     this.entries.set(key, entry);
     this.ledger.touch(entry.ledgerToken);
@@ -1040,17 +1057,16 @@ class VerifiedArtifactRecordCache {
     const key = recordKey(platform);
     this.deleteKey(key);
     if (record.bytes.length > MAXIMUM_VERIFIED_RECORD_CACHE_BYTES) return;
-    const stored: VerifiedArtifactRecord = {
-      metadata: { ...record.metadata },
-      bytes: Buffer.from(record.bytes),
-    };
-    const entry: VerifiedArtifactRecordCacheEntry = { record: stored, ledgerToken: undefined };
-    const token = this.ledger.claim(stored.bytes.length, () => this.deleteKey(key, false));
-    if (!token) {
-      stored.bytes.fill(0);
-      return;
+    const token = this.ledger.claim(record.bytes.length, () => this.deleteKey(key, false));
+    if (!token) return;
+    let stored: VerifiedArtifactRecord;
+    try {
+      stored = { metadata: { ...record.metadata }, bytes: Buffer.from(record.bytes) };
+    } catch (error) {
+      this.ledger.release(token);
+      throw error;
     }
-    entry.ledgerToken = token;
+    const entry: VerifiedArtifactRecordCacheEntry = { record: stored, ledgerToken: token };
     this.entries.set(key, entry);
     this.totalBytes += stored.bytes.length;
     this.evict();

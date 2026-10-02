@@ -56,7 +56,20 @@ export class ArtifactBridgeStaging {
       }
       await this.assertOpenedPath(resolved, before);
       budget?.throwIfExpired();
-      bytes = await handle.readFile(budget ? { signal: budget.signal } : undefined);
+      // A concurrent grow must not turn the admitted stat into an unbounded read.
+      bytes = Buffer.alloc(before.size);
+      let offset = 0;
+      while (offset < bytes.length) {
+        budget?.throwIfExpired();
+        const read = await handle.read(
+          bytes,
+          offset,
+          Math.min(64 * 1024, bytes.length - offset),
+          offset,
+        );
+        if (read.bytesRead === 0) throw new ArtifactBridgeStagingError();
+        offset += read.bytesRead;
+      }
       budget?.throwIfExpired();
       const after = await handle.stat();
       await this.assertOpenedPath(resolved, after);
@@ -71,7 +84,7 @@ export class ArtifactBridgeStaging {
       return bytes;
     } catch (error) {
       // The caller takes ownership only after a stable, fully validated return.
-      // A deadline or validation failure after readFile must not leave the
+      // A deadline or validation failure after reading must not leave the
       // encrypted source bytes resident in this frame.
       bytes?.fill(0);
       if (error instanceof ArtifactBridgeDeadlineError) throw error;

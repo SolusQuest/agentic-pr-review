@@ -639,7 +639,8 @@ internal sealed class RetainedStatePersistence
         OpaqueStoreObjectMetadata target,
         CancellationToken cancellationToken)
     {
-        if (!OpaqueStoreValidation.IsValid(target))
+        if (!OpaqueStoreValidation.IsValid(target) ||
+            target.Size > LineageFormat.MaximumEnvelopeBytes)
         {
             return RetainedStateTransactionCodes.Invalid;
         }
@@ -683,7 +684,8 @@ internal sealed class RetainedStatePersistence
             var listed = await store.ListExactAsync(
                     new OpaqueStoreListRequest(
                         target.Reference.Name,
-                        LineageFormat.MaximumPhysicalPerClass),
+                        LineageFormat.MaximumPhysicalPerClass,
+                        LineageFormat.MaximumEnvelopeBytes),
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (!listed.Succeeded || !listed.Complete)
@@ -697,7 +699,8 @@ internal sealed class RetainedStatePersistence
             }
 
             var metadata = await store.ReadMetadataAsync(
-                    new OpaqueStoreMetadataRequest(target.Reference),
+                    new OpaqueStoreMetadataRequest(target.Reference,
+                        LineageFormat.MaximumEnvelopeBytes),
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (metadata.Succeeded && metadata.Metadata != target)

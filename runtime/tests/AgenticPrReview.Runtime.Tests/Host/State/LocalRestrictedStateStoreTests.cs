@@ -6,6 +6,49 @@ namespace AgenticPrReview.Runtime.Tests.Host.State;
 
 public sealed class LocalRestrictedStateStoreTests
 {
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task ConsumerBoundAppliesToListMetadataAndDownload(int delta)
+    {
+        const int maximum = 262266;
+        await WithRootAsync(async root =>
+        {
+            var store = Store(root, RestrictedStateTestData.Now);
+            var upload = await store.UploadImmutableAsync(
+                Upload("bounded", new byte[maximum + delta], RestrictedStateTestData.Expires),
+                CancellationToken.None);
+            Assert.True(upload.Succeeded);
+            var metadata = upload.Metadata!;
+            var listed = await store.ListExactAsync(
+                new OpaqueStoreListRequest(metadata.Reference.Name, 8, maximum), CancellationToken.None);
+            var read = await store.ReadMetadataAsync(
+                new OpaqueStoreMetadataRequest(metadata.Reference, maximum), CancellationToken.None);
+            var download = await store.DownloadAsync(
+                new OpaqueStoreDownloadRequest(metadata, maximum), CancellationToken.None);
+            Assert.Equal(delta <= 0, listed.Succeeded);
+            Assert.Equal(delta <= 0, read.Succeeded);
+            Assert.Equal(delta <= 0, download.Succeeded);
+        });
+    }
+
+    [Fact]
+    public void ConsumerBoundRejectsLocalRecordBeforePayloadCopy()
+    {
+        var bytes = new byte[2 * 1024 * 1024 + 1];
+        var metadata = new OpaqueStoreObjectMetadata(new(new("bounded"), new("id")),
+            new("run", 1), new(new string('a', 64)), new(OpaqueStoreHash.Sha256(bytes)),
+            RestrictedStateTestData.Expires, bytes.Length);
+        Assert.True(LocalOpaqueStoreRecordCodec.TryWrite(metadata, bytes, out var record));
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var accepted = LocalOpaqueStoreRecordCodec.TryRead(record, out _, out var payload, bytes.Length - 1);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.False(accepted);
+        Assert.True(payload.IsEmpty);
+        Assert.True(allocated < 64 * 1024, $"Unexpected payload-sized allocation: {allocated}");
+    }
+
     [Fact]
     public async Task SixOperationsRoundTripAcrossFreshInstances()
     {
