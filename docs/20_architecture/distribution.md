@@ -1,6 +1,6 @@
 # Distribution Direction
 
-The development head now contains the replacement nested Action metadata and reproducibly generated Node 24 wrapper for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: automatic payload download, release assets, root alias, stable outputs, and public-default promotion remain R7 work.
+The development head now contains the replacement nested Action metadata and reproducibly generated Node 24 wrapper for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: release assets, automatic payload download and accounting outputs are not implemented at this baseline. The approved [R7 target](../90_roadmap/r7-plan.md) adds public experimental distribution and bounded maintainer adoption; it excludes a root alias and defers formal public/default graduation.
 
 See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
 
@@ -29,7 +29,7 @@ The wrapper may:
 - launch the .NET application;
 - forward cancellation;
 - bridge the official Actions artifact client;
-- render bounded Host-approved annotations and step summary without stable Action outputs;
+- render bounded Host-approved annotations and step summary; the current R4 proof has no Action outputs, while R7 targets matching [accounting outputs](../90_roadmap/r7-plan.md#summary-and-machine-readable-outputs);
 - forward the host exit code.
 
 Business behavior does not belong in the distribution wrapper.
@@ -69,9 +69,9 @@ Framework-dependent and selected Native AOT paths continue to run in CI. A succe
 
 ## Initial Platform Scope
 
-The first post-rebaseline production payload should target `linux-x64`, matching the primary GitHub-hosted runner path.
+The approved R7 experimental payload target is one `linux-x64` executable for GitHub-hosted `ubuntu-24.04`, consumed through the existing nested Node 24 Action without a .NET SDK. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
 
-Additional targets are added only when there is an identified downstream need and CI can publish and execute them:
+Additional targets are outside R7 and require separately scoped downstream demand and CI publish/execution proof:
 
 - `linux-arm64`;
 - `win-x64`;
@@ -82,11 +82,9 @@ Platform expansion must not delay the first agent vertical slice.
 
 ## Payload Resolution
 
-Target production resolution order:
+The selected R7 ordinary downstream path downloads only the exact release asset authorized by the small strict map committed with the trusted Action. There is no public local-path/bundled-payload fallback, arbitrary URL or implicit latest selection. This is an approved target; current R4 proof still uses an explicitly prepared trusted payload.
 
-1. an explicit trusted local payload path for repository tests and advanced development;
-2. a payload bundled with the Action release, if size and repository policy permit;
-3. an exact release asset selected by the Action release manifest.
+Fully verified repository-test overrides remain isolated and unreachable through ordinary downstream inputs. They bypass download, not executable/platform/manifest/build admission, and do not expand downstream support. Other distribution forms require a separate future contract.
 
 The wrapper must not:
 
@@ -102,19 +100,18 @@ R4 proves the thin wrapper and two-run workflow behavior using an explicitly pre
 
 ## Version Mapping
 
-The Action release and default .NET payload move together.
-
-For a normal release:
+The R7 public experimental channel is `vMAJOR.MINOR.PATCH-internal.N` (`N >= 1`); `internal` describes maturity, not visibility. Fixed published bytes remain immutable, without stable API/accuracy/compatibility/SLA promises. The first exact version is a later execution input.
 
 ```text
-action tag vX.Y.Z
-  -> payload manifest vX.Y.Z
-  -> agentic-pr-review build vX.Y.Z
+payload-vX.Y.Z-internal.N at source S -> original prepared archive B
+vX.Y.Z-internal.N at reviewed Action T -> exact map of B, S and builder W
 ```
 
-Internal Host, Agent, tool, provider, and publisher modules do not need independent semantic versions.
+`S != T`; builder/workflow identity `W` may differ from `S`. The strict map binds one version/platform, exact asset repository/tag/name, archive size/SHA-256, internal file inventory/sizes/hashes and build identity. The final pair also records original producer run/artifact/digest. Neither binary self-hash nor self-source cycles are introduced. Internal modules have no independent version matrix.
 
-Advanced runtime override is not a reason to create independent compatibility promises before a real downstream use case exists.
+Prepare/test original `B` from `S` without publication credentials; review the binding map and obtain maintainer merge to `T`; qualify exact original `B` with `T`; stage that qualified pair as an unpublished draft; publish and verify payload assets, then create the consumer Action tag last. A fixed Action SHA resolves the same map. Promotion never rebuilds/repackages. Changed build inputs need a new candidate; expiry or ambiguous external state fails closed/reconciles by exact identity, never duplicates/replaces a version.
+
+Mandatory producer attestation and final publish verification restrict expected repository, signer workflow, hosted runner and actual source claims. Attestation of `W` alone cannot prove detached `S` without independently verified candidate/build-policy binding. Consumers must verify SHA-256 against the reviewed map and retain opened-executable identity through spawn. Mandatory online consumer attestation is deferred; independent verifier commands belong to the later runbook. See the full [release identity and authority contract](../90_roadmap/r7-plan.md#exact-release-identities-and-trust); this activation creates no release or tag.
 
 ## Durable State Compatibility
 
@@ -151,7 +148,9 @@ R4 proves that public observers can see only allowed metadata and ciphertext, wh
 
 ## Release Assets
 
-Potential assets:
+The following are historical/future naming examples, not the R7 selected asset set or an available download. R7 selects only `linux-x64`; its package owner defines the exact layout/name within the reviewed-map contract before publication. Platform expansion requires separate scope.
+
+Examples:
 
 - `agentic-pr-review-vX.Y.Z-linux-x64.tar.gz`;
 - `agentic-pr-review-vX.Y.Z-linux-arm64.tar.gz`;
@@ -170,7 +169,7 @@ agentic-pr-review/
   THIRD-PARTY-NOTICES.txt
 ```
 
-The exact layout becomes a release contract only when the first production asset is published.
+The package/map owners must freeze the exact layout for review and qualification before publication. This example chooses no actual first candidate or version.
 
 ## Dependency Policy
 

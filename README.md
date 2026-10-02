@@ -13,7 +13,7 @@ provide a stable public API.
 
 ## Development Head Status
 
-The current development head contains the nested R4 Action metadata and generated Node 24 wrapper only for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: there is no release payload selection, automatic download, root Action alias, or stable output surface. R7 owns release assets, checksums, automatic payload resolution, and promotion of a supported public default. See [`r4-actionhost-wrapper-plan.md`](docs/20_architecture/r4-actionhost-wrapper-plan.md).
+The current development head contains the nested R4 Action metadata and generated Node 24 wrapper only for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: there is no release payload selection, automatic download, root Action alias, or stable output surface. The approved [R7 target](docs/90_roadmap/r7-plan.md) owns a publicly downloadable experimental prerelease, checksums, exact automatic payload resolution and bounded maintainer adoption. Formal public/default graduation requires a later maintainer decision; this documentation activation provides no release or runtime support. See [`r4-actionhost-wrapper-plan.md`](docs/20_architecture/r4-actionhost-wrapper-plan.md).
 
 Do not reference `main` or another moving development-head commit as an Action.
 There is no compatibility wrapper or supported downstream bootstrap/reset path during this transition.
@@ -63,11 +63,9 @@ roadmap phase explicitly introduces it.
 - R3 completed the trusted no-publish live-provider route and initial six-tool read-only profile.
 - R4 introduces the replacement thin Node wrapper, C# `ActionHost`, public
   Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
-- R7 owns release assets, checksums, exact automatic payload selection, and the
-  public default.
+- R7 targets public versioned experimental distribution, exact automatic payload selection and bounded public/private/test adoption. Formal public/default graduation remains deferred.
 
-Do not infer future Action inputs, outputs, or distribution behavior before the
-owning roadmap phase records them.
+The [R7 plan](docs/90_roadmap/r7-plan.md) records the approved target budgets, trusted configuration, accounting outputs and two-tag release identity. These remain targets until their implementation and separately authorized release gates complete. The current checked Action still has seven inputs and no outputs; no installation command or release version is available from this activation.
 
 ## Project Documentation
 
@@ -83,6 +81,7 @@ owning roadmap phase records them.
   records the closed R4 migration inventory and the exact-tree E1 handoff gate.
 - [`docs/90_roadmap/roadmap-seed.md`](docs/90_roadmap/roadmap-seed.md) defines
   the R0-R7 critical path.
+- [`docs/90_roadmap/r7-plan.md`](docs/90_roadmap/r7-plan.md) defines the approved experimental distribution and adoption contract, with current implementation distinguished from its targets.
 - [`docs/50_ai/agent-context.md`](docs/50_ai/agent-context.md) is the shared
   agent entrypoint.
 
