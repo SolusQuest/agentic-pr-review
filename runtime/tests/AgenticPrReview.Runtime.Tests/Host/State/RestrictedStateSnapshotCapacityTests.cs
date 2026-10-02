@@ -24,6 +24,8 @@ public sealed class RestrictedStateSnapshotCapacityTests
         fixture.Store.Index = fixture.Store.Index with { Size = size };
         var result = await fixture.ReadAsync();
         Assert.False(result.Succeeded);
+        Assert.Equal(IndexMaximum, fixture.Store.ListMaximum);
+        Assert.Equal(IndexMaximum, fixture.Store.MetadataMaximum);
         Assert.Equal(downloads ? 1 : 0, fixture.Store.Downloads.Count);
         if (downloads)
         {
@@ -185,11 +187,19 @@ public sealed class RestrictedStateSnapshotCapacityTests
         internal byte[] CandidateBytes => candidateBytes;
         internal readonly List<OpaqueStoreDownloadRequest> Downloads = [];
         internal bool? OversizedReturnIsCandidate;
+        internal int ListMaximum;
+        internal int MetadataMaximum;
 
-        public Task<OpaqueStoreListResult> ListExactAsync(OpaqueStoreListRequest request, CancellationToken token) =>
-            Task.FromResult(new OpaqueStoreListResult(OpaqueStoreFailure.None, [Index.Reference], true));
-        public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(OpaqueStoreMetadataRequest request, CancellationToken token) =>
-            Task.FromResult(new OpaqueStoreMetadataResult(OpaqueStoreFailure.None, Index));
+        public Task<OpaqueStoreListResult> ListExactAsync(OpaqueStoreListRequest request, CancellationToken token)
+        {
+            ListMaximum = request.MaximumBytes;
+            return Task.FromResult(new OpaqueStoreListResult(OpaqueStoreFailure.None, [Index.Reference], true));
+        }
+        public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(OpaqueStoreMetadataRequest request, CancellationToken token)
+        {
+            MetadataMaximum = request.MaximumBytes;
+            return Task.FromResult(new OpaqueStoreMetadataResult(OpaqueStoreFailure.None, Index));
+        }
         public Task<OpaqueStoreDownloadResult> DownloadAsync(OpaqueStoreDownloadRequest request, CancellationToken token)
         {
             Downloads.Add(request);

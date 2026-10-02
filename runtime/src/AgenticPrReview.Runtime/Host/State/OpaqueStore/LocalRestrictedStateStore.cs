@@ -98,7 +98,8 @@ internal sealed class LocalRestrictedStateStore
                     var read = await ReadRecordAsync(
                             operation,
                             path,
-                            cancellationToken)
+                            cancellationToken,
+                            request.MaximumBytes)
                         .ConfigureAwait(false);
                     if (read.Failure != OpaqueStoreFailure.None ||
                         read.Metadata is null ||
@@ -161,7 +162,8 @@ internal sealed class LocalRestrictedStateStore
         var read = await ReadExpectedAsync(
                 request.Reference,
                 expected: null,
-                cancellationToken)
+                cancellationToken,
+                request.MaximumBytes)
             .ConfigureAwait(false);
         return read.Failure == OpaqueStoreFailure.None
             ? new OpaqueStoreMetadataResult(
@@ -182,7 +184,8 @@ internal sealed class LocalRestrictedStateStore
         var read = await ReadExpectedAsync(
                 request.Expected.Reference,
                 request.Expected,
-                cancellationToken)
+                cancellationToken,
+                request.MaximumBytes)
             .ConfigureAwait(false);
         if (read.Failure != OpaqueStoreFailure.None ||
             read.Metadata is null)
@@ -614,7 +617,8 @@ internal sealed class LocalRestrictedStateStore
     private async Task<LocalOpaqueStoreRead> ReadExpectedAsync(
         OpaqueStoreObjectReference reference,
         OpaqueStoreObjectMetadata? expected,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int maximumBytes = OpaqueStoreLimits.MaximumObjectBytes)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!TryPrepareOperation(
@@ -637,7 +641,8 @@ internal sealed class LocalRestrictedStateStore
                 var read = await ReadRecordAsync(
                         operation,
                         path,
-                        cancellationToken)
+                        cancellationToken,
+                        maximumBytes)
                     .ConfigureAwait(false);
                 if (read.Failure != OpaqueStoreFailure.None ||
                     read.Metadata is null)
@@ -664,7 +669,8 @@ internal sealed class LocalRestrictedStateStore
     private static async Task<LocalOpaqueStoreRead> ReadRecordAsync(
         LocalOpaqueStoreOperation operation,
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int maximumBytes = OpaqueStoreLimits.MaximumObjectBytes)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!OperationIsCurrent(operation))
@@ -706,8 +712,8 @@ internal sealed class LocalRestrictedStateStore
                 }
 
                 var length = RandomAccess.GetLength(handle);
-                if (length is < 1 or >
-                    LocalOpaqueStoreRecordCodec.MaximumRecordBytes)
+                if (length < 1 || length >
+                    maximumBytes + LocalOpaqueStoreRecordCodec.MaximumHeaderBytes)
                 {
                     return LocalOpaqueStoreRead.Fail(
                         OpaqueStoreFailure.Invalid);
@@ -740,7 +746,8 @@ internal sealed class LocalRestrictedStateStore
                         !LocalOpaqueStoreRecordCodec.TryRead(
                             bytes,
                             out var metadata,
-                            out var payload))
+                            out var payload,
+                            maximumBytes))
                     {
                         return LocalOpaqueStoreRead.Fail(
                             OpaqueStoreFailure.Invalid);
@@ -1177,11 +1184,13 @@ internal static class LocalOpaqueStoreRecordCodec
     internal static bool TryRead(
         ReadOnlySpan<byte> bytes,
         out OpaqueStoreObjectMetadata? metadata,
-        out ReadOnlyMemory<byte> payload)
+        out ReadOnlyMemory<byte> payload,
+        int maximumBytes = OpaqueStoreLimits.MaximumObjectBytes)
     {
         metadata = null;
         payload = ReadOnlyMemory<byte>.Empty;
-        if (bytes.Length is < 1 or > MaximumRecordBytes)
+        if (maximumBytes is < 1 or > OpaqueStoreLimits.MaximumObjectBytes ||
+            bytes.Length < 1 || bytes.Length > maximumBytes + MaximumHeaderBytes)
         {
             return false;
         }
@@ -1211,7 +1220,7 @@ internal static class LocalOpaqueStoreRecordCodec
             !TryReadHex(bytes, ref offset, out var encryptedDigest) ||
             !TryReadInt64(bytes, ref offset, out var expiresAt) ||
             !TryReadInt64(bytes, ref offset, out var size) ||
-            size is < 1 or > OpaqueStoreLimits.MaximumObjectBytes ||
+            size < 1 || size > maximumBytes ||
             bytes.Length - offset != size)
         {
             return false;

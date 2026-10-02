@@ -907,7 +907,8 @@ internal sealed class LocatorRootService
         var list = await store.ListExactAsync(
                 new OpaqueStoreListRequest(
                     SentinelName,
-                    LocatorRootFormat.MaximumPhysicalSentinels),
+                    LocatorRootFormat.MaximumPhysicalSentinels,
+                    LocatorRootFormat.MaximumEnvelopeBytes),
                 cancellationToken)
             .ConfigureAwait(false);
         if (list.Failure == OpaqueStoreFailure.Incomplete ||
@@ -946,12 +947,14 @@ internal sealed class LocatorRootService
                 StringComparer.Ordinal))
             {
                 var metadataResult = await store.ReadMetadataAsync(
-                        new OpaqueStoreMetadataRequest(reference),
+                        new OpaqueStoreMetadataRequest(reference,
+                            LocatorRootFormat.MaximumEnvelopeBytes),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (!metadataResult.Succeeded ||
                     metadataResult.Metadata is null ||
-                    metadataResult.Metadata.Reference != reference)
+                    metadataResult.Metadata.Reference != reference ||
+                    metadataResult.Metadata.Size > LocatorRootFormat.MaximumEnvelopeBytes)
                 {
                     var failure = metadataResult.Failure ==
                         OpaqueStoreFailure.None
@@ -1104,7 +1107,8 @@ internal sealed class LocatorRootService
             var list = await store.ListExactAsync(
                     new OpaqueStoreListRequest(
                         SentinelName,
-                        LocatorRootFormat.MaximumPhysicalSentinels),
+                        LocatorRootFormat.MaximumPhysicalSentinels,
+                        LocatorRootFormat.MaximumEnvelopeBytes),
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (list.Succeeded &&

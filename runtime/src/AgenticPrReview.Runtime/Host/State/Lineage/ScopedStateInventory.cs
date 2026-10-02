@@ -74,7 +74,8 @@ internal sealed class ScopedStateInventory
                 var list = await store.ListExactAsync(
                         new OpaqueStoreListRequest(
                             name,
-                            LineageFormat.MaximumPhysicalPerClass),
+                            LineageFormat.MaximumPhysicalPerClass,
+                            LineageFormat.MaximumEnvelopeBytesForClass(objectClass)),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (list.Failure == OpaqueStoreFailure.Incomplete ||
@@ -102,7 +103,8 @@ internal sealed class ScopedStateInventory
                     StringComparer.Ordinal))
                 {
                     var metadata = await store.ReadMetadataAsync(
-                            new OpaqueStoreMetadataRequest(reference),
+                            new OpaqueStoreMetadataRequest(reference,
+                                LineageFormat.MaximumEnvelopeBytesForClass(objectClass)),
                             cancellationToken)
                         .ConfigureAwait(false);
                     if (!metadata.Succeeded ||

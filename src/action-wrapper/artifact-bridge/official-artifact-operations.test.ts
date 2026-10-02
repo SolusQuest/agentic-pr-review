@@ -11,7 +11,7 @@ import { createArtifactActionsRestClient } from './actions-rest-client.js';
 import { ArtifactCacheLedger } from './artifact-cache-ledger.js';
 import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
 import { digestBytes, encodeArtifactTransportEnvelope } from './transport-envelope.js';
-import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
+import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY, artifactReadLimits } from './limits.js';
 import { ArtifactBridgeOperationBudget } from './operation-budget.js';
 import {
   ArtifactRestAttemptDeadlineError,
@@ -538,6 +538,121 @@ describe('artifact-specific producing attempt authority', () => {
 });
 
 describe('verified envelope ownership', () => {
+  it.each([-1, 0, 1])(
+    'preflights semantic archive metadata before network (offset %i)',
+    async (offset) => {
+      const maximum = 262266;
+      const limits = artifactReadLimits(maximum);
+      const download = vi.fn(async (_input: unknown) => ({ status: 200, data: Buffer.alloc(0) }));
+      const operations = await createOperations({
+        getArtifact: async () => ({
+          status: 200,
+          data: {
+            ...platformRecord(metadataFixture()),
+            size_in_bytes: limits.maximumArchiveBytes + offset,
+          },
+        }),
+        downloadArtifactArchive: download,
+      });
+      try {
+        const result = await operations.execute(
+          {
+            operation: 'metadata',
+            correlation_id: 'bounded-metadata',
+            name: 'opaque-state',
+            object_id: '42',
+            maximum_bytes: String(maximum),
+          },
+          new AbortController().signal,
+        );
+        expect(result.failure).toBe(offset > 0 ? 'invalid' : 'digest_mismatch');
+        expect(download).toHaveBeenCalledTimes(offset > 0 ? 0 : 1);
+        if (offset <= 0)
+          expect(download.mock.calls[0]![0]).toMatchObject({
+            maximum_bytes: limits.maximumArchiveBytes,
+          });
+      } finally {
+        await operations.dispose();
+      }
+    },
+  );
+
+  it.each([-1, 0, 1])(
+    'applies semantic raw limits before base64 decode and cached copy (offset %i)',
+    async (offset) => {
+      const maximum = 262266;
+      const encrypted = Buffer.alloc(maximum + offset, 1);
+      const envelope = encodeArtifactTransportEnvelope(
+        '7001',
+        '2',
+        encrypted,
+        digestBytes(encrypted),
+        testBudget(),
+      );
+      const archive = createTestZip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+      const expected = {
+        ...metadataFixture(),
+        archive_digest: digestBytes(archive),
+        encrypted_object_digest: digestBytes(encrypted),
+        size: String(encrypted.length),
+      };
+      const download = vi.fn(async () => ({ status: 200, data: archive }));
+      const operations = await createOperations({
+        getArtifact: async () => ({
+          status: 200,
+          data: { ...platformRecord(expected), size_in_bytes: archive.length },
+        }),
+        downloadArtifactArchive: download,
+        getWorkflowRunAttempt: async () => ({ status: 200, data: { id: 7001, run_attempt: 2 } }),
+      });
+      const command = {
+        operation: 'metadata' as const,
+        correlation_id: 'semantic',
+        name: expected.name,
+        object_id: expected.object_id,
+      };
+      try {
+        const from = vi.spyOn(Buffer, 'from');
+        let result;
+        let decoded;
+        try {
+          result = await operations.execute(
+            { ...command, maximum_bytes: String(maximum) },
+            new AbortController().signal,
+          );
+          decoded = from.mock.calls.some((args) => (args as unknown[])[1] === 'base64');
+        } finally {
+          from.mockRestore();
+        }
+        expect(result.failure).toBe(offset > 0 ? 'invalid' : 'none');
+        expect(decoded).toBe(offset <= 0);
+
+        // A wider successful read may populate the cache; a narrower reader still
+        // has to reject before cloning that cached encrypted record.
+        expect((await operations.execute(command, new AbortController().signal)).failure).toBe(
+          'none',
+        );
+        const copies = vi.spyOn(Buffer, 'from');
+        try {
+          const narrowed = await operations.execute(
+            { ...command, maximum_bytes: String(maximum) },
+            new AbortController().signal,
+          );
+          expect(narrowed.failure).toBe(offset > 0 ? 'invalid' : 'none');
+          if (offset > 0)
+            expect(
+              copies.mock.calls.some(
+                (args) => Buffer.isBuffer(args[0]) && args[0].length === encrypted.length,
+              ),
+            ).toBe(false);
+        } finally {
+          copies.mockRestore();
+        }
+      } finally {
+        await operations.dispose();
+      }
+    },
+  );
   it.each([0, 1])(
     'admits archive metadata only through its separate cap (offset %i)',
     async (extra) => {

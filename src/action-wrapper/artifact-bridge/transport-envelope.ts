@@ -6,6 +6,7 @@ import {
   ARTIFACT_BRIDGE_LIMITS,
   ARTIFACT_ENVELOPE_DISCRIMINATOR,
   ARTIFACT_ENVELOPE_ENTRY,
+  artifactReadLimits,
 } from './limits.js';
 import {
   ArtifactBridgeDeadlineError,
@@ -91,21 +92,23 @@ export async function readArtifactArchive(
   archive: Buffer,
   expectedArchiveDigest: string,
   budget: ArtifactBridgeOperationBudget,
+  maximumBytes: number = ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes,
 ): Promise<DecodedArtifactTransportEnvelope> {
   budget.throwIfExpired();
   if (!sha256(expectedArchiveDigest)) {
     throw new ArtifactTransportEnvelopeError();
   }
-  if (archive.length < 1 || archive.length > ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes) {
+  const limits = artifactReadLimits(maximumBytes);
+  if (archive.length < 1 || archive.length > limits.maximumArchiveBytes) {
     throw new ArtifactTransportEnvelopeError();
   }
   if (digestBytes(archive) !== expectedArchiveDigest) {
     throw new ArtifactTransportEnvelopeError();
   }
   budget.throwIfExpired();
-  const envelopeBytes = await extractOneBoundedEntry(archive, budget);
+  const envelopeBytes = await extractOneBoundedEntry(archive, budget, limits);
   try {
-    return decodeEnvelope(envelopeBytes, budget);
+    return decodeEnvelope(envelopeBytes, budget, limits);
   } finally {
     envelopeBytes.fill(0);
   }
@@ -118,6 +121,7 @@ export function digestBytes(bytes: Uint8Array): string {
 async function extractOneBoundedEntry(
   archive: Buffer,
   budget: ArtifactBridgeOperationBudget,
+  limits: ReturnType<typeof artifactReadLimits>,
 ): Promise<Buffer> {
   budget.throwIfExpired();
   const eocd = findEndOfCentralDirectory(archive);
@@ -150,8 +154,8 @@ async function extractOneBoundedEntry(
     centralEnd !== eocd ||
     ![0, 0x8, 0x800, 0x808].includes(flags) ||
     (method !== 0 && method !== 8) ||
-    uncompressedSize > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes ||
-    compressedSize > ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes ||
+    uncompressedSize > limits.maximumStagingFileBytes ||
+    compressedSize > limits.maximumArchiveBytes ||
     (method === 0 && compressedSize !== uncompressedSize) ||
     localOffset !== 0 ||
     localOffset + 30 > centralOffset ||
@@ -231,7 +235,7 @@ async function extractOneBoundedEntry(
     if (
       output.length !== uncompressedSize ||
       crc32(output, budget) !== expectedCrc ||
-      output.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes
+      output.length > limits.maximumStagingFileBytes
     ) {
       throw new ArtifactTransportEnvelopeError();
     }
@@ -245,6 +249,7 @@ async function extractOneBoundedEntry(
 function decodeEnvelope(
   bytes: Buffer,
   budget: ArtifactBridgeOperationBudget,
+  limits: ReturnType<typeof artifactReadLimits>,
 ): DecodedArtifactTransportEnvelope {
   budget.throwIfExpired();
   let parsed: unknown;
@@ -260,11 +265,9 @@ function decodeEnvelope(
   }
   if (!isExactEnvelope(parsed)) throw new ArtifactTransportEnvelopeError();
   const size = Number(parsed.encrypted_object_size);
+  if (size > limits.maximumEncryptedObjectBytes) throw new ArtifactTransportEnvelopeError();
   const encoded = parsed.encrypted_object_base64;
-  if (
-    encoded.length !== 4 * Math.ceil(size / 3) ||
-    encoded.length > ARTIFACT_BRIDGE_LIMITS.maximumBase64Bytes
-  ) {
+  if (encoded.length !== 4 * Math.ceil(size / 3) || encoded.length > limits.maximumBase64Bytes) {
     throw new ArtifactTransportEnvelopeError();
   }
   const padding = (3 - (size % 3)) % 3;
@@ -287,7 +290,7 @@ function decodeEnvelope(
     if (
       encryptedBytes.length !== size ||
       encryptedBytes.length < 1 ||
-      encryptedBytes.length > ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes ||
+      encryptedBytes.length > limits.maximumEncryptedObjectBytes ||
       encryptedBytes.toString('base64') !== encoded ||
       digestBytes(encryptedBytes) !== parsed.encrypted_object_digest
     ) {

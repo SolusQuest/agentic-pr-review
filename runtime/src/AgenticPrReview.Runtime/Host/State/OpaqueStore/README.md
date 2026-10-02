@@ -4,6 +4,8 @@ R7-C2 admits opaque synthetic objects independently of SESSION. `OpaqueStoreCapa
 
 Snapshot consumers retain independent admission: candidate envelopes remain 2 MiB, and transaction index envelopes remain bounded by 256 KiB plaintext plus 122 bytes of existing framing. Index metadata and authenticated accepted/staging candidate metadata are rejected before download when they exceed those bounds. Returned bodies are length-checked before hashing, decoding, or copying; predecessor index metadata uses the same index bound. `RestrictedStateSnapshotCapacityTests` covers neighboring sizes, authenticated malformed metadata, body-access probes, and admitted restore/envelope roundtrips.
 
+Consumer bounds also travel through metadata reads, because the GitHub adapter downloads and decodes a record to discover its metadata. Each read derives its own archive, JSON and base64 limits and checks cached records before cloning. Local list and metadata reads bound record allocation to the caller's payload allowance plus the existing 2 KiB header allowance, then reject an oversized embedded payload size before copying. Snapshot, Lineage and Locator readers supply their existing semantic bounds; generic opaque requests retain the expanded carrier allowance. Tests exercise these paths through the real C#-Node bridge and synthetic official services.
+
 ## Derivation
 
 All values below are bytes. E through C are future sizing allowances; O, J, and A are active transport admission limits.

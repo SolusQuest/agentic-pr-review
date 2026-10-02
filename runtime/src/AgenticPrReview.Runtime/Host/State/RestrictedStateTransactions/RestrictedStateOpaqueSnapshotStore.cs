@@ -425,7 +425,8 @@ internal class RestrictedStateOpaqueSnapshotStore
         var listed = await store.ListExactAsync(
                 new OpaqueStoreListRequest(
                     names.Index,
-                    MaximumIndexObjects),
+                    MaximumIndexObjects,
+                    RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
                 cancellationToken)
             .ConfigureAwait(false);
         if (!listed.Succeeded ||
@@ -447,7 +448,8 @@ internal class RestrictedStateOpaqueSnapshotStore
         foreach (var reference in listed.Objects)
         {
             var metadata = await store.ReadMetadataAsync(
-                    new OpaqueStoreMetadataRequest(reference),
+                    new OpaqueStoreMetadataRequest(reference,
+                        RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!metadata.Succeeded ||
@@ -814,14 +816,14 @@ internal class RestrictedStateOpaqueSnapshotStore
         var names = Names(access.Scope);
         var metadata = ImmutableArray.CreateBuilder<
             OpaqueStoreObjectMetadata>();
-        foreach (var (name, limit) in new[]
+        foreach (var (name, limit, maximumBytes) in new[]
         {
-            (names.Index, MaximumIndexObjects),
-            (names.Candidate, MaximumCandidateObjects),
+            (names.Index, MaximumIndexObjects, RestrictedStateTransactionIndexEnvelope.MaximumEnvelopeBytes),
+            (names.Candidate, MaximumCandidateObjects, AgentLimits.StateEnvelopeBytes),
         })
         {
             var listed = await store.ListExactAsync(
-                    new OpaqueStoreListRequest(name, limit),
+                    new OpaqueStoreListRequest(name, limit, maximumBytes),
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!listed.Succeeded ||
@@ -836,11 +838,12 @@ internal class RestrictedStateOpaqueSnapshotStore
             foreach (var reference in listed.Objects)
             {
                 var read = await store.ReadMetadataAsync(
-                        new OpaqueStoreMetadataRequest(reference),
+                        new OpaqueStoreMetadataRequest(reference, maximumBytes),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (!read.Succeeded ||
-                    read.Metadata!.Reference != reference)
+                    read.Metadata!.Reference != reference ||
+                    read.Metadata.Size > maximumBytes)
                 {
                     return RestrictedStateRawReadCore.Fail(
                         read.Succeeded

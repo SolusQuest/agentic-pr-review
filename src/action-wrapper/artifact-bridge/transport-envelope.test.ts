@@ -16,6 +16,29 @@ import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import { ArtifactBridgeDeadlineError, ArtifactBridgeOperationBudget } from './operation-budget.js';
 
 describe('private artifact transport envelope', () => {
+  it('rejects semantic expanded-entry overflow before inflate or JSON/base64 decode', async () => {
+    const encrypted = Buffer.alloc(4096, 1);
+    const envelope = encodeArtifactTransportEnvelope(
+      '7001',
+      '2',
+      encrypted,
+      digestBytes(encrypted),
+      testBudget(),
+    );
+    const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
+    const concat = vi.spyOn(Buffer, 'concat');
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      await expect(
+        readArtifactArchive(archive, digestBytes(archive), testBudget(), 1024),
+      ).rejects.toThrow(ArtifactTransportEnvelopeError);
+      expect(concat).not.toHaveBeenCalled();
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      concat.mockRestore();
+      parse.mockRestore();
+    }
+  });
   it('round-trips one fixed envelope through a bounded raw ZIP', async () => {
     const encrypted = Buffer.from([0, 7, 255, 0, 9]);
     const envelope = encodeArtifactTransportEnvelope(

@@ -1066,6 +1066,11 @@ public sealed class RestrictedStateStoreConformanceTests
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!OpaqueStoreValidation.IsValid(request) ||
+                (TryGet(request.Reference, out var bounded) && bounded.Metadata.Size > request.MaximumBytes))
+            {
+                return Task.FromResult(OpaqueStoreMetadataResult.Fail(OpaqueStoreFailure.Invalid));
+            }
             return Task.FromResult(TryGet(request.Reference, out var value)
                 ? new OpaqueStoreMetadataResult(
                     OpaqueStoreFailure.None,
@@ -1330,6 +1335,13 @@ internal static class RestrictedStateStoreConformanceHarness
                 CancellationToken.None);
             Assert.True(metadata.Succeeded);
             Assert.Equal(uploaded.Metadata, metadata.Metadata);
+
+            Assert.True((await store.ReadMetadataAsync(
+                new OpaqueStoreMetadataRequest(uploaded.Metadata.Reference, bytes.Length),
+                CancellationToken.None)).Succeeded);
+            Assert.False((await store.ReadMetadataAsync(
+                new OpaqueStoreMetadataRequest(uploaded.Metadata.Reference, bytes.Length - 1),
+                CancellationToken.None)).Succeeded);
 
             var download = await store.DownloadAsync(
                 new OpaqueStoreDownloadRequest(metadata.Metadata!, bytes.Length),

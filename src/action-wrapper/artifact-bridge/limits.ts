@@ -9,15 +9,9 @@ const recoveryRecordBytes = acceptanceRecoveryBytes + 64 * 1024;
 const targetEnvelopeBytes = recoveryRecordBytes + controlWrapperBytes;
 const anchorBytes = targetEnvelopeBytes + 2048;
 const maximumEncryptedObjectBytes = anchorBytes + controlWrapperBytes;
-const maximumBase64Bytes = 4 * Math.ceil(maximumEncryptedObjectBytes / 3);
-const maximumStagingFileBytes = maximumBase64Bytes + 290;
-const maximumArchiveBytes =
-  maximumStagingFileBytes +
-  Math.ceil(maximumStagingFileBytes / 4096) +
-  Math.ceil(maximumStagingFileBytes / 16384) +
-  Math.ceil(maximumStagingFileBytes / 33554432) +
-  13 +
-  158;
+const { maximumBase64Bytes, maximumStagingFileBytes, maximumArchiveBytes } = artifactReadLimits(
+  maximumEncryptedObjectBytes,
+);
 
 export const ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   maximumNameBytes: 256,
@@ -45,3 +39,27 @@ export const ARTIFACT_BRIDGE_LIMITS = Object.freeze({
 export const ARTIFACT_ENVELOPE_DISCRIMINATOR = 'apr.private-artifact-envelope.s2';
 
 export const ARTIFACT_ENVELOPE_ENTRY = 'artifact-envelope.json';
+
+export function artifactReadLimits(maximumBytes: number) {
+  if (
+    !Number.isSafeInteger(maximumBytes) ||
+    maximumBytes < 1 ||
+    maximumBytes > maximumEncryptedObjectBytes
+  ) {
+    throw new RangeError('artifact_read_limit_invalid');
+  }
+  const maximumBase64Bytes = 4 * Math.ceil(maximumBytes / 3);
+  const maximumStagingFileBytes = maximumBase64Bytes + 290;
+  return {
+    maximumEncryptedObjectBytes: maximumBytes,
+    maximumBase64Bytes,
+    maximumStagingFileBytes,
+    maximumArchiveBytes:
+      maximumStagingFileBytes +
+      Math.ceil(maximumStagingFileBytes / 4096) +
+      Math.ceil(maximumStagingFileBytes / 16384) +
+      Math.ceil(maximumStagingFileBytes / 33554432) +
+      13 +
+      158,
+  };
+}

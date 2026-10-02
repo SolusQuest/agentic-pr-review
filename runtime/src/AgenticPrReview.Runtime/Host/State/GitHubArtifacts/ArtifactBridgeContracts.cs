@@ -60,7 +60,8 @@ internal sealed record ArtifactBridgeMetadataCommandDocument(
     string Operation,
     string CorrelationId,
     string Name,
-    string ObjectId) : IArtifactBridgeCommandDocument
+    string ObjectId,
+    string MaximumBytes) : IArtifactBridgeCommandDocument
 {
     public override string ToString() => "[PRIVATE]";
 }

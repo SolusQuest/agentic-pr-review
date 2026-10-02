@@ -153,7 +153,8 @@ internal sealed class GitHubArtifactRestrictedStateStore
             "metadata",
             correlation,
             request.Reference.Name.Value,
-            request.Reference.ObjectId.Value);
+            request.Reference.ObjectId.Value,
+            Decimal(request.MaximumBytes));
         var exchange = await ExchangeReadAsync(
                 command,
                 logical.Token,
@@ -165,6 +166,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
             return OpaqueStoreMetadataResult.Fail(exchange.Failure);
         }
         return TryMetadata(exchange.Result, out var metadata) &&
+            metadata!.Size <= request.MaximumBytes &&
             metadata!.Reference == request.Reference
             ? new OpaqueStoreMetadataResult(
                 OpaqueStoreFailure.None,
