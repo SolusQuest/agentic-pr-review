@@ -62,6 +62,30 @@ public sealed class TrustedProofArchitectureTests
     }
 
     [Fact]
+    public void CurrentFlashGoldenPreservesAllHistoricalSemanticsExceptDerivedCommitments()
+    {
+        var fixtureRoot = Path.Join(FindRepositoryRoot(), "runtime", "tests", "fixtures", "action-host");
+        var historical = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(
+            Path.Join(fixtureRoot, "framework", "expected-evidence.json.golden")))!;
+        var current = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(
+            Path.Join(fixtureRoot, "r7-flash", "expected-evidence.json.golden")))!;
+        Assert.Equal("36e018647a775601a0c615de49ab14229397ccb8a17e217051f8108fca195a78",
+            historical["source_inventory_digest"]!.GetValue<string>());
+        Assert.Equal("210102c8524ef3c0d2325d09e6dcc66f416cdc7feb785c9ea2e72e9221788833",
+            current["source_inventory_digest"]!.GetValue<string>());
+        Assert.Equal("43e7e95ebd47ec75e377f1a72dcac108c4c0a255c556c701dd8d8618c3d27d5f",
+            historical["continuation"]!["state_identity_digest"]!.GetValue<string>());
+        Assert.Equal("cd65ca1767ee6134cbcf0be82b06923b7a19f64f4988e88762e3698075677370",
+            current["continuation"]!["state_identity_digest"]!.GetValue<string>());
+        foreach (var document in new[] { historical, current })
+        {
+            document.AsObject().Remove("source_inventory_digest");
+            document["continuation"]!.AsObject().Remove("state_identity_digest");
+        }
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(historical, current));
+    }
+
+    [Fact]
     public void CurrentHeadPayloadIsUnconditionallyV2WithCompiledIdentity()
     {
         var root = FindRepositoryRoot();

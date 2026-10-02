@@ -426,7 +426,7 @@
     "second_process_status": "reviewed",
     "successor_accepted": true,
     "reviewed_head_advanced": true,
-    "state_identity_digest": "43e7e95ebd47ec75e377f1a72dcac108c4c0a255c556c701dd8d8618c3d27d5f",
+    "state_identity_digest": "cd65ca1767ee6134cbcf0be82b06923b7a19f64f4988e88762e3698075677370",
     "sticky_lineage_digest": "7a56ff8b50792ba129927078ff20d09397dba4e73b123165772df1ccc1224051",
     "prior_marker_first_request_exact": true,
     "prior_marker_carried_without_reinjection": true,
