@@ -1034,7 +1034,7 @@ public sealed partial class R3LiveAgentApplicationTests
             ",\"arguments\":",
             JsonSerializer.Serialize(arguments),
             "}}]},\"finish_reason\":\"tool_calls\"}]," +
-            "\"model\":\"deepseek-v4-flash\",\"usage\":{" +
+            "\"model\":\"deepseek-flash\",\"usage\":{" +
             "\"prompt_tokens\":3,\"completion_tokens\":2," +
             "\"total_tokens\":5,\"prompt_cache_hit_tokens\":1," +
             "\"prompt_cache_miss_tokens\":2}}");

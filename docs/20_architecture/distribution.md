@@ -2,7 +2,7 @@
 
 The development head now contains the replacement nested Action metadata and reproducibly generated Node 24 wrapper for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: release assets, automatic payload download and accounting outputs are not implemented at this baseline. The approved [R7 target](../90_roadmap/r7-plan.md) adds public experimental distribution and bounded maintainer adoption; it excludes a root alias and defers formal public/default graduation.
 
-See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
+See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, [`deepseek-flash-identity.md`](./deepseek-flash-identity.md) for the selected-current R7 provider identity and state boundary, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
 
 ## Distribution Goals
 

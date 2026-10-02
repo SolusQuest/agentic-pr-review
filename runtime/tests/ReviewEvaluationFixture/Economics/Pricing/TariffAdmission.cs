@@ -44,7 +44,7 @@ internal sealed class AdmittedTariff
         else if (terms.ProviderId != DeepSeekAdapterContext.Provider)
             error = "r6_pricing_tariff_provider_unsupported";
         else if (terms.RequestedModel != DeepSeekAdapterContext.Model ||
-            terms.ResponseModel is not (null or DeepSeekAdapterContext.Model or "deepseek-flash"))
+            terms.ResponseModel is not (null or DeepSeekAdapterContext.Model))
             error = "r6_pricing_tariff_model_mismatch";
         else if (terms.PriceClass is not ("standard" or "peak" or "off_peak" or "unknown"))
             error = "r6_pricing_tariff_price_class_unsupported";

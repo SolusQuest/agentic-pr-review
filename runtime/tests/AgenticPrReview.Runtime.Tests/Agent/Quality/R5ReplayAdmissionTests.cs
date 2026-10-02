@@ -16,6 +16,91 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R5ReplayAdmissionTests
 {
+    [Theory]
+    [InlineData("replay")]
+    [InlineData("incremental")]
+    [InlineData("growth")]
+    public void CurrentSyntheticExecutionHasNewIdentityAndPreservesHistoricalBytes(string name)
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", name);
+        var originals = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, File.ReadAllBytes);
+        var captured = ReplayDirectory.Capture(root, CancellationToken.None);
+        Assert.Equal("deepseek-v4-flash", captured.Manifest.Configuration.ModelId);
+        var originalCorpus = AgentCanonical.HashDomain("apr.r5.replay.corpus", ReplayJson.Write(captured.Manifest));
+        var selected = ReplayAdmission.CurrentSyntheticManifest(captured.Manifest);
+        Assert.Equal("deepseek-flash", selected.Configuration.ModelId);
+        Assert.Equal("393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6",
+            selected.Configuration.AdapterId);
+        var expectedCorpus = AgentCanonical.HashDomain("apr.r5.replay.corpus", ReplayJson.Write(selected));
+        Assert.NotEqual(originalCorpus, expectedCorpus);
+        Assert.Equal(ReplayJson.Write(selected),
+            ReplayJson.Write(ReplayAdmission.CurrentSyntheticManifest(selected)));
+
+        var first = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(root).Fixture);
+        var second = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(root).Fixture);
+        Assert.Equal(expectedCorpus, first.CorpusSha256);
+        Assert.Equal(first.CorpusSha256, second.CorpusSha256);
+        for (var index = 0; index < first.Runs.Length; index++)
+        {
+            var run = first.Runs[index];
+            var trusted = run.CreateTrustedRequest("r5-replay-admission");
+            Assert.Equal(selected.Configuration.ModelId, trusted.ModelId);
+            Assert.Equal(selected.Configuration.AdapterId, trusted.AdapterId);
+            Assert.NotEqual(EvaluationAttempt.Hash("replay-provider-settings", "deepseek",
+                captured.Manifest.Configuration.ModelId, captured.Manifest.Configuration.AdapterId),
+                run.ProviderConfigurationSha256);
+            Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted with
+            {
+                ModelId = captured.Manifest.Configuration.ModelId,
+                AdapterId = captured.Manifest.Configuration.AdapterId,
+            }, null, out var former));
+            Assert.NotEqual(EvaluationAttempt.ConfigurationIdentity(former!.StablePlan,
+                new(run.Input.Id, "deterministic", EvaluationSource.Commit, EvaluationSource.Tree,
+                    EvaluationSource.Clean, EvaluationAttempt.Hash("replay-provider-settings", "deepseek",
+                        captured.Manifest.Configuration.ModelId, captured.Manifest.Configuration.AdapterId))),
+                run.ConfigurationSha256);
+            Assert.NotEqual(EvaluationCase.Admit(run.Expected.Input with { CorpusSha256 = originalCorpus })!.Sha256,
+                run.Expected.Sha256);
+            Assert.Equal(run.ConfigurationSha256, second.Runs[index].ConfigurationSha256);
+            Assert.Equal(run.Expected.Sha256, second.Runs[index].Expected.Sha256);
+        }
+        foreach (var original in originals) Assert.Equal(original.Value, File.ReadAllBytes(original.Key));
+    }
+
+    [Theory]
+    [InlineData("source")]
+    [InlineData("provider")]
+    [InlineData("model")]
+    [InlineData("adapter")]
+    [InlineData("model-space")]
+    [InlineData("model-case")]
+    [InlineData("adapter-case")]
+    [InlineData("former-8192")]
+    [InlineData("former-65536")]
+    public void SyntheticDerivationRequiresTheExactFormerDefaultTuple(string change)
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay");
+        var manifest = ReplayDirectory.Capture(root, CancellationToken.None).Manifest;
+        var changed = change == "source" ? manifest with { SourceKind = "other" } : manifest with
+        {
+            Configuration = change switch
+            {
+                "provider" => manifest.Configuration with { ProviderId = "other" },
+                "model" => manifest.Configuration with { ModelId = "deepseek-flash" },
+                "adapter" => manifest.Configuration with { AdapterId = DeepSeekAdapterContext.Adapter },
+                "model-space" => manifest.Configuration with { ModelId = "deepseek-v4-flash " },
+                "model-case" => manifest.Configuration with { ModelId = "DEEPSEEK-V4-FLASH" },
+                "adapter-case" => manifest.Configuration with { AdapterId = manifest.Configuration.AdapterId.ToUpperInvariant() },
+                "former-8192" => manifest.Configuration with { AdapterId = "d87f3f29cff8d5d3d276c9e3fa22cebf1f1291da89d03597b7a0ebde5cd9f42d" },
+                _ => manifest.Configuration with { AdapterId = "d0be64c5ac080a3b0308d40a2f1bf33bfa249651c063e37986679875d660093f" },
+            },
+        };
+        Assert.Same(changed, ReplayAdmission.CurrentSyntheticManifest(changed));
+        var seed = ReplayDirectory.Capture(Seed, CancellationToken.None).Manifest;
+        Assert.Same(seed, ReplayAdmission.CurrentSyntheticManifest(seed));
+    }
+
     private const string SourcePath = "src/Counter.cs";
     private const string Canary = "EXPECTATION_ONLY_CANARY";
     private static string Seed => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay-seed", "valid");

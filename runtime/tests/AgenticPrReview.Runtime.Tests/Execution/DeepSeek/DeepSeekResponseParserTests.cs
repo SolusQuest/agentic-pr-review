@@ -82,15 +82,13 @@ public sealed class DeepSeekResponseParserTests
     }
 
     [Fact]
-    public void AcceptsDocumentedFlashResponseAliasWithoutBroadeningModelAdmission()
+    public void AcceptsOnlyTheSelectedFlashResponseIdentity()
     {
         var original = Response();
         AssertSuccess(original);
-        AssertSuccess(original.Replace("deepseek-v4-flash", "deepseek-flash", StringComparison.Ordinal));
-        foreach (var unsupported in new[] { "deepseek-v4-pro", "deepseek-chat", "deepseek-flash-other", "DEEPSEEK-FLASH", " deepseek-flash" })
-            AssertInvalid(original.Replace("deepseek-v4-flash", unsupported, StringComparison.Ordinal));
-        // Alias admission must not bypass validation of usage or tool messages.
-        AssertInvalid(Response(usage: "{}").Replace("deepseek-v4-flash", "deepseek-flash", StringComparison.Ordinal));
+        foreach (var unsupported in new[] { "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro", "deepseek-pro", "deepseek-chat", "DeepSeek-V4.1-Flash", "deepseek-flash-other", "DEEPSEEK-FLASH", " deepseek-flash", "deepseek-flash " })
+            AssertInvalid(original.Replace("deepseek-flash", unsupported, StringComparison.Ordinal));
+        AssertInvalid(Response(usage: "{}"));
     }
 
     [Fact]
@@ -135,7 +133,7 @@ public sealed class DeepSeekResponseParserTests
         Assert.Equal(5, response.Usage.OutputTokens);
         Assert.Equal(2, response.Usage.CacheReadInputTokens);
         Assert.Equal(5, response.Usage.UncachedInputTokens);
-        Assert.Equal("deepseek-v4-flash", response.ResponseModel);
+        Assert.Equal("deepseek-flash", response.ResponseModel);
         Assert.Equal(
             ["call_same", "call_other", "call_same"],
             response.Calls.Select(call => call.Id));
@@ -209,7 +207,7 @@ public sealed class DeepSeekResponseParserTests
             "\"prompt_cache_hit_tokens\":0," +
             "\"prompt_tokens\":0}," +
             "\"system_fingerprint\":null," +
-            "\"model\":\"deepseek-v4-flash\"," +
+            "\"model\":\"deepseek-flash\"," +
             "\"choices\":[{\"finish_reason\":\"tool_calls\"," +
             "\"logprobs\":null,\"message\":{" +
             "\"tool_calls\":[{\"function\":{" +
@@ -345,7 +343,7 @@ public sealed class DeepSeekResponseParserTests
             Response(choices: "[0]"),
             Response(choices: $"[{validChoice},{validChoice}]"),
             Response().Replace(
-                "\"deepseek-v4-flash\"",
+                "\"deepseek-flash\"",
                 "\"wrong-model\"",
                 StringComparison.Ordinal),
             Response(choice: Choice(Message(), index: "1")),
@@ -667,9 +665,9 @@ public sealed class DeepSeekResponseParserTests
         var invalid = new[]
         {
             baseJson.Replace(
-                "\"model\":\"deepseek-v4-flash\"",
-                "\"\\u006dodel\":\"deepseek-v4-flash\"," +
-                "\"model\":\"deepseek-v4-flash\"",
+                "\"model\":\"deepseek-flash\"",
+                "\"\\u006dodel\":\"deepseek-flash\"," +
+                "\"model\":\"deepseek-flash\"",
                 StringComparison.Ordinal),
             baseJson.Replace(
                 "\"index\":0",
@@ -719,7 +717,7 @@ public sealed class DeepSeekResponseParserTests
                 "",
                 StringComparison.Ordinal),
             baseJson.Replace(
-                ",\"model\":\"deepseek-v4-flash\"",
+                ",\"model\":\"deepseek-flash\"",
                 "",
                 StringComparison.Ordinal),
             baseJson[..baseJson.LastIndexOf(",\"usage\"", StringComparison.Ordinal)] + "}",
@@ -790,7 +788,7 @@ public sealed class DeepSeekResponseParserTests
             Response(choices: "null"),
             Response(choices: "[null]"),
             baseJson.Replace(
-                "\"model\":\"deepseek-v4-flash\"",
+                "\"model\":\"deepseek-flash\"",
                 "\"model\":1",
                 StringComparison.Ordinal),
             Response(usage: "null"),
@@ -915,7 +913,7 @@ public sealed class DeepSeekResponseParserTests
         string rootSuffix = "") =>
         "{\"choices\":" +
         (choices ?? $"[{choice ?? Choice(Message())}]") +
-        ",\"model\":\"deepseek-v4-flash\",\"usage\":" +
+        ",\"model\":\"deepseek-flash\",\"usage\":" +
         (usage ?? DefaultUsage()) +
         rootSuffix +
         "}";

@@ -23,7 +23,7 @@ public sealed class R6ResponseAdmissionTests
             "\"content\":\"\",\"reasoning_content\":\"reasoning\",\"tool_calls\":[{" +
             "\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_files\"," +
             "\"arguments\":" + JsonSerializer.Serialize(arguments) +
-            "}}]},\"finish_reason\":\"tool_calls\"}],\"model\":\"deepseek-v4-flash\"," +
+            "}}]},\"finish_reason\":\"tool_calls\"}],\"model\":\"deepseek-flash\"," +
             "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5," +
             "\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}";
         var response = DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw));
@@ -62,7 +62,7 @@ public sealed class R6ResponseAdmissionTests
     [Fact]
     public async Task SuccessfulTransportWithInvalidUsageKeepsUnknownAccountingAndSafeReason()
     {
-        var raw = "{\"choices\":[{}],\"model\":\"deepseek-v4-flash\"," +
+        var raw = "{\"choices\":[{}],\"model\":\"deepseek-flash\"," +
             "\"usage\":{\"" + Canary + "\":1}}";
         var transport = new FixedTransport(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw)));
         var accounting = Accounting();
@@ -104,7 +104,7 @@ public sealed class R6ResponseAdmissionTests
         string finishReason, string expectedCategory)
     {
         var raw = "{\"choices\":[{\"index\":0,\"message\":{},\"finish_reason\":\"" +
-            finishReason + "\"}],\"model\":\"deepseek-v4-flash\",\"usage\":" +
+            finishReason + "\"}],\"model\":\"deepseek-flash\",\"usage\":" +
             "{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5," +
             "\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}";
         var transport = new FixedTransport(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw)));

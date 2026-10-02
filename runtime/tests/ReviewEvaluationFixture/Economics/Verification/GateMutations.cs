@@ -38,7 +38,7 @@ internal static class GateMutations
             case "renamed-case": cases[0]!["id"] = "not-required"; Rebind(cases[0]!); break;
             case "reordered-case":
                 var first = cases[0]!.DeepClone(); cases[0] = cases[1]!.DeepClone(); cases[1] = first; break;
-            case "substituted-case": cases[1]!["evidence"] = cases[0]!["evidence"]!.DeepClone(); break;
+            case "substituted-case": Case("t1-alias")["evidence"] = Case("t1-zero")["evidence"]!.DeepClone(); break;
             case "wrong-source": json["selection"]!["source_commit"] = Hash('f', 40); break;
             case "wrong-tree": json["selection"]!["source_tree"] = Hash('f', 40); break;
             case "wrong-clean": json["selection"]!["source_clean"] = false; break;

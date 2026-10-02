@@ -243,7 +243,7 @@ internal sealed class UsageJournalCollector(UsageJournalExpectation expected)
             UsageJournalCache? cache = null;
             if (usage.ProviderUsage is { } observed && observed.ProviderId == DeepSeekAdapterContext.Provider &&
                 observed.RequestedModel == DeepSeekRequestWriter.Model &&
-                observed.ResponseModel is DeepSeekRequestWriter.Model or "deepseek-flash" &&
+                observed.ResponseModel is DeepSeekRequestWriter.Model &&
                 observed.CacheReadInputTokens >= 0 && observed.CacheReadInputTokens <= usage.InputTokens &&
                 observed.UncachedInputTokens == usage.InputTokens - observed.CacheReadInputTokens)
                 cache = new(observed.ResponseModel, observed.CacheReadInputTokens, observed.UncachedInputTokens);

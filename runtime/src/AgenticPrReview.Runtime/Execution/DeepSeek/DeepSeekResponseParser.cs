@@ -101,7 +101,7 @@ internal sealed class DeepSeekParsedToolResponse
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(reasoning);
         ArgumentNullException.ThrowIfNull(usage);
-        if (responseModel is not (DeepSeekRequestWriter.Model or "deepseek-flash") ||
+        if (responseModel != DeepSeekRequestWriter.Model ||
             calls.IsDefaultOrEmpty ||
             calls.Length > AgentLimits.ToolCallsPerResponse ||
             calls.Any(call => call is null) ||
@@ -314,10 +314,8 @@ internal static class DeepSeekResponseParser
     {
         if (root.ValueKind != JsonValueKind.Object ||
             !HasOnlyProperties(root, RootProperties) ||
-            // DeepSeek serves the retained v4-flash request alias as flash.
-            // Admit only that documented response alias, never arbitrary models.
-            (!TryReadExactString(root, "model", DeepSeekRequestWriter.Model) &&
-                !TryReadExactString(root, "model", "deepseek-flash")) ||
+            // Former request aliases do not authorize former response identities.
+            !TryReadExactString(root, "model", DeepSeekRequestWriter.Model) ||
             !ValidateOptionalRootFields(root) ||
             !root.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array ||
