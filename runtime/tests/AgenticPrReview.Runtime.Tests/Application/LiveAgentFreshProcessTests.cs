@@ -484,6 +484,9 @@ public sealed class LiveAgentFreshProcessTests
     [InlineData("model")]
     [InlineData("adapter")]
     [InlineData("candidate-adapter")]
+    [InlineData("former-model")]
+    [InlineData("former-adapter")]
+    [InlineData("former-tuple")]
     [InlineData("policy")]
     [InlineData("limits")]
     [InlineData("candidate-limits")]
@@ -529,6 +532,25 @@ public sealed class LiveAgentFreshProcessTests
             "candidate-adapter" => document with
             {
                 Stable = document.Stable with { AdapterId = DeepSeekAdapterContext.CandidateAdapter },
+            },
+            "former-model" => document with
+            {
+                Stable = document.Stable with { ModelId = "deepseek-v4-flash" },
+            },
+            "former-adapter" => document with
+            {
+                Stable = document.Stable with
+                {
+                    AdapterId = "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+                },
+            },
+            "former-tuple" => document with
+            {
+                Stable = document.Stable with
+                {
+                    ModelId = "deepseek-v4-flash",
+                    AdapterId = "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+                },
             },
             "policy" => document with
             {
@@ -588,7 +610,8 @@ public sealed class LiveAgentFreshProcessTests
 
         Assert.Equal(1, files.AuthorizationReads);
         Assert.Equal(0, files.AuthorizedLayoutCalls);
-        if (mismatch is "provider" or "model" or "adapter" or "candidate-adapter")
+        if (mismatch is "provider" or "model" or "adapter" or "candidate-adapter" or
+            "former-model" or "former-adapter" or "former-tuple")
         {
             Assert.Equal(10, result.ExitCode);
             Assert.Equal(

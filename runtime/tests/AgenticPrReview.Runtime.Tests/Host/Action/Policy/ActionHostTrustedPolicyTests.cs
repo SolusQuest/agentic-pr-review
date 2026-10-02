@@ -10,6 +10,7 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using Xunit;
@@ -48,6 +49,7 @@ public sealed class ActionHostTrustedPolicyTests
             policy.InlineMinSeverity);
         Assert.Equal(DeepSeekAdapterContext.Provider, policy.ProviderId);
         Assert.Equal(DeepSeekAdapterContext.Model, policy.ModelId);
+        Assert.Equal("deepseek-flash", policy.ModelId);
         Assert.Equal(DeepSeekAdapterContext.Adapter, policy.AdapterId);
         Assert.NotEqual(DeepSeekAdapterContext.CandidateAdapter, policy.AdapterId);
         Assert.NotEqual(DeepSeekAdapterContext.Output65536Adapter, policy.AdapterId);
@@ -70,7 +72,7 @@ public sealed class ActionHostTrustedPolicyTests
         Assert.Equal(policy.PayloadSha256,
             policy.PayloadContinuitySha256);
         Assert.Equal(
-            "9956efa3f0f4fd0099b1a05e8cdb2141edfec2e9fb761185f5e05554b113e744",
+            "53076f1bc42c679852fd4c9cc8ff7b6dcfec324c436069c241604fb4687dba90",
             policy.PolicySha256);
         Assert.All(transport.Calls, call => Assert.DoesNotContain(
             ActionHostAuthorizationScenario.HeadSha,
@@ -78,6 +80,26 @@ public sealed class ActionHostTrustedPolicyTests
             StringComparison.Ordinal));
         Assert.Contains(transport.Calls, call =>
             call == "commit:" + request.WorkflowCommitSha);
+
+        Assert.NotEqual(
+            "9956efa3f0f4fd0099b1a05e8cdb2141edfec2e9fb761185f5e05554b113e744",
+            policy.PolicySha256);
+        var scope = new LineageBaseScope("owner/repository", "workflow:review.yml",
+            "source:trusted", 335, policy.ProviderId, policy.ModelId, policy.AdapterId,
+            policy.ConfigSha256, policy.InstructionsSha256, policy.ToolsetSha256,
+            policy.LimitsSha256, "payload-335");
+        Assert.True(LineageBaseScopeCodec.TryDigest(scope, out var currentDigest));
+        foreach (var former in new[]
+        {
+            scope with { Model = "deepseek-v4-flash" },
+            scope with { Adapter = "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502" },
+            scope with { Model = "deepseek-v4-flash",
+                Adapter = "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502" },
+        })
+        {
+            Assert.True(LineageBaseScopeCodec.TryDigest(former, out var formerDigest));
+            Assert.NotEqual(currentDigest, formerDigest);
+        }
     }
 
     [Fact]

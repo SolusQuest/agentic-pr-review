@@ -29,7 +29,6 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
     private long _cacheReadInput;
     private long _uncachedInput;
     private bool _cacheOverflow;
-    private bool _responseV4Flash;
     private bool _responseFlash;
 
     internal long Sends { get; private set; }
@@ -61,8 +60,7 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
                 _cacheOverflow || _cacheMeasured == 0 ? null : _cacheReadInput,
                 _cacheOverflow || _cacheMeasured == 0 ? null : _uncachedInput,
                 "not_applicable", DeepSeekRequestWriter.Model,
-                [.. (_responseV4Flash ? new[] { DeepSeekRequestWriter.Model } : []),
-                 .. (_responseFlash ? new[] { "deepseek-flash" } : [])],
+                _responseFlash ? [DeepSeekRequestWriter.Model] : [],
                 "unavailable");
         }
     }
@@ -178,7 +176,7 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
         if (observed is null ||
             observed.ProviderId != DeepSeekAdapterContext.Provider ||
             observed.RequestedModel != DeepSeekRequestWriter.Model ||
-            observed.ResponseModel is not (DeepSeekRequestWriter.Model or "deepseek-flash") ||
+            observed.ResponseModel != DeepSeekRequestWriter.Model ||
             observed.CacheReadInputTokens < 0 || observed.UncachedInputTokens < 0 ||
             observed.CacheReadInputTokens > usage.InputTokens ||
             observed.UncachedInputTokens != usage.InputTokens - observed.CacheReadInputTokens)
@@ -187,8 +185,7 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
             return;
         }
         _cacheMeasured++;
-        _responseV4Flash |= observed.ResponseModel == DeepSeekRequestWriter.Model;
-        _responseFlash |= observed.ResponseModel == "deepseek-flash";
+        _responseFlash = true;
         if (_cacheOverflow) return;
         try
         {

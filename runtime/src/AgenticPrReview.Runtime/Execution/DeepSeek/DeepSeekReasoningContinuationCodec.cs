@@ -10,7 +10,7 @@ internal sealed class DeepSeekReasoningContinuationCodec :
     IAgentContinuationStructurePolicy
 {
     internal const string Id = "deepseek-reasoning-content";
-    internal const string Discriminator = "deepseek-v4-flash-thinking-v2";
+    internal const string Discriminator = "deepseek-flash-thinking-v1";
     internal const string EncodingName = "utf8";
     internal const string FramingName =
         "deepseek.reasoning_content.utf8.v1";

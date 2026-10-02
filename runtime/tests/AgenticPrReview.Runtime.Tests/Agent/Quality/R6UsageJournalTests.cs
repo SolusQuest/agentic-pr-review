@@ -615,6 +615,9 @@ public sealed class R6UsageJournalTests
             j => j["plan"]!["corpus_sha256"] = new string('0', 64),
             j => j["plan"]!["schedule"]![0] = "cs-defect",
             j => j["plan"]!["provider"]!["model_id"] = Canary,
+            j => j["plan"]!["provider"]!["model_id"] = "deepseek-v4-flash",
+            j => j["plan"]!["provider"]!["adapter_id"] =
+                "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
             j => j["plan"]!["provider"]!["adapter_id"] = new string('0', 64),
             j => j["plan"]!["provider"]!["configuration_sha256"] = new string('0', 64),
             j => j["plan"]!["bounds"]!["max_model_calls"] = 2049,
@@ -1039,7 +1042,7 @@ public sealed class R6UsageJournalTests
                 var observedInput = last ? input : earlierInput;
                 var observedOutput = last ? output : earlierOutput;
                 call.Returned(new(observedInput, observedOutput,
-                    new("deepseek", "deepseek-v4-flash", "deepseek-flash", observedInput, 0)));
+                    new("deepseek", "deepseek-flash", "deepseek-flash", observedInput, 0)));
             }
             var failed = index == 255 && violation;
             attempt.AgentFinished(!failed);
@@ -1117,6 +1120,7 @@ public sealed class R6UsageJournalTests
             j => j["calls"]![0]!["usage"]!["input_tokens"] = long.MaxValue,
             j => j["calls"]![0]!["usage"]!["combined_tokens"] = 0,
             j => j["calls"]![0]!["usage"]!["cache"]!["response_model"] = Canary,
+            j => j["calls"]![0]!["usage"]!["cache"]!["response_model"] = "deepseek-v4-flash",
             j => j["calls"]![0]!["usage"]!["cache"]!["cache_read_input_tokens"] = 8,
             j => j["calls"]![0]!["usage"]!["cache"]!["uncached_input_tokens"] = -1,
             j => j["totals"]!["known_input_tokens"] = 0,

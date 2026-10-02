@@ -247,7 +247,7 @@ public sealed class R6PricingTests
     }
 
     [Fact]
-    public void ResponseModelRestrictionWithholdsOnlyUnprovenOrMismatchedCalls()
+    public void SelectedResponseModelRestrictionPricesOnlyProvenCalls()
     {
         var input = Input();
         input = input with { Terms = input.Terms with { ResponseModel = "deepseek-flash" } };
@@ -255,13 +255,13 @@ public sealed class R6PricingTests
         foreach (var view in new[] { report.Document.ObservedUsage, report.Document.SameTokenAllMiss })
         {
             Assert.Equal(1, view.Coverage.ModelUnknownSends);
-            Assert.Equal(1, view.Coverage.ModelMismatchSends);
-            Assert.Equal(1, view.Coverage.PricedOutputSends);
-            Assert.Equal(0.2m, view.KnownOutputAmount);
+            Assert.Equal(0, view.Coverage.ModelMismatchSends);
+            Assert.Equal(2, view.Coverage.PricedOutputSends);
+            Assert.Equal(0.4m, view.KnownOutputAmount);
             Assert.Null(view.TotalAmount);
             Assert.Equal("amount_incomplete", view.TotalAmountPerInputToken.Availability);
         }
-        Assert.Equal(0.42m, report.Document.ObservedUsage.KnownTotalSubtotal);
+        Assert.Equal(0.84m, report.Document.ObservedUsage.KnownTotalSubtotal);
         Assert.Equal("not_exposed", report.Document.BackendSnapshotStatus);
     }
 
@@ -335,6 +335,8 @@ public sealed class R6PricingTests
     [InlineData("provider", "r6_pricing_tariff_provider_unsupported")]
     [InlineData("requested_model", "r6_pricing_tariff_model_mismatch")]
     [InlineData("response_model", "r6_pricing_tariff_model_mismatch")]
+    [InlineData("former_requested_model", "r6_pricing_tariff_model_mismatch")]
+    [InlineData("former_response_model", "r6_pricing_tariff_model_mismatch")]
     [InlineData("formula", "r6_pricing_tariff_formula_unsupported")]
     [InlineData("price_class", "r6_pricing_tariff_price_class_unsupported")]
     [InlineData("rounding", "r6_pricing_tariff_arithmetic_unsupported")]
@@ -351,6 +353,8 @@ public sealed class R6PricingTests
             "provider" => terms with { ProviderId = "other-provider" },
             "requested_model" => terms with { RequestedModel = "other-model" },
             "response_model" => terms with { ResponseModel = "unobserved-backend" },
+            "former_requested_model" => terms with { RequestedModel = "deepseek-v4-flash" },
+            "former_response_model" => terms with { ResponseModel = "deepseek-v4-flash" },
             "formula" => terms with { Formula = "tiered_with_cache_write" },
             "price_class" => terms with { PriceClass = "automatic" },
             "rounding" => terms with { Arithmetic = terms.Arithmetic with { Rounding = "away_from_zero" } },

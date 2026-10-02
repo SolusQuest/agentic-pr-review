@@ -65,7 +65,7 @@ public sealed class R6ComparisonTests
 
     [Theory]
     [InlineData("configuration", "evaluation_configuration_mismatch")]
-    [InlineData("model", "response_model_mismatch")]
+    [InlineData("model", "response_model_unbound")]
     [InlineData("tariff", "tariff_mismatch")]
     [InlineData("currency", "tariff_mismatch")]
     [InlineData("population", "scheduled_population_mismatch")]
@@ -76,7 +76,7 @@ public sealed class R6ComparisonTests
     {
         var right = Make("right", scheduled: change == "population" ? 2 : 1,
             completed: change == "population" ? 2 : 1, config: change == "configuration" ? 'd' : 'e',
-            model: change == "model" ? "deepseek-flash" : DeepSeekAdapterContext.Model,
+            model: change == "model" ? "deepseek-v4-flash" : DeepSeekAdapterContext.Model,
             missRate: change == "tariff" ? 9 : 4, currency: change == "currency" ? "CNY" : "USD",
             corpus: change == "corpus" ? '9' : 'c', caseHash: change == "case" ? '8' : 'd',
             maxSeconds: change == "bounds" ? 121 : 120);

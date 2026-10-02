@@ -64,8 +64,12 @@ public sealed class R6VerifierCoverageTests
             var cny = cases.Single(item => item.Id == "t3-cny");
             var substituted = GateCase.Create(usd.Id, usd.Selection, GateContracts.Bytes(cny.Evidence));
             Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(substituted, selection));
-            var alias = GateCase.Create("t1-partition", "10/4/6/4", GateContracts.Bytes(cases.Single(item => item.Id == "t1-alias").Evidence));
-            Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(alias, selection));
+            // The retained probe ID now carries the same selected response
+            // identity. A former response spelling must still be rejected.
+            var response = JsonNode.Parse(GateContracts.Bytes(cases.Single(item => item.Id == "t1-alias").Evidence))!;
+            response["calls"]![0]!["usage"]!["cache"]!["response_model"] = "deepseek-v4-flash";
+            var formerResponse = GateCase.Create("t1-partition", "10/4/6/4", Encoding.UTF8.GetBytes(response.ToJsonString()));
+            Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(formerResponse, selection));
             // Both round to 2. Equal output cannot substitute a different
             // independently selected numerator into the low-half probe.
             var sameAmount = GateCase.Create("t3-half-even-low", "3/2",

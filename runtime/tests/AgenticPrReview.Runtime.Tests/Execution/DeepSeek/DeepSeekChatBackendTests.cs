@@ -15,18 +15,25 @@ namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 
 public sealed class DeepSeekChatBackendTests
 {
+    private static readonly string[] FormerAdapters =
+    [
+        "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+        "d87f3f29cff8d5d3d276c9e3fa22cebf1f1291da89d03597b7a0ebde5cd9f42d",
+        "d0be64c5ac080a3b0308d40a2f1bf33bfa249651c063e37986679875d660093f",
+    ];
+
     [Fact]
     public void AdapterIdentityIsTheExactFrozenDescriptor()
     {
         var bytes = Encoding.UTF8.GetBytes(
             DeepSeekAdapterContext.AdapterDescriptor);
 
-        Assert.Equal(531, bytes.Length);
+        Assert.Equal(525, bytes.Length);
         Assert.Equal(
-            "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+            "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6",
             DeepSeekAdapterContext.Adapter);
         Assert.Equal(
-            "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
+            "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6",
             Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
         Assert.DoesNotContain("build", DeepSeekAdapterContext.AdapterDescriptor);
         Assert.False(bytes.AsSpan().StartsWith(
@@ -36,9 +43,28 @@ public sealed class DeepSeekChatBackendTests
     }
 
     [Fact]
+    public async Task CurrentAndFormerStablePlansHaveDistinctCacheIdentity()
+    {
+        var fixture = await BuildDeepSeekSessionAsync();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(
+            fixture.Trusted, null, out var materialized));
+        var current = materialized!.StablePlan;
+        var currentHash = AgentCanonical.StablePlanSha256(current);
+        foreach (var adapter in FormerAdapters)
+        {
+            Assert.NotEqual(currentHash, AgentCanonical.StablePlanSha256(
+                current with { AdapterId = adapter }));
+            Assert.NotEqual(currentHash, AgentCanonical.StablePlanSha256(
+                current with { ModelId = "deepseek-v4-flash", AdapterId = adapter }));
+        }
+        Assert.NotEqual(currentHash, AgentCanonical.StablePlanSha256(
+            current with { ModelId = "deepseek-v4-flash" }));
+    }
+
+    [Fact]
     public void CandidateAdapterHasDistinctExactDescriptorAndClosedLimitAuthority()
     {
-        Assert.Equal("d87f3f29cff8d5d3d276c9e3fa22cebf1f1291da89d03597b7a0ebde5cd9f42d",
+        Assert.Equal("60f69693c3050fdd92a65130bacb635ddd6b90f1a9c8b954231e24af59bfa8a7",
             DeepSeekAdapterContext.CandidateAdapter);
         Assert.Equal(DeepSeekAdapterContext.AdapterDescriptor.Replace(
                 "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal),
@@ -60,7 +86,7 @@ public sealed class DeepSeekChatBackendTests
     [Fact]
     public void Output65536AdapterHasExactDescriptorAndSeparateLimitAuthority()
     {
-        Assert.Equal("d0be64c5ac080a3b0308d40a2f1bf33bfa249651c063e37986679875d660093f",
+        Assert.Equal("c32d99201a21254fe4399cee64e73fa6da77183a82479151e64682dfce3a554f",
             DeepSeekAdapterContext.Output65536Adapter);
         Assert.Equal(DeepSeekAdapterContext.AdapterDescriptor.Replace(
                 "\"max_tokens\":4096,", "\"max_tokens\":65536,", StringComparison.Ordinal),
@@ -234,8 +260,8 @@ public sealed class DeepSeekChatBackendTests
             });
         Assert.Equal(3, response.Usage!.InputTokens);
         Assert.Equal(2, response.Usage.OutputTokens);
-        Assert.Equal(new ProjectProviderUsage("deepseek", "deepseek-v4-flash",
-            "deepseek-v4-flash", 1, 2), response.Usage.ProviderUsage);
+        Assert.Equal(new ProjectProviderUsage("deepseek", "deepseek-flash",
+            "deepseek-flash", 1, 2), response.Usage.ProviderUsage);
         var continuation = Assert.IsType<ProjectContinuation>(
             response.Continuation);
         Assert.Equal(DeepSeekAdapterContext.Provider, continuation.ProviderId);
@@ -413,6 +439,18 @@ public sealed class DeepSeekChatBackendTests
     public async Task SessionScopeAndContinuationMutationsFailClosed()
     {
         var fixture = await BuildDeepSeekSessionAsync();
+        foreach (var adapter in FormerAdapters)
+        {
+            Assert.Equal(AgentSessionCodes.ScopeMismatch, Restore(fixture,
+                trusted: fixture.Trusted with { AdapterId = adapter }).Code);
+            Assert.Equal(AgentSessionCodes.ScopeMismatch, Restore(fixture,
+                trusted: fixture.Trusted with
+                {
+                    ModelId = "deepseek-v4-flash", AdapterId = adapter,
+                }).Code);
+        }
+        Assert.Equal(AgentSessionCodes.ScopeMismatch, Restore(fixture,
+            trusted: fixture.Trusted with { ModelId = "deepseek-v4-flash" }).Code);
         foreach (var entry in new[]
                  {
                      (fixture.Trusted with { ProviderId = "other" }, "session_0"),
@@ -488,8 +526,20 @@ public sealed class DeepSeekChatBackendTests
                     item.PayloadBytes.AsSpan()),
             }).ToImmutableArray(),
         };
+        const string formerDiscriminator = "deepseek-v4-flash-thinking-v2";
+        var formerContinuation = run.Continuation with
+        {
+            CodecDiscriminator = formerDiscriminator,
+            Items = run.Continuation.Items.Select(item => item with
+            {
+                PayloadSha256 = AgentSessionCodec.ContinuationPayloadSha256(
+                    run.Continuation.CodecId, formerDiscriminator,
+                    item.ItemId, item.Encoding, item.PayloadBytes.AsSpan()),
+            }).ToImmutableArray(),
+        };
         AgentSessionDocument[] mutations =
         [
+            ReplaceRun(document, run with { Continuation = formerContinuation }),
             ReplaceRun(document, run with
             {
                 Continuation = run.Continuation with
@@ -773,6 +823,25 @@ public sealed class DeepSeekChatBackendTests
                 },
             }),
         };
+
+        cases.Add((new(DeepSeekAdapterContext.Provider, "deepseek-v4-flash",
+            DeepSeekAdapterContext.Adapter, "session_0"), valid));
+        cases.Add((Context(), valid with
+        {
+            Continuation = valid.Continuation! with { ModelId = "deepseek-v4-flash" },
+        }));
+        foreach (var adapter in FormerAdapters)
+        {
+            Assert.False(DeepSeekAdapterContext.TryResolveProfile(adapter, out _));
+            foreach (var model in new[] { DeepSeekAdapterContext.Model, "deepseek-v4-flash" })
+            {
+                cases.Add((new(DeepSeekAdapterContext.Provider, model, adapter, "session_0"), valid));
+                cases.Add((Context(), valid with
+                {
+                    Continuation = valid.Continuation! with { ModelId = model, AdapterId = adapter },
+                }));
+            }
+        }
 
         foreach (var entry in cases)
         {
@@ -1234,7 +1303,7 @@ public sealed class DeepSeekChatBackendTests
             ",\"tool_calls\":[",
             callJson,
             "]},\"finish_reason\":\"tool_calls\"}]," +
-            "\"model\":\"deepseek-v4-flash\",\"usage\":{" +
+            "\"model\":\"deepseek-flash\",\"usage\":{" +
             "\"prompt_tokens\":3,\"completion_tokens\":2," +
             "\"total_tokens\":5,\"prompt_cache_hit_tokens\":1," +
             "\"prompt_cache_miss_tokens\":2}}");
@@ -1245,7 +1314,7 @@ public sealed class DeepSeekChatBackendTests
         "{\"choices\":[{\"index\":0,\"message\":{\"role\":" +
         "\"assistant\",\"content\":null,\"reasoning_content\":null," +
         "\"tool_calls\":null},\"finish_reason\":\"stop\"}]," +
-        "\"model\":\"deepseek-v4-flash\",\"usage\":{" +
+        "\"model\":\"deepseek-flash\",\"usage\":{" +
         "\"prompt_tokens\":3,\"completion_tokens\":2," +
         "\"total_tokens\":5,\"prompt_cache_hit_tokens\":1," +
         "\"prompt_cache_miss_tokens\":2}}");

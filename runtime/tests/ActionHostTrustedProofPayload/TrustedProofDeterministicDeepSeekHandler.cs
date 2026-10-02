@@ -374,7 +374,7 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(
             writer.WriteString("finish_reason", "tool_calls");
             writer.WriteEndObject();
             writer.WriteEndArray();
-            writer.WriteString("model", "deepseek-v4-flash");
+            writer.WriteString("model", "deepseek-flash");
             writer.WriteStartObject("usage");
             writer.WriteNumber("prompt_tokens", 3);
             writer.WriteNumber("completion_tokens", 2);
