@@ -1,10 +1,10 @@
 # Agent Runtime Architecture Rebaseline
 
-Status: selected target architecture; R1-R4 are complete. The R4 handoff records W13/E1 migration closure and E2 Native AOT verification; [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) records the trusted two-run proof. R5 delivered evaluation engineering with inconclusive live model quality; R6 exit and R7 distribution remain evidence-gated.
+Status: selected target architecture; R1-R4 are complete. The R4 handoff records W13/E1 migration closure and E2 Native AOT verification; [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) records the trusted two-run proof. R5 delivered evaluation engineering with inconclusive earlier live model quality. [R6 final acceptance](https://github.com/SolusQuest/agentic-pr-review/issues/271#issuecomment-5928401721) accepts bounded closeout while preserving native-history equivalence, live-prefix association, formal-regression, billing and default-capacity unknowns. The [R7 plan](../90_roadmap/r7-plan.md) activates experimental distribution/adoption targets through the C1 docs merge, not implemented features or formal public/default graduation.
 
 Drafted: 2026-07-24.
 
-Last revised: 2026-09-24.
+Last revised: 2026-10-02.
 
 Rebaseline activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative reset activation point. The R4 contract was activated by the merged docs gate; [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) records the completed W13/E1 and E2 evidence.
 
@@ -117,9 +117,9 @@ The product is not a general coding agent, code editor, shell agent, hosted serv
 
 ## Current And Target Architecture
 
-### Current Implementation
+### Pre-Rebaseline Implementation Record
 
-The current implementation includes:
+This is the original rebaseline inventory, not the current R4/R6 implementation. The live baseline is recorded in [project context](../00_project/project-context.md#current-position) and the [R7 current/target table](../90_roadmap/r7-plan.md#authority-and-activation). At the original rebaseline, the implementation included:
 
 - a TypeScript GitHub Action host and publisher;
 - the legacy Claude Code CLI provider path;
@@ -130,7 +130,7 @@ The current implementation includes:
 - Native AOT validation;
 - extensive synthetic contract fixtures.
 
-These surfaces remain current implementation truth until their replacement lands. The rebaseline does not authorize deleting safeguards before equivalent target-path validation exists.
+These surfaces were implementation truth until their replacements landed; the closed R3/R4 handoffs record their later dispositions. This historical inventory does not restore removed surfaces or authorize deleting safeguards before equivalent target-path validation exists.
 
 ### Target Runtime Topology
 
@@ -527,7 +527,7 @@ R2 negative fixtures must prove that:
 - a tool result containing system/developer-looking prompt injection round-trips and remains tool-result/data content in the reconstructed provider request;
 - otherwise authenticated current-format state whose repository-derived or tool-result content is relabeled or reframed as a system, developer, policy, tool-definition, provider-configuration, endpoint-selection, secret-channel, or other control record is rejected before provider invocation.
 
-An adapter may discard reasoning state only where the provider contract explicitly makes it unnecessary for later continuation and fixtures prove that omission preserves valid behavior. Otherwise, the safe default is to preserve the complete returned continuation record. Provider or model changes that make the record incompatible cause an observable session bootstrap; cross-provider reasoning portability is not a goal.
+An adapter may discard reasoning state only where the provider contract explicitly makes it unnecessary for later continuation and fixtures prove that omission preserves valid behavior. Otherwise, the safe default is to preserve the complete returned continuation record. Provider/model changes that make selected-current continuation incompatible fail closed; recovery requires explicit authorized reset where applicable. True absence or Host-classified historical non-current state may bootstrap observably. Cross-provider reasoning portability is not a goal.
 
 Provider continuation state is restricted session data. Readable reasoning may contain source excerpts or sensitive inferences and receives at least the same protection as observed private-repository content. Among retained, logged, diagnostic, artifact, and published channels, only the bounded restricted session artifact may contain the payload. Validated in-memory session state and the outbound provider request required for replay may contain it transiently. It must not be committed as plaintext to Git objects, repository history, repository-visible state refs, normal public artifacts, logs, traces, annotations, step summaries, Action outputs, PR comments, or normal diagnostics. Those channels may record only bounded metadata such as kind, byte count, hash, and whether replay validation succeeded. Raw HTTP response bodies, headers, unrelated provider fields, and transport framing are not retained merely to satisfy continuation equality.
 
@@ -623,7 +623,7 @@ Mid-run checkpoints require a future explicit design covering replay, duplicated
 
 ### Growth And Compaction
 
-The first implementation uses a hard bounded session. When the bound is reached, it starts a new safe session or performs an explicitly observable reset.
+The original vertical-slice proposal used a hard bounded session and contemplated a fresh session/reset at the bound. The approved [R7 target](../90_roadmap/r7-plan.md#capacity-and-state-closure) instead preserves capacity exhaustion as incomplete, with no successful successor state or normal no-findings publication. Recovery requires explicit authorized reset where applicable; no automatic reset/compaction is allowed. This target does not claim the larger R7 capacity is already implemented.
 
 It must not silently summarize, truncate, or reorder prior messages. Hidden compaction changes review semantics and cache prefixes and would make correctness difficult to evaluate.
 
@@ -686,6 +686,8 @@ Evidence binding provides:
 - less reliance on model-authored evidence prose.
 
 ## Initial Agent Limits
+
+This table records the original vertical-slice hypotheses, not the approved R7 production profile or a statement of all current limits. The [R7 defaults and capacity contract](../90_roadmap/r7-plan.md#provider-defaults-and-trusted-configuration) supersedes these starting recommendations for R7 implementation; its larger values remain unimplemented targets at the pinned baseline.
 
 The first vertical slice should centralize provisional limits in one internal `AgentLimits` policy rather than expose each value as a public Action contract.
 
@@ -847,6 +849,8 @@ Do not build a full legacy reader, converter, dual writer, or migration matrix s
 
 ## Public Action Surface
 
+The R4 paragraphs below record the current seven-input/no-output proof contract. The approved [R7 surface](../90_roadmap/r7-plan.md#product-and-authority-boundaries) retains those inputs and adds bounded trusted `review` configuration plus matching accounting outputs. Model/endpoint/secret/structural-limit controls remain product-owned. These additions require their owning implementation leaves; this activation changes no parser or metadata.
+
 The post-reset Action API should describe user intent and stable review outcomes, not internal runtime generations.
 
 The current mixed Action surface is retired rather than incrementally preserved. The target should use a small direct-input layer plus one trusted repository configuration file.
@@ -967,7 +971,7 @@ An old schema or fixture does not survive merely because an existing test import
 
 ### Milestone Migration And Retirement Schedule
 
-Rows R0-R4 are the accepted migration schedule; their verbs record the plan used at those phases and are not instructions to recreate completed leaves. R4 completed W13/E1 migration closure, E2 proof, and the trusted two-run proof. R5's quality result remains inconclusive, while R6 exit and R7 distribution remain evidence-driven phases.
+Rows R0-R4 are the accepted migration schedule; their verbs record the plan used at those phases and are not instructions to recreate completed leaves. R4 completed W13/E1 migration closure, E2 proof, and the trusted two-run proof. R5's earlier live quality result remains inconclusive. R6 bounded closeout is accepted by the final #271 assessment; R7 distribution/adoption follows the approved [R7 plan](../90_roadmap/r7-plan.md), with independent qualification and execution authority.
 
 | Phase | When migration or retirement analysis begins                  | Approximate work                                                                                                                                                                                                                                                                                                             | Phase retirement gate                                                                                                                                                      |
 | ----- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1183,28 +1187,33 @@ Gate:
 - quality and safety pass independently of cache outcomes;
 - sustained prefix instability blocks promotion.
 
-### R7: Distribution And Default Graduation
+### R7: Versioned Experimental Distribution And Maintainer Adoption
+
+The normative [R7 plan](../90_roadmap/r7-plan.md) supersedes older forward-looking R7 projections and records the approved master decision digest and exact design baseline. Its targets become implementation authority only after the coordinated C1 docs merge. Current R4/R6 runtime facts and historical evidence remain intact.
 
 Deliver:
 
-- thin bundled Node.js wrapper;
-- one pinned Native AOT C# application payload;
-- release manifest, checksums, exact automatic Action-to-payload selection, and release-asset download behavior;
-- compatibility and state-reset notes;
-- evidence-based default-provider and runtime decision.
+- existing nested Node 24 wrapper and one pinned `linux-x64` Native AOT executable for GitHub-hosted `ubuntu-24.04`;
+- public, immutable `-internal.N` experimental assets, exact reviewed source/builder/archive/Action mapping, checksums and provenance;
+- practical defaults, bounded trusted configuration, capacity closure, physical-attempt accounting, usage stopping thresholds, shared deadlines and finite retries;
+- matching Host-approved summary/outputs, SDK-free trusted templates and explicit state reset/upgrade notes;
+- exact-byte qualification and separately authorized public-test/public-maintainer/private-maintainer adoption.
 
 Gate:
 
-- downstream runners do not require the .NET SDK;
-- checksum mismatch and implicit `latest` selection fail closed;
-- the published payload executes representative Host, Agent, provider, tool, and publisher paths;
-- quality, safety, resumability, operational, and cache-economics thresholds pass.
+- one public experimental prerelease downloads without SDK or latest selection; wrong identity/checksum fails closed;
+- capacities/budgets/retries and output parity are implemented and tested without hiding unknown usage;
+- original candidate bytes execute production Host/Agent/fake-provider/tools/publisher and continuation/reset/refusal paths;
+- trusted templates preserve credentials, encrypted state and stale-head/incomplete-result publication safety;
+- bounded adoption evidence and operating instructions are accepted, limitations remain explicit and the maintainer separately authorizes closeout.
+
+Formal public/default graduation requires a later explicit maintainer initiation. No second provider/platform, root alias, fork/draft support or automatic reset/compaction is introduced. R6's accepted bounded record is retained with its unknowns; no new cache-hit, billing or formal-regression gate is inherited. Release, deployment, paid calls, merge and closure have separate authority.
 
 ## Roadmap Governance Guardrails
 
 1. Every product milestone must improve or validate a real end-to-end review scenario.
 2. Without an identified consumer, do not introduce a compatibility matrix.
-3. Before 1.0, incompatible persisted state normally causes an observable bootstrap rather than migration.
+3. Before 1.0, true absence or Host-classified historical non-current state may bootstrap observably; selected-current incompatibility fails closed and requires explicit authorized reset where applicable, not automatic migration.
 4. A provider, prompt, policy, tool, or cache contract has one authoritative implementation and identity path.
 5. The new development head has at most one product execution path; fake providers remain test facilities.
 6. Before adding a contract, identify the independent release or durable persistence boundary it crosses.
@@ -1255,7 +1264,7 @@ Gate:
 - prompt-injection-like repository and tool-result content remains data/tool-result content in the reconstructed provider request;
 - a prior-only high-entropy synthetic fact is absent from fresh input, repository tool results, and policy but appears in the validated second response;
 - the second outbound request contains prior logical records, value-exact opaque payloads, and validated structured provider fields in adapter-required positions;
-- incompatible provider/model/policy/toolset state resets observably;
+- selected-current incompatible provider/model/policy/toolset state fails closed; recovery uses explicit authorized reset where applicable, while absence or Host-classified historical non-current state may bootstrap observably;
 - corrupt, missing, oversized, or unsafe state follows the documented bootstrap/failure policy;
 - stale concurrent writers cannot replace newer accepted state;
 - plaintext reasoning, tool results, and provider continuation material never enter Git objects, repository-visible refs, or normal public artifacts;
@@ -1297,9 +1306,11 @@ The R3 initial live Agent profile requires:
 
 Schema conformance alone is not agent-quality evidence.
 
-## Open Questions
+## Original Spike Questions And Later Decisions
 
-These questions do not block the first spike unless stated:
+The following records the original spike questions. For R7, the [approved plan](../90_roadmap/r7-plan.md) settles the initial `linux-x64`/`ubuntu-24.04` target, single executable/provider and serial tools, and target SESSION/envelope capacities with explicit failure/reset behavior. These are planned implementation values, not current runtime support. Second providers/platforms, workers and mid-run checkpoints remain outside R7; this activation decides no future expansion.
+
+These original questions did not block the first spike unless stated:
 
 1. Should the Node wrapper permanently own Actions artifact transport, or should a later C# artifact client replace it?
 2. What exact durable state byte cap best fits representative private and public repositories?

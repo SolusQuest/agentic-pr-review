@@ -47,7 +47,7 @@ The new critical path prioritizes the product vertical slice:
 2. prove a C# agent loop, tools, session round-trip, Native AOT, and model-visible secret boundary;
 3. prove a live thinking-enabled tool-calling review and exact continuation across fresh executable invocations;
 4. migrate stable GitHub host responsibilities to `.NET ActionHost`, restore a thin Action, and prove continuation across independent workflow runs;
-5. evaluate quality first, then cache economics and release graduation.
+5. evaluate quality first, then cache economics and versioned experimental distribution with bounded maintainer adoption; formal graduation remains a later maintainer decision.
 
 Sunk implementation cost does not determine which boundaries remain in the target architecture.
 
@@ -93,7 +93,7 @@ The near-term roadmap does not include:
 
 The current implementation on `main` includes:
 
-- nested seven-input/no-output Action metadata and a generated Node 24 wrapper for repository-controlled prepared-payload proof, without downstream support, release delivery, or a public default before R7;
+- nested seven-input/no-output Action metadata and a generated Node 24 wrapper for repository-controlled prepared-payload proof, without downstream support, release delivery or accounting outputs; R7 targets experimental distribution, not formal default graduation;
 - no Claude Code CLI, legacy TypeScript coordinator, or superseded single-request C# product route;
 - one project-minimal C# chat seam and bounded multi-turn Agent with six read-only repository tools;
 - validated tool arguments/results, canonical SESSION history, grounded structured findings, and must-find/must-not-find quality evaluation;
@@ -102,7 +102,7 @@ The current implementation on `main` includes:
 - framework-dependent and Linux x64 Native AOT product validation;
 - a closed TypeScript migration record: R4-W3 through W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families after mapped C# evidence or reviewed-obsolete dispositions passed. No current TypeScript state reader, publisher, business protocol adapter, or compatibility route remains. Direct-runtime schemas and fixtures remain C#-owned, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
-R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path now exist for repository-controlled prepared-payload proof. W13/E1 [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175), E2 [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179), and the maintainer-authorized trusted two-run proof [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) are completed R4 evidence. Supported release payload delivery and the public default remain R7 decisions.
+R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path now exist for repository-controlled prepared-payload proof. W13/E1 [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175), E2 [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179), and the maintainer-authorized trusted two-run proof [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) are completed R4 evidence. The approved [R7 plan](r7-plan.md) selects experimental release delivery and bounded maintainer adoption. Formal public/default graduation requires a later explicit maintainer initiation.
 
 ## Historical Milestones
 
@@ -422,30 +422,33 @@ Exit criteria:
 - sustained prefix instability blocks promotion;
 - cost regression is evaluated only on comparable complete runs.
 
-The [R6 issue graph](https://github.com/SolusQuest/agentic-pr-review/issues/267) and deterministic economics gate are delivered. Separately authorized observations recorded one unknown-cost send, an incomplete 23-stage repeat, and a later successful two-stage restored continuation on a corrected source. The [R6 economics conclusion](r6-economics-results.md) records an evidence-insufficient exit disposition: no comparable complete cost pair, full representative live history or independently established model quality. R7 refinement may use those bounded results, while release and default promotion remain separate decisions. After their R0 supersession, issue #54 and unmerged PR #74 remain historical inputs only; do not reopen or move their existing design unchanged into R6.
+R6 bounded engineering/evaluation closeout is accepted by the [final #271 assessment](https://github.com/SolusQuest/agentic-pr-review/issues/271#issuecomment-5928401721) after PR #320. Complete descriptive A/B populations, independently AI-adjudicated bounded V5 quality/safety and H reduced-capacity reset evidence address the earlier principal gaps. The historical [insufficient-evidence conclusion](r6-economics-results.md) remains unchanged. Native-history equivalence, live segmented-prefix association, formal regression, actual billing and default-capacity adequacy remain unknown or inconclusive; neither general quality nor cache savings/default graduation is established. R7 retains those limitations without automatically inheriting new mandatory gates. After their R0 supersession, issue #54 and unmerged PR #74 remain historical inputs only; do not reopen or move their existing design unchanged into R6.
 
-### R7: Distribution And Default Graduation
+### R7: Versioned Experimental Distribution And Maintainer Adoption
 
-Goal: publish a pinned, verifiable runtime and make an evidence-based default decision.
+Goal: deliver a publicly downloadable, pinned experimental prerelease and bounded maintainer adoption in public, private and test repositories. Formal public/default graduation requires a later explicit maintainer initiation after actual use.
+
+The normative [R7 plan](r7-plan.md) activates the approved master decision digest and pinned baseline through the C1 docs merge, before dependent implementation. Its defaults/configuration, attempt accounting/retries, capacity, outputs, release identities and evidence requirements are targets, not claims of current runtime behavior.
 
 In scope:
 
-- thin bundled Node.js wrapper;
-- one `linux-x64` Native AOT C# application;
-- payload manifest and checksums;
-- exact automatic Action/payload version mapping and release-asset download;
-- compatibility and state-reset notes;
-- default provider/runtime graduation thresholds;
-- additional platforms only when demanded.
+- existing nested bundled Node 24 Action and one `linux-x64` Native AOT executable for GitHub-hosted `ubuntu-24.04`;
+- practical review budgets, complete capacity bounds, finite provider retries and unknown-preserving accounting;
+- matching Host-approved summary/outputs and trusted SDK-free templates;
+- exact reviewed Action-to-payload mapping, manifest/checksums, producer provenance and release-owned download;
+- immutable `-internal.N` public prereleases with distinct payload-source and consumer-Action tags;
+- explicit reset/upgrade notes, exact-byte qualification and separately authorized bounded adoption.
 
 Exit criteria:
 
-- downstream runner needs no .NET SDK;
-- checksum mismatch fails closed;
-- no implicit `latest` download;
-- published payload executes Host, Agent, fake-provider, tool, and publisher smoke paths;
-- quality, safety, resumability, operational, and cache-economics gates pass;
-- the public Action inputs describe the project-owned architecture rather than migration scaffolding.
+- one exact public experimental prerelease is downloadable without downstream SDK or implicit `latest`;
+- wrong identity/checksum fails closed and original candidate bytes pass production Host/Agent/fake-provider/tool/publisher and continuation/reset/refusal qualification;
+- budgets/capacities/retries and summary/output parity are implemented and tested;
+- SDK-free templates preserve credentials, encrypted state, stale-head and incomplete-result publication safety;
+- all three adoption campaigns produce accepted scoped evidence and usable instructions;
+- limitations stay explicit and the maintainer separately authorizes closeout; release/R7 completion does not trigger formal graduation.
+
+No second provider/platform, root alias, fork/draft support, automatic reset/compaction or legacy compatibility matrix is added. The issue graph grants no release, deployment, paid-call, merge or closure authority.
 
 ## Issue And Milestone Policy
 
