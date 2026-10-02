@@ -41,7 +41,7 @@ internal static class OpaqueStoreLimits
     internal const int MaximumIdentityBytes = 256;
     internal const int MaximumCorrelationBytes = 256;
     internal const int MaximumObjects = 256;
-    internal const int MaximumObjectBytes = 2 * 1024 * 1024;
+    internal const int MaximumObjectBytes = OpaqueStoreCapacity.MaximumObjectBytes;
 }
 
 internal enum OpaqueStoreFailure

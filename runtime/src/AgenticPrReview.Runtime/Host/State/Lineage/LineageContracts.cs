@@ -37,14 +37,21 @@ internal static class LineageFormat
     internal const int MaximumEvidenceObjects = MaximumScopedObjects;
     internal const long MaximumJavaScriptInteger = 9_007_199_254_740_991;
 
+    internal static int MaximumPayloadBytesForClass(StateObjectClass objectClass) =>
+        objectClass is StateObjectClass.Candidate or StateObjectClass.Acceptance
+            ? MaximumReaderPayloadBytes
+            : MaximumPayloadBytes;
+
+    internal static int MaximumEnvelopeBytesForClass(StateObjectClass objectClass) =>
+        Math.Min(MaximumEnvelopeBytes,
+            MaximumPayloadBytesForClass(objectClass) + MaximumHeaderBytes +
+            OpaqueStoreCapacity.ControlFramingBytes);
+
     internal static bool IsPayloadLengthAllowed(
         StateObjectClass objectClass,
         int payloadLength) =>
         payloadLength >= 0 &&
-        payloadLength <= (objectClass is
-            StateObjectClass.Candidate or StateObjectClass.Acceptance
-                ? MaximumReaderPayloadBytes
-                : MaximumPayloadBytes);
+        payloadLength <= MaximumPayloadBytesForClass(objectClass);
 }
 
 internal static class LineageCodes

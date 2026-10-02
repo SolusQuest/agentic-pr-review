@@ -114,6 +114,12 @@ internal sealed class ScopedStateInventory
                             DiagnosticTerminal(metadata.Failure));
                     }
 
+                    if (metadata.Metadata.Size >
+                        LineageFormat.MaximumEnvelopeBytesForClass(objectClass))
+                    {
+                        return ScopedStateInventoryResult.Fail(LineageCodes.Unavailable);
+                    }
+
                     references.Add((objectClass, metadata.Metadata));
                     if (references.Count > LineageFormat.MaximumScopedObjects)
                     {
@@ -135,7 +141,7 @@ internal sealed class ScopedStateInventory
                 var download = await store.DownloadAsync(
                         new OpaqueStoreDownloadRequest(
                             item.Metadata,
-                            LineageFormat.MaximumEnvelopeBytes),
+                            LineageFormat.MaximumEnvelopeBytesForClass(item.ObjectClass)),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (!download.Succeeded || download.Metadata != item.Metadata)

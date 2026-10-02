@@ -11,7 +11,7 @@ import { createArtifactActionsRestClient } from './actions-rest-client.js';
 import { ArtifactCacheLedger } from './artifact-cache-ledger.js';
 import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
 import { digestBytes, encodeArtifactTransportEnvelope } from './transport-envelope.js';
-import { ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
+import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import { ArtifactBridgeOperationBudget } from './operation-budget.js';
 import {
   ArtifactRestAttemptDeadlineError,
@@ -538,6 +538,86 @@ describe('artifact-specific producing attempt authority', () => {
 });
 
 describe('verified envelope ownership', () => {
+  it.each([0, 1])(
+    'admits archive metadata only through its separate cap (offset %i)',
+    async (extra) => {
+      const download = vi.fn(async () => ({ status: 200, data: Buffer.alloc(0) }));
+      const operations = await createOperations({
+        getArtifact: async () => ({
+          status: 200,
+          data: {
+            id: 42,
+            name: physicalArtifactName('opaque-state', 'a'.repeat(64)),
+            size_in_bytes: ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes + extra,
+            expired: false,
+            expires_at: '2030-01-01T00:00:00Z',
+            digest: `sha256:${'b'.repeat(64)}`,
+            workflow_run: { id: 7001 },
+          },
+        }),
+        downloadArtifactArchive: download,
+      });
+      try {
+        const result = await operations.execute(
+          {
+            operation: 'metadata',
+            correlation_id: 'archive-cap',
+            name: 'opaque-state',
+            object_id: '42',
+          },
+          new AbortController().signal,
+        );
+        expect(result.failure).toBe(extra === 0 ? 'digest_mismatch' : 'invalid');
+        expect(download).toHaveBeenCalledTimes(extra === 0 ? 1 : 0);
+      } finally {
+        await operations.dispose();
+      }
+    },
+  );
+
+  it('reserves cache capacity and wipes the evicted maximum record before cloning its successor', async () => {
+    const operations = await createOperations({});
+    const internal = operations as unknown as {
+      verifiedRecords: { store: (platform: unknown, record: unknown) => void };
+      cacheLedger: ArtifactCacheLedger;
+    };
+    const bytes = Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes, 0xa5);
+    const platform = {
+      name: 'opaque',
+      id: '1',
+      physicalName: 'physical',
+      archiveSize: 1,
+      archiveDigest: 'a'.repeat(64),
+      expiresAtUnixSeconds: 1,
+      expired: false,
+      producingRunId: '1',
+    };
+    const original = Buffer.from.bind(Buffer);
+    let firstCopy: Buffer | undefined;
+    let clones = 0;
+    const from = vi.spyOn(Buffer, 'from').mockImplementation((value) => {
+      if (value === bytes) {
+        if (firstCopy) expect(firstCopy.every((byte) => byte === 0)).toBe(true);
+        const copy = original(value);
+        firstCopy ??= copy;
+        clones++;
+        return copy;
+      }
+      return original(value);
+    });
+    try {
+      internal.verifiedRecords.store(platform, { metadata: {}, bytes });
+      internal.verifiedRecords.store({ ...platform, id: '2' }, { metadata: {}, bytes });
+      expect(clones).toBe(2);
+      internal.cacheLedger.dispose();
+      internal.verifiedRecords.store({ ...platform, id: '3' }, { metadata: {}, bytes });
+      expect(clones).toBe(2);
+    } finally {
+      from.mockRestore();
+      await operations.dispose();
+    }
+  });
+
   it.each(['run-attempt verification', 'cache store', 'cache copy'] as const)(
     'zeroes decoded ciphertext when %s throws',
     async (failurePoint) => {
@@ -1631,293 +1711,299 @@ describe('official artifact lifecycle', () => {
     expect(invalidations).toEqual([{ owner: 'owner', repo: 'repository', artifact_id: 42 }]);
   });
 
-  it('uploads, verifies, downloads, reads back, and authorizes exact deletion', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'apr-lifecycle-test-'));
-    roots.push(root);
-    const staging = await ArtifactBridgeStaging.create(root);
-    const writeDestination = staging.writeDestination.bind(staging);
-    let callerRecordBytes: Buffer | undefined;
-    let uploadSourceBytes: Buffer | undefined;
-    let uploadEnvelopeBytes: Buffer | undefined;
-    const readSource = staging.readSource.bind(staging);
-    const writeUploadEnvelope = staging.writeUploadEnvelope.bind(staging);
-    vi.spyOn(staging, 'readSource').mockImplementation(async (relative, budget) => {
-      const bytes = await readSource(relative, budget);
-      uploadSourceBytes = bytes;
-      return bytes;
-    });
-    vi.spyOn(staging, 'writeUploadEnvelope').mockImplementation(async (relative, bytes, budget) => {
-      uploadEnvelopeBytes = bytes;
-      return await writeUploadEnvelope(relative, bytes, budget);
-    });
-    vi.spyOn(staging, 'writeDestination').mockImplementation(
-      async (relativePath, bytes, budget) => {
-        callerRecordBytes = bytes;
-        await writeDestination(relativePath, bytes, budget);
-      },
-    );
-    const sourceDirectory = path.join(root, 'source');
-    const destinationDirectory = path.join(root, 'destination');
-    await mkdir(sourceDirectory, { mode: 0o700 });
-    await mkdir(destinationDirectory, { mode: 0o700 });
-    const encrypted = Buffer.from('opaque-encrypted-state');
-    await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
-    await writeFile(path.join(sourceDirectory, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
-    await writeFile(path.join(destinationDirectory, 'object.bin'), Buffer.alloc(0));
+  it.each([22, ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes])(
+    'uploads, verifies, downloads, reads back, and authorizes exact deletion for %i bytes',
+    async (size) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'apr-lifecycle-test-'));
+      roots.push(root);
+      const staging = await ArtifactBridgeStaging.create(root);
+      const writeDestination = staging.writeDestination.bind(staging);
+      let callerRecordBytes: Buffer | undefined;
+      let uploadSourceBytes: Buffer | undefined;
+      let uploadEnvelopeBytes: Buffer | undefined;
+      const readSource = staging.readSource.bind(staging);
+      const writeUploadEnvelope = staging.writeUploadEnvelope.bind(staging);
+      vi.spyOn(staging, 'readSource').mockImplementation(async (relative, budget) => {
+        const bytes = await readSource(relative, budget);
+        uploadSourceBytes = bytes;
+        return bytes;
+      });
+      vi.spyOn(staging, 'writeUploadEnvelope').mockImplementation(
+        async (relative, bytes, budget) => {
+          uploadEnvelopeBytes = bytes;
+          return await writeUploadEnvelope(relative, bytes, budget);
+        },
+      );
+      vi.spyOn(staging, 'writeDestination').mockImplementation(
+        async (relativePath, bytes, budget) => {
+          callerRecordBytes = bytes;
+          await writeDestination(relativePath, bytes, budget);
+        },
+      );
+      const sourceDirectory = path.join(root, 'source');
+      const destinationDirectory = path.join(root, 'destination');
+      await mkdir(sourceDirectory, { mode: 0o700 });
+      await mkdir(destinationDirectory, { mode: 0o700 });
+      const encrypted = Buffer.alloc(size, 0xa5);
+      await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
+      await writeFile(path.join(sourceDirectory, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
+      await writeFile(path.join(destinationDirectory, 'object.bin'), Buffer.alloc(0));
 
-    const now = Date.parse('2029-01-01T00:00:00Z');
-    const minimumExpiry = Math.floor(now / 1000) + 86_401;
-    const expiresAt = minimumExpiry + 86400;
-    let nextId = 42;
-    let stored:
-      | {
-          readonly id: number;
-          readonly name: string;
-          readonly archive: Buffer;
-          readonly archiveDigest: string;
-        }
-      | undefined;
-    let deleted = false;
-    let expired = false;
-    let downloadCalls = 0;
-    let getArtifactCalls = 0;
-    let deleteCalls = 0;
-    const conditionalCacheInvalidations: Array<{
-      readonly owner: string;
-      readonly repo: string;
-      readonly name: string;
-      readonly artifact_id?: number;
-    }> = [];
+      const now = Date.parse('2029-01-01T00:00:00Z');
+      const minimumExpiry = Math.floor(now / 1000) + 86_401;
+      const expiresAt = minimumExpiry + 86400;
+      let nextId = 42;
+      let stored:
+        | {
+            readonly id: number;
+            readonly name: string;
+            readonly archive: Buffer;
+            readonly archiveDigest: string;
+          }
+        | undefined;
+      let deleted = false;
+      let expired = false;
+      let downloadCalls = 0;
+      let getArtifactCalls = 0;
+      let deleteCalls = 0;
+      const conditionalCacheInvalidations: Array<{
+        readonly owner: string;
+        readonly repo: string;
+        readonly name: string;
+        readonly artifact_id?: number;
+      }> = [];
 
-    const artifactClient: ArtifactClient = {
-      uploadArtifact: async (name, files, operationRoot, options) => {
-        expect(operationRoot).toBe(sourceDirectory);
-        expect(files).toHaveLength(1);
-        expect(options?.compressionLevel).toBe(0);
-        expect(options?.retentionDays).toBe(2);
-        const archive = createTestZip([
-          {
-            name: ARTIFACT_ENVELOPE_ENTRY,
-            data: await readFile(files[0]!),
-          },
-        ]);
-        stored = {
-          id: nextId++,
-          name,
-          archive,
-          archiveDigest: digestBytes(archive),
-        };
-        deleted = false;
-        return {
-          id: stored.id,
-          size: archive.length,
-          digest: stored.archiveDigest,
-        };
-      },
-      downloadArtifact: async () => {
-        throw new Error('unexpected package download');
-      },
-      listArtifacts: async () => {
-        throw new Error('unexpected artifact-client list');
-      },
-      getArtifact: async () => {
-        throw new Error('unexpected artifact-client get');
-      },
-      deleteArtifact: async () => {
-        throw new Error('unexpected artifact-client delete');
-      },
-    };
-    const actions: ArtifactActionsRestClient = {
-      invalidateArtifactMutation: (input) => {
-        conditionalCacheInvalidations.push(input);
-      },
-      listArtifactsForRepo: async () => {
-        throw new Error('unexpected repository list');
-      },
-      getArtifact: async (input) => {
-        getArtifactCalls += 1;
-        if (deleted || !stored) {
-          throw Object.assign(new Error('synthetic absence'), { status: 404 });
-        }
-        expect(input.artifact_id).toBe(stored.id);
-        return {
-          status: 200,
-          data: {
+      const artifactClient: ArtifactClient = {
+        uploadArtifact: async (name, files, operationRoot, options) => {
+          expect(operationRoot).toBe(sourceDirectory);
+          expect(files).toHaveLength(1);
+          expect(options?.compressionLevel).toBe(0);
+          expect(options?.retentionDays).toBe(2);
+          const archive = createTestZip([
+            {
+              name: ARTIFACT_ENVELOPE_ENTRY,
+              data: await readFile(files[0]!),
+            },
+          ]);
+          stored = {
+            id: nextId++,
+            name,
+            archive,
+            archiveDigest: digestBytes(archive),
+          };
+          deleted = false;
+          return {
             id: stored.id,
-            name: stored.name,
-            size_in_bytes: stored.archive.length,
-            expired,
-            expires_at: new Date(expiresAt * 1000).toISOString(),
-            digest: `sha256:${stored.archiveDigest}`,
-            workflow_run: { id: 7001 },
-          },
-        };
-      },
-      downloadArtifactArchive: async (input) => {
-        downloadCalls += 1;
-        expect(input.artifact_id).toBe(stored?.id);
-        if (!stored) throw new Error('missing synthetic artifact');
-        return { status: 200, data: stored.archive };
-      },
-      getWorkflowRunAttempt: async (input) => ({
-        status: 200,
-        data: { id: input.run_id, run_attempt: input.attempt_number },
-      }),
-      deleteArtifact: async (input, _signal, _latestAttemptStartAt, onDispatched) => {
-        deleteCalls += 1;
-        expect(input.artifact_id).toBe(stored?.id);
-        onDispatched?.();
-        deleted = true;
-        return { status: 204, data: undefined };
-      },
-    };
-    const operations = new OfficialArtifactOperations({
-      owner: 'owner',
-      repository: 'repository',
-      currentRunId: '7001',
-      currentRunAttempt: '2',
-      artifactClient,
-      actions,
-      staging,
-      monotonicNow: () => 0,
-      utcNow: () => now,
-    });
-    const signal = new AbortController().signal;
-    const uploadCommand = {
-      operation: 'upload_immutable' as const,
-      correlation_id: 'upload-lifecycle',
-      name: 'opaque-state',
-      source_relative_path: 'source/object.bin',
-      encrypted_object_digest: digestBytes(encrypted),
-      minimum_expires_at_unix_seconds: String(minimumExpiry),
-    };
-
-    const uploaded = await operations.execute(uploadCommand, signal);
-    expect(uploaded).toMatchObject({
-      failure: 'none',
-      mutation_state: 'committed',
-      metadata: {
-        producing_run_id: '7001',
-        producing_run_attempt: '2',
+            size: archive.length,
+            digest: stored.archiveDigest,
+          };
+        },
+        downloadArtifact: async () => {
+          throw new Error('unexpected package download');
+        },
+        listArtifacts: async () => {
+          throw new Error('unexpected artifact-client list');
+        },
+        getArtifact: async () => {
+          throw new Error('unexpected artifact-client get');
+        },
+        deleteArtifact: async () => {
+          throw new Error('unexpected artifact-client delete');
+        },
+      };
+      const actions: ArtifactActionsRestClient = {
+        invalidateArtifactMutation: (input) => {
+          conditionalCacheInvalidations.push(input);
+        },
+        listArtifactsForRepo: async () => {
+          throw new Error('unexpected repository list');
+        },
+        getArtifact: async (input) => {
+          getArtifactCalls += 1;
+          if (deleted || !stored) {
+            throw Object.assign(new Error('synthetic absence'), { status: 404 });
+          }
+          expect(input.artifact_id).toBe(stored.id);
+          return {
+            status: 200,
+            data: {
+              id: stored.id,
+              name: stored.name,
+              size_in_bytes: stored.archive.length,
+              expired,
+              expires_at: new Date(expiresAt * 1000).toISOString(),
+              digest: `sha256:${stored.archiveDigest}`,
+              workflow_run: { id: 7001 },
+            },
+          };
+        },
+        downloadArtifactArchive: async (input) => {
+          downloadCalls += 1;
+          expect(input.artifact_id).toBe(stored?.id);
+          if (!stored) throw new Error('missing synthetic artifact');
+          return { status: 200, data: stored.archive };
+        },
+        getWorkflowRunAttempt: async (input) => ({
+          status: 200,
+          data: { id: input.run_id, run_attempt: input.attempt_number },
+        }),
+        deleteArtifact: async (input, _signal, _latestAttemptStartAt, onDispatched) => {
+          deleteCalls += 1;
+          expect(input.artifact_id).toBe(stored?.id);
+          onDispatched?.();
+          deleted = true;
+          return { status: 204, data: undefined };
+        },
+      };
+      const operations = new OfficialArtifactOperations({
+        owner: 'owner',
+        repository: 'repository',
+        currentRunId: '7001',
+        currentRunAttempt: '2',
+        artifactClient,
+        actions,
+        staging,
+        monotonicNow: () => 0,
+        utcNow: () => now,
+      });
+      const signal = new AbortController().signal;
+      const uploadCommand = {
+        operation: 'upload_immutable' as const,
+        correlation_id: 'upload-lifecycle',
+        name: 'opaque-state',
+        source_relative_path: 'source/object.bin',
         encrypted_object_digest: digestBytes(encrypted),
-        expires_at_unix_seconds: String(expiresAt),
-        size: String(encrypted.length),
-      },
-    });
-    expect(uploaded.metadata?.archive_digest).toBe(stored?.archiveDigest);
-    expect(uploaded.metadata?.archive_digest).not.toBe(digestBytes(encrypted));
-    expect(uploadSourceBytes?.every((byte) => byte === 0)).toBe(true);
-    expect(uploadEnvelopeBytes?.every((byte) => byte === 0)).toBe(true);
-    expect(conditionalCacheInvalidations).toEqual([
-      { owner: 'owner', repo: 'repository', name: 'opaque-state' },
-    ]);
-    expect(downloadCalls).toBe(1);
-    expect(getArtifactCalls).toBe(1);
+        minimum_expires_at_unix_seconds: String(minimumExpiry),
+      };
 
-    const readBack = await operations.execute(
-      {
-        operation: 'readback_exact',
-        correlation_id: 'readback-lifecycle',
-        expected: uploaded.metadata!,
-      },
-      signal,
-    );
-    expect(readBack.failure).toBe('none');
-    expect(downloadCalls).toBe(1);
-    expect(getArtifactCalls).toBe(2);
-    const downloaded = await operations.execute(
-      {
-        operation: 'download',
-        correlation_id: 'download-lifecycle',
-        expected: uploaded.metadata!,
-        destination_relative_path: 'destination/object.bin',
-        maximum_bytes: String(encrypted.length),
-      },
-      signal,
-    );
-    expect(downloaded.failure).toBe('none');
-    expect(downloadCalls).toBe(1);
-    expect(getArtifactCalls).toBe(3);
-    await expect(readFile(path.join(destinationDirectory, 'object.bin'))).resolves.toEqual(
-      encrypted,
-    );
-    expect(callerRecordBytes?.every((byte) => byte === 0)).toBe(true);
-    const wrongDelete = await operations.execute(
-      {
-        operation: 'delete_exact',
-        correlation_id: 'delete-wrong-authority',
-        expected: { ...uploaded.metadata!, archive_digest: '0'.repeat(64) },
-      },
-      signal,
-    );
-    expect(wrongDelete).toMatchObject({ failure: 'conflict', mutation_state: 'not_committed' });
-    expect(deleteCalls).toBe(0);
-    expired = true;
-    const downloadsBeforeDelete = downloadCalls;
-    const expiredMetadata = await operations.execute(
-      {
-        operation: 'metadata',
-        correlation_id: 'metadata-expired',
-        name: uploaded.metadata!.name,
-        object_id: uploaded.metadata!.object_id,
-      },
-      signal,
-    );
-    expect(expiredMetadata.failure).toBe('expired');
-    expect(downloadCalls).toBe(downloadsBeforeDelete);
-    const expiredReadBack = await operations.execute(
-      {
-        operation: 'readback_exact',
-        correlation_id: 'readback-expired',
-        expected: uploaded.metadata!,
-      },
-      signal,
-    );
-    expect(expiredReadBack.failure).toBe('expired');
-    expect(downloadCalls).toBe(downloadsBeforeDelete);
-    const downloadsBeforeExpiredDownload = downloadCalls;
-    const expiredDownload = await operations.execute(
-      {
-        operation: 'download',
-        correlation_id: 'download-expired',
-        expected: uploaded.metadata!,
-        destination_relative_path: 'destination/object.bin',
-        maximum_bytes: String(encrypted.length),
-      },
-      signal,
-    );
-    expect(expiredDownload.failure).toBe('expired');
-    expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
-    const deletedResult = await operations.execute(
-      {
-        operation: 'delete_exact',
-        correlation_id: 'delete-lifecycle',
-        expected: uploaded.metadata!,
-      },
-      signal,
-    );
-    expect(deletedResult).toMatchObject({ failure: 'none', mutation_state: 'committed' });
-    expect(deleteCalls).toBe(1);
-    expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
-    expect(getArtifactCalls).toBe(9);
-    expect(conditionalCacheInvalidations).toEqual([
-      { owner: 'owner', repo: 'repository', name: 'opaque-state' },
-      { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
-      { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
-    ]);
-    await operations.dispose();
-    await expect(
-      operations.execute(
+      const uploaded = await operations.execute(uploadCommand, signal);
+      expect(uploaded).toMatchObject({
+        failure: 'none',
+        mutation_state: 'committed',
+        metadata: {
+          producing_run_id: '7001',
+          producing_run_attempt: '2',
+          encrypted_object_digest: digestBytes(encrypted),
+          expires_at_unix_seconds: String(expiresAt),
+          size: String(encrypted.length),
+        },
+      });
+      expect(uploaded.metadata?.archive_digest).toBe(stored?.archiveDigest);
+      expect(uploaded.metadata?.archive_digest).not.toBe(digestBytes(encrypted));
+      expect(uploadSourceBytes?.every((byte) => byte === 0)).toBe(true);
+      expect(uploadEnvelopeBytes?.every((byte) => byte === 0)).toBe(true);
+      expect(conditionalCacheInvalidations).toEqual([
+        { owner: 'owner', repo: 'repository', name: 'opaque-state' },
+      ]);
+      expect(downloadCalls).toBe(1);
+      expect(getArtifactCalls).toBe(1);
+
+      const readBack = await operations.execute(
+        {
+          operation: 'readback_exact',
+          correlation_id: 'readback-lifecycle',
+          expected: uploaded.metadata!,
+        },
+        signal,
+      );
+      expect(readBack.failure).toBe('none');
+      expect(downloadCalls).toBe(1);
+      expect(getArtifactCalls).toBe(2);
+      const downloaded = await operations.execute(
+        {
+          operation: 'download',
+          correlation_id: 'download-lifecycle',
+          expected: uploaded.metadata!,
+          destination_relative_path: 'destination/object.bin',
+          maximum_bytes: String(encrypted.length),
+        },
+        signal,
+      );
+      expect(downloaded.failure).toBe('none');
+      expect(downloadCalls).toBe(1);
+      expect(getArtifactCalls).toBe(3);
+      expect(
+        (await readFile(path.join(destinationDirectory, 'object.bin'))).equals(encrypted),
+      ).toBe(true);
+      expect(callerRecordBytes?.every((byte) => byte === 0)).toBe(true);
+      const wrongDelete = await operations.execute(
+        {
+          operation: 'delete_exact',
+          correlation_id: 'delete-wrong-authority',
+          expected: { ...uploaded.metadata!, archive_digest: '0'.repeat(64) },
+        },
+        signal,
+      );
+      expect(wrongDelete).toMatchObject({ failure: 'conflict', mutation_state: 'not_committed' });
+      expect(deleteCalls).toBe(0);
+      expired = true;
+      const downloadsBeforeDelete = downloadCalls;
+      const expiredMetadata = await operations.execute(
         {
           operation: 'metadata',
-          correlation_id: 'metadata-after-dispose',
+          correlation_id: 'metadata-expired',
           name: uploaded.metadata!.name,
           object_id: uploaded.metadata!.object_id,
         },
         signal,
-      ),
-    ).rejects.toThrow('artifact_lifecycle_coordinator_stopped');
-  });
+      );
+      expect(expiredMetadata.failure).toBe('expired');
+      expect(downloadCalls).toBe(downloadsBeforeDelete);
+      const expiredReadBack = await operations.execute(
+        {
+          operation: 'readback_exact',
+          correlation_id: 'readback-expired',
+          expected: uploaded.metadata!,
+        },
+        signal,
+      );
+      expect(expiredReadBack.failure).toBe('expired');
+      expect(downloadCalls).toBe(downloadsBeforeDelete);
+      const downloadsBeforeExpiredDownload = downloadCalls;
+      const expiredDownload = await operations.execute(
+        {
+          operation: 'download',
+          correlation_id: 'download-expired',
+          expected: uploaded.metadata!,
+          destination_relative_path: 'destination/object.bin',
+          maximum_bytes: String(encrypted.length),
+        },
+        signal,
+      );
+      expect(expiredDownload.failure).toBe('expired');
+      expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
+      const deletedResult = await operations.execute(
+        {
+          operation: 'delete_exact',
+          correlation_id: 'delete-lifecycle',
+          expected: uploaded.metadata!,
+        },
+        signal,
+      );
+      expect(deletedResult).toMatchObject({ failure: 'none', mutation_state: 'committed' });
+      expect(deleteCalls).toBe(1);
+      expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
+      expect(getArtifactCalls).toBe(9);
+      expect(conditionalCacheInvalidations).toEqual([
+        { owner: 'owner', repo: 'repository', name: 'opaque-state' },
+        { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
+        { owner: 'owner', repo: 'repository', name: 'opaque-state', artifact_id: 42 },
+      ]);
+      await operations.dispose();
+      await expect(
+        operations.execute(
+          {
+            operation: 'metadata',
+            correlation_id: 'metadata-after-dispose',
+            name: uploaded.metadata!.name,
+            object_id: uploaded.metadata!.object_id,
+          },
+          signal,
+        ),
+      ).rejects.toThrow('artifact_lifecycle_coordinator_stopped');
+    },
+    60_000,
+  );
 });
 
 describe.each(['metadata', 'download', 'readback_exact', 'delete_exact'] as const)(

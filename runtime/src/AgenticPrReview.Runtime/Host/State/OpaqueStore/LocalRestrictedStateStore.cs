@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using Microsoft.Win32.SafeHandles;
@@ -713,42 +714,49 @@ internal sealed class LocalRestrictedStateStore
                 }
 
                 var bytes = new byte[checked((int)length)];
-                var offset = 0;
-                while (offset < bytes.Length)
+                try
                 {
-                    var read = await RandomAccess.ReadAsync(
-                            handle,
-                            bytes.AsMemory(offset),
-                            offset,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                    if (read == 0)
+                    var offset = 0;
+                    while (offset < bytes.Length)
+                    {
+                        var read = await RandomAccess.ReadAsync(
+                                handle,
+                                bytes.AsMemory(offset),
+                                offset,
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            return LocalOpaqueStoreRead.Fail(
+                                OpaqueStoreFailure.Invalid);
+                        }
+
+                        offset += read;
+                    }
+
+                    if (RandomAccess.GetLength(handle) != length ||
+                        !PathStillNamesIdentity(path, identity, length) ||
+                        !OperationIsCurrent(operation) ||
+                        !LocalOpaqueStoreRecordCodec.TryRead(
+                            bytes,
+                            out var metadata,
+                            out var payload))
                     {
                         return LocalOpaqueStoreRead.Fail(
                             OpaqueStoreFailure.Invalid);
                     }
 
-                    offset += read;
+                    return new LocalOpaqueStoreRead(
+                        OpaqueStoreFailure.None,
+                        metadata,
+                        payload,
+                        identity,
+                        length);
                 }
-
-                if (RandomAccess.GetLength(handle) != length ||
-                    !PathStillNamesIdentity(path, identity, length) ||
-                    !OperationIsCurrent(operation) ||
-                    !LocalOpaqueStoreRecordCodec.TryRead(
-                        bytes,
-                        out var metadata,
-                        out var payload))
+                finally
                 {
-                    return LocalOpaqueStoreRead.Fail(
-                        OpaqueStoreFailure.Invalid);
+                    CryptographicOperations.ZeroMemory(bytes);
                 }
-
-                return new LocalOpaqueStoreRead(
-                    OpaqueStoreFailure.None,
-                    metadata,
-                    payload,
-                    identity,
-                    length);
             }
             catch (OperationCanceledException)
             {

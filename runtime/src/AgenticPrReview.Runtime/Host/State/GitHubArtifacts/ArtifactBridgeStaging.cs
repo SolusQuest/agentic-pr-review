@@ -163,27 +163,35 @@ internal sealed class ArtifactBridgeStaging
             throw new IOException("artifact_bridge_staging_invalid");
         }
         var bytes = new byte[checked((int)length)];
-        var offset = 0;
-        while (offset < bytes.Length)
+        try
         {
-            var read = await RandomAccess.ReadAsync(
-                    handle,
-                    bytes.AsMemory(offset),
-                    offset,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (read == 0)
+            var offset = 0;
+            while (offset < bytes.Length)
+            {
+                var read = await RandomAccess.ReadAsync(
+                        handle,
+                        bytes.AsMemory(offset),
+                        offset,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                {
+                    throw new IOException("artifact_bridge_staging_invalid");
+                }
+                offset += read;
+            }
+            if (RandomAccess.GetLength(handle) != length ||
+                !scope.ValidatePhysicalIdentity())
             {
                 throw new IOException("artifact_bridge_staging_invalid");
             }
-            offset += read;
+            return bytes;
         }
-        if (RandomAccess.GetLength(handle) != length ||
-            !scope.ValidatePhysicalIdentity())
+        catch
         {
-            throw new IOException("artifact_bridge_staging_invalid");
+            CryptographicOperations.ZeroMemory(bytes);
+            throw;
         }
-        return bytes;
     }
 
     private ArtifactBridgeStagingScope CreateScope(bool upload)

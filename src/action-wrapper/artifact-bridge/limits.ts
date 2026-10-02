@@ -1,9 +1,32 @@
+// Mirrors OpaqueStoreCapacity: these size the carrier, not SESSION admission.
+const innerEnvelopeBytes = 32 * 1024 * 1024;
+const generationBytes = innerEnvelopeBytes + 256 * 1024 + 16 * 1024;
+const physicalCopyBytes = generationBytes + 16 * 1024;
+const controlWrapperBytes = 16 * 1024 + 132;
+const acceptanceRecoveryBytes =
+  64 * 1024 + controlWrapperBytes + physicalCopyBytes + controlWrapperBytes + 1024;
+const recoveryRecordBytes = acceptanceRecoveryBytes + 64 * 1024;
+const targetEnvelopeBytes = recoveryRecordBytes + controlWrapperBytes;
+const anchorBytes = targetEnvelopeBytes + 2048;
+const maximumEncryptedObjectBytes = anchorBytes + controlWrapperBytes;
+const maximumBase64Bytes = 4 * Math.ceil(maximumEncryptedObjectBytes / 3);
+const maximumStagingFileBytes = maximumBase64Bytes + 290;
+const maximumArchiveBytes =
+  maximumStagingFileBytes +
+  Math.ceil(maximumStagingFileBytes / 4096) +
+  Math.ceil(maximumStagingFileBytes / 16384) +
+  Math.ceil(maximumStagingFileBytes / 33554432) +
+  13 +
+  158;
+
 export const ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   maximumNameBytes: 256,
   maximumCorrelationBytes: 256,
   maximumRelativePathBytes: 1_024,
-  maximumEncryptedObjectBytes: 2 * 1024 * 1024,
-  maximumStagingFileBytes: 4 * 1024 * 1024,
+  maximumEncryptedObjectBytes,
+  maximumBase64Bytes,
+  maximumStagingFileBytes,
+  maximumArchiveBytes,
   maximumDocumentBytes: 256 * 1024,
   recordsPerPage: 100,
   maximumPages: 3,

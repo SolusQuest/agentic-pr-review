@@ -1428,8 +1428,7 @@ internal static class RestrictedStateStoreConformanceHarness
             Assert.False(incomplete.Succeeded);
 
             var maximumBytes = new byte[OpaqueStoreLimits.MaximumObjectBytes];
-            maximumBytes[0] = 1;
-            maximumBytes[^1] = 2;
+            new Random(330).NextBytes(maximumBytes);
             var maximum = await store.UploadImmutableAsync(
                 Request(
                     new OpaqueStoreName("conformance-bound"),
@@ -1449,6 +1448,17 @@ internal static class RestrictedStateStoreConformanceHarness
                 OpaqueStoreLimits.MaximumObjectBytes,
                 maximum.Metadata!.Size);
             Assert.Equal(OpaqueStoreFailure.Invalid, oversized.Failure);
+            var maximumDownload = await store.DownloadAsync(
+                new OpaqueStoreDownloadRequest(maximum.Metadata,
+                    OpaqueStoreLimits.MaximumObjectBytes), CancellationToken.None);
+            Assert.True(maximumDownload.Succeeded);
+            Assert.True(maximumBytes.AsSpan().SequenceEqual(maximumDownload.EncryptedBytes.Span));
+            Assert.True((await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(maximum.Metadata), CancellationToken.None)).Succeeded);
+            Assert.True((await store.DeleteExactAsync(
+                new OpaqueStoreDeleteRequest(maximum.Metadata), CancellationToken.None)).Succeeded);
+            Assert.False((await store.ReadMetadataAsync(
+                new OpaqueStoreMetadataRequest(maximum.Metadata.Reference), CancellationToken.None)).Succeeded);
 
             var mayCommitRequest = Request(
                 name,
@@ -1534,7 +1544,6 @@ internal static class RestrictedStateStoreConformanceHarness
             {
                 uploaded.Metadata,
                 second.Metadata,
-                maximum.Metadata,
                 mayCommit.Metadata,
             })
             {

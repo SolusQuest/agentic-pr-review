@@ -5,6 +5,65 @@ export class ArtifactBridgeStrictJsonError extends Error {
   }
 }
 
+/** Admit the transport's flat string shape before JSON.parse can allocate a
+ * nested object graph. Command framing deliberately uses the separate parser
+ * below, since command metadata is nested. Scalar values are scanned, not built.
+ */
+export function strictParseFlatStringObject(
+  text: string,
+  allowedKeys: readonly string[],
+  checkBudget: () => void,
+): unknown {
+  let position = 0;
+  const seen = new Set<string>();
+  const advance = (): string => {
+    if ((position & 0xffff) === 0) checkBudget();
+    return text[position++] ?? '';
+  };
+  const whitespace = (): void => {
+    while (position < text.length && ' \t\r\n'.includes(text[position]!)) advance();
+  };
+  const expect = (character: string): void => {
+    if (advance() !== character) throw new ArtifactBridgeStrictJsonError();
+  };
+  const string = (key: boolean): string | undefined => {
+    const start = position;
+    expect('"');
+    let escaped = false;
+    while (position < text.length) {
+      if (key && position - start > 256) throw new ArtifactBridgeStrictJsonError();
+      const character = advance();
+      if (character === '"' && !escaped) {
+        return key ? (JSON.parse(text.slice(start, position)) as string) : undefined;
+      }
+      escaped = character === '\\' && !escaped;
+    }
+    throw new ArtifactBridgeStrictJsonError();
+  };
+  whitespace();
+  expect('{');
+  for (;;) {
+    whitespace();
+    const key = string(true)!;
+    if (!allowedKeys.includes(key) || seen.has(key)) throw new ArtifactBridgeStrictJsonError();
+    seen.add(key);
+    whitespace();
+    expect(':');
+    whitespace();
+    string(false);
+    whitespace();
+    const next = advance();
+    if (next === '}') break;
+    if (next !== ',' || seen.size >= allowedKeys.length) throw new ArtifactBridgeStrictJsonError();
+  }
+  whitespace();
+  if (position !== text.length || seen.size !== allowedKeys.length) {
+    throw new ArtifactBridgeStrictJsonError();
+  }
+  checkBudget();
+  return JSON.parse(text) as unknown;
+}
+
 export function strictParseArtifactBridgeJson(text: string): unknown {
   try {
     const value = JSON.parse(text);

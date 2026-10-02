@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
 namespace AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 
@@ -8,8 +9,9 @@ internal static class ArtifactBridgeLimits
     internal const int MaximumNameBytes = 256;
     internal const int MaximumCorrelationBytes = 256;
     internal const int MaximumRelativePathBytes = 1_024;
-    internal const int MaximumEncryptedObjectBytes = 2 * 1024 * 1024;
-    internal const int MaximumStagingFileBytes = 4 * 1024 * 1024;
+    internal const int MaximumEncryptedObjectBytes = OpaqueStoreLimits.MaximumObjectBytes;
+    internal const int MaximumStagingFileBytes = OpaqueStoreCapacity.MaximumTransportEnvelopeBytes;
+    internal const int MaximumArchiveBytes = OpaqueStoreCapacity.MaximumArchiveBytes;
     internal const int MaximumDocumentBytes = 256 * 1024;
     internal const int RecordsPerPage = 100;
     internal const int MaximumPages = 3;

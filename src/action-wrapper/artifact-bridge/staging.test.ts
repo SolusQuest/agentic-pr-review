@@ -1,4 +1,13 @@
-import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -52,7 +61,7 @@ describe('artifact bridge staging root', () => {
     ).rejects.toBeDefined();
   });
 
-  it('rejects a source above 2 MiB', async () => {
+  it('rejects a source above the derived carrier cap', async () => {
     const root = await temporaryRoot();
     await mkdir(path.join(root, 'csharp', 'op'), { recursive: true, mode: 0o700 });
     await writeFile(
@@ -87,6 +96,32 @@ describe('artifact bridge staging root', () => {
     );
 
     expectZeroedBuffer(fill, encrypted.length);
+  });
+
+  it('keeps the allocation at the admitted stat size if the source grows before reading', async () => {
+    const root = await temporaryRoot();
+    const parent = path.join(root, 'csharp', 'op');
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    const source = path.join(parent, 'source.bin');
+    await writeFile(source, Buffer.alloc(16, 0xa5));
+    const staging = await ArtifactBridgeStaging.create(root);
+    const internal = staging as unknown as {
+      assertOpenedPath: (...arguments_: readonly unknown[]) => Promise<void>;
+    };
+    const original = internal.assertOpenedPath.bind(internal);
+    let assertions = 0;
+    vi.spyOn(internal, 'assertOpenedPath').mockImplementation(async (...args) => {
+      await original(...args);
+      if (++assertions === 1) await appendFile(source, Buffer.alloc(100_000, 0xa5));
+    });
+    const allocation = vi.spyOn(Buffer, 'alloc');
+    const fill = vi.spyOn(Buffer.prototype, 'fill');
+    await expect(staging.readSource('csharp/op/source.bin')).rejects.toBeInstanceOf(
+      ArtifactBridgeStagingError,
+    );
+    expect(allocation.mock.calls.some(([length]) => length === 16)).toBe(true);
+    expect(allocation.mock.calls.some(([length]) => length === 100_016)).toBe(false);
+    expectZeroedBuffer(fill, 16);
   });
 
   it('zeroes a source buffer when the post-read deadline expires', async () => {
