@@ -19,6 +19,46 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 public sealed class R5LiveHarnessTests
 {
     [Theory]
+    [InlineData("model")]
+    [InlineData("adapter")]
+    [InlineData("tuple")]
+    public async Task FormerSelectedProfileRejectsBeforeAnySend(string mutation)
+    {
+        using var plan = new PlanFile(document =>
+        {
+            if (mutation is "model" or "tuple")
+                document["provider"]!["model_id"] = "deepseek-v4-flash";
+            if (mutation is "adapter" or "tuple")
+                document["provider"]!["adapter_id"] =
+                    "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502";
+        });
+        var activations = 0;
+        var error = await Assert.ThrowsAsync<LivePlanRejected>(() => LiveRunner.RunAsync(
+            plan.Path, false, Options(transport: _ =>
+            {
+                activations++;
+                throw new InvalidOperationException("A rejected profile must not activate transport.");
+            }), CancellationToken.None));
+        Assert.Equal(0, activations);
+        Assert.Equal(LiveAdmissionCode.UnsupportedConfiguration, error.Code);
+    }
+
+    [Theory]
+    [InlineData("deepseek-v4-flash", "deepseek-flash")]
+    [InlineData("deepseek-flash", "deepseek-v4-flash")]
+    [InlineData("deepseek-v4-flash", "deepseek-v4-flash")]
+    public void FormerUsageIdentityCannotBecomeMeasuredCurrentCache(string requested, string response)
+    {
+        var accounting = CacheAccounting();
+        accounting.RecordUsage(new(7, 3, new("deepseek", requested, response, 2, 5)));
+        Assert.Equal(7, accounting.KnownInputTokens);
+        Assert.Equal(0, accounting.UsageUnknownCalls);
+        Assert.Equal("unavailable", accounting.CacheUsage.Status);
+        Assert.Empty(accounting.CacheUsage.ResponseModels);
+        Assert.Equal(1, accounting.CacheUsage.KnownUsageWithoutCacheCalls);
+    }
+
+    [Theory]
     [InlineData(true)]
     public async Task R6AdmissionCategoriesCrossLiveRunnerAndStrictVerifier(bool responseInvalid)
     {
@@ -297,7 +337,7 @@ public sealed class R5LiveHarnessTests
     [InlineData(2, 5, 3)]
     [InlineData(0, 7, 3)]
     [InlineData(0, 0, 0)]
-    public async Task CachePartitionReachesSafeSummaryWithBothValidatedModelIdentities(
+    public async Task CachePartitionReachesSafeSummaryWithTheSelectedModelIdentity(
         long hit, long miss, long output)
     {
         using var plan = new PlanFile();
@@ -309,10 +349,11 @@ public sealed class R5LiveHarnessTests
             return new FakeTransport(async (request, token) =>
             {
                 using var sent = JsonDocument.Parse(request);
-                Assert.Equal("deepseek-v4-flash", sent.RootElement.GetProperty("model").GetString());
+                Assert.Equal("deepseek-flash", sent.RootElement.GetProperty("model").GetString());
                 var original = await replay.SendAsync(request, token);
                 var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
-                body["model"] = ++count % 2 == 0 ? "deepseek-flash" : "deepseek-v4-flash";
+                count++;
+                body["model"] = "deepseek-flash";
                 body["id"] = Canary;
                 body["system_fingerprint"] = Canary;
                 body["usage"] = new JsonObject
@@ -340,8 +381,8 @@ public sealed class R5LiveHarnessTests
         Assert.Equal(count * hit, cache.CacheReadInputTokens);
         Assert.Equal(count * miss, cache.UncachedInputTokens);
         Assert.Equal("deepseek", cache.ProviderId);
-        Assert.Equal("deepseek-v4-flash", cache.RequestedModel);
-        Assert.Equal(new[] { "deepseek-v4-flash", "deepseek-flash" }, cache.ResponseModels);
+        Assert.Equal("deepseek-flash", cache.RequestedModel);
+        Assert.Equal(new[] { "deepseek-flash" }, cache.ResponseModels);
         Assert.Equal("not_applicable", cache.CacheWriteBillingStatus);
         Assert.Equal("unavailable", cache.BackendSnapshotStatus);
         Assert.DoesNotContain(Canary, string.Join('\n', lines));
@@ -369,7 +410,7 @@ public sealed class R5LiveHarnessTests
         Assert.Empty(accounting.CacheUsage.ResponseModels);
         AssertCacheRoundTrip(accounting.CacheUsage);
 
-        accounting.RecordUsage(new(7, 3, new("deepseek", "deepseek-v4-flash", "deepseek-flash", 0, 7)));
+        accounting.RecordUsage(new(7, 3, new("deepseek", "deepseek-flash", "deepseek-flash", 0, 7)));
         Assert.Equal("partial", accounting.CacheUsage.Status);
         Assert.Equal(0, accounting.CacheUsage.CacheReadInputTokens);
         Assert.Equal(7, accounting.CacheUsage.UncachedInputTokens);
@@ -387,12 +428,12 @@ public sealed class R5LiveHarnessTests
         AssertCacheRoundTrip(accounting.CacheUsage);
         foreach (var observation in new ProjectProviderUsage[]
         {
-            new(Canary, "deepseek-v4-flash", "deepseek-flash", 2, 5),
+            new(Canary, "deepseek-flash", "deepseek-flash", 2, 5),
             new("deepseek", Canary, "deepseek-flash", 2, 5),
-            new("deepseek", "deepseek-v4-flash", Canary, 2, 5),
-            new("deepseek", "deepseek-v4-flash", "deepseek-flash", -1, 8),
-            new("deepseek", "deepseek-v4-flash", "deepseek-flash", 2, 6),
-            new("deepseek", "deepseek-v4-flash", "deepseek-flash", long.MaxValue, 1),
+            new("deepseek", "deepseek-flash", Canary, 2, 5),
+            new("deepseek", "deepseek-flash", "deepseek-flash", -1, 8),
+            new("deepseek", "deepseek-flash", "deepseek-flash", 2, 6),
+            new("deepseek", "deepseek-flash", "deepseek-flash", long.MaxValue, 1),
         }) accounting.RecordUsage(new(7, 3, observation));
         Assert.Equal(42, accounting.KnownInputTokens);
         Assert.Equal(0, accounting.UsageUnknownCalls);
@@ -406,7 +447,7 @@ public sealed class R5LiveHarnessTests
     public void CacheSubtotalRemainsPartialAfterUnknownUsageAndOverflowIsUnavailable()
     {
         var accounting = CacheAccounting();
-        accounting.RecordUsage(new(7, 3, new("deepseek", "deepseek-v4-flash", "deepseek-flash", 2, 5)));
+        accounting.RecordUsage(new(7, 3, new("deepseek", "deepseek-flash", "deepseek-flash", 2, 5)));
         accounting.RecordUsageUnknown();
         Assert.Equal("partial", accounting.CacheUsage.Status);
         Assert.Equal(2, accounting.CacheUsage.CacheReadInputTokens);
@@ -417,7 +458,7 @@ public sealed class R5LiveHarnessTests
         var overflow = CacheAccounting();
         for (var i = 0; i < 2; i++)
             overflow.RecordUsage(new(long.MaxValue, 0,
-                new("deepseek", "deepseek-v4-flash", "deepseek-flash", long.MaxValue, 0)));
+                new("deepseek", "deepseek-flash", "deepseek-flash", long.MaxValue, 0)));
         Assert.Equal("unavailable", overflow.CacheUsage.Status);
         Assert.Null(overflow.CacheUsage.CacheReadInputTokens);
         Assert.Null(overflow.CacheUsage.UncachedInputTokens);

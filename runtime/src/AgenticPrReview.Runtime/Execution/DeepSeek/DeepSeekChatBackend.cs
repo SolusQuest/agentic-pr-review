@@ -20,10 +20,10 @@ internal sealed class DeepSeekAdapterContext(
     string sessionId)
 {
     internal const string Provider = "deepseek";
-    internal const string Model = "deepseek-v4-flash";
+    internal const string Model = "deepseek-flash";
     internal const string AdapterDescriptor =
         "{\"schema_version\":1,\"provider\":\"deepseek\",\"model\":" +
-        "\"deepseek-v4-flash\",\"endpoint\":" +
+        "\"deepseek-flash\",\"endpoint\":" +
         "\"https://api.deepseek.com/chat/completions\",\"stream\":false," +
         "\"thinking\":\"enabled\",\"reasoning_effort\":\"high\"," +
         "\"max_tokens\":4096,\"tool_choice\":\"omitted\"," +
@@ -31,10 +31,10 @@ internal sealed class DeepSeekAdapterContext(
         "\"content_rule\":\"zero-or-one-exact\",\"response_rule\":" +
         "\"reasoning,text-if-nonempty,calls\",\"codec_id\":" +
         "\"deepseek-reasoning-content\",\"codec_discriminator\":" +
-        "\"deepseek-v4-flash-thinking-v2\",\"encoding\":\"utf8\"," +
+        "\"deepseek-flash-thinking-v1\",\"encoding\":\"utf8\"," +
         "\"framing\":\"deepseek.reasoning_content.utf8.v1\"}";
     internal const string Adapter =
-        "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502";
+        "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6";
     internal static string CandidateAdapterDescriptor { get; } = AdapterDescriptor.Replace(
         "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal);
     internal static string CandidateAdapter { get; } = Convert.ToHexString(

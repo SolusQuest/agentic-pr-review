@@ -91,7 +91,7 @@ internal sealed class EconomicsCalls : ILiveAttemptObserver
                     UsageJournalCache? cache = null;
                     if (observed.ProviderUsage is { } provider && provider.ProviderId == DeepSeekAdapterContext.Provider &&
                         provider.RequestedModel == DeepSeekRequestWriter.Model &&
-                        provider.ResponseModel is DeepSeekRequestWriter.Model or "deepseek-flash" &&
+                        provider.ResponseModel is DeepSeekRequestWriter.Model &&
                         provider.CacheReadInputTokens >= 0 && provider.CacheReadInputTokens <= observed.InputTokens &&
                         provider.UncachedInputTokens == observed.InputTokens - provider.CacheReadInputTokens)
                         cache = new(provider.ResponseModel, provider.CacheReadInputTokens, provider.UncachedInputTokens);

@@ -28,6 +28,11 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
 
         var body = await request.Content.ReadAsByteArrayAsync(
             cancellationToken).ConfigureAwait(false);
+        if (!HasCurrentRequestPolicy(body))
+        {
+            return new HttpResponseMessage(HttpStatusCode.BadRequest);
+        }
+
         var mode = ReadMode();
         var requestOrdinal = Increment("provider-request-count");
         Record("provider-request-count", requestOrdinal);
@@ -125,6 +130,26 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
             _ => Encoding.UTF8.GetBytes("{\"choices\":[]}"),
         };
         return Json(HttpStatusCode.OK, response);
+    }
+
+    private static bool HasCurrentRequestPolicy(byte[] body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            // Independent literals make both framework and AOT proofs reject
+            // a stale model or changed thinking policy in the real request.
+            return root.GetProperty("model").GetString() == "deepseek-flash" &&
+                root.GetProperty("stream").ValueKind == JsonValueKind.False &&
+                root.GetProperty("thinking").GetProperty("type").GetString() == "enabled" &&
+                root.GetProperty("reasoning_effort").GetString() == "high";
+        }
+        catch (Exception exception) when (exception is JsonException or
+            InvalidOperationException or KeyNotFoundException)
+        {
+            return false;
+        }
     }
 
     private byte[] Continuation(byte[] requestBody, int call) => call switch
@@ -383,7 +408,7 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
             writer.WriteString("finish_reason", "tool_calls");
             writer.WriteEndObject();
             writer.WriteEndArray();
-            writer.WriteString("model", "deepseek-v4-flash");
+            writer.WriteString("model", "deepseek-flash");
             writer.WriteStartObject("usage");
             writer.WriteNumber("prompt_tokens", 3);
             writer.WriteNumber("completion_tokens", 2);

@@ -151,7 +151,7 @@ internal static class LiveSelfTest
             EvaluationSource.Commit + "\",\"tree\":\"" + EvaluationSource.Tree + "\",\"clean\":" +
             (EvaluationSource.Clean ? "true" : "false") + "},\"corpus\":{\"path\":\"" +
             JsonEscape(Path.GetDirectoryName(path)! + "/bundle") + "\",\"sha256\":\"" + corpusSha256 +
-            "\"},\"provider\":{\"provider_id\":\"deepseek\",\"model_id\":\"deepseek-v4-flash\"," +
+            "\"},\"provider\":{\"provider_id\":\"deepseek\",\"model_id\":\"deepseek-flash\"," +
             "\"adapter_id\":\"" + DeepSeekAdapterContext.Adapter +
             "\",\"configuration_sha256\":\"" + LivePlanAdmission.ProviderConfigurationSha256() +
             "\"},\"schedule\":[{\"case_id\":\"self-test-safe\",\"repeats\":2}],\"bounds\":{" +

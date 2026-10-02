@@ -80,7 +80,7 @@ internal sealed class DeepSeekRequestWriteResult
 
 internal static class DeepSeekRequestWriter
 {
-    internal const string Model = "deepseek-v4-flash";
+    internal const string Model = DeepSeekAdapterContext.Model;
     internal const int MaxTokens = 4096;
     internal const int CandidateMaxTokens = 8192;
     internal const int Output65536MaxTokens = 65_536;

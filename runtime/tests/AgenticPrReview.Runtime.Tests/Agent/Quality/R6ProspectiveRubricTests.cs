@@ -26,9 +26,9 @@ public sealed class R6ProspectiveRubricTests
         var old = Plan();
         var oldJson = JsonSerializer.Serialize(old, LiveJsonContext.Default.LivePlanDigestInput);
         Assert.DoesNotContain("\"rubric\"", oldJson, StringComparison.Ordinal);
-        Assert.Equal("598542ebdcb437e7d98f38573fc55ac32465f9216713f7433f4290488e899b47",
+        Assert.Equal("e11fdd79cc7ece701d0767afd6d84606aa36a96bc23249130fb15c2dc3de56e4",
             Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(oldJson))));
-        Assert.Equal("152021a5a113961fb6125f8aeb15f5fcd06394383264424c1388b19c34c72a25",
+        Assert.Equal("fc617303c97135dbc19cca340f1f2452561bedf2f680fb3f126fd9ff70702541",
             LivePlanAdmission.Digest(old));
         Assert.Equal("b73cdcea42672134400a4eab4e77607e1311f1003d9c8bb7b1ee9e654f6adcab",
             R6ProspectiveRubric.Sha256);

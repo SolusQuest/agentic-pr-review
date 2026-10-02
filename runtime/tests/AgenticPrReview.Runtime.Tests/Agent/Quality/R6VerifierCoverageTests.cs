@@ -51,6 +51,39 @@ public sealed class R6VerifierCoverageTests
     }
 
     [Fact]
+    public void HostileSubstitutionChangesEvidenceAfterTheResponseIdentityConverges()
+    {
+        var selection = GateContracts.Select(Fixtures);
+        var root = ReplayProcess.CreatePrivateRoot();
+        try
+        {
+            var cases = new List<GateCase>();
+            GateTokenCases.Run(cases, selection, root);
+            // The two canonical response probes now have equal evidence.
+            // The hostile producer must still substitute a different artifact.
+            Assert.Equal(GateContracts.Bytes(cases[0].Evidence), GateContracts.Bytes(cases[1].Evidence));
+            GateTokenOracle.Verify(cases[0], selection);
+            GateTokenOracle.Verify(cases[1], selection);
+            var inventory = GateInventory.Cases.Select(wanted => cases.SingleOrDefault(item => item.Id == wanted.Id)
+                ?? GateContracts.Scalar(wanted.Id, wanted.Selection, "unused", [])).ToArray();
+            Assert.All(inventory, item => Assert.Equal(item.BindingSha256,
+                GateCase.Binding(item.Id, item.Selection, item.Evidence)));
+            var report = JsonSerializer.SerializeToUtf8Bytes(new GateReport(selection, [.. inventory]), GateJson.Default.GateReport);
+            var mutatedBytes = GateMutations.Create(report, "substituted-case");
+            var mutated = GateContracts.Read(mutatedBytes)!;
+            var target = mutated.Cases[1];
+            Assert.NotEqual(cases[1].Evidence.GetRawText(), target.Evidence.GetRawText());
+            Assert.NotEqual(target.BindingSha256, GateCase.Binding(target.Id, target.Selection, target.Evidence));
+            Assert.Throws<InvalidOperationException>(() => GateVerifier.Verify(mutatedBytes, selection));
+            // Even rebinding the substituted evidence cannot satisfy the
+            // independently authored token oracle for the selected probe.
+            var rebound = GateCase.Create(target.Id, target.Selection, GateContracts.Bytes(target.Evidence));
+            Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(rebound, selection));
+        }
+        finally { Assert.True(ReplayProcess.Cleanup(root)); }
+    }
+
+    [Fact]
     public void ReboundWrongArtifactsCannotSatisfyTheTokenOracle()
     {
         var selection = GateContracts.Select(Fixtures);
@@ -64,8 +97,12 @@ public sealed class R6VerifierCoverageTests
             var cny = cases.Single(item => item.Id == "t3-cny");
             var substituted = GateCase.Create(usd.Id, usd.Selection, GateContracts.Bytes(cny.Evidence));
             Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(substituted, selection));
-            var alias = GateCase.Create("t1-partition", "10/4/6/4", GateContracts.Bytes(cases.Single(item => item.Id == "t1-alias").Evidence));
-            Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(alias, selection));
+            // The retained probe ID now carries the same selected response
+            // identity. A former response spelling must still be rejected.
+            var response = JsonNode.Parse(GateContracts.Bytes(cases.Single(item => item.Id == "t1-alias").Evidence))!;
+            response["calls"]![0]!["usage"]!["cache"]!["response_model"] = "deepseek-v4-flash";
+            var formerResponse = GateCase.Create("t1-partition", "10/4/6/4", Encoding.UTF8.GetBytes(response.ToJsonString()));
+            Assert.Throws<InvalidOperationException>(() => GateTokenOracle.Verify(formerResponse, selection));
             // Both round to 2. Equal output cannot substitute a different
             // independently selected numerator into the low-half probe.
             var sameAmount = GateCase.Create("t3-half-even-low", "3/2",

@@ -22,7 +22,7 @@ public sealed class DeepSeekRequestWriterTests
 
         Assert.Equal(DeepSeekRequestWriteOutcome.Success, result.Outcome);
         Assert.Equal(
-            "{\"model\":\"deepseek-v4-flash\",\"messages\":[" +
+            "{\"model\":\"deepseek-flash\",\"messages\":[" +
             "{\"role\":\"system\",\"content\":\"policy\"}," +
             "{\"role\":\"user\",\"content\":\"review\"}]," +
             "\"stream\":false,\"thinking\":{\"type\":\"enabled\"}," +

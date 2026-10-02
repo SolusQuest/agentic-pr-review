@@ -221,7 +221,7 @@ internal sealed class UsageJournal
             usage.CombinedTokens < 0 || usage.InputTokens > long.MaxValue - usage.OutputTokens ||
             usage.CombinedTokens != usage.InputTokens + usage.OutputTokens) return false;
         return usage.Cache is not { } cache ||
-            cache.ResponseModel is DeepSeekRequestWriter.Model or "deepseek-flash" &&
+            cache.ResponseModel is DeepSeekRequestWriter.Model &&
             cache.CacheReadInputTokens >= 0 && cache.UncachedInputTokens >= 0 &&
             cache.CacheReadInputTokens <= usage.InputTokens &&
             cache.UncachedInputTokens == usage.InputTokens - cache.CacheReadInputTokens;

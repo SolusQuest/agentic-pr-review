@@ -15,7 +15,7 @@ internal static class ReplayAdmission
         try
         {
             var captured = ReplayDirectory.Capture(root, cancellationToken);
-            var manifest = captured.Manifest;
+            var manifest = CurrentSyntheticManifest(captured.Manifest);
             var corpus = AgentCanonical.HashDomain("apr.r5.replay.corpus", ReplayJson.Write(manifest));
             var roles = manifest.Files.ToDictionary(file => file.Path, file => file.Role, StringComparer.Ordinal);
             var used = new HashSet<string>(StringComparer.Ordinal);
@@ -65,6 +65,25 @@ internal static class ReplayAdmission
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         { return new(ReplayAdmissionCode.IoFailure, null); }
     }
+
+    // Captured authored-synthetic files remain immutable source evidence.
+    // A derived manifest has its own corpus/configuration/expected-case identity
+    // and never converts accepted SESSION state, a live plan, or a usage journal.
+    internal static ReplayManifest CurrentSyntheticManifest(ReplayManifest manifest) =>
+        manifest.SourceKind == "authored-synthetic" &&
+        manifest.Configuration.ProviderId == "deepseek" &&
+        manifest.Configuration.ModelId == "deepseek-v4-flash" &&
+        manifest.Configuration.AdapterId ==
+            "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502"
+            ? manifest with
+            {
+                Configuration = manifest.Configuration with
+                {
+                    ModelId = DeepSeekAdapterContext.Model,
+                    AdapterId = DeepSeekAdapterContext.Adapter,
+                },
+            }
+            : manifest;
 
     internal static bool ValidManifest(ReplayManifest manifest)
     {
