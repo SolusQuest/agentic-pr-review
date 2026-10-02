@@ -1568,6 +1568,11 @@ public sealed class LineageRecoveryAndFailureTests
             Assert.False(result.Succeeded);
             Assert.Equal(LineageCodes.RetentionFailed, result.Code);
             Assert.Equal(2, probe.DeleteCalls);
+            Assert.NotEmpty(probe.MetadataReadLimits);
+            Assert.All(probe.MetadataReadLimits, maximum =>
+                Assert.Equal(LineageFormat.MaximumEnvelopeBytes, maximum));
+            Assert.All(probe.ListReadLimits, maximum =>
+                Assert.Equal(LineageFormat.MaximumEnvelopeBytes, maximum));
             Assert.Empty(Directory.GetFiles(root, "*.aprobject"));
         });
     }
@@ -2911,11 +2916,14 @@ public sealed class LineageRecoveryAndFailureTests
         internal int DeleteCalls { get; private set; }
         internal bool StaleLineageListInjected { get; private set; }
         internal List<OpaqueStoreName> UploadedNames { get; } = [];
+        internal List<int> MetadataReadLimits { get; } = [];
+        internal List<int> ListReadLimits { get; } = [];
 
         public async Task<OpaqueStoreListResult> ListExactAsync(
             OpaqueStoreListRequest request,
             CancellationToken cancellationToken)
         {
+            ListReadLimits.Add(request.MaximumBytes);
             ListCalls++;
             if (ListCalls == IncompleteAtListCall)
             {
@@ -2945,6 +2953,7 @@ public sealed class LineageRecoveryAndFailureTests
             OpaqueStoreMetadataRequest request,
             CancellationToken cancellationToken)
         {
+            MetadataReadLimits.Add(request.MaximumBytes);
             var result = await inner.ReadMetadataAsync(
                 request,
                 cancellationToken);
