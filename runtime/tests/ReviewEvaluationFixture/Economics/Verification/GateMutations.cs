@@ -89,13 +89,13 @@ internal static class GateMutations
             case "history-plan":
                 Edit("p2-replay", value => Domain(value["rows"]![1]!["capture"]!, "stable_plan_sha256",
                     value["rows"]![0]!["capture"]!["baseline"]!["domain"]!["stable_plan_sha256"]!.GetValue<string>())); break;
-            case "host-capacity-epoch" or "host-capacity-session" or "host-restore-epoch" or "host-restore-session":
-                Edit("p2-host-capacity-reset", value => value["rows"]![mutation.Contains("capacity", StringComparison.Ordinal) ? 5 : 6]!
+            case "host-preserved-epoch" or "host-preserved-session" or "host-restore-epoch" or "host-restore-session":
+                Edit("p2-host-explicit-reset", value => value["rows"]![mutation.Contains("preserved", StringComparison.Ordinal) ? 1 : 2]!
                     [mutation.EndsWith("epoch", StringComparison.Ordinal) ? "epoch_sha256" : "session_id_sha256"] = Hash('e')); break;
             case "host-code":
-                Edit("p2-host-capacity-reset", value => value["rows"]![0]!["agent_code"] = "UNLISTED_PRIVATE_PAYLOAD_279"); break;
+                Edit("p2-host-explicit-reset", value => value["rows"]![0]!["agent_code"] = "UNLISTED_PRIVATE_PAYLOAD_279"); break;
             case "host-disposition":
-                Edit("p2-host-capacity-reset", value => value["rows"]![5]!["disposition"] = "UNLISTED_PRIVATE_PAYLOAD_279"); break;
+                Edit("p2-host-explicit-reset", value => value["rows"]![2]!["disposition"] = "UNLISTED_PRIVATE_PAYLOAD_279"); break;
             case "price-tamper":
                 var tampered = Case("t3-usd"); tampered["evidence"]!["observed_usage"]!["total_amount"] = 999; Rebind(tampered); break;
             case "chain-tamper": c2["evidence"]!["report"]!["steps"]![1]!["predecessor_sha256"] = Hash('f'); Rebind(c2); break;

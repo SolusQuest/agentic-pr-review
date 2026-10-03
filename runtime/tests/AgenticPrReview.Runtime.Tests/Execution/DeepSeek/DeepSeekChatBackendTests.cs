@@ -17,6 +17,9 @@ public sealed class DeepSeekChatBackendTests
 {
     private static readonly string[] FormerAdapters =
     [
+        "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6",
+        "60f69693c3050fdd92a65130bacb635ddd6b90f1a9c8b954231e24af59bfa8a7",
+        "c32d99201a21254fe4399cee64e73fa6da77183a82479151e64682dfce3a554f",
         "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502",
         "d87f3f29cff8d5d3d276c9e3fa22cebf1f1291da89d03597b7a0ebde5cd9f42d",
         "d0be64c5ac080a3b0308d40a2f1bf33bfa249651c063e37986679875d660093f",
@@ -28,12 +31,12 @@ public sealed class DeepSeekChatBackendTests
         var bytes = Encoding.UTF8.GetBytes(
             DeepSeekAdapterContext.AdapterDescriptor);
 
-        Assert.Equal(525, bytes.Length);
+        Assert.Equal(593, bytes.Length);
         Assert.Equal(
-            "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6",
+            "b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8",
             DeepSeekAdapterContext.Adapter);
         Assert.Equal(
-            "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6",
+            "b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8",
             Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
         Assert.DoesNotContain("build", DeepSeekAdapterContext.AdapterDescriptor);
         Assert.False(bytes.AsSpan().StartsWith(
@@ -64,7 +67,7 @@ public sealed class DeepSeekChatBackendTests
     [Fact]
     public void CandidateAdapterHasDistinctExactDescriptorAndClosedLimitAuthority()
     {
-        Assert.Equal("60f69693c3050fdd92a65130bacb635ddd6b90f1a9c8b954231e24af59bfa8a7",
+        Assert.Equal("8121f294eff9ef93f2c8a0e4df8d5432f60808d96692389550e348b35564fed8",
             DeepSeekAdapterContext.CandidateAdapter);
         Assert.Equal(DeepSeekAdapterContext.AdapterDescriptor.Replace(
                 "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal),
@@ -86,7 +89,7 @@ public sealed class DeepSeekChatBackendTests
     [Fact]
     public void Output65536AdapterHasExactDescriptorAndSeparateLimitAuthority()
     {
-        Assert.Equal("c32d99201a21254fe4399cee64e73fa6da77183a82479151e64682dfce3a554f",
+        Assert.Equal("c7decca7ce121c3dab17d840c478c71c49739b8d5bb94766a93d760bf316f5b6",
             DeepSeekAdapterContext.Output65536Adapter);
         Assert.Equal(DeepSeekAdapterContext.AdapterDescriptor.Replace(
                 "\"max_tokens\":4096,", "\"max_tokens\":65536,", StringComparison.Ordinal),

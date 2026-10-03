@@ -23,6 +23,8 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
 
 public sealed class AcceptedStatePersistenceBoundaryTests
 {
+    // Restorable fixture size; the independent wire cap remains 16 MiB.
+    internal const int LargeAdmittedPlaintextBytes = 4 * 1024 * 1024;
     [Theory]
     [MemberData(nameof(R4StickyPublicationByteVectors.Names),
         MemberType = typeof(R4StickyPublicationByteVectors))]
@@ -106,7 +108,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
     }
 
     [Fact]
-    public async Task MaximumCompositeSerializesWithinPhysicalLayerCaps()
+    public async Task FourMiBCompositeSerializesWithinPhysicalLayerCaps()
     {
         var lineageTemplate = LineageTestData.Scope();
         var fixture = await AgentSessionStateBoundaryTests
@@ -119,10 +121,10 @@ public sealed class AcceptedStatePersistenceBoundaryTests
                 buildId: AcceptedStateTestData.BuildDiscriminator,
                 baseSha: R4PublicationTestData.BaseSha,
                 headSha: R4PublicationTestData.HeadSha);
-        var admittedSession = MaximumAdmittedSession(fixture);
+        var admittedSession = LargeAdmittedSession(fixture);
         var document = admittedSession.Value.Artifact.Document;
         Assert.Equal(
-            AgentLimits.SessionPlaintextBytes,
+            LargeAdmittedPlaintextBytes,
             admittedSession.Plaintext.Length);
 
         var stateScope = RestrictedScope(document);
@@ -531,7 +533,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
         int completedRuns,
         string predecessorEnvelopeSha256,
         string priorSessionSha256,
-        bool maximize)
+        bool largeFixture)
     {
         var original = fixture.Artifact.Document;
         var expandedRoot = original with
@@ -563,9 +565,9 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             out var baselineFailure), baselineFailure);
 
         var paddedRuns = runs.ToBuilder();
-        if (maximize)
+        if (largeFixture)
         {
-            var remaining = AgentLimits.SessionPlaintextBytes -
+            var remaining = LargeAdmittedPlaintextBytes -
                 baselineArtifact!.Plaintext.Length;
             Assert.InRange(
                 remaining,
@@ -595,10 +597,10 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             maximumDocument,
             out var maximumArtifact,
             out var maximumFailure), maximumFailure);
-        if (maximize)
+        if (largeFixture)
         {
             Assert.Equal(
-                AgentLimits.SessionPlaintextBytes,
+                LargeAdmittedPlaintextBytes,
                 maximumArtifact!.Plaintext.Length);
         }
         Assert.True(AgentSessionValidation.TryValidateRoot(
@@ -648,14 +650,14 @@ public sealed class AcceptedStatePersistenceBoundaryTests
         return admitted.Session;
     }
 
-    private static RestrictedStateAdmittedSession MaximumAdmittedSession(
+    private static RestrictedStateAdmittedSession LargeAdmittedSession(
         AgentSessionStateBoundaryTests.SessionFixture fixture) =>
         BuildAdmittedSession(
             fixture,
             completedRuns: 16,
             predecessorEnvelopeSha256: new string('d', 64),
             priorSessionSha256: new string('e', 64),
-            maximize: true);
+            largeFixture: true);
 
     private static AgentSessionCompletedRun CloneRun(
         AgentSessionCompletedRun template,

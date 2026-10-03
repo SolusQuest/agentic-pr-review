@@ -20,11 +20,17 @@ internal sealed record HistoryReport(string Mode, string Profile, string Code, s
             Profile is "tools" or "continuation" && Rows.Length > 1 && Rows.Take(Rows.Length - 1).All(r => r.Accepted) &&
             !Rows[^1].Accepted && CapacityReached(Profile, Rows[^1]));
 
+    internal bool CurrentContinuityVerified => Cleanup == "cleaned" &&
+        (Profile == "replay" ? Code == "verified" && Rows.Length == 3 :
+            Profile is "tools" or "continuation" && Code == "observation_incomplete" && Rows.Length == 2) &&
+        Rows.All(r => r.PredecessorPreserved && Positive(r)) &&
+        Rows.Select(r => r.ProcessId).Distinct().Count() == Rows.Length;
+
     private static bool CapacityReached(string profile, HistoryRow row) => row.Code == Agent.Core.AgentFailureCodes.ResponseInvalid &&
         row.Capacity is { } capacity && (profile == "tools"
-            ? capacity.LastMessages <= Agent.AgentLimits.Messages && capacity.LastResponseMessages > Agent.AgentLimits.Messages
-            : capacity.LastContinuationBeforeBytes <= Agent.AgentLimits.ContinuationTotalBytes &&
-                capacity.LastContinuationAfterBytes > Agent.AgentLimits.ContinuationTotalBytes);
+            ? capacity.LastMessages <= MeasurementLimits.Historical.Messages && capacity.LastResponseMessages > MeasurementLimits.Historical.Messages
+            : capacity.LastContinuationBeforeBytes <= MeasurementLimits.Historical.ContinuationTotalBytes &&
+                capacity.LastContinuationAfterBytes > MeasurementLimits.Historical.ContinuationTotalBytes);
 
     internal static bool Positive(HistoryRow row) => row.Accepted && row.ProcessId > 0 &&
         row.RestoredMatch && row.WireMatch && row.Capture.Code == "observed" &&
@@ -54,7 +60,7 @@ internal static class HistoryRunner
         if (profile is not ("tools" or "continuation")) return Report(profile: "invalid", "input_invalid", "not_created", [], new());
         var collector = new Collector();
         // The exact input constructed by GrowthRunner is executed and admitted unchanged.
-        var result = await GrowthRunner.RunAsync(bundle, new() { Profile = profile, RunProcess = collector.RunAsync }, token);
+        var result = await GrowthRunner.RunAsync(bundle, new() { Profile = profile, AttemptLimit = 2, RunProcess = collector.RunAsync }, token);
         var rows = result.Profiles.SelectMany(p => p.Rows).Select(row => collector.Row(row.Attempt, row.Code,
             row.Accepted, row.State?.Generation, row.State?.SessionSha256, row.State?.EnvelopeSha256,
             row.PredecessorPreserved) with { Capacity = row.Project }).ToImmutableArray();

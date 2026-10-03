@@ -728,7 +728,7 @@ internal static class PublicationRecoveryPayloadCodec
                 publication!,
                 stickyReadback);
             if (!reader.TryReadBytes(
-                    LineageFormat.MaximumPayloadBytes,
+                    OpaqueStoreCapacity.AcceptanceRecoveryBytes,
                     out handoff) ||
                 handoff.Length == 0 ||
                 !reader.TryReadInt64(out var minimumExpiry) ||
@@ -841,7 +841,7 @@ internal static class PublicationRecoveryPayloadCodec
                 return false;
             }
 
-            var writer = new LineageBinaryWriter();
+            var writer = new LineageBinaryWriter(MaximumBytesForKind(kind));
             WriteHeader(writer, kind, publication);
             switch (value)
             {
@@ -917,7 +917,7 @@ internal static class PublicationRecoveryPayloadCodec
                         recovery.StickyReadback.TryRehydrate(out _) &&
                         !recovery.AcceptanceRecoveryHandoff.IsDefaultOrEmpty &&
                         recovery.AcceptanceRecoveryHandoff.Length <=
-                            LineageFormat.MaximumPayloadBytes &&
+                            OpaqueStoreCapacity.AcceptanceRecoveryBytes &&
                         LineageValidation.IsTime(
                             recovery.MinimumSemanticExpiresAtUnixSeconds):
                     WriteReadbackFields(writer, recovery.StickyReadback);
@@ -951,7 +951,7 @@ internal static class PublicationRecoveryPayloadCodec
             }
 
             bytes = writer.ToArray();
-            return bytes.Length <= LineageFormat.MaximumPayloadBytes;
+            return bytes.Length <= MaximumBytesForKind(kind);
         }
         catch (Exception exception) when (
             exception is ArgumentException or OverflowException)
@@ -964,6 +964,11 @@ internal static class PublicationRecoveryPayloadCodec
         }
     }
 
+    private static int MaximumBytesForKind(PublicationRecoveryRecordKind kind) =>
+        kind == PublicationRecoveryRecordKind.Recovery
+            ? OpaqueStoreCapacity.RecoveryRecordBytes
+            : LineageFormat.MaximumPayloadBytes;
+
     private static bool TryReadHeader(
         ReadOnlySpan<byte> bytes,
         PublicationRecoveryRecordKind expectedKind,
@@ -972,7 +977,7 @@ internal static class PublicationRecoveryPayloadCodec
     {
         reader = new LineageBinaryReader(bytes);
         publication = null;
-        if (bytes.Length is < 1 or > LineageFormat.MaximumPayloadBytes ||
+        if (bytes.Length < 1 || bytes.Length > MaximumBytesForKind(expectedKind) ||
             !reader.TryReadString(32, out var magic) ||
             !StringComparer.Ordinal.Equals(magic, Magic) ||
             !reader.TryReadUInt16(out var version) ||

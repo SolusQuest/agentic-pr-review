@@ -41,12 +41,12 @@ internal static class AgentLimits
     internal const long Combined8192Tokens = 327_680;
     internal const long Output65536Tokens = 524_288;
     internal const long Combined65536Tokens = 786_432;
-    internal const int RequestBytes = 1 * 1024 * 1024;
-    internal const int ResponseBytes = 1 * 1024 * 1024;
-    internal const int Messages = 64;
+    internal const int RequestBytes = 8 * 1024 * 1024;
+    internal const int ResponseBytes = 2 * 1024 * 1024;
+    internal const int Messages = 4096;
     internal const int PartsPerMessage = 32;
-    internal const int PartsTotal = 256;
-    internal const int ContentBytes = 64 * 1024;
+    internal const int PartsTotal = 8192;
+    internal const int ContentBytes = 1024 * 1024;
     internal const int ToolArgumentsBytes = 8 * 1024;
     internal const int ToolResultBytes = 32 * 1024;
     internal const int ToolResultsTotalBytes = 256 * 1024;
@@ -64,16 +64,18 @@ internal static class AgentLimits
     internal const int FindingMessageBytes = 16 * 1024;
     internal const int EvidencePerFinding = 8;
     internal const int TerminalBytes = 256 * 1024;
-    internal const int SessionRecords = 256;
-    internal const int SessionRecordBytes = 512 * 1024;
-    internal const int ContinuationItemBytes = 64 * 1024;
-    internal const int ContinuationTotalBytes = 256 * 1024;
-    internal const int SessionPlaintextBytes = 1 * 1024 * 1024;
-    internal const int StateEnvelopeBytes = 2 * 1024 * 1024;
+    internal const int SessionRecords = 8192;
+    // Field limits and the complete framed SESSION remain authoritative too.
+    internal const int SessionRecordBytes = 16 * 1024 * 1024;
+    internal const int ContinuationItemBytes = 1024 * 1024;
+    internal const int ContinuationTotalBytes = 8 * 1024 * 1024;
+    internal const int SessionPlaintextBytes = 16 * 1024 * 1024;
+    internal const int StateEnvelopeBytes = 32 * 1024 * 1024;
     internal const int AcceptedCandidates = 2;
     internal const int CandidateMetadataBytes = 16 * 1024;
-    internal const int CandidateEnvelopeTotalBytes = 4 * 1024 * 1024;
-    internal const int StateScopeTotalBytes = 6 * 1024 * 1024;
+    internal const int CandidateEnvelopeTotalBytes = AcceptedCandidates * StateEnvelopeBytes;
+    internal const int StateScopeTotalBytes =
+        CandidateEnvelopeTotalBytes + StateEnvelopeBytes + CandidateMetadataBytes;
     internal const int TrackedFiles = 20_000;
     internal const int TrackedFilesMetadataBytes = 8 * 1024 * 1024;
     internal const int ListFilesEntries = 100;

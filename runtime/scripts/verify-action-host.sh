@@ -21,7 +21,7 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 project="$repo_root/runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj"
 runtime_project="$repo_root/runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
-golden="$repo_root/runtime/tests/fixtures/action-host/r7-flash/expected-evidence.json.golden"
+golden="$repo_root/runtime/tests/fixtures/action-host/r7-session-capacity/expected-evidence.json.golden"
 record="$repo_root/runtime/tests/fixtures/action-host/framework/replacement-record.json"
 inventory="$repo_root/runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
 canaries="$repo_root/runtime/tests/fixtures/action-host/framework/canary-routes.tsv"

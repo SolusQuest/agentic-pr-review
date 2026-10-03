@@ -27,9 +27,8 @@ internal static class LineageFormat
     internal const int TagBytes = 16;
     internal const int MaximumHeaderBytes = 16 * 1024;
     internal const int MaximumPayloadBytes = 1024 * 1024;
-    internal const int MaximumReaderPayloadBytes = 1_500_000;
-    internal const int MaximumEnvelopeBytes = MaximumHeaderBytes +
-        MaximumReaderPayloadBytes + 1024;
+    internal const int MaximumReaderPayloadBytes = OpaqueStoreCapacity.AnchorBytes;
+    internal const int MaximumEnvelopeBytes = OpaqueStoreCapacity.MaximumObjectBytes;
     internal const int MaximumPhysicalPerClass = 8;
     internal const int MaximumScopedObjects = 9 * MaximumPhysicalPerClass;
     internal const int MaximumTextBytes = 512;
@@ -38,9 +37,15 @@ internal static class LineageFormat
     internal const long MaximumJavaScriptInteger = 9_007_199_254_740_991;
 
     internal static int MaximumPayloadBytesForClass(StateObjectClass objectClass) =>
-        objectClass is StateObjectClass.Candidate or StateObjectClass.Acceptance
-            ? MaximumReaderPayloadBytes
-            : MaximumPayloadBytes;
+        objectClass switch
+        {
+            // Both ordinary generations and predecessor physical copies use Candidate.
+            StateObjectClass.Candidate => OpaqueStoreCapacity.PhysicalCopyBytes,
+            StateObjectClass.Acceptance => 64 * 1024,
+            StateObjectClass.PublicationIntent => OpaqueStoreCapacity.RecoveryRecordBytes,
+            StateObjectClass.Cleanup => OpaqueStoreCapacity.AnchorBytes,
+            _ => MaximumPayloadBytes,
+        };
 
     internal static int MaximumEnvelopeBytesForClass(StateObjectClass objectClass) =>
         Math.Min(MaximumEnvelopeBytes,
@@ -52,6 +57,21 @@ internal static class LineageFormat
         int payloadLength) =>
         payloadLength >= 0 &&
         payloadLength <= MaximumPayloadBytesForClass(objectClass);
+
+    // Framing admission before payload copies. The semantic codecs still
+    // require the entire canonical nested record, identities and associations.
+    internal static bool IsPayloadAllowed(StateObjectClass objectClass, ReadOnlySpan<byte> payload)
+    {
+        if (!IsPayloadLengthAllowed(objectClass, payload.Length)) return false;
+        if (payload.Length <= MaximumPayloadBytes ||
+            objectClass is not (StateObjectClass.PublicationIntent or StateObjectClass.Cleanup)) return true;
+        var reader = new LineageBinaryReader(payload);
+        if (!reader.TryReadString(32, out var magic) || !reader.TryReadUInt16(out var version) || version != 1)
+            return false;
+        return objectClass == StateObjectClass.Cleanup
+            ? magic == "APROWA01"
+            : magic == "APR5RC01" && reader.TryReadUInt16(out var kind) && kind == 5;
+    }
 }
 
 internal static class LineageCodes

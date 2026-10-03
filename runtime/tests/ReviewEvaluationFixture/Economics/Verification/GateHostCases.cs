@@ -45,18 +45,14 @@ internal static class GateHostCases
                 call.Provider.Request.StablePlan.PriorSessionSha256, [.. records.AcceptanceIdentities], true, exclusion, world.Remote.Writes));
             return (call, records);
         }
-        for (; phase <= AgentSessionFormat.MaximumCompletedRuns; phase++)
+        for (; phase < 2; phase++)
         {
             var (call, records) = await Invoke(phase, "grow");
-            if (call.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted)
-            { previous = call; previousRecords = records; continue; }
-            Require(previous is not null && previousRecords is not null && call.Provider.Outcome!.Diagnostic?.Code == AgentFailureCodes.ResponseInvalid &&
-                call.Provider.Outcome.Diagnostic.ModelCalls == 1 && call.Provider.Request!.InitialMessages.Length + 9 > AgentLimits.Messages &&
-                previousRecords.AcceptanceIdentities.SequenceEqual(records.AcceptanceIdentities));
-            break;
+            Require(call.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted);
+            previous = call;
+            previousRecords = records;
         }
-        Require(phase is >= 1 and <= AgentSessionFormat.MaximumCompletedRuns && previous is not null && previousRecords is not null);
-        var (restored, _) = await Invoke(++phase, "restore-only");
+        var (restored, _) = await Invoke(phase, "restore-only");
         Require(restored.Provider.Request!.SessionId == previous!.Provider.Request!.SessionId && restored.Provider.Request.Continuation is not null);
         var (reset, resetRecords) = await Invoke(++phase, "reset", fresh: true);
         Require(reset.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted &&

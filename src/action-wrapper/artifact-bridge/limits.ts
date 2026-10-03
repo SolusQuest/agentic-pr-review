@@ -30,10 +30,10 @@ export const ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   requestTimeoutMs: 30_000,
   logicalOperationTimeoutMs: 120_000,
   maximumActiveCorrelations: 32,
-  // One complete state transaction can legitimately cross the former 512-entry
-  // boundary while retaining both current and previous state keys. Keep the
-  // registry bounded, but leave enough room for the real Host route to finish.
-  maximumTerminalCorrelations: 2_048,
+  // Retained-state reconciliation rereads bounded inventories around mutations.
+  // R7 multi-generation physical-copy acceptance crosses the former 2,048 entries.
+  // Keep every terminal ID for this process to reject replay; never evict IDs.
+  maximumTerminalCorrelations: 4_096,
 });
 
 export const ARTIFACT_ENVELOPE_DISCRIMINATOR = 'apr.private-artifact-envelope.s2';

@@ -35,6 +35,8 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
 
         var mode = ReadMode();
         var requestOrdinal = Increment("provider-request-count");
+        if (FrameworkSessionCapacity.IsMode(mode))
+            FrameworkSessionCapacity.Observe(scenarioRoot, body, requestOrdinal, mode);
         Record("provider-request-count", requestOrdinal);
         Record("provider-auth-count", Increment("provider-auth-count"));
         FrameworkCanaryCapture.CaptureAll(scenarioRoot,
@@ -89,7 +91,8 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
                 .ConfigureAwait(false);
         }
 
-        var prefix = mode == "continuation" ? "continuation-" : "framework-";
+        var prefix = FrameworkSessionCapacity.IsMode(mode) ? mode + "-" :
+            mode == "continuation" ? "continuation-" : "framework-";
         var response = mode == "continuation"
             ? Continuation(body, call)
             : call switch
@@ -391,7 +394,9 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
             writer.WriteString("content", string.Empty);
             writer.WriteString(
                 "reasoning_content",
-                "framework-reasoning-" + sequence.ToString(
+                callId.StartsWith(FrameworkSessionCapacity.Prefix, StringComparison.Ordinal)
+                    ? FrameworkSessionCapacity.Reasoning
+                    : "framework-reasoning-" + sequence.ToString(
                     System.Globalization.CultureInfo.InvariantCulture) +
                 (privateMarker is null ? string.Empty : " " + privateMarker));
             writer.WriteStartArray("tool_calls");

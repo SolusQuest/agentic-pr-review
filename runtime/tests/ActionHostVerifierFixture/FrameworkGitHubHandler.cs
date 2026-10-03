@@ -32,6 +32,8 @@ internal sealed class FrameworkGitHubHandler(
     internal static readonly string HeadSha = new('e', 40);
     internal static readonly string ContinuedHeadSha = new('f', 40);
     internal static readonly string ConflictHeadSha = new('7', 40);
+    private static readonly string[] CapacityHeads = Enumerable.Range(0, 21)
+        .Select(index => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("r7-capacity-head-" + index)))[..40]).ToArray();
 
     private static readonly string WorkflowRoot = new('1', 40);
     private static readonly string GitHubRoot = new('2', 40);
@@ -623,6 +625,7 @@ internal sealed class FrameworkGitHubHandler(
     }
 
     private string CurrentHead(string mode) =>
+        mode.StartsWith("r7-capacity-", StringComparison.Ordinal) ? CapacityHeads[int.Parse(mode[12..], CultureInfo.InvariantCulture)] :
         mode == "cross-head-conflict" ? ConflictHeadSha :
         mode == "continuation" && !IsTrustedProofPayload() ||
             mode == "stale" &&
@@ -717,7 +720,8 @@ internal sealed class FrameworkGitHubHandler(
         var effectiveBaseSha = IsTrustedProofPayload()
             ? CurrentWorkflowSha()
             : CurrentBaseSha();
-        var parents = sha == HeadSha
+        var capacityOrdinal = Array.IndexOf(CapacityHeads, sha);
+        var parents = capacityOrdinal >= 0 ? new[] { capacityOrdinal == 0 ? effectiveBaseSha : CapacityHeads[capacityOrdinal - 1] } : sha == HeadSha
             ? IsTrustedProofPayload()
                 ? new[] { effectiveBaseSha, TriggerSha }
                 : new[] { effectiveBaseSha }
@@ -869,7 +873,7 @@ internal sealed class FrameworkGitHubHandler(
     }
 
     private static bool IsSyntheticHeadSha(string sha) => sha == HeadSha ||
-        sha == ContinuedHeadSha || sha == ConflictHeadSha;
+        sha == ContinuedHeadSha || sha == ConflictHeadSha || CapacityHeads.Contains(sha, StringComparer.Ordinal);
 
     private static bool IsHeadBlobSha(string sha) => sha ==
         GitBlobSha(ProductionShapedLargeBlobBytes) || sha == GitBlobSha(FileBytes);
@@ -1018,7 +1022,7 @@ internal sealed class FrameworkGitHubHandler(
     }
 
     private string ProofControlPath(string mode) => Path.Join(
-        mode is "continuation-seed" or "continuation"
+        mode is "continuation-seed" or "continuation" || mode.StartsWith("r7-capacity-", StringComparison.Ordinal)
             ? Directory.GetParent(scenarioRoot)!.FullName
             : scenarioRoot,
         mode is "continuation-seed" or "continuation"
@@ -1115,7 +1119,9 @@ internal sealed class FrameworkGitHubHandler(
     }
 
     private string StorageRoot(string mode) =>
-        mode is "mutation-crash" or "mutation-recovery"
+        mode.StartsWith("r7-capacity-", StringComparison.Ordinal)
+            ? Path.Join(Directory.GetParent(scenarioRoot)!.FullName, "r7-shared-github")
+        : mode is "mutation-crash" or "mutation-recovery"
             ? Path.Join(Directory.GetParent(scenarioRoot)!.FullName,
                 "shared-github")
             : mode is "continuation-seed" or "continuation" or

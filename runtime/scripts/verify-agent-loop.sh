@@ -12,8 +12,8 @@ PROJECT="${REPO_ROOT}/runtime/tests/AgentLoopAotFixture/AgenticPrReview.Runtime.
 TEST_PROJECT="${REPO_ROOT}/runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj"
 FIXTURES="${REPO_ROOT}/runtime/tests/fixtures/agent/agent-loop"
 REPOSITORY_FIXTURE="${FIXTURES}/repository"
-EXPECTED_BOOTSTRAP="${FIXTURES}/expected/bootstrap.json.golden"
-EXPECTED_CONTINUE="${FIXTURES}/expected/continue.json.golden"
+EXPECTED_BOOTSTRAP="${REPO_ROOT}/runtime/tests/fixtures/agent/r7/session-capacity/bootstrap.json.golden"
+EXPECTED_CONTINUE="${REPO_ROOT}/runtime/tests/fixtures/agent/r7/session-capacity/continue.json.golden"
 NEGATIVE_CASES="${FIXTURES}/negative-cases.txt"
 LIMIT_CASES="${FIXTURES}/limit-cases.tsv"
 FRAMEWORK_ENVIRONMENT="${FIXTURES}/environment/framework.txt"
@@ -262,6 +262,18 @@ _run_positive() {
   printf 'APR_AGENT_POSITIVE_OK %s\n' "${mode}"
 }
 
+_run_r7_capacity() {
+  local mode="$1" root="$2/r7-capacity"
+  mkdir -p -- "${root}"
+  _copy_repository "${root}"
+  _run_fixture "${mode}" "${root}" "${root}/capacity.log" \
+    r7-capacity --output "${root}/capacity.json" ||
+    _fail "APR_R7_LOCAL_SESSION_CAPACITY_FAILED ${mode}"
+  grep -Fxq APR_R7_LOCAL_SESSION_CAPACITY_OK "${root}/capacity.log" ||
+    _fail "APR_R7_LOCAL_SESSION_CAPACITY_REPORT_INVALID ${mode}"
+  printf 'APR_R7_LOCAL_SESSION_CAPACITY_OK %s\n' "${mode}"
+}
+
 _requires_seed_state() {
   case "$1" in
     state-*|head-*) return 0 ;;
@@ -471,6 +483,7 @@ _run_mode() {
     _build_aot "${mode_root}"
   fi
   _run_positive "${mode}" "${mode_root}"
+  _run_r7_capacity "${mode}" "${mode_root}"
   _run_negatives "${mode}" "${mode_root}"
   _run_environment_negatives "${mode}" "${mode_root}"
   printf 'APR_AGENT_MODE_OK %s\n' "${mode}"

@@ -189,7 +189,7 @@ public sealed class AgentSessionStateBoundaryTests
                 {
                     Text = new string(
                         'x',
-                        AgentLimits.SessionRecordBytes),
+                        AgentLimits.ContentBytes + 1),
                 }),
             fixture.Artifact.Document with
             {

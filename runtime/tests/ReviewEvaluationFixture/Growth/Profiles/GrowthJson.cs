@@ -22,10 +22,13 @@ internal static class GrowthJson
 
     // Data admission is not proof that unseen execution occurred. Recomputes accounting,
     // links existing Q1/Q4 outcomes and checks the closed producer measurement domains.
-    internal static GrowthReport? Read(ReadOnlySpan<byte> bytes)
+    internal static GrowthReport? Read(ReadOnlySpan<byte> bytes) => Read(bytes, MeasurementLimits.Historical);
+    internal static GrowthReport? ReadCurrent(ReadOnlySpan<byte> bytes) => Read(bytes, MeasurementLimits.Current);
+
+    private static GrowthReport? Read(ReadOnlySpan<byte> bytes, MeasurementLimits limits)
     {
         var report = ReplayWire.Read(bytes, GrowthJsonContext.Default.GrowthReport, MaximumBytes);
-        try { return report is not null && Valid(report) ? report : null; }
+        try { return report is not null && Valid(report, limits) ? report : null; }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or NullReferenceException or OverflowException) { return null; }
     }
 
@@ -40,7 +43,7 @@ internal static class GrowthJson
         return AgentCanonical.HashDomain("apr.r5.growth.rows", JsonSerializer.SerializeToUtf8Bytes(rows, GrowthJsonContext.Default.ImmutableArrayGrowthRow));
     }
 
-    private static bool Valid(GrowthReport report)
+    private static bool Valid(GrowthReport report, MeasurementLimits limits)
     {
         if (report.Code is not ("verified" or "observation_incomplete" or "input_invalid" or "cancelled" or "infrastructure_failed" or "cleanup_failed") ||
             report.Cleanup is not ("cleaned" or "cleanup_failed") || report.Schedule is not { Valid: true } || !EvaluationLimits.Hash(report.SourceCommit, 40) ||
@@ -69,12 +72,12 @@ internal static class GrowthJson
                     !EvaluationLimits.Hash(row.AttemptSha256) || outcome.CorpusSha256 != report.CorpusSha256 ||
                     outcome.SourceCommit != report.SourceCommit || outcome.SourceTree != report.SourceTree || outcome.SourceClean != report.SourceClean ||
                     outcome.Mode != "deterministic" || row.Before != previous || row.Accepted != (row.State is not null) ||
-                    row.Classification != GrowthRunner.Classify(row.Stage, row.Code, row.Project) ||
+                    row.Classification != GrowthRunner.Classify(row.Stage, row.Code, row.Project, limits) ||
                     row.ModelCalls < 0 || row.ModelCalls > AgentLimits.ModelCalls || row.ToolObservations < 0 || row.ToolObservations > AgentLimits.ToolCalls ||
                     row.ProviderRequests < 0 || row.ProviderRequests > row.ModelCalls || row.ProviderRequestBytes < 0 ||
-                    row.ProviderRequestBytes > (long)(row.ProviderRequests ?? 0) * AgentLimits.RequestBytes ||
+                    row.ProviderRequestBytes > (long)(row.ProviderRequests ?? 0) * limits.RequestBytes ||
                     (row.ProviderRequests is { } requests && (requests == 0 ? row.LastProviderRequestBytes is not null || row.ProviderRequestBytes != 0 :
-                        row.LastProviderRequestBytes is not (> 0 and <= AgentLimits.RequestBytes) || row.LastProviderRequestBytes > row.ProviderRequestBytes)) ||
+                        (row.LastProviderRequestBytes is null || row.LastProviderRequestBytes <= 0 || row.LastProviderRequestBytes > limits.RequestBytes) || row.LastProviderRequestBytes > row.ProviderRequestBytes)) ||
                     !Code(row.Stage, row.Code) || !OutcomeMatches(row.Stage, outcome)) return false;
                 if (row.Code == "result_invalid" && (outcome.ExecutionStatus != EvaluationStatus.Invalid || outcome.FailureSource != EvaluationFailureSource.Evaluator)) return false;
                 if (row.Code == "process_unreaped" && (report.Cleanup != "cleanup_failed" || row.PredecessorPreserved || row.ModelCalls is not null)) return false;
@@ -83,16 +86,16 @@ internal static class GrowthJson
                     row.ToolObservations is null || row.ProviderRequests is null || row.ProviderRequestBytes is null) return false;
                 if (row.Project is null && row.ModelCalls is not null && (row.ModelCalls != 0 || row.ToolObservations != 0 || row.ProviderRequests != 0)) return false;
                 if (row.Project is { } project && (project.Calls < 1 || project.Calls != row.ModelCalls || project.Calls < row.ProviderRequests || project.Calls > AgentLimits.ModelCalls ||
-                    project.LastProjectRequestBytes is < 1 or > AgentLimits.RequestBytes || project.LastMessages is < 1 or > AgentLimits.Messages ||
+                    (project.LastProjectRequestBytes < 1 || project.LastProjectRequestBytes > limits.RequestBytes) || (project.LastMessages < 1 || project.LastMessages > limits.Messages) ||
                     project.LastResponseMessages < project.LastMessages || project.LastResponseMessages > project.LastMessages + 1 + AgentLimits.ToolCallsPerResponse ||
                     project.LastContinuationBeforeBytes < 0 ||
-                    project.LastContinuationBeforeBytes > AgentLimits.ContinuationTotalBytes ||
+                    project.LastContinuationBeforeBytes > limits.ContinuationTotalBytes ||
                     project.LastContinuationAfterBytes < project.LastContinuationBeforeBytes ||
-                    project.LastContinuationAfterBytes > 2L * AgentLimits.ContinuationTotalBytes)) return false;
+                    project.LastContinuationAfterBytes > 2L * limits.ContinuationTotalBytes)) return false;
                 if (row.State is { } state)
                 {
                     if (!row.PredecessorPreserved || row.Stage != "accept" || row.Code != RestrictedStateCodes.Accepted ||
-                        outcome.ExecutionStatus != EvaluationStatus.Completed || !StateValid(state, previous, index)) return false;
+                        outcome.ExecutionStatus != EvaluationStatus.Completed || !StateValid(state, previous, index, limits)) return false;
                     previous = state;
                 }
                 else if (index != profile.Rows.Length - 1) return false;
@@ -107,15 +110,15 @@ internal static class GrowthJson
         return report.Code != "verified" || report.Profiles.All(p => p.LimitObserved && p.Rows.All(r => r.PredecessorPreserved));
     }
 
-    private static bool StateValid(GrowthState state, GrowthState? previous, int index) =>
+    private static bool StateValid(GrowthState state, GrowthState? previous, int index, MeasurementLimits limits) =>
         state.Generation == index && state.CompletedRuns == index + 1 && state.CompletedRuns <= AgentSessionFormat.MaximumCompletedRuns &&
-        state.Records > (previous?.Records ?? 0) && state.Records <= AgentLimits.SessionRecords &&
-        state.ContinuationBytes >= (previous?.ContinuationBytes ?? 0) && state.ContinuationBytes <= AgentLimits.ContinuationTotalBytes &&
-        state.PlaintextBytes > (previous?.PlaintextBytes ?? 0) && state.PlaintextBytes <= AgentLimits.SessionPlaintextBytes &&
-        state.EnvelopeBytes > state.PlaintextBytes && state.EnvelopeBytes <= AgentLimits.StateEnvelopeBytes &&
+        state.Records > (previous?.Records ?? 0) && state.Records <= limits.SessionRecords &&
+        state.ContinuationBytes >= (previous?.ContinuationBytes ?? 0) && state.ContinuationBytes <= limits.ContinuationTotalBytes &&
+        state.PlaintextBytes > (previous?.PlaintextBytes ?? 0) && state.PlaintextBytes <= limits.SessionPlaintextBytes &&
+        state.EnvelopeBytes > state.PlaintextBytes && state.EnvelopeBytes <= limits.StateEnvelopeBytes &&
         state.AcceptedCandidates == Math.Min(index + 1, AgentLimits.AcceptedCandidates) &&
         state.MetadataBytes is > 0 and <= AgentLimits.CandidateMetadataBytes &&
-        state.ScopeBytes == state.EnvelopeBytes + (previous?.EnvelopeBytes ?? 0) + state.MetadataBytes && state.ScopeBytes <= AgentLimits.StateScopeTotalBytes &&
+        state.ScopeBytes == state.EnvelopeBytes + (previous?.EnvelopeBytes ?? 0) + state.MetadataBytes && state.ScopeBytes <= limits.StateScopeTotalBytes &&
         EvaluationLimits.Hash(state.SessionSha256) && EvaluationLimits.Hash(state.EnvelopeSha256) && EvaluationLimits.Hash(state.LogicalSha256) &&
         state.PredecessorEnvelopeSha256 == previous?.EnvelopeSha256;
 

@@ -141,7 +141,9 @@ internal static class FrameworkHost
             github,
             new FrameworkStateDependencies(scenarioRoot, github),
             publisher,
-            provider,
+            FrameworkSessionCapacity.IsMode(mode)
+                ? new FrameworkSessionCapacity.ProviderFactory(scenarioRoot, provider)
+                : provider,
             new FrameworkTimeProvider(scenarioRoot),
             () => Path.Join(scenarioRoot, "host-staging"),
             new PostAcceptanceInlinePublisherHook(publisher),
@@ -277,8 +279,12 @@ internal static class FrameworkHost
         internal FrameworkTimeProvider(string scenarioRoot) =>
             this.scenarioRoot = scenarioRoot;
 
-        public override DateTimeOffset GetUtcNow() =>
-            DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        public override DateTimeOffset GetUtcNow()
+        {
+            var mode = File.ReadAllText(Path.Join(scenarioRoot, "mode")).Trim();
+            return DateTimeOffset.FromUnixTimeSeconds(1_800_000_000 +
+                (FrameworkSessionCapacity.IsMode(mode) ? 60L * FrameworkSessionCapacity.Ordinal(mode) : 0));
+        }
 
         public override ITimer CreateTimer(
             TimerCallback callback,

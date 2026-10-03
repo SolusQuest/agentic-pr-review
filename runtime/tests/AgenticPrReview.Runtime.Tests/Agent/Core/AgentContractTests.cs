@@ -20,12 +20,12 @@ public sealed class AgentContractTests
             ("input_tokens", 262_144, "tokens"),
             ("output_tokens", 32_768, "tokens"),
             ("combined_tokens", 294_912, "tokens"),
-            ("request_bytes", 1_048_576, "bytes"),
-            ("response_bytes", 1_048_576, "bytes"),
-            ("messages", 64, "count"),
+            ("request_bytes", 8_388_608, "bytes"),
+            ("response_bytes", 2_097_152, "bytes"),
+            ("messages", 4_096, "count"),
             ("parts_per_message", 32, "count"),
-            ("parts_total", 256, "count"),
-            ("content_bytes", 65_536, "bytes"),
+            ("parts_total", 8_192, "count"),
+            ("content_bytes", 1_048_576, "bytes"),
             ("tool_arguments_bytes", 8_192, "bytes"),
             ("tool_result_bytes", 32_768, "bytes"),
             ("tool_results_total_bytes", 262_144, "bytes"),
@@ -43,16 +43,16 @@ public sealed class AgentContractTests
             ("finding_message_bytes", 16_384, "bytes"),
             ("evidence_per_finding", 8, "count"),
             ("terminal_bytes", 262_144, "bytes"),
-            ("session_records", 256, "count"),
-            ("session_record_bytes", 524_288, "bytes"),
-            ("continuation_item_bytes", 65_536, "bytes"),
-            ("continuation_total_bytes", 262_144, "bytes"),
-            ("session_plaintext_bytes", 1_048_576, "bytes"),
-            ("state_envelope_bytes", 2_097_152, "bytes"),
+            ("session_records", 8_192, "count"),
+            ("session_record_bytes", 16_777_216, "bytes"),
+            ("continuation_item_bytes", 1_048_576, "bytes"),
+            ("continuation_total_bytes", 8_388_608, "bytes"),
+            ("session_plaintext_bytes", 16_777_216, "bytes"),
+            ("state_envelope_bytes", 33_554_432, "bytes"),
             ("accepted_candidates", 2, "count"),
             ("candidate_metadata_bytes", 16_384, "bytes"),
-            ("candidate_envelope_total_bytes", 4_194_304, "bytes"),
-            ("state_scope_total_bytes", 6_291_456, "bytes"),
+            ("candidate_envelope_total_bytes", 67_108_864, "bytes"),
+            ("state_scope_total_bytes", 100_679_680, "bytes"),
             ("tracked_files", 20_000, "count"),
             ("tracked_files_metadata_bytes", 8_388_608, "bytes"),
             ("list_files_entries", 100, "count"),
@@ -80,9 +80,9 @@ public sealed class AgentContractTests
     [Fact]
     public void Output8192LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6",
+        Assert.Equal("8c184a185067b867de078109295d0fa4f442d90fd5bbbec01c7ff4afaeaf30e5",
             AgentCanonical.LimitsSha256());
-        Assert.Equal("620174ae7519d7a0cd76296600cb3d0783328d2ea0d62170d8d058ea3eb41cda",
+        Assert.Equal("0cdf29eda2c6fa98082f8975d721e22c59ffe78bacbddd0f9957ad7ebc409cfc",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192));
         var current = AgentLimits.Registry;
         var candidate = AgentLimits.RegistryFor(AgentLimitProfile.Output8192);
@@ -105,7 +105,7 @@ public sealed class AgentContractTests
     [Fact]
     public void Output65536LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("adec4475338ada7a1bdb9781ed93e1d8ac16ecfd4209f138ba0869c78ad3c926",
+        Assert.Equal("8dc0cf80288515c2c5202846e134ada0db4c8434b48b042233775aecb6dcb463",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536));
         var current = AgentLimits.Registry;
         var large = AgentLimits.RegistryFor(AgentLimitProfile.Output65536);
@@ -223,7 +223,7 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6",
+            "8c184a185067b867de078109295d0fa4f442d90fd5bbbec01c7ff4afaeaf30e5",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
             "39b7291fbde316c6b0081c153fa960303d1d0e0ddeb9fc565bc0cbf821b5b502",

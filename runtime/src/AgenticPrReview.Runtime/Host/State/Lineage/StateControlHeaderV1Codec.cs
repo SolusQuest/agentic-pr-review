@@ -13,9 +13,9 @@ internal static class StateControlHeaderV1Codec
         header = null;
         if (!LineageValidation.IsValid(draft) ||
             !LineageValidation.IsSha256(keyId) ||
-            !LineageFormat.IsPayloadLengthAllowed(
+            !LineageFormat.IsPayloadAllowed(
                 draft!.ObjectClass,
-                payload.Length))
+                payload))
         {
             return false;
         }
@@ -116,9 +116,9 @@ internal static class StateControlHeaderV1Codec
             !reader.TryReadString(64, out var objectClassText) ||
             !StateObjectClasses.TryParse(objectClassText, out var objectClass) ||
             objectClass == StateObjectClass.LocatorRoot ||
-            !LineageFormat.IsPayloadLengthAllowed(
+            !LineageFormat.IsPayloadAllowed(
                 objectClass,
-                payload.Length) ||
+                payload) ||
             !reader.TryReadString(64, out var keyId) ||
             !reader.TryReadString(64, out var objectIdentity) ||
             !reader.TryReadOptionalString(64, out var predecessorIdentity) ||

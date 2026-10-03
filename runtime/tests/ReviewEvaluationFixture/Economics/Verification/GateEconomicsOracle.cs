@@ -48,7 +48,7 @@ internal static class GateEconomicsOracle
         }
         var negativeRoot = item.Id is "c2-cleanup" or "c2-unreaped";
         Require(evidence.NegativeRootObserved == negativeRoot && report.Cleanup == (negativeRoot ? "cleanup_failed" : "cleaned"));
-        var complete = item.Id is "c2-replay" or "c2-output8192" or "c2-output65536" or "c2-full" or "c2-execute-loopback" or
+        var complete = item.Id is "c2-replay" or "c2-output8192" or "c2-output65536" or "c2-current-workloads" or "c2-execute-loopback" or
             "c2-credential-probe" or "c2-spaced-repeat";
         var missing = item.Id is "c2-wrong-source" or "c2-wrong-build" or "c2-wrong-predecessor" or
             "c2-before-ready-crash" or "c2-after-prepare-crash" or "c2-partial-reply" or "c2-oversized-reply" or
@@ -66,7 +66,7 @@ internal static class GateEconomicsOracle
             _ when complete => "complete",
             _ => throw new InvalidOperationException("r6_gate_economics_case"),
         };
-        var scheduled = item.Id == "c2-full" ? 20 : item.Id == "c2-spaced-repeat" ? 4 : item.Id == "c2-campaign-deadline" ? 2 : 3;
+        var scheduled = item.Id == "c2-current-workloads" ? 7 : item.Id == "c2-spaced-repeat" ? 4 : item.Id == "c2-campaign-deadline" ? 2 : 3;
         var attempted = complete ? scheduled : item.Id is "c2-hang" or "c2-cleanup" or "c2-unreaped" or "c2-campaign-deadline" ? 1 : item.Id == "c2-final-missing" ? 3 : 2;
         Require(report.StopReason == stop && report.Scheduled == scheduled && report.Attempted == attempted &&
             report.ReceiptMissing == (missing ? 1 : 0) && report.Allocations.Calls == attempted * 8);
@@ -85,9 +85,9 @@ internal static class GateEconomicsOracle
         if (complete)
         {
             Require(report.UsageComplete && report.MonetaryComplete && report.Steps.All(step => step.Readback));
-            Require(report.Steps.Count(step => step.Code == "capacity_stop") == (item.Id == "c2-full" ? 2 : 0) &&
-                report.Steps.Count(step => step.Reset) == (item.Id == "c2-full" ? 2 : 0));
-            var sends = item.Id == "c2-full" ? 39 : item.Id == "c2-spaced-repeat" ? 8 : 6;
+            Require(report.Steps.Count(step => step.Code == "capacity_stop") == 0 &&
+                report.Steps.Count(step => step.Reset) == 0);
+            var sends = item.Id == "c2-current-workloads" ? 14 : item.Id == "c2-spaced-repeat" ? 8 : 6;
             Require(report.Journal!.Totals.ActualSends == sends && report.Journal.Totals.KnownInputTokens == sends * 3 &&
                 report.Journal.Totals.KnownOutputTokens == sends * 2 && report.Pricing!.ObservedUsage.TotalAmount == sends * .000022m);
         }

@@ -1041,8 +1041,8 @@ internal static class StateNegativeProofRunner
             {
                 var position = request.Messages.Length;
                 var item = new ProjectContinuationItem(
-                    new string('r', 32 * 1024),
-                    new string('o', 32 * 1024),
+                    new string('r', AgentLimits.ContinuationItemBytes / 2),
+                    new string('o', AgentLimits.ContinuationItemBytes / 2),
                     new string('f', 2 * 1024),
                     "finish-continuation",
                     position,

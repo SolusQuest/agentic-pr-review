@@ -52,6 +52,7 @@ internal sealed class ProjectChatNormalizationException : Exception
     {
         if (diagnosticCode is not (
             AgentFailureCodes.ResponseInvalid or
+            AgentFailureCodes.ContextLimit or
             AgentFailureCodes.MissingTool))
         {
             throw new ArgumentOutOfRangeException(nameof(diagnosticCode));

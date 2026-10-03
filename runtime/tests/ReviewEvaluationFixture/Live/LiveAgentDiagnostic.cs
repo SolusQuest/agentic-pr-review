@@ -46,7 +46,7 @@ internal sealed record LiveAgentDiagnostic(int ScheduleIndex, string Code, int? 
         var code = diagnostic.Code;
         var known = AgentToolResultAdmission.IsFrozenFailureCode(code) || code is
             AgentFailureCodes.Cancelled or AgentFailureCodes.DeadlineExceeded or AgentFailureCodes.ChatFailed or
-            AgentFailureCodes.ModelLimit or AgentFailureCodes.ToolLimit or AgentFailureCodes.TokenLimit or
+            AgentFailureCodes.ModelLimit or AgentFailureCodes.ToolLimit or AgentFailureCodes.TokenLimit or AgentFailureCodes.ContextLimit or
             AgentFailureCodes.RequestTooLarge or AgentFailureCodes.ResponseTooLarge or AgentFailureCodes.UsageInvalid or
             AgentFailureCodes.ResponseInvalid or AgentFailureCodes.MissingTool or AgentFailureCodes.UnknownTool or
             AgentFailureCodes.ToolArgumentsInvalid or AgentFailureCodes.TerminalSequenceInvalid or AgentFailureCodes.TerminalInvalid;

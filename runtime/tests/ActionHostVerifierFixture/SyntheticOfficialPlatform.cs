@@ -37,6 +37,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private readonly HttpListener listener = new();
     private readonly CancellationTokenSource shutdown = new();
     private readonly Dictionary<long, Artifact> artifacts = [];
+    private readonly Dictionary<long, Artifact> capacityScenarioUploads = [];
     private readonly Dictionary<string, byte[]> blocks =
         new(StringComparer.Ordinal);
     private readonly List<string> artifactNames = [];
@@ -115,6 +116,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     {
         lock (gate)
         {
+            capacityScenarioUploads.Clear();
             activeMode = mode;
             activeScenarioRoot = scenarioRoot;
             activePayloadSha256 = payloadSha256;
@@ -430,6 +432,11 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                         pendingExpiry,
                         producingRunId,
                         producingRunAttempt);
+                    if (activeMode.StartsWith("r7-capacity-", StringComparison.Ordinal))
+                    {
+                        if (capacityScenarioUploads.Count >= 64) throw new InvalidOperationException("capacity_upload_inventory_bound");
+                        capacityScenarioUploads.Add(id, artifacts[id]);
+                    }
                     artifactNames.Add(pendingName);
                     pendingFinalizedArtifactId = id;
                     if (delayInitialLineage && artifacts.Values.Count(artifact =>
@@ -1013,6 +1020,27 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private bool TryArtifact(long id, out Artifact? artifact)
     {
         lock (gate) return artifacts.TryGetValue(id, out artifact);
+    }
+
+    internal (string Name, byte[] Bytes, bool Current)[] ReadR7EncryptedObjects()
+    {
+        lock (gate)
+        {
+            return artifacts.Values.Concat(capacityScenarioUploads.Values.Where(value => !artifacts.ContainsKey(value.Id))).Select(artifact =>
+            {
+                using var stream = new MemoryStream(artifact.Archive, writable: false);
+                using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
+                var entry = zip.GetEntry("artifact-envelope.json") ?? throw new InvalidDataException();
+                if (entry.Length > Host.State.GitHubArtifacts.ArtifactBridgeLimits.MaximumStagingFileBytes)
+                    throw new InvalidDataException();
+                using var content = entry.Open();
+                using var document = JsonDocument.Parse(content);
+                var encoded = document.RootElement.GetProperty("encrypted_object_base64").GetString()!;
+                if (encoded.Length > Host.State.OpaqueStore.OpaqueStoreCapacity.MaximumBase64Bytes)
+                    throw new InvalidDataException();
+                return (artifact.Name, Convert.FromBase64String(encoded), artifacts.ContainsKey(artifact.Id));
+            }).ToArray();
+        }
     }
 
     private ArtifactIdentity[] SnapshotArtifacts() => artifacts.Values

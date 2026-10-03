@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Lineage;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
 namespace AgenticPrReview.Runtime.Host.State.Restore;
 
@@ -22,9 +23,9 @@ internal static class AcceptedStateFormat
     internal const string RenderingVersion = "r4-sticky-v1";
     internal const long LogicalWindowSeconds = 604_800;
     internal const int MaximumPublicationPayloadBytes = 256 * 1024;
-    internal const int MaximumGenerationPayloadBytes = 1_400_000;
+    internal const int MaximumGenerationPayloadBytes = OpaqueStoreCapacity.GenerationBytes;
     internal const int MaximumAcceptancePayloadBytes = 64 * 1024;
-    internal const int MaximumPhysicalCopyPayloadBytes = 1_500_000;
+    internal const int MaximumPhysicalCopyPayloadBytes = OpaqueStoreCapacity.PhysicalCopyBytes;
     internal const int MaximumReaderPayloadBytes =
         MaximumPhysicalCopyPayloadBytes;
     internal const int MaximumRepositoryNameBytes = 256;

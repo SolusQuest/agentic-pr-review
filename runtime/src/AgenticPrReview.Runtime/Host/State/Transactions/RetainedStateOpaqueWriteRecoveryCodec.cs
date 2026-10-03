@@ -8,6 +8,7 @@ internal static class RetainedStateOpaqueWriteRecoveryCodec
 {
     internal const string Magic = "APROWR01";
     internal const ushort Version = 1;
+    internal const int MaximumBytes = OpaqueStoreCapacity.TargetEnvelopeBytes + 1024;
 
     internal static bool TryEncode(
         StateObjectClass objectClass,
@@ -30,12 +31,13 @@ internal static class RetainedStateOpaqueWriteRecoveryCodec
                 header.PredecessorIdentity != candidateObjectIdentity ||
                 header.LogicalExpiresAtUnixSeconds !=
                     semanticRequiredExpiresAtUnixSeconds ||
-                envelope.Length is < 1 or > LineageFormat.MaximumEnvelopeBytes)
+                envelope.Length < 1 ||
+                envelope.Length > LineageFormat.MaximumEnvelopeBytesForClass(objectClass))
             {
                 return false;
             }
 
-            var writer = new LineageBinaryWriter();
+            var writer = new LineageBinaryWriter(MaximumBytes);
             writer.WriteString(Magic);
             writer.WriteUInt16(Version);
             writer.WriteUInt16((ushort)objectClass);
@@ -44,7 +46,7 @@ internal static class RetainedStateOpaqueWriteRecoveryCodec
             writer.WriteString(name.Value);
             writer.WriteBytes(envelope);
             bytes = writer.ToArray();
-            return bytes.Length <= LineageFormat.MaximumPayloadBytes;
+            return bytes.Length <= MaximumBytes;
         }
         catch (Exception exception) when (
             exception is ArgumentException or OverflowException)
@@ -70,7 +72,7 @@ internal static class RetainedStateOpaqueWriteRecoveryCodec
         envelope = [];
         try
         {
-            if (bytes.Length is < 1 or > LineageFormat.MaximumPayloadBytes)
+            if (bytes.Length is < 1 or > MaximumBytes)
             {
                 return false;
             }
@@ -82,6 +84,7 @@ internal static class RetainedStateOpaqueWriteRecoveryCodec
                 version != Version ||
                 !reader.TryReadUInt16(out var encodedClass) ||
                 !Enum.IsDefined(typeof(StateObjectClass), (int)encodedClass) ||
+                !Allowed((StateObjectClass)encodedClass) ||
                 !reader.TryReadInt64(
                     out semanticRequiredExpiresAtUnixSeconds) ||
                 !reader.TryReadString(
@@ -91,7 +94,7 @@ internal static class RetainedStateOpaqueWriteRecoveryCodec
                     OpaqueStoreLimits.MaximumNameBytes,
                     out var nameValue) ||
                 !reader.TryReadBytes(
-                    LineageFormat.MaximumEnvelopeBytes,
+                    LineageFormat.MaximumEnvelopeBytesForClass((StateObjectClass)encodedClass),
                     out envelope) ||
                 !reader.IsComplete)
             {

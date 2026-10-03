@@ -247,8 +247,8 @@ public sealed class DeepSeekTransportTests
     }
 
     [Theory]
-    [InlineData(1_048_577)]
-    [InlineData(1_064_960)]
+    [InlineData(8_388_609)]
+    [InlineData(8_404_992)]
     public async Task OversizedRequestReturnsSentinelWithoutSending(int size)
     {
         using var handler = new RecordingHandler(_ => Response(200, []));
@@ -605,9 +605,9 @@ public sealed class DeepSeekTransportTests
     [Theory]
     [InlineData(0)]
     [InlineData(13)]
-    [InlineData(1_048_576)]
-    [InlineData(1_048_577)]
-    [InlineData(1_064_960)]
+    [InlineData(2_097_152)]
+    [InlineData(2_097_153)]
+    [InlineData(2_113_536)]
     public async Task SuccessReadUsesExactCapPlusOneBoundary(int size)
     {
         var stream = new TrackingStream(size);

@@ -128,6 +128,10 @@ describe('artifact bridge correlation registry', () => {
       expect(terminal.admit(`terminal-${index}`).accepted).toBe(true);
       terminal.complete(`terminal-${index}`);
     }
+    expect(ARTIFACT_BRIDGE_LIMITS.maximumTerminalCorrelations).toBe(4_096);
+    expect(terminal.terminalCount).toBe(4_096);
+    // Saturation cannot erase the earliest replay protection.
+    expect(terminal.admit('terminal-0')).toEqual({ accepted: false, reason: 'duplicate' });
     expect(terminal.admit('terminal-over')).toEqual({
       accepted: false,
       reason: 'saturated',

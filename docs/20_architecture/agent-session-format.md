@@ -17,7 +17,7 @@ The plaintext byte sequence is:
 3. exactly that many canonical UTF-8 JSON bytes;
 4. no trailing bytes.
 
-The complete plaintext is at most `AgentLimits.SessionPlaintextBytes` (1 MiB), including the 12 framing bytes. Length and magic are checked before JSON parsing or allocation based on the declared length.
+The complete plaintext is at most `AgentLimits.SessionPlaintextBytes` (16 MiB), including the 12 framing bytes. Length and magic are checked before JSON parsing or allocation based on the declared length.
 
 ## Canonical JSON
 
@@ -55,7 +55,7 @@ Construction never truncates, compacts, summarizes, normalizes, reorders, or del
 
 ## Logical records
 
-Every record property order is `kind`, `id`, `sequence`, the kind-specific fields below, `role`, `framing`, `classification`. Record IDs and provider call IDs use `[A-Za-z0-9_-]{1,64}` and are unique across the cumulative session. Sequence values are contiguous zero-based Int32 values within each run. The cumulative sum of logical records plus continuation items across every completed run is at most 256; this is one session cap, not a per-run allowance. Each canonical record is at most 512 KiB.
+Every record property order is `kind`, `id`, `sequence`, the kind-specific fields below, `role`, `framing`, `classification`. Record IDs and provider call IDs use `[A-Za-z0-9_-]{1,64}` and are unique across the cumulative session. Sequence values are contiguous zero-based Int32 values within each run. The cumulative sum of logical records plus continuation items across every completed run is at most 8192; this is one session cap, not a per-run allowance. Each canonical record is at most 16 MiB; field limits and the complete 16 MiB SESSION still apply.
 
 | Kind                | Kind-specific fields in exact order                                                      | role        | framing              | classification            |
 | ------------------- | ---------------------------------------------------------------------------------------- | ----------- | -------------------- | ------------------------- |
@@ -65,13 +65,13 @@ Every record property order is `kind`, `id`, `sequence`, the kind-specific field
 | `tool_error`        | `source_message_id`, `call_id`, `name`, `result_json`                                    | `tool`      | `tool_error`         | `repository_feedback`     |
 | `review_outcome`    | `terminal_message_id`, `terminal_call_id`, `terminal_sha256`, `summary`, `findings_json` | `assistant` | `validated_terminal` | `validated_terminal_data` |
 
-`review_context.text` is 1-64 KiB of valid-scalar UTF-8. Construction accepts a current dynamic request message only when it is exactly one `user` message containing exactly one valid `ProjectTextContent`. It does not join, normalize, select, or discard physical text parts. The initial outcome event must match the same role and text. Restore reconstructs exactly one user message with exactly one text content.
+`review_context.text` is 1 byte through 1 MiB of valid-scalar UTF-8. Construction accepts a current dynamic request message only when it is exactly one `user` message containing exactly one valid `ProjectTextContent`. It does not join, normalize, select, or discard physical text parts. The initial outcome event must match the same role and text. Restore reconstructs exactly one user message with exactly one text content.
 
-`assistant_message.message_ordinal` is contiguous from zero and at most 63. `contents` has 1-32 items with contiguous zero-based `content_position`.
+`assistant_message.message_ordinal` is contiguous from zero and at most 4095. `contents` has 1-32 items with contiguous zero-based `content_position`.
 
 | Assistant content kind | Fields after `kind`, `content_position`                                                                                  |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `text`                 | `text`, 1-64 KiB valid-scalar UTF-8                                                                                      |
+| `text`                 | `text`, 1 byte through 1 MiB valid-scalar UTF-8                                                                          |
 | `continuation_slot`    | identifier `continuation_item_id`                                                                                        |
 | `tool_call`            | identifier `call_id`, one of the five read-only tool names below, canonical `arguments_json` of 1-8 KiB                  |
 | `recovery_tool_call`   | identifier `call_id`, one of the five read-only names, sanitized `arguments_json`, boolean `rejected`                    |
@@ -117,15 +117,15 @@ Every run has one continuation object with exact property order `codec_id`, `cod
 
 Each item property order is exactly `item_id`, `encoding`, `payload`, `payload_sha256`, `message_id`, `content_position`, `associated_call_id`.
 
-| Field                | Exact domain                                             |
-| -------------------- | -------------------------------------------------------- |
-| `item_id`            | unique identifier                                        |
-| `encoding`           | `utf8` or canonical padded RFC 4648 `base64`             |
-| `payload`            | exact codec payload string; decoded bytes at most 64 KiB |
-| `payload_sha256`     | continuation registry digest                             |
-| `message_id`         | assistant record ID in the same run                      |
-| `content_position`   | Int32 0-31 naming the matching continuation slot         |
-| `associated_call_id` | same-message call identifier or JSON `null`              |
+| Field                | Exact domain                                            |
+| -------------------- | ------------------------------------------------------- |
+| `item_id`            | unique identifier                                       |
+| `encoding`           | `utf8` or canonical padded RFC 4648 `base64`            |
+| `payload`            | exact codec payload string; decoded bytes at most 1 MiB |
+| `payload_sha256`     | continuation registry digest                            |
+| `message_id`         | assistant record ID in the same run                     |
+| `content_position`   | Int32 0-31 naming the matching continuation slot        |
+| `associated_call_id` | same-message call identifier or JSON `null`             |
 
 The continuation digest is domain `apr.continuation.r2` over the exact ordered canonical object `codec_id`, `codec_discriminator`, `item_id`, `encoding`, `payload_bytes`, where `payload_bytes` is canonical padded base64 of the decoded exact codec bytes.
 
@@ -133,13 +133,13 @@ Generic SESSION code validates bytes, encoding, hash, array order, slot, same-me
 
 The selected DeepSeek thinking adapter uses exactly `codec_id: "deepseek-reasoning-content"`, `codec_discriminator: "deepseek-flash-thinking-v1"`, `encoding: "utf8"`, and framing `deepseek.reasoning_content.utf8.v1`. Its payload bytes are the exact UTF-8 bytes, including zero bytes for an empty string, of the required non-null readable `reasoning_content`, without BOM, normalization, wrapper, compression, or trailing newline; opaque is exactly empty. The v1 framing literal remains unchanged because the wire representation is still exact UTF-8; the selected discriminator binds these unchanged readable-value rules to the current Flash identity. Every assistant message containing admitted calls has exactly one continuation item at content position 0, before optional non-empty text and ordered calls. Items are chronological by assistant-message ordinal, `associated_call_id` is JSON `null`, and multi-call order does not create additional items. Every later request reinserts each complete reasoning value, including an empty string, at its original assistant message before provider projection.
 
-The selected DeepSeek adapter scope is provider `deepseek`, model `deepseek-flash`, and adapter ID `393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6`. That adapter ID is the lowercase SHA-256 of the frozen 525-byte no-BOM/no-newline descriptor owned by the backend; build identity remains the existing independent root field. Former `deepseek-v4-flash` adapter and v1/v2 codec identities are incompatible and fail closed for selected-current restore; there is no compatibility reader or migration because no released persisted consumer exists. See the [identity transition](./deepseek-flash-identity.md) for existing Host bootstrap/reset semantics and immutable historical evidence. These provider rules add no SESSION property, namespace, root discriminator, public schema, or provider framework.
+The selected DeepSeek adapter scope is provider `deepseek`, model `deepseek-flash`, and adapter ID `b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8`. That adapter ID is the lowercase SHA-256 of the frozen 593-byte no-BOM/no-newline descriptor owned by the backend; build identity remains the existing independent root field. Former `deepseek-v4-flash` adapter and v1/v2 codec identities are incompatible and fail closed for selected-current restore; there is no compatibility reader or migration because no released persisted consumer exists. See the [identity transition](./deepseek-flash-identity.md) for existing Host bootstrap/reset semantics and immutable historical evidence. These provider rules add no SESSION property, namespace, root discriminator, public schema, or provider framework.
 
 Durable item-array order is significant and never changed. Adapter materialization independently groups by absolute assistant-message position and inserts by content position. Consequently a durable array may intentionally differ from physical insertion order; tests assert both orders separately through the exact `MinimalChatClient.Materialize` path.
 
 The R2 public-safe synthetic codec uses `codec_id: "r2-synthetic"` and `codec_discriminator: "current-1"`. Its readable payload property order is `kind`, `text`; opaque order is `kind`, `opaque`; structured order is `kind`, `framing`, `readable`, `opaque`, `signature`, `fields`. Structured `fields` is an ordered array of exact `{ "name": ..., "value": ... }` objects, with 0-32 fields, ASCII names `[A-Za-z0-9_.-]{1,64}`, and values up to 8 KiB. This codec is fixture evidence, not a production provider contract.
 
-The total decoded continuation payload retained across all completed runs is at most 256 KiB. Generation N+1 reconstructs the predecessor cumulative continuation, requires the actual `AgentRunRequest.Continuation` to equal it exactly, and requires the successful outcome's cumulative candidate to start with that unchanged prefix. Only the remaining current-run suffix is persisted in the appended run. A successor with no new continuation therefore appends a zero-item run container rather than duplicating predecessor items.
+The total decoded continuation payload retained across all completed runs is at most 8 MiB. Generation N+1 reconstructs the predecessor cumulative continuation, requires the actual `AgentRunRequest.Continuation` to equal it exactly, and requires the successful outcome's cumulative candidate to start with that unchanged prefix. Only the remaining current-run suffix is persisted in the appended run. A successor with no new continuation therefore appends a zero-item run container rather than duplicating predecessor items.
 
 ## Stable and dynamic request identity
 
@@ -243,7 +243,7 @@ The cumulative generation golden uses review texts `g0`, `g1`, and `g2`, termina
 | 1          |           4,162 | `e289e6fe6c095c10924761e8fdf85f0ffddd2409af9974d8b01fc84824f1a2d6` |
 | 2          |           6,015 | `44e434665aff7155f6f92db085427c15d22576545b3c4c723271f0bbd39596a1` |
 
-Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, generation-2-only reconstruction after the oldest envelope is unavailable, direct terminal and tool-round grammars, provider-valid terminal closure, replayable multi-item continuation placement across generations, exact cumulative 256/257 durable-record validation, builder-owned append-capacity failure without predecessor mutation, and semantic terminal re-admission.
+Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, generation-2-only reconstruction after the oldest envelope is unavailable, direct terminal and tool-round grammars, provider-valid terminal closure, replayable multi-item continuation placement across generations, exact cumulative durable-record validation, builder-owned append-capacity failure without predecessor mutation, and semantic terminal re-admission.
 
 ## Security exclusions and downstream handoff
 
@@ -252,3 +252,5 @@ SESSION is a pure bounded in-memory plaintext transformation. It has no filesyst
 SESSION does not reference, deserialize, reinterpret, or convert `ProviderSessionLedgerV1`, the historical StateManifestV2 removed by W5, `ReviewInputV1`, or any other M4 state payload. R4-W5 retired StateV2; no current reader or compatibility surface. Host-classified non-current artifacts bypass the current parser.
 
 Issue [#87](https://github.com/SolusQuest/agentic-pr-review/issues/87) consumes SESSION through the narrow `AgentSessionStateBoundary`: STATE re-admits Agent-produced plaintext before encryption and re-admits authenticated plaintext after decryption through the complete current parser and semantic validator. STATE does not reinterpret records or continuation semantics; authenticated SESSION rejection maps to its closed state outcome. The exact encrypted wrapper, authorization, independent lineage, retention, and local conformance store are defined by [`restricted-state-format.md`](./restricted-state-format.md). Issue [#88](https://github.com/SolusQuest/agentic-pr-review/issues/88) proves this integration across two fresh framework and Native AOT processes. Issue [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109) adds the concrete executable boundary: process one derives a prior-only fact solely from an admitted reviewed-file tool observation, while process two reconstructs the encrypted SESSION into the real DeepSeek request writer/parser path and must use that fact in its terminal result even though it is absent from fresh public input. The proof retains only stable hashes outside restricted state. R3 still owns trusted live-provider continuation evidence; R4 owns production workflow transport.
+
+R7-C3 raises the configured session/request capacity without changing ordered history, call/result association, scope, or trust rules. The [capacity proof and bound derivation](../../runtime/tests/fixtures/agent/r7/session-capacity/README.md) separate decoded continuation bytes, JSON escaping, provider context admission, historical data admission, and current executable proofs. Oversized arrays and declared continuation payload lengths are rejected before typed item/payload allocation; the initial bounded JSON envelope parse still owns a document-sized allocation.

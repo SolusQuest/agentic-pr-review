@@ -955,7 +955,7 @@ internal static class NegativeProofRunner
 
         const int messagesCount = 8;
         const int partsPerMessage = 32;
-        const int baseTextLength = 3_900;
+        const int baseTextLength = 32_700;
         var messages = Enumerable.Range(0, messagesCount)
             .Select(messageIndex => new ProjectChatMessage(
                 "user",

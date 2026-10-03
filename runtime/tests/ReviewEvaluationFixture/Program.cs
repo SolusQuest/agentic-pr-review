@@ -89,6 +89,14 @@ internal static class Program
             if (args.SequenceEqual(["reset", "--fixture", "self-test"]))
                 return await Growth.Reset.ResetOwnerProbe.RunAsync();
             if (args.SequenceEqual(["replay-child"])) return await ReplayChild.MainAsync();
+            if (args is ["growth-current", "--bundle", { } currentBundle])
+            {
+                var growth = await GrowthRunner.RunAsync(currentBundle, new() { AttemptLimit = 2 });
+                var bytes = GrowthJson.Write(growth);
+                var admitted = GrowthJson.ReadCurrent(bytes);
+                Console.WriteLine(Encoding.UTF8.GetString(bytes));
+                return admitted is not null && CurrentGrowthOracle.Valid(admitted) ? 0 : 1;
+            }
             if (args.Length == 3 && args[0] == "replay" && args[1] == "--bundle")
             {
                 var admitted = ReplayAdmission.Load(args[2]);
@@ -96,7 +104,7 @@ internal static class Program
                 {
                     var growth = await GrowthRunner.RunAsync(args[2]);
                     var bytes = GrowthJson.Write(growth);
-                    if (GrowthJson.Read(bytes) is null) throw new InvalidOperationException("growth_report_invalid");
+                    if (GrowthJson.ReadCurrent(bytes) is null) throw new InvalidOperationException("growth_report_invalid");
                     Console.WriteLine(Encoding.UTF8.GetString(bytes));
                     return growth.ExitCode;
                 }
@@ -253,6 +261,8 @@ internal static class R5CaseVerifier
             {
                 var fixture = ReplayAdmission.Load(corpus).Fixture;
                 corpusSha = fixture?.CorpusSha256;
+                if (fixture is not null && scenario == "growth")
+                    corpusSha = MeasurementLimits.HistoricalGrowthCorpus(corpus);
                 if (fixture is not null)
                     expected = fixture.Runs.ToDictionary(run => run.Input.Id, run => run.ExpectedCode);
             }
@@ -330,6 +340,7 @@ internal static class R5CaseVerifier
             case "replay": return ExtractReplay(lines[^1], ReplayCases, corpusSha, expected);
             case "incremental": return ExtractReplay(lines[^1], IncrementalCases, corpusSha, expected);
             case "growth": return ExtractGrowth(lines[^1], corpusSha);
+            case "growth-current": return ExtractCurrentGrowth(lines[^1], corpusSha);
             case "reset-owner": return ExtractResetOwner(lines[^1]);
             case "live-self-test": return ExtractLiveSelfTest(lines[^1]);
             case "live-plan": return ExtractLivePlan(lines, corpusSha, expected, QualityCases);
@@ -450,6 +461,27 @@ internal static class R5CaseVerifier
         parity["normalized_sha256"] = report.NormalizedSha256;
         parity["steps"] = steps;
         return (parity, null);
+    }
+
+    private static (JsonObject?, string?) ExtractCurrentGrowth(string line, string? corpusSha)
+    {
+        var report = GrowthJson.ReadCurrent(Encoding.UTF8.GetBytes(line));
+        if (report is null) return (null, "rejected_report_invalid");
+        if (!CurrentGrowthOracle.Valid(report)) return (null, "rejected_terminal");
+        if (report.SeedCorpusSha256 != corpusSha) return (null, "rejected_corpus_mismatch");
+        if (!SourceBinds(report.SourceCommit, report.SourceTree, report.SourceClean))
+            return (null, "rejected_source");
+        var result = SourceParity();
+        result["seed_corpus_sha256"] = corpusSha;
+        result["corpus_sha256"] = report.CorpusSha256;
+        result["normalized_sha256"] = report.NormalizedSha256;
+        result["profiles"] = new JsonArray(report.Profiles.Select(p => (JsonNode)new JsonObject
+        {
+            ["profile"] = p.Profile, ["rows"] = p.Rows.Length,
+            ["terminal_stage"] = p.TerminalStage, ["terminal_code"] = p.TerminalCode,
+            ["limit_observed"] = p.LimitObserved,
+        }).ToArray());
+        return (result, null);
     }
 
     private static (JsonObject?, string?) ExtractGrowth(string line, string? corpusSha)
