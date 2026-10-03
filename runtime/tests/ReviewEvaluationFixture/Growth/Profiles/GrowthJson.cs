@@ -73,7 +73,7 @@ internal static class GrowthJson
                     outcome.SourceCommit != report.SourceCommit || outcome.SourceTree != report.SourceTree || outcome.SourceClean != report.SourceClean ||
                     outcome.Mode != "deterministic" || row.Before != previous || row.Accepted != (row.State is not null) ||
                     row.Classification != GrowthRunner.Classify(row.Stage, row.Code, row.Project, limits) ||
-                    row.ModelCalls < 0 || row.ModelCalls > AgentLimits.ModelCalls || row.ToolObservations < 0 || row.ToolObservations > AgentLimits.ToolCalls ||
+                    row.ModelCalls < 0 || row.ModelCalls > limits.ModelCalls || row.ToolObservations < 0 || row.ToolObservations > limits.ToolCalls ||
                     row.ProviderRequests < 0 || row.ProviderRequests > row.ModelCalls || row.ProviderRequestBytes < 0 ||
                     row.ProviderRequestBytes > (long)(row.ProviderRequests ?? 0) * limits.RequestBytes ||
                     (row.ProviderRequests is { } requests && (requests == 0 ? row.LastProviderRequestBytes is not null || row.ProviderRequestBytes != 0 :
@@ -85,9 +85,9 @@ internal static class GrowthJson
                     row.LastProviderRequestBytes is not null || row.Project is not null || row.Stage != "executor" :
                     row.ToolObservations is null || row.ProviderRequests is null || row.ProviderRequestBytes is null) return false;
                 if (row.Project is null && row.ModelCalls is not null && (row.ModelCalls != 0 || row.ToolObservations != 0 || row.ProviderRequests != 0)) return false;
-                if (row.Project is { } project && (project.Calls < 1 || project.Calls != row.ModelCalls || project.Calls < row.ProviderRequests || project.Calls > AgentLimits.ModelCalls ||
+                if (row.Project is { } project && (project.Calls < 1 || project.Calls != row.ModelCalls || project.Calls < row.ProviderRequests || project.Calls > limits.ModelCalls ||
                     (project.LastProjectRequestBytes < 1 || project.LastProjectRequestBytes > limits.RequestBytes) || (project.LastMessages < 1 || project.LastMessages > limits.Messages) ||
-                    project.LastResponseMessages < project.LastMessages || project.LastResponseMessages > project.LastMessages + 1 + AgentLimits.ToolCallsPerResponse ||
+                    project.LastResponseMessages < project.LastMessages || project.LastResponseMessages > project.LastMessages + 1 + limits.ToolCallsPerResponse ||
                     project.LastContinuationBeforeBytes < 0 ||
                     project.LastContinuationBeforeBytes > limits.ContinuationTotalBytes ||
                     project.LastContinuationAfterBytes < project.LastContinuationBeforeBytes ||

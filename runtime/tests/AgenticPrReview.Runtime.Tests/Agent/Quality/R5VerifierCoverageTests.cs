@@ -1045,11 +1045,11 @@ public sealed class R5VerifierCoverageTests
     }
 
     [Theory]
-    [InlineData((int)DeepSeekRequestProfile.Current, 32768L, 294912L)]
-    [InlineData((int)DeepSeekRequestProfile.Output8192, 65536L, 327680L)]
-    [InlineData((int)DeepSeekRequestProfile.Output65536, 524288L, 786432L)]
+    [InlineData((int)DeepSeekRequestProfile.Current, 32768L, 294912L, 512L)]
+    [InlineData((int)DeepSeekRequestProfile.Output8192, 65536L, 327680L, 8192L)]
+    [InlineData((int)DeepSeekRequestProfile.Output65536, 524288L, 786432L, 65536L)]
     public void GeneratedLivePlanAdmitsAndBindsDeclaredInventory(
-        int profile, long outputTokens, long combinedTokens)
+        int profile, long outputTokens, long combinedTokens, long perCallOutputTokens)
     {
         var outPath = Path.Combine(Path.GetTempPath(), "r5v1-plan-" + Guid.NewGuid().ToString("N") + ".json");
         try
@@ -1060,8 +1060,11 @@ public sealed class R5VerifierCoverageTests
             var plan = LivePlanAdmission.Load(outPath, execute: false, CancellationToken.None);
             Assert.Equal(13, plan.Schedule.Length);
             Assert.Equal(QualityIds, plan.Schedule.ToArray());
-            Assert.True(plan.Bounds.PerCall.MaxInputTokens > 0);
+            Assert.Equal(8192L, plan.Bounds.PerCall.MaxInputTokens);
+            Assert.Equal(perCallOutputTokens, plan.Bounds.PerCall.MaxOutputTokens);
+            Assert.Equal(1000L, plan.Bounds.PerCall.MaxChargeMicroUsd);
             Assert.Equal(13 * 64, plan.Bounds.MaxModelCalls);
+            Assert.Equal(104000L, plan.Bounds.SpendCeilingMicroUsd);
             Assert.Equal(13 * 262144L, plan.Bounds.MaxInputTokens);
             Assert.Equal(13 * outputTokens, plan.Bounds.MaxOutputTokens);
             Assert.Equal(13 * combinedTokens, plan.Bounds.MaxCombinedTokens);

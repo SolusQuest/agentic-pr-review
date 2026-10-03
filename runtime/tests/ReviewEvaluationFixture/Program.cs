@@ -146,6 +146,8 @@ internal static class Program
 // cannot pass silently.
 internal static class R5CaseVerifier
 {
+    // Preserve evaluator monetary authority independently of production model-call capacity.
+    private const long GeneratedSpendPerEvaluationMicroUsd = 8000;
     private const string VerdictSchema = "r5-v1-verdict-v1";
     private const string TempRootMarker = ".r5-v1-temp-root";
 
@@ -844,7 +846,7 @@ internal static class R5CaseVerifier
                     ["max_combined_tokens"] = declared.Length * Math.Min(AgentLimits.CombinedTokensFor(limits),
                         AgentLimits.ModelCalls * (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + DeepSeekRequestWriter.MaxTokensFor(profile))),
                     ["max_seconds"] = 600,
-                    ["spend_ceiling_micro_usd"] = declared.Length * AgentLimits.ModelCalls * 1000L,
+                    ["spend_ceiling_micro_usd"] = declared.Length * GeneratedSpendPerEvaluationMicroUsd,
                     ["per_call"] = new JsonObject
                     {
                         ["max_input_tokens"] = 8192,

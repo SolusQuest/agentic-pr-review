@@ -1,5 +1,5 @@
-using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
 
@@ -27,7 +27,7 @@ internal static class ComparisonAdmission
             (rule.Metric != "observed_reference_total" || rule.AbsoluteIncreaseThreshold < 0)) return false;
         if (evidence.Expectations.Any(e => e is null || !EvaluationLimits.Hash(e.HistorySha256) ||
             !EvaluationLimits.Hash(e.ObservationSha256) || e.Phase < 0 || e.Phase >= GrowthProfiles.Attempts ||
-            e.CallOrdinal is < 1 or > AgentLimits.ModelCalls ||
+            e.CallOrdinal is < 1 or > UsageJournalLimits.CallsPerAttempt ||
             e.Expectation is not ("stable_continuity" or "intentional_fault" or "unknown"))) return false;
 
         var journal = input.Pricing.Journal;

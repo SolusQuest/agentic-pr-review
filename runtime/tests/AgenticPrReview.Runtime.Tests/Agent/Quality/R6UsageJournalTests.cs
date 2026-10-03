@@ -15,6 +15,67 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class R6UsageJournalTests
 {
+    [Fact]
+    public void RetainedEightCallJournalCannotRedistributeSixteenSendsAsNineAndSeven()
+    {
+        var expected = Expected(2);
+        var collector = new UsageJournalCollector(expected);
+        for (var index = 0; index < 2; index++)
+        {
+            var attempt = collector.BeginAttempt(index);
+            attempt.AgentStarted();
+            for (var ordinal = 0; ordinal < 8; ordinal++)
+            {
+                var call = attempt.BeginCall()!;
+                Assert.True(call.Dispatch());
+                call.TransportFinished(DeepSeekTransportResult.Success([]));
+                call.Returned(new(1, 1));
+            }
+            attempt.AgentFinished(true);
+            attempt.AdmitEvaluation(new string('d', 64));
+            attempt.Finish("completed");
+        }
+        var journal = collector.Seal("complete", Reservations(16));
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(journal), expected));
+        var original = journal.Document;
+        var calls = original.Calls.SetItem(8, original.Calls[8] with
+        { AttemptId = expected.AttemptId(0), Ordinal = 9, CallId = expected.CallId(0, 9) });
+        for (var index = 9; index < 16; index++) calls = calls.SetItem(index, calls[index] with
+        { Ordinal = index - 8, CallId = expected.CallId(1, index - 8) });
+        var attempts = original.Attempts
+            .SetItem(0, original.Attempts[0] with { Calls = 9, Sends = 9 })
+            .SetItem(1, original.Attempts[1] with { Calls = 7, Sends = 7 });
+        var candidate = original with { Calls = calls, Attempts = attempts,
+            Totals = UsageJournal.Totals(attempts, calls) };
+        // Keep all16 known sends, selected campaign budget and exact accounting:
+        // the per-attempt domain alone rejects the9/7 redistribution.
+        Assert.Null(UsageJournalJson.Read(JsonSerializer.SerializeToUtf8Bytes(candidate,
+            UsageJournalJsonContext.Default.UsageJournalDocument), expected));
+    }
+
+    [Fact]
+    public void RetainedGenericCollectorRefusesNinthCallAfterEightCompletedSends()
+    {
+        var collector = new UsageJournalCollector(Expected(1));
+        var attempt = collector.BeginAttempt(0);
+        attempt.AgentStarted();
+        for (var ordinal = 0; ordinal < 8; ordinal++)
+        {
+            var call = attempt.BeginCall()!;
+            Assert.True(call.Dispatch());
+            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.Returned(new(1, 1));
+        }
+        Assert.Throws<InvalidOperationException>(() => attempt.BeginCall());
+        attempt.AgentFinished(true);
+        attempt.AdmitEvaluation(new string('d', 64));
+        attempt.Finish("completed");
+        Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(collector.Seal("complete", Reservations(8)))));
+        Assert.Equal(8, UsageJournalLimits.CallsPerAttempt);
+        Assert.Equal(2048, UsageJournalLimits.Calls);
+    }
+
+
     private const string Canary = "APR273_PRIVATE_PROVIDER_PATH_REASONING_CANARY";
 
     [Theory]

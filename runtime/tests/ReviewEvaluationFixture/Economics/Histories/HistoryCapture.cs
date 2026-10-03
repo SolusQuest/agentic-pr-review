@@ -30,7 +30,7 @@ internal sealed record HistoryCapture(string Code, PrefixObservation? Baseline,
 
     internal static bool Safe(HistoryCapture? value, MeasurementLimits limits)
     {
-        if (value is null || value.Calls.IsDefault || value.Calls.Length > AgentLimits.ModelCalls) return false;
+        if (value is null || value.Calls.IsDefault || value.Calls.Length > limits.ModelCalls) return false;
         if (value.Code == "unavailable") return value.Baseline is null && value.Calls.IsEmpty;
         if (value.Code is not ("observed" or "unmeasurable")) return false;
         if (value.Code == "observed" && (value.Baseline is null || value.Calls.Any(c => c is null))) return false;
