@@ -241,7 +241,7 @@ internal static class ProviderScripts
             (
                 CallId: (string?)"read0",
                 Name: (string?)AgentToolRegistry.ReadFileName,
-                Arguments: (string?)"{\"path\":\"reviewed/fact.txt\",\"start_line\":1,\"line_count\":400}"),
+                Arguments: (string?)"{\"path\":\"reviewed/fact.txt\",\"start_line\":1,\"line_count\":800}"),
             (
                 CallId: (string?)"list0",
                 Name: (string?)AgentToolRegistry.ListFilesName,
