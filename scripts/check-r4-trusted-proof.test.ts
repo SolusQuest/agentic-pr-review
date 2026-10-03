@@ -49,6 +49,57 @@ describe('R4 E3 trusted proof policy', () => {
     expect(checkR4TrustedProof()).toBe(true);
   });
 
+  test.each([
+    [
+      'compiled output upload',
+      'path: ${{ runner.temp }}/r4-e2p-v2-first.receipt',
+      'path: ${{ runner.temp }}/compiled-payload',
+    ],
+    [
+      'shared artifact name',
+      'name: r4-e2p-v2-${{ github.run_id }}-${{ github.run_attempt }}-first',
+      'name: shared-proof-output',
+    ],
+    ['unbounded receipt extraction', '-le 32768', '-le 65536'],
+    [
+      'duplicate receipt extraction',
+      '-eq 1\n          test "$(wc -c',
+      '-ge 1\n          test "$(wc -c',
+    ],
+    [
+      'cross-attempt download',
+      'pattern: r4-e2p-v2-${{ github.run_id }}-${{ github.run_attempt }}-*',
+      'pattern: r4-e2p-v2-*',
+    ],
+    ['merged receipts', 'merge-multiple: false', 'merge-multiple: true'],
+    ['cross-run download', 'digest-mismatch: error', 'digest-mismatch: error\n          run-id: 1'],
+    ['receipt archive bypass', 'archive: true', 'archive: false'],
+    ['receipt overwrite', 'overwrite: false', 'overwrite: true'],
+    ['receipt absence masking', 'if-no-files-found: error', 'if-no-files-found: warn'],
+    [
+      'missing V2 dependency',
+      'needs: [trusted-proof-payload-v2-first, trusted-proof-payload-v2-second]',
+      'needs: [trusted-proof-payload-v2-first]',
+    ],
+    ['aggregate source substitution', '"$(git rev-parse HEAD)" \\\n', '"${{ github.sha }}" \\\n'],
+  ])('rejects a broadened CI2 artifact route: %s', (_name, search, replacement) => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const candidate = path.join(workflowsRoot, 'runtime-ci.yml');
+    const source = fs.readFileSync(candidate, 'utf8');
+    expect(source).toContain(search);
+    fs.writeFileSync(candidate, source.replace(search, replacement));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
+  });
+
+  test('rejects the same receipt actions under another workflow owner', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.copyFileSync(
+      path.join(workflowsRoot, 'runtime-ci.yml'),
+      path.join(workflowsRoot, 'other.yml'),
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
+  });
+
   test('derives both canary digests from the exact LF-terminated byte arrays', () => {
     const contract = JSON.parse(
       fs.readFileSync(path.join(fixtureRoot, 'fixture-pr-contract.json'), 'utf8'),

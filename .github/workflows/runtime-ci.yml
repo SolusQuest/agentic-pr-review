@@ -277,7 +277,7 @@ jobs:
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-second.receipt")" -eq 1
           cmp "$RUNNER_TEMP/r4-e2p-first.receipt" "$RUNNER_TEMP/r4-e2p-second.receipt"
 
-  trusted-proof-payload-v2:
+  trusted-proof-payload-v2-first:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -313,29 +313,187 @@ jobs:
         with:
           dotnet-version: 10.0.109
 
+      - name: Require clean event-selected V2 source after setup
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+
       - name: Current-head R4 E2P first clean production and verifier Native AOT build
         run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
+
+      - name: Extract bounded first receipt
+        run: |
+          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
+          test "$(wc -c < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -le 32768
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: r4-e2p-v2-${{ github.run_id }}-${{ github.run_attempt }}-first
+          path: ${{ runner.temp }}/r4-e2p-v2-first.receipt
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: false
+          include-hidden-files: false
+          archive: true
+
+  trusted-proof-payload-v2-second:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact event-selected payload source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$(git show -s --format=%T HEAD)"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: npm ci
+
+      - name: Install current-head E2P Native AOT and network-audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang strace zlib1g-dev
+
+      - name: Set up exact current-head R4 E2P .NET SDK
+        uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-v2-dotnet
+        with:
+          dotnet-version: 10.0.109
+
+      - name: Require clean event-selected V2 source after setup
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
 
       - name: Current-head R4 E2P second clean production and verifier Native AOT build
         run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
 
+      - name: Extract bounded second receipt
+        run: |
+          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
+          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
+          test "$(wc -c < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -le 32768
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: r4-e2p-v2-${{ github.run_id }}-${{ github.run_attempt }}-second
+          path: ${{ runner.temp }}/r4-e2p-v2-second.receipt
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: false
+          include-hidden-files: false
+          archive: true
+
+  trusted-proof-payload-v2:
+    if: ${{ always() }}
+    needs: [trusted-proof-payload-v2-first, trusted-proof-payload-v2-second]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require both complete current-head V2 proofs to succeed
+        env:
+          V2_CI_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'NODE'
+          const expected = ['trusted-proof-payload-v2-first', 'trusted-proof-payload-v2-second'].sort();
+          let results;
+          try {
+            results = JSON.parse(process.env.V2_CI_NEEDS ?? '');
+          } catch {
+            console.error('V2 dependency results are invalid.');
+            process.exit(1);
+          }
+          if (results === null || typeof results !== 'object' || Array.isArray(results) ||
+              JSON.stringify(Object.keys(results).sort()) !== JSON.stringify(expected) ||
+              expected.some(id => results[id]?.result !== 'success')) {
+            console.error('Both complete current-head V2 proofs must succeed.');
+            process.exit(1);
+          }
+          console.log('Both complete current-head V2 proofs succeeded.');
+          NODE
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact event-selected aggregate source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$(git show -s --format=%T HEAD)"
+
+      - name: Prepare isolated receipt evidence directory
+        run: |
+          test ! -e "$RUNNER_TEMP/r4-e2p-v2-receipts"
+          mkdir "$RUNNER_TEMP/r4-e2p-v2-receipts"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: r4-e2p-v2-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/r4-e2p-v2-receipts
+          merge-multiple: false
+          skip-decompress: false
+          digest-mismatch: error
+
       - name: Current-head R4 E2P receipts and source identities are exact
         run: |
-          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
-          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
-          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
-          test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
           node --input-type=module - \
-            "$RUNNER_TEMP/r4-e2p-v2-first.receipt" \
-            "$RUNNER_TEMP/r4-e2p-v2-second.receipt" \
+            "$RUNNER_TEMP/r4-e2p-v2-receipts" \
+            "${{ github.run_id }}" \
+            "${{ github.run_attempt }}" \
             "$(git rev-parse HEAD)" \
             "$(git rev-parse 'HEAD^{tree}')" <<'NODE'
           import fs from 'node:fs';
-          const [firstReceiptPath, secondReceiptPath, sourceCommit, sourceTree] =
+          import path from 'node:path';
+          const [receiptRoot, runId, runAttempt, sourceCommit, sourceTree] =
             process.argv.slice(2);
+          if (process.argv.length !== 7 || !/^[1-9][0-9]*$/.test(runId) ||
+              !/^[1-9][0-9]*$/.test(runAttempt) ||
+              !/^[a-f0-9]{40}$/.test(sourceCommit) || !/^[a-f0-9]{40}$/.test(sourceTree)) {
+            throw new Error('The current-head receipt oracle is invalid.');
+          }
+          const roles = ['first', 'second'];
+          const expected = roles.map(role => `r4-e2p-v2-${runId}-${runAttempt}-${role}`);
+          if (!fs.lstatSync(receiptRoot).isDirectory() ||
+              JSON.stringify(fs.readdirSync(receiptRoot).sort()) !== JSON.stringify(expected)) {
+            throw new Error('Exactly first and second receipt artifacts are required.');
+          }
           const prefix = 'APR_R4_E2P_RECEIPT_V2 ';
-          for (const receiptPath of [firstReceiptPath, secondReceiptPath]) {
-            const line = fs.readFileSync(receiptPath, 'utf8');
+          for (const [index, role] of roles.entries()) {
+            const directory = path.join(receiptRoot, expected[index]);
+            const file = `r4-e2p-v2-${role}.receipt`;
+            if (!fs.lstatSync(directory).isDirectory() ||
+                JSON.stringify(fs.readdirSync(directory)) !== JSON.stringify([file])) {
+              throw new Error('Each artifact must contain only its expected receipt.');
+            }
+            const receiptPath = path.join(directory, file);
+            const stat = fs.lstatSync(receiptPath);
+            if (!stat.isFile() || stat.size === 0 || stat.size > 32768) {
+              throw new Error('The current-head receipt file is not bounded regular evidence.');
+            }
+            const line = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+              .decode(fs.readFileSync(receiptPath));
             if (!line.startsWith(prefix) || line.indexOf('\n') !== line.length - 1) {
               throw new Error('The current-head receipt framing is invalid.');
             }
@@ -347,6 +505,7 @@ jobs:
               throw new Error('The current-head receipt source identity is invalid.');
             }
           }
+          console.log('Both bounded current-head V2 receipts and source identities are exact.');
           NODE
 
   integration:
