@@ -214,36 +214,36 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains(
             "ref: ${{ github.event_name == 'pull_request' && " +
             "github.event.pull_request.head.sha || github.sha }}",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.Contains(
             "receipt.source_commit !== sourceCommit",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.Contains(
             "receipt.source_tree !== sourceTree",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.Contains(
             "receipt.compiled_payload_source_commit !== sourceCommit",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.Contains(
             "receipt.compiled_payload_source_tree !== sourceTree",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "cmp \"$RUNNER_TEMP/r4-e2p-v2-first.receipt\" " +
             "\"$RUNNER_TEMP/r4-e2p-v2-second.receipt\"",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.Contains(
             "\"$RUNNER_TEMP/r4-e2p-v2-first.receipt\" \\",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.Contains(
             "\"$RUNNER_TEMP/r4-e2p-v2-second.receipt\" \\",
-            workflow,
+            v2Job,
             StringComparison.Ordinal);
         Assert.DoesNotContain("path: payload-source", workflow,
             StringComparison.Ordinal);
