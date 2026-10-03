@@ -71,7 +71,7 @@ public sealed partial class AgentSessionRoundTripTests
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.Equal(
-            "e4586c980d106192e3736118d170d507ca297b32619daa0a91d42b0992863d37",
+            "9bc8577e070ed7100747002d2ff78f4cf8e34c73f06a9877a3f1d597dcacabbd",
             artifact.SessionSha256);
         Assert.Equal(2627, artifact.Plaintext.Length);
         Assert.Equal("APRSES01", Encoding.ASCII.GetString(
@@ -306,13 +306,13 @@ public sealed partial class AgentSessionRoundTripTests
             [
                 (
                     2607,
-                    "a4c46627c14f784130f08822f8a45fc837ed5ae381b8d522fafeca2721a5c7bb"),
+                    "b7601ef2fd66b84a4fd5857dd8282de3fff5e340216ee18a7459432defc5bdc7"),
                 (
                     4162,
-                    "0b86ea015961444f88b8bfe15fdbcdd677115eefab78775dd7cf30ba1acdf7af"),
+                    "f3a72390ae2e687a7734f6072b7fd1b1352332819b3d2004e90b1dd868a4d89f"),
                 (
                     6015,
-                    "d4bc98e052906d1142d9d3e0106be3563f9f2e506d39cd1c788baf241e2d3de6"),
+                    "2efa9fd709b50a25968c9546d8aa5e89b8998d9743ea82ff1a7be35ae31205af"),
             ],
             new[]
             {
@@ -861,6 +861,26 @@ public sealed partial class AgentSessionRoundTripTests
                 built.EnvelopeSha256,
                 trusted with { BuildId = "other-build" },
                 AgentSessionHeadTransition.SameHead).Code);
+    }
+
+    [Fact]
+    public async Task PreviousSnapshotLimitsCannotRestoreAsSelectedCurrent()
+    {
+        const string previousLimits = "8c184a185067b867de078109295d0fa4f442d90fd5bbbec01c7ff4afaeaf30e5";
+        var trusted = Trusted();
+        var built = await BuildGenerationAsync(trusted, null, "g0", "finish0", reasoning: false);
+        Assert.NotEqual(previousLimits, AgentCanonical.LimitsSha256());
+        var previous = RawMutation(built.Artifact,
+            "\"limits_sha256\":\"" + AgentCanonical.LimitsSha256() + "\"",
+            "\"limits_sha256\":\"" + previousLimits + "\"");
+
+        var restored = Restore(previous, built.EnvelopeSha256, trusted,
+            AgentSessionHeadTransition.SameHead);
+
+        Assert.False(restored.Succeeded);
+        Assert.Equal(AgentSessionCodes.ScopeMismatch, restored.Code);
+        Assert.Null(restored.RunRequest);
+        Assert.Null(restored.Artifact);
     }
 
     [Fact]

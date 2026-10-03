@@ -46,7 +46,8 @@ public sealed class ReviewedTreeSnapshotTests
         Assert.Equal(TimeSpan.FromSeconds(300),
             ReviewedContentLimits.AcquisitionAndMaterializationTimeout);
         Assert.Equal(100, ReviewedContentLimits.ChangedFilesPerPage);
-        Assert.Equal(200, ReviewedContentLimits.ChangedFiles);
+        Assert.Equal(500, ReviewedContentLimits.ChangedFiles);
+        Assert.Equal(AgentLimits.ChangedFiles, ReviewedContentLimits.ChangedFiles);
         Assert.Equal(1L * 1024 * 1024,
             ReviewedContentLimits.BaseBlobBytes);
         Assert.Equal(64L * 1024 * 1024,

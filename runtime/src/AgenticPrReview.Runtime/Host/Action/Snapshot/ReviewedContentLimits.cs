@@ -11,7 +11,7 @@ internal static class ReviewedContentLimits
     internal const int UniqueTreeAndBlobObjects = 4_000;
     internal const int GitObjectRequests = 4_096;
     internal const int ChangedFilesPerPage = 100;
-    internal const int ChangedFiles = 200;
+    internal const int ChangedFiles = 500;
     internal const long HeadBlobBytes = 8L * 1024 * 1024;
     internal const long AggregateHeadBlobBytes = 256L * 1024 * 1024;
     internal const long BaseBlobBytes = 1024L * 1024;

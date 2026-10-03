@@ -57,14 +57,14 @@ public sealed class AgentContractTests
             ("tracked_files_metadata_bytes", 8_388_608, "bytes"),
             ("list_files_entries", 100, "count"),
             ("list_changed_files_entries", 100, "count"),
-            ("changed_files", 200, "count"),
+            ("changed_files", 500, "count"),
             ("changed_files_metadata_bytes", 262_144, "bytes"),
             ("read_diff_hunks", 20, "count"),
             ("diff_hunks_per_file", 200, "count"),
             ("diff_lines_per_hunk", 1_000, "lines"),
             ("diff_line_text_bytes", 4_096, "bytes"),
-            ("diff_source_bytes_per_file", 524_288, "bytes"),
-            ("diff_snapshot_bytes", 8_388_608, "bytes"),
+            ("diff_source_bytes_per_file", 2_097_152, "bytes"),
+            ("diff_snapshot_bytes", 33_554_432, "bytes"),
         };
 
         Assert.Equal(53, AgentLimits.Registry.Length);
@@ -80,9 +80,9 @@ public sealed class AgentContractTests
     [Fact]
     public void Output8192LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("8c184a185067b867de078109295d0fa4f442d90fd5bbbec01c7ff4afaeaf30e5",
+        Assert.Equal("671d94914fa572ce6e6381abe1546c0a20c881115ea214ded89ef61bd21a8189",
             AgentCanonical.LimitsSha256());
-        Assert.Equal("0cdf29eda2c6fa98082f8975d721e22c59ffe78bacbddd0f9957ad7ebc409cfc",
+        Assert.Equal("c094f392f5aea17a14a901601386bbbeefcf68b9993cb2b388d5b7ede733da88",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192));
         var current = AgentLimits.Registry;
         var candidate = AgentLimits.RegistryFor(AgentLimitProfile.Output8192);
@@ -105,7 +105,7 @@ public sealed class AgentContractTests
     [Fact]
     public void Output65536LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("8dc0cf80288515c2c5202846e134ada0db4c8434b48b042233775aecb6dcb463",
+        Assert.Equal("5a12766b017658f1664f77911a3b9f0b043b5b7b71159369472297874fd13042",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536));
         var current = AgentLimits.Registry;
         var large = AgentLimits.RegistryFor(AgentLimitProfile.Output65536);
@@ -223,7 +223,7 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "8c184a185067b867de078109295d0fa4f442d90fd5bbbec01c7ff4afaeaf30e5",
+            "671d94914fa572ce6e6381abe1546c0a20c881115ea214ded89ef61bd21a8189",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
             "39b7291fbde316c6b0081c153fa960303d1d0e0ddeb9fc565bc0cbf821b5b502",

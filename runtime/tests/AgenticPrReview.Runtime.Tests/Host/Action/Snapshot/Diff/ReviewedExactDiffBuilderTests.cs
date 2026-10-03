@@ -11,7 +11,7 @@ using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Snapshot.Diff;
 
-public sealed class ReviewedExactDiffBuilderTests
+public sealed partial class ReviewedExactDiffBuilderTests
 {
     [Fact]
     public void BaseLogicalByteMeterAcceptsTheCapAndRejectsCapPlusOne()
@@ -871,7 +871,8 @@ public sealed class ReviewedExactDiffBuilderTests
         var parent = H5SnapshotTestSupport.TemporaryDirectory();
         var line = new string('x', AgentLimits.DiffLineTextBytes);
         var bytes = Encoding.UTF8.GetBytes(string.Concat(
-            Enumerable.Repeat(line + "\n", 128)));
+            Enumerable.Repeat(line + "\n",
+                AgentLimits.DiffSourceBytesPerFile / AgentLimits.DiffLineTextBytes + 1)));
         var tree = await H5SnapshotTestSupport.TreeAsync(
             invocation,
             parent,

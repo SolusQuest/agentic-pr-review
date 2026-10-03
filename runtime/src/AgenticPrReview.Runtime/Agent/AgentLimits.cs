@@ -80,14 +80,14 @@ internal static class AgentLimits
     internal const int TrackedFilesMetadataBytes = 8 * 1024 * 1024;
     internal const int ListFilesEntries = 100;
     internal const int ListChangedFilesEntries = 100;
-    internal const int ChangedFiles = 200;
+    internal const int ChangedFiles = 500;
     internal const int ChangedFilesMetadataBytes = 256 * 1024;
     internal const int ReadDiffHunks = 20;
     internal const int DiffHunksPerFile = 200;
     internal const int DiffLinesPerHunk = 1_000;
     internal const int DiffLineTextBytes = 4_096;
-    internal const int DiffSourceBytesPerFile = 512 * 1024;
-    internal const int DiffSnapshotBytes = 8 * 1024 * 1024;
+    internal const int DiffSourceBytesPerFile = 2 * 1024 * 1024;
+    internal const int DiffSnapshotBytes = 32 * 1024 * 1024;
 
     internal static ImmutableArray<AgentLimit> Registry { get; } =
     [

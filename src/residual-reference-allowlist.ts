@@ -299,7 +299,7 @@ export const residualReferenceRules = [
   narrowConformance(
     'RR-041',
     /legacy\.tar\.gz/u,
-    /^runtime\/(?:src\/AgenticPrReview\.Runtime\/Host\/Action\/GitHub\/ActionHostGitObjectTransport|tests\/ActionHostVerifierFixture\/FrameworkGitHubHandler|tests\/AgenticPrReview\.Runtime\.Tests\/Host\/Action\/(?:GitHub\/ActionHostGitObjectTransport|Snapshot\/GitObjects\/GitObjectTransport)Tests)\.cs$/u,
+    /^runtime\/(?:src\/AgenticPrReview\.Runtime\/Host\/Action\/GitHub\/ActionHostGitObjectTransport|tests\/ActionHostVerifierFixture\/FrameworkGitHubHandler|tests\/AgenticPrReview\.Runtime\.Tests\/Host\/Action\/(?:GitHub\/ActionHostGitObjectTransport|Snapshot\/(?:GitObjects\/GitObjectTransport|R7SnapshotCapacity))Tests)\.cs$/u,
     'R4 Git-object transport and production-shaped verifier conformance',
     'permanent production-shaped codeload redirect conformance',
     'the Codeload endpoint segment is the exact GitHub tarball transport shape in the production reader and its bounded verifier fixtures, not a supported legacy runtime route',
