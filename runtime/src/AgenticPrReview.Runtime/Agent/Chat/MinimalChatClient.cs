@@ -9,6 +9,7 @@ internal sealed class MinimalChatClient(
         ProjectChatRequest request,
         CancellationToken cancellationToken)
     {
+        request.Accounting?.ObserveNoDispatch();
         MinimalChatRequest native;
         try
         {
@@ -22,11 +23,24 @@ internal sealed class MinimalChatClient(
                 ProjectChatNormalizationReason.RequestProjection);
         }
 
+        request.Accounting?.ObserveUnavailableDispatch();
         var response = await backend.GetResponseAsync(native, cancellationToken);
+        if (response?.CapturedResponseBodyBytes > AgentLimits.ResponseBytes)
+        {
+            request.Accounting?.MarkFailed();
+            request.Accounting?.RecordUsage(ProviderUsageObservation.Unknown);
+        }
+        else if (response?.Usage is { } usage)
+        {
+            request.Accounting?.RecordUsage(ProviderUsageObservation.Create(
+                usage.InputTokens, usage.OutputTokens,
+                usage.ProviderUsage?.CacheReadInputTokens,
+                usage.ProviderUsage?.UncachedInputTokens));
+        }
         try
         {
             return new ProjectChatResponse(
-                ToProject(response.Message),
+                ToProject(response!.Message),
                 response.Usage is null
                     ? null
                     : new ProjectChatUsage(
@@ -78,7 +92,8 @@ internal sealed class MinimalChatClient(
                 tool.Description,
                 tool.SchemaJson)).ToArray(),
             continuation,
-            request.ThinkingRequired);
+            request.ThinkingRequired,
+            request.Accounting);
     }
 
     private static MinimalChatMessage ToNative(
@@ -262,7 +277,8 @@ internal sealed record MinimalChatRequest(
     MinimalChatMessage[] Messages,
     MinimalChatTool[] Tools,
     MinimalChatContinuation? Continuation,
-    bool ThinkingRequired = false);
+    bool ThinkingRequired = false,
+    ProviderAttemptCapture? Accounting = null);
 
 internal sealed record MinimalChatMessage(
     string Role,

@@ -32,6 +32,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
         {
             typeof(AgentLimits),
             typeof(AgentValueDomains),
+            typeof(ProviderUsageObservation),
         };
         var allowedDeepSeekTypes = new HashSet<Type>(parserTypes)
         {

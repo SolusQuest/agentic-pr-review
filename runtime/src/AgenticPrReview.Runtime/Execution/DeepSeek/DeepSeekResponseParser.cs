@@ -39,7 +39,8 @@ internal sealed class DeepSeekResponseParseResult
     private DeepSeekResponseParseResult(
         DeepSeekResponseParseOutcome outcome,
         DeepSeekParsedToolResponse? response,
-        DeepSeekResponseInvalidCategory invalidCategory)
+        DeepSeekResponseInvalidCategory invalidCategory,
+        ProviderUsageObservation? accountingUsage = null)
     {
         if (outcome == DeepSeekResponseParseOutcome.Success !=
             (response is not null) ||
@@ -52,11 +53,16 @@ internal sealed class DeepSeekResponseParseResult
         Outcome = outcome;
         Response = response;
         InvalidCategory = invalidCategory;
+        AccountingUsage = accountingUsage ?? ProviderUsageObservation.Unknown;
     }
 
     internal DeepSeekResponseParseOutcome Outcome { get; }
     internal DeepSeekParsedToolResponse? Response { get; }
     internal DeepSeekResponseInvalidCategory InvalidCategory { get; }
+    internal ProviderUsageObservation AccountingUsage { get; }
+
+    internal DeepSeekResponseParseResult WithAccountingUsage(ProviderUsageObservation usage) =>
+        new(Outcome, Response, InvalidCategory, usage);
 
     internal static DeepSeekResponseParseResult Invalid(
         DeepSeekResponseInvalidCategory category) => new(
@@ -272,6 +278,7 @@ internal static class DeepSeekResponseParser
                 DeepSeekResponseInvalidCategory.TransportContract);
         }
 
+        var usage = ProviderUsageObservation.Unknown;
         try
         {
             var body = transportResult.Body.ToArray();
@@ -289,14 +296,15 @@ internal static class DeepSeekResponseParser
                     CommentHandling = JsonCommentHandling.Disallow,
                     MaxDepth = 64,
                 });
+            usage = ReadAccountingUsage(document.RootElement);
             return ParseRoot(
                 document.RootElement,
-                transportResult.CapturedCount.Value);
+                transportResult.CapturedCount.Value).WithAccountingUsage(usage);
         }
         catch (JsonException)
         {
             return DeepSeekResponseParseResult.Invalid(
-                DeepSeekResponseInvalidCategory.Json);
+                DeepSeekResponseInvalidCategory.Json).WithAccountingUsage(usage);
         }
         catch (Exception exception) when (
             exception is ArgumentException or
@@ -304,7 +312,7 @@ internal static class DeepSeekResponseParser
             OverflowException)
         {
             return DeepSeekResponseParseResult.Invalid(
-                DeepSeekResponseInvalidCategory.Internal);
+                DeepSeekResponseInvalidCategory.Internal).WithAccountingUsage(usage);
         }
     }
 
@@ -602,6 +610,26 @@ internal static class DeepSeekResponseParser
             cacheHitTokens, cacheMissTokens);
         return true;
     }
+
+    // Same bounded, duplicate-checked document as response admission, but its
+    // measurements survive rejection of unrelated model/choice/tool fields.
+    private static ProviderUsageObservation ReadAccountingUsage(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("usage", out var usage) ||
+            usage.ValueKind != JsonValueKind.Object)
+            return ProviderUsageObservation.Unknown;
+
+        return ProviderUsageObservation.Create(
+            ReadCounter(usage, "prompt_tokens"),
+            ReadCounter(usage, "completion_tokens"),
+            ReadCounter(usage, "prompt_cache_hit_tokens"),
+            ReadCounter(usage, "prompt_cache_miss_tokens"),
+            ReadCounter(usage, "total_tokens"));
+    }
+
+    private static long? ReadCounter(JsonElement usage, string name) =>
+        TryReadNonnegativeInt64(usage, name, out var value) ? value : null;
 
     private static bool ValidateOptionalDetail(
         JsonElement usage,
