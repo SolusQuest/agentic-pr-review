@@ -97,7 +97,8 @@ internal static class EconomicsReportJson
             if (step.ReceiptCoverage != "complete" || !EvaluationLimits.Hash(step.AttemptSha256) ||
                 step.EvaluationStatus is not ("completed" or "failed" or "invalid") || step.ProcessId is null or <= 0 ||
                 !Guid.TryParseExact(step.Startup, "N", out _) || !startups.Add(step.Startup!) ||
-                step.ToolCalls is null or < 0 or > 64 || step.Restored != (plan.Slots[index].Previous is not null) ||
+                step.ToolCalls is null or < 0 || step.ToolCalls > EconomicsJournal.MaximumExecutedTools ||
+                step.Restored != (plan.Slots[index].Previous is not null) ||
                 step.Restored != (step.PredecessorSha256 is not null) ||
                 step.PredecessorSha256 is { } predecessor && !EvaluationLimits.Hash(predecessor) ||
                 step.Accepted && (!step.Prepared || !EvaluationLimits.Hash(step.SessionSha256)) ||
@@ -110,6 +111,7 @@ internal static class EconomicsReportJson
                 outcome.SourceCommit != input.Source.Commit || outcome.SourceTree != input.Source.Tree || outcome.SourceClean != input.Source.Clean ||
                 outcome.Mode != (report.ExecutionKind == "live" ? "live" : "deterministic")) return false;
             if (!EconomicsJournal.ValidObservation(step.Observation, step) ||
+                step.ToolCalls > EconomicsJournal.ExecutedToolLimit(step.Observation!.Calls) ||
                 step.Code is not ("completed" or "capacity_stop") && step.Code != step.Observation!.Code ||
                 step.Code == "capacity_stop" && (!plan.Slots[index].ExpectedCapacity || !step.Readback || step.Accepted ||
                     !EconomicsJournal.Capacity(step.Observation!))) return false;

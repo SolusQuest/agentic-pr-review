@@ -14,6 +14,10 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 
 internal static class EconomicsJournal
 {
+    internal static int MaximumExecutedTools => Math.Min(AgentLimits.ToolCalls,
+        EconomicsLiveLimits.Calls * AgentLimits.ToolCallsPerResponse);
+    internal static int ExecutedToolLimit(ImmutableArray<EconomicsCall> calls) => Math.Min(MaximumExecutedTools,
+        calls.Count(call => call?.Dispatched == true) * AgentLimits.ToolCallsPerResponse);
     internal static bool ValidReceipt(EconomicsChildInput input, EconomicsChildReady? ready,
         EconomicsReceipt receipt, EconomicsPlan plan, AdmittedReplayRun run)
     {
@@ -25,10 +29,10 @@ internal static class EconomicsJournal
             receipt.WorkloadSha256 != input.WorkloadSha256 || receipt.Index != input.Slot.Index ||
             receipt.LeaseId != input.Lease.Id || receipt.Startup != ready.Startup || receipt.Transport != input.Transport ||
             receipt.Session != input.Session || receipt.PredecessorSha256 != input.Predecessor?.SessionSha256 ||
-            receipt.Restored != ready.Restored || receipt.Calls.IsDefault || receipt.Calls.Length > 8 ||
+            receipt.Restored != ready.Restored || !ValidChildCalls(receipt.Calls) ||
             receipt.Accounting is not { Outcomes: not null, CacheUsage: not null } accounting ||
-            receipt.ToolCalls is < 0 or > 64 || receipt.Measurement is not { } counts ||
-            counts.Calls != receipt.Calls.Length || counts.Calls is < 1 or > 8 ||
+            receipt.ToolCalls < 0 || receipt.ToolCalls > ExecutedToolLimit(receipt.Calls) || receipt.Measurement is not { } counts ||
+            counts.Calls != receipt.Calls.Length || counts.Calls is < 1 or > 9 ||
             counts.LastProjectRequestBytes is < 1 or > AgentLimits.RequestBytes || counts.LastMessages is < 1 or > AgentLimits.Messages ||
             counts.LastResponseMessages < counts.LastMessages || counts.LastResponseMessages > counts.LastMessages + 1 + AgentLimits.ToolCallsPerResponse ||
             counts.LastContinuationBeforeBytes is < 0 or > AgentLimits.ContinuationTotalBytes ||
@@ -96,6 +100,15 @@ internal static class EconomicsJournal
     internal static bool ValidTerminalReason(string? diagnostic, string? reason) =>
         reason is null || diagnostic == AgentFailureCodes.TerminalInvalid && TerminalReviewValidator.IsReason(reason);
 
+    // Preserve the independent eight-send allocation. Only its single final
+    // refused logical observation can extend the existing eight-call records.
+    private static bool ValidChildCalls(ImmutableArray<EconomicsCall> calls) =>
+        !calls.IsDefault && calls.Length is >= 1 and <= 9 &&
+        (calls.Length <= 8 || calls.Take(8).Select((call, index) => call is
+            { Dispatched: true, TransportOutcome: "success", ChatOutcome: "returned", UsageStatus: "known", Usage: not null } &&
+            call.Ordinal == index + 1).All(valid => valid) && calls[8] is
+            { Ordinal: 9, Dispatched: false, TransportOutcome: "budget_refused", ChatOutcome: "threw", UsageStatus: "not_sent", Usage: null });
+
     // Admission of the known prefix is internal. A missing child is never published
     // as an unattempted slot in a replacement full-campaign journal.
     internal static UsageJournal? CreateObserved(EconomicsPlan plan, string campaign, string transport,
@@ -154,7 +167,7 @@ internal static class EconomicsJournal
             !ValidTerminalReason(value.Diagnostic, value.TerminalReason) ||
             value.ToolRejection is { } rejection && !rejection.IsValid(value.Diagnostic) || value.Calls.IsDefault ||
             !ValidRecoveries(value.Recoveries, step.Index) ||
-            value.Calls.Length is < 1 or > 8 || counts.Calls != value.Calls.Length || value.Reservations is < 0 or > 8 ||
+            !ValidChildCalls(value.Calls) || counts.Calls != value.Calls.Length || value.Reservations is < 0 or > 8 ||
             !EvaluationLimits.Hash(value.InitialPrefixSha256) ||
             counts.LastProjectRequestBytes is < 1 or > AgentLimits.RequestBytes || counts.LastMessages is < 1 or > AgentLimits.Messages ||
             counts.LastResponseMessages < counts.LastMessages || counts.LastResponseMessages > counts.LastMessages + 1 + AgentLimits.ToolCallsPerResponse ||
