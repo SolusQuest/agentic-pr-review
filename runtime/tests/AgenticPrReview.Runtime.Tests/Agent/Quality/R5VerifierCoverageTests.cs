@@ -1044,19 +1044,27 @@ public sealed class R5VerifierCoverageTests
         }
     }
 
-    [Fact]
-    public void GeneratedLivePlanAdmitsAndBindsDeclaredInventory()
+    [Theory]
+    [InlineData((int)DeepSeekRequestProfile.Current, 32768L, 294912L)]
+    [InlineData((int)DeepSeekRequestProfile.Output8192, 65536L, 327680L)]
+    [InlineData((int)DeepSeekRequestProfile.Output65536, 524288L, 786432L)]
+    public void GeneratedLivePlanAdmitsAndBindsDeclaredInventory(
+        int profile, long outputTokens, long combinedTokens)
     {
         var outPath = Path.Combine(Path.GetTempPath(), "r5v1-plan-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
-            var (code, verdict) = R5CaseVerifier.MakeLivePlan(Corpus("quality", "bundle"), outPath);
+            var (code, verdict) = R5CaseVerifier.MakeLivePlan(Corpus("quality", "bundle"), outPath, (DeepSeekRequestProfile)profile);
             Assert.Equal(0, code);
             Assert.Equal("plan_written", verdict["code"]?.GetValue<string>());
             var plan = LivePlanAdmission.Load(outPath, execute: false, CancellationToken.None);
             Assert.Equal(13, plan.Schedule.Length);
             Assert.Equal(QualityIds, plan.Schedule.ToArray());
             Assert.True(plan.Bounds.PerCall.MaxInputTokens > 0);
+            Assert.Equal(13 * 64, plan.Bounds.MaxModelCalls);
+            Assert.Equal(13 * 262144L, plan.Bounds.MaxInputTokens);
+            Assert.Equal(13 * outputTokens, plan.Bounds.MaxOutputTokens);
+            Assert.Equal(13 * combinedTokens, plan.Bounds.MaxCombinedTokens);
             Assert.Equal(verdict["plan_sha256"]?.GetValue<string>(), plan.Digest);
         }
         finally

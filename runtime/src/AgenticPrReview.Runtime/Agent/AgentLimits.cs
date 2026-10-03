@@ -29,9 +29,9 @@ internal sealed record AgentLimitAuthority(string AdapterId, AgentLimitProfile P
 
 internal static class AgentLimits
 {
-    internal const int ModelCalls = 8;
-    internal const int ToolCalls = 24;
-    internal const int ToolCallsPerResponse = 8;
+    internal const int ModelCalls = 64;
+    internal const int ToolCalls = 512;
+    internal const int ToolCallsPerResponse = 16;
     internal const int ConcurrentToolCalls = 1;
     internal const int DeadlineSeconds = 300;
     internal const long InputTokens = 262_144;

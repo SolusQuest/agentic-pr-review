@@ -43,7 +43,9 @@ internal sealed class AgentLoop(
         var events = ImmutableArray.CreateBuilder<AgentLogicalEvent>();
         var usedCallIds = new HashSet<string>(StringComparer.Ordinal);
         var modelCalls = 0;
+        // Diagnostic tools count attempted execution (including finish_review).
         var toolCalls = 0;
+        // Admission also charges every recovery member, including skipped siblings.
         var toolBudgetCalls = 0;
         var contentParts = 0;
         long inputTokens = 0;
@@ -137,6 +139,8 @@ internal sealed class AgentLoop(
                     events);
             }
 
+            // Local adapter/projection and transport failures still consume this
+            // logical invocation; physical sends are observed independently.
             modelCalls++;
             var attempt = accounting.BeginCall().BeginAttempt();
             request = request with { Accounting = attempt };

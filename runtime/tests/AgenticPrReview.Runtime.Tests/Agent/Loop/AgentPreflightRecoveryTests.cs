@@ -10,8 +10,8 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Loop;
 public sealed partial class AgentLoopTests
 {
     [Theory]
-    [InlineData(1, AgentFailureCodes.ModelLimit, 8)]
-    [InlineData(8, AgentFailureCodes.ToolLimit, 3)]
+    [InlineData(1, AgentFailureCodes.ModelLimit, 64)]
+    [InlineData(16, AgentFailureCodes.ToolLimit, 32)]
     public async Task RepeatedDenialsConsumeExistingModelAndToolCaps(int batchSize, string code, int admittedBatches)
     {
         var responses = Enumerable.Range(0, AgentLimits.ModelCalls).Select(turn =>

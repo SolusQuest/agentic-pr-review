@@ -883,10 +883,10 @@ public sealed partial class AgentLoopTests
     [Fact]
     public async Task RecoveryBudgetStopsRepeatedRejectedBatches()
     {
-        var responses = Enumerable.Range(0, 7).Select(batch =>
+        var responses = Enumerable.Range(0, 33).Select(batch =>
             new ProjectChatResponse(
                 new ProjectChatMessage("assistant",
-                    Enumerable.Range(0, 4).Select(index =>
+                    Enumerable.Range(0, 16).Select(index =>
                         (ProjectChatContent)new ProjectToolCallContent(
                             $"invalid_{batch}_{index}",
                             "list_files",
@@ -900,10 +900,10 @@ public sealed partial class AgentLoopTests
 
         AssertFailure(outcome, AgentFailureCodes.ToolLimit);
         Assert.Equal(0, outcome.Diagnostic!.ToolCalls);
-        Assert.Equal(7, outcome.Diagnostic.ModelCalls);
+        Assert.Equal(33, outcome.Diagnostic.ModelCalls);
         Assert.Empty(executor.PreflightOrder);
         Assert.Empty(executor.Order);
-        Assert.Equal(24, outcome.Events
+        Assert.Equal(512, outcome.Events
             .OfType<AgentRecoveryToolCallEvent>().Count());
     }
 
@@ -1858,20 +1858,21 @@ public sealed partial class AgentLoopTests
                 LimitsSha256 = AgentCanonical.LimitsSha256(authority.Profile),
             },
         };
-        var responses = Enumerable.Range(0, AgentLimits.ModelCalls).Select(index => Response(
-            index == AgentLimits.ModelCalls - 1
+        const int tokenBoundaryCalls = 8;
+        var responses = Enumerable.Range(0, tokenBoundaryCalls).Select(index => Response(
+            index == tokenBoundaryCalls - 1
                 ? TerminalCall("finish", "done")
                 : new ProjectToolCallContent("read-" + index, "read_file", "{\"path\":\"a.txt\"}"),
             32_768,
-            index == AgentLimits.ModelCalls - 1 ? finalOutputTokens : 65_536)).ToArray();
+            index == tokenBoundaryCalls - 1 ? finalOutputTokens : 65_536)).ToArray();
         var chat = new ScriptedChatClient(responses);
         var executor = new ScriptedToolExecutor(call => Success(call, new string('a', 64), "a.txt", 1));
         var outcome = await new AgentLoop(chat, executor, limitAuthority: authority)
             .RunAsync(request, CancellationToken.None);
         Assert.Equal(admitted, outcome.Succeeded);
         if (!admitted) AssertFailure(outcome, "agent_token_limit");
-        Assert.Equal(AgentLimits.ModelCalls, chat.Requests.Count);
-        Assert.Equal(AgentLimits.ModelCalls - 1, executor.Order.Count);
+        Assert.Equal(tokenBoundaryCalls, chat.Requests.Count);
+        Assert.Equal(tokenBoundaryCalls - 1, executor.Order.Count);
 
         var crossed = request with
         {
@@ -1885,7 +1886,7 @@ public sealed partial class AgentLoopTests
     }
 
     [Fact]
-    public async Task Output65536RefusesNinthCallAfterEightToolTurns()
+    public async Task Output65536TokenLimitStopsNinthResponseBeforeTheModelCap()
     {
         var authority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Output65536);
         var baseline = Request();
@@ -1907,12 +1908,14 @@ public sealed partial class AgentLoopTests
         var executor = new ScriptedToolExecutor(call => Success(call, new string('a', 64), "a.txt", 1));
         var outcome = await new AgentLoop(chat, executor, limitAuthority: authority)
             .RunAsync(request, CancellationToken.None);
-        AssertFailure(outcome, "agent_model_limit");
-        Assert.Equal(AgentLimits.ModelCalls, chat.Requests.Count);
+        AssertFailure(outcome, "agent_token_limit");
+        Assert.Equal(9, chat.Requests.Count);
+        Assert.Equal(8, executor.Order.Count);
+        Assert.True(chat.Requests.Count < AgentLimits.ModelCalls);
     }
 
     [Fact]
-    public async Task EighthFailedToFinishTurnEndsAtModelLimitWithoutRetry()
+    public async Task SixtyFourthUnfinishedTurnEndsAtModelLimitWithoutRetry()
     {
         var responses = Enumerable.Range(0, AgentLimits.ModelCalls)
             .Select(index => Response(
@@ -1932,6 +1935,8 @@ public sealed partial class AgentLoopTests
         AssertFailure(outcome, "agent_model_limit");
         Assert.Equal(AgentLimits.ModelCalls, chat.Requests.Count);
         Assert.Equal(AgentLimits.ModelCalls, executor.Order.Count);
+        Assert.Equal(64, outcome.Diagnostic!.ModelCalls);
+        Assert.Equal(64, outcome.Accounting!.ModelCalls);
     }
 
     [Theory]
@@ -1944,7 +1949,7 @@ public sealed partial class AgentLoopTests
             accepted
                 ? [response, Response(TerminalCall("finish", "done"), 0, 0)]
                 : [response]);
-        var executor = new ScriptedToolExecutor();
+        var executor = new ScriptedToolExecutor(yieldDuringExecution: true);
         var outcome = await new AgentLoop(chat, executor).RunAsync(
             Request(),
             CancellationToken.None);
@@ -1953,11 +1958,16 @@ public sealed partial class AgentLoopTests
         {
             Assert.True(outcome.Succeeded);
             Assert.Equal(calls, executor.Order.Count);
+            Assert.Equal(1, executor.MaximumConcurrency);
+            Assert.Equal(Enumerable.Range(0, calls).Select(index => "call-" + index),
+                outcome.Events.OfType<AgentToolResultEvent>().Select(result => result.CallId));
         }
         else
         {
             AssertFailure(outcome, "agent_response_invalid");
             Assert.Empty(executor.Order);
+            Assert.Empty(executor.PreflightOrder);
+            Assert.Empty(outcome.Events.OfType<AgentRecoveryToolCallEvent>());
         }
     }
 
@@ -2043,13 +2053,13 @@ public sealed partial class AgentLoopTests
 
         Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
         Assert.True(outcome.CompletedSessionEligible);
-        Assert.Equal(Enumerable.Repeat("search_text", 8), executor.Order);
+        Assert.Equal(Enumerable.Repeat("search_text", 16), executor.Order);
         Assert.Equal(2, chat.Requests.Count);
         var results = outcome.Events.OfType<AgentToolResultEvent>().ToArray();
-        Assert.Equal(8, results.Length);
-        Assert.Equal(Enumerable.Range(0, 8).Select(index => "call-" + index),
+        Assert.Equal(16, results.Length);
+        Assert.Equal(Enumerable.Range(0, 16).Select(index => "call-" + index),
             results.Select(result => result.CallId));
-        Assert.Equal(8 * 65_536, results.Sum(result => result.CanonicalResult.Length));
+        Assert.Equal(16 * 65_536, results.Sum(result => result.CanonicalResult.Length));
         Assert.True(results.Sum(result => result.CanonicalResult.Length) > 256 * 1024);
     }
 
