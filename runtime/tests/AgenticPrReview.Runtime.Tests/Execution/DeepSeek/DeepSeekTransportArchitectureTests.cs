@@ -258,6 +258,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
                 typeof(IAccountedDeepSeekTransport),
                 typeof(ProviderAttemptCapture),
                 typeof(ProviderUsageObservation),
+                typeof(IProviderUsageObserver),
                 typeof(DeepSeekTransportOutcome),
                 typeof(DeepSeekTransportPolicy),
                 typeof(DeepSeekResponseParser),

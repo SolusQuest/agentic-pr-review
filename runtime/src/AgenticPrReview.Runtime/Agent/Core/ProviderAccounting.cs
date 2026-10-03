@@ -69,7 +69,14 @@ internal sealed record ProviderAttemptObservation(
     bool Succeeded,
     ProviderUsageObservation Usage);
 
-internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attemptOrdinal)
+// Parser receives only the ability to publish validated numeric observations,
+// not dispatch permission, finalization, or any provider/Host capabilities.
+internal interface IProviderUsageObserver
+{
+    void RecordUsage(ProviderUsageObservation observation);
+}
+
+internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attemptOrdinal) : IProviderUsageObserver
 {
     private readonly object gate = new();
     private bool observed;
@@ -114,6 +121,8 @@ internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attempt
                 usage = observation;
         }
     }
+
+    void IProviderUsageObserver.RecordUsage(ProviderUsageObservation observation) => RecordUsage(observation);
 
     internal void MarkFailed()
     {

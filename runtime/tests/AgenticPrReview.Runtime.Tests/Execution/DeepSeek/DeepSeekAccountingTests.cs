@@ -15,6 +15,37 @@ public sealed class DeepSeekAccountingTests
     private const string FullUsage = """{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13,"prompt_cache_hit_tokens":7,"prompt_cache_miss_tokens":3}""";
     private static readonly ReviewedIdentity Identity = new("repo", 1, new string('0', 40), new string('1', 40));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UsageIsPublishedBeforeRemainingResponseValidationAndConcurrentFreeze(bool reject)
+    {
+        var attempt = new ProviderAttemptCapture(0, 0);
+        Assert.True(attempt.TryBeginDispatch());
+        using var observer = new PausingObserver(attempt);
+        var body = reject ? Body().Replace("deepseek-flash", "wrong-model", StringComparison.Ordinal) : Body();
+        var parsing = Task.Run(() => DeepSeekResponseParser.Parse(
+            DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body)), observer));
+        try
+        {
+            await observer.Observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // This is the WaitAsync cancellation cutoff while parser work is pending.
+            var snapshot = attempt.Freeze(false, false);
+            Assert.Equal(10, snapshot.Usage.InputTokens);
+            Assert.Equal(3, snapshot.Usage.OutputTokens);
+            Assert.False(snapshot.Reconciled);
+            observer.Release.Set();
+            var result = await parsing.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(reject ? DeepSeekResponseParseOutcome.Invalid : DeepSeekResponseParseOutcome.Success, result.Outcome);
+            Assert.Same(snapshot, attempt.Freeze(true, !reject));
+            var accounting = ProviderAccounting.Aggregate([snapshot]);
+            Assert.Equal(1, accounting.ProviderFailedAttempts);
+            Assert.Equal(0, accounting.UnknownUsageAttempts);
+            Assert.Equal(AccountingCompleteness.Partial, accounting.UsageCompleteness);
+        }
+        finally { observer.Release.Set(); }
+    }
+
     [Fact]
     public async Task MeasuredZeroIsCompleteRatherThanUnavailable()
     {
@@ -63,6 +94,7 @@ public sealed class DeepSeekAccountingTests
     [InlineData("finish")]
     [InlineData("choice")]
     [InlineData("message")]
+    [InlineData("empty-tool-list")]
     [InlineData("missing-tool")]
     [InlineData("terminal")]
     public async Task LaterValidationFailureRetainsKnownUsageExactlyOnce(string rejection)
@@ -74,10 +106,14 @@ public sealed class DeepSeekAccountingTests
             "finish" => body.Replace("\"finish_reason\":\"tool_calls\"", "\"finish_reason\":\"length\"", StringComparison.Ordinal),
             "choice" => body.Replace("\"index\":0", "\"index\":2", StringComparison.Ordinal),
             "message" => body.Replace("\"role\":\"assistant\"", "\"role\":\"user\"", StringComparison.Ordinal),
-            "missing-tool" => Body(calls: "[]"),
+            "empty-tool-list" => Body(calls: "[]"),
+            "missing-tool" => Body(calls: "null").Replace("\"finish_reason\":\"tool_calls\"", "\"finish_reason\":\"stop\"", StringComparison.Ordinal),
             "terminal" => Body(arguments: """{"summary":"clean","findings":[{}]}"""),
             _ => body,
         };
+        if (rejection == "missing-tool")
+            Assert.Equal(DeepSeekResponseParseOutcome.MissingTool,
+                DeepSeekResponseParser.Parse(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body))).Outcome);
         using var handler = new Handler((_, _) => Task.FromResult(Http(body)));
         using var transport = Transport(handler);
         var outcome = await Loop(transport).RunAsync(Run(), default);
@@ -295,5 +331,18 @@ public sealed class DeepSeekAccountingTests
         public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody, CancellationToken cancellationToken) =>
             Task.FromResult(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(Body())));
         public void Dispose() { }
+    }
+
+    private sealed class PausingObserver(ProviderAttemptCapture attempt) : IProviderUsageObserver, IDisposable
+    {
+        internal TaskCompletionSource Observed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal ManualResetEventSlim Release { get; } = new();
+        public void RecordUsage(ProviderUsageObservation observation)
+        {
+            ((IProviderUsageObserver)attempt).RecordUsage(observation);
+            Observed.SetResult();
+            if (!Release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException();
+        }
+        public void Dispose() => Release.Dispose();
     }
 }

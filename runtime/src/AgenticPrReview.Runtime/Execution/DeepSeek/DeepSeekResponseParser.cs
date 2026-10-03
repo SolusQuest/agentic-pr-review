@@ -265,7 +265,8 @@ internal static class DeepSeekResponseParser
     ];
 
     internal static DeepSeekResponseParseResult Parse(
-        DeepSeekTransportResult? transportResult)
+        DeepSeekTransportResult? transportResult,
+        IProviderUsageObserver? usageObserver = null)
     {
         if (transportResult is null ||
             transportResult.Outcome != DeepSeekTransportOutcome.Success ||
@@ -297,6 +298,9 @@ internal static class DeepSeekResponseParser
                     MaxDepth = 64,
                 });
             usage = ReadAccountingUsage(document.RootElement);
+            // Publish before later response admission: its synchronous work may
+            // race the Agent's cancellation/finalization on another thread.
+            usageObserver?.RecordUsage(usage);
             return ParseRoot(
                 document.RootElement,
                 transportResult.CapturedCount.Value).WithAccountingUsage(usage);

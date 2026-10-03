@@ -160,7 +160,7 @@ internal sealed class DeepSeekChatBackend(
             request.Accounting?.ObserveUnavailableDispatch();
             transportResult = await transport.SendAsync(projection.Body.ToArray(), cancellationToken);
         }
-        var parsed = DeepSeekResponseParser.Parse(transportResult);
+        var parsed = DeepSeekResponseParser.Parse(transportResult, request.Accounting);
         request.Accounting?.RecordUsage(parsed.AccountingUsage);
         if (transportResult?.Outcome == DeepSeekTransportOutcome.ResponseTooLarge)
             request.Accounting?.MarkFailed();
