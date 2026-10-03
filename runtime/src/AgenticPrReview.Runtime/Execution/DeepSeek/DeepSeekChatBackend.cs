@@ -114,8 +114,9 @@ internal sealed class DeepSeekChatBackend(
         MinimalChatRequest request,
         CancellationToken cancellationToken)
     {
+        request?.Accounting?.ObserveNoDispatch();
         cancellationToken.ThrowIfCancellationRequested();
-        if (context is null ||
+        if (request is null || context is null ||
             transport is null ||
             !context.IsValid ||
             !ValidReplay(request))
@@ -148,9 +149,21 @@ internal sealed class DeepSeekChatBackend(
                 ProjectChatNormalizationReason.RequestProjection);
         }
 
-        var transportResult = await transport.SendAsync(
-            projection.Body.ToArray(),
-            cancellationToken);
+        DeepSeekTransportResult transportResult;
+        if (transport is IAccountedDeepSeekTransport accounted)
+        {
+            transportResult = await accounted.SendAsync(
+                projection.Body.ToArray(), cancellationToken, request.Accounting);
+        }
+        else
+        {
+            request.Accounting?.ObserveUnavailableDispatch();
+            transportResult = await transport.SendAsync(projection.Body.ToArray(), cancellationToken);
+        }
+        var parsed = DeepSeekResponseParser.Parse(transportResult, request.Accounting);
+        request.Accounting?.RecordUsage(parsed.AccountingUsage);
+        if (transportResult?.Outcome == DeepSeekTransportOutcome.ResponseTooLarge)
+            request.Accounting?.MarkFailed();
         cancellationToken.ThrowIfCancellationRequested();
         if (transportResult is null)
         {
@@ -165,7 +178,7 @@ internal sealed class DeepSeekChatBackend(
                 throw new ProjectChatNormalizationException(
                     AgentFailureCodes.ResponseInvalid,
                     ProjectChatNormalizationReason.TransportContract),
-            DeepSeekTransportOutcome.Success => Parse(transportResult, request),
+            DeepSeekTransportOutcome.Success => Parse(parsed, request),
             DeepSeekTransportOutcome.ResponseTooLarge =>
                 ResponseTooLarge(request.Messages.Length),
             DeepSeekTransportOutcome.HttpFailure or
@@ -180,10 +193,9 @@ internal sealed class DeepSeekChatBackend(
     }
 
     private MinimalChatResponse Parse(
-        DeepSeekTransportResult transportResult,
+        DeepSeekResponseParseResult parsed,
         MinimalChatRequest request)
     {
-        var parsed = DeepSeekResponseParser.Parse(transportResult);
         if (parsed.Outcome == DeepSeekResponseParseOutcome.MissingTool)
         {
             throw new ProjectChatNormalizationException(

@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using AgenticPrReview.Runtime.Agent.Core;
 
 namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 
-internal sealed class DeepSeekTransport : IDeepSeekTransport
+internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
 {
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
@@ -104,10 +105,16 @@ internal sealed class DeepSeekTransport : IDeepSeekTransport
         return new Uri(candidate, UriKind.Absolute);
     }
 
+    public Task<DeepSeekTransportResult> SendAsync(
+        ReadOnlyMemory<byte> requestBody,
+        CancellationToken cancellationToken) => SendAsync(requestBody, cancellationToken, null);
+
     public async Task<DeepSeekTransportResult> SendAsync(
         ReadOnlyMemory<byte> requestBody,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ProviderAttemptCapture? accounting)
     {
+        accounting?.ObserveNoDispatch();
         cancellationToken.ThrowIfCancellationRequested();
         if (requestBody.Length > DeepSeekTransportPolicy.RequestBodyMaxBytes)
         {
@@ -147,6 +154,9 @@ internal sealed class DeepSeekTransport : IDeepSeekTransport
                 return DeepSeekTransportResult.TransportFailure();
             }
 
+            providerCancellation.Token.ThrowIfCancellationRequested();
+            if (accounting is not null && !accounting.TryBeginDispatch())
+                throw new OperationCanceledException(cancellationToken);
             using var response = await _client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,

@@ -70,7 +70,8 @@ internal sealed record ProjectChatRequest(
     ProjectChatMessage[] Messages,
     ProjectToolDefinition[] Tools,
     ProjectContinuation? Continuation,
-    bool ThinkingRequired = false);
+    bool ThinkingRequired = false,
+    ProviderAttemptCapture? Accounting = null);
 
 internal sealed record ProjectChatMessage(
     string Role,
