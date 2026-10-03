@@ -32,10 +32,10 @@ public sealed class R5SessionGrowthTests
         var row = json.RootElement.GetProperty("profiles")[0].GetProperty("rows")[0];
         Assert.False(row.TryGetProperty("tool_calls", out _));
         Assert.Equal(expected, row.GetProperty("tool_observations").GetInt32());
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
         var oldName = System.Text.Encoding.UTF8.GetString(GrowthJson.Write(report))
             .Replace("\"tool_observations\":", "\"tool_calls\":", StringComparison.Ordinal);
-        Assert.Null(GrowthJson.Read(System.Text.Encoding.UTF8.GetBytes(oldName)));
+        Assert.Null(GrowthJson.ReadCurrent(System.Text.Encoding.UTF8.GetBytes(oldName)));
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class R5SessionGrowthTests
         Assert.Equal(profile.Rows[0].State, failed.Before);
         Assert.Equal(classification, failed.Classification);
         Assert.Equal(expectedCode, failed.Code);
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
         Assert.Equal(fault, report.Schedule.Fault);
         Assert.NotEqual(GrowthProfiles.Corpus(ReplayAdmission.Load(Bundle).Fixture!), report.CorpusSha256);
     }
@@ -101,19 +101,19 @@ public sealed class R5SessionGrowthTests
         Assert.Equal("attempt_limit", profile.TerminalCode);
         var row = Assert.Single(profile.Rows);
         Assert.True(row.Accepted);
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
         var state = row.State!;
         foreach (var changed in new[] { state with { Records = -1 }, state with { ScopeBytes = state.ScopeBytes + 1 },
             state with { CompletedRuns = state.CompletedRuns + 1 }, state with { PredecessorEnvelopeSha256 = new string('f', 64) } })
         {
             var profiles = report.Profiles.SetItem(0, profile with { Rows = [row with { State = changed }] });
             var altered = report with { Profiles = profiles, NormalizedSha256 = GrowthJson.Normalize(profiles) };
-            Assert.Null(GrowthJson.Read(GrowthJson.Write(altered)));
+            Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(altered)));
         }
-        Assert.Null(GrowthJson.Read(GrowthJson.Write(report with { Profiles = [profile with { LimitObserved = true }] })));
-        Assert.Null(GrowthJson.Read(GrowthJson.Write(report with { Schedule = report.Schedule with { AttemptLimit = 2 } })));
+        Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(report with { Profiles = [profile with { LimitObserved = true }] })));
+        Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(report with { Schedule = report.Schedule with { AttemptLimit = 2 } })));
         var text = System.Text.Encoding.UTF8.GetString(GrowthJson.Write(report));
-        Assert.Null(GrowthJson.Read(System.Text.Encoding.UTF8.GetBytes("{\"unexpected\":1," + text[1..])));
+        Assert.Null(GrowthJson.ReadCurrent(System.Text.Encoding.UTF8.GetBytes("{\"unexpected\":1," + text[1..])));
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public sealed class R5SessionGrowthTests
         Assert.Equal("accept", last.Stage);
         Assert.Equal(EvaluationStatus.Completed, report.Profiles[0].Evaluation.Outcomes.Single(o => o.CaseId == last.CaseId).ExecutionStatus);
         Assert.Equal(2, report.Profiles[0].Evaluation.Summary.Execution.Completed);
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
     }
 
     [Fact]
@@ -172,17 +172,18 @@ public sealed class R5SessionGrowthTests
     }
 
     [Fact]
-    public async Task MatrixMeasuresActualArtifactsAndReproducesFirstBoundary()
+    public async Task CurrentMatrixMeasuresTwoAcceptedArtifactsWithoutClaimingCapacity()
     {
         var observed = new Dictionary<string, List<(int Bytes, int Entries, long Continuation)>>();
         var startups = new HashSet<string>();
         var diagnostics = new List<string>();
         var report = await GrowthRunner.RunAsync(Bundle, new()
         {
+            AttemptLimit = 2,
             TransformReply = (input, reply) =>
             {
                 var fixture = ReplayAdmission.Load(Bundle).Fixture!;
-                var run = GrowthProfiles.Run(fixture, input.GrowthProfile!, input.Phase);
+                var run = GrowthProfiles.Run(fixture, input.GrowthProfile!, input.Phase, input.Fault, input.GrowthSchedule);
                 var okay = ReplayRunner.AdmitReply(input, run, reply, out var outcome);
                 if (!okay) diagnostics.Add($"{reply.Code}/{reply.ObservedStage}/{reply.ObservedCode}; evaluation={outcome?.ExecutionStatus}; diagnostic={GrowthProfiles.Diagnostic(reply, outcome)}; identity={ReplayRunner.AdmitIdentity(input, reply)}; model={reply.ModelCalls}; requests={reply.Requests.Length}; counts={reply.GrowthCounts}; plaintext={reply.Plaintext is null}/{reply.Plaintext?.Length}; receipt={reply.Prepared is null}");
                 return reply;
@@ -197,21 +198,18 @@ public sealed class R5SessionGrowthTests
                     artifact.Document.CompletedRuns.Sum(r => r.Continuation.Items.Sum(i => (long)i.PayloadBytes.Length))));
             },
         });
-        Assert.True(report.Code == "verified", report.Code + ": " + string.Join("; ", diagnostics));
+        Assert.True(report.Code == "observation_incomplete", report.Code + ": " + string.Join("; ", diagnostics));
         Assert.Equal("cleaned", report.Cleanup);
         Assert.Equal(GrowthProfiles.Names, report.Profiles.Select(p => p.Profile));
-        Assert.Equal(AgentSessionCodes.ConstructionLimit, report.Profiles[0].TerminalCode);
-        Assert.Equal("message_limit", report.Profiles[1].Rows[^1].Classification);
-        Assert.Equal("continuation_limit", report.Profiles[2].Rows[^1].Classification);
-        Assert.Equal("message_limit", report.Profiles[3].Rows[^1].Classification);
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.True(CurrentGrowthOracle.Valid(report));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
         foreach (var profile in report.Profiles)
         {
-            Assert.True(profile.LimitObserved);
-            Assert.InRange(profile.Rows.Length, 2, GrowthProfiles.Attempts);
+            Assert.False(profile.LimitObserved);
+            Assert.Equal(2, profile.Rows.Length);
             Assert.All(profile.Rows, row => Assert.True(row.PredecessorPreserved));
-            Assert.False(profile.Rows[^1].Accepted);
-            Assert.Null(profile.Rows[^1].State);
+            Assert.True(profile.Rows[^1].Accepted);
+            Assert.NotNull(profile.Rows[^1].State);
             Assert.NotNull(profile.Rows[^1].Before);
             Assert.Equal(profile.Rows.Length, profile.Evaluation.Outcomes.Length);
             var accepted = profile.Rows.Where(r => r.Accepted).ToArray();
@@ -223,8 +221,8 @@ public sealed class R5SessionGrowthTests
                 Assert.Equal(observed[profile.Profile][index], (state.PlaintextBytes, state.Records, state.ContinuationBytes));
             }
         }
-        var again = await GrowthRunner.RunAsync(Bundle);
-        Assert.Equal("verified", again.Code);
+        var again = await GrowthRunner.RunAsync(Bundle, new() { AttemptLimit = 2 });
+        Assert.Equal("observation_incomplete", again.Code);
         Assert.Equal(report.NormalizedSha256, again.NormalizedSha256);
         Assert.Equal(report.Profiles.Select(p => (p.TerminalStage, p.TerminalCode, p.Rows.Length)),
             again.Profiles.Select(p => (p.TerminalStage, p.TerminalCode, p.Rows.Length)));
@@ -276,7 +274,7 @@ public sealed class R5SessionGrowthTests
         Assert.Equal(cancel ? "cancelled" : "infrastructure_failed", profile.TerminalCode);
         Assert.Null(profile.Rows[1].ProviderRequestBytes);
         var bytes = GrowthJson.Write(report);
-        Assert.NotNull(GrowthJson.Read(bytes));
+        Assert.NotNull(GrowthJson.ReadCurrent(bytes));
         Assert.DoesNotContain("private-test-exception-not-output", System.Text.Encoding.UTF8.GetString(bytes));
     }
 
@@ -299,7 +297,7 @@ public sealed class R5SessionGrowthTests
         Assert.Null(row.LastProviderRequestBytes);
         Assert.Null(row.Project);
         Assert.Equal(EvaluationStatus.Failed, profile.Evaluation.Outcomes.Single(o => o.CaseId == row.CaseId).ExecutionStatus);
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
     }
 
     [Theory]
@@ -314,7 +312,7 @@ public sealed class R5SessionGrowthTests
         var limit = classification != "harness_failure";
         var profiles = ImmutableArray.Create(profile with { Rows = [row], TerminalStage = stage, TerminalCode = code, LimitObserved = limit });
         var changed = report with { Code = limit ? "verified" : "observation_incomplete", Profiles = profiles, NormalizedSha256 = GrowthJson.Normalize(profiles) };
-        Assert.Null(GrowthJson.Read(GrowthJson.Write(changed)));
+        Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(changed)));
     }
 
     [Fact]
@@ -349,8 +347,8 @@ public sealed class R5SessionGrowthTests
             Assert.False(cleanupCalled);
             Assert.True(Directory.Exists(retained));
             Assert.Equal(2, profile.Evaluation.Outcomes.Length);
-            Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
-            Assert.Null(GrowthJson.Read(GrowthJson.Write(report with { Code = "observation_incomplete", Cleanup = "cleaned" })));
+            Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
+            Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(report with { Code = "observation_incomplete", Cleanup = "cleaned" })));
         }
         finally { if (retained is not null) Assert.True(ReplayProcess.Cleanup(retained)); }
     }
@@ -371,7 +369,7 @@ public sealed class R5SessionGrowthTests
             Assert.True(Assert.Single(Assert.Single(report.Profiles).Rows).Accepted);
             Assert.True(Directory.Exists(retained));
             var bytes = GrowthJson.Write(report);
-            Assert.NotNull(GrowthJson.Read(bytes));
+            Assert.NotNull(GrowthJson.ReadCurrent(bytes));
             Assert.DoesNotContain("synthetic-cleanup-failure", System.Text.Encoding.UTF8.GetString(bytes));
         }
         finally { if (retained is not null) Assert.True(ReplayProcess.Cleanup(retained)); }
@@ -410,7 +408,7 @@ public sealed class R5SessionGrowthTests
         Assert.Equal(ModelObservationStatus.NotEvaluated, outcome.ModelStatus);
         Assert.Equal(1, profile.Evaluation.Summary.Execution.Completed);
         Assert.Equal(1, profile.Evaluation.Summary.Execution.Invalid);
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
     }
 
     [Theory]
@@ -441,7 +439,7 @@ public sealed class R5SessionGrowthTests
         Assert.Equal(call == 2, cleanupCalled);
         Assert.Equal("cleaned", report.Cleanup);
         Assert.Empty(report.Profiles);
-        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
     }
 }
 
@@ -449,15 +447,15 @@ public sealed partial class AgentSessionRoundTripTests
 {
     [Theory]
     [InlineData(-1)] [InlineData(0)] [InlineData(1)]
-    public async Task R5GrowthCumulativeRecordAdmissionBoundary(int delta)
+    public async Task FormerRecordBoundaryRemainsAdmitted(int delta)
     {
         var trusted = Trusted();
         BuiltGeneration? previous = null;
         for (var index = 0; index < 19; index++)
             previous = await BuildGenerationWithContinuationCountAsync(trusted, previous, "prior-" + index, "finish" + index, index < 6 ? 11 : 10);
         var document = AddTerminalContinuationItems(previous!.Artifact.Document, 3 + delta);
-        Assert.Equal(AgentLimits.SessionRecords + delta, document.CompletedRuns.Sum(r => r.Records.Length + r.Continuation.Items.Length));
-        Assert.Equal(delta <= 0, AgentSessionValidation.TryValidateRecords(document, SyntheticContinuationCodec.Instance, out _));
+        Assert.Equal(256 + delta, document.CompletedRuns.Sum(r => r.Records.Length + r.Continuation.Items.Length));
+        Assert.True(AgentSessionValidation.TryValidateRecords(document, SyntheticContinuationCodec.Instance, out _));
     }
 
     [Theory]
@@ -505,8 +503,8 @@ public sealed partial class AgentSessionRoundTripTests
         var single = await BuildSizedContinuationAsync([AgentLimits.ContinuationItemBytes + delta]);
         Assert.Equal(delta <= 0, single.Succeeded);
         var total = AgentLimits.ContinuationTotalBytes + delta;
-        var lengths = Enumerable.Repeat(total / 5, 5).ToArray();
-        lengths[^1] += total % 5;
+        var lengths = Enumerable.Repeat(total / 9, 9).ToArray();
+        lengths[^1] += total % 9;
         var aggregate = await BuildSizedContinuationAsync(lengths);
         Assert.Equal(delta <= 0, aggregate.Succeeded);
         if (delta > 0)
@@ -522,7 +520,7 @@ public sealed partial class AgentSessionRoundTripTests
     public void R5GrowthReconstructedRequestByteAndMessageBoundaries(int delta)
     {
         var trusted = Trusted();
-        var messages = Enumerable.Range(0, 16).Select(_ => User(new string('x', AgentLimits.ContentBytes - 4096))).ToArray();
+        var messages = Enumerable.Range(0, 8).Select(_ => User(new string('x', AgentLimits.ContentBytes - 4096))).ToArray();
         int Size() => AgentRequestWriter.Write(new(messages, AgentToolRegistry.Definitions.ToArray(), Continuation: null, ThinkingRequired: true)).Length;
         var remaining = AgentLimits.RequestBytes + delta - Size();
         for (var index = 0; index < messages.Length && remaining > 0; index++)

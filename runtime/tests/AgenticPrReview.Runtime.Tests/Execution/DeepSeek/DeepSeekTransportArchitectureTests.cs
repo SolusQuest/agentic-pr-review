@@ -248,6 +248,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
         Type[] approvedRoots =
         [
             .. roots,
+            typeof(DeepSeekContextAdmission),
             typeof(DeepSeekRequestWriter),
                 typeof(DeepSeekRequestProfile),
                 typeof(DeepSeekRequestWriteResult),

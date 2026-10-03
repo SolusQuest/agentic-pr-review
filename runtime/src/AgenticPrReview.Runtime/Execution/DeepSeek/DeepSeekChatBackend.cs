@@ -27,14 +27,15 @@ internal sealed class DeepSeekAdapterContext(
         "\"https://api.deepseek.com/chat/completions\",\"stream\":false," +
         "\"thinking\":\"enabled\",\"reasoning_effort\":\"high\"," +
         "\"max_tokens\":4096,\"tool_choice\":\"omitted\"," +
-        "\"request_cap_bytes\":1048576,\"response_cap_bytes\":1048576," +
+        "\"request_cap_bytes\":8388608,\"response_cap_bytes\":2097152," +
+        "\"context_policy\":\"dsv41-utf8-upper-v1\",\"context_cap_tokens\":1000000," +
         "\"content_rule\":\"zero-or-one-exact\",\"response_rule\":" +
         "\"reasoning,text-if-nonempty,calls\",\"codec_id\":" +
         "\"deepseek-reasoning-content\",\"codec_discriminator\":" +
         "\"deepseek-flash-thinking-v1\",\"encoding\":\"utf8\"," +
         "\"framing\":\"deepseek.reasoning_content.utf8.v1\"}";
     internal const string Adapter =
-        "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6";
+        "b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8";
     internal static string CandidateAdapterDescriptor { get; } = AdapterDescriptor.Replace(
         "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal);
     internal static string CandidateAdapter { get; } = Convert.ToHexString(
@@ -136,6 +137,14 @@ internal sealed class DeepSeekChatBackend(
         {
             throw new ProjectChatNormalizationException(
                 AgentFailureCodes.ResponseInvalid,
+                ProjectChatNormalizationReason.RequestProjection);
+        }
+
+        if (!DeepSeekContextAdmission.TryEstimate(projection.Body.AsSpan(), out var inputUpperBound) ||
+            !DeepSeekContextAdmission.Allows(inputUpperBound, profile))
+        {
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.ContextLimit,
                 ProjectChatNormalizationReason.RequestProjection);
         }
 

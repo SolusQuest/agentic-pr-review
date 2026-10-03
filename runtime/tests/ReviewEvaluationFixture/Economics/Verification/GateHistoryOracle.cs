@@ -14,13 +14,13 @@ internal static class GateHistoryOracle
 {
     internal static JsonElement Verify(GateCase item, GateSelection selection)
     {
-        if (item.Id == "p2-host-capacity-reset") return Host(item, selection);
-        var report = HistoryJson.Read(Bytes(item.Evidence)) ?? throw new InvalidOperationException("r6_gate_history");
+        if (item.Id == "p2-host-explicit-reset") return Host(item, selection);
+        var report = HistoryJson.ReadCurrent(Bytes(item.Evidence)) ?? throw new InvalidOperationException("r6_gate_history");
         Require(report.SourceCommit == selection.SourceCommit && report.SourceTree == selection.SourceTree &&
             report.SourceClean == selection.SourceClean && report.Cleanup == "cleaned" && report.Rows.All(row => row.PredecessorPreserved));
-        var positive = item.Id is "p2-replay" or "p2-tools" or "p2-continuation";
-        var profile = item.Id == "p2-tools" ? "tools" : item.Id == "p2-continuation" ? "continuation" : "replay";
-        Require(report.Profile == profile && report.Rows.Length == (positive ? profile == "replay" ? 3 : profile == "tools" ? 6 : 7 : 2));
+        var positive = item.Id is "p2-replay" or "p2-current-tools" or "p2-current-continuation";
+        var profile = item.Id == "p2-current-tools" ? "tools" : item.Id == "p2-current-continuation" ? "continuation" : "replay";
+        Require(report.Profile == profile && report.Rows.Length == (positive ? profile == "replay" ? 3 : 2 : 2));
         Require(report.Rows.Select(row => row.ProcessId).Distinct().Count() == report.Rows.Length);
         foreach (var row in report.Rows) Absent(row.ProcessId);
         Require(HistoryReport.Positive(report.Rows[0]));
@@ -35,7 +35,7 @@ internal static class GateHistoryOracle
             Require(observations.All(value => value.Domain.SessionSha256 == session && value.Domain == observations[0].Domain) &&
                 phasePlans.Add(observations[0].Domain.StablePlanSha256));
         }
-        if (positive) Require(report.ContinuityVerified);
+        if (positive) Require(report.CurrentContinuityVerified);
         else
         {
             var code = item.Id switch
@@ -43,12 +43,12 @@ internal static class GateHistoryOracle
                 "p2-missing-history" => "history_failed",
                 "p2-reordered-history" or "p2-missing-continuation" or "p2-wrong-position" => "unknown_failed",
                 "p2-changed-continuation" => "session_failed",
-                "p2-wrong-scope" or "p2-wrong-head" or "p2-stale-generation" or "p2-policy" or "p2-model" or "p2-adapter" or "p2-toolset" => "state_failed",
+                "p2-wrong-scope" or "p2-wrong-head" or "p2-stale-generation" or "p2-policy" or "p2-model" or "p2-adapter" or "p2-current-toolset" => "state_failed",
                 _ => throw new InvalidOperationException("r6_gate_history_case"),
             };
             var failed = report.Rows[1];
             Require(report.Code == code && failed.Code == code && !failed.Accepted && failed.SessionSha256 is null && failed.Generation is null);
-            if (code == "state_failed") Require(failed.Capture.Code == (item.Id == "p2-toolset" ? "observed" : "unavailable") &&
+            if (code == "state_failed") Require(failed.Capture.Code == (item.Id == "p2-current-toolset" ? "observed" : "unavailable") &&
                 failed.Capture.Calls.IsEmpty && !failed.WireMatch);
             if (item.Id == "p2-missing-history") Require(failed.Capture.Code == "unmeasurable");
             if (item.Id == "p2-changed-continuation") Require(failed.RestoredMatch && failed.Comparison == new PrefixComparison("compared", false, false));
@@ -93,35 +93,29 @@ internal static class GateHistoryOracle
         var report = PricingJson.ReadValue(Bytes(item.Evidence), GateJson.Default.GateHostReport, 128 * 1024, 16)!;
         Require(report is not null && report.Mode == selection.Mode && report.SourceCommit == selection.SourceCommit &&
             report.SourceTree == selection.SourceTree && report.SourceClean == selection.SourceClean && report.CorpusSha256 == selection.GrowthSha256 &&
-            report.Rows.Length == 9);
+            report.Rows.Length == 5);
         var rows = report!.Rows;
-        var capacity = rows.Length - 4;
-        Require(rows.Take(capacity + 1).All(row => row.Action == "grow") && rows[capacity + 1].Action == "restore-only" &&
-            rows[capacity + 2].Action == "reset" && rows[capacity + 3].Action == "continue");
+        const int preserved = 2;
+        Require(rows.Take(preserved).All(row => row.Action == "grow") && rows[preserved].Action == "restore-only" &&
+            rows[preserved + 1].Action == "reset" && rows[preserved + 2].Action == "continue");
         for (var i = 0; i < rows.Length; i++)
         {
             var row = rows[i];
             Require(row.Phase == i && row.StoredMarkersMatch && row.WireExclusion && row.InitialMessages >= 2 &&
                 row.AcceptedCount == row.AcceptanceIdentities.Length && row.AcceptanceIdentities.Distinct().Count() == row.AcceptedCount &&
                 row.AcceptanceIdentities.All(Hex) && Hex(row.EpochSha256) && Hex(row.SessionIdSha256) && Hex(row.StoredSessionSha256));
-            if (i < capacity || i > capacity + 1)
+            if (i != preserved)
                 Require(row.Disposition == "Accepted" && row.AgentCode is null && row.ModelCalls is null);
             else Require(row.Disposition == "NotCommitted");
-            if (i < capacity)
+            if (i < preserved)
                 Require(row.Disposition == "Accepted" && row.Generation == i && row.AcceptedCount == Math.Min(2, i + 1) && row.Publications == i + 1 &&
                     row.EpochSha256 == rows[0].EpochSha256 && row.SessionIdSha256 == rows[0].SessionIdSha256 &&
                     row.RestoredSessionSha256 == (i == 0 ? null : rows[i - 1].StoredSessionSha256));
         }
-        var stopped = rows[capacity];
-        var previous = rows[capacity - 1];
-        var restored = rows[capacity + 1];
-        var reset = rows[capacity + 2];
-        var next = rows[capacity + 3];
-        Require(stopped.Disposition == "NotCommitted" && stopped.AgentCode == AgentFailureCodes.ResponseInvalid && stopped.ModelCalls == 1 &&
-            stopped.InitialMessages + 9 > AgentLimits.Messages && stopped.AcceptanceIdentities.SequenceEqual(previous.AcceptanceIdentities) &&
-            stopped.Generation == previous.Generation && stopped.EpochSha256 == previous.EpochSha256 &&
-            stopped.SessionIdSha256 == previous.SessionIdSha256 && stopped.RestoredSessionSha256 == previous.StoredSessionSha256 &&
-            stopped.StoredSessionSha256 == previous.StoredSessionSha256 && stopped.Publications == previous.Publications);
+        var previous = rows[preserved - 1];
+        var restored = rows[preserved];
+        var reset = rows[preserved + 1];
+        var next = rows[preserved + 2];
         Require(restored.Disposition == "NotCommitted" && restored.AgentCode == AgentFailureCodes.ChatFailed && restored.ModelCalls == 0 &&
             restored.AcceptanceIdentities.SequenceEqual(previous.AcceptanceIdentities) && restored.StoredSessionSha256 == previous.StoredSessionSha256 &&
             restored.Generation == previous.Generation && restored.EpochSha256 == previous.EpochSha256 && restored.Publications == previous.Publications &&
@@ -140,8 +134,8 @@ internal static class GateHistoryOracle
         for (var i = 0; i < rows.Length; i++)
         {
             var row = rows[i]; var node = json["rows"]![i]!;
-            node["epoch_sha256"] = i <= capacity + 1 ? "previous-epoch" : "reset-epoch";
-            node["session_id_sha256"] = i <= capacity + 1 ? "previous-session" : "reset-session";
+            node["epoch_sha256"] = i <= preserved ? "previous-epoch" : "reset-epoch";
+            node["session_id_sha256"] = i <= preserved ? "previous-session" : "reset-session";
             node["stored_session_sha256"] = Map(sessions, row.StoredSessionSha256);
             if (row.RestoredSessionSha256 is not null) node["restored_session_sha256"] = Map(sessions, row.RestoredSessionSha256);
             // Random authenticated receipt IDs are represented by verified

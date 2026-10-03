@@ -64,7 +64,7 @@ internal static class GateEconomicsCases
             },
         };
         await Add("c2-output65536", "candidate-output65536", output65536);
-        await Add("c2-full", "capacity-reset", Prepare());
+        await Add("c2-current-workloads", "bounded-current-workloads", Prepare([new("replay", 3, 1, false), new("tools", 2, 1, false), new("continuation", 2, 1, false)]));
         // Deliberately fail on an uncommitted build. Final acceptance cannot
         // silently take the dirty-source rejection branch in place of execute.
         await Add("c2-execute-loopback", "execute-loopback", execute: true);

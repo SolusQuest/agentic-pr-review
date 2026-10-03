@@ -71,7 +71,7 @@ public sealed partial class AgentSessionRoundTripTests
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.Equal(
-            "8041e6f179379b613c469f877cbf994bf8e4ec70da45e6fe5b43e7e1a31b94f6",
+            "e4586c980d106192e3736118d170d507ca297b32619daa0a91d42b0992863d37",
             artifact.SessionSha256);
         Assert.Equal(2627, artifact.Plaintext.Length);
         Assert.Equal("APRSES01", Encoding.ASCII.GetString(
@@ -306,13 +306,13 @@ public sealed partial class AgentSessionRoundTripTests
             [
                 (
                     2607,
-                    "7bcfac058b0aa5179160b8dfbef38d6e30947241a2d39577a8200c5092e43a8c"),
+                    "a4c46627c14f784130f08822f8a45fc837ed5ae381b8d522fafeca2721a5c7bb"),
                 (
                     4162,
-                    "f744b7173b6eef62da935abb37e91ecf407bbb78e830070e39fb31debdbb71b9"),
+                    "0b86ea015961444f88b8bfe15fdbcdd677115eefab78775dd7cf30ba1acdf7af"),
                 (
                     6015,
-                    "0e25cac9f247b82a45e33caa5ebf01771fa1ffeb17247f5555f470b25abe95d3"),
+                    "d4bc98e052906d1142d9d3e0106be3563f9f2e506d39cd1c788baf241e2d3de6"),
             ],
             new[]
             {
@@ -3139,25 +3139,12 @@ public sealed partial class AgentSessionRoundTripTests
             overItem.FailureCode);
         Assert.Null(overItem.Artifact);
 
-        var exactAggregate = await BuildSizedContinuationAsync(
-        [
-            AgentLimits.ContinuationItemBytes,
-            AgentLimits.ContinuationItemBytes,
-            AgentLimits.ContinuationItemBytes,
-            AgentLimits.ContinuationItemBytes,
-        ]);
-        Assert.True(
-            exactAggregate.Succeeded,
-            exactAggregate.FailureCode);
-
-        var overAggregate = await BuildSizedContinuationAsync(
-        [
-            52_429,
-            52_429,
-            52_429,
-            52_429,
-            52_429,
-        ]);
+        var sizes = Enumerable.Repeat(AgentLimits.ContinuationTotalBytes / 9, 9).ToArray();
+        sizes[^1] += AgentLimits.ContinuationTotalBytes % 9;
+        var exactAggregate = await BuildSizedContinuationAsync(sizes);
+        Assert.True(exactAggregate.Succeeded, exactAggregate.FailureCode);
+        sizes[^1]++;
+        var overAggregate = await BuildSizedContinuationAsync(sizes);
         Assert.Equal(
             AgentSessionCodes.ConstructionLimit,
             overAggregate.FailureCode);
@@ -3165,7 +3152,7 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     [Fact]
-    public async Task CumulativeSessionRecordCapIsExactAndNeverDropsHistory()
+    public async Task FormerRecordBoundaryPreservesCompleteHistory()
     {
         var trusted = Trusted();
         BuiltGeneration? predecessor = null;
@@ -3184,7 +3171,7 @@ public sealed partial class AgentSessionRoundTripTests
         var validOverPredecessor = Assert.IsType<BuiltGeneration>(
             predecessor);
         Assert.Equal(
-            AgentLimits.SessionRecords - 3,
+            256 - 3,
             validOverPredecessor.Artifact.Document.CompletedRuns.Sum(run =>
                 run.Records.Length + run.Continuation.Items.Length));
         var predecessorBytes =
@@ -3195,17 +3182,15 @@ public sealed partial class AgentSessionRoundTripTests
             "boundary-final",
             "finish19",
             continuationCount: 0);
-        Assert.Equal(
-            AgentSessionCodes.ConstructionLimit,
-            appendAtBoundary.FailureCode);
-        Assert.Null(appendAtBoundary.Artifact);
+        Assert.True(appendAtBoundary.Succeeded, appendAtBoundary.FailureCode);
+        Assert.Equal(20, appendAtBoundary.Artifact!.Document.CompletedRuns.Length);
         Assert.Equal(
             predecessorBytes,
             validOverPredecessor.Artifact.Plaintext);
 
         var nearRecoveryPredecessor = await BuildGenerationWithContinuationCountAsync(
             trusted, predecessorBeforeFinal, "near-recovery", "finish-near", 8);
-        Assert.Equal(AgentLimits.SessionRecords - 5,
+        Assert.Equal(256 - 5,
             nearRecoveryPredecessor.Artifact.Document.CompletedRuns.Sum(run =>
                 run.Records.Length + run.Continuation.Items.Length));
 
@@ -3253,15 +3238,14 @@ public sealed partial class AgentSessionRoundTripTests
                 nearRecoveryPredecessor.Artifact.Document.ProducerHeadSha,
                 nearRecoveryPredecessor.Artifact.Document.PredecessorStateSha256),
             AgentSessionHeadTransition.SameHead));
-        Assert.Equal(AgentSessionCodes.ConstructionLimit, recoveryAppend.FailureCode);
-        Assert.Null(recoveryAppend.Artifact);
+        Assert.True(recoveryAppend.Succeeded, recoveryAppend.FailureCode);
         Assert.Equal(predecessorBytes, validOverPredecessor.Artifact.Plaintext);
 
         var exact = AddTerminalContinuationItems(
             validOverPredecessor.Artifact.Document,
             count: 3);
         Assert.Equal(
-            AgentLimits.SessionRecords,
+            256,
             exact.CompletedRuns.Sum(run =>
                 run.Records.Length + run.Continuation.Items.Length));
         Assert.True(
@@ -3282,19 +3266,19 @@ public sealed partial class AgentSessionRoundTripTests
             validOverPredecessor.Artifact.Document,
             count: 4);
         Assert.Equal(
-            AgentLimits.SessionRecords + 1,
+            256 + 1,
             over.CompletedRuns.Sum(run =>
                 run.Records.Length + run.Continuation.Items.Length));
-        Assert.False(
+        Assert.True(
             AgentSessionValidation.TryValidateRecords(
                 over,
                 SyntheticContinuationCodec.Instance,
                 out var overFailure));
-        Assert.Equal(AgentSessionCodes.RecordInvalid, overFailure);
+        Assert.Equal(string.Empty, overFailure);
     }
 
     [Fact]
-    public async Task ConstructionRejectsHistoryWithoutNextMessageCapacity()
+    public async Task ConstructionCrossesFormerMessageLimitWithoutDroppingHistory()
     {
         var trusted = Trusted();
         var generation0Run = new AgentRunRequest(
@@ -3348,15 +3332,15 @@ public sealed partial class AgentSessionRoundTripTests
                     predecessorArtifact.Document.ProducerHeadSha,
                     predecessorArtifact.Document.PredecessorStateSha256),
                 AgentSessionHeadTransition.SameHead));
-        Assert.Equal(
-            AgentSessionCodes.ConstructionLimit,
-            generation1.FailureCode);
-        Assert.Null(generation1.Artifact);
+        Assert.True(generation1.Succeeded, generation1.FailureCode);
+        var next = Restore(new BuiltGeneration(generation1.Artifact!, new string('f', 64)), trusted, AgentSessionHeadTransition.SameHead);
+        Assert.True(next.Succeeded, next.Code);
+        Assert.True(next.RunRequest!.InitialMessages.Length > 64);
         Assert.Equal(predecessorBytes, predecessorArtifact.Plaintext);
     }
 
     [Fact]
-    public async Task ConstructionReservesNextContextPartCapacity()
+    public async Task ConstructionCrossesFormerPartLimitWithoutDroppingHistory()
     {
         var trusted = Trusted();
         var run = new AgentRunRequest(
@@ -3418,10 +3402,8 @@ public sealed partial class AgentSessionRoundTripTests
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
             AgentSessionHeadTransition.SameHead));
-        Assert.Equal(
-            AgentSessionCodes.ConstructionLimit,
-            built.FailureCode);
-        Assert.Null(built.Artifact);
+        Assert.True(built.Succeeded, built.FailureCode);
+        Assert.NotNull(built.Artifact);
     }
 
     [Fact]
@@ -3439,7 +3421,7 @@ public sealed partial class AgentSessionRoundTripTests
             [.. Controls(trusted), User("review")]);
         var largeTexts = Enumerable.Repeat(
                 (ProjectChatContent)new ProjectTextContent(
-                    new string('x', AgentLimits.ContentBytes)),
+                    new string('x', AgentLimits.ContentBytes / 2)),
                 7)
             .Append(new ProjectTextContent(new string('y', 32_500)))
             .ToArray();

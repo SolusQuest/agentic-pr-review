@@ -906,7 +906,7 @@ public sealed class AcceptedStateProductionEndToEndTests
     }
 
     [Fact]
-    public async Task ProductionEntryRestoresMaximumGenerationFifteenComposite()
+    public async Task ProductionEntryRestoresFourMiBGenerationFifteenComposite()
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
             ActionHostAuthorizationRoute.WorkflowRun);
@@ -973,7 +973,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         Assert.NotNull(admitted);
         Assert.Equal(15, admitted!.Artifact.Document.Generation);
         Assert.Equal(
-            AgentLimits.SessionPlaintextBytes,
+            AcceptedStatePersistenceBoundaryTests.LargeAdmittedPlaintextBytes,
             admitted.Artifact.Plaintext.Length);
         Assert.NotNull(admitted.Artifact.Document.PredecessorStateSha256);
         Assert.NotNull(admitted.Artifact.Document.PriorSessionSha256);
@@ -1073,7 +1073,7 @@ public sealed class AcceptedStateProductionEndToEndTests
                         completedRuns: 15,
                         predecessorEnvelopeSha256: new string('d', 64),
                         priorSessionSha256: new string('e', 64),
-                        maximize: false);
+                        largeFixture: false);
                 var stateScope = new RestrictedStateScope(
                     repositoryId,
                     trustedWorkflowIdentity,
@@ -1128,7 +1128,7 @@ public sealed class AcceptedStateProductionEndToEndTests
                             RestrictedStateEnvelope.EnvelopeSha256(
                                 predecessorEnvelope!),
                         priorSessionSha256: predecessor.SessionSha256,
-                        maximize: true);
+                        largeFixture: true);
                 var currentDocument = current.Value.Artifact.Document;
                 var currentBinding = new RestrictedStateBinding(
                     stateScope,
@@ -1926,7 +1926,7 @@ public sealed class AcceptedStateProductionEndToEndTests
                             completedRuns: 2,
                             predecessor.StateEnvelopeSha256,
                             predecessor.SessionSha256,
-                            maximize: false)
+                            largeFixture: false)
                         .Value.Artifact;
                 if (mutation == "session")
                 {

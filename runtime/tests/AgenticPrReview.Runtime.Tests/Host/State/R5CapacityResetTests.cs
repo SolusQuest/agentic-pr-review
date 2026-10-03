@@ -67,9 +67,9 @@ namespace AgenticPrReview.Runtime.Tests.Host.State
         }
 
         [Fact]
-        public async Task CapacityRejectionResetAndIndependentContinuationUseOneProductionHistory()
+        public async Task ExplicitResetAndIndependentContinuationUseOneProductionHistory()
         {
-            await Action.ActionHostCompositionTests.VerifyCapacityResetAsync();
+            await Action.ActionHostCompositionTests.VerifyExplicitResetAsync();
         }
     }
 }
@@ -157,38 +157,27 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             Assert.Equal(ActionHostStateDisposition.Accepted, reset.Completion.Summary.StateDisposition);
         }
 
-        internal static async Task VerifyCapacityResetAsync()
+        internal static async Task VerifyExplicitResetAsync()
         {
             var world = new CapacityResetWorld();
             CapacityResetInvocation? previous = null;
             var phase = 0;
-            for (; phase < AgentSessionFormat.MaximumCompletedRuns + 1; phase++)
+            for (; phase < 2; phase++)
             {
-                var before = previous is null ? [] : ReadAcceptedStateRecords(world.Store, previous.Launch, world.Time)
-                    .Acceptances.Select(a => a.Header.ObjectIdentity).Order().ToArray();
-                var attempt = await world.RunAsync(phase);
-                if (attempt.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted)
-                {
-                    previous = attempt;
-                    continue;
-                }
-                Assert.NotNull(previous);
-                Assert.NotNull(attempt.Provider.Outcome);
-                Assert.True(attempt.Provider.Outcome.Diagnostic?.Code == AgentFailureCodes.ResponseInvalid,
-                    $"phase={phase};status={attempt.Completion.Status};agentSucceeded={attempt.Provider.Outcome.Succeeded};agentCode={attempt.Provider.Outcome.Diagnostic?.Code ?? "none"};acceptedReceipts={before.Length};writes={world.Publications}");
-                Assert.Equal(1, attempt.Provider.Outcome.Diagnostic!.ModelCalls);
-                Assert.True(attempt.Provider.Request!.InitialMessages.Length + 1 + 8 > AgentLimits.Messages,
-                    "the actual next tool response must exceed the production message bound");
-                Assert.Equal(before, ReadAcceptedStateRecords(world.Store, attempt.Launch, world.Time)
-                    .Acceptances.Select(a => a.Header.ObjectIdentity).Order());
-                break;
+                previous = await world.RunAsync(phase);
+                Assert.Equal(ActionHostStateDisposition.Accepted, previous.Completion.Summary.StateDisposition);
             }
-            Assert.InRange(phase, 1, AgentSessionFormat.MaximumCompletedRuns);
-            var capacityPhase = phase;
             AssertSessionMarkers(world, previous!, ResetWorkload.OldFact, ResetWorkload.OldReasoning);
             var previousEpoch = ReadAcceptedStateRecords(world.Store, previous!.Launch, world.Time).Acceptances[0].Header.Epoch;
             var oldSession = previous!.Provider.Request!.SessionId;
-            var restored = await world.RunAsync(++phase, failProvider: true);
+            var before = ReadAcceptedStateRecords(world.Store, previous.Launch, world.Time)
+                .Acceptances.Select(a => a.Header.ObjectIdentity).Order().ToArray();
+            var publications = world.Publications;
+            var restored = await world.RunAsync(phase, failProvider: true);
+            Assert.Equal(ActionHostStateDisposition.NotCommitted, restored.Completion.Summary.StateDisposition);
+            Assert.Equal(publications, world.Publications);
+            Assert.Equal(before, ReadAcceptedStateRecords(world.Store, restored.Launch, world.Time)
+                .Acceptances.Select(a => a.Header.ObjectIdentity).Order());
             Assert.Equal(oldSession, restored.Provider.Request!.SessionId);
             Assert.NotNull(restored.Provider.Request.Continuation);
             var reset = await world.RunAsync(++phase, reset: true, fresh: true);
@@ -227,8 +216,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             Assert.Equal(reset.Provider.Request.StablePlan, continued.Provider.Request.StablePlan with { PriorSessionSha256 = null });
             AssertSessionMarkers(world, continued, ResetWorkload.FreshFact, ResetWorkload.FreshReasoning,
                 ResetWorkload.OldFact, ResetWorkload.OldReasoning);
-            Console.WriteLine(ResetCapacityReport.Write(world.SeedCorpusSha256, capacityPhase,
-                AgentLimits.Messages, world.Observations.ToArray()));
+
         }
 
         internal static async Task VerifyCancelledResetAsync()

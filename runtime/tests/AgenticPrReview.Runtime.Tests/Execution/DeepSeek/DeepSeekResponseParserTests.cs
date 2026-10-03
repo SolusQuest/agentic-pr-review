@@ -411,7 +411,7 @@ public sealed class DeepSeekResponseParserTests
             new string('a', AgentLimits.ToolArgumentsBytes + 1))))));
 
         AssertSuccess(Response(choice: Choice(Message(
-            content: new string('é', AgentLimits.ContentBytes / 2),
+            contentLiteral: "\"" + new string('é', AgentLimits.ContentBytes / 2) + "\"",
             reasoning: "🧠"))));
         AssertInvalid(Response().Replace(
             "\"reasoning_content\":\"reasoning\"",

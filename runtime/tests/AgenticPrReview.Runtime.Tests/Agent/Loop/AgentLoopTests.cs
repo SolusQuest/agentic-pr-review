@@ -2597,20 +2597,9 @@ public sealed partial class AgentLoopTests
     [InlineData(true)]
     public async Task ContinuationAggregateCanonicalByteCapIsExact(bool plusOne)
     {
-        var sizes = plusOne
-            ? new[]
-            {
-                AgentLimits.ContinuationItemBytes,
-                AgentLimits.ContinuationItemBytes,
-                AgentLimits.ContinuationItemBytes,
-                AgentLimits.ContinuationItemBytes / 2,
-                AgentLimits.ContinuationItemBytes / 2 + 1,
-            }
-            : Enumerable.Repeat(
-                    AgentLimits.ContinuationItemBytes,
-                    AgentLimits.ContinuationTotalBytes /
-                        AgentLimits.ContinuationItemBytes)
-                .ToArray();
+        var total = AgentLimits.ContinuationTotalBytes + (plusOne ? 1 : 0);
+        var sizes = Enumerable.Repeat(total / 9, 9).ToArray();
+        sizes[^1] += total % 9;
         var items = sizes
             .Select((size, index) => ContinuationItemOfSize(size, index))
             .ToArray();
@@ -2636,8 +2625,9 @@ public sealed partial class AgentLoopTests
         }
         else
         {
-            Assert.True(outcome.Succeeded);
-            Assert.Single(chat.Requests);
+            // Valid continuation still needs space for the complete request wrapper.
+            AssertFailure(outcome, "agent_request_too_large");
+            Assert.Empty(chat.Requests);
         }
     }
 
@@ -2812,7 +2802,7 @@ public sealed partial class AgentLoopTests
 
     private static AgentRunRequest RequestWithSerializedSize(int targetBytes)
     {
-        var messages = Enumerable.Range(0, 15)
+        var messages = Enumerable.Range(0, 7)
             .Select(_ => new ProjectChatMessage(
                 "user",
                 [new ProjectTextContent(new string('x', AgentLimits.ContentBytes))]))

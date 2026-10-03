@@ -14,7 +14,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.State;
 public sealed class OpaqueTransportCapacityTests
 {
     [Fact]
-    public void CarrierCoversCleanupAnchorWithoutActivatingSemanticCapacity()
+    public void CarrierCoversActivatedSessionCapacityAndNestedCleanupAnchor()
     {
         Assert.Equal(34_049_552, OpaqueStoreLimits.MaximumObjectBytes);
         Assert.Equal(OpaqueStoreLimits.MaximumObjectBytes, ArtifactBridgeLimits.MaximumEncryptedObjectBytes);
@@ -24,17 +24,17 @@ public sealed class OpaqueTransportCapacityTests
         Assert.Equal(OpaqueStoreCapacity.TargetEnvelopeBytes + 2048, OpaqueStoreCapacity.AnchorBytes);
         Assert.Equal(OpaqueStoreCapacity.AnchorBytes + OpaqueStoreCapacity.ControlWrapperBytes,
             OpaqueStoreLimits.MaximumObjectBytes);
-        Assert.Equal(2 * 1024 * 1024, AgentLimits.StateEnvelopeBytes);
-        Assert.Equal(1024 * 1024, AgentLimits.SessionPlaintextBytes);
-        Assert.Equal(1_400_000, AcceptedStateFormat.MaximumGenerationPayloadBytes);
-        Assert.Equal(1_500_000, AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes);
+        Assert.Equal(32 * 1024 * 1024, AgentLimits.StateEnvelopeBytes);
+        Assert.Equal(16 * 1024 * 1024, AgentLimits.SessionPlaintextBytes);
+        Assert.Equal(33_832_960, AcceptedStateFormat.MaximumGenerationPayloadBytes);
+        Assert.Equal(33_849_344, AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes);
         Assert.Equal(64 * 1024, AcceptedStateFormat.MaximumAcceptancePayloadBytes);
         Assert.Equal(1024 * 1024, LineageFormat.MaximumPayloadBytes);
-        Assert.Equal(1_500_000, LineageFormat.MaximumReaderPayloadBytes);
-        Assert.Equal(1_517_408, LineageFormat.MaximumEnvelopeBytes);
+        Assert.Equal(34_033_036, LineageFormat.MaximumReaderPayloadBytes);
+        Assert.Equal(34_049_552, LineageFormat.MaximumEnvelopeBytes);
         // Structural upper bounds, not newly configurable semantic policies.
-        Assert.Equal(108_000_000, LineageFormat.MaximumScopedObjects * LineageFormat.MaximumReaderPayloadBytes);
-        Assert.Equal(109_253_376, LineageFormat.MaximumScopedObjects * LineageFormat.MaximumEnvelopeBytes);
+        Assert.Equal(2_450_378_592L, (long)LineageFormat.MaximumScopedObjects * LineageFormat.MaximumReaderPayloadBytes);
+        Assert.Equal(2_451_567_744L, (long)LineageFormat.MaximumScopedObjects * LineageFormat.MaximumEnvelopeBytes);
         Assert.False(RestrictedStateEnvelope.TryEncrypt(RestrictedStateTestData.Access(),
             RestrictedStateTestData.Binding(), new byte[AgentLimits.SessionPlaintextBytes + 1],
             new TestKeyResolver(), out _, out _));
@@ -93,6 +93,14 @@ public sealed class OpaqueTransportCapacityTests
         var name = new OpaqueStoreName("opaque");
         var maximum = LineageFormat.MaximumPayloadBytesForClass(objectClass);
         var payload = new byte[maximum];
+        if (objectClass == StateObjectClass.PublicationIntent)
+        {
+            var prefix = new LineageBinaryWriter();
+            prefix.WriteString("APR5RC01");
+            prefix.WriteUInt16(1);
+            prefix.WriteUInt16(5);
+            prefix.ToArray().CopyTo(payload, 0);
+        }
         var draft = Draft(objectClass);
         Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(lease.Context, lease.Access, name,
             draft, payload, out var envelope, out _, out _));

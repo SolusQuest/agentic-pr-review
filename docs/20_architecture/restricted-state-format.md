@@ -34,7 +34,7 @@ The R2 table below remains the implemented local-store contract. The R4 producti
 
 The stable storage scope contains repository ID, workflow identity, review target, session ID, provider ID, model ID, adapter ID, policy SHA-256, limits SHA-256, toolset SHA-256, and build ID. It excludes the dynamic current base/head. Stored producer base/head remain authenticated provenance, while current dynamic reviewed identity is admitted separately through the SESSION `same_head` or `verified_ahead` transition.
 
-The class retains the accepted generation and its immediate predecessor for at most seven days from a Host-trusted acceptance timestamp. The service reads its trusted clock once per operation; prepare fixes accepted-at to that value and expires-at to exactly accepted-at plus 604,800 seconds. Restore enumeration exposes only accepted objects, ordered by generation descending and then envelope SHA-256 ordinal, and at most two candidates. One separate staging slot may hold the next prepared envelope. Staging is never a restore candidate. Candidate metadata is at most 16 KiB, accepted envelope bytes are at most 4 MiB, and the complete accepted-plus-staging logical scope, including the exact bytes emitted by the candidate-metadata codec, is at most 6 MiB. Partial, malformed, duplicate, non-adjacent, out-of-order, or over-limit enumeration fails closed and selects no partial set.
+The class retains the accepted generation and its immediate predecessor for at most seven days from a Host-trusted acceptance timestamp. The service reads its trusted clock once per operation; prepare fixes accepted-at to that value and expires-at to exactly accepted-at plus 604,800 seconds. Restore enumeration exposes only accepted objects, ordered by generation descending and then envelope SHA-256 ordinal, and at most two candidates. One separate staging slot may hold the next prepared envelope. Staging is never a restore candidate. Candidate metadata is at most 16 KiB, accepted envelope bytes are at most 64 MiB, and the complete accepted-plus-staging logical scope, including the exact bytes emitted by the candidate-metadata codec, is at most 96 MiB plus 16 KiB of metadata. Partial, malformed, duplicate, non-adjacent, out-of-order, or over-limit enumeration fails closed and selects no partial set.
 
 The independent Host input `AcceptedLineage` contains the stable scope, accepted generation, accepted `session_sha256`, accepted `envelope_sha256`, expected predecessor envelope SHA-256, accepted timestamp, expiry timestamp, and transition authorization. Candidate bytes, staging, local snapshots, selectors, and receipts cannot create or change lineage.
 
@@ -110,7 +110,7 @@ The envelope is binary and contains, in order:
 9. tag length UInt16 little-endian `16` plus a 16-byte tag;
 10. no trailing bytes.
 
-Plaintext is the complete current SESSION bytes and is at most 1 MiB. The complete envelope is at most 2 MiB. Encryption uses `AesGcm`, a 256-bit key, a random 96-bit nonce, and a 128-bit tag. Repeated encryption of identical plaintext and Host binding must produce distinct nonces and envelope identities.
+Plaintext is the complete current SESSION bytes and is at most 16 MiB. The complete envelope is at most 32 MiB. Encryption uses `AesGcm`, a 256-bit key, a random 96-bit nonce, and a 128-bit tag. Repeated encryption of identical plaintext and Host binding must produce distinct nonces and envelope identities.
 
 AAD is reconstructed and is not stored separately:
 

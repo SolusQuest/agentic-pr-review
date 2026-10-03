@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AgenticPrReview.Runtime.Agent;
 
 namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -7,8 +8,8 @@ internal static class DeepSeekTransportPolicy
     internal const string Endpoint =
         "https://api.deepseek.com/chat/completions";
     internal const int CredentialMaxBytes = 256;
-    internal const int RequestBodyMaxBytes = 1_048_576;
-    internal const int SuccessBodyMaxBytes = 1_048_576;
+    internal const int RequestBodyMaxBytes = AgentLimits.RequestBytes;
+    internal const int SuccessBodyMaxBytes = AgentLimits.ResponseBytes;
     internal const int ErrorBodyDiscardMaxBytes = 8_192;
     internal const int RequestRejectedCount = RequestBodyMaxBytes + 1;
     internal const int ResponseTooLargeCount = SuccessBodyMaxBytes + 1;

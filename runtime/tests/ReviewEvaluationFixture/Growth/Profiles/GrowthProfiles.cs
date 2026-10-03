@@ -21,7 +21,7 @@ internal sealed record GrowthSchedule(int AttemptLimit, ReplayFault Fault, int F
 internal static class GrowthProfiles
 {
     internal static readonly ImmutableArray<string> Names = ["short", "tools", "continuation", "updates"];
-    internal static int Attempts => AgentSessionFormat.MaximumCompletedRuns + 1;
+    internal const int Attempts = 65;
     internal static bool ValidPhase(string name, int phase) => Names.Contains(name) && phase >= 0 && phase < Attempts;
     internal static bool IsCandidate(AdmittedReplayFixture fixture) => fixture.Runs.Any(r => r.Input.CaseId.StartsWith("growth-", StringComparison.Ordinal));
     internal static bool Matches(AdmittedReplayFixture fixture) =>
@@ -66,7 +66,7 @@ internal static class GrowthProfiles
     }
 
     internal static bool AgentCode(string? code) => code is AgentFailureCodes.Cancelled or AgentFailureCodes.DeadlineExceeded or
-        AgentFailureCodes.ChatFailed or AgentFailureCodes.ModelLimit or AgentFailureCodes.ToolLimit or AgentFailureCodes.TokenLimit or
+        AgentFailureCodes.ChatFailed or AgentFailureCodes.ModelLimit or AgentFailureCodes.ToolLimit or AgentFailureCodes.TokenLimit or AgentFailureCodes.ContextLimit or
         AgentFailureCodes.RequestTooLarge or AgentFailureCodes.ResponseTooLarge or AgentFailureCodes.UsageInvalid or
         AgentFailureCodes.ResponseInvalid or AgentFailureCodes.MissingTool or AgentFailureCodes.UnknownTool or
         AgentFailureCodes.ToolArgumentsInvalid or AgentFailureCodes.TerminalSequenceInvalid or AgentFailureCodes.TerminalInvalid or

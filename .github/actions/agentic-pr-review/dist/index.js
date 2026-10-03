@@ -97601,10 +97601,10 @@ var ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   requestTimeoutMs: 3e4,
   logicalOperationTimeoutMs: 12e4,
   maximumActiveCorrelations: 32,
-  // One complete state transaction can legitimately cross the former 512-entry
-  // boundary while retaining both current and previous state keys. Keep the
-  // registry bounded, but leave enough room for the real Host route to finish.
-  maximumTerminalCorrelations: 2048
+  // Retained-state reconciliation rereads bounded inventories around mutations.
+  // R7 multi-generation physical-copy acceptance crosses the former 2,048 entries.
+  // Keep every terminal ID for this process to reject replay; never evict IDs.
+  maximumTerminalCorrelations: 4096
 });
 var ARTIFACT_ENVELOPE_DISCRIMINATOR = "apr.private-artifact-envelope.s2";
 var ARTIFACT_ENVELOPE_ENTRY = "artifact-envelope.json";
@@ -102551,4 +102551,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 2f1df3fbc9ca884bee9dffe10b528a83005fd4801fedbb6ee6a6042c0c236cb5
+// Action source inventory sha256: ddccad9ba44ca690bb05759fff7b22cefb8ee823bd218c26ec99df33d008027a

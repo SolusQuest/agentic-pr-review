@@ -29,7 +29,7 @@ MUTATIONS = (
     "invalid-binding wrong-artifact price-tamper chain-tamper live cleanup unreaped "
     "unknown-field duplicate-field raw-canary escaped-canary extra-record stderr-canary "
     "aggregate-inputs comparison-corpus prefix-domain prefix-generation history-session history-plan "
-    "host-capacity-epoch host-capacity-session host-restore-epoch host-restore-session host-code host-disposition"
+    "host-preserved-epoch host-preserved-session host-restore-epoch host-restore-session host-code host-disposition"
 ).split()
 NETWORK = re.compile(rb"\b(?:socket|connect|sendto|sendmsg|sendmmsg)\(.*\bAF_INET6?\b")
 

@@ -228,12 +228,16 @@ internal static class GrowthRunner
             rows.ToImmutable(), report.Value!.Document), reaped);
     }
 
-    internal static string Classify(string stage, string code, GrowthChatCounts? counts) => (stage, code) switch
+    internal static string Classify(string stage, string code, GrowthChatCounts? counts) =>
+        Classify(stage, code, counts, MeasurementLimits.Current);
+
+    internal static string Classify(string stage, string code, GrowthChatCounts? counts, MeasurementLimits limits) => (stage, code) switch
     {
         ("build", AgentSessionCodes.ConstructionLimit) => "append_limit",
+        ("agent", AgentFailureCodes.ContextLimit) when limits == MeasurementLimits.Current => "run_budget",
         ("agent", AgentFailureCodes.ModelLimit or AgentFailureCodes.ToolLimit or AgentFailureCodes.TokenLimit or AgentFailureCodes.RequestTooLarge) => "run_budget",
-        ("agent", AgentFailureCodes.ResponseInvalid) when counts?.LastContinuationAfterBytes > AgentLimits.ContinuationTotalBytes => "continuation_limit",
-        ("agent", AgentFailureCodes.ResponseInvalid) when counts?.LastResponseMessages > AgentLimits.Messages => "message_limit",
+        ("agent", AgentFailureCodes.ResponseInvalid) when counts?.LastContinuationAfterBytes > limits.ContinuationTotalBytes => "continuation_limit",
+        ("agent", AgentFailureCodes.ResponseInvalid) when counts?.LastResponseMessages > limits.Messages => "message_limit",
         ("restore", _) => "invalid_current_state",
         ("accept", RestrictedStateCodes.Accepted) => "accepted",
         ("agent", _) => "agent_failure",

@@ -8,6 +8,7 @@ internal static class RetainedStateAcceptanceRecoveryCodec
 {
     internal const string Magic = "APRSAR01";
     internal const ushort Version = 1;
+    internal const int MaximumBytes = OpaqueStoreCapacity.AcceptanceRecoveryBytes;
 
     internal static bool TryEncode(
         RetainedStateAcceptanceAttempt attempt,
@@ -29,7 +30,7 @@ internal static class RetainedStateAcceptanceRecoveryCodec
                 return false;
             }
 
-            var writer = new LineageBinaryWriter();
+            var writer = new LineageBinaryWriter(MaximumBytes);
             writer.WriteString(Magic);
             writer.WriteUInt16(Version);
             writer.WriteString(attempt.Name.Value);
@@ -48,7 +49,7 @@ internal static class RetainedStateAcceptanceRecoveryCodec
             }
 
             bytes = writer.ToArray();
-            return bytes.Length <= LineageFormat.MaximumPayloadBytes;
+            return bytes.Length <= MaximumBytes;
         }
         catch (Exception exception) when (
             exception is ArgumentException or OverflowException)
@@ -69,7 +70,7 @@ internal static class RetainedStateAcceptanceRecoveryCodec
         envelopeBytes = [];
         predecessorCopy = null;
         byte[] copyEnvelope = [];
-        if (bytes.Length is < 1 or > LineageFormat.MaximumPayloadBytes)
+        if (bytes.Length is < 1 or > MaximumBytes)
         {
             return false;
         }
@@ -85,7 +86,7 @@ internal static class RetainedStateAcceptanceRecoveryCodec
                     OpaqueStoreLimits.MaximumNameBytes,
                     out var nameValue) ||
                 !reader.TryReadBytes(
-                    LineageFormat.MaximumEnvelopeBytes,
+                    LineageFormat.MaximumEnvelopeBytesForClass(StateObjectClass.Acceptance),
                     out envelopeBytes) ||
                 !reader.TryReadUInt16(out var hasCopy) ||
                 hasCopy > 1)
@@ -104,7 +105,7 @@ internal static class RetainedStateAcceptanceRecoveryCodec
                         OpaqueStoreLimits.MaximumNameBytes,
                         out var copyNameValue) ||
                     !reader.TryReadBytes(
-                        LineageFormat.MaximumEnvelopeBytes,
+                        LineageFormat.MaximumEnvelopeBytesForClass(StateObjectClass.Candidate),
                         out copyEnvelope))
                 {
                     return false;

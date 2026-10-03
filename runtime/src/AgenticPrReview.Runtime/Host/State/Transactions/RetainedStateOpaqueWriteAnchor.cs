@@ -30,6 +30,7 @@ internal static class RetainedStateOpaqueWriteAnchorCodec
 {
     internal const string Magic = "APROWA01";
     internal const ushort Version = 1;
+    internal const int MaximumBytes = OpaqueStoreCapacity.AnchorBytes;
 
     internal static bool TryEncode(
         RetainedStateOpaqueWriteAnchor anchor,
@@ -43,7 +44,7 @@ internal static class RetainedStateOpaqueWriteAnchorCodec
 
         try
         {
-            var writer = new LineageBinaryWriter();
+            var writer = new LineageBinaryWriter(MaximumBytes);
             writer.WriteString(Magic);
             writer.WriteUInt16(Version);
             writer.WriteString(anchor.CandidateObjectIdentity);
@@ -65,7 +66,7 @@ internal static class RetainedStateOpaqueWriteAnchorCodec
             writer.WriteUInt16((ushort)anchor.DispatchPhase);
             writer.WriteString(anchor.TargetPayloadSha256);
             bytes = writer.ToArray();
-            return bytes.Length <= LineageFormat.MaximumPayloadBytes;
+            return bytes.Length <= MaximumBytes;
         }
         catch (Exception exception) when (
             exception is ArgumentException or OverflowException)
@@ -80,7 +81,7 @@ internal static class RetainedStateOpaqueWriteAnchorCodec
         out RetainedStateOpaqueWriteAnchor? anchor)
     {
         anchor = null;
-        if (bytes.Length is < 1 or > LineageFormat.MaximumPayloadBytes)
+        if (bytes.Length is < 1 or > MaximumBytes)
         {
             return false;
         }
@@ -117,7 +118,7 @@ internal static class RetainedStateOpaqueWriteAnchorCodec
                 OpaqueStoreLimits.MaximumIdentityBytes,
                 out var targetObjectIdentity) ||
             !reader.TryReadBytes(
-                LineageFormat.MaximumEnvelopeBytes,
+                LineageFormat.MaximumEnvelopeBytesForClass(objectClass),
                 out var targetEnvelope) ||
             !reader.TryReadString(
                 OpaqueStoreLimits.MaximumIdentityBytes,
@@ -187,8 +188,8 @@ internal static class RetainedStateOpaqueWriteAnchorCodec
         anchor.ProducingRunAttempt >= 0 &&
         OpaqueStoreValidation.IsValid(anchor.TargetName) &&
         LineageValidation.IsSha256(anchor.TargetObjectIdentity) &&
-        anchor.TargetEnvelope.Length is > 0 and <=
-            LineageFormat.MaximumEnvelopeBytes &&
+        anchor.TargetEnvelope.Length > 0 &&
+        anchor.TargetEnvelope.Length <= LineageFormat.MaximumEnvelopeBytesForClass(anchor.ObjectClass) &&
         LineageValidation.IsSha256(anchor.TargetEnvelopeSha256) &&
         StringComparer.Ordinal.Equals(
             anchor.TargetEnvelopeSha256,

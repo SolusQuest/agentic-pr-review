@@ -177,8 +177,21 @@ public sealed class R5VerifierCoverageTests
             [], normalized ?? ReplayProjection.Steps(stepArray)), ReplayExecutionJson.Default.ReplayReport);
     }
 
-    private static readonly Lazy<Task<GrowthReport>> RealGrowth = new(async () =>
-        await GrowthRunner.RunAsync(Corpus("growth")));
+    // Synthetic verifier input cloned from immutable historical observations.
+    // Rebinding source is confined to this unit test, never evidence production.
+    private static readonly Lazy<Task<GrowthReport>> RealGrowth = new(() =>
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r7",
+            "session-capacity", "historical-growth.json"));
+        var historical = AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles.GrowthJson.Read(bytes)!;
+        var profiles = historical.Profiles.Select(p => p with
+        {
+            Evaluation = EvaluationReport.Create(p.Evaluation.Outcomes.Select(o => (ReadOnlyMemory<byte>)EvaluationJson.Write(o with
+            { SourceCommit = EvaluationSource.Commit, SourceTree = EvaluationSource.Tree, SourceClean = EvaluationSource.Clean })).ToImmutableArray()).Value!.Document,
+        }).ToImmutableArray();
+        return Task.FromResult(historical with { SourceCommit = EvaluationSource.Commit,
+            SourceTree = EvaluationSource.Tree, SourceClean = EvaluationSource.Clean, Profiles = profiles });
+    });
 
     private static async Task<string> GrowthJson(GrowthReport report) =>
         await Task.FromResult(Encoding.UTF8.GetString(
@@ -504,9 +517,28 @@ public sealed class R5VerifierCoverageTests
     {
         var (code, verdict) = Verify("growth", await GrowthJson(await RealGrowth.Value),
             corpus: Corpus("growth"));
-        Assert.Equal(0, code);
+        Assert.True(code == 0, verdict.ToJsonString());
         Assert.Equal(4, verdict["parity"]!["profiles"]!.AsArray().Count);
         Assert.Equal(EvaluationSource.Commit, verdict["parity"]!["source_commit"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task CurrentGrowthGateRequiresEveryBoundedProfileAndCannotSubstituteForHistoricalCapacity()
+    {
+        var report = await GrowthRunner.RunAsync(Corpus("growth"), new() { AttemptLimit = 2 });
+        var bytes = await GrowthJson(report);
+        var (code, verdict) = Verify("growth-current", bytes, corpus: Corpus("growth"));
+        Assert.True(code == 0, verdict.ToJsonString());
+        Assert.Equal(1, Verify("growth", bytes, corpus: Corpus("growth")).Code);
+        Assert.Equal(1, Verify("growth-current", await GrowthJson(await RealGrowth.Value), corpus: Corpus("growth")).Code);
+        foreach (var profiles in new[] { report.Profiles.RemoveAt(0), report.Profiles.Reverse().ToImmutableArray(),
+            report.Profiles.SetItem(0, report.Profiles[0] with { LimitObserved = true }) })
+        {
+            var changed = report with { Profiles = profiles,
+                NormalizedSha256 = AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles.GrowthJson.Normalize(profiles) };
+            Assert.Equal(1, Verify("growth-current", await GrowthJson(changed), corpus: Corpus("growth")).Code);
+        }
+        Assert.Equal(1, Verify("growth-current", "{\"unexpected\":1," + bytes[1..], corpus: Corpus("growth")).Code);
     }
 
     [Fact]

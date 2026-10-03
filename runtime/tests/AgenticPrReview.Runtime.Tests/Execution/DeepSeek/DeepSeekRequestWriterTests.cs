@@ -567,16 +567,16 @@ public sealed class DeepSeekRequestWriterTests
     [Fact]
     public void AcceptsTheExactWireCapAndRejectsCapPlusOne()
     {
-        var messages = Enumerable.Range(0, 16)
+        var messages = Enumerable.Range(0, 8)
             .Select(index => new MinimalChatMessage(
                 "user",
-                [Text(index < 15 ? new string('a', 65_536) : "x")]))
+                [Text(index < 7 ? new string('a', AgentLimits.ContentBytes) : "x")]))
             .ToArray();
         var baseline = DeepSeekRequestWriter.Write(BuildRequest(messages));
         Assert.Equal(DeepSeekRequestWriteOutcome.Success, baseline.Outcome);
         var remaining = DeepSeekTransportPolicy.RequestBodyMaxBytes -
             baseline.Body.Length;
-        Assert.InRange(remaining, 1, 65_535);
+        Assert.InRange(remaining, 1, AgentLimits.ContentBytes - 1);
 
         messages[^1] = new MinimalChatMessage(
             "user",
@@ -726,7 +726,7 @@ public sealed class DeepSeekRequestWriterTests
             BuildRequest(
                 [new MinimalChatMessage(
                     "user",
-                    [Text(new string('a', 65_537))])]),
+                    [Text(new string('a', AgentLimits.ContentBytes + 1))])]),
             BuildRequest(
                 [new MinimalChatMessage(
                     "assistant",

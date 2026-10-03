@@ -214,6 +214,7 @@ internal static class AgentSessionCodec
         failureCode = AgentSessionCodes.CurrentMalformed;
         try
         {
+            if (!TryPreflightArrays(parsed.Root, includeContinuation: true, out failureCode)) return false;
             var json = parsed.Plaintext.AsSpan(
                 AgentSessionFormat.FramingBytes);
             var dto = JsonSerializer.Deserialize(
@@ -261,6 +262,7 @@ internal static class AgentSessionCodec
         failureCode = AgentSessionCodes.CurrentMalformed;
         try
         {
+            if (!TryPreflightArrays(parsed.Root, includeContinuation: false, out failureCode)) return false;
             var json = parsed.Plaintext.AsSpan(
                 AgentSessionFormat.FramingBytes);
             var dto = JsonSerializer.Deserialize(
@@ -299,6 +301,67 @@ internal static class AgentSessionCodec
             failureCode = AgentSessionCodes.CurrentMalformed;
             return false;
         }
+    }
+
+    // Runs are still JsonElements here. Admit counts before deserializing the
+    // record/continuation DTO arrays, after the caller's scope checks. The
+    // grammar pass deliberately defers continuation errors to preserve order.
+    private static bool TryPreflightArrays(AgentSessionEnvelopeRootDto root, bool includeContinuation,
+        out string failureCode)
+    {
+        failureCode = AgentSessionCodes.CurrentMalformed;
+        if (root.CompletedRuns is null || root.CompletedRuns.Length is < 1 or > AgentSessionFormat.MaximumCompletedRuns)
+            return false;
+        long entries = 0;
+        long parts = 0;
+        long continuationBytes = 0;
+        foreach (var run in root.CompletedRuns)
+        {
+            failureCode = AgentSessionCodes.RecordInvalid;
+            if (run.ValueKind != JsonValueKind.Object || !run.TryGetProperty("records", out var records) ||
+                records.ValueKind != JsonValueKind.Array) return false;
+            entries += records.GetArrayLength();
+            if (entries > AgentLimits.SessionRecords) return false;
+            foreach (var record in records.EnumerateArray())
+            {
+                if (record.ValueKind != JsonValueKind.Object) continue;
+                if (record.TryGetProperty("contents", out var contents) && contents.ValueKind == JsonValueKind.Array)
+                {
+                    var count = contents.GetArrayLength();
+                    if (count > AgentLimits.PartsPerMessage) return false;
+                    // Each continuation slot becomes one continuation item during
+                    // reconstruction. Count it here, never again in the item array.
+                    parts = checked(parts + count);
+                }
+                else if (record.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String &&
+                    (kind.ValueEquals("review_context"u8) || kind.ValueEquals("tool_result"u8) ||
+                     kind.ValueEquals("tool_error"u8) || kind.ValueEquals("review_outcome"u8)))
+                {
+                    parts = checked(parts + 1);
+                }
+                if (parts > AgentLimits.PartsTotal) return false;
+            }
+            if (!includeContinuation) continue;
+            failureCode = AgentSessionCodes.ContinuationInvalid;
+            if (!run.TryGetProperty("continuation", out var continuation) ||
+                !DeclaredContinuationObjectTokensAreValid(continuation)) return false;
+            var items = continuation.GetProperty("items");
+            entries += items.GetArrayLength();
+            if (entries > AgentLimits.SessionRecords)
+            {
+                failureCode = AgentSessionCodes.RecordInvalid;
+                return false;
+            }
+            foreach (var item in items.EnumerateArray())
+            {
+                var payload = item.GetProperty("payload").GetString()!;
+                if (!TryPayloadLength(item.GetProperty("encoding").GetString()!, payload, out var length)) return false;
+                continuationBytes += length;
+                if (continuationBytes > AgentLimits.ContinuationTotalBytes) return false;
+            }
+        }
+        failureCode = string.Empty;
+        return true;
     }
 
     private static bool DeclaredContinuationObjectTokensAreValid(
@@ -996,6 +1059,7 @@ internal static class AgentSessionCodec
         out byte[]? payloadBytes)
     {
         payloadBytes = null;
+        if (!TryPayloadLength(encoding, payload, out _)) return false;
         switch (encoding)
         {
             case "utf8":
@@ -1019,6 +1083,22 @@ internal static class AgentSessionCodec
             default:
                 return false;
         }
+    }
+
+    private static bool TryPayloadLength(string encoding, string payload, out int length)
+    {
+        length = 0;
+        if (encoding == "utf8") length = StrictUtf8.GetByteCount(payload);
+        else if (encoding == "base64")
+        {
+            // Canonical Base64 contains no whitespace. Decoding and canonical
+            // spelling are checked later, after this allocation bound.
+            if (payload.Length % 4 != 0 || payload.Length > 4L * ((AgentLimits.ContinuationItemBytes + 2L) / 3)) return false;
+            var padding = payload.EndsWith("==", StringComparison.Ordinal) ? 2 : payload.EndsWith('=') ? 1 : 0;
+            length = payload.Length / 4 * 3 - padding;
+        }
+        else return false;
+        return length >= 0 && length <= AgentLimits.ContinuationItemBytes;
     }
 
     private static bool TryConvertIdentity(

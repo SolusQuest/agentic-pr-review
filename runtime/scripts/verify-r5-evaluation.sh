@@ -101,6 +101,7 @@ _scenario() {
     reset-owner|live-self-test) ;;
     quality|live-plan|live-candidate|live-output65536) extra+=(--corpus "${FIXTURES}/quality/bundle") ;;
     quality-sandbox) extra+=(--corpus "${R6_QUALITY_SANDBOX}") ;;
+    growth-current) extra+=(--corpus "${FIXTURES}/growth") ;;
     *) extra+=(--corpus "${FIXTURES}/${name}") ;;
   esac
   case "${name}" in
@@ -169,7 +170,7 @@ _run_scenarios() {
   _scenario "${mode}" quality       quality --corpus "${FIXTURES}/quality"
   _scenario "${mode}" replay        replay --bundle "${FIXTURES}/replay"
   _scenario "${mode}" incremental   replay --bundle "${FIXTURES}/incremental"
-  _scenario "${mode}" growth        replay --bundle "${FIXTURES}/growth"
+  _scenario "${mode}" growth-current growth-current --bundle "${FIXTURES}/growth"
   _scenario "${mode}" reset-owner   reset --fixture self-test
   _scenario "${mode}" live-self-test live-local --dry-run --fixture self-test
   local plan="${EVIDENCE}/${mode}/live.plan.json"
@@ -229,7 +230,7 @@ run_aot() {
 
 run_parity() {
   local name
-  for name in quality replay incremental growth reset-owner live-self-test live-plan live-candidate live-output65536 live-coverage quality-sandbox; do
+  for name in quality replay incremental growth-current reset-owner live-self-test live-plan live-candidate live-output65536 live-coverage quality-sandbox; do
     "${RUNNER[@]}" verify-cases --parity \
         "${EVIDENCE}/framework/${name}.verdict.json" \
         "${EVIDENCE}/aot/${name}.verdict.json" ||

@@ -502,7 +502,7 @@ internal sealed class RetainedStateTransactionService
             .ConfigureAwait(false);
         var operationIdentity = request is not null &&
             !request.Payload.IsDefaultOrEmpty &&
-            request.Payload.Length <= LineageFormat.MaximumPayloadBytes
+            LineageFormat.IsPayloadAllowed(request.ObjectClass, request.Payload.AsSpan())
                 ? ComputeOpaqueOperationIdentity(request)
                 : null;
         if (lease is null ||
@@ -513,7 +513,7 @@ internal sealed class RetainedStateTransactionService
                 StateObjectClass.PublicationFailure or
                 StateObjectClass.Abandonment) ||
             request.Payload.IsDefaultOrEmpty ||
-            request.Payload.Length > LineageFormat.MaximumPayloadBytes ||
+            !LineageFormat.IsPayloadAllowed(request.ObjectClass, request.Payload.AsSpan()) ||
             ownership.RestrictedObjectClass is { } restrictedClass &&
                 restrictedClass != request.ObjectClass ||
             !LineageValidation.IsSha256(operationIdentity) ||
@@ -985,7 +985,7 @@ internal sealed class RetainedStateTransactionService
             !candidate.IsIssuedBy(authority) ||
             !candidate.Prepared.IsIssuedBy(authority) ||
             recoveryPayload.IsDefaultOrEmpty ||
-            recoveryPayload.Length > LineageFormat.MaximumPayloadBytes ||
+            recoveryPayload.Length > RetainedStateOpaqueWriteRecoveryCodec.MaximumBytes ||
             !authority.TryGetBinding(lease, out var binding) ||
             binding is null ||
             !MatchesPreparedBinding(candidate.Prepared, binding) ||
@@ -3449,7 +3449,7 @@ internal sealed class RetainedStateTransactionService
                 StateObjectClass.PublicationIntent or
                 StateObjectClass.PublicationFailure or
                 StateObjectClass.Abandonment) ||
-            payloadLength > LineageFormat.MaximumPayloadBytes ||
+            payloadLength > RetainedStateAcceptanceRecoveryCodec.MaximumBytes ||
             !record.TryCopyPayloadRange(
                 authority,
                 payloadOffset,
@@ -3618,7 +3618,7 @@ internal sealed class RetainedStateTransactionService
         if (!extraction.TryCopyExtractedPayload(
                 authority,
                 out var encoded) ||
-            encoded.Length > LineageFormat.MaximumPayloadBytes)
+            encoded.Length > RetainedStateAcceptanceRecoveryCodec.MaximumBytes)
         {
             CryptographicOperations.ZeroMemory(encoded);
             return RetainedStateTransactionResult<

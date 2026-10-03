@@ -27,12 +27,12 @@ public sealed class R6VerifierCoverageTests
             t3-zero-denominator t3-missing-partition t3-unknown-zero-rate t3-overflow
             p1-bootstrap-restored p1-dynamic-suffix p1-control p1-history p1-settings
             p1-continuation-position p1-logical-only p1-domain p1-invalid-position
-            p2-replay p2-tools p2-continuation p2-missing-history p2-reordered-history
+            p2-replay p2-current-tools p2-current-continuation p2-missing-history p2-reordered-history
             p2-missing-continuation p2-wrong-position p2-changed-continuation p2-wrong-scope
-            p2-wrong-head p2-stale-generation p2-policy p2-model p2-adapter p2-toolset p2-host-capacity-reset
+            p2-wrong-head p2-stale-generation p2-policy p2-model p2-adapter p2-current-toolset p2-host-explicit-reset
             c1-descriptive c1-source-axis c1-fixed-mismatch c1-partial-population c1-effective-conditional
             c1-control-unsupported c1-prefix-bound c1-prefix-unbound c1-prefix-conflict c1-c2-handoff
-            c2-replay c2-output8192 c2-output65536 c2-full c2-execute-loopback c2-wrong-source c2-wrong-build c2-wrong-predecessor
+            c2-replay c2-output8192 c2-output65536 c2-current-workloads c2-execute-loopback c2-wrong-source c2-wrong-build c2-wrong-predecessor
             c2-before-ready-crash c2-after-prepare-crash c2-partial-reply c2-oversized-reply c2-wrong-reply
             c2-rate-limit c2-usage-violation c2-provider-failure c2-cancel-after-usage c2-cancel-after-prepare
             c2-reject-accept c2-hang c2-preparation-failure c2-credential-probe c2-plan-budget
@@ -219,14 +219,14 @@ public sealed class R6VerifierCoverageTests
     {
         var selection = GateContracts.Select(Fixtures);
         var host = await GateHostCases.RunAsync(Path.Combine(Fixtures, "growth"), selection);
-        var item = GateCase.Create("p2-host-capacity-reset", "production-host-capacity-reset",
+        var item = GateCase.Create("p2-host-explicit-reset", "production-host-explicit-reset",
             System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(host, GateJson.Default.GateHostReport));
         var projected = GateHistoryOracle.Verify(item, selection);
-        foreach (var phase in new[] { 5, 6 })
+        foreach (var phase in new[] { 1, 2 })
             foreach (var field in new[] { "epoch_sha256", "session_id_sha256" })
                 Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(
                     Rewrite(item, value => value["rows"]![phase]![field] = GateContracts.Hash('e')), selection));
-        foreach (var phase in new[] { 0, 4, 7, 8 })
+        foreach (var phase in new[] { 0, 1, 3, 4 })
         {
             var wrong = Rewrite(item, value => value["rows"]![phase]!["agent_code"] = "UNLISTED_PRIVATE_PAYLOAD_279");
             Assert.True(GateContracts.Safe(wrong.Evidence));
@@ -234,15 +234,15 @@ public sealed class R6VerifierCoverageTests
             Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(
                 Rewrite(item, value => value["rows"]![phase]!["model_calls"] = 1), selection));
         }
-        foreach (var phase in new[] { 5, 6 })
+        foreach (var phase in new[] { 1, 2 })
             Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(
                 Rewrite(item, value => value["rows"]![phase]!["disposition"] = "UNLISTED_PRIVATE_PAYLOAD_279"), selection));
         var renamed = Rewrite(item, value =>
         {
-            for (var phase = 0; phase < 9; phase++)
+            for (var phase = 0; phase < 5; phase++)
             {
-                value["rows"]![phase]!["epoch_sha256"] = GateContracts.Hash(phase < 7 ? 'a' : 'b');
-                value["rows"]![phase]!["session_id_sha256"] = GateContracts.Hash(phase < 7 ? 'c' : 'd');
+                value["rows"]![phase]!["epoch_sha256"] = GateContracts.Hash(phase < 3 ? 'a' : 'b');
+                value["rows"]![phase]!["session_id_sha256"] = GateContracts.Hash(phase < 3 ? 'c' : 'd');
             }
         });
         Assert.True(JsonElement.DeepEquals(projected, GateHistoryOracle.Verify(renamed, selection)));
@@ -260,7 +260,7 @@ public sealed class R6VerifierCoverageTests
             Assert.True(GateContracts.Safe(item.Evidence), item.Id);
             GateHistoryOracle.Verify(item, selection);
         }
-        foreach (var id in new[] { "p2-replay", "p2-tools", "p2-continuation" })
+        foreach (var id in new[] { "p2-replay", "p2-current-tools", "p2-current-continuation" })
         {
             var item = cases.Single(value => value.Id == id);
             var projected = GateHistoryOracle.Verify(item, selection);
@@ -275,7 +275,7 @@ public sealed class R6VerifierCoverageTests
             });
             Assert.True(JsonElement.DeepEquals(projected, GateHistoryOracle.Verify(renamed, selection)));
         }
-        var repeated = GateCase.Create("p2-replay", "replay", HistoryJson.Write(await HistoryRunner.ReplayAsync(Path.Combine(Fixtures, "replay"))));
+        var repeated = GateCase.Create("p2-replay", "replay", HistoryJson.WriteCurrent(await HistoryRunner.ReplayAsync(Path.Combine(Fixtures, "replay"))));
         Assert.True(JsonElement.DeepEquals(GateHistoryOracle.Verify(cases.Single(item => item.Id == "p2-replay"), selection),
             GateHistoryOracle.Verify(repeated, selection)));
     }

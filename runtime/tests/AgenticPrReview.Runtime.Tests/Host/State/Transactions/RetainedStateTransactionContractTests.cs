@@ -679,8 +679,9 @@ public sealed class RetainedStateTransactionContractTests
             }
         }
 
-        Assert.Equal(LineageFormat.MaximumPayloadBytes,
-            maximumEncoding.Length);
+        Assert.Equal(LineageFormat.MaximumEnvelopeBytesForClass(value.ObjectClass), maximumEnvelopeBytes);
+        Assert.InRange(maximumEncoding.Length - maximumEnvelopeBytes, 1, 2048);
+        Assert.True(maximumEncoding.Length <= RetainedStateOpaqueWriteAnchorCodec.MaximumBytes);
         Assert.True(RetainedStateOpaqueWriteAnchorCodec.TryDecode(
             maximumEncoding,
             out _));

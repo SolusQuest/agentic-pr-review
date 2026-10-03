@@ -24,7 +24,7 @@ public sealed class R6PrefixHistoryTests
     {
         var report = await HistoryRunner.ReplayAsync(Bundle("replay"));
         Assert.Equal("verified", report.Code);
-        Assert.True(report.ContinuityVerified);
+        Assert.True(report.CurrentContinuityVerified);
         Assert.Equal(3, report.Rows.Length);
         Assert.Equal(3, report.Rows.Select(r => r.ProcessId).Distinct().Count());
         Assert.DoesNotContain(Environment.ProcessId, report.Rows.Select(r => r.ProcessId));
@@ -50,35 +50,17 @@ public sealed class R6PrefixHistoryTests
     }
 
     [Theory]
-    [InlineData("tools", 5)]
-    [InlineData("continuation", 6)]
-    public async Task ActualGrowthBoundaryRejectsWithoutChangingAcceptedPredecessor(string profile, int accepted)
+    [InlineData("tools")]
+    [InlineData("continuation")]
+    public async Task BoundedCurrentGrowthRestoresTwoAcceptedGenerations(string profile)
     {
         var report = await HistoryRunner.GrowthAsync(Bundle("growth"), profile);
-        Assert.Equal("verified", report.Code);
-        Assert.True(report.ContinuityVerified);
-        Assert.Equal(accepted + 1, report.Rows.Length);
-        Assert.All(report.Rows.Take(accepted), row => Assert.True(HistoryReport.Positive(row)));
-        var rejected = report.Rows[^1];
-        Assert.False(rejected.Accepted);
-        Assert.Null(rejected.Generation);
-        Assert.Null(rejected.SessionSha256);
-        Assert.True(rejected.PredecessorPreserved);
-        Assert.Equal(report.Rows[^2].SessionSha256, rejected.Capture.Baseline!.Domain.AcceptedSessionSha256);
-        Assert.Equal(AgentFailureCodes.ResponseInvalid, rejected.Code);
-        Assert.NotNull(rejected.Capacity);
-        if (profile == "tools")
-        {
-            Assert.True(report.Rows[^2].Capacity!.LastResponseMessages <= AgentLimits.Messages);
-            Assert.True(rejected.Capacity.LastMessages <= AgentLimits.Messages);
-            Assert.True(rejected.Capacity.LastResponseMessages > AgentLimits.Messages);
-        }
-        else
-        {
-            Assert.True(report.Rows[^2].Capacity!.LastContinuationAfterBytes <= AgentLimits.ContinuationTotalBytes);
-            Assert.True(rejected.Capacity.LastContinuationBeforeBytes <= AgentLimits.ContinuationTotalBytes);
-            Assert.True(rejected.Capacity.LastContinuationAfterBytes > AgentLimits.ContinuationTotalBytes);
-        }
+        Assert.Equal("observation_incomplete", report.Code);
+        Assert.True(report.CurrentContinuityVerified);
+        Assert.False(report.ContinuityVerified);
+        Assert.Equal(2, report.Rows.Length);
+        Assert.All(report.Rows, row => Assert.True(HistoryReport.Positive(row)));
+        Assert.Equal(report.Rows[0].SessionSha256, report.Rows[1].Capture.Baseline!.Domain.AcceptedSessionSha256);
         AssertSafe(report);
     }
 
@@ -99,7 +81,7 @@ public sealed class R6PrefixHistoryTests
     {
         var report = await HistoryRunner.ReplayAsync(Bundle("replay"), Enum.Parse<ReplayFault>(fault));
         Assert.Equal(expected, report.Code);
-        Assert.False(report.ContinuityVerified);
+        Assert.False(report.CurrentContinuityVerified);
         Assert.Equal("cleaned", report.Cleanup);
         Assert.Equal(2, report.Rows.Length);
         Assert.True(HistoryReport.Positive(report.Rows[0]));
@@ -123,11 +105,11 @@ public sealed class R6PrefixHistoryTests
     }
 
     [Fact]
-    public async Task ExplicitHostResetChangesDomainAndContinuesNewEpochAfterCapacityRejection()
+    public async Task ExplicitHostResetChangesDomainAndContinuesNewEpochAfterTwoAccepts()
     {
-        // This production-Host assertion proves epoch change, generation0, actual capacity rejection,
+        // This production-Host assertion proves epoch change, generation0, two accepted generations,
         // predecessor preservation, old-fact exclusion, and independent new-epoch continuation.
-        await ActionHostCompositionTests.VerifyCapacityResetAsync();
+        await ActionHostCompositionTests.VerifyExplicitResetAsync();
         var callable = await GateHostCases.RunAsync(Bundle("growth"), GateContracts.Select(Path.GetDirectoryName(Bundle("growth"))!));
         Assert.Contains(callable.Rows, row => row.Action == "reset" && row.Generation == 0 && row.StoredMarkersMatch);
         Assert.Equal("continue", callable.Rows[^1].Action);
@@ -150,12 +132,12 @@ public sealed class R6PrefixHistoryTests
     public async Task ReportCodecIsSourceGeneratedBoundedAndRejectsUnknownFields()
     {
         var report = await HistoryRunner.ReplayAsync(Bundle("replay"));
-        var bytes = HistoryJson.Write(report);
-        Assert.True(HistoryJson.Read(bytes)!.ContinuityVerified);
+        var bytes = HistoryJson.WriteCurrent(report);
+        Assert.True(HistoryJson.ReadCurrent(bytes)!.CurrentContinuityVerified);
         var json = Encoding.UTF8.GetString(bytes);
-        Assert.Null(HistoryJson.Read(Encoding.UTF8.GetBytes(json.Insert(1, "\"private_request\":{},"))));
-        Assert.Null(HistoryJson.Read(new byte[HistoryJson.MaximumBytes + 1]));
-        Assert.Null(HistoryJson.Read([0xff]));
+        Assert.Null(HistoryJson.ReadCurrent(Encoding.UTF8.GetBytes(json.Insert(1, "\"private_request\":{},"))));
+        Assert.Null(HistoryJson.ReadCurrent(new byte[HistoryJson.MaximumBytes + 1]));
+        Assert.Null(HistoryJson.ReadCurrent([0xff]));
         foreach (var mutate in new Action<JsonObject>[]
         {
             root => root["rows"]![0]!["capture"] = null,
@@ -169,7 +151,7 @@ public sealed class R6PrefixHistoryTests
         {
             var root = JsonNode.Parse(bytes)!.AsObject();
             mutate(root);
-            Assert.Null(HistoryJson.Read(Encoding.UTF8.GetBytes(root.ToJsonString())));
+            Assert.Null(HistoryJson.ReadCurrent(Encoding.UTF8.GetBytes(root.ToJsonString())));
         }
     }
 
@@ -212,19 +194,19 @@ public sealed class R6PrefixHistoryTests
         Assert.Equal("cancelled", cancelled.Code);
         Assert.Equal("cleaned", cancelled.Cleanup);
         Assert.Empty(cancelled.Rows);
-        Assert.False(cancelled.ContinuityVerified);
+        Assert.False(cancelled.CurrentContinuityVerified);
         AssertSafe(cancelled);
         var invalid = await HistoryRunner.GrowthAsync(Bundle("growth"), "private-invalid-profile");
         Assert.Equal("input_invalid", invalid.Code);
         Assert.Equal("not_created", invalid.Cleanup);
         Assert.Empty(invalid.Rows);
-        Assert.False(invalid.ContinuityVerified);
+        Assert.False(invalid.CurrentContinuityVerified);
         AssertSafe(invalid);
     }
 
     private static void AssertSafe(HistoryReport report)
     {
-        var text = Encoding.UTF8.GetString(HistoryJson.Write(report));
+        var text = Encoding.UTF8.GetString(HistoryJson.WriteCurrent(report));
         foreach (var secret in new[] { ReplayCoverage.Fact, ReplayCoverage.Current, "reasoning_content", "arguments_json",
             "synthetic-continuation-", "environment_bytes", "plaintext", "src/fact.txt", Path.GetTempPath(), "exception" })
             Assert.False(text.Contains(secret, StringComparison.Ordinal));

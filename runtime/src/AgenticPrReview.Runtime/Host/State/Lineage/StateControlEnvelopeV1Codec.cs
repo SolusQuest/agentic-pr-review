@@ -21,9 +21,9 @@ internal static class StateControlEnvelopeV1Codec
         code = LineageCodes.Invalid;
         if (!OpaqueStoreValidation.IsValid(name) ||
             !LineageValidation.IsValid(draft) ||
-            !LineageFormat.IsPayloadLengthAllowed(
+            !LineageFormat.IsPayloadAllowed(
                 draft.ObjectClass,
-                payload.Length))
+                payload))
         {
             return false;
         }
@@ -191,7 +191,8 @@ internal static class StateControlEnvelopeV1Codec
                         payloadSpan,
                         out header) ||
                     header is null ||
-                    !StringComparer.Ordinal.Equals(header.KeyId, keyId))
+                    !StringComparer.Ordinal.Equals(header.KeyId, keyId) ||
+                    !LineageFormat.IsPayloadAllowed(header.ObjectClass, payloadSpan))
                 {
                     CryptographicOperations.ZeroMemory(payload);
                     payload = [];

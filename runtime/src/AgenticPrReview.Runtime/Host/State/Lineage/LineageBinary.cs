@@ -4,13 +4,22 @@ using System.Text;
 
 namespace AgenticPrReview.Runtime.Host.State.Lineage;
 
-internal sealed class LineageBinaryWriter
+internal sealed class LineageBinaryWriter(int maximumBytes = int.MaxValue)
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly ArrayBufferWriter<byte> writer = new();
 
+    private void Reserve(int length)
+    {
+        if (length < 0 || length > maximumBytes - writer.WrittenCount)
+        {
+            throw new ArgumentException("The lineage payload exceeds its byte limit.");
+        }
+    }
+
     internal void WriteByte(byte value)
     {
+        Reserve(1);
         var span = writer.GetSpan(1);
         span[0] = value;
         writer.Advance(1);
@@ -18,6 +27,7 @@ internal sealed class LineageBinaryWriter
 
     internal void WriteUInt16(ushort value)
     {
+        Reserve(sizeof(ushort));
         var span = writer.GetSpan(sizeof(ushort));
         BinaryPrimitives.WriteUInt16LittleEndian(span, value);
         writer.Advance(sizeof(ushort));
@@ -25,6 +35,7 @@ internal sealed class LineageBinaryWriter
 
     internal void WriteUInt32(uint value)
     {
+        Reserve(sizeof(uint));
         var span = writer.GetSpan(sizeof(uint));
         BinaryPrimitives.WriteUInt32LittleEndian(span, value);
         writer.Advance(sizeof(uint));
@@ -32,6 +43,7 @@ internal sealed class LineageBinaryWriter
 
     internal void WriteUInt64(ulong value)
     {
+        Reserve(sizeof(ulong));
         var span = writer.GetSpan(sizeof(ulong));
         BinaryPrimitives.WriteUInt64LittleEndian(span, value);
         writer.Advance(sizeof(ulong));
@@ -39,6 +51,7 @@ internal sealed class LineageBinaryWriter
 
     internal void WriteInt64(long value)
     {
+        Reserve(sizeof(long));
         var span = writer.GetSpan(sizeof(long));
         BinaryPrimitives.WriteInt64LittleEndian(span, value);
         writer.Advance(sizeof(long));
@@ -46,6 +59,7 @@ internal sealed class LineageBinaryWriter
 
     internal void WriteBytes(ReadOnlySpan<byte> value)
     {
+        Reserve(checked(sizeof(uint) + value.Length));
         WriteUInt32(checked((uint)value.Length));
         value.CopyTo(writer.GetSpan(value.Length));
         writer.Advance(value.Length);
@@ -53,6 +67,7 @@ internal sealed class LineageBinaryWriter
 
     internal void WriteString(string value)
     {
+        Reserve(checked(sizeof(uint) + StrictUtf8.GetByteCount(value)));
         var bytes = StrictUtf8.GetBytes(value);
         try
         {

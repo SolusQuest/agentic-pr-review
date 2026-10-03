@@ -9,6 +9,8 @@ public static class Program
             return args.Length switch
             {
                 0 => await FrameworkHost.RunAsync().ConfigureAwait(false),
+                _ when args[0] == "supervise-capacity" =>
+                    await FrameworkSupervisor.RunCapacityAsync(args[1..]).ConfigureAwait(false),
                 _ when args[0] == "supervise" =>
                     await FrameworkSupervisor.RunAsync(args[1..])
                         .ConfigureAwait(false),

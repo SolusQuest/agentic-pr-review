@@ -414,22 +414,26 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Fact]
-    public async Task ToolsAndContinuationCapacityResetIsExplicitAndRestoresFreshHistory()
+    public async Task BoundedCurrentWorkloadsAccountForEverySendWithoutClaimingCapacity()
+    {
+        using var files = new Inputs(bounded: true);
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false);
+        Assert.True(result.StopReason == "complete", Describe(result));
+        Assert.Equal(7, result.Scheduled);
+        Assert.All(result.Steps, step => { Assert.True(step.Accepted); Assert.False(step.Reset); });
+        Assert.DoesNotContain(result.Steps, step => step.Code == "capacity_stop");
+        Assert.Equal(14, result.Journal!.Totals.ActualSends);
+        Assert.Equal(result.Scheduled * 8, result.Allocations.Calls);
+        Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
+    }
+
+    [Fact]
+    public async Task HistoricalDefaultCapacityExpectationFailsTruthfullyOnCurrentRuntime()
     {
         using var files = new Inputs(full: true);
         var result = await EconomicsRunner.RunAsync(files.PlanPath, false);
-        Assert.True(result.StopReason == "complete", Describe(result));
-        Assert.Equal(2, result.Steps.Count(step => step.Code == "capacity_stop"));
-        Assert.All(result.Steps.Where(step => step.Code == "capacity_stop"), step =>
-            Assert.True(EconomicsJournal.Capacity(step.Observation!)));
-        Assert.Equal(2, result.Steps.Count(step => step.Reset));
-        foreach (var reset in result.Steps.Where(step => step.Reset))
-        {
-            Assert.False(reset.Restored); Assert.True(reset.Accepted);
-            Assert.True(result.Steps[reset.Index + 1].Restored);
-            Assert.Equal(reset.SessionSha256, result.Steps[reset.Index + 1].PredecessorSha256);
-        }
-        Assert.Equal(result.Scheduled * 8, result.Allocations.Calls);
+        Assert.True(result.StopReason == "representative_history_insufficient", Describe(result));
+        Assert.DoesNotContain(result.Steps, step => step.Code == "capacity_stop" || step.Reset);
         Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
     }
 
@@ -1098,7 +1102,7 @@ public sealed class R6EconomicsRunnerTests
         internal string Root { get; } = ReplayProcess.CreatePrivateRoot();
         internal string PlanPath => Path.Combine(Root, "plan.json");
         internal EconomicsPlanInput Plan { get; private set; }
-        internal Inputs(bool full = false)
+        internal Inputs(bool full = false, bool bounded = false)
         {
             var tariff = new TariffInput(PricingLimits.TariffFormat, "https://example.com/synthetic-tariff", "2026-09-20",
                 new(PricingLimits.Formula, DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, null,
@@ -1109,7 +1113,7 @@ public sealed class R6EconomicsRunnerTests
             File.WriteAllBytes(tariffPath, JsonSerializer.SerializeToUtf8Bytes(tariff, PricingJsonContext.Default.TariffInput));
             var fixtureRoot = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5");
             Plan = EconomicsCommand.Prepare(Path.Combine(fixtureRoot, "replay"), Path.Combine(fixtureRoot, "growth"), tariffPath,
-                full ? default : [new("replay", 3, 1, false)]);
+                full ? default : bounded ? [new("replay", 3, 1, false), new("tools", 2, 1, false), new("continuation", 2, 1, false)] : [new("replay", 3, 1, false)]);
             Write(Plan);
         }
         internal void Write(EconomicsPlanInput plan)

@@ -13,7 +13,7 @@ using System.Text.RegularExpressions;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
-internal static class FrameworkSupervisor
+internal static partial class FrameworkSupervisor
 {
     internal const string RuntimeToken =
         "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0." +
@@ -323,6 +323,8 @@ internal static class FrameworkSupervisor
 
         await WriteEvidenceAsync(root, payload, platform, cases, true)
             .ConfigureAwait(false);
+        if (!await RunR7CapacityAsync(Path.Join(root, "r7-capacity"), repository, payload, bundle, node))
+            return 1;
         if (aotProof.Context is { } context)
         {
             await WriteAotIdentityAsync(context, root, repository, record,
@@ -2079,7 +2081,8 @@ internal static class FrameworkSupervisor
         return process;
     }
 
-    private static long RunId(CaseSpec spec) => spec.Name switch
+    private static long RunId(CaseSpec spec) => FrameworkSessionCapacity.IsMode(spec.Mode)
+        ? 10_000 + FrameworkSessionCapacity.Ordinal(spec.Mode) : spec.Name switch
     {
         "dispatch-bootstrap" => 900,
         "dispatch-continuation" => 901,
