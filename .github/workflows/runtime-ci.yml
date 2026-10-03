@@ -10,11 +10,12 @@ permissions:
   contents: read
 
 jobs:
-  runtime:
+  runtime-core:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -38,6 +39,17 @@ jobs:
 
       - run: npm ci
 
+      - name: Verify Runtime CI topology and failure semantics
+        run: node scripts/verify-runtime-ci-workflow.mjs --self-test
+
+      - name: Verify exact selected core source and clean worktree
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          printf 'source_commit=%s\n' "$EXPECTED_SOURCE_SHA"
+
       - name: Runtime tests
         run: bash runtime/scripts/verify-runtime.sh test
 
@@ -47,26 +59,98 @@ jobs:
       - name: Native AOT bootstrap smoke
         run: bash runtime/scripts/verify-runtime.sh aot
 
-      - name: R2 Agent loop framework and Native AOT proof
-        run: bash runtime/scripts/verify-agent-loop.sh all
-
       - name: R3 deterministic live-agent replacement proof
         run: bash runtime/scripts/verify-live-agent.sh deterministic
 
       - name: R3 Linux x64 Native AOT live-agent replacement proof
         run: bash runtime/scripts/verify-live-agent.sh aot
 
-      - name: R4 framework ActionHost replacement proof first fresh process
-        run: bash runtime/scripts/verify-action-host.sh framework
+      - name: Verify core leaves the selected source clean
+        run: test -z "$(git status --porcelain)"
 
-      - name: R4 framework ActionHost replacement proof second fresh process
-        run: bash runtime/scripts/verify-action-host.sh framework
+  r2-agent-loop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: R4 generic Linux x64 Native AOT ActionHost conformance first fresh process
-        run: bash runtime/scripts/verify-action-host.sh aot
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
 
-      - name: R4 generic Linux x64 Native AOT ActionHost conformance second fresh process
-        run: bash runtime/scripts/verify-action-host.sh aot
+      - name: Install AOT build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - run: npm ci
+
+      - name: Verify exact selected R2 source and clean worktree
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          printf 'source_commit=%s\n' "$EXPECTED_SOURCE_SHA"
+
+      - name: Complete R2 Agent verification
+        run: bash runtime/scripts/verify-agent-loop.sh all
+
+      - name: Verify R2 leaves the selected source clean
+        run: test -z "$(git status --porcelain)"
+
+  r4-action-host:
+    name: R4 ActionHost (${{ matrix.mode }}, ${{ matrix.repetition }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        mode: [framework, aot]
+        repetition: [first, second]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install AOT build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - run: npm ci
+
+      - name: Verify exact selected R4 source and clean worktree
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          PROOF_MODE: ${{ matrix.mode }}
+          PROOF_REPETITION: ${{ matrix.repetition }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          printf 'source_commit=%s mode=%s repetition=%s\n' "$EXPECTED_SOURCE_SHA" "$PROOF_MODE" "$PROOF_REPETITION"
+
+      - name: Run isolated ActionHost proof
+        run: bash runtime/scripts/verify-action-host.sh "${{ matrix.mode }}"
 
   r5-evaluation-gate:
     runs-on: ubuntu-24.04
@@ -272,7 +356,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Verify exact event-selected integration source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
 
       - uses: actions/setup-node@v6
         with:
@@ -295,3 +385,31 @@ jobs:
 
       - name: Run host/runtime integration matrix
         run: npm run runtime:integration
+
+  runtime:
+    name: runtime
+    if: ${{ always() }}
+    needs: [runtime-core, r2-agent-loop, r4-action-host]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all former Runtime lanes to succeed
+        env:
+          RUNTIME_CI_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'NODE'
+          const expected = ['runtime-core', 'r2-agent-loop', 'r4-action-host'].sort();
+          let results;
+          try {
+            results = JSON.parse(process.env.RUNTIME_CI_NEEDS ?? '');
+          } catch {
+            console.error('Runtime CI dependency results are invalid.');
+            process.exit(1);
+          }
+          if (results === null || typeof results !== 'object' || Array.isArray(results) ||
+              JSON.stringify(Object.keys(results).sort()) !== JSON.stringify(expected) ||
+              expected.some(id => results[id]?.result !== 'success')) {
+            console.error('Every required Runtime CI lane must succeed.');
+            process.exit(1);
+          }
+          console.log('All required Runtime CI lanes succeeded.');
+          NODE

@@ -110,6 +110,8 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/run-clean-source-proof.mjs',
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-runtime-integration.mjs',
+      'scripts/verify-runtime-ci-timing.mjs',
+      'scripts/verify-runtime-ci-workflow.mjs',
     ]);
     expect(trackedFiles('.github/workflows/*')).toEqual([
       '.github/workflows/ci.yml',
