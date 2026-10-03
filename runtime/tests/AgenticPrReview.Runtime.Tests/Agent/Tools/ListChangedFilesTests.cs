@@ -313,12 +313,12 @@ public sealed class ListChangedFilesTests
     [Fact]
     public void ChangedCountAndMetadataCapsAreExactAndInputsAreCopied()
     {
-        var twoHundred = Enumerable.Range(0, AgentLimits.ChangedFiles)
+        var atCapacity = Enumerable.Range(0, AgentLimits.ChangedFiles)
             .Select(index => Unavailable($"f/{index:D3}.txt", null, "modified"))
             .ToList();
-        var tracked = twoHundred.Select(change => change.Path).ToArray();
-        var accepted = Snapshot(tracked, twoHundred, []);
-        twoHundred.Clear();
+        var tracked = atCapacity.Select(change => change.Path).ToArray();
+        var accepted = Snapshot(tracked, atCapacity, []);
+        atCapacity.Clear();
         Assert.Equal(AgentLimits.ChangedFiles, accepted.OrderedChangedFiles.Length);
 
         Assert.Throws<ArgumentException>(() => Snapshot(
@@ -384,7 +384,7 @@ public sealed class ListChangedFilesTests
         Assert.Equal(AgentLimits.DiffSourceBytesPerFile, perFile.CanonicalBytes.Length);
         _ = Snapshot(
             [perFile.Path],
-            [Available(perFile, 128, 0)],
+            [Available(perFile, 600, 0)],
             [perFile]);
         Assert.Throws<ArgumentException>(() =>
             SizedSource("single.txt", AgentLimits.DiffSourceBytesPerFile + 1));
@@ -392,12 +392,12 @@ public sealed class ListChangedFilesTests
         var exactSources = SizedSources(AgentLimits.DiffSnapshotBytes);
         _ = Snapshot(
             exactSources.Select(source => source.Path),
-            exactSources.Select(source => Available(source, 128, 0)),
+            exactSources.Select(source => Available(source, 600, 0)),
             exactSources);
         var overSources = SizedSources(AgentLimits.DiffSnapshotBytes + 1);
         Assert.Throws<ArgumentException>(() => Snapshot(
             overSources.Select(source => source.Path),
-            overSources.Select(source => Available(source, 128, 0)),
+            overSources.Select(source => Available(source, 600, 0)),
             overSources));
     }
 
@@ -433,7 +433,7 @@ public sealed class ListChangedFilesTests
     }
 
     [Fact]
-    public async Task RepeatedPagesEnumerateTwoHundredRecordsExactlyOnce()
+    public async Task RepeatedPagesEnumerateTheChangedFileCapacityExactlyOnce()
     {
         var changes = Enumerable.Range(0, AgentLimits.ChangedFiles)
             .Select(index => Unavailable($"f/{index:D3}.txt", null, "modified"))
@@ -863,7 +863,7 @@ public sealed class ListChangedFilesTests
 
     private static ReviewedDiffSource SizedSource(string path, int target)
     {
-        var emptyLines = Enumerable.Range(1, 128)
+        var emptyLines = Enumerable.Range(1, 600)
             .Select(index => new ReviewedDiffLine("addition", null, index, string.Empty))
             .ToArray();
         var baseline = new ReviewedDiffSource(
@@ -872,7 +872,7 @@ public sealed class ListChangedFilesTests
             null,
             "modified",
             false,
-            [new ReviewedDiffHunk(0, 0, 1, 128, emptyLines)]);
+            [new ReviewedDiffHunk(0, 0, 1, 600, emptyLines)]);
         var remaining = target - baseline.CanonicalBytes.Length;
         Assert.True(remaining >= 0);
         var lines = new ReviewedDiffLine[emptyLines.Length];
@@ -894,7 +894,7 @@ public sealed class ListChangedFilesTests
             null,
             "modified",
             false,
-            [new ReviewedDiffHunk(0, 0, 1, 128, lines)]);
+            [new ReviewedDiffHunk(0, 0, 1, 600, lines)]);
     }
 
     private static ReviewedDiffSource[] SizedSources(int target)

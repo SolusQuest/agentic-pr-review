@@ -10,8 +10,10 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.Snapshot.ChangedFiles;
 
 public sealed class ReviewedChangedFileReaderTests
 {
-    [Fact]
-    public async Task ExactCapRequiresAndAcceptsAnEmptyTerminalProbe()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExactCapRequiresACompleteEmptyTerminalProbe(bool complete)
     {
         var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
         var parent = H5SnapshotTestSupport.TemporaryDirectory();
@@ -38,14 +40,11 @@ public sealed class ReviewedChangedFileReaderTests
                     0,
                     null))
                 .ToArray();
+            var pages = Pages(files);
+            pages[6] = new([], complete);
             var transport = new ScriptedTransport(
                 H5SnapshotTestSupport.PullRequest(invocation.PullRequest),
-                new Dictionary<int, ActionHostPullRequestFilePageObject>
-                {
-                    [1] = new(files[..100], false),
-                    [2] = new(files[100..], false),
-                    [3] = new([], true),
-                });
+                pages);
 
             var result = await new ReviewedChangedFileReader(
                     new ScriptedFactory(transport))
@@ -55,10 +54,18 @@ public sealed class ReviewedChangedFileReaderTests
                     tree,
                     CancellationToken.None);
 
-            Assert.Equal(ReviewedSnapshotReadFailure.None, result.Failure);
-            Assert.Equal(ReviewedContentLimits.ChangedFiles,
-                Assert.IsType<ReviewedChangedFileSet>(result.Value).Files.Length);
-            Assert.Equal([1, 2, 3], transport.RequestedPages);
+            if (complete)
+            {
+                Assert.Equal(ReviewedSnapshotReadFailure.None, result.Failure);
+                Assert.Equal(ReviewedContentLimits.ChangedFiles,
+                    Assert.IsType<ReviewedChangedFileSet>(result.Value).Files.Length);
+            }
+            else
+            {
+                Assert.Equal(ReviewedSnapshotReadFailure.UnsupportedSize, result.Failure);
+                Assert.Null(result.Value);
+            }
+            Assert.Equal([1, 2, 3, 4, 5, 6], transport.RequestedPages);
         }
         finally
         {
@@ -99,12 +106,7 @@ public sealed class ReviewedChangedFileReaderTests
                 .ToArray();
             var transport = new ScriptedTransport(
                 H5SnapshotTestSupport.PullRequest(invocation.PullRequest),
-                new Dictionary<int, ActionHostPullRequestFilePageObject>
-                {
-                    [1] = new(files[..100], false),
-                    [2] = new(files[100..200], false),
-                    [3] = new(files[200..], true),
-                });
+                Pages(files));
 
             var result = await new ReviewedChangedFileReader(
                     new ScriptedFactory(transport))
@@ -118,7 +120,7 @@ public sealed class ReviewedChangedFileReaderTests
             Assert.Equal(
                 ReviewedSnapshotReadFailure.UnsupportedSize,
                 result.Failure);
-            Assert.Equal([1, 2, 3], transport.RequestedPages);
+            Assert.Equal([1, 2, 3, 4, 5, 6], transport.RequestedPages);
         }
         finally
         {
@@ -406,6 +408,25 @@ public sealed class ReviewedChangedFileReaderTests
             await tree.DisposeAsync();
             Directory.Delete(parent, recursive: true);
         }
+    }
+
+    private static Dictionary<int, ActionHostPullRequestFilePageObject> Pages(
+        ActionHostPullRequestFileObject[] files)
+    {
+        var pages = new Dictionary<int, ActionHostPullRequestFilePageObject>();
+        var size = ReviewedContentLimits.ChangedFilesPerPage;
+        for (var offset = 0; offset < files.Length; offset += size)
+        {
+            var batch = files.Skip(offset).Take(size).ToArray();
+            pages.Add(offset / size + 1, new(batch, batch.Length < size));
+        }
+
+        if (files.Length % size == 0)
+        {
+            pages.Add(files.Length / size + 1, new([], true));
+        }
+
+        return pages;
     }
 
     private sealed class ScriptedFactory : IReviewedSnapshotTransportFactory
