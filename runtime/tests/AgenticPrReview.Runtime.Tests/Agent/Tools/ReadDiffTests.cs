@@ -338,18 +338,14 @@ public sealed class ReadDiffTests
     [Fact]
     public async Task CountAndBytePaginationKeepHunksAtomic()
     {
-        var small = ContextHunk(1);
+        var small = new ReviewedDiffHunk(
+            1, 8, 1, 8,
+            Enumerable.Range(1, 8).Select(line => new ReviewedDiffLine(
+                "context", line, line, new string('x', AgentLimits.DiffLineTextBytes))));
         var large = new ReviewedDiffHunk(
-            2,
-            0,
-            2,
-            8,
-            Enumerable.Range(2, 8)
-                .Select(line => new ReviewedDiffLine(
-                    "addition",
-                    null,
-                    line,
-                    new string('x', AgentLimits.DiffLineTextBytes))));
+            9, 0, 9, 8,
+            Enumerable.Range(9, 8).Select(line => new ReviewedDiffLine(
+                "addition", null, line, new string('x', AgentLimits.DiffLineTextBytes))));
         var source = Source("a.txt", false, [small, large]);
         var snapshot = Snapshot(
             ["a.txt"],
@@ -363,6 +359,18 @@ public sealed class ReadDiffTests
         Assert.True(root.GetProperty("truncated").GetBoolean());
         Assert.Equal(2, root.GetProperty("next_start_hunk").GetInt32());
         Assert.True(execution.CanonicalResult!.Length <= AgentLimits.ToolResultBytes);
+
+        Assert.True(execution.CanonicalResult.Length > 32 * 1024);
+        Assert.False(execution.Observation!.Grounds(new AgentEvidence(
+            execution.Observation.ObservationId, "a.txt", 9, 9)));
+        var second = await ExecuteAsync(snapshot,
+            "{\"path\":\"a.txt\",\"start_hunk\":2}");
+        Assert.True(second.Succeeded, second.FailureCode);
+        using var secondDocument = JsonDocument.Parse(second.CanonicalResult!);
+        Assert.Equal(1, secondDocument.RootElement.GetProperty("hunks").GetArrayLength());
+        Assert.False(secondDocument.RootElement.GetProperty("truncated").GetBoolean());
+        Assert.True(second.Observation!.Grounds(new AgentEvidence(
+            second.Observation.ObservationId, "a.txt", 9, 16)));
 
         var countLimited = await ExecuteAsync(
             Snapshot(
@@ -388,8 +396,8 @@ public sealed class ReadDiffTests
             0,
             0,
             1,
-            9,
-            Enumerable.Range(1, 9)
+            16,
+            Enumerable.Range(1, 16)
                 .Select(line => new ReviewedDiffLine(
                     "addition",
                     null,

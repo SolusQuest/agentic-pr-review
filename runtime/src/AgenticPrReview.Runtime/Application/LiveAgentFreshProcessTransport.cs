@@ -255,7 +255,7 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
                 "bootstrap_read",
                 AgentToolRegistry.ReadFileName,
                 "{\"path\":\"fact.txt\",\"start_line\":1," +
-                    "\"line_count\":400}") ||
+                    "\"line_count\":800}") ||
             !TryReadLastTool(
                 messages,
                 "bootstrap_read",
@@ -328,7 +328,7 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
                 "bootstrap_read",
                 AgentToolRegistry.ReadFileName,
                 "{\"path\":\"fact.txt\",\"start_line\":1," +
-                    "\"line_count\":400}") ||
+                    "\"line_count\":800}") ||
             !TryReadTool(
                 values[3],
                 "bootstrap_read",
@@ -378,7 +378,7 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
                 "continue_read",
                 AgentToolRegistry.ReadFileName,
                 "{\"path\":\"fact.txt\",\"start_line\":1," +
-                    "\"line_count\":400}") ||
+                    "\"line_count\":800}") ||
             !TryReadLastTool(
                 messages,
                 "continue_read",

@@ -386,29 +386,10 @@ internal sealed class AgentLoop(
                 }
 
                 var canonicalResult = execution.CanonicalResult;
-                if (canonicalResult.Length > AgentLimits.ToolResultBytes)
-                {
-                    return Failure(
-                        AgentFailureCodes.ToolResultLimit,
-                        modelCalls,
-                        toolCalls,
-                        events);
-                }
-
-                try
-                {
-                    toolResultBytes = checked(toolResultBytes + canonicalResult.Length);
-                }
-                catch (OverflowException)
-                {
-                    return Failure(
-                        AgentFailureCodes.ToolResultLimit,
-                        modelCalls,
-                        toolCalls,
-                        events);
-                }
-
-                if (toolResultBytes > AgentLimits.ToolResultsTotalBytes)
+                if (!AgentToolResultBudget.TryAdd(
+                        toolResultBytes,
+                        canonicalResult.Length,
+                        out toolResultBytes))
                 {
                     return Failure(
                         AgentFailureCodes.ToolResultLimit,
@@ -618,27 +599,14 @@ internal sealed class AgentLoop(
                 rejected));
             var result = member.Error ?? AgentRecoveryFeedback.BatchNotExecuted;
             var resultLength = Encoding.UTF8.GetByteCount(result);
-            if (resultLength > AgentLimits.ToolResultBytes)
-            {
-                return AgentFailureCodes.ToolResultLimit;
-            }
-
-            try
-            {
-                nextResultBytes = checked(nextResultBytes + resultLength);
-            }
-            catch (OverflowException)
+            if (!AgentToolResultBudget.TryAdd(
+                    nextResultBytes, resultLength, out nextResultBytes))
             {
                 return AgentFailureCodes.ToolResultLimit;
             }
 
             errors.Add(new ProjectToolErrorContent(
                 member.Call.CallId, result));
-        }
-
-        if (nextResultBytes > AgentLimits.ToolResultsTotalBytes)
-        {
-            return AgentFailureCodes.ToolResultLimit;
         }
 
         var nextIds = new HashSet<string>(usedCallIds, StringComparer.Ordinal);

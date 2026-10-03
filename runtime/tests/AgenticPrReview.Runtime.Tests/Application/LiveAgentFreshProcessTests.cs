@@ -1652,7 +1652,7 @@ public sealed class LiveAgentFreshProcessTests
                 "bootstrap_read",
                 AgentToolRegistry.ReadFileName,
                 "{\"path\":\"fact.txt\",\"start_line\":1," +
-                    "\"line_count\":400}"),
+                    "\"line_count\":800}"),
             new JsonObject
             {
                 ["role"] = "tool",

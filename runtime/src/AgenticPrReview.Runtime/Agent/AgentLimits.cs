@@ -48,10 +48,10 @@ internal static class AgentLimits
     internal const int PartsTotal = 8192;
     internal const int ContentBytes = 1024 * 1024;
     internal const int ToolArgumentsBytes = 8 * 1024;
-    internal const int ToolResultBytes = 32 * 1024;
-    internal const int ToolResultsTotalBytes = 256 * 1024;
-    internal const int ReadFileRawBytes = 64 * 1024;
-    internal const int ReadFileLines = 400;
+    internal const int ToolResultBytes = 64 * 1024;
+    internal const int ToolResultsTotalBytes = 8 * 1024 * 1024;
+    internal const int ReadFileRawBytes = 1024 * 1024;
+    internal const int ReadFileLines = 800;
     internal const int SearchFiles = 100;
     internal const int SearchRawBytes = 8 * 1024 * 1024;
     internal const int SearchFileBytes = 256 * 1024;

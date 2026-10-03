@@ -42,7 +42,7 @@ internal static class NegativeProofRunner
             ["tool-result-cap"] =
                 "failed\tloop\ttool_result_limit\t1\t1\t1\t0\t0\tfalse\tfalse",
             ["tool-result-aggregate"] =
-                "failed\tloop\ttool_result_limit\t2\t9\t2\t0\t0\tfalse\tfalse",
+                "passed\tloop\tnone\t3\t10\t3\t0\t0\tfalse\tfalse",
             ["session-construction-limit"] =
                 "failed\tsession_build\tsession_construction_limit\t1\t1\t0\t0\t0\tfalse\tfalse",
             ["continuation-limit"] =
@@ -654,6 +654,7 @@ internal static class NegativeProofRunner
             [
                 body => ProviderScripts.ReadCalls(body, path, 0, 8),
                 body => ProviderScripts.ReadCalls(body, path, 8, 1),
+                body => ProviderScripts.DirectFinish(body),
             ]
             :
             [
@@ -687,13 +688,26 @@ internal static class NegativeProofRunner
             tool,
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(identity), CancellationToken.None);
+        if (aggregate)
+        {
+            var results = outcome.Events.OfType<AgentToolResultEvent>().ToArray();
+            return outcome.Succeeded && outcome.CompletedSessionEligible &&
+                outcome.Diagnostic is null &&
+                outcome.Events.OfType<AgentMessageEvent>()
+                    .Count(message => message.Role == "assistant") == 3 &&
+                outcome.Events.OfType<AgentToolCallEvent>().Count() == 10 &&
+                results.Length == 9 &&
+                results.All(result => result.CanonicalResult.Length <=
+                    AgentLimits.ToolResultBytes) &&
+                results.Sum(result => result.CanonicalResult.Length) > 256 * 1024 &&
+                server.Captures.Count == 3 &&
+                !File.Exists(ProofPaths.Lineage(command)) &&
+                !Directory.Exists(ProofPaths.StateRoot(command));
+        }
         return !outcome.CompletedSessionEligible &&
-            HasDiagnostic(
-                outcome,
-                AgentFailureCodes.ToolResultLimit,
-                modelCalls: aggregate ? 2 : 1,
-                toolCalls: aggregate ? 9 : 1) &&
-            server.Captures.Count == (aggregate ? 2 : 1) &&
+            HasDiagnostic(outcome, AgentFailureCodes.ToolResultLimit,
+                modelCalls: 1, toolCalls: 1) &&
+            server.Captures.Count == 1 &&
             !File.Exists(ProofPaths.Lineage(command)) &&
             !Directory.Exists(ProofPaths.StateRoot(command));
     }
