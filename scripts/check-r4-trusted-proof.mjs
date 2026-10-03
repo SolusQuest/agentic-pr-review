@@ -8,6 +8,7 @@ import { extractPreflight } from './check-r4-e2p-preflight.mjs';
 import { verifySealedReceipt } from './check-r4-e2p-receipt.mjs';
 import { verifySealedReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
 import { generateCleanupPlan, projectTrustedProofEvidence } from './r4-trusted-proof-contract.mjs';
+import { verifyWorkflow as verifyRuntimeCiWorkflow } from './verify-runtime-ci-workflow.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const fixtureRelative = 'runtime/tests/fixtures/action-host/trusted-proof';
@@ -773,6 +774,16 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     if (name !== 'r4-trusted-proof.yml' && proofAnchors.some((anchor) => source.includes(anchor))) {
       fail('repository-proof-route-owner');
     }
+    if (/actions\/(?:upload|download)-artifact/u.test(source)) {
+      if (name !== 'runtime-ci.yml') fail('repository-alternate-route');
+      try {
+        // Only CI2's complete closed topology can admit its bounded receipt transport.
+        // Every other gate still rejects artifact actions, including compiled-output reuse.
+        verifyRuntimeCiWorkflow(value);
+      } catch {
+        fail('repository-alternate-route');
+      }
+    }
     const expressions = [];
     collectCredentialExpressions(value, expressions);
     for (const expression of expressions) observed.push(`${name}\0${expression}`);
@@ -800,7 +811,7 @@ function validateRepositorySecretRoutes(workflowsRoot) {
   if (
     /secrets\s*:\s*inherit/u.test(allSource) ||
     allSource.includes('secrets.AGENTIC_REVIEW_DEEPSEEK_API_KEY') ||
-    /pull_request_target|actions\/(?:upload|download)-artifact|actions\/cache/u.test(allSource)
+    /pull_request_target|actions\/cache/u.test(allSource)
   ) {
     fail('repository-alternate-route');
   }
