@@ -1263,14 +1263,42 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     }
 
     [Fact]
-    public void RuntimeCiRunsTheCheckedFrameworkProofTwiceWithoutCredentials()
+    public async Task RuntimeCiRunsIsolatedProofsWithFailClosedAggregationWithoutCredentials()
     {
         var root = FindRepositoryRoot();
         var workflow = File.ReadAllText(Path.Join(root,
             ".github", "workflows", "runtime-ci.yml"));
 
-        Assert.True(Count(workflow,
-            "bash runtime/scripts/verify-action-host.sh framework") >= 2);
+        var info = new ProcessStartInfo("node")
+        {
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        info.ArgumentList.Add(Path.Join(root,
+            "scripts", "verify-runtime-ci-workflow.mjs"));
+        info.ArgumentList.Add("--self-test");
+        using var process = Process.Start(info) ??
+            throw new InvalidOperationException("Workflow verifier did not start.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            throw new InvalidOperationException("Workflow verifier timed out.");
+        }
+
+        var standardOutput = await output;
+        Assert.True(process.ExitCode == 0,
+            standardOutput + await error);
+        Assert.Contains("runtime_ci_workflow_verified lanes=4",
+            standardOutput, StringComparison.Ordinal);
         Assert.True(Count(workflow, "persist-credentials: false") >= 2);
         Assert.DoesNotContain("secrets.", workflow,
             StringComparison.Ordinal);
@@ -1320,8 +1348,6 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("compose-r4-e2-receipt.mjs", verifier,
             StringComparison.Ordinal);
-        Assert.Equal(2, Count(workflow,
-            "bash runtime/scripts/verify-action-host.sh aot"));
         Assert.DoesNotContain("r4-e2-aot-", workflow,
             StringComparison.Ordinal);
         Assert.DoesNotContain("R4 Native AOT receipts are byte-identical",
