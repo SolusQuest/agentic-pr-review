@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
@@ -162,7 +163,7 @@ internal static class ReplayRunner
             reply.Requests.Any(bytes => bytes is null || bytes.Length > 1048576) || reply.Requests.Sum(bytes => (long)bytes.Length) > ReplayWire.EvidenceLimit ||
             reply.EnvironmentKeys.IsDefault || reply.EnvironmentBytes is null || reply.EnvironmentBytes.Length > ReplayWire.InputLimit || reply.Evaluation is null ||
             !reply.EnvironmentKeys.Order(StringComparer.Ordinal).SequenceEqual(ReplayProcess.EnvironmentNames.Order(StringComparer.Ordinal)) ||
-            reply.ModelCalls is < 0 or > 64 || reply.ToolCalls is < 0 or > 256 ||
+            reply.ModelCalls is < 0 or > 64 || reply.ToolCalls is < 0 or > AgentLimits.ToolCalls ||
             reply.Code is not ("prepared" or "input_invalid" or "infrastructure_failed" or "state_failed" or "session_failed" or "agent_failed" or "tool_failed" or "unknown_failed" or "provider_failed" or "script_exhausted" or "history_failed" or "cancelled" or "assertion_failed")) return false;
         if (reply.Evaluation.Length != 0)
         {

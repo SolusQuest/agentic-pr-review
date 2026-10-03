@@ -4,9 +4,15 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 using Xunit;
@@ -17,6 +23,117 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 public sealed class R5CompletedReplayTests
 {
     private static string Bundle => Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay");
+
+    [Theory]
+    [InlineData(256, 16)]
+    [InlineData(257, 16)]
+    [InlineData(272, 16)]
+    [InlineData(63, 1)]
+    public async Task CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds(int tools, int batchSize)
+    {
+        using var bundle = new MutableBundle();
+        WriteCountReplay(bundle, tools, batchSize);
+        Assert.True(new FileInfo(Path.Combine(bundle.Root, "script-0.json")).Length <= ReplayLimits.FileBytes);
+        Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture);
+        ReplayChildReply? observed = null;
+        bool admitted = false;
+        var rejected = new List<bool>();
+        string? privateRoot = null;
+        var result = await ReplayRunner.RunAsync(bundle.Root, new()
+        {
+            BeforeCleanup = root => privateRoot = root,
+            ObserveReply = (input, run, reply) =>
+            {
+                observed = reply;
+                admitted = ReplayRunner.AdmitReply(input, run, reply, out _);
+                foreach (var invalid in new[]
+                {
+                    reply with { ToolCalls = -1 }, reply with { ToolCalls = 513 },
+                    reply with { ModelCalls = -1 }, reply with { ModelCalls = 65 },
+                    reply with { Requests = [.. reply.Requests, .. Enumerable.Repeat(reply.Requests[^1], 65 - reply.Requests.Length)] },
+                    reply with { Requests = reply.Requests.SetItem(0, new byte[1_048_577]) },
+                    reply with { EnvironmentBytes = new byte[ReplayWire.InputLimit + 1] },
+                    reply with { EnvironmentKeys = [] }, reply with { PrefixHistory = null },
+                    reply with { Plaintext = "malformed session"u8.ToArray() },
+                    reply with { Prepared = reply.Prepared! with { Generation = 1 } },
+                    reply with { Operation = Guid.NewGuid().ToString("N") }, reply with { Code = "unknown" },
+                }) rejected.Add(!ReplayRunner.AdmitReply(input, run, invalid, out _));
+            },
+            Verify = (fixture, phase, reply) => VerifyCountReplay(fixture, phase, reply, tools, batchSize),
+        });
+        Assert.NotNull(observed);
+        Assert.True(observed.Code == "prepared", $"{observed.Code}; tools={observed.ToolCalls}; models={observed.ModelCalls}; requestBytes={observed.Requests.Sum(bytes => (long)bytes.Length)}");
+        Assert.Equal(tools, observed.ToolCalls); // Execution diagnostics exclude the terminal's budget charge.
+        Assert.Equal((tools + batchSize - 1) / batchSize + 1, observed.ModelCalls);
+        Assert.Equal(observed.ModelCalls, observed.Requests.Length);
+        Assert.True(observed.Requests.Sum(bytes => (long)bytes.Length) <= ReplayWire.EvidenceLimit);
+        Assert.Equal("verified", result.Code);
+        Assert.True(admitted);
+        Assert.Equal(13, rejected.Count);
+        Assert.All(rejected, Assert.True);
+        var step = Assert.Single(result.Steps);
+        Assert.True(step.Accepted);
+        Assert.Equal(tools, step.ToolCalls);
+        Assert.Equal(0L, step.Generation);
+        Assert.Single(result.Observations);
+        Assert.Equal("cleaned", result.Cleanup);
+        Assert.False(Directory.Exists(privateRoot));
+    }
+
+    [Theory]
+    [InlineData(512, "unknown_failed")]
+    [InlineData(513, "result_invalid")]
+    public async Task ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery(int reportedTools, string expected)
+    {
+        using var bundle = new MutableBundle();
+        WriteCountReplay(bundle, 512, 16);
+        ReplayChildReply? actual = null;
+        string? privateRoot = null;
+        var result = await ReplayRunner.RunAsync(bundle.Root, new()
+        {
+            BeforeCleanup = root => privateRoot = root,
+            // The real transport's retained 4 MiB cumulative request trace stops this large
+            // corpus before 512. Isolate the diagnostic count boundary with a real production
+            // loop and snapshot tools, measured history and scored failure at the IPC seam.
+            // The positive wide-replay test above separately exercises fresh child IPC/SESSION.
+            RunProcess = async (input, _, token) =>
+            {
+                actual = await ProductionExhaustionReply(input, token);
+                return new("completed", actual with { ToolCalls = reportedTools });
+            },
+        });
+        Assert.NotNull(actual);
+        Assert.Equal("unknown_failed", actual.Code); // Preserve the evaluator's ToolLimit failure classification.
+        Assert.Equal(512, actual.ToolCalls);
+        Assert.Equal(33, actual.ModelCalls);
+        Assert.Empty(actual.Requests); // This isolated seam observes ProjectChat requests, not transport bytes.
+        Assert.Equal(33, actual.PrefixHistory!.Calls.Length);
+        Assert.Null(actual.Prepared); // 512 executed tools leave no budget for finish_review.
+        Assert.Null(actual.Plaintext);
+        Assert.Equal(expected, result.Code);
+        var step = Assert.Single(result.Steps);
+        Assert.False(step.Accepted);
+        Assert.True(step.PredecessorPreserved);
+        Assert.Equal(reportedTools == 512 ? 512 : 0, step.ToolCalls);
+        Assert.Equal(reportedTools == 512 ? 1 : 0, result.Observations.Length);
+        Assert.Equal("cleaned", result.Cleanup);
+        Assert.False(Directory.Exists(privateRoot));
+    }
+
+    [Theory]
+    [InlineData(17, 17)]
+    [InlineData(64, 1)]
+    public async Task CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts(int tools, int batchSize)
+    {
+        using var bundle = new MutableBundle();
+        WriteCountReplay(bundle, tools, batchSize);
+        Assert.Equal(ReplayAdmissionCode.InvalidContent, ReplayAdmission.Load(bundle.Root).Code);
+        var result = await ReplayRunner.RunAsync(bundle.Root);
+        Assert.Equal("input_invalid", result.Code);
+        Assert.Empty(result.Steps);
+        Assert.Empty(result.Observations);
+        Assert.Equal("cleaned", result.Cleanup);
+    }
 
     [Fact]
     public async Task BootstrapPreparesRealStateWithoutAcceptingIt()
@@ -390,6 +507,108 @@ public sealed class R5CompletedReplayTests
             return result;
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
+    }
+
+    private static async Task<ReplayChildReply> ProductionExhaustionReply(ReplayChildInput input, CancellationToken token)
+    {
+        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Path.Combine(input.Root, "bundle")).Fixture);
+        var run = Assert.Single(fixture.Runs);
+        using var state = new ReplayState(run, input.Session, input.Root, input.Key);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable));
+        var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable!.StablePlan, input.Session,
+            [.. stable.ControlMessages, new("user", [new ProjectTextContent(run.InitialContext)])]);
+        var boundary = PrefixBoundary.Bootstrap(state.Trusted, request);
+        var history = new HistoryChatClient(boundary, new CountReplayChatClient(run.Script),
+            HistoryChatClient.Measure(boundary, HistoryCapture.Request(request)));
+        var reviewed = Path.Combine(input.Root, "reviewed");
+        Directory.CreateDirectory(reviewed);
+        var snapshot = run.CreateSnapshot(reviewed);
+        var outcome = await new AgentLoop(history, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)))
+            .RunAsync(request, token);
+        Assert.False(outcome.Succeeded);
+        Assert.Equal(AgentFailureCodes.ToolLimit, outcome.Diagnostic!.Code);
+        Assert.Equal(512, outcome.Diagnostic.ToolCalls);
+        Assert.Equal(33, outcome.Accounting!.ModelCalls);
+        Assert.Equal(512, outcome.Events.OfType<AgentToolResultEvent>().Count());
+        var attempt = EvaluationAttempt.Admit(state.Trusted, new(run.Input.Id, "deterministic", EvaluationSource.Commit,
+            EvaluationSource.Tree, EvaluationSource.Clean, run.ProviderConfigurationSha256));
+        var scored = EvaluationScorer.Failure(run.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
+        return new(input.Operation, input.Corpus, input.Phase, input.Session, EvaluationSource.Commit, EvaluationSource.Tree,
+            EvaluationSource.Clean, Environment.ProcessId, Guid.NewGuid().ToString("N"), "unknown_failed", null,
+            EvaluationJson.Write(scored), null, null, outcome.Accounting!.ModelCalls,
+            outcome.Events.OfType<AgentToolResultEvent>().Count(), null, [], [.. ReplayProcess.EnvironmentNames], [],
+            PrefixHistory: history.Capture);
+    }
+
+    private sealed class CountReplayChatClient(ReplayScript script) : IProjectChatClient
+    {
+        private int ordinal;
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            var turn = script.Turns[ordinal++];
+            return Task.FromResult(new ProjectChatResponse(new("assistant", turn.ToolCalls.Select(call =>
+                (ProjectChatContent)new ProjectToolCallContent(call.Id, call.Name, call.ArgumentsJson)).ToArray()), new(1, 1), 1));
+        }
+    }
+
+    // Expand only a private copy. Keep the real provider, history, SESSION and state pipeline.
+    private static void WriteCountReplay(MutableBundle bundle, int tools, int batchSize)
+    {
+        bundle.EditJson("script-0.json", script =>
+        {
+            var original = script["turns"]!.AsArray();
+            var first = original[0]!;
+            var calls = first["tool_calls"]!.AsArray();
+            var turns = new JsonArray();
+            for (var offset = 0; offset < tools; offset += batchSize)
+            {
+                var turn = first.DeepClone();
+                turn["tool_calls"] = new JsonArray(Enumerable.Range(offset, Math.Min(batchSize, tools - offset)).Select(index =>
+                {
+                    return index < 2 ? calls[index]!.DeepClone() : new JsonObject
+                    {
+                        ["id"] = "count-" + index, ["name"] = "list_changed_files", ["arguments_json"] = "{}",
+                    };
+                }).ToArray());
+                turns.Add(turn);
+            }
+            turns.Add(original[^1]!.DeepClone());
+            script["turns"] = turns;
+        });
+        var unused = new[] { "context-1.txt", "context-2.txt", "script-1.json", "script-2.json" };
+        bundle.EditJson("manifest.json", manifest =>
+        {
+            manifest["runs"] = new JsonArray(manifest["runs"]![0]!.DeepClone());
+            manifest["files"] = new JsonArray(manifest["files"]!.AsArray()
+                .Where(file => !unused.Contains(file!["path"]!.GetValue<string>())).Select(file => file!.DeepClone()).ToArray());
+        });
+        foreach (var file in unused) File.Delete(Path.Combine(bundle.Root, file));
+    }
+
+    private static bool VerifyCountReplay(AdmittedReplayFixture fixture, int phase, ReplayChildReply reply, int tools, int batchSize)
+    {
+        if (phase != 0 || fixture.Runs.Length != 1 || reply.ModelCalls != (tools + batchSize - 1) / batchSize + 1 ||
+            reply.ToolCalls != tools || reply.Requests.Length != reply.ModelCalls || reply.Plaintext is null ||
+            !AgentSessionCodec.TryParse(reply.Plaintext, out var artifact, out _) || artifact is null) return false;
+        var run = artifact.Document.CompletedRuns.Single();
+        var results = run.Records.OfType<AgentSessionToolResultRecord>().ToArray();
+        var calls = fixture.Runs[0].Script.Turns.SelectMany(turn => turn.ToolCalls).Where(call => call.Name != "finish_review");
+        if (!results.Select(result => result.CallId).SequenceEqual(calls.Select(call => call.Id)) || results.Length != tools ||
+            run.Continuation.Items.Length != reply.ModelCalls || artifact.Document.Generation != 0) return false;
+        foreach (var result in results)
+        {
+            using var parsed = JsonDocument.Parse(result.ResultJson);
+            if (parsed.RootElement.GetProperty("status").GetString() != "ok") return false;
+            if (result.Name == "read_file")
+            {
+                if (parsed.RootElement.GetProperty("lines")[0].GetProperty("text").GetString() !=
+                    (result.CallId == "seed_read" ? ReplayCoverage.Fact : ReplayCoverage.Current)) return false;
+            }
+            else if (result.Name != "list_changed_files" || parsed.RootElement.GetProperty("changes").GetArrayLength() != 0) return false;
+        }
+        var outcome = run.Records.OfType<AgentSessionReviewOutcomeRecord>().Single();
+        return outcome.Summary == "Seed complete." && outcome.FindingsJson == "[]";
     }
 
     private sealed class MutableBundle : IDisposable
