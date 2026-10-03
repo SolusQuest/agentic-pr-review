@@ -187,30 +187,78 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("trusted-proof-payload-v2:\n", workflow,
             StringComparison.Ordinal);
-        var v2JobStart = workflow.IndexOf("  trusted-proof-payload-v2:\n",
+        string Job(string id, string next)
+        {
+            var start = workflow.IndexOf($"  {id}:\n", StringComparison.Ordinal);
+            Assert.True(start >= 0);
+            var end = workflow.IndexOf($"\n  {next}:\n", start,
+                StringComparison.Ordinal);
+            Assert.True(end > start);
+            return workflow[start..end];
+        }
+
+        foreach (var role in new[] { "first", "second" })
+        {
+            var next = role == "first"
+                ? "trusted-proof-payload-v2-second"
+                : "trusted-proof-payload-v2";
+            var worker = Job($"trusted-proof-payload-v2-{role}", next);
+            var checkout = worker.IndexOf("uses: actions/checkout@v6",
+                StringComparison.Ordinal);
+            var setupNode = worker.IndexOf("uses: actions/setup-node@v6",
+                StringComparison.Ordinal);
+            var installDependencies = worker.IndexOf("- run: npm ci",
+                StringComparison.Ordinal);
+            var proof = worker.IndexOf(
+                $"bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-{role}.log\"",
+                StringComparison.Ordinal);
+            var upload = worker.IndexOf("uses: actions/upload-artifact@v7",
+                StringComparison.Ordinal);
+            Assert.True(checkout >= 0 && checkout < setupNode &&
+                setupNode < installDependencies && installDependencies < proof &&
+                proof < upload);
+            Assert.Equal(1, worker.Split(
+                "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh",
+                StringSplitOptions.None).Length - 1);
+            Assert.Contains(
+                "ref: ${{ github.event_name == 'pull_request' && " +
+                "github.event.pull_request.head.sha || github.sha }}",
+                worker, StringComparison.Ordinal);
+            Assert.Contains("persist-credentials: false", worker,
+                StringComparison.Ordinal);
+            Assert.Contains("test -z \"$(git status --porcelain)\"", worker,
+                StringComparison.Ordinal);
+            Assert.Contains("sudo apt-get install -y clang strace zlib1g-dev",
+                worker, StringComparison.Ordinal);
+            Assert.Contains("dotnet-version: 10.0.109", worker,
+                StringComparison.Ordinal);
+            Assert.Contains($"path: ${{{{ runner.temp }}}}/r4-e2p-v2-{role}.receipt",
+                worker, StringComparison.Ordinal);
+            Assert.DoesNotContain("needs:", worker, StringComparison.Ordinal);
+            Assert.DoesNotContain("concurrency:", worker, StringComparison.Ordinal);
+            Assert.DoesNotContain("download-artifact", worker,
+                StringComparison.Ordinal);
+        }
+
+        var v2Job = Job("trusted-proof-payload-v2", "integration");
+        Assert.Contains("if: ${{ always() }}", v2Job, StringComparison.Ordinal);
+        Assert.Contains(
+            "needs: [trusted-proof-payload-v2-first, trusted-proof-payload-v2-second]",
+            v2Job, StringComparison.Ordinal);
+        Assert.Contains("V2_CI_NEEDS: ${{ toJSON(needs) }}", v2Job,
             StringComparison.Ordinal);
-        var v2JobEnd = workflow.IndexOf("\n  integration:\n", v2JobStart,
+        Assert.Contains("results[id]?.result !== 'success'", v2Job,
             StringComparison.Ordinal);
-        Assert.True(v2JobStart >= 0 && v2JobEnd > v2JobStart);
-        var v2Job = workflow[v2JobStart..v2JobEnd];
-        var checkout = v2Job.IndexOf("uses: actions/checkout@v6",
+        Assert.Contains("uses: actions/download-artifact@v8", v2Job,
             StringComparison.Ordinal);
-        var setupNode = v2Job.IndexOf("uses: actions/setup-node@v6",
+        Assert.Contains("merge-multiple: false", v2Job, StringComparison.Ordinal);
+        Assert.Contains("stat.size > 32768", v2Job, StringComparison.Ordinal);
+        Assert.Contains("fs.readdirSync(receiptRoot).sort()", v2Job,
             StringComparison.Ordinal);
-        var installDependencies = v2Job.IndexOf("- run: npm ci",
+        Assert.Contains("fs.readdirSync(directory)", v2Job,
             StringComparison.Ordinal);
-        var firstProof = v2Job.IndexOf(
-            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-first.log\"",
+        Assert.DoesNotContain("verify-r4-trusted-proof-payload-v2.sh", v2Job,
             StringComparison.Ordinal);
-        var secondProof = v2Job.IndexOf(
-            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-second.log\"",
-            StringComparison.Ordinal);
-        Assert.True(checkout >= 0 && checkout < setupNode &&
-            setupNode < installDependencies && installDependencies < firstProof &&
-            firstProof < secondProof);
-        Assert.Equal(2, v2Job.Split(
-            "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh",
-            StringSplitOptions.None).Length - 1);
         Assert.Contains(
             "ref: ${{ github.event_name == 'pull_request' && " +
             "github.event.pull_request.head.sha || github.sha }}",
@@ -238,12 +286,10 @@ public sealed class TrustedProofArchitectureTests
             v2Job,
             StringComparison.Ordinal);
         Assert.Contains(
-            "\"$RUNNER_TEMP/r4-e2p-v2-first.receipt\" \\",
+            "\"$(git rev-parse HEAD)\" \\",
             v2Job,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "\"$RUNNER_TEMP/r4-e2p-v2-second.receipt\" \\",
-            v2Job,
+        Assert.Contains("\"$(git rev-parse 'HEAD^{tree}')\" <<'NODE'", v2Job,
             StringComparison.Ordinal);
         Assert.DoesNotContain("path: payload-source", workflow,
             StringComparison.Ordinal);
