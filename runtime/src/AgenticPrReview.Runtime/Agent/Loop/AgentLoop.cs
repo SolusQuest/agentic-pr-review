@@ -26,6 +26,16 @@ internal sealed class AgentLoop(
         AgentRunRequest run,
         CancellationToken cancellationToken)
     {
+        var accounting = new ReviewAccounting();
+        var outcome = await RunCoreAsync(run, accounting, cancellationToken);
+        return outcome with { Accounting = accounting.Finish() };
+    }
+
+    private async Task<AgentRunOutcome> RunCoreAsync(
+        AgentRunRequest run,
+        ReviewAccounting accounting,
+        CancellationToken cancellationToken)
+    {
         var started = _timeProvider.GetTimestamp();
         var messages = run.InitialMessages.ToList();
         var continuation = run.Continuation;
@@ -128,7 +138,11 @@ internal sealed class AgentLoop(
             }
 
             modelCalls++;
+            var attempt = accounting.BeginCall().BeginAttempt();
+            request = request with { Accounting = attempt };
             ProjectChatResponse response;
+            Task<ProjectChatResponse>? chatTask = null;
+            var projected = false;
             using var chatDeadline = new CancellationTokenSource(
                 Remaining(started),
                 _timeProvider);
@@ -138,10 +152,23 @@ internal sealed class AgentLoop(
                     chatDeadline.Token);
             try
             {
-                var task = chatClient.GetResponseAsync(
+                chatTask = chatClient.GetResponseAsync(
                     request,
                     chatCancellation.Token);
-                response = await task.WaitAsync(chatCancellation.Token);
+                response = await chatTask.WaitAsync(chatCancellation.Token);
+                if (response?.CapturedResponseBodyBytes > AgentLimits.ResponseBytes)
+                {
+                    attempt.MarkFailed();
+                    attempt.RecordUsage(ProviderUsageObservation.Unknown);
+                }
+                else if (response?.Usage is { } usage)
+                {
+                    attempt.RecordUsage(ProviderUsageObservation.Create(
+                        usage.InputTokens, usage.OutputTokens,
+                        usage.ProviderUsage?.CacheReadInputTokens,
+                        usage.ProviderUsage?.UncachedInputTokens));
+                }
+                projected = response is not null;
             }
             catch (OperationCanceledException)
             {
@@ -172,6 +199,10 @@ internal sealed class AgentLoop(
                     modelCalls,
                     toolCalls,
                     events);
+            }
+            finally
+            {
+                attempt.Freeze(chatTask?.IsCompleted ?? true, projected);
             }
 
             stop = StopReason(started, cancellationToken);

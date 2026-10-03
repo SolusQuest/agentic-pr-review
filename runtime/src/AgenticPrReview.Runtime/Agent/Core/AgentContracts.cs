@@ -166,7 +166,8 @@ internal sealed record AgentRunOutcome(
     ReviewedIdentity? ReviewedIdentity,
     AgentDiagnostic? Diagnostic,
     ImmutableArray<AgentLogicalEvent> Events,
-    AgentContinuationCandidate? Continuation)
+    AgentContinuationCandidate? Continuation,
+    ProviderAccounting? Accounting = null)
 {
     internal bool CompletedSessionEligible =>
         Succeeded && Review is not null && ReviewedIdentity is not null;
