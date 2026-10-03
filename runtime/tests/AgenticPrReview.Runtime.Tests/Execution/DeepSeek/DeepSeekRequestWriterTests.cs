@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -123,16 +124,16 @@ public sealed class DeepSeekRequestWriterTests
                 "\"required\":[\"path\"],\"additionalProperties\":false}"),
             (
                 "search_text",
-                "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot. Omit path to search the current tracked files. If specifying path, use an exact current tracked path; use list_files first when membership is unknown. Historical paths may have been removed or renamed and do not establish current membership.",
+                "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot. Omit path to search the current tracked files. If specifying path, use an exact current tracked path; use list_files first when membership is unknown. Historical paths may have been removed or renamed and do not establish current membership. Results report scan/match/byte truncation explicitly. Narrow the query to reduce match/output pressure; select an exact path to reach files beyond the scan window. Search has no cursor. Only returned matches can ground evidence.",
                 "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," +
                 "\"path\":{\"type\":\"string\"}},\"required\":[\"query\"]," +
                 "\"additionalProperties\":false}"),
             (
                 "read_file",
-                "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot. When current path membership is unknown, use list_files first and copy the exact path. A path in accepted history may have been removed or renamed after the head changed; historical observations do not establish current tracked-file membership.",
+                "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot. When current path membership is unknown, use list_files first and copy the exact path. A path in accepted history may have been removed or renamed after the head changed; historical observations do not establish current tracked-file membership. Results report truncation explicitly; use start_line to request omitted lines that fit individually. Only returned lines can ground evidence.",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}," +
                 "\"start_line\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647}," +
-                "\"line_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":400}}," +
+                "\"line_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":800}}," +
                 "\"required\":[\"path\"],\"additionalProperties\":false}"),
             (
                 "finish_review",
@@ -514,7 +515,7 @@ public sealed class DeepSeekRequestWriterTests
     }
 
     [Fact]
-    public void ProjectsCrossRunToolResultsAboveOneRunAggregateLimit()
+    public void ProjectsCrossRunToolResultsAboveFormerAggregateLimit()
     {
         const int historicalResults = 9;
         var resultText = new string('r', 30 * 1024);
@@ -543,7 +544,7 @@ public sealed class DeepSeekRequestWriterTests
         var result = DeepSeekRequestWriter.Write(BuildRequest(messages.ToArray()));
 
         Assert.Equal(DeepSeekRequestWriteOutcome.Success, result.Outcome);
-        Assert.True(result.Body.Length > AgentLimits.ToolResultsTotalBytes);
+        Assert.True(result.Body.Length > 256 * 1024);
         Assert.True(result.Body.Length < DeepSeekTransportPolicy.RequestBodyMaxBytes);
     }
 
@@ -773,6 +774,61 @@ public sealed class DeepSeekRequestWriterTests
             [new MinimalChatMessage("user", [Text(canary)])]));
 
         Assert.DoesNotContain(canary, result.ToString());
+    }
+
+    [Fact]
+    public async Task C5SizedHistoricalResultsRejectNativeProjectionBeforePhysicalSend()
+    {
+        var identity = new ReviewedIdentity("repo", 1, new string('0', 40), new string('1', 40));
+        var line = new string('"', 20_000);
+        var result = new ReadFileResult("ok", identity, "a.txt",
+            AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(line + "\n")), 1, 1, 1, 1,
+            [new ReadFileLine(1, line)], false, null, null);
+        result = result with { ObservationId = AgentCanonical.HashDomain(AgentCanonical.ReadObservationDomain,
+            ReadFileResultWriter.Write(result, includeObservationId: false)) };
+        var resultText = Encoding.UTF8.GetString(ReadFileResultWriter.Write(result));
+        Assert.InRange(Encoding.UTF8.GetByteCount(resultText), 32 * 1024 + 1, 64 * 1024);
+        var messages = new List<MinimalChatMessage> { new("user", [Text("synthetic retained history")]) };
+        var items = new List<MinimalChatContinuationItem>();
+        for (var index = 0; index < 110; index++)
+        {
+            var position = messages.Count;
+            var reasoning = new MinimalChatContent("reasoning", null, null, "r", string.Empty,
+                DeepSeekReasoningContinuationCodec.FramingName, null, 0, 0);
+            messages.Add(new MinimalChatMessage("assistant", [reasoning,
+                Call("read" + index, "read_file", "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":1}")]));
+            items.Add(new MinimalChatContinuationItem("r", string.Empty,
+                DeepSeekReasoningContinuationCodec.FramingName, null, position, 0));
+            messages.Add(new MinimalChatMessage("tool", [Result("read" + index, resultText)]));
+        }
+        var request = BuildRequest(messages.ToArray(),
+            [new MinimalChatTool("read_file", AgentToolRegistry.ReadFileDescription, AgentToolRegistry.ReadFileSchema)],
+            new MinimalChatContinuation(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+                DeepSeekAdapterContext.Adapter, "capacity_history", items.ToArray()));
+        var oversized = DeepSeekRequestWriter.Write(request);
+        Assert.Equal(DeepSeekRequestWriteOutcome.RequestTooLarge, oversized.Outcome);
+        Assert.False(oversized.HasBody);
+        Assert.Equal(DeepSeekTransportPolicy.RequestRejectedCount, oversized.ActualCount);
+        var context = new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+            DeepSeekAdapterContext.Adapter, "capacity_history");
+        var small = request with
+        {
+            Messages = request.Messages.Select(message => message.Role == "tool"
+                ? message with { Contents = message.Contents.Select(content => content with { Text = "{}" }).ToArray() }
+                : message).ToArray(),
+        };
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, DeepSeekRequestWriter.Write(small).Outcome);
+        var controlTransport = new CountingTransport();
+        var controlFailure = await Assert.ThrowsAsync<ProjectChatNormalizationException>(() =>
+            new DeepSeekChatBackend(context, controlTransport).GetResponseAsync(small, CancellationToken.None));
+        Assert.Equal(1, controlTransport.Calls);
+        Assert.NotEqual(ProjectChatNormalizationReason.RequestProjection, controlFailure.Reason);
+        var transport = new CountingTransport();
+        var failure = await Assert.ThrowsAsync<ProjectChatNormalizationException>(() =>
+            new DeepSeekChatBackend(context, transport).GetResponseAsync(request, CancellationToken.None));
+        Assert.Equal(ProjectChatNormalizationReason.RequestProjection, failure.Reason);
+        Assert.Equal("agent_response_invalid", failure.DiagnosticCode);
+        Assert.Equal(0, transport.Calls);
     }
 
     private static MinimalChatRequest BuildRequest(

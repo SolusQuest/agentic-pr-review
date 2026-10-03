@@ -277,7 +277,7 @@ public sealed partial class AgentLoopTests
         var replayCall = Assert.IsType<ProjectToolCallContent>(
             Assert.Single(replayAssistant.Contents));
         Assert.Equal(
-            "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":400}",
+            "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":800}",
             replayCall.ArgumentsJson);
     }
 
@@ -1569,7 +1569,7 @@ public sealed partial class AgentLoopTests
 
         Assert.True(outcome.Succeeded);
         const string canonical =
-            "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":400}";
+            "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":800}";
         var replayCall = Assert.IsType<ProjectToolCallContent>(
             chat.Requests[1].Messages[1].Contents.Single());
         Assert.Equal(canonical, replayCall.ArgumentsJson);
@@ -2025,67 +2025,32 @@ public sealed partial class AgentLoopTests
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task AggregateToolResultByteCapIsExact(bool plusOne)
+    [Fact]
+    public async Task ResultsAboveFormerAggregateLimitSucceedInOrder()
     {
-        var responses = new List<ProjectChatResponse>
-        {
+        var chat = new ScriptedChatClient([
             ToolResponse(0, AgentLimits.ToolCallsPerResponse),
-        };
-        if (plusOne)
-        {
-            responses.Add(ToolResponse(AgentLimits.ToolCallsPerResponse, 1));
-        }
-        else
-        {
-            responses.Add(Response(TerminalCall("finish", "done"), 0, 0));
-        }
-
+            Response(TerminalCall("finish", "done"), 0, 0),
+        ]);
         var executor = new ScriptedToolExecutor(call =>
         {
             var search = Assert.IsType<PreparedSearchTextCall>(call);
-            var minimum = SearchSuccess(
-                search.Arguments,
-                "a.txt",
-                1).CanonicalResult!.Length;
-            var size = AgentLimits.ToolResultBytes;
-            if (plusOne &&
-                call.CallId == "call-" +
-                    (AgentLimits.ToolCallsPerResponse - 1))
-            {
-                size -= minimum - 1;
-            }
-            else if (plusOne &&
-                call.CallId == "call-" +
-                    AgentLimits.ToolCallsPerResponse)
-            {
-                size = minimum;
-            }
-
-            return SearchSuccess(
-                search.Arguments,
-                "a.txt",
-                1,
-                targetBytes: size);
+            return SearchSuccess(search.Arguments, "a.txt", 1,
+                targetBytes: AgentLimits.ToolResultBytes);
         });
-        var outcome = await new AgentLoop(
-            new ScriptedChatClient(responses),
-            executor).RunAsync(
-                Request(),
-                CancellationToken.None);
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(), CancellationToken.None);
 
-        if (plusOne)
-        {
-            AssertFailure(outcome, "tool_result_limit");
-            Assert.Equal(AgentLimits.ToolCallsPerResponse + 1, executor.Order.Count);
-        }
-        else
-        {
-            Assert.True(outcome.Succeeded);
-            Assert.Equal(AgentLimits.ToolCallsPerResponse, executor.Order.Count);
-        }
+        Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
+        Assert.True(outcome.CompletedSessionEligible);
+        Assert.Equal(Enumerable.Repeat("search_text", 8), executor.Order);
+        Assert.Equal(2, chat.Requests.Count);
+        var results = outcome.Events.OfType<AgentToolResultEvent>().ToArray();
+        Assert.Equal(8, results.Length);
+        Assert.Equal(Enumerable.Range(0, 8).Select(index => "call-" + index),
+            results.Select(result => result.CallId));
+        Assert.Equal(8 * 65_536, results.Sum(result => result.CanonicalResult.Length));
+        Assert.True(results.Sum(result => result.CanonicalResult.Length) > 256 * 1024);
     }
 
     [Fact]

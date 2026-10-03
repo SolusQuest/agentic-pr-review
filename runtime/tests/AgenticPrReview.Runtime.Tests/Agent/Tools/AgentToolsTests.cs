@@ -26,7 +26,7 @@ public sealed partial class AgentToolsTests
 
         Assert.True(execution.Succeeded);
         Assert.Equal(
-            "{\"status\":\"ok\",\"reviewed_identity\":{\"repository_id\":\"repo\",\"review_target\":1,\"base_sha\":\"0000000000000000000000000000000000000000\",\"head_sha\":\"1111111111111111111111111111111111111111\"},\"path\":\"a.txt\",\"raw_sha256\":\"87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7\",\"requested_start_line\":1,\"requested_line_count\":400,\"returned_start_line\":1,\"returned_end_line\":1,\"lines\":[{\"line\":1,\"text\":\"a\"}],\"truncated\":false,\"truncation_reason\":null,\"observation_id\":\"0976fa91a184d9a972b55b5ae937666030179d1204f131d66ec8146766714c19\"}",
+            "{\"status\":\"ok\",\"reviewed_identity\":{\"repository_id\":\"repo\",\"review_target\":1,\"base_sha\":\"0000000000000000000000000000000000000000\",\"head_sha\":\"1111111111111111111111111111111111111111\"},\"path\":\"a.txt\",\"raw_sha256\":\"87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7\",\"requested_start_line\":1,\"requested_line_count\":800,\"returned_start_line\":1,\"returned_end_line\":1,\"lines\":[{\"line\":1,\"text\":\"a\"}],\"truncated\":false,\"truncation_reason\":null,\"observation_id\":\"9dc0460fb3695f6fe2cec4b29f214220dc877b95e2c2af39c9315c86cbad36f2\"}",
             execution.ResultJson);
     }
 
@@ -46,7 +46,7 @@ public sealed partial class AgentToolsTests
             [],
             "{\"path\":\"empty.txt\"}");
         Assert.Equal(
-            "{\"status\":\"start_after_eof\",\"reviewed_identity\":{\"repository_id\":\"repo\",\"review_target\":1,\"base_sha\":\"0000000000000000000000000000000000000000\",\"head_sha\":\"1111111111111111111111111111111111111111\"},\"path\":\"empty.txt\",\"raw_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"requested_start_line\":1,\"requested_line_count\":400,\"returned_start_line\":null,\"returned_end_line\":null,\"lines\":[],\"truncated\":false,\"truncation_reason\":null,\"observation_id\":\"518e2251e8ff850e74ecb983b206824d7f2d3bc0c87585fff2e93f86f9e0ac99\"}",
+            "{\"status\":\"start_after_eof\",\"reviewed_identity\":{\"repository_id\":\"repo\",\"review_target\":1,\"base_sha\":\"0000000000000000000000000000000000000000\",\"head_sha\":\"1111111111111111111111111111111111111111\"},\"path\":\"empty.txt\",\"raw_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"requested_start_line\":1,\"requested_line_count\":800,\"returned_start_line\":null,\"returned_end_line\":null,\"lines\":[],\"truncated\":false,\"truncation_reason\":null,\"observation_id\":\"e7ef532fcc3845d88c0e21db5890c780a2d4a1d041d19eadcf5eea9cdba39316\"}",
             empty.ResultJson);
     }
 
@@ -55,7 +55,7 @@ public sealed partial class AgentToolsTests
     {
         var execution = await ExecuteReadAsync(
             "wide.txt",
-            Encoding.UTF8.GetBytes(new string('x', 40_000)),
+            Encoding.UTF8.GetBytes(new string('x', AgentLimits.ToolResultBytes)),
             "{\"path\":\"wide.txt\"}");
 
         Assert.True(execution.Succeeded);
@@ -111,6 +111,7 @@ public sealed partial class AgentToolsTests
         Assert.False(result.Succeeded);
         Assert.Equal("tool_file_too_large", result.FailureCode);
         Assert.Equal(0, access.ReadCount);
+        Assert.Equal(0, access.ProbeCount);
     }
 
     [Fact]
@@ -192,17 +193,17 @@ public sealed partial class AgentToolsTests
                     string.Concat(Enumerable.Repeat(wideLine, 100))),
             },
             "wide.txt");
-        Assert.Equal(32_175, wide.CanonicalResult!.Length);
+        Assert.Equal(62_547, wide.CanonicalResult!.Length);
         Assert.Contains(
-            "\"truncation_reason\":\"result_bytes\"",
+            "\"truncation_reason\":null",
             wide.ResultJson,
             StringComparison.Ordinal);
         Assert.Contains(
-            "\"observation_id\":\"16e6ad0bfe490a65817cdec1933bed30e12552e25fe05de9118432a1d9b0fde3\"",
+            "\"observation_id\":\"7f501fd335e320f12811e3706836a940885f7571d0bf7624aa068c187689d23b\"",
             wide.ResultJson,
             StringComparison.Ordinal);
         Assert.Equal(
-            "4e58cf6e2f5f7a87708105a09e332b1e9cf3ba517ef8ab9593a8e572f04f66df",
+            "ddb191f1ad701cc3f45aef6a81d63cf7a407b2746835049cab2a90a2d307e6fa",
             AgentCanonical.HashRaw(wide.CanonicalResult));
     }
 
@@ -308,7 +309,7 @@ public sealed partial class AgentToolsTests
     [InlineData("{\"path\":\"a\\u002etxt\"}", false)]
     [InlineData("{\"path\":\"a.txt\",\"unknown\":1}", false)]
     [InlineData("{\"path\":\"a.txt\",\"start_line\":0}", false)]
-    [InlineData("{\"path\":\"a.txt\",\"line_count\":401}", false)]
+    [InlineData("{\"path\":\"a.txt\",\"line_count\":801}", false)]
     public void ReadArgumentsAreClosedAndCanonical(string json, bool accepted)
     {
         Assert.Equal(
@@ -989,6 +990,8 @@ public sealed partial class AgentToolsTests
 
         internal int ReadCount { get; private set; }
 
+        internal int ProbeCount { get; private set; }
+
         public ReviewedFileMetadata InspectMetadata(
             ReviewedSnapshot snapshot,
             string path)
@@ -1007,6 +1010,7 @@ public sealed partial class AgentToolsTests
 
         public ReviewedFileProbe Probe(ReviewedSnapshot snapshot, string path)
         {
+            ProbeCount++;
             if (ProbeStatus != ReviewedFileAccessStatus.Success)
             {
                 return ProbeStatus == ReviewedFileAccessStatus.Unsafe

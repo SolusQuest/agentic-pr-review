@@ -24,7 +24,7 @@ public sealed class R5QualityCorpusTests
         Assert.Equal(13, result.Summary.ExecutedCases);
         Assert.Equal(13, result.Summary.VerifiedCases);
         Assert.Equal("8c33b8669e6ff85c43fa7dd267d48c2d94c80912b2ee3f407ce1f92e00b3b9f0", result.Summary.CorpusSha256);
-        Assert.Equal("02112a467153f28321b58e4f7f44105d8ea5128c57a818ec58f1c7169b3da679", result.Executions[0].Outcome.ConfigurationSha256);
+        Assert.Equal("0689a29a078b56ff73e7c160439620c8a464cbb2d73c5ba24ce7a34f365e0654", result.Executions[0].Outcome.ConfigurationSha256);
         Assert.Equal("00e26ee9a729f0ca5fba89cbe420804e3158d20f2157b39b10273785a74892fa", result.Executions[0].Outcome.CaseSha256);
         Assert.Equal(QualityCoverage.Cases.Select(spec => spec.Id), result.Executions.Select(item => item.Spec.Id));
         Assert.All(result.Summary.Cases, row => Assert.True(row.Verified, row.CaseId));

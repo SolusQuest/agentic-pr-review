@@ -71,7 +71,7 @@ public sealed partial class AgentSessionRoundTripTests
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.Equal(
-            "9bc8577e070ed7100747002d2ff78f4cf8e34c73f06a9877a3f1d597dcacabbd",
+            "e7cb3731be0e53166ece23e9d0d7c2484bdd626ea3045dcc443ce4cb587f80dd",
             artifact.SessionSha256);
         Assert.Equal(2627, artifact.Plaintext.Length);
         Assert.Equal("APRSES01", Encoding.ASCII.GetString(
@@ -306,13 +306,13 @@ public sealed partial class AgentSessionRoundTripTests
             [
                 (
                     2607,
-                    "b7601ef2fd66b84a4fd5857dd8282de3fff5e340216ee18a7459432defc5bdc7"),
+                    "514ce7c21025928fa2840b204ac9148f51ab6da77bb566b1b158055ebdbf6ccc"),
                 (
                     4162,
-                    "f3a72390ae2e687a7734f6072b7fd1b1352332819b3d2004e90b1dd868a4d89f"),
+                    "81fb248769837051ca8608150c93386c0892f9c86ffe49308286f7c93acc6e80"),
                 (
                     6015,
-                    "2efa9fd709b50a25968c9546d8aa5e89b8998d9743ea82ff1a7be35ae31205af"),
+                    "c878fb6046a75bc2af873716c451963e928ed3ef17791b8f9a5db1ea1e8f3278"),
             ],
             new[]
             {
@@ -2406,7 +2406,7 @@ public sealed partial class AgentSessionRoundTripTests
             "{\"path\":\"src/a.cs\"}",
             out var providerRead));
         const string canonicalRead =
-            "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":400}";
+            "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":800}";
         Assert.Equal(
             canonicalRead,
             Encoding.UTF8.GetString(providerRead!.CanonicalBytes));

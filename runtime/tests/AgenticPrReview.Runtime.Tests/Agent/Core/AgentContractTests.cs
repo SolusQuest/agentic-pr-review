@@ -27,10 +27,10 @@ public sealed class AgentContractTests
             ("parts_total", 8_192, "count"),
             ("content_bytes", 1_048_576, "bytes"),
             ("tool_arguments_bytes", 8_192, "bytes"),
-            ("tool_result_bytes", 32_768, "bytes"),
-            ("tool_results_total_bytes", 262_144, "bytes"),
-            ("read_file_raw_bytes", 65_536, "bytes"),
-            ("read_file_lines", 400, "lines"),
+            ("tool_result_bytes", 65_536, "bytes"),
+            ("tool_results_total_bytes", 8_388_608, "bytes"),
+            ("read_file_raw_bytes", 1_048_576, "bytes"),
+            ("read_file_lines", 800, "lines"),
             ("search_files", 100, "count"),
             ("search_raw_bytes", 8_388_608, "bytes"),
             ("search_file_bytes", 262_144, "bytes"),
@@ -80,9 +80,9 @@ public sealed class AgentContractTests
     [Fact]
     public void Output8192LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("671d94914fa572ce6e6381abe1546c0a20c881115ea214ded89ef61bd21a8189",
+        Assert.Equal("dbe36dba580fd8a3a5256b8c6710e462a58b477d84844cc33b2daf63c54614e6",
             AgentCanonical.LimitsSha256());
-        Assert.Equal("c094f392f5aea17a14a901601386bbbeefcf68b9993cb2b388d5b7ede733da88",
+        Assert.Equal("f41f3b63592f477edb251bcc2823b128e62d5b86507875e329c45e34facc66aa",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192));
         var current = AgentLimits.Registry;
         var candidate = AgentLimits.RegistryFor(AgentLimitProfile.Output8192);
@@ -105,7 +105,7 @@ public sealed class AgentContractTests
     [Fact]
     public void Output65536LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("5a12766b017658f1664f77911a3b9f0b043b5b7b71159369472297874fd13042",
+        Assert.Equal("fd38cb267ae80ae90a4de723baf5d51bd64d266a2b96f20b3cb2b7f46f779875",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536));
         var current = AgentLimits.Registry;
         var large = AgentLimits.RegistryFor(AgentLimitProfile.Output65536);
@@ -195,7 +195,7 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("search_text", search.Name);
                 Assert.Equal(
-                    "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot. Omit path to search the current tracked files. If specifying path, use an exact current tracked path; use list_files first when membership is unknown. Historical paths may have been removed or renamed and do not establish current membership.",
+                    "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot. Omit path to search the current tracked files. If specifying path, use an exact current tracked path; use list_files first when membership is unknown. Historical paths may have been removed or renamed and do not establish current membership. Results report scan/match/byte truncation explicitly. Narrow the query to reduce match/output pressure; select an exact path to reach files beyond the scan window. Search has no cursor. Only returned matches can ground evidence.",
                     search.Description);
                 Assert.Equal(AgentToolRegistry.SearchTextSchema, search.SchemaJson);
             },
@@ -203,7 +203,7 @@ public sealed class AgentContractTests
             {
                 Assert.Equal("read_file", read.Name);
                 Assert.Equal(
-                    "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot. When current path membership is unknown, use list_files first and copy the exact path. A path in accepted history may have been removed or renamed after the head changed; historical observations do not establish current tracked-file membership.",
+                    "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot. When current path membership is unknown, use list_files first and copy the exact path. A path in accepted history may have been removed or renamed after the head changed; historical observations do not establish current tracked-file membership. Results report truncation explicitly; use start_line to request omitted lines that fit individually. Only returned lines can ground evidence.",
                     read.Description);
                 Assert.Equal(AgentToolRegistry.ReadFileSchema, read.SchemaJson);
             },
@@ -223,10 +223,10 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "671d94914fa572ce6e6381abe1546c0a20c881115ea214ded89ef61bd21a8189",
+            "dbe36dba580fd8a3a5256b8c6710e462a58b477d84844cc33b2daf63c54614e6",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
-            "39b7291fbde316c6b0081c153fa960303d1d0e0ddeb9fc565bc0cbf821b5b502",
+            "50acece85187a24d6f9b8df4501dabe89c51db1b82c14c50747ef2f1d632561f",
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions));
 
         var original = AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);
