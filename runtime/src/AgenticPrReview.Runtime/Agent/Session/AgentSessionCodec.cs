@@ -313,6 +313,7 @@ internal static class AgentSessionCodec
         if (root.CompletedRuns is null || root.CompletedRuns.Length is < 1 or > AgentSessionFormat.MaximumCompletedRuns)
             return false;
         long entries = 0;
+        long parts = 0;
         long continuationBytes = 0;
         foreach (var run in root.CompletedRuns)
         {
@@ -322,8 +323,24 @@ internal static class AgentSessionCodec
             entries += records.GetArrayLength();
             if (entries > AgentLimits.SessionRecords) return false;
             foreach (var record in records.EnumerateArray())
-                if (record.ValueKind == JsonValueKind.Object && record.TryGetProperty("contents", out var contents) &&
-                    contents.ValueKind == JsonValueKind.Array && contents.GetArrayLength() > AgentLimits.PartsPerMessage) return false;
+            {
+                if (record.ValueKind != JsonValueKind.Object) continue;
+                if (record.TryGetProperty("contents", out var contents) && contents.ValueKind == JsonValueKind.Array)
+                {
+                    var count = contents.GetArrayLength();
+                    if (count > AgentLimits.PartsPerMessage) return false;
+                    // Each continuation slot becomes one continuation item during
+                    // reconstruction. Count it here, never again in the item array.
+                    parts = checked(parts + count);
+                }
+                else if (record.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String &&
+                    (kind.ValueEquals("review_context"u8) || kind.ValueEquals("tool_result"u8) ||
+                     kind.ValueEquals("tool_error"u8) || kind.ValueEquals("review_outcome"u8)))
+                {
+                    parts = checked(parts + 1);
+                }
+                if (parts > AgentLimits.PartsTotal) return false;
+            }
             if (!includeContinuation) continue;
             failureCode = AgentSessionCodes.ContinuationInvalid;
             if (!run.TryGetProperty("continuation", out var continuation) ||
