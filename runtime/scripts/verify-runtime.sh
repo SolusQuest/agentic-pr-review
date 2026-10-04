@@ -30,6 +30,7 @@ BOOTSTRAP_INPUT="${REPO_ROOT}/protocol/fixtures/v1/cases/bootstrap/input.json"
 BOOTSTRAP_EXPECTED_RESULT="${REPO_ROOT}/runtime/tests/fixtures/deterministic/bootstrap/expected-result.json"
 BOOTSTRAP_EXPECTED_TRACE="${REPO_ROOT}/runtime/tests/fixtures/deterministic/bootstrap/expected-trace.json"
 ACTION_HOST_FIXTURE="${REPO_ROOT}/runtime/tests/ActionHostFixture/verify-entrypoint.mjs"
+ACTION_HOST_WRAPPER_FIXTURE="${REPO_ROOT}/runtime/tests/ActionHostFixture/verify-wrapper.mjs"
 
 _tempdirs=()
 
@@ -122,6 +123,9 @@ run_framework() {
   _require_file "${ACTION_HOST_FIXTURE}"
   node "${ACTION_HOST_FIXTURE}" framework "$(command -v dotnet)" \
     "${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/bin/Release/net10.0/AgenticPrReview.Runtime.dll"
+  _require_file "${ACTION_HOST_WRAPPER_FIXTURE}"
+  node "${ACTION_HOST_WRAPPER_FIXTURE}" framework "$(command -v dotnet)" \
+    "${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/bin/Release/net10.0/AgenticPrReview.Runtime.dll"
 }
 
 run_aot() {
@@ -166,6 +170,8 @@ run_aot() {
   cmp "${trace}" "${BOOTSTRAP_EXPECTED_TRACE}"
   _require_file "${ACTION_HOST_FIXTURE}"
   node "${ACTION_HOST_FIXTURE}" native "${binary}"
+  _require_file "${ACTION_HOST_WRAPPER_FIXTURE}"
+  node "${ACTION_HOST_WRAPPER_FIXTURE}" native "${binary}"
 }
 
 run_all() {

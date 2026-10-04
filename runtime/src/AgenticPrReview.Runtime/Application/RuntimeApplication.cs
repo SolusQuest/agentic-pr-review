@@ -13,9 +13,9 @@ namespace AgenticPrReview.Runtime;
 
 public sealed class RuntimeApplication
 {
-    // This is the current lockstep wrapper handshake, not proof selection or
-    // independently versioned protocol negotiation.
-    internal const string ActionHostBuildDiscriminator = "r4-w2";
+    // Fixed ordinary-production handshake. r4-w2 belongs to the separate
+    // repository proof payload and requires proof-only profiles and receipts.
+    internal const string ActionHostBuildDiscriminator = "r7-d0";
     internal static readonly string RuntimeVersion = GetRuntimeVersion();
     private const string Summary = "Deterministic fixture runtime completed without findings.";
     private const string Limitation = "No live provider was invoked.";

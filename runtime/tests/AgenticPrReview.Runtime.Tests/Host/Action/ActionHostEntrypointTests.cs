@@ -36,9 +36,12 @@ public sealed class ActionHostEntrypointTests
         yield return ["unknown_member", Frame(Encoding.UTF8.GetBytes(
             "{\"private_canary\":\"" + PrivateCanary + "\"," + text[1..]))];
         yield return ["duplicate", Frame(Encoding.UTF8.GetBytes(text.Replace(
-            "\"build_discriminator\":\"r4-w2\"",
-            "\"build_discriminator\":\"r4-w2\",\"build_discriminator\":\"r4-w2\"")))];
-        yield return ["wrong_build", Frame(Encoding.UTF8.GetBytes(text.Replace("r4-w2", "other-build")))];
+            "\"build_discriminator\":\"r7-d0\"",
+            "\"build_discriminator\":\"r7-d0\",\"build_discriminator\":\"r7-d0\"")))];
+        foreach (var build in new[] { "other-build", "r4-w2", "r4-h1" })
+        {
+            yield return ["foreign_build_" + build, Frame(Encoding.UTF8.GetBytes(text.Replace("r7-d0", build)))];
+        }
     }
 
     [Theory]

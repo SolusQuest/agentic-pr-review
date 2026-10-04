@@ -48,7 +48,7 @@ const launch = {
   workflow_sha: 'a'.repeat(40),
   action_source_sha: 'b'.repeat(40),
   payload_sha256: 'f'.repeat(64),
-  build_discriminator: 'r4-w2',
+  build_discriminator: 'r7-d0',
   cancellation: 'active',
   artifact_bridge_endpoint: `http://127.0.0.1:1/${privateCanary}`,
 };
@@ -159,7 +159,7 @@ function assertCompletion(result, status, exitClass) {
     'summary',
     'termination_reason',
   ]);
-  assert.equal(completion.build_discriminator, 'r4-w2');
+  assert.equal(completion.build_discriminator, 'r7-d0');
   assert.equal(completion.status, status);
   assert.equal(completion.exit_class, exitClass);
   assert.equal(completion.process_exit_code, result.code);
@@ -215,12 +215,14 @@ try {
     frame(
       Buffer.from(
         text.replace(
-          '"build_discriminator":"r4-w2"',
-          '"build_discriminator":"r4-w2","build_discriminator":"r4-w2"',
+          '"build_discriminator":"r7-d0"',
+          '"build_discriminator":"r7-d0","build_discriminator":"r7-d0"',
         ),
       ),
     ),
     launchFrame({ ...launch, build_discriminator: 'wrong-build' }),
+    launchFrame({ ...launch, build_discriminator: 'r4-w2' }),
+    launchFrame({ ...launch, build_discriminator: 'r4-h1' }),
   ];
   for (const bytes of invalid) {
     const result = await run(bytes);
