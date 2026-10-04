@@ -23,6 +23,20 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 [Collection(ProcessEnvironmentCollection.Name)]
 public sealed class R6ComparisonTests
 {
+    [Theory]
+    [InlineData(8, true)]
+    [InlineData(9, false)]
+    public void RetainedComparisonOrdinalDomainEndsAtEight(int ordinal, bool admitted)
+    {
+        var sample = Histories(Make("r7-retained-count"), [History()], "stable_continuity");
+        sample = sample with { Evidence = sample.Evidence with
+        { Expectations = [sample.Evidence.Expectations[0] with { CallOrdinal = ordinal }] } };
+        var input = Pair(sample, sample).Left;
+        Assert.Equal(admitted, ComparisonJson.ReadInput(ComparisonJson.WriteInput(input)) is not null);
+    }
+
+
+
     private const string Canary = "APR277_PRIVATE_CANARY";
     private static string Hash(char c) => new(c, 64);
     private sealed record Sample(PricingReportDocument Pricing, ComparisonEvidence Evidence);

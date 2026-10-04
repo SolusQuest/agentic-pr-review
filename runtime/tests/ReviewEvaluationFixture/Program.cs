@@ -146,6 +146,8 @@ internal static class Program
 // cannot pass silently.
 internal static class R5CaseVerifier
 {
+    // Preserve evaluator monetary authority independently of production model-call capacity.
+    private const long GeneratedSpendPerEvaluationMicroUsd = 8000;
     private const string VerdictSchema = "r5-v1-verdict-v1";
     private const string TempRootMarker = ".r5-v1-temp-root";
 
@@ -809,6 +811,7 @@ internal static class R5CaseVerifier
                 ? LiveCoverageCases : QualityCases;
             if (!fixture.Runs.Select(r => r.Input.CaseId).SequenceEqual(declared))
                 return Reject("r5-plan", "rejected_case_mismatch");
+            var limits = DeepSeekAdapterContext.LimitAuthorityFor(profile).Profile;
             var plan = new JsonObject
             {
                 ["format"] = LiveLimits.PlanFormat,
@@ -836,13 +839,14 @@ internal static class R5CaseVerifier
                 {
                     ["max_evaluations"] = declared.Length,
                     ["max_model_calls"] = declared.Length * AgentLimits.ModelCalls,
-                    ["max_input_tokens"] = declared.Length * AgentLimits.ModelCalls * 8192L,
-                    ["max_output_tokens"] = declared.Length * AgentLimits.ModelCalls *
-                        (profile == DeepSeekRequestProfile.Current ? 512L : DeepSeekRequestWriter.MaxTokensFor(profile)),
-                    ["max_combined_tokens"] = declared.Length * AgentLimits.ModelCalls *
-                        (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + DeepSeekRequestWriter.MaxTokensFor(profile)),
+                    ["max_input_tokens"] = declared.Length * Math.Min(AgentLimits.InputTokens,
+                        AgentLimits.ModelCalls * 8192L),
+                    ["max_output_tokens"] = declared.Length * Math.Min(AgentLimits.OutputTokensFor(limits),
+                        AgentLimits.ModelCalls * (profile == DeepSeekRequestProfile.Current ? 512L : DeepSeekRequestWriter.MaxTokensFor(profile))),
+                    ["max_combined_tokens"] = declared.Length * Math.Min(AgentLimits.CombinedTokensFor(limits),
+                        AgentLimits.ModelCalls * (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + DeepSeekRequestWriter.MaxTokensFor(profile))),
                     ["max_seconds"] = 600,
-                    ["spend_ceiling_micro_usd"] = declared.Length * AgentLimits.ModelCalls * 1000L,
+                    ["spend_ceiling_micro_usd"] = declared.Length * GeneratedSpendPerEvaluationMicroUsd,
                     ["per_call"] = new JsonObject
                     {
                         ["max_input_tokens"] = 8192,

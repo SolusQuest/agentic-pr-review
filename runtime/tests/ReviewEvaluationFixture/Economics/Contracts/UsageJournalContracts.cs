@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
@@ -11,7 +10,8 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 internal static class UsageJournalLimits
 {
     internal const int Attempts = LiveLimits.ExpandedEvaluations;
-    internal const int CallsPerAttempt = AgentLimits.ModelCalls;
+    // Retained R6 portable evidence domain, independent of current production capacity.
+    internal const int CallsPerAttempt = 8;
     internal const int Calls = Attempts * CallsPerAttempt;
     internal const int JsonBytes = 4 * 1024 * 1024;
     internal const int Depth = 12;

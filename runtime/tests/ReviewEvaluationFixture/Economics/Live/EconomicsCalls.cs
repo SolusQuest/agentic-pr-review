@@ -17,7 +17,10 @@ internal sealed class EconomicsCalls : ILiveAttemptObserver
         lock (gate)
         {
             if (sealedCalls) return null;
-            if (calls.Count >= 8 || calls.LastOrDefault() is { Ended: false })
+            // The independent child budget permits eight sends. One final
+            // logical observation records its refusal, without another send.
+            if (calls.Count >= 9 || calls.LastOrDefault() is { Ended: false } ||
+                calls.Count == 8 && calls.Any(call => !call.CompletedDispatch))
                 throw new InvalidOperationException("r6_economics_call_invalid");
             var call = new Call(this, calls.Count + 1); calls.Add(call); return call;
         }
@@ -41,11 +44,13 @@ internal sealed class EconomicsCalls : ILiveAttemptObserver
         private string transport = "not_dispatched", chat = "not_observed";
         private UsageJournalUsage? usage;
         private bool Mutable => !owner.sealedCalls && !Ended;
+        internal bool CompletedDispatch => Ended && dispatched && transport == "success" &&
+            chat == "returned" && usage is not null;
         public bool Dispatch()
         {
             lock (owner.gate)
             {
-                if (!Mutable || dispatched || transportObserved) return false;
+                if (!Mutable || dispatched || transportObserved || ordinal > 8) return false;
                 dispatched = true; transport = "incomplete"; return true;
             }
         }

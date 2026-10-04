@@ -22,14 +22,19 @@ public sealed class AgentToolResultBudgetTests
     }
 
     [Fact]
-    public void CurrentCallLimitCannotReachTheNominalAggregateCeiling()
+    public void MaximumResultsReachTheAggregateCeilingBeforeTheCallLimit()
     {
         long bytes = 0;
-        for (var call = 0; call < AgentLimits.ToolCalls; call++)
+        const int results = 128;
+        for (var call = 0; call < results; call++)
         {
             Assert.True(AgentToolResultBudget.TryAdd(bytes, AgentLimits.ToolResultBytes, out bytes));
         }
-        Assert.Equal(1_572_864, bytes);
-        Assert.True(bytes < AgentLimits.ToolResultsTotalBytes);
+        Assert.Equal(8_388_608, bytes);
+        Assert.True(results < AgentLimits.ToolCalls);
+        Assert.False(AgentToolResultBudget.TryAdd(bytes, 1, out var next));
+        Assert.Equal(bytes, next);
+        Assert.False(AgentToolResultBudget.TryAdd(bytes, AgentLimits.ToolResultBytes, out next));
+        Assert.Equal(bytes, next);
     }
 }

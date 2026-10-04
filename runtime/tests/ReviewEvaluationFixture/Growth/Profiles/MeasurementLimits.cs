@@ -8,14 +8,16 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
 // aea38e3f8f14eeae3e2dc915598aade031b3c6e7; only current production admission executes.
 internal sealed record MeasurementLimits(int RequestBytes, int Messages, int PartsTotal,
     int SessionRecords, int ContinuationTotalBytes, int SessionPlaintextBytes,
-    int StateEnvelopeBytes, int StateScopeTotalBytes)
+    int StateEnvelopeBytes, int StateScopeTotalBytes,
+    int ModelCalls, int ToolCalls, int ToolCallsPerResponse)
 {
     internal static MeasurementLimits Historical { get; } = new(1_048_576, 64, 256,
-        256, 262_144, 1_048_576, 2_097_152, 6_291_456);
+        256, 262_144, 1_048_576, 2_097_152, 6_291_456, 8, 24, 8);
     internal static MeasurementLimits Current { get; } = new(AgentLimits.RequestBytes,
         AgentLimits.Messages, AgentLimits.PartsTotal, AgentLimits.SessionRecords,
         AgentLimits.ContinuationTotalBytes, AgentLimits.SessionPlaintextBytes,
-        AgentLimits.StateEnvelopeBytes, AgentLimits.StateScopeTotalBytes);
+        AgentLimits.StateEnvelopeBytes, AgentLimits.StateScopeTotalBytes,
+        AgentLimits.ModelCalls, AgentLimits.ToolCalls, AgentLimits.ToolCallsPerResponse);
 
     internal static string HistoricalGrowthCorpus(string root)
     {

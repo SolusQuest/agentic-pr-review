@@ -521,14 +521,203 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Fact]
-    public async Task EighthNonterminalResponseStopsAtTheProductLimitWithoutNinthSend()
+    public async Task EightSendScopeRecordsNinthLogicalRefusalWithoutNinthSend()
     {
         using var files = new Inputs();
-        var result = await EconomicsRunner.RunAsync(files.PlanPath, false, new() { Fault = EconomicsFault.EightCalls, FaultIndex = 0 });
-        Assert.Equal("representative_history_insufficient", result.StopReason);
-        Assert.Equal(8, result.Journal!.Totals.ActualSends); Assert.Equal(8, result.Journal.Reservations.Calls);
-        Assert.Equal(8, result.Allocations.Calls); Assert.Equal(2, result.Journal.Totals.Unattempted);
+        WriteWideReplay(files, batches: 1);
+        var captured = false;
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false, new()
+        {
+            Fault = EconomicsFault.EightCalls, FaultIndex = 0,
+            Process = async (input, credential, token) =>
+            {
+                var observed = await EconomicsProcess.RunAsync(input, credential, token);
+                var receipt = Assert.IsType<EconomicsReceipt>(observed.Receipt);
+                Assert.Equal(9, receipt.Measurement.Calls);
+                Assert.Equal(9, receipt.Calls.Length);
+                Assert.Equal(8, receipt.Calls.Count(call => call.Dispatched));
+                Assert.Equal(8, receipt.Accounting.Sends);
+                Assert.Equal(128, receipt.ToolCalls);
+                Assert.Equal(new EconomicsCall(9, false, "budget_refused", "threw", "not_sent", null), receipt.Calls[^1]);
+                var plan = EconomicsPlan.Admit(input.Plan, false);
+                var run = EconomicsWorkload.Load(plan, token).Run(input.Slot, input.Campaign);
+                Assert.True(EconomicsJournal.ValidReceipt(input, observed.Ready, receipt, plan, run));
+                Assert.True(EconomicsJournal.ValidObservation(EconomicsJournal.Observe(receipt), LocalFailedStep(receipt)));
+                Assert.False(EconomicsJournal.ValidReceipt(input, observed.Ready, receipt with { ToolCalls = 129 }, plan, run));
+                // The campaign selection does not declare this child-local stop.
+                // Keep complete journal/pricing admission instead of fabricating24 reservations.
+                Assert.Null(EconomicsJournal.Create(plan, input.Campaign, input.Transport, [receipt], "infrastructure_failed"));
+                captured = true;
+                return observed;
+            },
+        });
+        Assert.True(captured);
+        Assert.Equal("receipt_invalid", result.StopReason);
+        Assert.Equal(8, result.Allocations.Calls);
+        Assert.Equal(1, result.ReceiptMissing);
+        Assert.Null(result.Journal);
+        Assert.Null(result.Pricing);
+        Assert.Equal("unavailable_missing_receipt", result.C1Handoff);
+        Assert.False(result.UsageComplete);
+        Assert.False(result.MonetaryComplete);
         Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
+    }
+
+    [Theory]
+    [InlineData("dispatched")]
+    [InlineData("refusal")]
+    [InlineData("request_rejected")]
+    [InlineData("chat")]
+    [InlineData("usage")]
+    [InlineData("ordinal")]
+    [InlineData("order")]
+    [InlineData("preceding_refusal")]
+    [InlineData("multiple_refusal")]
+    [InlineData("extra")]
+    public async Task ForgedNinthObservationRejectsRealReceiptAndStrictReportObservation(string mutation)
+    {
+        using var files = new Inputs();
+        var captured = false;
+        var rejected = await EconomicsRunner.RunAsync(files.PlanPath, false, new()
+        {
+            Fault = EconomicsFault.EightCalls, FaultIndex = 0,
+            Process = async (input, credential, token) =>
+            {
+                var observed = await EconomicsProcess.RunAsync(input, credential, token);
+                var receipt = Assert.IsType<EconomicsReceipt>(observed.Receipt);
+                Assert.Equal(9, receipt.Calls.Length);
+                var plan = EconomicsPlan.Admit(input.Plan, false);
+                var run = EconomicsWorkload.Load(plan, token).Run(input.Slot, input.Campaign);
+                Assert.True(EconomicsJournal.ValidReceipt(input, observed.Ready, receipt, plan, run));
+                var step = LocalFailedStep(receipt);
+                Assert.True(EconomicsJournal.ValidObservation(EconomicsJournal.Observe(receipt), step));
+                var changed = CorruptNinthObservation(receipt.Calls, mutation);
+                var forged = receipt with { Calls = changed, Measurement = receipt.Measurement with { Calls = changed.Length } };
+                Assert.False(EconomicsJournal.ValidReceipt(input, observed.Ready, forged, plan, run));
+                Assert.False(EconomicsJournal.ValidObservation(EconomicsJournal.Observe(forged), step));
+                captured = true;
+                return observed with { Receipt = forged };
+            },
+        });
+        Assert.Equal("receipt_invalid", rejected.StopReason);
+        Assert.True(captured);
+        Assert.Equal(1, rejected.ReceiptMissing);
+        Assert.Equal(8, rejected.Allocations.Calls);
+        Assert.False(rejected.Steps[0].Accepted);
+        Assert.Null(rejected.Journal);
+        Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(rejected)));
+    }
+
+    [Fact]
+    public async Task LowTokenWideBatchesExecute80ToolsWithinEightSendsAndRetainPortableReport()
+    {
+        using var files = new Inputs();
+        WriteWideReplay(files, batches: 5);
+        var result = await EconomicsRunner.RunAsync(files.PlanPath, false, new()
+        {
+            Process = async (input, credential, token) =>
+            {
+                var observed = await EconomicsProcess.RunAsync(input, credential, token);
+                if (input.Slot.Index != 0) return observed;
+                var receipt = Assert.IsType<EconomicsReceipt>(observed.Receipt);
+                Assert.Equal(80, receipt.ToolCalls);
+                Assert.Equal(6, receipt.Accounting.Sends);
+                var plan = EconomicsPlan.Admit(input.Plan, false);
+                var run = EconomicsWorkload.Load(plan, token).Run(input.Slot, input.Campaign);
+                Assert.True(EconomicsJournal.ValidReceipt(input, observed.Ready, receipt, plan, run));
+                Assert.False(EconomicsJournal.ValidReceipt(input, observed.Ready, receipt with { ToolCalls = 129 }, plan, run));
+                Assert.False(EconomicsJournal.ValidReceipt(input, observed.Ready, receipt with { ToolCalls = 97 }, plan, run));
+                return observed;
+            },
+        });
+        Assert.Equal("complete", result.StopReason);
+        Assert.Equal(80, result.Steps[0].ToolCalls);
+        Assert.Equal(6, result.Steps[0].Observation!.Reservations);
+        Assert.Equal(0, result.ReceiptMissing);
+        Assert.NotNull(EconomicsReportJson.Read(EconomicsReportJson.Write(result)));
+        Assert.NotNull(UsageJournal.Admit(result.Journal));
+        var pricing = JsonSerializer.SerializeToUtf8Bytes(result.Pricing, PricingJsonContext.Default.PricingReportDocument);
+        Assert.NotNull(PricingJson.Read(pricing));
+        var forged = result with { Steps = result.Steps.SetItem(0, result.Steps[0] with { ToolCalls = 129 }) };
+        Assert.Null(EconomicsReportJson.Read(JsonSerializer.SerializeToUtf8Bytes(forged, EconomicsLiveJson.Default.EconomicsReport)));
+        var aboveSentBatches = result with { Steps = result.Steps.SetItem(0, result.Steps[0] with { ToolCalls = 97 }) };
+        Assert.Null(EconomicsReportJson.Read(JsonSerializer.SerializeToUtf8Bytes(aboveSentBatches, EconomicsLiveJson.Default.EconomicsReport)));
+    }
+
+    private static EconomicsStep LocalFailedStep(EconomicsReceipt receipt) => new(
+        receipt.Index, receipt.Evaluation!.CaseId, receipt.Code, "complete", true,
+        receipt.Evaluation.AttemptSha256, "failed", receipt.Restored, false, false, false, false,
+        receipt.ProcessId, receipt.Startup, 0, 1, null, null, receipt.PredecessorSha256,
+        receipt.ToolCalls, EconomicsJournal.Observe(receipt));
+
+    // Alter only a task-private copied replay corpus; archived fixtures stay byte-exact.
+    private static void WriteWideReplay(Inputs files, int batches)
+    {
+        var replay = Path.Combine(files.Root, "wide-replay");
+        Directory.CreateDirectory(replay);
+        foreach (var path in Directory.GetFiles(files.Plan.Replay.Path))
+            File.Copy(path, Path.Combine(replay, Path.GetFileName(path)));
+        var scriptPath = Path.Combine(replay, "script-0.json");
+        var script = JsonNode.Parse(File.ReadAllText(scriptPath))!;
+        var first = script["turns"]![0]!;
+        var original = first["tool_calls"]!.AsArray();
+        var turns = new JsonArray();
+        for (var batch = 0; batch < batches; batch++)
+        {
+            var turn = first.DeepClone();
+            turn["tool_calls"] = new JsonArray(Enumerable.Range(0, 16).Select(index =>
+            {
+                var call = original[index % original.Count]!.DeepClone();
+                if (batch != 0 || index >= original.Count) call["id"] = $"wide-{batch}-{index}";
+                return call;
+            }).ToArray());
+            turns.Add(turn);
+        }
+        turns.Add(script["turns"]!.AsArray()[^1]!.DeepClone());
+        script["turns"] = turns;
+        File.WriteAllText(scriptPath, script.ToJsonString());
+        var manifestPath = Path.Combine(replay, "manifest.json");
+        var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!;
+        var member = manifest["files"]!.AsArray().Single(item => item!["path"]!.GetValue<string>() == "script-0.json")!;
+        var scriptBytes = File.ReadAllBytes(scriptPath);
+        member["length"] = scriptBytes.Length;
+        member["sha256"] = AgentCanonical.HashRaw(scriptBytes);
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+        files.Write(EconomicsCommand.Prepare(replay, files.Plan.Growth.Path, files.Plan.TariffPath, files.Plan.Scenarios));
+    }
+
+    private static ImmutableArray<EconomicsCall> CorruptNinthObservation(
+        ImmutableArray<EconomicsCall> calls, string mutation) => mutation switch
+    {
+        "dispatched" => calls.SetItem(8, calls[0] with { Ordinal = 9 }),
+        "refusal" => calls.SetItem(8, calls[8] with { TransportOutcome = "violation_refused" }),
+        "request_rejected" => calls.SetItem(8, calls[8] with { TransportOutcome = "request_rejected" }),
+        "chat" => calls.SetItem(8, calls[8] with { ChatOutcome = "returned" }),
+        "usage" => calls.SetItem(8, calls[8] with { Usage = calls[0].Usage }),
+        "ordinal" => calls.SetItem(8, calls[8] with { Ordinal = 8 }),
+        "order" => calls.SetItem(0, calls[1]).SetItem(1, calls[0]),
+        "preceding_refusal" => calls.SetItem(0, calls[8] with { Ordinal = 1 }),
+        "multiple_refusal" => calls.SetItem(7, calls[8] with { Ordinal = 8 }),
+        _ => calls.Add(calls[8] with { Ordinal = 10 }),
+    };
+
+    [Fact]
+    public void EightCompletedSendsPermitOnlyOneNondispatchableRefusalObserver()
+    {
+        var observer = new EconomicsCalls();
+        for (var ordinal = 1; ordinal <= 8; ordinal++)
+        {
+            var call = observer.BeginCall()!;
+            Assert.True(call.Dispatch());
+            call.TransportFinished(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes("{}")));
+            call.Returned(new ProjectChatUsage(1, 1));
+        }
+        var refused = observer.BeginCall()!;
+        Assert.False(refused.Dispatch());
+        refused.Refuse("budget_refused");
+        refused.Threw();
+        Assert.Throws<InvalidOperationException>(() => observer.BeginCall());
+        Assert.Equal(new EconomicsCall(9, false, "budget_refused", "threw", "not_sent", null), observer.Seal(false)[^1]);
     }
 
     [Theory]

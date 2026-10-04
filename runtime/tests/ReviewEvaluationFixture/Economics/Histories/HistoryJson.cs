@@ -1,7 +1,6 @@
 using System.Text.Json;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles;
 using System.Text.Json.Serialization;
-using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
@@ -39,11 +38,11 @@ internal static class HistoryJson
             HistoryCapture.Safe(row.Capture, limits) && Bound(row.Capture, report, index) && row.Comparison is not null &&
             (row.Comparison.Code == "compared" ? row.Comparison.LogicalStable is not null && row.Comparison.ProviderStable is not null :
                 row.Comparison.Code is "unavailable" or "incomparable" && row.Comparison.LogicalStable is null && row.Comparison.ProviderStable is null) &&
-            (row.Capacity is null || row.Capacity.Calls is >= 1 and <= AgentLimits.ModelCalls &&
+            (row.Capacity is null || row.Capacity.Calls >= 1 && row.Capacity.Calls <= limits.ModelCalls &&
                 row.Capacity.LastProjectRequestBytes >= 1 && row.Capacity.LastProjectRequestBytes <= limits.RequestBytes &&
                 row.Capacity.LastMessages >= 1 && row.Capacity.LastMessages <= limits.Messages &&
                 row.Capacity.LastResponseMessages >= row.Capacity.LastMessages &&
-                row.Capacity.LastResponseMessages <= limits.Messages + AgentLimits.ToolCallsPerResponse + 1 &&
+                row.Capacity.LastResponseMessages <= limits.Messages + limits.ToolCallsPerResponse + 1 &&
                 row.Capacity.LastContinuationBeforeBytes >= 0 && row.Capacity.LastContinuationBeforeBytes <= limits.ContinuationTotalBytes &&
                 row.Capacity.LastContinuationAfterBytes >= row.Capacity.LastContinuationBeforeBytes &&
                 row.Capacity.LastContinuationAfterBytes <= 2L * limits.ContinuationTotalBytes)).All(valid => valid) &&

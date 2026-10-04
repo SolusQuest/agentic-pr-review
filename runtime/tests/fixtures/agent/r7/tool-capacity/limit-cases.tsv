@@ -2,8 +2,8 @@ case	status	action	code	model_calls	tool_calls	provider_requests	store_calls	ses
 caller-cancellation	failed	loop	agent_cancelled	0	0	0	0	0	false	false
 deadline-before-model	failed	loop	agent_deadline_exceeded	0	0	0	0	0	false	false
 deadline-after-tool	failed	loop	agent_deadline_exceeded	1	1	1	0	0	false	false
-model-limit	failed	loop	agent_model_limit	8	8	8	0	0	false	false
-tool-limit	failed	loop	agent_tool_limit	4	24	4	0	0	false	false
+model-limit	failed	loop	agent_model_limit	64	64	64	0	0	false	false
+tool-limit	failed	loop	agent_tool_limit	33	512	33	0	0	false	false
 token-limit	failed	loop	agent_token_limit	1	0	1	0	0	false	false
 request-cap	passed	loop	none	1	1	1	0	0	false	false
 request-cap-plus-one	failed	loop	agent_request_too_large	0	0	0	0	0	false	false

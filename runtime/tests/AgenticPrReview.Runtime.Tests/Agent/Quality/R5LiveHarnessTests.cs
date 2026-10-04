@@ -918,7 +918,7 @@ public sealed class R5LiveHarnessTests
                 case "zero-seconds": document["bounds"]!["max_seconds"] = 0; break;
                 case "negative-tokens": document["bounds"]!["max_input_tokens"] = -1; break;
                 case "oversize-evals": document["bounds"]!["max_evaluations"] = 257; break;
-                case "oversize-calls": document["bounds"]!["max_model_calls"] = 33; break;
+                case "oversize-calls": document["bounds"]!["max_model_calls"] = 257; break;
                 case "percall-input-over-total": document["bounds"]!["per_call"]!["max_input_tokens"] = 524289; break;
                 case "percall-output-over-wire": document["bounds"]!["per_call"]!["max_output_tokens"] = 4097; break;
                 case "percall-over-combined": document["bounds"]!["max_combined_tokens"] = 1000; break;

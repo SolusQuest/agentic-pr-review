@@ -360,7 +360,7 @@ public sealed class R3QualityCorpusTests
             { "not_evaluated", "quality", R3QualityCodes.ProductFailed, "source", 0, 0, null },
             { "not_evaluated", "tool", R3QualityCodes.ToolFailed, "source", 0, 0, terminal },
             { "failed", "quality", R3QualityCodes.ExpectedFindingMissing, null, 21, 0, terminal },
-            { "failed", "quality", R3QualityCodes.ExpectedFindingMissing, null, 0, 25, terminal },
+            { "failed", "quality", R3QualityCodes.ExpectedFindingMissing, null, 0, 513, terminal },
         };
     }
 

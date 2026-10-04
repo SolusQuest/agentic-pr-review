@@ -24,9 +24,9 @@ internal static class NegativeProofRunner
             ["deadline-after-tool"] =
                 "failed\tloop\tagent_deadline_exceeded\t1\t1\t1\t0\t0\tfalse\tfalse",
             ["model-limit"] =
-                "failed\tloop\tagent_model_limit\t8\t8\t8\t0\t0\tfalse\tfalse",
+                "failed\tloop\tagent_model_limit\t64\t64\t64\t0\t0\tfalse\tfalse",
             ["tool-limit"] =
-                "failed\tloop\tagent_tool_limit\t4\t24\t4\t0\t0\tfalse\tfalse",
+                "failed\tloop\tagent_tool_limit\t33\t512\t33\t0\t0\tfalse\tfalse",
             ["token-limit"] =
                 "failed\tloop\tagent_token_limit\t1\t0\t1\t0\t0\tfalse\tfalse",
             ["request-cap"] =
@@ -588,13 +588,13 @@ internal static class NegativeProofRunner
         var identity = ProofScenario.BootstrapIdentity();
         var providerCanary = CanarySet.Provider(
             "issue88-negative-tool-limit");
-        Func<byte[], ProviderServerResponse>[] scripts =
-        [
-            body => ProviderScripts.ReadCalls(body, ProofScenario.ReviewedPath, 0, 8),
-            body => ProviderScripts.ReadCalls(body, ProofScenario.ReviewedPath, 8, 8),
-            body => ProviderScripts.ReadCalls(body, ProofScenario.ReviewedPath, 16, 8),
-            body => ProviderScripts.ReadCalls(body, ProofScenario.ReviewedPath, 24, 1),
-        ];
+        // Low usage and small real read results isolate the tool budget from
+        // independent model/token/byte/time bounds. The final batch is denied.
+        var scripts = Enumerable.Range(0, 32)
+            .Select<int, Func<byte[], ProviderServerResponse>>(batch =>
+                body => ProviderScripts.ReadCalls(body, ProofScenario.ReviewedPath, batch * 16, 16))
+            .Append(body => ProviderScripts.ReadCalls(body, ProofScenario.ReviewedPath, 512, 1))
+            .ToArray();
         await using var server = StrictLoopbackServer.Start(
             providerCanary,
             scripts);
@@ -616,9 +616,9 @@ internal static class NegativeProofRunner
             HasDiagnostic(
                 outcome,
                 AgentFailureCodes.ToolLimit,
-                modelCalls: 4,
+                modelCalls: 33,
                 toolCalls: AgentLimits.ToolCalls) &&
-            server.Captures.Count == 4;
+            server.Captures.Count == 33;
     }
 
     private static async Task<bool> ToolResultLimitAsync(
