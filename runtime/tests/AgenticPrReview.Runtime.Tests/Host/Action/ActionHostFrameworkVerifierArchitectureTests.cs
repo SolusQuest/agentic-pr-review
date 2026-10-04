@@ -185,12 +185,18 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     }
 
     [Fact]
-    public void OutputsGoldenPreservesPriorFactsWithTruthfulOutputMetric()
+    public void OutputsGoldenPreservesPriorFactsExceptOutputMetricAndDerivedSourceCommitment()
     {
         var root = FindRepositoryRoot();
         var prior = File.ReadAllText(Path.Join(root, "runtime", "tests", "fixtures", "action-host", "r7-session-capacity", "expected-evidence.json.golden"));
         var current = File.ReadAllText(Path.Join(root, "runtime", "tests", "fixtures", "action-host", "r7-action-outputs", "expected-evidence.json.golden"));
-        Assert.Equal(prior.Replace("output_file_unchanged", "outputs_match_summary", StringComparison.Ordinal), current);
+        using var priorDocument = JsonDocument.Parse(prior);
+        using var currentDocument = JsonDocument.Parse(current);
+        var priorDigest = priorDocument.RootElement.GetProperty("source_inventory_digest").GetString()!;
+        var currentDigest = currentDocument.RootElement.GetProperty("source_inventory_digest").GetString()!;
+        Assert.NotEqual(priorDigest, currentDigest);
+        Assert.Equal(prior.Replace("output_file_unchanged", "outputs_match_summary", StringComparison.Ordinal)
+            .Replace(priorDigest, currentDigest, StringComparison.Ordinal), current);
     }
 
     [Fact]
