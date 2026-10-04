@@ -3,7 +3,7 @@
 #
 # Subcommands:
 #   test        Run the runtime test project.
-#   framework   Framework-dependent bootstrap smoke: dotnet run + cmp goldens.
+#   framework   Framework-dependent bootstrap and actual ActionHost entrypoint smoke.
 #   aot         Native AOT bootstrap smoke: publish linux-x64, execute published binary,
 #               cmp goldens.
 #   all         test -> framework -> aot.
@@ -29,6 +29,7 @@ TEST_PROJECT="${REPO_ROOT}/runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPr
 BOOTSTRAP_INPUT="${REPO_ROOT}/protocol/fixtures/v1/cases/bootstrap/input.json"
 BOOTSTRAP_EXPECTED_RESULT="${REPO_ROOT}/runtime/tests/fixtures/deterministic/bootstrap/expected-result.json"
 BOOTSTRAP_EXPECTED_TRACE="${REPO_ROOT}/runtime/tests/fixtures/deterministic/bootstrap/expected-trace.json"
+ACTION_HOST_FIXTURE="${REPO_ROOT}/runtime/tests/ActionHostFixture/verify-entrypoint.mjs"
 
 _tempdirs=()
 
@@ -118,6 +119,9 @@ run_framework() {
 
   cmp "${result}" "${BOOTSTRAP_EXPECTED_RESULT}"
   cmp "${trace}" "${BOOTSTRAP_EXPECTED_TRACE}"
+  _require_file "${ACTION_HOST_FIXTURE}"
+  node "${ACTION_HOST_FIXTURE}" framework "$(command -v dotnet)" \
+    "${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/bin/Release/net10.0/AgenticPrReview.Runtime.dll"
 }
 
 run_aot() {
@@ -160,6 +164,8 @@ run_aot() {
 
   cmp "${result}" "${BOOTSTRAP_EXPECTED_RESULT}"
   cmp "${trace}" "${BOOTSTRAP_EXPECTED_TRACE}"
+  _require_file "${ACTION_HOST_FIXTURE}"
+  node "${ACTION_HOST_FIXTURE}" native "${binary}"
 }
 
 run_all() {
@@ -179,8 +185,8 @@ case "${subcommand}" in
 Usage: verify-runtime.sh [test|framework|aot|all]
 
   test        Run the runtime test project.
-  framework   Framework-dependent bootstrap smoke.
-  aot         Native AOT bootstrap smoke (linux-x64).
+  framework   Bootstrap and actual ActionHost entrypoint smoke.
+  aot         Native AOT bootstrap and actual ActionHost smoke (linux-x64).
   all         Run test, then framework, then aot (default).
 USAGE
     ;;

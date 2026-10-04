@@ -4,11 +4,18 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Buffers.Binary;
+using AgenticPrReview.Runtime.ActionHost;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.Serialization;
 
 namespace AgenticPrReview.Runtime;
 
 public sealed class RuntimeApplication
 {
+    // This is the current lockstep wrapper handshake, not proof selection or
+    // independently versioned protocol negotiation.
+    internal const string ActionHostBuildDiscriminator = "r4-w2";
     internal static readonly string RuntimeVersion = GetRuntimeVersion();
     private const string Summary = "Deterministic fixture runtime completed without findings.";
     private const string Limitation = "No live provider was invoked.";
@@ -24,6 +31,124 @@ public sealed class RuntimeApplication
         this.fileSystem = fileSystem ?? new PhysicalRuntimeFileSystem();
         this.executor = executor ?? new DeterministicRuntimeExecutor();
         this.schemas = schemas ?? SchemaContracts.Load(typeof(RuntimeApplication).Assembly);
+    }
+
+    // The production entrypoint cannot choose the linked-test runner. It always
+    // constructs the existing production composition after launch admission.
+    internal static async Task<int> RunActionHostAsync(
+        Stream input, Stream output, TextWriter stderr, CancellationToken cancellationToken,
+        Func<ActionHostLaunchContract, CancellationToken, Task<ActionHostCompletion>>? linkedRunner = null)
+    {
+        try
+        {
+            var bytes = await ReadActionHostFrameAsync(input, cancellationToken).ConfigureAwait(false);
+            ActionHostLaunchContract? launch;
+            if (bytes is null)
+            {
+                return await ActionHostFailureAsync(stderr, "APR_ACTION_HOST_INPUT_INVALID").ConfigureAwait(false);
+            }
+
+            try
+            {
+                if (!ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out _) || launch is null ||
+                    !StringComparer.Ordinal.Equals(launch.BuildDiscriminator, ActionHostBuildDiscriminator))
+                {
+                    return await ActionHostFailureAsync(stderr, "APR_ACTION_HOST_INPUT_INVALID").ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(bytes);
+            }
+
+            // Composition retains the original Host-entry deadline, state
+            // horizon and transaction-aware cancellation/reconciliation owner.
+            var completion = linkedRunner is null
+                ? await new ActionHostComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false)
+                : await linkedRunner(launch, cancellationToken).ConfigureAwait(false);
+            if (completion is null ||
+                !StringComparer.Ordinal.Equals(completion.BuildDiscriminator, ActionHostBuildDiscriminator) ||
+                !ActionHostJsonCodec.TryWriteCompletion(completion, out var document))
+            {
+                return await ActionHostFailureAsync(stderr).ConfigureAwait(false);
+            }
+
+            // Caller cancellation controls Host work, not emission of a result
+            // the Host has already admitted. Never retry a partial write.
+            var header = new byte[4];
+            BinaryPrimitives.WriteUInt32BigEndian(header, checked((uint)document.Length));
+            await output.WriteAsync(header, CancellationToken.None).ConfigureAwait(false);
+            await output.WriteAsync(document, CancellationToken.None).ConfigureAwait(false);
+            await output.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+            return completion.ProcessExitCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return await ActionHostFailureAsync(stderr, "APR_ACTION_HOST_CANCELLED").ConfigureAwait(false);
+        }
+        catch
+        {
+            return await ActionHostFailureAsync(stderr).ConfigureAwait(false);
+        }
+    }
+
+    internal static async Task<int> ActionHostFailureAsync(
+        TextWriter stderr, string code = "APR_ACTION_HOST_INTERNAL")
+    {
+        try
+        {
+            await stderr.WriteLineAsync(code).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A broken diagnostic sink cannot replace the safe failure exit.
+        }
+        return 1;
+    }
+
+    private static async Task<byte[]?> ReadActionHostFrameAsync(Stream input, CancellationToken token)
+    {
+        var header = new byte[4];
+        if (!await ReadExactlyAsync(header).ConfigureAwait(false)) return null;
+        var length = BinaryPrimitives.ReadUInt32BigEndian(header);
+        if (length is 0 or > ActionHostContractBounds.MaximumLaunchDocumentBytes) return null;
+        var document = new byte[length];
+        var admitted = false;
+        try
+        {
+            if (!await ReadExactlyAsync(document).ConfigureAwait(false)) return null;
+            var trailing = new byte[1];
+            if (await ReadAsync(trailing).ConfigureAwait(false) != 0) return null;
+            admitted = true;
+            return document;
+        }
+        finally
+        {
+            if (!admitted) CryptographicOperations.ZeroMemory(document);
+        }
+
+        async Task<bool> ReadExactlyAsync(byte[] buffer)
+        {
+            var offset = 0;
+            while (offset < buffer.Length)
+            {
+                var read = await ReadAsync(buffer.AsMemory(offset)).ConfigureAwait(false);
+                if (read == 0) return false;
+                offset += read;
+            }
+            return true;
+        }
+
+        async Task<int> ReadAsync(Memory<byte> buffer)
+        {
+            var pending = input.ReadAsync(buffer, token).AsTask();
+            // Observe a late failure if the stream ignores cancellation and
+            // its wait is interrupted. No private exception data is logged.
+            _ = pending.ContinueWith(static task => _ = task.Exception,
+                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted |
+                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return await pending.WaitAsync(token).ConfigureAwait(false);
+        }
     }
 
     public async Task<int> RunAsync(string[] args, TextWriter stdout, TextWriter stderr)
@@ -426,6 +551,12 @@ public sealed class RuntimeApplication
 
 public static class RuntimeEntrypoint
 {
+    internal static Task<int> RunAsync(
+        string[] args, Stream input, Stream output, TextWriter stderr, CancellationToken cancellationToken) =>
+        args.Length == 0
+            ? RuntimeApplication.RunActionHostAsync(input, output, stderr, cancellationToken)
+            : RunAsync(args, TextWriter.Null, stderr);
+
     public static async Task<int> RunAsync(string[] args, TextWriter stdout, TextWriter stderr, Func<RuntimeApplication>? createApplication = null)
     {
         try
