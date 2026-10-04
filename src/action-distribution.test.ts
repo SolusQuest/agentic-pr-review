@@ -1,3 +1,4 @@
+import { zeroAccounting } from './action-wrapper/presentation/accounting-fixtures.js';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
@@ -183,6 +184,11 @@ describe('R4 Action distribution', () => {
       const execution = await runIsolatedBundle('r4-w2');
 
       expect(execution.result.status).toBe(0);
+      const accountingSummary = await readFile(execution.summaryPath, 'utf8');
+      expect(accountingSummary).toContain('| Review termination | not_started |');
+      expect(accountingSummary).toContain('| Attempt accounting completeness | complete |');
+      expect(accountingSummary).toContain('| Usage completeness | complete |');
+      expect(accountingSummary).toContain('| Failed provider attempts | 0 |');
       expect(await readFile(execution.markerPath, 'utf8')).toBe('executor-reached\n');
       expect(await readFile(execution.summaryPath, 'utf8')).toContain('skipped_untrusted_event');
       const receiptLines = execution.result.stderr.trimEnd().split('\n');
@@ -343,7 +349,9 @@ process.stdin.on('end', async () => {
         finding_count: null,
         state_disposition: 'not_accessed'
       },
-      annotations: []
+      annotations: [],
+      accounting: ${JSON.stringify(zeroAccounting)},
+      termination_reason: 'not_started'
     };
     process.stderr.write(${JSON.stringify(finalGitHubBudgetReceipt + finalControlBudgetReceipt)});
     process.stdout.write(encode(completion));

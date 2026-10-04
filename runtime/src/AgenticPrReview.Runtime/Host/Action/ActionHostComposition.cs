@@ -678,6 +678,13 @@ internal sealed class ActionHostComposition
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(launch);
+        var capture = new ActionHostAccountingCapture();
+        return capture.Apply(await RunCoreAsync(launch, cancellationToken, capture).ConfigureAwait(false));
+    }
+
+    private async Task<ActionHostCompletion> RunCoreAsync(
+        ActionHostLaunchContract launch, CancellationToken cancellationToken, ActionHostAccountingCapture capture)
+    {
         using var timeBudget = new ActionHostTimeBudget(dependencies.TimeProvider, cancellationToken);
         using var journal = new ActionHostTransactionJournal(
             launch.Cancellation,
@@ -943,7 +950,8 @@ internal sealed class ActionHostComposition
                     snapshot,
                     state,
                     publicationScope,
-                    cancellationToken)
+                    cancellationToken,
+                    capture)
                 .ConfigureAwait(false);
             return timeBudget.ReconciliationToken.IsCancellationRequested &&
                 completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted

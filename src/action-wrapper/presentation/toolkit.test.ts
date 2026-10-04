@@ -1,3 +1,4 @@
+import { unavailableAccounting } from './accounting-fixtures.js';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +31,8 @@ describe('W1 concrete Actions presentation binding', () => {
       status: 'reviewed_with_inline_warnings',
       exit_class: 'success',
       process_exit_code: 0,
+      accounting: unavailableAccounting,
+      termination_reason: 'review_completed',
       summary: {
         reviewed_sha: 'a'.repeat(40),
         publication_url: 'https://github.com/o/r/pull/1',

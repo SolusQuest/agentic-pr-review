@@ -68,6 +68,8 @@ public sealed partial class ActionHostCompositionTests
             launch,
             new CancellationToken(callerCancellation));
 
+        Assert.True(completion.Accounting.IsCompleteZero);
+        Assert.Equal(ActionHostTerminationReason.NotStarted, completion.TerminationReason);
         Assert.Equal(ActionHostStatus.Cancelled, completion.Status);
         Assert.Equal(ActionHostStateDisposition.NotCommitted,
             completion.Summary.StateDisposition);
@@ -580,6 +582,9 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(ActionHostStatus.Reviewed, resumed.Status);
         Assert.Equal(ActionHostStateDisposition.Accepted,
             resumed.Summary.StateDisposition);
+        AssertAccounting(provider.LastOutcome!.Accounting!, completion.Accounting);
+        Assert.True(resumed.Accounting.IsCompleteZero);
+        Assert.Equal(ActionHostTerminationReason.NotStarted, resumed.TerminationReason);
         Assert.Equal(providerRuns, provider.Runs);
         Assert.Equal(stickyMutations, publisher.Transport.Bodies.Count);
         Assert.False(Directory.Exists(resumedStaging));
