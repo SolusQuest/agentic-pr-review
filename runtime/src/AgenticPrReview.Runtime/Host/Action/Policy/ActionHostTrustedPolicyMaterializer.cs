@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
@@ -57,6 +58,7 @@ internal sealed partial class ActionHostTrustedPolicy
                     out var instructionsPath,
                     out var publicationMode,
                     out var inlineMinSeverity,
+                    out var limitAuthority,
                     out var configFailure))
             {
                 return ActionHostTrustedPolicyMaterialization.Failed(
@@ -94,7 +96,7 @@ internal sealed partial class ActionHostTrustedPolicy
                 instructionsBlob.Bytes);
             var toolsetSha = AgentCanonical.ToolsetSha256(
                 AgentToolRegistry.Definitions);
-            var limitsSha = AgentCanonical.LimitsSha256();
+            var limitsSha = AgentCanonical.LimitsSha256(limitAuthority!);
             var policySha = PolicyIdentity(
                 request,
                 configBlob,
@@ -137,6 +139,7 @@ internal sealed partial class ActionHostTrustedPolicy
                 PromptCaching,
                 toolsetSha,
                 limitsSha,
+                limitAuthority!,
                 RestrictedStateFormat.MaximumRetentionSeconds,
                 InlineCommentCap,
                 SecurityPolicy));
@@ -165,11 +168,13 @@ internal sealed partial class ActionHostTrustedPolicy
         out ActionHostTrustedPolicyPath? instructionsPath,
         out ActionHostPublicationMode publicationMode,
         out ActionHostInlineSeverity inlineMinSeverity,
+        out AgentLimitAuthority? limitAuthority,
         out ActionHostTrustedPolicyFailure failure)
     {
         instructionsPath = null;
         publicationMode = default;
         inlineMinSeverity = default;
+        limitAuthority = null;
         failure = ActionHostTrustedPolicyFailure.MalformedConfig;
         if (bytes.Length > ConfigByteCap)
         {
@@ -197,10 +202,17 @@ internal sealed partial class ActionHostTrustedPolicy
 
         if (document is null ||
             !StringComparer.Ordinal.Equals(document.Schema, Schema) ||
-            document.Publication is not { } publication)
+            document.Publication is not { } publication ||
+            document.Review is not { } review)
         {
             return false;
         }
+
+        limitAuthority = new(DeepSeekAdapterContext.Adapter, AgentLimitProfile.Current,
+            new(review.MaxUncachedInputTokens, review.MaxCachedInputTokens, review.MaxOutputTokens),
+            review.MaxModelCalls, review.TimeoutSeconds);
+        if (!AgentLimitAuthority.TryResolve(DeepSeekAdapterContext.Adapter, limitAuthority, out _))
+            return false;
 
         if (!ActionHostTrustedPolicyPath.TryCreate(
                 document.InstructionsPath,

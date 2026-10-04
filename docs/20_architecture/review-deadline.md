@@ -1,6 +1,6 @@
 # Review Deadline
 
-R7-R5 uses a 900-second current Agent review allowance. The authoritative `deadline_seconds` row in `AgentLimits` and `AgentCanonical.LimitsBytes` contains 900; selected-current continuation with a previous limits identity remains incompatible and fails closed. The retained Output8192 and Output65536 evaluator profiles keep their 300-second identities and execution allowance.
+R7-R5 introduced the 900-second current Agent review allowance. R7-C6 retains 900 as its default and ceiling and permits trusted Current configuration to select 1..900 seconds through [`review.timeoutSeconds`](./action-interface.md). The authoritative `deadline_seconds` row in `AgentLimits` and `AgentCanonical.LimitsBytes` contains that effective configured value; selected-current continuation with a different limits identity remains incompatible and fails closed. The retained Output8192 and Output65536 evaluator profiles keep their 300-second identities and execution allowance.
 
 The Agent measures one monotonic interval with an injected `TimeProvider`. Request preparation, provider response admission, ordinary tools, recovery and terminal validation consume its remaining time. Trusted Host headroom can shorten that interval without changing the configured canonical identity. Caller cancellation takes precedence over simultaneous expiry. Expiry returns `agent_deadline_exceeded`; it cannot produce an eligible completed session or a normal clean review.
 

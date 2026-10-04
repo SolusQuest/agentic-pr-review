@@ -17,20 +17,31 @@ internal enum AgentLimitProfile
 
 // This authority is supplied by trusted composition. Agent code only knows
 // the selected adapter identity and cumulative limits, not provider policy.
-internal sealed record AgentLimitAuthority(string AdapterId, AgentLimitProfile Profile, ReviewTokenBudget? TokenBudget = null)
+internal sealed record AgentLimitAuthority(
+    string AdapterId,
+    AgentLimitProfile Profile,
+    ReviewTokenBudget? TokenBudget = null,
+    int ModelCalls = AgentLimits.ModelCalls,
+    int TimeoutSeconds = AgentLimits.DeadlineSeconds)
 {
     internal static bool TryResolve(string adapterId, AgentLimitAuthority? authority, out AgentLimitProfile profile)
     {
         profile = authority?.Profile ?? AgentLimitProfile.Current;
         return (authority is null || StringComparer.Ordinal.Equals(adapterId, authority.AdapterId)) &&
             profile is AgentLimitProfile.Current or AgentLimitProfile.Output8192 or AgentLimitProfile.Output65536 &&
-            (authority?.TokenBudget is null || profile == AgentLimitProfile.Current && authority.TokenBudget.IsValid);
+            (authority?.TokenBudget is null || profile == AgentLimitProfile.Current && authority.TokenBudget.IsValid) &&
+            (authority is null ||
+                authority.ModelCalls is >= 1 and <= AgentLimits.ModelCallsCeiling &&
+                authority.TimeoutSeconds is >= 1 and <= AgentLimits.DeadlineSeconds &&
+                (profile == AgentLimitProfile.Current ||
+                    authority.ModelCalls == AgentLimits.ModelCalls && authority.TimeoutSeconds == AgentLimits.DeadlineSeconds));
     }
 }
 
 internal static class AgentLimits
 {
     internal const int ModelCalls = 64;
+    internal const int ModelCallsCeiling = 128;
     internal const int ToolCalls = 512;
     internal const int ToolCallsPerResponse = 16;
     internal const int ConcurrentToolCalls = 1;
@@ -154,24 +165,32 @@ internal static class AgentLimits
 
     internal static ImmutableArray<AgentLimit> Registry { get; } = CurrentRegistry(ReviewTokenBudget.Default);
 
-    private static ImmutableArray<AgentLimit> CurrentRegistry(ReviewTokenBudget budget) =>
+    private static ImmutableArray<AgentLimit> CurrentRegistry(ReviewTokenBudget budget,
+        int modelCalls = ModelCalls, int timeoutSeconds = DeadlineSeconds) =>
         RetainedRegistry.Select(row => row.Ordinal switch
         {
-            5 => row with { Value = DeadlineSeconds },
+            1 => row with { Value = modelCalls },
+            5 => row with { Value = timeoutSeconds },
             6 => row with { Name = "uncached_input_tokens", Value = budget.UncachedInputTokens },
             7 => row with { Name = "cached_input_tokens", Value = budget.CachedInputTokens },
             8 => row with { Name = "output_tokens", Value = budget.OutputTokens },
             _ => row,
         }).ToImmutableArray();
 
-    internal static ImmutableArray<AgentLimit> RegistryFor(AgentLimitProfile profile, ReviewTokenBudget? budget = null) => profile switch
+    internal static ImmutableArray<AgentLimit> RegistryFor(AgentLimitProfile profile, ReviewTokenBudget? budget = null,
+        int modelCalls = ModelCalls, int timeoutSeconds = DeadlineSeconds)
     {
-        AgentLimitProfile.Current => budget is null ? Registry : budget.IsValid
-            ? CurrentRegistry(budget) : throw new ArgumentOutOfRangeException(nameof(budget)),
-        AgentLimitProfile.Output8192 => CandidateRegistry,
-        AgentLimitProfile.Output65536 => Output65536Registry,
-        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
-    };
+        if (!AgentLimitAuthority.TryResolve("limits", new("limits", profile, budget, modelCalls, timeoutSeconds), out _))
+            throw new ArgumentOutOfRangeException(nameof(profile));
+        return profile switch
+        {
+            AgentLimitProfile.Current => budget is null && modelCalls == ModelCalls && timeoutSeconds == DeadlineSeconds
+                ? Registry : CurrentRegistry(budget ?? ReviewTokenBudget.Default, modelCalls, timeoutSeconds),
+            AgentLimitProfile.Output8192 => CandidateRegistry,
+            AgentLimitProfile.Output65536 => Output65536Registry,
+            _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+        };
+    }
 
     internal static long OutputTokensFor(AgentLimitProfile profile) => profile switch
     {

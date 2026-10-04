@@ -28,7 +28,10 @@ internal sealed class AgentLoop(
         AgentRunRequest run,
         CancellationToken cancellationToken)
     {
-        var accounting = new ReviewAccounting();
+        // Invalid authority is rejected by RunCoreAsync before any admission.
+        var accounting = new ReviewAccounting(
+            AgentLimitAuthority.TryResolve(run.StablePlan.AdapterId, limitAuthority, out _)
+                ? limitAuthority?.ModelCalls ?? AgentLimits.ModelCalls : AgentLimits.ModelCalls);
         var outcome = await RunCoreAsync(run, accounting, cancellationToken);
         return outcome with { Accounting = accounting.Finish() };
     }
@@ -39,7 +42,8 @@ internal sealed class AgentLoop(
         CancellationToken cancellationToken)
     {
         var started = new ReviewDeadline(_timeProvider,
-            limitAuthority?.Profile ?? AgentLimitProfile.Current, run.RemainingHostTime);
+            limitAuthority?.Profile ?? AgentLimitProfile.Current, run.RemainingHostTime,
+            limitAuthority?.TimeoutSeconds ?? AgentLimits.DeadlineSeconds);
         var messages = run.InitialMessages.ToList();
         var continuation = run.Continuation;
         var observations = new List<AgentObservation>();
@@ -108,7 +112,7 @@ internal sealed class AgentLoop(
                 return Failure(stop, modelCalls, toolCalls, events);
             }
 
-            if (modelCalls >= AgentLimits.ModelCalls)
+            if (modelCalls >= (limitAuthority?.ModelCalls ?? AgentLimits.ModelCalls))
             {
                 return Failure(
                     AgentFailureCodes.ModelLimit,
@@ -1650,7 +1654,9 @@ internal sealed class AgentLoop(
                 AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions)) &&
             StringComparer.Ordinal.Equals(
                 plan.LimitsSha256,
-                AgentCanonical.LimitsSha256(profile, authority?.TokenBudget)) &&
+                AgentCanonical.LimitsSha256(profile, authority?.TokenBudget,
+                    authority?.ModelCalls ?? AgentLimits.ModelCalls,
+                    authority?.TimeoutSeconds ?? AgentLimits.DeadlineSeconds)) &&
             AgentValueDomains.IsUtf8(plan.BuildId, 1, 256) &&
             AgentValueDomains.IsUtf8(plan.ProviderId, 1, 128) &&
             AgentValueDomains.IsUtf8(plan.ModelId, 1, 128) &&
