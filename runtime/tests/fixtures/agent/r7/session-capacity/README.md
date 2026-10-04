@@ -1,6 +1,6 @@
 # R7 SESSION capacity evidence
 
-This directory owns R7-C3 capacity fixtures. Historical reports are immutable observations from base commit `aea38e3f8f14eeae3e2dc915598aade031b3c6e7`; `historical-manifest.json` records their digests and provenance. They are read with frozen R5/R6 measurement limits and never stand in for execution of the current runtime. Current bounded R5/R6 regressions explicitly report incomplete capacity observation. The dedicated R7 local and artifact proofs exercise the current runtime.
+This directory owns R7-C3 capacity fixtures. Historical reports are immutable observations from base commit `aea38e3f8f14eeae3e2dc915598aade031b3c6e7`; `historical-manifest.json` records their digests and provenance. They are read with frozen R5/R6 measurement limits and never stand in for execution of the current runtime. Current bounded R5/R6 regressions explicitly report incomplete capacity observation. The dedicated R7 local and artifact proofs exercise the current runtime. The `bootstrap.json.golden` and `continue.json.golden` files are current producer regression contracts, separate from the four immutable reports listed in `historical-manifest.json`; their identity digests track the selected Current limits, including the R7-R4 token policy.
 
 ## Current bounds
 
@@ -21,7 +21,7 @@ This directory owns R7-C3 capacity fixtures. Historical reports are immutable ob
 
 All bounds apply together. An otherwise valid continuation can exceed the complete request bound after framing; 16 MiB of valid wire data need not be a restorable request. These are logical byte/count limits, not a peak process-memory guarantee. Bounded JSON parsing, canonicalization and authenticated copies coexist in memory. Count and payload-length preflight occurs before typed record arrays and decoded payload copies; the initial bounded JSON parse still allocates. The stored-history part count is cumulative across completed runs: assistant contents count individually, each context/tool-result/tool-error/review-outcome contributes one part, and a continuation slot counts once rather than again for its matching item. Final reconstructed-request admission additionally accounts for trusted controls and the current review context.
 
-Model calls, tool calls, cumulative usage, deadlines, provider model, tools, roles, associations, authentication and reset authority are unchanged. Admission never truncates or summarizes history. A refusal must leave the accepted predecessor intact.
+R7-R4 leaves the byte/state bounds above, model/tool count ceilings, deadline, provider model, tools, roles, associations, authentication and reset authority unchanged. Current uses independent post-response stopping thresholds of 2,000,000 uncached input, 38,000,000 cached input and 524,288 output tokens, with no combined-token cap. Admission never truncates or summarizes history. A refusal must leave the accepted predecessor intact.
 
 ## Nested retained-state budget
 
@@ -33,7 +33,7 @@ The Node bridge retains at most 4,096 terminal correlation IDs per Host process 
 
 ## Conservative context admission
 
-`dsv41-utf8-upper-v1` admits only if its prompt upper bound plus the selected maximum output reservation (4096, 8192 or 65536) fits 1,000,000 tokens. It inspects the actual bounded provider projection, including all restored reasoning. Unsupported function argument shapes, duplicate object keys and nonfinite numbers fail closed before physical send. Provider usage remains separate from this estimate.
+`dsv41-utf8-upper-v1` admits only if its prompt upper bound plus the actual request output allowance fits 1,000,000 tokens. Current reserves `min(65536, remaining known output)`; retained named profiles reserve their fixed 8192 or 65536 tokens. It inspects the actual bounded provider projection, including all restored reasoning. Unsupported function argument shapes, duplicate object keys and nonfinite numbers fail closed before physical send. Provider usage remains separate from this estimate.
 
 The derivation is pinned to `deepseek-ai/deepseek-recipe` commit `8cadfede7063c896b944e7bae05daa3549ae97ea`. `verify-context-bound.mjs` independently checks the four source-file SHA-256 values, the absence of normalization, the non-expanding isolated split and byte-level pretokenizer, and coverage of every single byte by the BPE vocabulary. Under those pinned assumptions, rendered UTF-8 bytes upper-bound token count. This is deliberately conservative and is not an exact tokenizer or a claim about future server templates.
 

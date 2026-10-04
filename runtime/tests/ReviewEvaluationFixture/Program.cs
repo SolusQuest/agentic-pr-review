@@ -839,19 +839,19 @@ internal static class R5CaseVerifier
                 {
                     ["max_evaluations"] = declared.Length,
                     ["max_model_calls"] = declared.Length * AgentLimits.ModelCalls,
-                    ["max_input_tokens"] = declared.Length * Math.Min(AgentLimits.InputTokens,
+                    ["max_input_tokens"] = declared.Length * Math.Min(LivePlanAdmission.InputTokens,
                         AgentLimits.ModelCalls * 8192L),
-                    ["max_output_tokens"] = declared.Length * Math.Min(AgentLimits.OutputTokensFor(limits),
-                        AgentLimits.ModelCalls * (profile == DeepSeekRequestProfile.Current ? 512L : DeepSeekRequestWriter.MaxTokensFor(profile))),
-                    ["max_combined_tokens"] = declared.Length * Math.Min(AgentLimits.CombinedTokensFor(limits),
-                        AgentLimits.ModelCalls * (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + DeepSeekRequestWriter.MaxTokensFor(profile))),
+                    ["max_output_tokens"] = declared.Length * Math.Min(LivePlanAdmission.OutputTokensFor(limits),
+                        AgentLimits.ModelCalls * (profile == DeepSeekRequestProfile.Current ? 512L : LivePlanAdmission.RequestOutputFor(profile))),
+                    ["max_combined_tokens"] = declared.Length * Math.Min(LivePlanAdmission.CombinedTokensFor(limits),
+                        AgentLimits.ModelCalls * (profile == DeepSeekRequestProfile.Current ? 8704L : 8192L + LivePlanAdmission.RequestOutputFor(profile))),
                     ["max_seconds"] = 600,
                     ["spend_ceiling_micro_usd"] = declared.Length * GeneratedSpendPerEvaluationMicroUsd,
                     ["per_call"] = new JsonObject
                     {
                         ["max_input_tokens"] = 8192,
                         ["max_output_tokens"] = profile == DeepSeekRequestProfile.Current ? 512 :
-                            DeepSeekRequestWriter.MaxTokensFor(profile),
+                            LivePlanAdmission.RequestOutputFor(profile),
                         ["max_charge_micro_usd"] = 1000,
                     },
                 },

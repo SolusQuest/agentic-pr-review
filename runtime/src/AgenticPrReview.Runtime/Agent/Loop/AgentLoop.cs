@@ -70,6 +70,9 @@ internal sealed class AgentLoop(
                 events);
         }
 
+        var tokenBalance = limitProfile == AgentLimitProfile.Current
+            ? new ReviewTokenBalance(limitAuthority?.TokenBudget ?? ReviewTokenBudget.Default) : null;
+
         events.Add(new AgentPlanEvent(
             AgentCanonical.StablePlanSha256(run.StablePlan)));
         for (var index = 0; index < messages.Count; index++)
@@ -111,11 +114,15 @@ internal sealed class AgentLoop(
                     events);
             }
 
+            if (tokenBalance?.Exhausted == true)
+                return Failure(AgentFailureCodes.TokenLimit, modelCalls, toolCalls, events);
+
             var request = new ProjectChatRequest(
                 messages.ToArray(),
                 AgentToolRegistry.Definitions.ToArray(),
                 continuation,
-                ThinkingRequired: true);
+                ThinkingRequired: true,
+                MaxOutputTokens: tokenBalance?.OutputAllowance);
             byte[] requestBytes;
             try
             {
@@ -206,7 +213,8 @@ internal sealed class AgentLoop(
             }
             finally
             {
-                attempt.Freeze(chatTask?.IsCompleted ?? true, projected);
+                var frozen = attempt.Freeze(chatTask?.IsCompleted ?? true, projected);
+                tokenBalance?.Debit(frozen);
             }
 
             stop = StopReason(started, cancellationToken);
@@ -215,9 +223,13 @@ internal sealed class AgentLoop(
                 return Failure(stop, modelCalls, toolCalls, events);
             }
 
+            if (tokenBalance?.Overrun == true)
+                return Failure(AgentFailureCodes.TokenLimit, modelCalls, toolCalls, events);
+
             var admissionFailure = AdmitResponse(
                 response,
                 limitProfile,
+                tokenBalance?.Exhausted == true,
                 usedCallIds,
                 messages.Count,
                 contentParts,
@@ -232,6 +244,9 @@ internal sealed class AgentLoop(
                 out var preflightErrors);
             if (admissionFailure is not null)
             {
+                if (tokenBalance?.Exhausted == true)
+                    return Failure(AgentFailureCodes.TokenLimit, modelCalls, toolCalls, events);
+
                 if (StringComparer.Ordinal.Equals(
                         admissionFailure,
                         AgentFailureCodes.ToolArgumentsInvalid) || preflightErrors.Count > 0)
@@ -240,6 +255,7 @@ internal sealed class AgentLoop(
                         response,
                         run,
                         limitProfile,
+                        tokenBalance?.OutputAllowance,
                         messages,
                         events,
                         usedCallIds,
@@ -331,6 +347,9 @@ internal sealed class AgentLoop(
                     events.ToImmutable(),
                     ToContinuationCandidate(continuation));
             }
+
+            if (tokenBalance?.Exhausted == true)
+                return Failure(AgentFailureCodes.TokenLimit, modelCalls, toolCalls, events);
 
             foreach (var call in preparedCalls)
             {
@@ -467,6 +486,7 @@ internal sealed class AgentLoop(
         ProjectChatResponse response,
         AgentRunRequest run,
         AgentLimitProfile limitProfile,
+        int? outputAllowance,
         List<ProjectChatMessage> messages,
         ImmutableArray<AgentLogicalEvent>.Builder events,
         HashSet<string> usedCallIds,
@@ -601,10 +621,10 @@ internal sealed class AgentLoop(
         long nextResultBytes = toolResultBytes;
         try
         {
-            nextInput = checked(inputTokens + response.Usage!.InputTokens);
-            nextOutput = checked(outputTokens + response.Usage.OutputTokens);
-            nextCombined = checked(
-                combinedTokens + response.Usage.InputTokens +
+            nextInput = limitProfile == AgentLimitProfile.Current ? 0 : checked(inputTokens + response.Usage!.InputTokens);
+            nextOutput = limitProfile == AgentLimitProfile.Current ? 0 : checked(outputTokens + response.Usage!.OutputTokens);
+            nextCombined = limitProfile == AgentLimitProfile.Current ? 0 : checked(
+                combinedTokens + response.Usage!.InputTokens +
                 response.Usage.OutputTokens);
         }
         catch (OverflowException)
@@ -612,9 +632,9 @@ internal sealed class AgentLoop(
             return AgentFailureCodes.UsageInvalid;
         }
 
-        if (nextInput > AgentLimits.InputTokens ||
+        if (limitProfile != AgentLimitProfile.Current && (nextInput > AgentLimits.RetainedInputTokens ||
             nextOutput > AgentLimits.OutputTokensFor(limitProfile) ||
-            nextCombined > AgentLimits.CombinedTokensFor(limitProfile))
+            nextCombined > AgentLimits.CombinedTokensFor(limitProfile)))
         {
             return AgentFailureCodes.TokenLimit;
         }
@@ -690,7 +710,8 @@ internal sealed class AgentLoop(
                 stagedMessages,
                 AgentToolRegistry.Definitions.ToArray(),
                 nextContinuation,
-                ThinkingRequired: true);
+                ThinkingRequired: true,
+                MaxOutputTokens: outputAllowance);
             if (AgentRequestWriter.Write(nextRequest).Length >
                 AgentLimits.RequestBytes)
             {
@@ -748,6 +769,7 @@ internal sealed class AgentLoop(
     private string? AdmitResponse(
         ProjectChatResponse response,
         AgentLimitProfile limitProfile,
+        bool tokenBudgetExhausted,
         HashSet<string> usedCallIds,
         int currentMessages,
         int currentParts,
@@ -830,9 +852,9 @@ internal sealed class AgentLoop(
         long newCombined;
         try
         {
-            newInput = checked(cumulativeInput + response.Usage.InputTokens);
-            newOutput = checked(cumulativeOutput + response.Usage.OutputTokens);
-            newCombined = checked(
+            newInput = limitProfile == AgentLimitProfile.Current ? 0 : checked(cumulativeInput + response.Usage.InputTokens);
+            newOutput = limitProfile == AgentLimitProfile.Current ? 0 : checked(cumulativeOutput + response.Usage.OutputTokens);
+            newCombined = limitProfile == AgentLimitProfile.Current ? 0 : checked(
                 cumulativeCombined +
                 response.Usage.InputTokens +
                 response.Usage.OutputTokens);
@@ -842,9 +864,9 @@ internal sealed class AgentLoop(
             return AgentFailureCodes.UsageInvalid;
         }
 
-        if (newInput > AgentLimits.InputTokens ||
+        if (limitProfile != AgentLimitProfile.Current && (newInput > AgentLimits.RetainedInputTokens ||
             newOutput > AgentLimits.OutputTokensFor(limitProfile) ||
-            newCombined > AgentLimits.CombinedTokensFor(limitProfile))
+            newCombined > AgentLimits.CombinedTokensFor(limitProfile)))
         {
             return AgentFailureCodes.TokenLimit;
         }
@@ -863,6 +885,9 @@ internal sealed class AgentLoop(
         {
             return AgentFailureCodes.TerminalSequenceInvalid;
         }
+
+        if (tokenBudgetExhausted && terminalCount != 1)
+            return AgentFailureCodes.TokenLimit;
 
         if (currentToolCalls + toolContents.Count > AgentLimits.ToolCalls)
         {
@@ -1577,7 +1602,7 @@ internal sealed class AgentLoop(
                 AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions)) &&
             StringComparer.Ordinal.Equals(
                 plan.LimitsSha256,
-                AgentCanonical.LimitsSha256(profile)) &&
+                AgentCanonical.LimitsSha256(profile, authority?.TokenBudget)) &&
             AgentValueDomains.IsUtf8(plan.BuildId, 1, 256) &&
             AgentValueDomains.IsUtf8(plan.ProviderId, 1, 128) &&
             AgentValueDomains.IsUtf8(plan.ModelId, 1, 128) &&

@@ -21,7 +21,7 @@ internal sealed class DeepSeekAdapterContext(
 {
     internal const string Provider = "deepseek";
     internal const string Model = "deepseek-flash";
-    internal const string AdapterDescriptor =
+    internal const string RetainedAdapterDescriptor =
         "{\"schema_version\":1,\"provider\":\"deepseek\",\"model\":" +
         "\"deepseek-flash\",\"endpoint\":" +
         "\"https://api.deepseek.com/chat/completions\",\"stream\":false," +
@@ -34,13 +34,15 @@ internal sealed class DeepSeekAdapterContext(
         "\"deepseek-reasoning-content\",\"codec_discriminator\":" +
         "\"deepseek-flash-thinking-v1\",\"encoding\":\"utf8\"," +
         "\"framing\":\"deepseek.reasoning_content.utf8.v1\"}";
-    internal const string Adapter =
-        "b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8";
-    internal static string CandidateAdapterDescriptor { get; } = AdapterDescriptor.Replace(
+    internal static string AdapterDescriptor { get; } = RetainedAdapterDescriptor.Replace(
+        "\"max_tokens\":4096,", "\"max_tokens\":65536,\"max_tokens_policy\":\"remaining-known-output-v1\",", StringComparison.Ordinal);
+    internal static string Adapter { get; } = Convert.ToHexString(
+        SHA256.HashData(Encoding.UTF8.GetBytes(AdapterDescriptor))).ToLowerInvariant();
+    internal static string CandidateAdapterDescriptor { get; } = RetainedAdapterDescriptor.Replace(
         "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal);
     internal static string CandidateAdapter { get; } = Convert.ToHexString(
         SHA256.HashData(Encoding.UTF8.GetBytes(CandidateAdapterDescriptor))).ToLowerInvariant();
-    internal static string Output65536AdapterDescriptor { get; } = AdapterDescriptor.Replace(
+    internal static string Output65536AdapterDescriptor { get; } = RetainedAdapterDescriptor.Replace(
         "\"max_tokens\":4096,", "\"max_tokens\":65536,", StringComparison.Ordinal);
     internal static string Output65536Adapter { get; } = Convert.ToHexString(
         SHA256.HashData(Encoding.UTF8.GetBytes(Output65536AdapterDescriptor))).ToLowerInvariant();
@@ -142,7 +144,7 @@ internal sealed class DeepSeekChatBackend(
         }
 
         if (!DeepSeekContextAdmission.TryEstimate(projection.Body.AsSpan(), out var inputUpperBound) ||
-            !DeepSeekContextAdmission.Allows(inputUpperBound, profile))
+            !DeepSeekContextAdmission.Allows(inputUpperBound, request.MaxOutputTokens ?? DeepSeekRequestWriter.MaxTokensFor(profile)))
         {
             throw new ProjectChatNormalizationException(
                 AgentFailureCodes.ContextLimit,

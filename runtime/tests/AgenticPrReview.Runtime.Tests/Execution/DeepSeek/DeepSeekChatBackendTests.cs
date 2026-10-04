@@ -17,6 +17,7 @@ public sealed class DeepSeekChatBackendTests
 {
     private static readonly string[] FormerAdapters =
     [
+        "b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8",
         "393c2f6cff466c0b8a6ec9aaf29c016959386a4c90ec48d883c6be5fea8b05f6",
         "60f69693c3050fdd92a65130bacb635ddd6b90f1a9c8b954231e24af59bfa8a7",
         "c32d99201a21254fe4399cee64e73fa6da77183a82479151e64682dfce3a554f",
@@ -25,18 +26,50 @@ public sealed class DeepSeekChatBackendTests
         "d0be64c5ac080a3b0308d40a2f1bf33bfa249651c063e37986679875d660093f",
     ];
 
+    [Theory]
+    [InlineData(0, 1, true)]
+    [InlineData(0, 7123, true)]
+    [InlineData(0, 65536, true)]
+    [InlineData(0, 0, false)]
+    [InlineData(0, -1, false)]
+    [InlineData(0, 65537, false)]
+    [InlineData(1, 8191, false)]
+    [InlineData(1, 8192, true)]
+    [InlineData(1, 8193, false)]
+    [InlineData(2, 65535, false)]
+    [InlineData(2, 65536, true)]
+    public async Task OutputOperandRespectsExactSelectedIdentityBeforeTransport(int selected, int allowance, bool sends)
+    {
+        var profile = (DeepSeekRequestProfile)selected;
+        var transport = new FakeTransport(DeepSeekTransportResult.TransportFailure());
+        var backend = new DeepSeekChatBackend(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+            DeepSeekAdapterContext.AdapterFor(profile), "session"), transport);
+        if (sends)
+            await Assert.ThrowsAsync<DeepSeekChatBackendException>(() => backend.GetResponseAsync(
+                MinimalRequest() with { MaxOutputTokens = allowance }, default));
+        else
+            await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => backend.GetResponseAsync(
+                MinimalRequest() with { MaxOutputTokens = allowance }, default));
+        Assert.Equal(sends ? 1 : 0, transport.Requests.Count);
+        if (sends)
+        {
+            using var json = JsonDocument.Parse(transport.Requests[0]);
+            Assert.Equal(allowance, json.RootElement.GetProperty("max_tokens").GetInt32());
+        }
+    }
+
     [Fact]
     public void AdapterIdentityIsTheExactFrozenDescriptor()
     {
         var bytes = Encoding.UTF8.GetBytes(
             DeepSeekAdapterContext.AdapterDescriptor);
 
-        Assert.Equal(593, bytes.Length);
+        Assert.Equal(642, bytes.Length);
         Assert.Equal(
-            "b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8",
+            "b7a3cc62596733a9b2c1747fda5fb862905c15f7946089a2537ccf6f5b7972bc",
             DeepSeekAdapterContext.Adapter);
         Assert.Equal(
-            "b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8",
+            "b7a3cc62596733a9b2c1747fda5fb862905c15f7946089a2537ccf6f5b7972bc",
             Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
         Assert.DoesNotContain("build", DeepSeekAdapterContext.AdapterDescriptor);
         Assert.False(bytes.AsSpan().StartsWith(
@@ -69,7 +102,7 @@ public sealed class DeepSeekChatBackendTests
     {
         Assert.Equal("8121f294eff9ef93f2c8a0e4df8d5432f60808d96692389550e348b35564fed8",
             DeepSeekAdapterContext.CandidateAdapter);
-        Assert.Equal(DeepSeekAdapterContext.AdapterDescriptor.Replace(
+        Assert.Equal(DeepSeekAdapterContext.RetainedAdapterDescriptor.Replace(
                 "\"max_tokens\":4096,", "\"max_tokens\":8192,", StringComparison.Ordinal),
             DeepSeekAdapterContext.CandidateAdapterDescriptor);
         Assert.Equal(DeepSeekAdapterContext.CandidateAdapter,
@@ -91,7 +124,7 @@ public sealed class DeepSeekChatBackendTests
     {
         Assert.Equal("c7decca7ce121c3dab17d840c478c71c49739b8d5bb94766a93d760bf316f5b6",
             DeepSeekAdapterContext.Output65536Adapter);
-        Assert.Equal(DeepSeekAdapterContext.AdapterDescriptor.Replace(
+        Assert.Equal(DeepSeekAdapterContext.RetainedAdapterDescriptor.Replace(
                 "\"max_tokens\":4096,", "\"max_tokens\":65536,", StringComparison.Ordinal),
             DeepSeekAdapterContext.Output65536AdapterDescriptor);
         Assert.Equal(DeepSeekAdapterContext.Output65536Adapter,

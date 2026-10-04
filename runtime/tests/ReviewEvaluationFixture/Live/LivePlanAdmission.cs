@@ -13,6 +13,15 @@ internal static class LivePlanAdmission
     internal const string ProviderConfigurationDomain = "live-provider-settings";
     private const string DigestDomain = "apr.r5.live-plan";
 
+    // Retained evaluator authorization does not grow with Current review defaults.
+    internal const long InputTokens = 262_144;
+    internal static long OutputTokensFor(AgentLimitProfile profile) => profile == AgentLimitProfile.Current
+        ? 32_768 : AgentLimits.OutputTokensFor(profile);
+    internal static long CombinedTokensFor(AgentLimitProfile profile) => profile == AgentLimitProfile.Current
+        ? 294_912 : AgentLimits.CombinedTokensFor(profile);
+    internal static int RequestOutputFor(DeepSeekRequestProfile profile) => profile == DeepSeekRequestProfile.Current
+        ? 4096 : DeepSeekRequestWriter.MaxTokensFor(profile);
+
     internal static string ProviderConfigurationSha256(DeepSeekRequestProfile profile = DeepSeekRequestProfile.Current) =>
         EvaluationAttempt.Hash(ProviderConfigurationDomain,
             DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.AdapterFor(profile));
@@ -112,17 +121,17 @@ internal static class LivePlanAdmission
         var perCall = bounds.PerCall;
         if (bounds.MaxEvaluations < 1 || bounds.MaxEvaluations > LiveLimits.ExpandedEvaluations ||
             bounds.MaxModelCalls < 1 || bounds.MaxModelCalls > (long)AgentLimits.ModelCalls * evaluations ||
-            bounds.MaxInputTokens < 1 || bounds.MaxInputTokens > (long)AgentLimits.InputTokens * evaluations ||
-            bounds.MaxOutputTokens < 1 || bounds.MaxOutputTokens > AgentLimits.OutputTokensFor(
+            bounds.MaxInputTokens < 1 || bounds.MaxInputTokens > (long)InputTokens * evaluations ||
+            bounds.MaxOutputTokens < 1 || bounds.MaxOutputTokens > OutputTokensFor(
                 DeepSeekAdapterContext.LimitAuthorityFor(profile).Profile) * evaluations ||
-            bounds.MaxCombinedTokens < 1 || bounds.MaxCombinedTokens > AgentLimits.CombinedTokensFor(
+            bounds.MaxCombinedTokens < 1 || bounds.MaxCombinedTokens > CombinedTokensFor(
                 DeepSeekAdapterContext.LimitAuthorityFor(profile).Profile) * evaluations ||
             bounds.MaxSeconds is < 1 or > 86400 || bounds.SpendCeilingMicroUsd < 1 ||
-            perCall.MaxInputTokens is < 1 || perCall.MaxInputTokens > Math.Min(bounds.MaxInputTokens, AgentLimits.InputTokens) ||
+            perCall.MaxInputTokens is < 1 || perCall.MaxInputTokens > Math.Min(bounds.MaxInputTokens, InputTokens) ||
             perCall.MaxOutputTokens is < 1 || perCall.MaxOutputTokens > Math.Min(bounds.MaxOutputTokens,
-                DeepSeekRequestWriter.MaxTokensFor(profile)) ||
+                RequestOutputFor(profile)) ||
             profile != DeepSeekRequestProfile.Current &&
-                perCall.MaxOutputTokens != DeepSeekRequestWriter.MaxTokensFor(profile) ||
+                perCall.MaxOutputTokens != RequestOutputFor(profile) ||
             perCall.MaxInputTokens + perCall.MaxOutputTokens > bounds.MaxCombinedTokens ||
             perCall.MaxChargeMicroUsd < 1)
             return false;

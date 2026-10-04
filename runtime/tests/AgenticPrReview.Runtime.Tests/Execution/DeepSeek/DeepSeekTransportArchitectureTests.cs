@@ -291,6 +291,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
                 typeof(AgentContinuationEncodedPayload),
                 typeof(AgentLimits),
                 typeof(AgentLimitAuthority),
+                typeof(ReviewTokenBudget),
                 typeof(AgentLimitProfile),
             typeof(AgentValueDomains),
         ];

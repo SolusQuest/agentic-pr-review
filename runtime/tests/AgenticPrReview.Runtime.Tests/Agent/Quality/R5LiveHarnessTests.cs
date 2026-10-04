@@ -16,7 +16,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
-public sealed class R5LiveHarnessTests
+public sealed partial class R5LiveHarnessTests
 {
     [Theory]
     [InlineData("model")]

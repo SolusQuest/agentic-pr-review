@@ -36,6 +36,7 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
         var call = attempt?.BeginCall();
         try
         {
+            request = LiveOutputCapClient.Restrict(request, accounting.PerCallOutputAllowance);
             var response = await inner.GetResponseAsync(request, cancellationToken);
             // The transport already records oversized responses as usage unknown.
             // Their convertible sentinel carries zero placeholders, not measured
@@ -71,5 +72,28 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
             accounting.RecordChatException(error);
             throw;
         }
+    }
+}
+
+// Apply before measurement as well as before dispatch. The same immutable
+// admitted allowance restricts both views; it never refunds a reservation.
+internal sealed class LiveOutputCapClient(IProjectChatClient inner, long admittedAllowance) : IProjectChatClient
+{
+    public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token) =>
+        inner.GetResponseAsync(Restrict(request, admittedAllowance), token);
+
+    internal static ProjectChatRequest Restrict(ProjectChatRequest request, long admittedAllowance)
+    {
+        if (admittedAllowance is < 1 or > 65_536)
+            throw new ArgumentOutOfRangeException(nameof(admittedAllowance));
+        // Admitted named profiles are fixed8192/65536. Never repair a supplied
+        // differing value: their writer must reject it without a physical send.
+        if (request.MaxOutputTokens is null)
+            return request with { MaxOutputTokens = (int)admittedAllowance };
+        if (admittedAllowance <= LivePlanAdmission.RequestOutputFor(
+                AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekRequestProfile.Current) &&
+            request.MaxOutputTokens is >= 1 and <= 65_536)
+            return request with { MaxOutputTokens = (int)Math.Min(request.MaxOutputTokens.Value, admittedAllowance) };
+        return request;
     }
 }

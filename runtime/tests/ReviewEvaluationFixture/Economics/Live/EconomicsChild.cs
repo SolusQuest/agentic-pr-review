@@ -78,7 +78,8 @@ internal static class EconomicsChild
                 sessionPredecessor = new(admitted.Artifact.Plaintext, predecessor.SessionSha256, predecessor.EnvelopeSha256,
                     predecessor.Generation, producer.BaseSha, producer.HeadSha, predecessor.ExpectedPredecessorEnvelopeSha256);
             }
-            var baseline = HistoryChatClient.Measure(boundary, HistoryCapture.Request(request));
+            var baseline = HistoryChatClient.Measure(boundary, LiveOutputCapClient.Restrict(
+                HistoryCapture.Request(request), plan.ChildBounds.PerCall.MaxOutputTokens));
             if (baseline is null) return 2;
             var startup = Guid.NewGuid().ToString("N");
             var ready = new EconomicsChildReady(input.Operation, plan.Sha256, input.Slot.Index, input.Lease.Id,
@@ -116,7 +117,7 @@ internal static class EconomicsChild
                 input.Transport == "live" ? "live" : "deterministic", EvaluationSource.Commit, EvaluationSource.Tree,
                 EvaluationSource.Clean, input.Plan.Provider.ConfigurationSha256);
             var attempt = EvaluationAttempt.Admit(state.Trusted, descriptor) ?? throw new IOException();
-            var outcome = await new AgentLoop(history, executor,
+            var outcome = await new AgentLoop(new LiveOutputCapClient(history, plan.ChildBounds.PerCall.MaxOutputTokens), executor,
                 limitAuthority: state.Trusted.LimitAuthority)
                 .RunAsync(request, deadline.Token);
             EvaluationOutcome evaluation;

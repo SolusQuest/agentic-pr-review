@@ -47,7 +47,7 @@ internal static class AgentStableRequestMaterializer
             trusted.WorkflowIdentity,
             AgentCanonical.HashRaw(trusted.TrustedPolicyBytes),
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions),
-            AgentCanonical.LimitsSha256(limitProfile),
+            AgentCanonical.LimitsSha256(limitProfile, trusted.LimitAuthority?.TokenBudget),
             trusted.BuildId,
             trusted.ProviderId,
             trusted.ModelId,

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +17,24 @@ public sealed class AgentProofContractTests
         "fixtures",
         "agent",
         "agent-loop");
+
+    [Theory]
+    [InlineData("bootstrap", 0, 2, 5, "c3c73c74ddfee7e67b3c7985f4c771f1c59a2f45f65df16b4f5cd159c0aed533")]
+    [InlineData("continue", 1, 1, 1, "c60cc89e402caa46637a4de945b81037b428c4f6d3ae2ca63b014b719acaf02b")]
+    public void CurrentProofGoldensPinActualR7TokenBudgetProducer(
+        string phase, int generation, int modelCalls, int toolCalls, string expectedSha256)
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory,
+            "fixtures", "agent", "r7", "session-capacity", phase + ".json.golden"));
+        Assert.Equal(expectedSha256, Convert.ToHexStringLower(SHA256.HashData(bytes)));
+        Assert.Equal((byte)'\n', bytes[^1]);
+        Assert.DoesNotContain((byte)'\r', bytes);
+        AssertGolden(bytes, phase, generation, modelCalls, toolCalls);
+        using var document = JsonDocument.Parse(bytes);
+        const string limits = "75e8c549b0a9a9cbee70f09da1bb58de0d517cafa9762260030964a015607902";
+        Assert.Equal(limits, document.RootElement.GetProperty("limits_sha256").GetString());
+        Assert.Equal(limits, AgentCanonical.LimitsSha256());
+    }
 
     [Fact]
     public void ProofGoldensAreByteExactPublicMetadata()

@@ -93,7 +93,8 @@ internal sealed class MinimalChatClient(
                 tool.SchemaJson)).ToArray(),
             continuation,
             request.ThinkingRequired,
-            request.Accounting);
+            request.Accounting,
+            request.MaxOutputTokens);
     }
 
     private static MinimalChatMessage ToNative(
@@ -278,7 +279,8 @@ internal sealed record MinimalChatRequest(
     MinimalChatTool[] Tools,
     MinimalChatContinuation? Continuation,
     bool ThinkingRequired = false,
-    ProviderAttemptCapture? Accounting = null);
+    ProviderAttemptCapture? Accounting = null,
+    int? MaxOutputTokens = null);
 
 internal sealed record MinimalChatMessage(
     string Role,

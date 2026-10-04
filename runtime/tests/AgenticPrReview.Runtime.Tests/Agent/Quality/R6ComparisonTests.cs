@@ -696,9 +696,9 @@ public sealed class R6ComparisonTests
         var plan = new LivePlanDigestInput(LiveLimits.PlanFormat, new(new string(source, 40), new string('b', 40), true),
             Hash(corpus), new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
                 LivePlanAdmission.ProviderConfigurationSha256()), Enumerable.Repeat("cs-safe", scheduled).ToImmutableArray(),
-            new(scheduled, calls, scheduled * AgentLimits.InputTokens, scheduled * AgentLimits.OutputTokens,
-                scheduled * AgentLimits.CombinedTokens, maxSeconds, calls * 1000,
-                new(AgentLimits.InputTokens / 8, AgentLimits.OutputTokens / 8, 1000)));
+            new(scheduled, calls, scheduled * AgentLimits.RetainedInputTokens, scheduled * AgentLimits.RetainedOutputTokens,
+                scheduled * AgentLimits.RetainedCombinedTokens, maxSeconds, calls * 1000,
+                new(AgentLimits.RetainedInputTokens / 8, AgentLimits.RetainedOutputTokens / 8, 1000)));
         var expected = new UsageJournalExpectation(new(campaign, plan.Source.Commit, plan.Source.Tree, true, build,
             plan.CorpusSha256, plan.Provider.ConfigurationSha256, LivePlanAdmission.Digest(plan), "loopback"), plan);
         var collector = new UsageJournalCollector(expected);
