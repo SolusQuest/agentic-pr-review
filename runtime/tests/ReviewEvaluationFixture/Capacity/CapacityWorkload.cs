@@ -82,7 +82,7 @@ internal static class CapacityUserOracle
         (fresh ? CapacitySpec.FreshUser : CapacitySpec.OldUser) + "_" + runId + " Review this synthetic snapshot.";
 
     internal static void Verify(JsonElement[] messages, CapacityHistory[] history, CapacityCase selected,
-        int sentTurns, bool fresh, string[]? hostUsers = null)
+        int sentTurns, bool fresh, string[]? hostUsers = null, string[]? forbiddenUsers = null)
     {
         var users = hostUsers ?? history.Select(run => LocalText(run.Id, fresh)).Append(LocalText(selected.Id, fresh)).ToArray();
         CapacitySpec.Require(users.Length == history.Length + 1 && users.All(text => !string.IsNullOrEmpty(text)), "wire_user_inventory");
@@ -98,6 +98,19 @@ internal static class CapacityUserOracle
         CapacitySpec.Require(controlCount >= 1, "wire_user_message_count");
         foreach (var control in messages.Take(controlCount))
             CapacitySpec.Require(control.GetProperty("role").GetString() is "system" or "developer", "wire_user_control_prefix");
+        // An intact user suffix does not prove that its untrusted contents were not also
+        // copied into control/assistant/tool messages. Decode every string, including nested
+        // values, so escaped newlines or a wrapping field cannot hide that promotion.
+        var forbidden = (forbiddenUsers ?? []).Concat(fresh ? [CapacitySpec.OldUser] : []).ToArray();
+        CapacitySpec.Require(forbidden.All(text => !string.IsNullOrEmpty(text)), "wire_user_forbidden_inventory");
+        var forbiddenTokens = forbidden.SelectMany(Tokens).Distinct(StringComparer.Ordinal).ToArray();
+        var userTokens = users.SelectMany(Tokens).Distinct(StringComparer.Ordinal).ToArray();
+        foreach (var message in messages)
+        {
+            CapacitySpec.Require(!forbiddenTokens.Any(text => Contains(message, text)), "wire_user_forbidden");
+            if (message.GetProperty("role").GetString() != "user")
+                CapacitySpec.Require(!userTokens.Any(text => Contains(message, text)), "wire_user_promotion");
+        }
         for (var index = 0; index < expected.Count; index++)
         {
             var actual = messages[controlCount + index]; var wanted = expected[index];
@@ -115,12 +128,31 @@ internal static class CapacityUserOracle
             }
         }
     }
+
+    private static IEnumerable<string> Tokens(string context)
+    {
+        yield return context;
+        // Real Host contexts have this independently authored identity line. Keep the
+        // anchor observable even if a leaked context is wrapped as a serialized JSON string.
+        foreach (var line in context.Split('\n'))
+            if (line.StartsWith("head-sha=", StringComparison.Ordinal)) yield return line;
+    }
+
+    private static bool Contains(JsonElement value, string text) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()!.Contains(text, StringComparison.Ordinal),
+        JsonValueKind.Array => value.EnumerateArray().Any(item => Contains(item, text)),
+        JsonValueKind.Object => value.EnumerateObject().Any(item =>
+            item.Name.Contains(text, StringComparison.Ordinal) || Contains(item.Value, text)),
+        _ => false,
+    };
 }
 
 // Unlike R5 replay, this transport never retains the complete repeated request transcript.
 // The independently authored history oracle is evaluated on the actual provider wire on every send.
 internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[] history, CapacityClock clock,
-    bool fresh, bool host = false, ReviewedIdentity? expectedIdentity = null, string[]? expectedUsers = null) : IAccountedDeepSeekTransport
+    bool fresh, bool host = false, ReviewedIdentity? expectedIdentity = null, string[]? expectedUsers = null,
+    string[]? forbiddenUsers = null) : IAccountedDeepSeekTransport
 {
     internal int Sends { get; private set; }
     internal int MaximumRequestBytes { get; private set; }
@@ -203,7 +235,7 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
     {
         using var document = JsonDocument.Parse(body);
         var messages = document.RootElement.GetProperty("messages").EnumerateArray().ToArray();
-        CapacityUserOracle.Verify(messages, history, selected, Sends, fresh, expectedUsers);
+        CapacityUserOracle.Verify(messages, history, selected, Sends, fresh, expectedUsers, forbiddenUsers);
         var expected = history.SelectMany(run => Enumerable.Range(0, run.Calls)
             .Select(turn => (run.Id, run.Calls, run.ToolsPerTurn, Turn: turn, Identity: run.Identity ?? expectedIdentity ?? CapacityState.Identity)))
             .Concat(Enumerable.Range(0, Sends).Select(turn => (selected.Id, selected.Calls, selected.ToolsPerTurn, Turn: turn,

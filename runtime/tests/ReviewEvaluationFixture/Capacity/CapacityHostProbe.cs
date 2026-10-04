@@ -31,6 +31,9 @@ internal sealed class CapacityHostProbe
     private string? acceptedHead;
     private readonly List<CapacityHistory> history = [];
     private readonly List<string> acceptedUsers = [];
+    // Retain independently observed contexts across reset. Previously rejected and retired
+    // contexts remain forbidden even when they are absent from the active accepted suffix.
+    private readonly List<string> observedUsers = [];
     private string? previousSession;
 
     internal async Task<CapacityHostReceipt[]> RunAsync(CancellationToken token)
@@ -63,7 +66,8 @@ internal sealed class CapacityHostProbe
         var github = new FullPathGitHubFactory(scenario.Transport.PullRequest, previousHead: acceptedHead,
             withInlineFile: true, fileBytes: Encoding.UTF8.GetBytes((fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool) + "\n"));
         var provider = new Provider(selected, selected.Mode == "reset" ? [] : history.ToArray(),
-            selected.Mode == "reset" ? [] : acceptedUsers.ToArray(), fresh);
+            selected.Mode == "reset" ? [] : acceptedUsers.ToArray(),
+            observedUsers.Where(text => selected.Mode == "reset" || !acceptedUsers.Contains(text, StringComparer.Ordinal)).ToArray(), fresh);
         var before = Inventory(launch);
         var protectedUpload = false;
         if (selected.Mode is not ("success" or "reset"))
@@ -119,6 +123,7 @@ internal sealed class CapacityHostProbe
                         StateObjectClass.Abandonment or StateObjectClass.Cleanup, "host_failure_control_change");
             CapacitySpec.Require(!provider.Outcome.CompletedSessionEligible && provider.Outcome.Review is null, "host_failure_terminal");
         }
+        observedUsers.Add(provider.CurrentUser!);
         return new(selected.Id, code, completion.Status.ToString(), completion.ProcessExitCode,
             completion.Summary.StateDisposition.ToString(), provider.Outcome.Accounting!.ModelCalls,
             provider.Transport!.Sends, provider.Request!.Continuation is not null, noSummary, noMutation,
@@ -172,11 +177,13 @@ internal sealed class CapacityHostProbe
         public IRestrictedStateStore CreateArtifactStore(ActionHostLaunchContract launch) => store;
         public IActionHostGitObjectTransport CreateAncestryTransport(ActionHostGitHubToken token) => github.CreateExactObjectTransport(token);
     }
-    private sealed class Provider(CapacityCase selected, CapacityHistory[] prior, string[] priorUsers, bool fresh) : IActionHostProviderRunnerFactory
+    private sealed class Provider(CapacityCase selected, CapacityHistory[] prior, string[] priorUsers,
+        string[] forbiddenUsers, bool fresh) : IActionHostProviderRunnerFactory
     {
         private readonly CapacityCase selected = selected;
         private readonly CapacityHistory[] prior = prior;
         private readonly string[] priorUsers = priorUsers;
+        private readonly string[] forbiddenUsers = forbiddenUsers;
         private readonly bool fresh = fresh;
         internal AgentRunRequest? Request { get; private set; }
         internal AgentRunOutcome? Outcome { get; private set; }
@@ -199,7 +206,8 @@ internal sealed class CapacityHostProbe
                     [.. request.InitialMessages[..^1], new("user", [new ProjectTextContent(new string('x', 1_000_000))])] } : request;
                 var clock = new CapacityClock();
                 using var transport = new CapacityTransport(owner.selected, owner.prior, clock, owner.fresh, host: true,
-                    expectedIdentity: snapshot.Identity, expectedUsers: [.. owner.priorUsers, owner.CurrentUser]);
+                    expectedIdentity: snapshot.Identity, expectedUsers: [.. owner.priorUsers, owner.CurrentUser],
+                    forbiddenUsers: owner.forbiddenUsers);
                 owner.Transport = transport;
                 var client = DeepSeekChatBackend.CreateClient(new(policy.ProviderId, policy.ModelId, policy.AdapterId, request.SessionId), transport);
                 return owner.Outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()),
