@@ -74,10 +74,53 @@ internal sealed record CapacitySnapshot(ReviewedSnapshot Snapshot, IReviewedFile
 
 internal sealed record CapacityCall(string Id, string Name, string Arguments);
 
+// Independent positive transcript inventory. Expectations come from authored run metadata
+// (local) or each previously accepted pre-projection Host context, never restored wire users.
+internal static class CapacityUserOracle
+{
+    internal static string LocalText(string runId, bool fresh) =>
+        (fresh ? CapacitySpec.FreshUser : CapacitySpec.OldUser) + "_" + runId + " Review this synthetic snapshot.";
+
+    internal static void Verify(JsonElement[] messages, CapacityHistory[] history, CapacityCase selected,
+        int sentTurns, bool fresh, string[]? hostUsers = null)
+    {
+        var users = hostUsers ?? history.Select(run => LocalText(run.Id, fresh)).Append(LocalText(selected.Id, fresh)).ToArray();
+        CapacitySpec.Require(users.Length == history.Length + 1 && users.All(text => !string.IsNullOrEmpty(text)), "wire_user_inventory");
+        var expected = new List<(string Role, string? User)>();
+        for (var index = 0; index < history.Length; index++)
+        {
+            expected.Add(("user", users[index]));
+            AddTurns(history[index].Calls, history[index].ToolsPerTurn, history[index].Calls);
+        }
+        expected.Add(("user", users[^1]));
+        AddTurns(selected.Calls, selected.ToolsPerTurn, sentTurns);
+        var controlCount = messages.Length - expected.Count;
+        CapacitySpec.Require(controlCount >= 1, "wire_user_message_count");
+        foreach (var control in messages.Take(controlCount))
+            CapacitySpec.Require(control.GetProperty("role").GetString() is "system" or "developer", "wire_user_control_prefix");
+        for (var index = 0; index < expected.Count; index++)
+        {
+            var actual = messages[controlCount + index]; var wanted = expected[index];
+            CapacitySpec.Require(actual.GetProperty("role").GetString() == wanted.Role, "wire_user_placement");
+            if (wanted.User is not null)
+                CapacitySpec.Require(actual.GetProperty("content").GetString() == wanted.User, "wire_user_content");
+        }
+        void AddTurns(int total, int tools, int completed)
+        {
+            CapacitySpec.Require(completed >= 0 && completed <= total, "wire_user_turns");
+            for (var turn = 0; turn < completed; turn++)
+            {
+                expected.Add(("assistant", null));
+                for (var slot = 0; slot < (turn == total - 1 ? 1 : tools); slot++) expected.Add(("tool", null));
+            }
+        }
+    }
+}
+
 // Unlike R5 replay, this transport never retains the complete repeated request transcript.
 // The independently authored history oracle is evaluated on the actual provider wire on every send.
 internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[] history, CapacityClock clock,
-    bool fresh, bool host = false, ReviewedIdentity? expectedIdentity = null) : IAccountedDeepSeekTransport
+    bool fresh, bool host = false, ReviewedIdentity? expectedIdentity = null, string[]? expectedUsers = null) : IAccountedDeepSeekTransport
 {
     internal int Sends { get; private set; }
     internal int MaximumRequestBytes { get; private set; }
@@ -160,6 +203,7 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
     {
         using var document = JsonDocument.Parse(body);
         var messages = document.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+        CapacityUserOracle.Verify(messages, history, selected, Sends, fresh, expectedUsers);
         var expected = history.SelectMany(run => Enumerable.Range(0, run.Calls)
             .Select(turn => (run.Id, run.Calls, run.ToolsPerTurn, Turn: turn, Identity: run.Identity ?? expectedIdentity ?? CapacityState.Identity)))
             .Concat(Enumerable.Range(0, Sends).Select(turn => (selected.Id, selected.Calls, selected.ToolsPerTurn, Turn: turn,

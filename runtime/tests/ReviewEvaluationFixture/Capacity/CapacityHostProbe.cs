@@ -30,6 +30,7 @@ internal sealed class CapacityHostProbe
     private readonly ResetProbeClock time = new();
     private string? acceptedHead;
     private readonly List<CapacityHistory> history = [];
+    private readonly List<string> acceptedUsers = [];
     private string? previousSession;
 
     internal async Task<CapacityHostReceipt[]> RunAsync(CancellationToken token)
@@ -61,7 +62,8 @@ internal sealed class CapacityHostProbe
         store.ProducingRunAttempt = launch.RunAttempt;
         var github = new FullPathGitHubFactory(scenario.Transport.PullRequest, previousHead: acceptedHead,
             withInlineFile: true, fileBytes: Encoding.UTF8.GetBytes((fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool) + "\n"));
-        var provider = new Provider(selected, selected.Mode == "reset" ? [] : history.ToArray(), fresh);
+        var provider = new Provider(selected, selected.Mode == "reset" ? [] : history.ToArray(),
+            selected.Mode == "reset" ? [] : acceptedUsers.ToArray(), fresh);
         var before = Inventory(launch);
         var protectedUpload = false;
         if (selected.Mode is not ("success" or "reset"))
@@ -94,8 +96,9 @@ internal sealed class CapacityHostProbe
                 provider.Request!.Continuation is not null && provider.Request.SessionId == previousSession, "host_continuation");
             acceptedHead = scenario.Transport.PullRequest.HeadSha;
             previousSession = provider.Request!.SessionId;
-            if (selected.Mode == "reset") history.Clear();
+            if (selected.Mode == "reset") { history.Clear(); acceptedUsers.Clear(); }
             history.Add(new(selected.Id, selected.Calls, selected.ToolsPerTurn, provider.Request!.ReviewedIdentity));
+            acceptedUsers.Add(provider.CurrentUser!);
         }
         else
         {
@@ -169,14 +172,16 @@ internal sealed class CapacityHostProbe
         public IRestrictedStateStore CreateArtifactStore(ActionHostLaunchContract launch) => store;
         public IActionHostGitObjectTransport CreateAncestryTransport(ActionHostGitHubToken token) => github.CreateExactObjectTransport(token);
     }
-    private sealed class Provider(CapacityCase selected, CapacityHistory[] prior, bool fresh) : IActionHostProviderRunnerFactory
+    private sealed class Provider(CapacityCase selected, CapacityHistory[] prior, string[] priorUsers, bool fresh) : IActionHostProviderRunnerFactory
     {
         private readonly CapacityCase selected = selected;
         private readonly CapacityHistory[] prior = prior;
+        private readonly string[] priorUsers = priorUsers;
         private readonly bool fresh = fresh;
         internal AgentRunRequest? Request { get; private set; }
         internal AgentRunOutcome? Outcome { get; private set; }
         internal CapacityTransport? Transport { get; private set; }
+        internal string? CurrentUser { get; private set; }
         public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
             ReviewedSnapshot snapshot, TimeProvider timeProvider) => new Runner(this, policy, snapshot);
         private sealed class Runner(Provider owner, ActionHostProviderPolicy policy, ReviewedSnapshot snapshot) : IActionHostProviderRunner
@@ -184,11 +189,17 @@ internal sealed class CapacityHostProbe
             public async Task<AgentRunOutcome> RunAsync(AgentRunRequest request, CancellationToken token)
             {
                 owner.Request = request;
+                // Capture only the independently materialized current context. Historical
+                // expectations were saved at their own accepted invocation, before projection.
+                var current = request.InitialMessages[^1];
+                CapacitySpec.Require(current.Role == "user" && current.Contents is [ProjectTextContent], "host_current_user");
+                owner.CurrentUser = ((ProjectTextContent)current.Contents[0]).Text;
+                CapacitySpec.Require(owner.CurrentUser.Contains("head-sha=" + snapshot.Identity.HeadSha, StringComparison.Ordinal), "host_current_user_identity");
                 var stimulus = owner.selected.Mode == "context" ? request with { InitialMessages =
-                    [.. request.InitialMessages[..^1], CapacityState.User(owner.fresh, "context")] } : request;
+                    [.. request.InitialMessages[..^1], new("user", [new ProjectTextContent(new string('x', 1_000_000))])] } : request;
                 var clock = new CapacityClock();
                 using var transport = new CapacityTransport(owner.selected, owner.prior, clock, owner.fresh, host: true,
-                    expectedIdentity: snapshot.Identity);
+                    expectedIdentity: snapshot.Identity, expectedUsers: [.. owner.priorUsers, owner.CurrentUser]);
                 owner.Transport = transport;
                 var client = DeepSeekChatBackend.CreateClient(new(policy.ProviderId, policy.ModelId, policy.AdapterId, request.SessionId), transport);
                 return owner.Outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()),

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Diagnostics.CodeAnalysis;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Agent.Core;
 
@@ -70,7 +71,7 @@ internal static class CapacitySpec
         "role" or "association" or "policy" or "scope" => "admission_rejected",
         _ => throw new InvalidOperationException("r7_capacity_case_invalid"),
     };
-    internal static void Require(bool condition, string code)
+    internal static void Require([DoesNotReturnIf(false)] bool condition, string code)
     { if (!condition) throw new InvalidOperationException("r7_capacity_" + code); }
     internal static bool IsPrivate(ReadOnlySpan<byte> bytes)
     {

@@ -18,8 +18,10 @@ internal sealed class CapacityState : IDisposable
     internal const long Now = 1_800_000_000;
     internal static readonly ReviewedIdentity Identity = new("r7-capacity-repository", 358, new('a', 40), new('b', 40));
     private readonly Keys keys;
+    private readonly string runId;
     internal CapacityState(CapacityInput input, bool reset = false)
     {
+        runId = input.Case.Id;
         Session = reset ? "r7-capacity-reset" : input.Fresh ? "r7-capacity-reset" : input.Case.ModelCallAuthority == 128
             ? "r7-capacity-configured" : "r7-capacity-default";
         // The default case supplies no override. Configured128 is additionally bound by the
@@ -52,9 +54,9 @@ internal sealed class CapacityState : IDisposable
     internal AuthorizedStateAccess Access { get; }
     internal LocalRestrictedStateStore Store { get; }
     internal RestrictedStateService Service { get; }
-    internal static ProjectChatMessage User(bool fresh, string mode = "success") =>
+    internal ProjectChatMessage User(bool fresh, string mode = "success") =>
         new("user", [new ProjectTextContent(mode == "context" ? new string('x', 1_000_000) :
-            (fresh ? CapacitySpec.FreshUser : CapacitySpec.OldUser) + " Review this synthetic snapshot.")]);
+            CapacityUserOracle.LocalText(runId, fresh))]);
     internal RestrictedStateSessionAdmissionContext Context(long generation, string? predecessor, bool fresh, string mode = "success") =>
         new(Identity.BaseSha, Identity.HeadSha, generation, predecessor,
             new AgentSessionStateAdmissionContext(Trusted, Session, Identity, User(fresh, mode),
@@ -128,7 +130,7 @@ internal static class CapacityChild
         var lineage = input.Lineage;
         if (lineage is null)
             request = new(CapacityState.Identity, state.Stable.StablePlan, state.Session,
-                [.. state.Stable.ControlMessages, CapacityState.User(input.Fresh)]);
+                [.. state.Stable.ControlMessages, state.User(input.Fresh)]);
         else
         {
             var restored = await state.RestoreAsync(lineage, input.Fresh, input.Case.Mode);
@@ -188,7 +190,7 @@ internal static class CapacityChild
                 CapacitySpec.Require(gone.Session is null && gone.Result.Action == StateAction.Failed, "reset_old_absent");
                 freshState = new(input, reset: true);
                 request = new(CapacityState.Identity, freshState.Stable.StablePlan, freshState.Session,
-                    [.. freshState.Stable.ControlMessages, CapacityState.User(true)]);
+                    [.. freshState.Stable.ControlMessages, freshState.User(true)]);
                 lineage = null; predecessor = null;
             }
             var active = freshState ?? state;

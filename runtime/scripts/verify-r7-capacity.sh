@@ -56,10 +56,10 @@ NODE
     "${mode}" "${SOURCE_SHA}" "${SOURCE_TREE}" "$(sha256sum "${artifact}" | cut -d' ' -f1)"
   if [[ "${mode}" == framework ]]; then
     "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
-      --filter 'FullyQualifiedName~R7CapacityVerifierTests|FullyQualifiedName~R7CapacityStateTests|FullyQualifiedName~TrustedConfiguredCallsReachRealProviderAndBothSessionConsumers' \
+      --filter 'FullyQualifiedName~R7CapacityVerifierTests|FullyQualifiedName~R7CapacityUserOracleTests|FullyQualifiedName~R7CapacityStateTests|FullyQualifiedName~TrustedConfiguredCallsReachRealProviderAndBothSessionConsumers' \
       --logger "trx;LogFileName=${ROOT}/focused.trx" >"${ROOT}/focused.log" 2>&1
     "${runner[@]}" verify-cases --trx "${ROOT}/focused.trx" \
-      --require 'R7CapacityVerifierTests,R7CapacityStateTests,TrustedConfiguredCallsReachRealProviderAndBothSessionConsumers'
+      --require 'R7CapacityVerifierTests,R7CapacityUserOracleTests,R7CapacityStateTests,TrustedConfiguredCallsReachRealProviderAndBothSessionConsumers'
     printf 'r7_capacity_gate trusted_config_and_focused_tests=verified\n'
   fi
   # Optional sanitized evidence export for a task audit; all private roots still get deleted.
