@@ -370,6 +370,32 @@ public sealed class DeepSeekTransportTests
     }
 
     [Fact]
+    public async Task RemainingReviewCancelsProductionConnectBeforeFifteenSecondCap()
+    {
+        var clock = new DeadlineTestClock();
+        using var review = new CancellationTokenSource(TimeSpan.FromSeconds(9), clock);
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async ValueTask<Stream> Stall(SocketsHttpConnectionContext _, CancellationToken token)
+        {
+            entered.TrySetResult(token);
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); return Stream.Null; }
+            finally { stopped.TrySetResult(); }
+        }
+        using var handler = DeepSeekTransport.CreateHandler(DeepSeekTransportPolicy.ConnectTimeout, Stall);
+        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("test-key"),
+            handler, DeepSeekTransportPolicy.ProviderTimeout, clock);
+        var send = transport.SendAsync(new byte[] { 1 }, review.Token);
+        var connectToken = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(TimeSpan.FromSeconds(15), handler.ConnectTimeout);
+        clock.Advance(TimeSpan.FromSeconds(9));
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => send.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(review.Token, error.CancellationToken);
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(connectToken.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task UnownedGenericCancellationIsTransportFailure()
     {
         using var handler = new ThrowingHandler(

@@ -207,13 +207,16 @@ internal sealed class ActionHostCoordinator
             iteration < MaximumConvergenceIterations;
             iteration++)
         {
+            var classificationToken = journal.PhaseToken;
             using var evaluation = await recovery.ClassifyBeforeProviderAsync(
                     launch.Inputs.GitHubToken!,
                     invocation,
                     scope,
                     state,
-                    journal.ReconciliationToken)
+                    classificationToken)
                 .ConfigureAwait(false);
+            classificationToken.ThrowIfCancellationRequested();
+            journal.EnterRecoveryPhase(evaluation.Decision.Action);
             var observation = evaluation.Observation;
             var progressKey = string.Concat(
                 ((int)evaluation.Decision.Action).ToString(
@@ -435,7 +438,7 @@ internal sealed class ActionHostCoordinator
                             invocation,
                             state,
                             evaluation,
-                            journal.ReconciliationToken)
+                            journal.PhaseToken)
                         .ConfigureAwait(false);
                     admittedCleanup.Resolve(StateOwnerResolution(cleanup.Code));
                     if (!cleanup.Completed)
@@ -888,7 +891,7 @@ internal sealed class ActionHostCoordinator
                             scope,
                             state,
                             evaluation,
-                            journal.ReconciliationToken)
+                            journal.PhaseToken)
                         .ConfigureAwait(false);
                     admittedStaleCleanup.Resolve(
                         StateOwnerResolution(cleanup.Code));

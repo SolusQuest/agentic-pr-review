@@ -10,6 +10,7 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Locator;
@@ -52,7 +53,31 @@ internal sealed class ActionHostTimeBudget : TimeProvider, IStateReconciliationD
     internal CancellationToken CallerToken { get; }
     internal long LatestAcceptanceUnixSeconds { get; }
     internal TimeSpan RemainingPreSticky => Positive(PreStickyAllowance - inner.GetElapsedTime(started));
+    internal TimeSpan RemainingReviewTime
+    {
+        get
+        {
+            var remaining = RemainingPreSticky;
+            long? finalizationStart;
+            lock (gate) finalizationStart = finalizationStarted;
+            if (finalizationStart is { } value)
+            {
+                var finalizationRemaining = Positive(FinalizationAllowance - inner.GetElapsedTime(value));
+                if (finalizationRemaining < remaining) remaining = finalizationRemaining;
+            }
+            return remaining;
+        }
+    }
     internal CancellationToken BusinessToken { get { ObserveTime(); return business.Token; } }
+    internal CancellationToken PhaseToken
+    {
+        get
+        {
+            bool finalizing;
+            lock (gate) finalizing = finalizationStarted is not null;
+            return finalizing ? ReconciliationToken : BusinessToken;
+        }
+    }
     public CancellationToken ReconciliationToken { get { ObserveTime(); return reconciliation.Token; } }
 
     internal void BeginFinalization()
@@ -159,9 +184,18 @@ internal sealed class ActionHostTransactionJournal : IDisposable
     internal bool HasCurrentRunMutation =>
         Volatile.Read(ref currentRunMutationDispatched) != 0;
 
-    internal TimeSpan? RemainingReviewTime => timeBudget?.RemainingPreSticky;
+    internal TimeSpan? RemainingReviewTime => timeBudget?.RemainingReviewTime;
     internal CancellationToken ProviderCancellationToken => timeBudget?.CallerToken ?? callerCancellationToken;
     internal CancellationToken ReconciliationToken => timeBudget?.ReconciliationToken ?? CancellationToken.None;
+    internal CancellationToken PhaseToken => timeBudget?.PhaseToken ?? CancellationToken.None;
+
+    internal void EnterRecoveryPhase(PublicationRecoveryAction action)
+    {
+        if (action is PublicationRecoveryAction.ResumeAnchoredWrite or
+            PublicationRecoveryAction.ResumeCleanup or PublicationRecoveryAction.ResumeStaleCleanup or
+            PublicationRecoveryAction.CompleteAcceptance or PublicationRecoveryAction.ReturnCommitted)
+            timeBudget?.BeginFinalization();
+    }
 
     internal async Task<T> WithinHorizonAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken token)
     {
@@ -298,7 +332,7 @@ internal sealed class ActionHostTransactionJournal : IDisposable
     {
         lock (admissionGate)
         {
-            timeBudget?.BeginFinalization();
+            if (HasCurrentRunActivity) timeBudget?.BeginFinalization();
             Interlocked.Exchange(ref cancellationObserved, 1);
             Interlocked.Exchange(
                 ref executionMode,

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using AgenticPrReview.Runtime.Agent.Core;
 
@@ -7,6 +8,7 @@ namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 
 internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
 {
+    private static readonly HttpRequestOptionsKey<CancellationToken> ConnectCancellation = new("apr.connect-cancellation");
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -89,7 +91,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
                 DistributedContextPropagator.CreateNoOutputPropagator(),
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.None,
-            ConnectCallback = connectCallback,
+            ConnectCallback = (context, token) => ConnectAsync(context, token, connectCallback),
             ConnectTimeout = connectTimeout,
             Credentials = null,
             MaxResponseDrainSize = 0,
@@ -104,6 +106,40 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             UseCookies = false,
             UseProxy = false,
         };
+    }
+
+    private static async ValueTask<Stream> ConnectAsync(
+        SocketsHttpConnectionContext context,
+        CancellationToken connectionToken,
+        Func<SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>>? callback)
+    {
+        // The handler can keep connecting after its request waiter is cancelled.
+        // Bind the actual socket operation to this attempt's review/deadline token.
+        context.InitialRequestMessage.Options.TryGetValue(ConnectCancellation, out var requestToken);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(connectionToken, requestToken);
+        try
+        {
+            linked.Token.ThrowIfCancellationRequested();
+            if (callback is not null) return await callback(context, linked.Token).ConfigureAwait(false);
+            var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                await socket.ConnectAsync(context.DnsEndPoint, linked.Token).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+        catch (OperationCanceledException) when (connectionToken.IsCancellationRequested && !requestToken.IsCancellationRequested)
+        {
+            // Preserve the handler-owned cancellation identity used to classify
+            // its independent ConnectTimeout, rather than a generic failure.
+            connectionToken.ThrowIfCancellationRequested();
+            throw;
+        }
     }
 
     internal static Uri CreateEndpoint(string candidate)
@@ -162,6 +198,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             {
                 Content = new ByteArrayContent(requestSnapshot),
             };
+            request.Options.Set(ConnectCancellation, providerCancellation.Token);
             if (!request.Headers.TryAddWithoutValidation(
                     "Authorization",
                     $"Bearer {_credential.Value}") ||

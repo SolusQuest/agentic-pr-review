@@ -85,6 +85,85 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(accepted ? ActionHostStatus.Reviewed : ActionHostStatus.InternalFailure, completion.Status);
     }
 
+    [Theory]
+    [InlineData(239, true)]
+    [InlineData(240, false)]
+    public async Task PriorAcceptanceRecoveryHasFourMinutesFromSelection(int seconds, bool accepted)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var publisher = SuccessfulPublisher(79);
+        var provider = new FullPathProviderFactory();
+        var armed = false;
+        store.AfterUpload = (_, call) =>
+        {
+            if (armed || publisher.Transport.Bodies.Count == 0) return;
+            armed = true;
+            store.FailUploadOnUploadCall = call + 1;
+            store.ScheduledUploadFailure = OpaqueStoreFailure.OutcomeUnknown;
+            store.ScheduledUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown;
+            store.HideFailedUploadForNextLists = 128;
+        };
+        var first = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github,
+            new FullPathStateDependencies(store, github), publisher, provider,
+            new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath)).RunAsync(launch, default);
+        Assert.True(armed);
+        Assert.Equal(ActionHostStatus.OutcomeAmbiguous, first.Status);
+        var clock = new DeadlineTestClock(LocatorTestData.Now);
+        var advanced = false;
+        store.HideNextUploadedObjectForNextLists = 0;
+        store.AfterUpload = (_, _) =>
+        {
+            if (advanced) return;
+            advanced = true;
+            clock.Advance(TimeSpan.FromSeconds(seconds));
+        };
+        var resumed = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github,
+            new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath))
+            .RunAsync(WithoutProviderKey(launch), default);
+        Assert.True(advanced);
+        Assert.Equal(accepted, resumed.Summary.StateDisposition == ActionHostStateDisposition.Accepted);
+        Assert.Equal(1, provider.Runs);
+        Assert.Single(publisher.Transport.Bodies);
+    }
+
+    [Fact]
+    public async Task ExistingStateClassificationStopsAtPreStickyBoundaryWithoutNewWrites()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var publisher = SuccessfulPublisher(80);
+        var provider = new FullPathProviderFactory();
+        var first = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github,
+            new FullPathStateDependencies(store, github), publisher, provider,
+            new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath)).RunAsync(launch, default);
+        Assert.Equal(ActionHostStatus.Reviewed, first.Status);
+        var uploads = store.UploadCalls;
+        var clock = new DeadlineTestClock(LocatorTestData.Now);
+        CancellationToken observed = default;
+        publisher.Transport.OnList = () =>
+        {
+            observed = publisher.Transport.ListCancellationTokens[^1];
+            clock.Advance(TimeSpan.FromMinutes(24));
+        };
+        var resumed = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github,
+            new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath))
+            .RunAsync(WithoutProviderKey(launch), default);
+        Assert.True(observed.IsCancellationRequested);
+        Assert.NotEqual(ActionHostStatus.Reviewed, resumed.Status);
+        Assert.Equal(uploads, store.UploadCalls);
+        Assert.Equal(1, provider.Runs);
+        Assert.Single(publisher.Transport.Bodies);
+    }
+
     private sealed class DeadlineBlockingStore : IRestrictedStateStore
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

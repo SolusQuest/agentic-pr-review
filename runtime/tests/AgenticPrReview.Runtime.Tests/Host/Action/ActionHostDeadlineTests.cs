@@ -2,12 +2,54 @@ using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Transactions;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Tests.Agent.Loop;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action;
 
 public sealed class ActionHostDeadlineTests
 {
+    [Theory]
+    [InlineData((int)PublicationRecoveryAction.ResumeAnchoredWrite)]
+    [InlineData((int)PublicationRecoveryAction.ResumeCleanup)]
+    [InlineData((int)PublicationRecoveryAction.ResumeStaleCleanup)]
+    [InlineData((int)PublicationRecoveryAction.CompleteAcceptance)]
+    [InlineData((int)PublicationRecoveryAction.ReturnCommitted)]
+    public async Task ExistingRecoveryStartsOneFourMinuteWindow(int action)
+    {
+        var clock = new DeadlineTestClock();
+        using var budget = new ActionHostTimeBudget(clock, default);
+        using var journal = new ActionHostTransactionJournal(ActionHostCancellationState.Active, default, budget);
+        clock.Advance(TimeSpan.FromMinutes(1));
+        journal.EnterRecoveryPhase((PublicationRecoveryAction)action);
+        var token = journal.PhaseToken;
+        var operation = Task.Delay(Timeout.InfiniteTimeSpan, token);
+        clock.Advance(TimeSpan.FromSeconds(239));
+        Assert.False(token.IsCancellationRequested);
+        Assert.Equal(TimeSpan.FromSeconds(1), journal.RemainingReviewTime);
+        journal.EnterRecoveryPhase((PublicationRecoveryAction)action);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+        Assert.True(journal.ReconciliationToken.IsCancellationRequested);
+        Assert.Equal(TimeSpan.Zero, journal.RemainingReviewTime);
+        Assert.False(journal.TryBeginBusinessOperation(ActionHostOperationKind.Recovery, default, out _, allowReconciliation: true));
+    }
+
+    [Fact]
+    public async Task OrdinaryClassificationDoesNotBorrowReconciliationHeadroom()
+    {
+        var clock = new DeadlineTestClock();
+        using var budget = new ActionHostTimeBudget(clock, default);
+        using var journal = new ActionHostTransactionJournal(ActionHostCancellationState.Active, default, budget);
+        var token = journal.PhaseToken;
+        var operation = Task.Delay(Timeout.InfiniteTimeSpan, token);
+        clock.Advance(TimeSpan.FromMinutes(24));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+        Assert.False(journal.HasCurrentRunActivity);
+        Assert.True(journal.PhaseToken.IsCancellationRequested);
+        Assert.False(journal.ReconciliationToken.IsCancellationRequested);
+    }
+
     [Fact]
     public void FinalizationOwnsItsWindowAfterPreStickyAdmission()
     {
