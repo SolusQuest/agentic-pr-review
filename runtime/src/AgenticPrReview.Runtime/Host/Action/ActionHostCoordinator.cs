@@ -1727,81 +1727,88 @@ internal sealed class ActionHostCoordinator
             }
         }
 
-        if (journal.TryBeginBusinessOperation(
-                ActionHostOperationKind.Cleanup,
-                callerCancellationToken,
-                out var cleanupOperation))
+        try
         {
-            using var admittedCleanup = cleanupOperation!;
-            var cleanupResolution =
-                ActionHostOperationResolution.ResolvedNoCommit;
-            if (existingEvaluation is not null)
+            if (journal.TryBeginBusinessOperation(
+                    ActionHostOperationKind.Cleanup,
+                    callerCancellationToken,
+                    out var cleanupOperation))
             {
-                var historicalCleanup = await PublicationRecoveryService
-                    .CleanupHistoricalRecoveryRecordsAsync(
-                        invocation,
-                        state,
-                        existingEvaluation,
-                        journal.ReconciliationToken)
-                    .ConfigureAwait(false);
-                cleanupResolution = MergeResolution(
-                    cleanupResolution,
-                    StateOwnerResolution(historicalCleanup.Code));
-            }
-            else
-            {
-                using var terminal = await new PublicationRecoveryService(
-                        publisher)
-                    .ClassifyBeforeProviderAsync(
-                        launch.Inputs.GitHubToken!,
-                        invocation,
-                        scope,
-                        state,
-                        journal.ReconciliationToken)
-                    .ConfigureAwait(false);
-                if (terminal.Decision.Action ==
-                    PublicationRecoveryAction.ReturnCommitted)
+                using var admittedCleanup = cleanupOperation!;
+                var cleanupResolution =
+                    ActionHostOperationResolution.ResolvedNoCommit;
+                if (existingEvaluation is not null)
                 {
                     var historicalCleanup = await PublicationRecoveryService
                         .CleanupHistoricalRecoveryRecordsAsync(
                             invocation,
                             state,
-                            terminal,
+                            existingEvaluation,
                             journal.ReconciliationToken)
                         .ConfigureAwait(false);
                     cleanupResolution = MergeResolution(
                         cleanupResolution,
                         StateOwnerResolution(historicalCleanup.Code));
                 }
-            }
+                else
+                {
+                    using var terminal = await new PublicationRecoveryService(
+                            publisher)
+                        .ClassifyBeforeProviderAsync(
+                            launch.Inputs.GitHubToken!,
+                            invocation,
+                            scope,
+                            state,
+                            journal.ReconciliationToken)
+                        .ConfigureAwait(false);
+                    if (terminal.Decision.Action ==
+                        PublicationRecoveryAction.ReturnCommitted)
+                    {
+                        var historicalCleanup = await PublicationRecoveryService
+                            .CleanupHistoricalRecoveryRecordsAsync(
+                                invocation,
+                                state,
+                                terminal,
+                                journal.ReconciliationToken)
+                            .ConfigureAwait(false);
+                        cleanupResolution = MergeResolution(
+                            cleanupResolution,
+                            StateOwnerResolution(historicalCleanup.Code));
+                    }
+                }
 
-            var cleanupPlan = await RestrictedStateService
-                .PlanRetainedStateCleanupAsync(
-                    state,
-                    acceptance,
-                    journal.ReconciliationToken)
-                .ConfigureAwait(false);
-            using var cleanupAuthorization = cleanupPlan.Value;
-            if (cleanupPlan.Succeeded && cleanupAuthorization is not null)
-            {
-                var semanticExpiry = checked(
-                    timeProvider.GetUtcNow().ToUnixTimeSeconds() +
-                    StateRetentionRequirements.ScopedPlatformRequestSeconds);
-                var cleanup = await RestrictedStateService
-                    .CleanupRetainedStateAsync(
+                var cleanupPlan = await RestrictedStateService
+                    .PlanRetainedStateCleanupAsync(
                         state,
-                        new RetainedStateCleanupRequest(
-                            acceptance,
-                            cleanupAuthorization,
-                            semanticExpiry),
+                        acceptance,
                         journal.ReconciliationToken)
                     .ConfigureAwait(false);
-                cleanupResolution = MergeResolution(
-                    cleanupResolution,
-                    StateOwnerResolution(cleanup.Code));
-            }
+                using var cleanupAuthorization = cleanupPlan.Value;
+                if (cleanupPlan.Succeeded && cleanupAuthorization is not null)
+                {
+                    var semanticExpiry = checked(
+                        timeProvider.GetUtcNow().ToUnixTimeSeconds() +
+                        StateRetentionRequirements.ScopedPlatformRequestSeconds);
+                    var cleanup = await RestrictedStateService
+                        .CleanupRetainedStateAsync(
+                            state,
+                            new RetainedStateCleanupRequest(
+                                acceptance,
+                                cleanupAuthorization,
+                                semanticExpiry),
+                            journal.ReconciliationToken)
+                        .ConfigureAwait(false);
+                    cleanupResolution = MergeResolution(
+                        cleanupResolution,
+                        StateOwnerResolution(cleanup.Code));
+                }
 
-            admittedCleanup.Resolve(cleanupResolution);
+                admittedCleanup.Resolve(cleanupResolution);
+            }
+        }
+        catch (OperationCanceledException) when (journal.ReconciliationToken.IsCancellationRequested)
+        {
+            // Acceptance is durable; optional cleanup expiry cannot revoke it.
         }
 
         return Success(

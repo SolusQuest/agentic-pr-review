@@ -945,7 +945,8 @@ internal sealed class ActionHostComposition
                     publicationScope,
                     cancellationToken)
                 .ConfigureAwait(false);
-            return timeBudget.ReconciliationToken.IsCancellationRequested
+            return timeBudget.ReconciliationToken.IsCancellationRequested &&
+                completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted
                 ? Completion(launch, journal.CancellationStatus, StateWasAccessed: true)
                 : completion;
         }

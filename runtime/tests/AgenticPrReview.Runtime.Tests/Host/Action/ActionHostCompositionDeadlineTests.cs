@@ -197,6 +197,83 @@ public sealed partial class ActionHostCompositionTests
         Assert.True(publisher.Transport.ListCancellationTokens[^1].IsCancellationRequested);
     }
 
+    [Theory]
+    [InlineData(false, false, 4, false)]
+    [InlineData(true, false, 4, false)]
+    [InlineData(true, true, 4, false)]
+    [InlineData(true, true, 28, false)]
+    [InlineData(false, true, 4, true)]
+    [InlineData(true, true, 4, true)]
+    public async Task VerifiedAcceptanceSurvivesOptionalWorkDeadline(bool resume, bool throwCancellation, int minutes, bool inlineExpiry)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest, withInlineFile: true);
+        var store = FullPathStore(launch);
+        var publisher = SuccessfulPublisher(81);
+        var provider = new FullPathProviderFactory(withFinding: true);
+        if (resume)
+        {
+            var seeded = await new ActionHostComposition(new ActionHostCompositionDependencies(
+                scenario.EventReader, scenario.Factory, github, github,
+                new FullPathStateDependencies(store, github), publisher, provider,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath, new ConsumingInlineHook()))
+                .RunAsync(launch, default);
+            Assert.Equal(ActionHostStateDisposition.Accepted, seeded.Summary.StateDisposition);
+        }
+        var clock = new DeadlineTestClock(LocatorTestData.Now);
+        var expired = false;
+        (int, int, int, int, int, int) Counts() => (store.ListCalls, store.MetadataCalls,
+            store.DownloadCalls, store.UploadCalls, store.ReadBackCalls, store.DeleteCalls);
+        var atExpiry = Counts();
+        var inline = new DeadlineAcceptedInlineHook(() =>
+        {
+            if (inlineExpiry)
+            {
+                expired = true;
+                clock.Advance(TimeSpan.FromMinutes(minutes));
+                atExpiry = Counts();
+                throw new OperationCanceledException();
+            }
+            store.BeforeList = (_, _) =>
+            {
+                Assert.False(expired);
+                expired = true;
+                clock.Advance(TimeSpan.FromMinutes(minutes));
+                atExpiry = Counts();
+                if (throwCancellation) throw new OperationCanceledException();
+            };
+        });
+        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github,
+            new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath, inline))
+            .RunAsync(resume ? WithoutProviderKey(launch) : launch, default);
+        Assert.True(expired);
+        Assert.Equal(ActionHostStateDisposition.Accepted, completion.Summary.StateDisposition);
+        Assert.Equal(inlineExpiry ? ActionHostStatus.ReviewedWithInlineWarnings : ActionHostStatus.Reviewed, completion.Status);
+        Assert.Equal(atExpiry, Counts());
+        store.BeforeList = null;
+        var recovered = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github,
+            new FullPathStateDependencies(store, github), publisher, provider,
+            new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath, new ConsumingInlineHook()))
+            .RunAsync(WithoutProviderKey(launch), default);
+        Assert.Equal(ActionHostStateDisposition.Accepted, recovered.Summary.StateDisposition);
+        Assert.Equal(1, provider.Runs);
+        Assert.Single(publisher.Transport.Bodies);
+    }
+
+    private sealed class DeadlineAcceptedInlineHook(System.Action afterAcceptance) : IActionHostPostAcceptanceInlineHook
+    {
+        public Task<ActionHostInlineHookResult> PublishAsync(
+            ActionHostCoordinator.PostAcceptanceInlineRequest request, CancellationToken cancellationToken)
+        {
+            Assert.True(request.TryConsume(out _));
+            afterAcceptance();
+            return Task.FromResult(ActionHostInlineHookResult.Complete);
+        }
+    }
+
     private sealed class DeadlineBlockingStore : IRestrictedStateStore
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
