@@ -168,6 +168,35 @@ public sealed partial class ActionHostCompositionTests
         Assert.Single(publisher.Transport.Bodies);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CurrentCandidateStickyReadbackCancellationPreservesConflict(bool callerCancellation)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var publisher = EmptyPublisher();
+        var provider = new FullPathProviderFactory();
+        var clock = new DeadlineTestClock(LocatorTestData.Now);
+        using var caller = new CancellationTokenSource();
+        publisher.Transport.OnList = () =>
+        {
+            if (callerCancellation) caller.Cancel();
+            else clock.Advance(TimeSpan.FromMinutes(24));
+        };
+        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github,
+            new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath))
+            .RunAsync(launch, caller.Token);
+        Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
+        Assert.True(store.UploadCalls > 0);
+        Assert.Equal(1, provider.Runs);
+        Assert.Empty(publisher.Transport.Bodies);
+        Assert.True(publisher.Transport.ListCancellationTokens[^1].IsCancellationRequested);
+    }
+
     private sealed class DeadlineBlockingStore : IRestrictedStateStore
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -215,11 +215,11 @@ internal sealed class ActionHostCoordinator
                     state,
                     classificationToken)
                 .ConfigureAwait(false);
-            // Preserve incomplete prior-state readback as a conflict, while
-            // current-run activity retains its journal-owned cancellation outcome.
+            // An admitted state observation with incomplete sticky readback remains
+            // a conflict. Cancelled state inventory work retains the journal outcome.
             if (classificationToken.IsCancellationRequested &&
                 (evaluation.Decision.Action != PublicationRecoveryAction.Conflict ||
-                 journal.HasCurrentRunActivity))
+                 (evaluation.Observation is null && journal.HasCurrentRunActivity)))
                 return Failure(launch, journal.CancellationStatus);
             journal.EnterRecoveryPhase(evaluation.Decision.Action);
             var observation = evaluation.Observation;
