@@ -748,9 +748,9 @@ public sealed class R6PricingTests
             new string('c', 64), new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
                 DeepSeekAdapterContext.Adapter, LivePlanAdmission.ProviderConfigurationSha256()),
             Enumerable.Repeat("cs-safe", count).ToImmutableArray(),
-            new(count, maximumCalls ?? calls, count * AgentLimits.InputTokens, count * AgentLimits.OutputTokens,
-                count * AgentLimits.CombinedTokens, 120, calls * charge,
-                new(AgentLimits.InputTokens / 8, AgentLimits.OutputTokens / 8, charge)));
+            new(count, maximumCalls ?? calls, count * AgentLimits.RetainedInputTokens, count * AgentLimits.RetainedOutputTokens,
+                count * AgentLimits.RetainedCombinedTokens, 120, calls * charge,
+                new(AgentLimits.RetainedInputTokens / 8, AgentLimits.RetainedOutputTokens / 8, charge)));
         return new(new("pricing-test", plan.Source.Commit, plan.Source.Tree, true, LiveRunner.BuildId,
             plan.CorpusSha256, plan.Provider.ConfigurationSha256, LivePlanAdmission.Digest(plan), "loopback"), plan);
     }

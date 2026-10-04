@@ -13,7 +13,7 @@ namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 public sealed class DeepSeekRequestWriterTests
 {
     [Fact]
-    public void WritesTheExactFixedProfile()
+    public void WritesTheExactCurrentCeilingProfile()
     {
         var result = DeepSeekRequestWriter.Write(BuildRequest(
             [
@@ -27,7 +27,7 @@ public sealed class DeepSeekRequestWriterTests
             "{\"role\":\"system\",\"content\":\"policy\"}," +
             "{\"role\":\"user\",\"content\":\"review\"}]," +
             "\"stream\":false,\"thinking\":{\"type\":\"enabled\"}," +
-            "\"reasoning_effort\":\"high\",\"max_tokens\":4096," +
+            "\"reasoning_effort\":\"high\",\"max_tokens\":65536," +
             "\"tools\":[{\"type\":\"function\",\"function\":{" +
             "\"name\":\"read_file\",\"description\":\"Read a file\"," +
             "\"parameters\":{\"type\":\"object\",\"properties\":{}," +
@@ -49,7 +49,7 @@ public sealed class DeepSeekRequestWriterTests
         Assert.Equal(DeepSeekRequestWriteOutcome.Success, candidate.Outcome);
         Assert.Equal(
             Encoding.UTF8.GetString(current.Body.AsSpan()).Replace(
-                "\"max_tokens\":4096", "\"max_tokens\":8192", StringComparison.Ordinal),
+                "\"max_tokens\":65536", "\"max_tokens\":8192", StringComparison.Ordinal),
             Encoding.UTF8.GetString(candidate.Body.AsSpan()));
         using var document = JsonDocument.Parse(candidate.Body.ToArray());
         Assert.False(document.RootElement.TryGetProperty("tool_choice", out _));
@@ -70,7 +70,7 @@ public sealed class DeepSeekRequestWriterTests
         Assert.Equal(DeepSeekRequestWriteOutcome.Success, large.Outcome);
         Assert.Equal(
             Encoding.UTF8.GetString(current.Body.AsSpan()).Replace(
-                "\"max_tokens\":4096", "\"max_tokens\":65536", StringComparison.Ordinal),
+                "\"max_tokens\":65536", "\"max_tokens\":65536", StringComparison.Ordinal),
             Encoding.UTF8.GetString(large.Body.AsSpan()));
         using var document = JsonDocument.Parse(large.Body.ToArray());
         Assert.Equal(65_536, document.RootElement.GetProperty("max_tokens").GetInt32());

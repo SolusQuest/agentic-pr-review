@@ -71,7 +71,8 @@ internal sealed record ProjectChatRequest(
     ProjectToolDefinition[] Tools,
     ProjectContinuation? Continuation,
     bool ThinkingRequired = false,
-    ProviderAttemptCapture? Accounting = null);
+    ProviderAttemptCapture? Accounting = null,
+    int? MaxOutputTokens = null);
 
 internal sealed record ProjectChatMessage(
     string Role,
@@ -143,7 +144,8 @@ internal sealed record ProjectChatUsage(
     long OutputTokens,
     ProjectProviderUsage? ProviderUsage = null);
 
-// Optional observation only; never part of Agent admission or SESSION.
+// Optional measured partition. Validated frozen observations inform stopping debit;
+// these measurements are never durable SESSION authority.
 internal sealed record ProjectProviderUsage(
     string ProviderId,
     string RequestedModel,

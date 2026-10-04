@@ -17,13 +17,14 @@ internal enum AgentLimitProfile
 
 // This authority is supplied by trusted composition. Agent code only knows
 // the selected adapter identity and cumulative limits, not provider policy.
-internal sealed record AgentLimitAuthority(string AdapterId, AgentLimitProfile Profile)
+internal sealed record AgentLimitAuthority(string AdapterId, AgentLimitProfile Profile, ReviewTokenBudget? TokenBudget = null)
 {
     internal static bool TryResolve(string adapterId, AgentLimitAuthority? authority, out AgentLimitProfile profile)
     {
         profile = authority?.Profile ?? AgentLimitProfile.Current;
         return (authority is null || StringComparer.Ordinal.Equals(adapterId, authority.AdapterId)) &&
-            profile is AgentLimitProfile.Current or AgentLimitProfile.Output8192 or AgentLimitProfile.Output65536;
+            profile is AgentLimitProfile.Current or AgentLimitProfile.Output8192 or AgentLimitProfile.Output65536 &&
+            (authority?.TokenBudget is null || profile == AgentLimitProfile.Current && authority.TokenBudget.IsValid);
     }
 }
 
@@ -34,9 +35,13 @@ internal static class AgentLimits
     internal const int ToolCallsPerResponse = 16;
     internal const int ConcurrentToolCalls = 1;
     internal const int DeadlineSeconds = 300;
-    internal const long InputTokens = 262_144;
-    internal const long OutputTokens = 32_768;
-    internal const long CombinedTokens = 294_912;
+    // Current input without a validated partition is conservatively debited here.
+    internal const long InputTokens = 2_000_000;
+    internal const long CachedInputTokens = 38_000_000;
+    internal const long OutputTokens = 524_288;
+    internal const long RetainedInputTokens = 262_144;
+    internal const long RetainedOutputTokens = 32_768;
+    internal const long RetainedCombinedTokens = 294_912;
     internal const long Output8192Tokens = 65_536;
     internal const long Combined8192Tokens = 327_680;
     internal const long Output65536Tokens = 524_288;
@@ -89,16 +94,16 @@ internal static class AgentLimits
     internal const int DiffSourceBytesPerFile = 2 * 1024 * 1024;
     internal const int DiffSnapshotBytes = 32 * 1024 * 1024;
 
-    internal static ImmutableArray<AgentLimit> Registry { get; } =
+    private static ImmutableArray<AgentLimit> RetainedRegistry { get; } =
     [
         new(1, "model_calls", ModelCalls, "count"),
         new(2, "tool_calls", ToolCalls, "count"),
         new(3, "tool_calls_per_response", ToolCallsPerResponse, "count"),
         new(4, "concurrent_tool_calls", ConcurrentToolCalls, "count"),
         new(5, "deadline_seconds", DeadlineSeconds, "seconds"),
-        new(6, "input_tokens", InputTokens, "tokens"),
-        new(7, "output_tokens", OutputTokens, "tokens"),
-        new(8, "combined_tokens", CombinedTokens, "tokens"),
+        new(6, "input_tokens", RetainedInputTokens, "tokens"),
+        new(7, "output_tokens", RetainedOutputTokens, "tokens"),
+        new(8, "combined_tokens", RetainedCombinedTokens, "tokens"),
         new(9, "request_bytes", RequestBytes, "bytes"),
         new(10, "response_bytes", ResponseBytes, "bytes"),
         new(11, "messages", Messages, "count"),
@@ -146,9 +151,21 @@ internal static class AgentLimits
         new(53, "diff_snapshot_bytes", DiffSnapshotBytes, "bytes"),
     ];
 
-    internal static ImmutableArray<AgentLimit> RegistryFor(AgentLimitProfile profile) => profile switch
+    internal static ImmutableArray<AgentLimit> Registry { get; } = CurrentRegistry(ReviewTokenBudget.Default);
+
+    private static ImmutableArray<AgentLimit> CurrentRegistry(ReviewTokenBudget budget) =>
+        RetainedRegistry.Select(row => row.Ordinal switch
+        {
+            6 => row with { Name = "uncached_input_tokens", Value = budget.UncachedInputTokens },
+            7 => row with { Name = "cached_input_tokens", Value = budget.CachedInputTokens },
+            8 => row with { Name = "output_tokens", Value = budget.OutputTokens },
+            _ => row,
+        }).ToImmutableArray();
+
+    internal static ImmutableArray<AgentLimit> RegistryFor(AgentLimitProfile profile, ReviewTokenBudget? budget = null) => profile switch
     {
-        AgentLimitProfile.Current => Registry,
+        AgentLimitProfile.Current => budget is null ? Registry : budget.IsValid
+            ? CurrentRegistry(budget) : throw new ArgumentOutOfRangeException(nameof(budget)),
         AgentLimitProfile.Output8192 => CandidateRegistry,
         AgentLimitProfile.Output65536 => Output65536Registry,
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
@@ -164,23 +181,33 @@ internal static class AgentLimits
 
     internal static long CombinedTokensFor(AgentLimitProfile profile) => profile switch
     {
-        AgentLimitProfile.Current => CombinedTokens,
+        AgentLimitProfile.Current => throw new ArgumentOutOfRangeException(nameof(profile)),
         AgentLimitProfile.Output8192 => Combined8192Tokens,
         AgentLimitProfile.Output65536 => Combined65536Tokens,
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
 
-    private static ImmutableArray<AgentLimit> CandidateRegistry { get; } = Registry.Select(row => row.Name switch
+    private static ImmutableArray<AgentLimit> CandidateRegistry { get; } = RetainedRegistry.Select(row => row.Name switch
     {
         "output_tokens" => row with { Value = Output8192Tokens },
         "combined_tokens" => row with { Value = Combined8192Tokens },
         _ => row,
     }).ToImmutableArray();
 
-    private static ImmutableArray<AgentLimit> Output65536Registry { get; } = Registry.Select(row => row.Name switch
+    private static ImmutableArray<AgentLimit> Output65536Registry { get; } = RetainedRegistry.Select(row => row.Name switch
     {
         "output_tokens" => row with { Value = Output65536Tokens },
         "combined_tokens" => row with { Value = Combined65536Tokens },
         _ => row,
     }).ToImmutableArray();
+}
+
+// Trusted composition only; balances are transient and never part of this identity.
+internal sealed record ReviewTokenBudget(long UncachedInputTokens, long CachedInputTokens, long OutputTokens)
+{
+    internal static ReviewTokenBudget Default { get; } = new(
+        AgentLimits.InputTokens, AgentLimits.CachedInputTokens, AgentLimits.OutputTokens);
+    internal bool IsValid => UncachedInputTokens is > 0 and <= AgentLimits.InputTokens &&
+        CachedInputTokens is > 0 and <= AgentLimits.CachedInputTokens &&
+        OutputTokens is > 0 and <= AgentLimits.OutputTokens;
 }

@@ -30,7 +30,7 @@ public sealed class R5ReplayAdmissionTests
         var originalCorpus = AgentCanonical.HashDomain("apr.r5.replay.corpus", ReplayJson.Write(captured.Manifest));
         var selected = ReplayAdmission.CurrentSyntheticManifest(captured.Manifest);
         Assert.Equal("deepseek-flash", selected.Configuration.ModelId);
-        Assert.Equal("b90d3067f349f65024b5e62f1a7793a789f056e62ad7e755fce2ca5672cd2ab8",
+        Assert.Equal("b7a3cc62596733a9b2c1747fda5fb862905c15f7946089a2537ccf6f5b7972bc",
             selected.Configuration.AdapterId);
         var expectedCorpus = AgentCanonical.HashDomain("apr.r5.replay.corpus", ReplayJson.Write(selected));
         Assert.NotEqual(originalCorpus, expectedCorpus);
@@ -129,7 +129,7 @@ public sealed class R5ReplayAdmissionTests
         Assert.Equal(6, fixture.Files.Length);
         var run = Assert.Single(fixture.Runs);
         Assert.Equal("db6a077771c3c87335e6726e0934ab4b50c849d125b222671f875cd3ce2a67da", run.Expected.Sha256);
-        Assert.Equal("bde71dfbd006d8f37d06a2ac496d0ea7c7629d4e6b17487a2bac844718b53b3e", run.ConfigurationSha256);
+        Assert.Equal("2a8b878864fdb5609b3463d7907b2f1a71e7f7526edb46ea1215e0e8a478e68e", run.ConfigurationSha256);
         Assert.Equal("seed-safe-control", run.Expected.Input.Id);
         Assert.Equal(fixture.CorpusSha256, run.Expected.Input.CorpusSha256);
         Assert.Equal(EvaluationCode.Scored, run.ExpectedCode);

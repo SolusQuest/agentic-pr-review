@@ -9,7 +9,7 @@ namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 public sealed class DeepSeekContextAdmissionTests
 {
     [Theory]
-    [InlineData(0, 4096)]
+    [InlineData(0, 65536)]
     [InlineData(1, 8192)]
     [InlineData(2, 65536)]
     public void ContextAndReservedOutputHaveAnExactIndependentBoundary(int profile, int reserved)
@@ -35,6 +35,32 @@ public sealed class DeepSeekContextAdmissionTests
         var failure = await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => backend.GetResponseAsync(request, default));
         Assert.Equal(AgentFailureCodes.ContextLimit, failure.DiagnosticCode);
         Assert.Equal(0, transport.Sends);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(7123)]
+    [InlineData(65536)]
+    public async Task ActualRequestAllowanceSetsExactBackendContextBoundary(int allowance)
+    {
+        var empty = Request("x") with { MaxOutputTokens = allowance };
+        Assert.True(DeepSeekContextAdmission.TryEstimate(DeepSeekRequestWriter.Write(empty).Body.AsSpan(), out var overhead));
+        foreach (var excess in new[] { 0, 1 })
+        {
+            var request = Request(new string('x', checked((int)(1_000_000 - allowance - overhead + 1 + excess))))
+                with { MaxOutputTokens = allowance };
+            var wire = DeepSeekRequestWriter.Write(request);
+            Assert.True(DeepSeekContextAdmission.TryEstimate(wire.Body.AsSpan(), out var estimate));
+            Assert.Equal(1_000_000 - allowance + excess, estimate);
+            var transport = new RejectDispatch();
+            var backend = new DeepSeekChatBackend(new(DeepSeekAdapterContext.Provider,
+                DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session"), transport);
+            if (excess == 0)
+                await Assert.ThrowsAsync<InvalidOperationException>(() => backend.GetResponseAsync(request, default));
+            else
+                await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => backend.GetResponseAsync(request, default));
+            Assert.Equal(excess == 0 ? 1 : 0, transport.Sends);
+        }
     }
 
     [Fact]

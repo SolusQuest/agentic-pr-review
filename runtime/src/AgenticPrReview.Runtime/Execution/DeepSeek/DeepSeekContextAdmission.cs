@@ -63,7 +63,11 @@ internal static class DeepSeekContextAdmission
     }
 
     internal static bool Allows(long inputUpperBound, DeepSeekRequestProfile profile) =>
-        inputUpperBound >= 0 && inputUpperBound <= ContextTokens - DeepSeekRequestWriter.MaxTokensFor(profile);
+        Allows(inputUpperBound, DeepSeekRequestWriter.MaxTokensFor(profile));
+
+    internal static bool Allows(long inputUpperBound, int outputAllowance) =>
+        outputAllowance is >= 1 and <= 65_536 && inputUpperBound >= 0 &&
+        inputUpperBound <= ContextTokens - outputAllowance;
 
     private static int Bytes(string value) => StrictUtf8.GetByteCount(value);
 

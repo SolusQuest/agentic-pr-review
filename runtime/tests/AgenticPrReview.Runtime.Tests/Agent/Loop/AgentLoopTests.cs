@@ -478,7 +478,7 @@ public sealed partial class AgentLoopTests
     [InlineData("negative_body", "agent_response_invalid")]
     [InlineData("oversized_body", "agent_response_too_large")]
     [InlineData("over_token", "agent_token_limit")]
-    [InlineData("overflow_usage", "agent_usage_invalid")]
+    [InlineData("overflow_usage", "agent_token_limit")]
     public async Task ResponseMetadataFailuresUseStablePrecedence(
         string scenario,
         string expectedCode)
@@ -557,9 +557,9 @@ public sealed partial class AgentLoopTests
                     "read",
                     "read_file",
                     "{\"path\":\"a.txt\"}"),
-                AgentLimits.InputTokens,
+                AgentLimits.InputTokens - 1,
                 0),
-            Response(TerminalCall("finish", "done"), 1, 0),
+            Response(TerminalCall("finish", "done"), 2, 0),
         ]);
         var executor = new ScriptedToolExecutor(call =>
             Success(call, new string('a', 64), "a.txt", 1));
@@ -2802,7 +2802,7 @@ public sealed partial class AgentLoopTests
             run.InitialMessages,
             AgentToolRegistry.Definitions.ToArray(),
             run.Continuation,
-            ThinkingRequired: true)).Length;
+            ThinkingRequired: true, MaxOutputTokens: 65_536)).Length;
 
     private static AgentToolExecution Success(
         PreparedAgentToolCall call,

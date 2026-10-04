@@ -17,9 +17,9 @@ public sealed class AgentContractTests
             ("tool_calls_per_response", 16, "count"),
             ("concurrent_tool_calls", 1, "count"),
             ("deadline_seconds", 300, "seconds"),
-            ("input_tokens", 262_144, "tokens"),
-            ("output_tokens", 32_768, "tokens"),
-            ("combined_tokens", 294_912, "tokens"),
+            ("uncached_input_tokens", 2_000_000, "tokens"),
+            ("cached_input_tokens", 38_000_000, "tokens"),
+            ("output_tokens", 524_288, "tokens"),
             ("request_bytes", 8_388_608, "bytes"),
             ("response_bytes", 2_097_152, "bytes"),
             ("messages", 4_096, "count"),
@@ -80,11 +80,17 @@ public sealed class AgentContractTests
     [Fact]
     public void Output8192LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("5ba07d7b81496cae11ca0382bbd92780b136177137de54aad714dcd09732c515",
+        Assert.Equal("75e8c549b0a9a9cbee70f09da1bb58de0d517cafa9762260030964a015607902",
             AgentCanonical.LimitsSha256());
         Assert.Equal("e05ed6796ddf0b3f01c09d1f4a9a7007ec772b4a070e1bbfefeef5ede5681bbe",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192));
-        var current = AgentLimits.Registry;
+        var current = AgentLimits.Registry.Select(row => row.Ordinal switch
+        {
+            6 => row with { Name = "input_tokens", Value = 262_144 },
+            7 => row with { Name = "output_tokens", Value = 32_768 },
+            8 => row with { Name = "combined_tokens", Value = 294_912 },
+            _ => row,
+        }).ToArray();
         var candidate = AgentLimits.RegistryFor(AgentLimitProfile.Output8192);
         Assert.Equal(current.Length, candidate.Length);
         for (var index = 0; index < current.Length; index++)
@@ -107,7 +113,13 @@ public sealed class AgentContractTests
     {
         Assert.Equal("f49598b183ee12465f38c3f0d3e3b39331131bed5a6bd0a4f12860f2221597c3",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536));
-        var current = AgentLimits.Registry;
+        var current = AgentLimits.Registry.Select(row => row.Ordinal switch
+        {
+            6 => row with { Name = "input_tokens", Value = 262_144 },
+            7 => row with { Name = "output_tokens", Value = 32_768 },
+            8 => row with { Name = "combined_tokens", Value = 294_912 },
+            _ => row,
+        }).ToArray();
         var large = AgentLimits.RegistryFor(AgentLimitProfile.Output65536);
         Assert.Equal(current.Length, large.Length);
         for (var index = 0; index < current.Length; index++)
@@ -223,7 +235,7 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "5ba07d7b81496cae11ca0382bbd92780b136177137de54aad714dcd09732c515",
+            "75e8c549b0a9a9cbee70f09da1bb58de0d517cafa9762260030964a015607902",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
             "50acece85187a24d6f9b8df4501dabe89c51db1b82c14c50747ef2f1d632561f",

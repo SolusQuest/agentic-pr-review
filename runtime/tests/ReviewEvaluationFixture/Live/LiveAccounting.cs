@@ -8,6 +8,8 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 // capacity, because the repository has no provider billing oracle.
 internal sealed class LiveAccounting(LivePlanBounds bounds)
 {
+    internal long PerCallOutputAllowance => bounds.PerCall.MaxOutputTokens;
+
     private readonly object _gate = new();
     private LiveAccountingSnapshot? _sealed;
     private int _requestRejected;

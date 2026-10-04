@@ -79,8 +79,8 @@ internal static class GateComparisonCases
         var plan = new LivePlanDigestInput(LiveLimits.PlanFormat, new(commit ?? selection.SourceCommit, selection.SourceTree, selection.SourceClean),
             selection.ReplaySha256, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
                 LivePlanAdmission.ProviderConfigurationSha256()), Enumerable.Repeat("cs-safe", scheduled).ToImmutableArray(),
-            new(scheduled, calls, scheduled * AgentLimits.InputTokens, scheduled * AgentLimits.OutputTokens,
-                scheduled * AgentLimits.CombinedTokens, 120, calls * 1000, new(AgentLimits.InputTokens / 8, AgentLimits.OutputTokens / 8, 1000)));
+            new(scheduled, calls, scheduled * LivePlanAdmission.InputTokens, scheduled * AgentLimits.RetainedOutputTokens,
+                scheduled * AgentLimits.RetainedCombinedTokens, 120, calls * 1000, new(LivePlanAdmission.InputTokens / 8, AgentLimits.RetainedOutputTokens / 8, 1000)));
         var expected = new UsageJournalExpectation(new(campaign, plan.Source.Commit, plan.Source.Tree, plan.Source.Clean, build,
             plan.CorpusSha256, plan.Provider.ConfigurationSha256, LivePlanAdmission.Digest(plan), "loopback"), plan);
         var collector = new UsageJournalCollector(expected);

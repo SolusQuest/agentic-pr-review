@@ -155,9 +155,9 @@ internal static class GateTokenCases
             selection.ReplaySha256, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
                 DeepSeekAdapterContext.Adapter, LivePlanAdmission.ProviderConfigurationSha256()),
             Enumerable.Repeat("cs-safe", count).ToImmutableArray(),
-            new(count, maximumCalls ?? calls, count * AgentLimits.InputTokens, count * AgentLimits.OutputTokens,
-                count * AgentLimits.CombinedTokens, 120, calls * 1000,
-                new(AgentLimits.InputTokens / 8, AgentLimits.OutputTokens / 8, 1000)));
+            new(count, maximumCalls ?? calls, count * LivePlanAdmission.InputTokens, count * AgentLimits.RetainedOutputTokens,
+                count * AgentLimits.RetainedCombinedTokens, 120, calls * 1000,
+                new(LivePlanAdmission.InputTokens / 8, AgentLimits.RetainedOutputTokens / 8, 1000)));
         return new(new("r6-gate-tokens", plan.Source.Commit, plan.Source.Tree, plan.Source.Clean, "r6-gate", plan.CorpusSha256,
             plan.Provider.ConfigurationSha256, LivePlanAdmission.Digest(plan), "loopback"), plan);
     }

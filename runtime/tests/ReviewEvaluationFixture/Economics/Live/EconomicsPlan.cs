@@ -90,8 +90,8 @@ internal sealed class EconomicsPlan
                 input.Source.Clean != EvaluationSource.Clean || input.BuildSha256 != EconomicsBuild.Current()) ||
             execute && (!input.Source.Clean || currentBuild && !EvaluationSource.Clean)) Reject("source_invalid");
         var per = input.Bounds.PerCall;
-        if (per.MaxInputTokens is < 1 or > AgentLimits.InputTokens / 8 ||
-            per.MaxOutputTokens != DeepSeekRequestWriter.MaxTokensFor(profile) ||
+        if (per.MaxInputTokens is < 1 or > LivePlanAdmission.InputTokens / 8 ||
+            per.MaxOutputTokens != LivePlanAdmission.RequestOutputFor(profile) ||
             input.Bounds.MaxModelCalls != plan.Slots.Length * 8L) Reject("allocation_invalid");
         EconomicsAllocation required = new(0, 0, 0, 0, 0, 0,
             CampaignOverheadMilliseconds(plan.Slots.Length, input.SpacingMilliseconds));
