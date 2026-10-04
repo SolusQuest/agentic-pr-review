@@ -200,6 +200,9 @@ jobs:
       - name: R5 deterministic evaluation gate in framework and Linux x64 Native AOT
         run: bash runtime/scripts/verify-r5-evaluation.sh all
 
+      - name: R7 capacity gate in framework and Linux x64 Native AOT
+        run: bash runtime/scripts/verify-r7-capacity.sh all
+
   r6-economics-gate:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
