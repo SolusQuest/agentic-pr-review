@@ -87,7 +87,7 @@ internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attempt
 
     internal bool CanRetry
     {
-        get { lock (gate) return frozen is { Succeeded: false } && completed; }
+        get { lock (gate) return frozen is { Dispatched: true, Reconciled: true, Succeeded: false } && completed; }
     }
     private ProviderUsageObservation? usage;
     private ProviderAttemptObservation? frozen;

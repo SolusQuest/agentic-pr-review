@@ -9,7 +9,9 @@ public sealed class ProviderAccountingTests
     {
         var review = new ReviewAccounting();
         var noSend = review.BeginCall();
-        noSend.BeginAttempt().Freeze(true, false);
+        var initial = noSend.BeginAttempt();
+        Assert.True(initial.TryBeginDispatch());
+        initial.Freeze(true, false);
         var reservation = noSend.BeginAttempt();
         reservation.ObserveNoDispatch();
         reservation.Freeze(true, false);
@@ -33,8 +35,27 @@ public sealed class ProviderAccountingTests
         Assert.False(denied.TryBeginDispatch());
         denied.Freeze(true, false);
         Assert.Equal(8, review.Finish().ProviderRetries);
-        Assert.Equal(13, review.Finish().ProviderAttempts);
+        Assert.Equal(14, review.Finish().ProviderAttempts);
         Assert.False(review.CanRetry);
+    }
+
+    [Theory]
+    [InlineData("unavailable", true, false, false)]
+    [InlineData("no-send", true, false, false)]
+    [InlineData("sent", false, false, false)]
+    [InlineData("sent", true, true, false)]
+    [InlineData("sent", true, false, true)]
+    public void RetryRequiresObservedReconciledFailedDispatch(string dispatch, bool completed, bool succeeded, bool retry)
+    {
+        var call = new ReviewAccounting().BeginCall();
+        var attempt = call.BeginAttempt();
+        if (dispatch == "sent") Assert.True(attempt.TryBeginDispatch());
+        else if (dispatch == "no-send") attempt.ObserveNoDispatch();
+        else attempt.ObserveUnavailableDispatch();
+        attempt.Freeze(completed, succeeded);
+        Assert.Equal(retry, attempt.CanRetry);
+        if (retry) Assert.NotNull(call.BeginAttempt());
+        else Assert.Throws<InvalidOperationException>(() => call.BeginAttempt());
     }
 
     [Fact]

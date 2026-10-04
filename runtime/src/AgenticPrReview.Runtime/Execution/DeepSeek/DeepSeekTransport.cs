@@ -203,6 +203,13 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
         var phase = TransportPhase.Send;
         int? observedStatus = null;
         TimeSpan? retryAfter = null;
+        long retryAfterStarted = 0;
+        TimeSpan? RemainingRetryAfter()
+        {
+            if (retryAfter is not { } delay) return null;
+            var remaining = delay - _timeProvider.GetElapsedTime(retryAfterStarted);
+            return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+        }
         try
         {
             using var ownedClient = _handlerFactory is null ? null : CreateClient(_handlerFactory());
@@ -241,6 +248,10 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             phase = TransportPhase.Body;
             var status = (int)response.StatusCode;
             observedStatus = status;
+            // Both delta-seconds and HTTP-date are anchored to header receipt.
+            // Body work consumes that wait, including the exceptional-read path.
+            // Convert wall time once; all subsequent elapsed time is monotonic.
+            retryAfterStarted = _timeProvider.GetTimestamp();
             retryAfter = ReadRetryAfter(response, _timeProvider.GetUtcNow());
             if (status == 200)
             {
@@ -276,7 +287,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             cancellationToken.ThrowIfCancellationRequested();
             if (Expired()) return DeepSeekTransportResult.ProviderTimeout();
             return DeepSeekTransportResult.HttpFailure(
-                statusClass, errorBody.Length, status, retryAfter);
+                statusClass, errorBody.Length, status, RemainingRetryAfter());
         }
         catch (Exception exception)
             when (IsNonFatal(exception) && cancellationToken.IsCancellationRequested)
@@ -302,7 +313,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             var eligible = observedStatus is { } status && status != 200
                 ? DeepSeekTransportResult.IsRetryableStatus(status)
                 : IsTransientConnection(exception);
-            return DeepSeekTransportResult.TransportFailure(eligible, retryAfter);
+            return DeepSeekTransportResult.TransportFailure(eligible, RemainingRetryAfter());
         }
     }
 

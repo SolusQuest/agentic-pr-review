@@ -46,7 +46,7 @@ internal static class ProviderRetryProof
                         return new(HttpStatusCode.ServiceUnavailable) { Content = new StringContent(failedOutput.HasValue
                             ? "{\"usage\":{\"completion_tokens\":" + failedOutput.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}"
                             : "synthetic-unknown-usage") };
-                    return new(HttpStatusCode.OK) { Content = new StringContent("""{"model":"deepseek-flash","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"reasoning_content":"","tool_calls":[{"id":"finish","type":"function","function":{"name":"finish_review","arguments":"{\"summary\":\"done\",\"findings\":[]}"}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":1}}""") };
+                    return Success();
                 });
                 handlers.Add(handler);
                 return handler;
@@ -65,9 +65,64 @@ internal static class ProviderRetryProof
                 "accounting-known-lower-bound-and-unknown-attempt");
             Require(outcome.Events.OfType<AgentTerminalEvent>().Count() == (success ? 1 : 0), "single-terminal");
         }
-        ProofFiles.WriteNew(command.Output, """{"schema":"r7-provider-retry-v1","scenarios":3,"frozen_request":true,"fresh_transport":true,"failed_output_boundary":true}"""u8.ToArray());
+        foreach (var connectTimeout in new[] { false, true })
+        {
+            using var transport = new UninstrumentedTransport(connectTimeout);
+            var loop = new AgentLoop(DeepSeekChatBackend.CreateClient(new(plan.ProviderId, plan.ModelId, plan.AdapterId, run.SessionId), transport),
+                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), retryRandom: () => 0);
+            var outcome = await loop.RunAsync(run, default);
+            Require(outcome.Diagnostic?.Code == AgentFailureCodes.ChatFailed && transport.Sends == 1 &&
+                outcome.Accounting is { ProviderAttempts: 0, ProviderRetries: 0, AttemptCompleteness: AccountingCompleteness.Unavailable },
+                "unavailable-dispatch-cannot-retry");
+        }
+        foreach (var bodyFails in new[] { false, true })
+        {
+            var clock = new SyntheticTimeProvider(ProofScenario.Now);
+            var sends = 0;
+            using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("synthetic-r7-retry"),
+                new Handler((_, _) =>
+                {
+                    if (++sends > 1) return Task.FromResult(Success());
+                    var response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    {
+                        Content = new StreamContent(new ElapsedBody(clock, bodyFails)),
+                    };
+                    response.Headers.TryAddWithoutValidation("Retry-After", clock.GetUtcNow().AddSeconds(10).ToString("R"));
+                    return Task.FromResult(response);
+                }), DeepSeekTransportPolicy.ProviderTimeout, clock);
+            var loop = new AgentLoop(DeepSeekChatBackend.CreateClient(new(plan.ProviderId, plan.ModelId, plan.AdapterId, run.SessionId), transport),
+                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), clock, retryRandom: () => 0);
+            var outcome = await loop.RunAsync(run with { RemainingHostTime = TimeSpan.FromSeconds(17) }, default);
+            Require(outcome.CompletedSessionEligible && sends == 2 && outcome.Accounting?.ProviderRetries == 1,
+                "body-time-consumes-retry-after");
+        }
+        ProofFiles.WriteNew(command.Output, """{"schema":"r7-provider-retry-v1","scenarios":7,"frozen_request":true,"fresh_transport":true,"failed_output_boundary":true}"""u8.ToArray());
         Console.WriteLine("APR_R7_PROVIDER_RETRY_OK");
         return 0;
+    }
+
+    private static HttpResponseMessage Success() => new(HttpStatusCode.OK) { Content = new StringContent("""{"model":"deepseek-flash","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"reasoning_content":"","tool_calls":[{"id":"finish","type":"function","function":{"name":"finish_review","arguments":"{\"summary\":\"done\",\"findings\":[]}"}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":1}}""") };
+
+    private sealed class UninstrumentedTransport(bool connectTimeout) : IDeepSeekTransport
+    {
+        internal int Sends { get; private set; }
+        public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> body, CancellationToken token)
+        {
+            Sends++;
+            return Task.FromResult(connectTimeout ? DeepSeekTransportResult.ConnectTimeout()
+                : DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.Other5xx, 0, 503, null));
+        }
+        public void Dispose() { }
+    }
+
+    private sealed class ElapsedBody(SyntheticTimeProvider clock, bool fails) : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            clock.Advance(TimeSpan.FromSeconds(12));
+            if (fails) throw new IOException("synthetic read failure");
+            return ValueTask.FromResult(0);
+        }
     }
 
     private static void Require(bool value, string code)
