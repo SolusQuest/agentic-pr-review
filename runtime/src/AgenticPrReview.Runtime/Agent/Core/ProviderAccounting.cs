@@ -58,8 +58,8 @@ internal sealed class ProviderUsageObservation
     public override string ToString() => "provider_usage_observation";
 }
 
-// A transport operation is distinct from a logical invocation, even while R2
-// permits only attempt ordinal zero. No request/response/exception is retained.
+// A physical send is distinct from a logical invocation.
+// No request/response/exception is retained.
 internal sealed record ProviderAttemptObservation(
     int LogicalCallOrdinal,
     int AttemptOrdinal,
@@ -76,12 +76,19 @@ internal interface IProviderUsageObserver
     void RecordUsage(ProviderUsageObservation observation);
 }
 
-internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attemptOrdinal) : IProviderUsageObserver
+internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attemptOrdinal,
+    Func<bool>? admitDispatch = null) : IProviderUsageObserver
 {
     private readonly object gate = new();
     private bool observed;
     private bool dispatched;
     private bool forcedFailure;
+    private bool completed;
+
+    internal bool CanRetry
+    {
+        get { lock (gate) return frozen is { Dispatched: true, Reconciled: true, Succeeded: false } && completed; }
+    }
     private ProviderUsageObservation? usage;
     private ProviderAttemptObservation? frozen;
 
@@ -107,6 +114,7 @@ internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attempt
         lock (gate)
         {
             if (frozen is not null || dispatched) return false;
+            if (admitDispatch is not null && !admitDispatch()) return false;
             observed = true;
             dispatched = true;
             return true;
@@ -136,6 +144,7 @@ internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attempt
     {
         lock (gate)
         {
+            if (frozen is null) completed = operationCompleted;
             return frozen ??= new(
                 logicalCallOrdinal, attemptOrdinal, observed, dispatched,
                 observed && (operationCompleted || !dispatched),
@@ -147,36 +156,63 @@ internal sealed class ProviderAttemptCapture(int logicalCallOrdinal, int attempt
     public override string ToString() => "provider_attempt_capture";
 }
 
-internal sealed class ProviderLogicalCall(int ordinal)
+internal static class ProviderRetryLimits
 {
-    private ProviderAttemptCapture? attempt;
+    internal const int PerCall = 2;
+    internal const int PerReview = 8;
+}
+
+internal sealed class ProviderLogicalCall(int ordinal, Func<bool> admitRetry)
+{
+    private readonly List<ProviderAttemptCapture> attempts = [];
 
     internal ProviderAttemptCapture BeginAttempt()
     {
-        if (attempt is not null)
-            throw new InvalidOperationException("Provider retries are disabled.");
-        return attempt = new ProviderAttemptCapture(ordinal, 0);
+        if (attempts.Count > ProviderRetryLimits.PerCall ||
+            (attempts.Count > 0 && !attempts[^1].CanRetry))
+            throw new InvalidOperationException("Provider attempt is not admissible.");
+        var attempt = new ProviderAttemptCapture(ordinal, attempts.Count,
+            attempts.Count == 0 ? null : admitRetry);
+        attempts.Add(attempt);
+        return attempt;
     }
 
-    internal ProviderAttemptObservation Finish() =>
-        (attempt ??= new ProviderAttemptCapture(ordinal, 0)).Freeze(false, false);
+    internal IEnumerable<ProviderAttemptObservation> Finish()
+    {
+        if (attempts.Count == 0) BeginAttempt();
+        return attempts.Select(attempt => attempt.Freeze(false, false));
+    }
 }
 
 internal sealed class ReviewAccounting
 {
     private readonly List<ProviderLogicalCall> calls = [];
+    private readonly object dispatchGate = new();
+    private int retries;
+
+    internal bool CanRetry { get { lock (dispatchGate) return retries < ProviderRetryLimits.PerReview; } }
+
+    private bool AdmitRetry()
+    {
+        lock (dispatchGate)
+        {
+            if (retries >= ProviderRetryLimits.PerReview) return false;
+            retries++;
+            return true;
+        }
+    }
 
     internal ProviderLogicalCall BeginCall()
     {
         if (calls.Count >= AgentLimits.ModelCalls)
             throw new InvalidOperationException("Logical call accounting limit exceeded.");
-        var call = new ProviderLogicalCall(calls.Count);
+        var call = new ProviderLogicalCall(calls.Count, AdmitRetry);
         calls.Add(call);
         return call;
     }
 
     internal ProviderAccounting Finish() => ProviderAccounting.Aggregate(
-        calls.Select(call => call.Finish()).ToArray());
+        calls.SelectMany(call => call.Finish()).ToArray());
 }
 
 // Only this validated, immutable projection crosses the existing outcome seam.
@@ -188,7 +224,7 @@ internal sealed class ProviderAccounting
 
     internal int ModelCalls { get; private init; }
     internal int ProviderAttempts { get; private init; }
-    internal int ProviderRetries => 0;
+    internal int ProviderRetries { get; private init; }
     internal int ProviderFailedAttempts { get; private init; }
     internal int UnknownUsageAttempts { get; private init; }
     internal int UnknownCachePartitionAttempts { get; private init; }
@@ -201,13 +237,12 @@ internal sealed class ProviderAccounting
 
     internal static ProviderAccounting Aggregate(IReadOnlyList<ProviderAttemptObservation> attempts)
     {
-        if (attempts.Count > AgentLimits.ModelCalls ||
-            attempts.Where((attempt, index) => attempt.LogicalCallOrdinal != index ||
-                attempt.AttemptOrdinal != 0 ||
+        if (!ValidSequence(attempts) ||
+            attempts.Any(attempt =>
                 (attempt.Dispatched && !attempt.DispatchObserved) ||
                 (attempt.Reconciled && !attempt.DispatchObserved) ||
                 (attempt.DispatchObserved && !attempt.Dispatched && attempt.Usage.HasAny) ||
-                (attempt.Dispatched && attempt.Succeeded && !attempt.Reconciled)).Any())
+                (attempt.Dispatched && attempt.Succeeded && !attempt.Reconciled)))
             throw new ArgumentException("Invalid provider accounting observations.");
 
         var sends = attempts.Where(attempt => attempt.Dispatched).ToArray();
@@ -224,7 +259,8 @@ internal sealed class ProviderAccounting
             input.HasValue && output.HasValue && hit.HasValue && miss.HasValue;
         return new()
         {
-            ModelCalls = attempts.Count,
+            ModelCalls = attempts.Count(attempt => attempt.AttemptOrdinal == 0),
+            ProviderRetries = sends.Count(attempt => attempt.AttemptOrdinal > 0),
             ProviderAttempts = sends.Length,
             ProviderFailedAttempts = sends.Count(attempt => !attempt.Succeeded),
             UnknownUsageAttempts = sends.Count(attempt =>
@@ -241,6 +277,34 @@ internal sealed class ProviderAccounting
                 : attempts.Any(attempt => attempt.Usage.HasAny)
                     ? AccountingCompleteness.Partial : AccountingCompleteness.Unavailable,
         };
+    }
+
+    private static bool ValidSequence(IReadOnlyList<ProviderAttemptObservation> attempts)
+    {
+        var logical = -1;
+        var ordinal = -1;
+        var retries = 0;
+        ProviderAttemptObservation? previous = null;
+        foreach (var attempt in attempts)
+        {
+            if (attempt.AttemptOrdinal == 0)
+            {
+                logical++;
+                ordinal = 0;
+            }
+            else
+            {
+                ordinal++;
+                if (previous is null || previous.Succeeded) return false;
+            }
+            if (attempt.LogicalCallOrdinal != logical || attempt.AttemptOrdinal != ordinal ||
+                ordinal > ProviderRetryLimits.PerCall || logical >= AgentLimits.ModelCalls)
+                return false;
+            if (ordinal > 0 && attempt.Dispatched && ++retries > ProviderRetryLimits.PerReview)
+                return false;
+            previous = attempt;
+        }
+        return true;
     }
 
     private static long? Sum(IReadOnlyList<ProviderAttemptObservation> attempts,

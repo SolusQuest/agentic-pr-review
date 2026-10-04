@@ -48,7 +48,7 @@ internal static class ProofArguments
         }
 
         var verb = args[0];
-        if (verb is not ("bootstrap" or "continue" or "negative" or "r7-capacity") ||
+        if (verb is not ("bootstrap" or "continue" or "negative" or "r7-capacity" or "r7-retry") ||
             !values.TryGetValue("--mode", out var mode) ||
             mode is not ("framework" or "aot") ||
             !values.TryGetValue("--root", out var root) ||

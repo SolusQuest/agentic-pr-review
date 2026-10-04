@@ -274,6 +274,18 @@ _run_r7_capacity() {
   printf 'APR_R7_LOCAL_SESSION_CAPACITY_OK %s\n' "${mode}"
 }
 
+_run_r7_retry() {
+  local mode="$1" root="$2/r7-retry"
+  mkdir -p -- "${root}"
+  _copy_repository "${root}"
+  _run_fixture "${mode}" "${root}" "${root}/retry.log" \
+    r7-retry --output "${root}/retry.json" ||
+    _fail "APR_R7_PROVIDER_RETRY_FAILED ${mode}"
+  grep -Fxq APR_R7_PROVIDER_RETRY_OK "${root}/retry.log" ||
+    _fail "APR_R7_PROVIDER_RETRY_REPORT_INVALID ${mode}"
+  printf 'APR_R7_PROVIDER_RETRY_OK %s\n' "${mode}"
+}
+
 _requires_seed_state() {
   case "$1" in
     state-*|head-*) return 0 ;;
@@ -484,6 +496,7 @@ _run_mode() {
   fi
   _run_positive "${mode}" "${mode_root}"
   _run_r7_capacity "${mode}" "${mode_root}"
+  _run_r7_retry "${mode}" "${mode_root}"
   _run_negatives "${mode}" "${mode_root}"
   _run_environment_negatives "${mode}" "${mode_root}"
   printf 'APR_AGENT_MODE_OK %s\n' "${mode}"

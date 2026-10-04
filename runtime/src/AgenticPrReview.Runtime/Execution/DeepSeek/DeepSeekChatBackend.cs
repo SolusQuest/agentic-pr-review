@@ -174,6 +174,9 @@ internal sealed class DeepSeekChatBackend(
                 ProjectChatNormalizationReason.TransportContract);
         }
 
+        if (transportResult.RetryEligible)
+            throw new ProjectChatRetryException(transportResult.RetryAfter);
+
         return transportResult.Outcome switch
         {
             DeepSeekTransportOutcome.RequestRejected =>

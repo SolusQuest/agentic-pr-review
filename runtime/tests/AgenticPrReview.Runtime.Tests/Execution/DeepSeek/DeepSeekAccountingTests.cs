@@ -187,10 +187,12 @@ public sealed class DeepSeekAccountingTests
         using var transport = Transport(handler, failure == "timeout" ? TimeSpan.FromMilliseconds(20) : null);
         var outcome = await Loop(transport).RunAsync(Run(), default);
         Assert.False(outcome.Succeeded);
-        Assert.Equal(1, handler.Sends);
-        Assert.Equal(1, outcome.Accounting!.ProviderAttempts);
-        Assert.Equal(1, outcome.Accounting.ProviderFailedAttempts);
-        Assert.Equal(1, outcome.Accounting.UnknownUsageAttempts);
+        var expectedSends = failure == "http" ? 3 : 1;
+        Assert.Equal(expectedSends, handler.Sends);
+        Assert.Equal(expectedSends, outcome.Accounting!.ProviderAttempts);
+        Assert.Equal(expectedSends - 1, outcome.Accounting.ProviderRetries);
+        Assert.Equal(expectedSends, outcome.Accounting.ProviderFailedAttempts);
+        Assert.Equal(expectedSends, outcome.Accounting.UnknownUsageAttempts);
         Assert.Equal(AccountingCompleteness.Unavailable, outcome.Accounting.UsageCompleteness);
         Assert.DoesNotContain("secret-error-canary", outcome.ToString(), StringComparison.Ordinal);
     }
@@ -224,7 +226,7 @@ public sealed class DeepSeekAccountingTests
         using var handler = new Handler((_, _) => Task.FromResult(Http(Body())));
         using var transport = Transport(handler);
         var badContext = new DeepSeekAdapterContext("wrong", DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session");
-        var loop = new AgentLoop(DeepSeekChatBackend.CreateClient(badContext, transport), new NoTools());
+        var loop = new AgentLoop(DeepSeekChatBackend.CreateClient(badContext, transport), new NoTools(), retryRandom: () => 0);
         var outcome = await loop.RunAsync(Run(), default);
         Assert.False(outcome.Succeeded);
         Assert.Equal(1, outcome.Accounting!.ModelCalls);
@@ -308,7 +310,7 @@ public sealed class DeepSeekAccountingTests
 
     private static AgentLoop Loop(IDeepSeekTransport transport) => new(
         DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider,
-            DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session"), transport), new NoTools());
+            DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session"), transport), new NoTools(), retryRandom: () => 0);
 
     private static AgentRunRequest Run() => new(Identity,
         new StableAgentPlan("repo", 1, "workflow", new string('2', 64),

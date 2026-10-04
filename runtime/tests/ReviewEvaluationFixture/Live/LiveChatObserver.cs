@@ -70,6 +70,11 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
             // call that was actually sent can have unobservable usage.
             if (!accounting.TryAttributeRefusal()) accounting.RecordUsageUnknown();
             accounting.RecordChatException(error);
+            // The retained evaluation journal admits a subsequent call only
+            // after success. It has no provider-retry authority, even when its
+            // synthetic plan selects Current; preserve that existing boundary.
+            if (error is ProjectChatRetryException)
+                throw new AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekChatBackendException();
             throw;
         }
     }

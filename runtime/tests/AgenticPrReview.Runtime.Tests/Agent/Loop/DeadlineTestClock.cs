@@ -26,6 +26,15 @@ internal sealed class DeadlineTestClock(long unixSeconds = 1_800_000_000) : Time
         ticks = target;
     }
 
+    // Simulate an event-loop/scheduler stall: callbacks observe the actual late
+    // timestamp, not each ideal scheduled due time as in Advance.
+    internal void AdvanceWithLateCallbacks(TimeSpan duration)
+    {
+        ticks = checked(ticks + duration.Ticks);
+        foreach (var timer in timers.ToArray())
+            if (timer.Due <= ticks) timer.Fire();
+    }
+
     private sealed class Timer(DeadlineTestClock clock, TimerCallback callback, object? state) : ITimer
     {
         internal long Due { get; private set; } = long.MaxValue;

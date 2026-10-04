@@ -18,6 +18,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
         var parserTypes = new[]
             {
                 typeof(DeepSeekResponseParser),
+                typeof(DeepSeekUsageReader),
                 typeof(DeepSeekResponseParseOutcome),
                 typeof(DeepSeekResponseInvalidCategory),
                 typeof(DeepSeekResponseParseResult),
@@ -165,6 +166,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
         var parserTypes = new[]
             {
                 typeof(DeepSeekResponseParser),
+                typeof(DeepSeekUsageReader),
                 typeof(DeepSeekResponseParseOutcome),
                 typeof(DeepSeekResponseInvalidCategory),
                 typeof(DeepSeekResponseParseResult),
