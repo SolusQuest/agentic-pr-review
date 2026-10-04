@@ -1,3 +1,12 @@
+import {
+  ACTION_OUTPUT_NAMES,
+  FIXED_WRAPPER_FAILURE_OUTPUTS,
+  projectCompletionOutputs,
+} from './action-wrapper/presentation/outputs.js';
+import {
+  renderStepSummary,
+  type ActionHostCompletionDocument,
+} from './action-wrapper/presentation/completion.js';
 import { zeroAccounting } from './action-wrapper/presentation/accounting-fixtures.js';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -18,7 +27,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 
 const repoRoot = path.resolve('.');
 const guardRelativePath = 'scripts/check-action-distribution.mjs';
@@ -40,13 +49,19 @@ afterEach(async () => {
 });
 
 describe('R4 Action distribution', () => {
-  it('declares exactly the H1 metadata surface with no outputs', async () => {
+  it('declares the exact H1 inputs and fourteen H4 outputs', async () => {
     const metadata = parse(
       await readFile(path.join(repoRoot, actionRootRelativePath, 'action.yml'), 'utf8'),
     ) as Record<string, unknown>;
     const inputs = metadata.inputs as Record<string, Record<string, unknown>>;
 
-    expect(Object.keys(metadata).sort()).toEqual(['description', 'inputs', 'name', 'runs']);
+    expect(Object.keys(metadata).sort()).toEqual([
+      'description',
+      'inputs',
+      'name',
+      'outputs',
+      'runs',
+    ]);
     expect(Object.keys(inputs).sort()).toEqual([
       'config-path',
       'github-token',
@@ -59,7 +74,7 @@ describe('R4 Action distribution', () => {
     expect(Object.values(inputs).every((input) => input.required === false)).toBe(true);
     expect(inputs['config-path'].default).toBe('.github/agentic-pr-review.json');
     expect(inputs['state-mode'].default).toBe('auto');
-    expect(metadata).not.toHaveProperty('outputs');
+    expect(Object.keys(metadata.outputs as object).sort()).toEqual([...ACTION_OUTPUT_NAMES].sort());
     expect(metadata.runs).toEqual({ using: 'node24', main: 'dist/index.js' });
   });
 
@@ -122,7 +137,7 @@ describe('R4 Action distribution', () => {
     const fixture = await createDistributionFixture();
     const metadataPath = path.join(fixture, actionRootRelativePath, 'action.yml');
     const packagePath = path.join(fixture, 'package.json');
-    await writeFile(metadataPath, `${await readFile(metadataPath, 'utf8')}outputs: {}\n`);
+    await writeFile(metadataPath, `${await readFile(metadataPath, 'utf8')}extra: true\n`);
     await writeFile(
       packagePath,
       (await readFile(packagePath, 'utf8')).replace(
@@ -178,6 +193,94 @@ describe('R4 Action distribution', () => {
     );
   });
 
+  it.each([
+    'missing-root',
+    'missing-name',
+    'extra-name',
+    'entry-scalar',
+    'entry-value',
+    'description-type',
+    'description-multiline',
+    'description-empty',
+    'duplicate',
+  ])('rejects H4 metadata %s drift', async (mutation) => {
+    const fixture = await createDistributionFixture();
+    const metadataPath = path.join(fixture, actionRootRelativePath, 'action.yml');
+    const metadata = parse(await readFile(metadataPath, 'utf8')) as {
+      outputs: Record<string, unknown>;
+    };
+    if (mutation === 'missing-root') delete (metadata as Partial<typeof metadata>).outputs;
+    if (mutation === 'missing-name') delete metadata.outputs['provider-attempts'];
+    if (mutation === 'extra-name') metadata.outputs.private = { description: 'Private' };
+    if (mutation === 'entry-scalar') metadata.outputs.status = 'wrong';
+    if (mutation === 'entry-value')
+      metadata.outputs.status = { description: 'Status', value: '${{ secret }}' };
+    if (mutation === 'description-type') metadata.outputs.status = { description: 1 };
+    if (mutation === 'description-multiline')
+      metadata.outputs.status = { description: 'Status\nprivate' };
+    if (mutation === 'description-empty') metadata.outputs.status = { description: '' };
+    let source = stringify(metadata);
+    if (mutation === 'duplicate')
+      source = source.replace('outputs:\n', 'outputs:\n  status:\n    description: duplicate\n');
+    await writeFile(metadataPath, source);
+    const guardModule = (await import(
+      pathToFileURL(path.join(repoRoot, guardRelativePath)).href
+    )) as {
+      inspectActionDistribution(
+        root: string,
+        options: { testOnlySkipGeneratedBundle: true },
+      ): Promise<{ kind: string }[]>;
+    };
+    const violations = await guardModule.inspectActionDistribution(fixture, {
+      testOnlySkipGeneratedBundle: true,
+    });
+    expect(
+      violations.some(
+        (v) =>
+          v.kind.startsWith('action-output-') ||
+          v.kind === 'action-metadata-shape-invalid' ||
+          v.kind === 'action-metadata-yaml-invalid',
+      ),
+    ).toBe(true);
+  });
+
+  it
+    .runIf(process.platform === 'linux')
+    .each([
+      'retry_success',
+      'final_failure_unknown_usage',
+      'unknown_partition',
+      'overflow_known_sum',
+      'exact_int64',
+      'missing_finalizer',
+      'pre_provider',
+      'unobserved_dispatch_usage',
+    ])(
+    'executes real checked bundle native outputs for %s',
+    async (name) => {
+      const cases = JSON.parse(
+        await readFile(
+          'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/provider-accounting.json',
+          'utf8',
+        ),
+      ) as { name: string; document: ActionHostCompletionDocument }[];
+      const document = {
+        ...cases.find((item) => item.name === name)!.document,
+        build_discriminator: 'r4-w2',
+      };
+      const execution = await runIsolatedBundle('r4-w2', document);
+      expect(execution.result.status).toBe(document.process_exit_code);
+      expect(readNativeOutputs(await readFile(execution.outputPath, 'utf8'))).toEqual(
+        projectCompletionOutputs(document),
+      );
+      expect(await readFile(execution.summaryPath, 'utf8')).toBe(renderStepSummary(document));
+      const output = await readFile(execution.outputPath, 'utf8');
+      expect(output).not.toContain(execution.trustedRoot);
+      expect(output).not.toMatch(/synthetic-github-token|SESSION|CANARY|github.com/);
+    },
+    30_000,
+  );
+
   it.runIf(process.platform === 'linux')(
     'runs the checked ESM bundle in its real package scope without node_modules and reaches the lazy executor locally',
     async () => {
@@ -185,6 +288,15 @@ describe('R4 Action distribution', () => {
 
       expect(execution.result.status).toBe(0);
       const accountingSummary = await readFile(execution.summaryPath, 'utf8');
+      expect(readNativeOutputs(await readFile(execution.outputPath, 'utf8'))).toEqual({
+        status: 'skipped_untrusted_event',
+        'termination-reason': 'not_started',
+        ...Object.fromEntries(
+          ACTION_OUTPUT_NAMES.filter(
+            (name) => name !== 'status' && name !== 'termination-reason',
+          ).map((name) => [name, name.endsWith('completeness') ? 'complete' : '0']),
+        ),
+      });
       expect(accountingSummary).toContain('| Review termination | not_started |');
       expect(accountingSummary).toContain('| Attempt accounting completeness | complete |');
       expect(accountingSummary).toContain('| Usage completeness | complete |');
@@ -229,11 +341,27 @@ describe('R4 Action distribution', () => {
   );
 
   it.runIf(process.platform === 'linux')(
+    'still attempts fixed summary and error when the native output channel is missing',
+    async () => {
+      const execution = await runIsolatedBundle('r4-w2-mismatch', undefined, true);
+      expect(execution.result.status).toBe(1);
+      await expect(access(execution.outputPath)).rejects.toThrow();
+      expect(await readFile(execution.summaryPath, 'utf8')).toContain('failed safely');
+      expect(execution.result.stdout).toContain('The private review wrapper failed.');
+      expect(execution.result.stdout).not.toContain(execution.outputPath);
+    },
+    30_000,
+  );
+
+  it.runIf(process.platform === 'linux')(
     'rejects a payload build mismatch before spawning the prepared executable',
     async () => {
       const execution = await runIsolatedBundle('r4-w2-mismatch');
 
       expect(execution.result.status).toBe(1);
+      expect(readNativeOutputs(await readFile(execution.outputPath, 'utf8'))).toEqual(
+        FIXED_WRAPPER_FAILURE_OUTPUTS,
+      );
       await expect(access(execution.markerPath)).rejects.toThrow();
       expect(execution.result.stdout).not.toContain(execution.payloadSha256);
       expect(execution.result.stdout).not.toContain(execution.trustedRoot);
@@ -259,18 +387,24 @@ async function createDistributionFixture() {
   return fixture;
 }
 
-async function runIsolatedBundle(buildDiscriminator: string) {
+async function runIsolatedBundle(
+  buildDiscriminator: string,
+  completion?: ActionHostCompletionDocument,
+  missingOutputChannel = false,
+) {
   const trustedRoot = await temporaryDirectory('apr-isolated-action-');
   const bundlePath = path.join(trustedRoot, 'index.js');
   const hostPath = path.join(trustedRoot, 'synthetic-host.cjs');
   const markerPath = path.join(trustedRoot, 'executor-marker.txt');
   const summaryPath = path.join(trustedRoot, 'step-summary.md');
+  const outputPath = path.join(trustedRoot, 'outputs.txt');
   const eventPath = path.join(trustedRoot, 'event.json');
   await copyFile(path.join(repoRoot, bundleRelativePath), bundlePath);
   await writeFile(path.join(trustedRoot, 'package.json'), '{"type":"module"}\n');
   await writeFile(eventPath, '{}\n');
   await writeFile(summaryPath, '');
-  await writeFile(hostPath, syntheticHostSource(markerPath));
+  if (!missingOutputChannel) await writeFile(outputPath, '');
+  await writeFile(hostPath, syntheticHostSource(markerPath, completion));
   await chmod(hostPath, 0o700);
   const payloadSha256 = createHash('sha256')
     .update(await readFile(hostPath))
@@ -292,6 +426,7 @@ async function runIsolatedBundle(buildDiscriminator: string) {
     GITHUB_WORKFLOW_REF: 'owner/repository/.github/workflows/review.yml@refs/heads/main',
     GITHUB_WORKFLOW_SHA: 'b'.repeat(40),
     GITHUB_STEP_SUMMARY: summaryPath,
+    GITHUB_OUTPUT: outputPath,
     'INPUT_GITHUB-TOKEN': 'synthetic-github-token',
     'INPUT_PROVIDER-API-KEY': '',
     'INPUT_STATE-KEY': '',
@@ -307,10 +442,10 @@ async function runIsolatedBundle(buildDiscriminator: string) {
     timeout: 20_000,
     windowsHide: true,
   });
-  return { result, markerPath, summaryPath, payloadSha256, trustedRoot };
+  return { result, markerPath, summaryPath, outputPath, payloadSha256, trustedRoot };
 }
 
-function syntheticHostSource(markerPath: string) {
+function syntheticHostSource(markerPath: string, supplied?: ActionHostCompletionDocument) {
   return `#!${process.execPath}
 const fs = require('node:fs');
 const net = require('node:net');
@@ -338,21 +473,25 @@ process.stdin.on('end', async () => {
       throw new Error('lazy executor was not reached safely');
     }
     fs.writeFileSync(${JSON.stringify(markerPath)}, 'executor-reached\\n');
-    const completion = {
-      build_discriminator: launch.build_discriminator,
-      status: 'skipped_untrusted_event',
-      exit_class: 'success',
-      process_exit_code: 0,
-      summary: {
-        reviewed_sha: null,
-        publication_url: null,
-        finding_count: null,
-        state_disposition: 'not_accessed'
+    const completion = ${JSON.stringify(
+      supplied ?? {
+        build_discriminator: 'r4-w2',
+        status: 'skipped_untrusted_event',
+        exit_class: 'success',
+        process_exit_code: 0,
+        summary: {
+          reviewed_sha: null,
+          publication_url: null,
+          finding_count: null,
+          state_disposition: 'not_accessed',
+        },
+        annotations: [],
+        accounting: zeroAccounting,
+        termination_reason: 'not_started',
       },
-      annotations: [],
-      accounting: ${JSON.stringify(zeroAccounting)},
-      termination_reason: 'not_started'
-    };
+    )};
+    completion.build_discriminator = launch.build_discriminator;
+    process.exitCode = completion.process_exit_code;
     process.stderr.write(${JSON.stringify(finalGitHubBudgetReceipt + finalControlBudgetReceipt)});
     process.stdout.write(encode(completion));
   } catch {
@@ -397,4 +536,21 @@ async function write(relativePath: string, contents: string, fixture: string) {
   const absolutePath = path.join(fixture, relativePath);
   await mkdir(path.dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, contents);
+}
+
+function readNativeOutputs(source: string): Record<string, string> {
+  const lines = source.replaceAll('\r\n', '\n').split('\n');
+  expect(lines.pop()).toBe('');
+  expect(lines.length % 3).toBe(0);
+  const outputs: Record<string, string> = {};
+  for (let i = 0; i < lines.length; i += 3) {
+    const header = /^([a-z-]+)<<(ghadelimiter_[0-9a-f-]{36})$/u.exec(lines[i]!);
+    expect(header).not.toBeNull();
+    const [, name, delimiter] = header!;
+    expect(ACTION_OUTPUT_NAMES).toContain(name);
+    expect(outputs).not.toHaveProperty(name!);
+    expect(lines[i + 2]).toBe(delimiter);
+    outputs[name!] = lines[i + 1]!;
+  }
+  return outputs;
 }

@@ -31,6 +31,9 @@ await runPrivateActionWrapperWithSeams({
   toolkit: {
     getInput: (name) => (name === 'github-token' ? 'termination-canary' : ''),
     setSecret: () => undefined,
+    setOutput: () => {
+      throw new Error('fatal_output_must_not_run');
+    },
     writeSummary: async () => undefined,
     warning: () => undefined,
     error: () => undefined,

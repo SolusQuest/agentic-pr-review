@@ -49,7 +49,7 @@ public sealed class TrustedProofArchitectureTests
             "tests",
             "fixtures",
             "action-host",
-            "r7-session-capacity",
+            "r7-action-outputs",
             "expected-evidence.json.golden")));
         var expected = golden.RootElement
             .GetProperty("source_inventory_digest")

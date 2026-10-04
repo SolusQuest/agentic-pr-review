@@ -41,7 +41,7 @@ Credential-free policy and production-composition tests exercise parsing, canoni
 
 ## Current-run Provider Accounting
 
-R7-H2 carries the immutable R2 numerical aggregate through Host completion into the existing Action step summary. It adds no Action outputs or counter collection. The private Host and its Node wrapper ship together: both require `accounting` and `termination_reason` on every completion, with no previous wire fallback. The strict UTF-8, duplicate/unknown-member and 16 KiB completion boundaries remain.
+R7-H2 carries the immutable R2 numerical aggregate through Host completion into the existing Action step summary. It adds no counter collection. R7-H4 exposes matching Action outputs from the same validated completion. The private Host and its Node wrapper ship together: both require `accounting` and `termination_reason` on every completion, with no previous wire fallback. The strict UTF-8, duplicate/unknown-member and 16 KiB completion boundaries remain.
 
 `accounting` has exactly the following members. Every numerical member is a canonical nonnegative decimal string or explicit `null`, never a JSON number. This preserves exact Int64 values beyond JavaScript's safe integer range. All members, including nullable members, are required.
 
@@ -71,3 +71,32 @@ Validators enforce the retry geometry: with attempts P and retries R, initial ph
 The summary retains status, reviewed SHA, publication URL, finding count and state disposition, then adds the termination reason, independent completeness, counters and known sums. Unavailable values are displayed as `Not available`. A missing or malformed Host completion uses fixed wrapper failure text with unavailable facts and no accepted-state claim. Private diagnostics, raw requests/responses, SESSION content, continuations, credentials and private paths never enter accounting or presentation.
 
 Matching C#/Node fixtures cover retry geometry, independent completeness, exact Int64 strings, overflow, success consistency, hostile/missing/duplicate fields and the completion cap. Real synthetic HTTP, composition, recovery, early cancellation and exception tests verify every production completion family. Validation remains `npm run check`, `npm run dist:check`, the affected/full Release runtime tests and `npm run runtime:integration`; provider execution is synthetic.
+
+## Machine-readable Action Outputs
+
+R7-H4 declares exactly fourteen outputs on the nested Node Action. Both the summary and outputs project the same strictly validated H2 completion; no second accounting collector or stored prior-run aggregate is used.
+
+| Output                                      | Meaning                                                |
+| ------------------------------------------- | ------------------------------------------------------ |
+| `status`                                    | Final Host status, or fixed wrapper `failed`           |
+| `termination-reason`                        | Closed review termination reason described above       |
+| `model-calls`                               | Logical invocations                                    |
+| `provider-attempts`                         | Observed physical sends                                |
+| `provider-retries`                          | Additional physical sends                              |
+| `provider-failed-attempts`                  | Observed sends without successful finalization         |
+| `provider-unknown-usage-attempts`           | Sends missing input or output usage                    |
+| `provider-unknown-cache-partition-attempts` | Sends with known input but unavailable cache partition |
+| `attempt-accounting-completeness`           | `complete`, `partial`, or `unavailable`                |
+| `usage-completeness`                        | Independently `complete`, `partial`, or `unavailable`  |
+| `input-tokens`                              | Known input token sum                                  |
+| `input-cache-hit-tokens`                    | Known cache hit token sum                              |
+| `input-cache-miss-tokens`                   | Known cache miss token sum                             |
+| `output-tokens`                             | Known output token sum                                 |
+
+All counts and sums are nonnegative canonical decimal strings with the H2 bounds above. Values beyond JavaScript safe integer precision remain exact through Int64.MaxValue. Each unknown or overflowed numerical value is omitted, independently; known lower bounds remain available even when completeness is partial or unavailable. A known zero alongside unknown usage is an observed lower bound, not proof of no consumption. Proven pre-provider and recovery-only invocations emit complete zero for this run.
+
+The Host status vocabulary is `reviewed`, `reviewed_with_inline_warnings`, `skipped_untrusted_event`, `skipped_fork`, `skipped_draft`, `skipped_closed`, `configuration_invalid`, `authorization_failed`, `credentials_missing`, `snapshot_incomplete`, `provider_failed`, `agent_result_invalid`, `stale_head`, `state_conflict`, `sticky_publication_failed`, `outcome_ambiguous`, `cancelled`, and `internal_failure`. The wrapper-only `failed` token accompanies `host_failure` and both completeness values `unavailable`; all ten numerical outputs are omitted. Missing or untrusted completion and ordinary wrapper replacement before presentation use that fixed projection, including late receipt or cleanup failures after parsing. Raw errors, private paths, prompts, tools, SESSION data and summary-only publication metadata never enter outputs.
+
+Once quiescence and cleanup admit a completion, its outputs are attempted before the summary and canonical annotation, including unsuccessful Host results. A later output, summary or annotation sink failure returns a failing step without rewriting those facts as a contradictory wrapper fallback. Each native output write is independent: a failing sink or runner hard kill may leave only a prefix or no outputs. Consumers must inspect the step result and available completeness; absent outputs never imply zero or complete accounting. Unconfirmed Host termination or failed drain/quiescence exits fatally before presentation. Fixed fallback independently attempts each of its four constants and its summary/error once, without retries or numerical substitution. These outputs describe observations rather than billing.
+
+Credential-free validation includes every shared H2 fixture, actual entrypoint replacement/sink/fatal cases, strict metadata drift, real Linux checked-bundle `GITHUB_OUTPUT` execution, and strict native output/summary parity in the framework/AOT verifier. Run `npm run check`, `npm run dist:check`, `npm run runtime:integration`, the affected Release output-oracle/architecture tests, and `bash runtime/scripts/verify-action-host.sh framework` (plus `aot` in its Linux toolchain gate). Historical proof goldens remain preserved; the active H4 golden names the parity metric `outputs_match_summary`.
