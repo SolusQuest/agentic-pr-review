@@ -829,6 +829,8 @@ public sealed class R6UsageJournalTests
     [InlineData("http429")]
     [InlineData("http5xx")]
     [InlineData("connect_timeout")]
+    [InlineData("retryable_http503")]
+    [InlineData("retryable_http429")]
     [InlineData("provider_timeout")]
     [InlineData("transport_failure")]
     [InlineData("response_too_large")]
@@ -855,6 +857,8 @@ public sealed class R6UsageJournalTests
                 "http429" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 1),
                 "http5xx" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.Other5xx, 1),
                 "connect_timeout" => DeepSeekTransportResult.ConnectTimeout(),
+                "retryable_http503" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.Other5xx, 1, 503, null),
+                "retryable_http429" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 1, 429, null),
                 "provider_timeout" => DeepSeekTransportResult.ProviderTimeout(),
                 "response_too_large" => DeepSeekTransportResult.ResponseTooLarge(),
                 "invalid_json" => DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(Canary)),
@@ -862,7 +866,7 @@ public sealed class R6UsageJournalTests
             };
         }), lines);
         var journal = result.Journal.Document;
-        var count = fault == "http429" ? 1 : 2;
+        var count = fault is "http429" or "retryable_http429" ? 1 : 2;
         Assert.Equal(count, journal.Totals.ActualSends);
         Assert.Equal(count, journal.Totals.UnknownUsageSends);
         Assert.Equal(0, journal.Totals.KnownUsageSends);
@@ -875,6 +879,8 @@ public sealed class R6UsageJournalTests
             Assert.Equal("unknown", c.UsageStatus);
             Assert.Equal(fault switch
             {
+                "retryable_http503" => "http5xx",
+                "retryable_http429" => "http429",
                 "thrown" => "transport_failure",
                 "invalid_usage" or "invalid_json" => "success",
                 _ => fault,

@@ -19,7 +19,8 @@ internal sealed class AgentLoop(
     IProjectChatClient chatClient,
     IAgentToolExecutor toolExecutor,
     TimeProvider? timeProvider = null,
-    AgentLimitAuthority? limitAuthority = null)
+    AgentLimitAuthority? limitAuthority = null,
+    Func<double>? retryRandom = null)
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
@@ -154,11 +155,9 @@ internal sealed class AgentLoop(
             // Local adapter/projection and transport failures still consume this
             // logical invocation; physical sends are observed independently.
             modelCalls++;
-            var attempt = accounting.BeginCall().BeginAttempt();
-            request = request with { Accounting = attempt };
-            ProjectChatResponse response;
-            Task<ProjectChatResponse>? chatTask = null;
-            var projected = false;
+            var logicalCall = accounting.BeginCall();
+            ProjectChatResponse response = null!;
+            var retryOrdinal = 0;
             using var chatDeadline = new CancellationTokenSource(
                 Remaining(started),
                 _timeProvider);
@@ -166,60 +165,101 @@ internal sealed class AgentLoop(
                 CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken,
                     chatDeadline.Token);
-            try
+            while (true)
             {
-                chatTask = chatClient.GetResponseAsync(
-                    request,
-                    chatCancellation.Token);
-                response = await chatTask.WaitAsync(chatCancellation.Token);
-                if (response?.CapturedResponseBodyBytes > AgentLimits.ResponseBytes)
+                var attempt = logicalCall.BeginAttempt();
+                var attemptRequest = request with { Accounting = attempt };
+                Task<ProjectChatResponse>? chatTask = null;
+                var projected = false;
+                ProjectChatRetryException? retryFailure = null;
+                try
                 {
-                    attempt.MarkFailed();
-                    attempt.RecordUsage(ProviderUsageObservation.Unknown);
+                    chatTask = chatClient.GetResponseAsync(
+                        attemptRequest,
+                        chatCancellation.Token);
+                    response = await chatTask.WaitAsync(chatCancellation.Token);
+                    if (response?.CapturedResponseBodyBytes > AgentLimits.ResponseBytes)
+                    {
+                        attempt.MarkFailed();
+                        attempt.RecordUsage(ProviderUsageObservation.Unknown);
+                    }
+                    else if (response?.Usage is { } usage)
+                    {
+                        attempt.RecordUsage(ProviderUsageObservation.Create(
+                            usage.InputTokens, usage.OutputTokens,
+                            usage.ProviderUsage?.CacheReadInputTokens,
+                            usage.ProviderUsage?.UncachedInputTokens));
+                    }
+                    projected = response is not null;
                 }
-                else if (response?.Usage is { } usage)
+                catch (ProjectChatRetryException exception)
                 {
-                    attempt.RecordUsage(ProviderUsageObservation.Create(
-                        usage.InputTokens, usage.OutputTokens,
-                        usage.ProviderUsage?.CacheReadInputTokens,
-                        usage.ProviderUsage?.UncachedInputTokens));
+                    retryFailure = exception;
                 }
-                projected = response is not null;
-            }
-            catch (OperationCanceledException)
-            {
-                return Failure(
-                    OperationStopReason(
-                        started,
-                        cancellationToken,
-                        chatDeadline) ??
-                        AgentFailureCodes.ChatFailed,
-                    modelCalls,
-                    toolCalls,
+                catch (OperationCanceledException)
+                {
+                    return Failure(
+                        OperationStopReason(
+                            started,
+                            cancellationToken,
+                            chatDeadline) ??
+                            AgentFailureCodes.ChatFailed,
+                        modelCalls,
+                        toolCalls,
+                            events);
+                }
+                catch (ProjectChatNormalizationException exception)
+                {
+                    return Failure(
+                        StopReason(started, cancellationToken) ??
+                            exception.DiagnosticCode,
+                        modelCalls,
+                        toolCalls,
                         events);
-            }
-            catch (ProjectChatNormalizationException exception)
-            {
-                return Failure(
-                    StopReason(started, cancellationToken) ??
-                        exception.DiagnosticCode,
-                    modelCalls,
-                    toolCalls,
-                    events);
-            }
-            catch
-            {
-                return Failure(
-                    StopReason(started, cancellationToken) ??
-                        AgentFailureCodes.ChatFailed,
-                    modelCalls,
-                    toolCalls,
-                    events);
-            }
-            finally
-            {
-                var frozen = attempt.Freeze(chatTask?.IsCompleted ?? true, projected);
-                tokenBalance?.Debit(frozen);
+                }
+                catch
+                {
+                    return Failure(
+                        StopReason(started, cancellationToken) ??
+                            AgentFailureCodes.ChatFailed,
+                        modelCalls,
+                        toolCalls,
+                        events);
+                }
+                finally
+                {
+                    var frozen = attempt.Freeze(chatTask?.IsCompleted ?? true, projected);
+                    tokenBalance?.Debit(frozen);
+                }
+
+                if (retryFailure is null) break;
+                stop = OperationStopReason(started, cancellationToken, chatDeadline);
+                if (stop is not null) return Failure(stop, modelCalls, toolCalls, events);
+                if (tokenBalance?.Exhausted == true || tokenBalance?.OutputAllowance < request.MaxOutputTokens)
+                    return Failure(AgentFailureCodes.TokenLimit, modelCalls, toolCalls, events);
+                if (limitProfile != AgentLimitProfile.Current ||
+                    retryOrdinal >= ProviderRetryLimits.PerCall || !accounting.CanRetry || !attempt.CanRetry)
+                    return Failure(AgentFailureCodes.ChatFailed, modelCalls, toolCalls, events);
+
+                var delay = ProviderRetryDelay.Choose(++retryOrdinal,
+                    (retryRandom ?? Random.Shared.NextDouble)(), retryFailure.RetryAfter);
+                if (delay >= Remaining(started))
+                    return Failure(AgentFailureCodes.ChatFailed, modelCalls, toolCalls, events);
+                try
+                {
+                    await Task.Delay(delay, _timeProvider, chatCancellation.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return Failure(OperationStopReason(started, cancellationToken, chatDeadline) ??
+                        AgentFailureCodes.ChatFailed, modelCalls, toolCalls, events);
+                }
+                stop = OperationStopReason(started, cancellationToken, chatDeadline);
+                if (stop is not null) return Failure(stop, modelCalls, toolCalls, events);
+                if (tokenBalance?.Exhausted == true || tokenBalance?.OutputAllowance < request.MaxOutputTokens)
+                    return Failure(AgentFailureCodes.TokenLimit, modelCalls, toolCalls, events);
+                if (!accounting.CanRetry)
+                    return Failure(AgentFailureCodes.ChatFailed, modelCalls, toolCalls, events);
             }
 
             stop = StopReason(started, cancellationToken);

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -14,19 +15,22 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
         throwOnInvalidBytes: true);
 
     private readonly DeepSeekCredential _credential;
-    private readonly HttpClient _client;
+    private readonly HttpClient? _client;
+    private readonly Func<HttpMessageHandler>? _handlerFactory;
     private readonly TimeSpan _providerTimeout;
     private readonly TimeProvider _timeProvider;
     private bool _disposed;
 
     private DeepSeekTransport(
         DeepSeekCredential credential,
-        HttpClient client,
+        HttpClient? client,
         TimeSpan providerTimeout,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        Func<HttpMessageHandler>? handlerFactory = null)
     {
         _credential = credential;
         _client = client;
+        _handlerFactory = handlerFactory;
         _providerTimeout = providerTimeout;
         _timeProvider = timeProvider;
     }
@@ -38,12 +42,9 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
     private static DeepSeekTransport CreateCore(DeepSeekCredential credential, TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(credential);
-        var handler = CreateHandler(DeepSeekTransportPolicy.ConnectTimeout);
         return new DeepSeekTransport(
-            credential,
-            CreateClient(handler),
-            DeepSeekTransportPolicy.ProviderTimeout,
-            timeProvider);
+            credential, null, DeepSeekTransportPolicy.ProviderTimeout, timeProvider,
+            () => CreateHandler(DeepSeekTransportPolicy.ConnectTimeout));
     }
 
     internal static DeepSeekTransport CreateForTesting(
@@ -71,6 +72,16 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             CreateClient(handler),
             providerTimeout,
             timeProvider);
+    }
+
+    internal static DeepSeekTransport CreateForTesting(
+        DeepSeekCredential credential, Func<HttpMessageHandler> handlerFactory,
+        TimeSpan providerTimeout, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(credential);
+        ArgumentNullException.ThrowIfNull(handlerFactory);
+        if (providerTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(providerTimeout));
+        return new(credential, null, providerTimeout, timeProvider, handlerFactory);
     }
 
     internal static SocketsHttpHandler CreateHandler(
@@ -190,8 +201,12 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
                 cancellationToken,
                 providerDeadline.Token);
         var phase = TransportPhase.Send;
+        int? observedStatus = null;
+        TimeSpan? retryAfter = null;
         try
         {
+            using var ownedClient = _handlerFactory is null ? null : CreateClient(_handlerFactory());
+            var client = ownedClient ?? _client!;
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
                 CreateEndpoint(DeepSeekTransportPolicy.Endpoint))
@@ -213,7 +228,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             if (Expired()) return DeepSeekTransportResult.ProviderTimeout();
             if (accounting is not null && !accounting.TryBeginDispatch())
                 throw new OperationCanceledException(cancellationToken);
-            using var response = await _client.SendAsync(
+            using var response = await client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 providerCancellation.Token);
@@ -225,6 +240,8 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
 
             phase = TransportPhase.Body;
             var status = (int)response.StatusCode;
+            observedStatus = status;
+            retryAfter = ReadRetryAfter(response, _timeProvider.GetUtcNow());
             if (status == 200)
             {
                 var successBody = await ReadBoundedAsync(
@@ -248,28 +265,27 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
                 return DeepSeekTransportResult.TransportFailure();
             }
 
-            var discarded = await DiscardBoundedAsync(
+            var errorBody = await ReadBoundedAsync(
                 response.Content,
                 DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes,
                 providerCancellation.Token);
+            // Below the cap means ReadBoundedAsync observed EOF. At the cap,
+            // completeness is unknown and no extra read is permitted.
+            if (errorBody.Length < DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes)
+                DeepSeekUsageReader.ObserveError(errorBody, accounting);
             cancellationToken.ThrowIfCancellationRequested();
-            if (Expired())
-            {
-                return DeepSeekTransportResult.ProviderTimeout();
-            }
-
+            if (Expired()) return DeepSeekTransportResult.ProviderTimeout();
             return DeepSeekTransportResult.HttpFailure(
-                statusClass,
-                discarded);
+                statusClass, errorBody.Length, status, retryAfter);
         }
-        catch (OperationCanceledException)
-            when (cancellationToken.IsCancellationRequested)
+        catch (Exception exception)
+            when (IsNonFatal(exception) && cancellationToken.IsCancellationRequested)
         {
             cancellationToken.ThrowIfCancellationRequested();
             throw;
         }
-        catch (OperationCanceledException)
-            when (Expired())
+        catch (Exception exception)
+            when (IsNonFatal(exception) && Expired())
         {
             return DeepSeekTransportResult.ProviderTimeout();
         }
@@ -281,7 +297,12 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
         }
         catch (Exception exception) when (IsNonFatal(exception))
         {
-            return DeepSeekTransportResult.TransportFailure();
+            // An observed status is authoritative even if draining later fails.
+            // A 200 partial body can retry only for proved connection evidence.
+            var eligible = observedStatus is { } status && status != 200
+                ? DeepSeekTransportResult.IsRetryableStatus(status)
+                : IsTransientConnection(exception);
+            return DeepSeekTransportResult.TransportFailure(eligible, retryAfter);
         }
     }
 
@@ -293,7 +314,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
         }
 
         _disposed = true;
-        _client.Dispose();
+        _client?.Dispose();
     }
 
     private static HttpClient CreateClient(HttpMessageHandler handler)
@@ -334,31 +355,34 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
         return captured.ToArray();
     }
 
-    private static async Task<int> DiscardBoundedAsync(
-        HttpContent content,
-        int limit,
-        CancellationToken cancellationToken)
+    internal static TimeSpan? ReadRetryAfter(HttpResponseMessage response, DateTimeOffset now)
     {
-        await using var stream =
-            await content.ReadAsStreamAsync(cancellationToken);
-        var buffer = new byte[Math.Min(8 * 1024, limit)];
-        var discarded = 0;
-        while (discarded < limit)
+        if (!response.Headers.TryGetValues("Retry-After", out var values)) return null;
+        var entries = values.Take(2).ToArray();
+        if (entries.Length != 1 || entries[0].Length > 128 ||
+            !RetryConditionHeaderValue.TryParse(entries[0], out var parsed)) return null;
+        // Overflow is rejected by TryParse; dates use UTC only for conversion.
+        var delay = parsed.Delta ?? (parsed.Date - now);
+        return delay >= TimeSpan.Zero ? delay : null;
+    }
+
+    private static bool IsTransientConnection(Exception exception)
+    {
+        for (var depth = 0; depth < 8; depth++)
         {
-            var read = await stream.ReadAsync(
-                buffer.AsMemory(
-                    0,
-                    Math.Min(buffer.Length, limit - discarded)),
-                cancellationToken);
-            if (read == 0)
-            {
-                break;
-            }
-
-            discarded = checked(discarded + read);
+            if (exception is SocketException socket)
+                return socket.SocketErrorCode is SocketError.ConnectionReset or
+                    SocketError.ConnectionAborted or SocketError.ConnectionRefused or
+                    SocketError.TimedOut or SocketError.TryAgain or
+                    SocketError.NetworkUnreachable or SocketError.HostUnreachable;
+            if (exception is HttpRequestException http && http.HttpRequestError is not
+                (HttpRequestError.Unknown or HttpRequestError.ConnectionError or
+                 HttpRequestError.NameResolutionError or HttpRequestError.ResponseEnded)) return false;
+            if (exception is not HttpRequestException and not IOException ||
+                exception.InnerException is not { } inner) return false;
+            exception = inner;
         }
-
-        return discarded;
+        return false;
     }
 
     private static bool TryClassifyHttpFailure(

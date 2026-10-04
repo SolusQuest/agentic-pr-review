@@ -283,7 +283,7 @@ internal static class DeepSeekResponseParser
         try
         {
             var body = transportResult.Body.ToArray();
-            if (!HasUniquePropertyNames(body))
+            if (!DeepSeekUsageReader.HasUniquePropertyNames(body))
             {
                 return DeepSeekResponseParseResult.Invalid(
                     DeepSeekResponseInvalidCategory.Json);
@@ -297,7 +297,7 @@ internal static class DeepSeekResponseParser
                     CommentHandling = JsonCommentHandling.Disallow,
                     MaxDepth = 64,
                 });
-            usage = ReadAccountingUsage(document.RootElement);
+            usage = DeepSeekUsageReader.ReadAccountingUsage(document.RootElement);
             // Publish before later response admission: its synchronous work may
             // race the Agent's cancellation/finalization on another thread.
             usageObserver?.RecordUsage(usage);
@@ -617,24 +617,6 @@ internal static class DeepSeekResponseParser
 
     // Same bounded, duplicate-checked document as response admission, but its
     // measurements survive rejection of unrelated model/choice/tool fields.
-    private static ProviderUsageObservation ReadAccountingUsage(JsonElement root)
-    {
-        if (root.ValueKind != JsonValueKind.Object ||
-            !root.TryGetProperty("usage", out var usage) ||
-            usage.ValueKind != JsonValueKind.Object)
-            return ProviderUsageObservation.Unknown;
-
-        return ProviderUsageObservation.Create(
-            ReadCounter(usage, "prompt_tokens"),
-            ReadCounter(usage, "completion_tokens"),
-            ReadCounter(usage, "prompt_cache_hit_tokens"),
-            ReadCounter(usage, "prompt_cache_miss_tokens"),
-            ReadCounter(usage, "total_tokens"));
-    }
-
-    private static long? ReadCounter(JsonElement usage, string name) =>
-        TryReadNonnegativeInt64(usage, name, out var value) ? value : null;
-
     private static bool ValidateOptionalDetail(
         JsonElement usage,
         string objectName,
@@ -758,47 +740,4 @@ internal static class DeepSeekResponseParser
         return true;
     }
 
-    private static bool HasUniquePropertyNames(ReadOnlySpan<byte> body)
-    {
-        var reader = new Utf8JsonReader(
-            body,
-            new JsonReaderOptions
-            {
-                AllowTrailingCommas = false,
-                CommentHandling = JsonCommentHandling.Disallow,
-                MaxDepth = 64,
-            });
-        var scopes = new Stack<HashSet<string>>();
-        while (reader.Read())
-        {
-            if (reader.TokenType == JsonTokenType.StartObject)
-            {
-                scopes.Push(new HashSet<string>(StringComparer.Ordinal));
-                continue;
-            }
-
-            if (reader.TokenType == JsonTokenType.EndObject)
-            {
-                if (scopes.Count == 0)
-                {
-                    return false;
-                }
-
-                scopes.Pop();
-                continue;
-            }
-
-            if (reader.TokenType == JsonTokenType.PropertyName)
-            {
-                var name = reader.GetString();
-                if (name is null || scopes.Count == 0 ||
-                    !scopes.Peek().Add(name))
-                {
-                    return false;
-                }
-            }
-        }
-
-        return scopes.Count == 0;
-    }
 }

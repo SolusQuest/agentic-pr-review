@@ -270,6 +270,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
                 typeof(DeepSeekParsedUsage),
                 typeof(IProjectChatClient),
                 typeof(ProjectChatNormalizationException),
+                typeof(ProjectChatRetryException),
                 typeof(ProjectChatNormalizationReason),
                 typeof(MinimalChatClient),
                 typeof(IMinimalChatBackend),

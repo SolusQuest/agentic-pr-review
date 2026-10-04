@@ -133,11 +133,23 @@ public sealed class DeepSeekTransportTests
 
         using var transport = DeepSeekTransport.Create(
             DeepSeekCredential.Create("key"));
-        var client = (HttpClient)typeof(DeepSeekTransport)
-            .GetField(
-                "_client",
-                BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(transport)!;
+        var factory = (Func<HttpMessageHandler>)typeof(DeepSeekTransport)
+            .GetField("_handlerFactory", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(transport)!;
+        using var first = Assert.IsType<SocketsHttpHandler>(factory());
+        using var second = Assert.IsType<SocketsHttpHandler>(factory());
+        Assert.NotSame(first, second);
+        foreach (var created in new[] { first, second })
+        {
+            Assert.False(created.UseProxy);
+            Assert.False(created.UseCookies);
+            Assert.False(created.AllowAutoRedirect);
+            Assert.Equal(DecompressionMethods.None, created.AutomaticDecompression);
+            Assert.Equal(TimeSpan.FromSeconds(15), created.ConnectTimeout);
+            Assert.NotNull(created.ConnectCallback);
+        }
+        using var client = (HttpClient)typeof(DeepSeekTransport)
+            .GetMethod("CreateClient", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { first })!;
         Assert.Equal(Timeout.InfiniteTimeSpan, client.Timeout);
         Assert.Empty(client.DefaultRequestHeaders);
     }

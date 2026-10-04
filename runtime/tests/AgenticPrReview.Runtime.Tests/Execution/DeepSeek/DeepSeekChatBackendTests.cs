@@ -759,6 +759,16 @@ public sealed class DeepSeekChatBackendTests
             var transport = new FakeTransport(result);
             var backend = new DeepSeekChatBackend(Context(), transport);
 
+            if (result.RetryEligible)
+            {
+                var retry = await Assert.ThrowsAsync<ProjectChatRetryException>(() =>
+                    backend.GetResponseAsync(MinimalRequest(), CancellationToken.None));
+                Assert.Equal("Transient provider attempt failed.", retry.Message);
+                Assert.Null(retry.InnerException);
+                Assert.Null(retry.RetryAfter);
+                Assert.Single(transport.Requests);
+                continue;
+            }
             var exception = await Assert.ThrowsAsync<
                 DeepSeekChatBackendException>(() =>
                 backend.GetResponseAsync(

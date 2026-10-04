@@ -82,6 +82,8 @@ internal sealed class DeepSeekTransportResult
     internal int? ActualCount { get; }
     internal int? CapturedCount { get; }
     internal int? DiscardedErrorCount { get; }
+    internal bool RetryEligible { get; private init; }
+    internal TimeSpan? RetryAfter { get; private init; }
     internal bool HasBody => !_body.IsDefault;
     internal ImmutableArray<byte> Body => _body;
 
@@ -152,6 +154,21 @@ internal sealed class DeepSeekTransportResult
             default);
     }
 
+    internal static DeepSeekTransportResult HttpFailure(
+        DeepSeekHttpStatusClass statusClass, int discardedErrorCount,
+        int exactStatus, TimeSpan? retryAfter)
+    {
+        var validated = HttpFailure(statusClass, discardedErrorCount);
+        return new DeepSeekTransportResult(validated.Outcome, null, statusClass,
+            null, null, discardedErrorCount, default)
+        {
+            RetryEligible = IsRetryableStatus(exactStatus),
+            RetryAfter = retryAfter,
+        };
+    }
+
+    internal static bool IsRetryableStatus(int status) => status is 408 or 429 or 500 or 502 or 503 or 504;
+
     internal static DeepSeekTransportResult ConnectTimeout() => new(
         DeepSeekTransportOutcome.ConnectTimeout,
         null,
@@ -159,7 +176,7 @@ internal sealed class DeepSeekTransportResult
         null,
         null,
         null,
-        default);
+        default) { RetryEligible = true };
 
     internal static DeepSeekTransportResult ProviderTimeout() => new(
         DeepSeekTransportOutcome.ProviderTimeout,
@@ -170,14 +187,14 @@ internal sealed class DeepSeekTransportResult
         null,
         default);
 
-    internal static DeepSeekTransportResult TransportFailure() => new(
+    internal static DeepSeekTransportResult TransportFailure(bool retryEligible = false, TimeSpan? retryAfter = null) => new(
         DeepSeekTransportOutcome.TransportFailure,
         null,
         null,
         null,
         null,
         null,
-        default);
+        default) { RetryEligible = retryEligible, RetryAfter = retryAfter };
 
     public override string ToString() => Outcome switch
     {

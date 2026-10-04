@@ -25,6 +25,7 @@ internal static class Program
                 "continue" => await ProofOrchestrator.ContinueAsync(command),
                 "negative" => await NegativeProofRunner.RunAsync(command),
                 "r7-capacity" => await SessionCapacityProof.RunAsync(command),
+                "r7-retry" => await ProviderRetryProof.RunAsync(command),
                 _ => 2,
             };
         }

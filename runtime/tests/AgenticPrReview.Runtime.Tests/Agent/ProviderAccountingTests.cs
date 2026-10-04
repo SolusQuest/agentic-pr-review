@@ -5,7 +5,53 @@ namespace AgenticPrReview.Runtime.Tests.Agent;
 public sealed class ProviderAccountingTests
 {
     [Fact]
-    public void LogicalCallsOwnAttemptsWithoutEnablingRetries()
+    public void UndispatchedReservationsDoNotSpendTheGlobalRetryLimit()
+    {
+        var review = new ReviewAccounting();
+        var noSend = review.BeginCall();
+        noSend.BeginAttempt().Freeze(true, false);
+        var reservation = noSend.BeginAttempt();
+        reservation.ObserveNoDispatch();
+        reservation.Freeze(true, false);
+        for (var callIndex = 0; callIndex < 4; callIndex++)
+        {
+            var call = review.BeginCall();
+            for (var ordinal = 0; ordinal <= 2; ordinal++)
+            {
+                var attempt = call.BeginAttempt();
+                Assert.True(attempt.TryBeginDispatch());
+                attempt.Freeze(true, false);
+            }
+            Assert.Throws<InvalidOperationException>(() => call.BeginAttempt());
+        }
+        var last = review.BeginCall();
+        var first = last.BeginAttempt();
+        Assert.True(first.TryBeginDispatch());
+        first.Freeze(true, false);
+        var denied = last.BeginAttempt();
+        denied.ObserveNoDispatch();
+        Assert.False(denied.TryBeginDispatch());
+        denied.Freeze(true, false);
+        Assert.Equal(8, review.Finish().ProviderRetries);
+        Assert.Equal(13, review.Finish().ProviderAttempts);
+        Assert.False(review.CanRetry);
+    }
+
+    [Fact]
+    public void RetryRequiresCompletedFailureAndKeepsLateUsageFrozen()
+    {
+        foreach (var completed in new[] { false, true })
+        {
+            var call = new ReviewAccounting().BeginCall();
+            var capture = call.BeginAttempt();
+            capture.TryBeginDispatch();
+            capture.Freeze(completed, completed);
+            Assert.Throws<InvalidOperationException>(() => call.BeginAttempt());
+        }
+    }
+
+    [Fact]
+    public void LogicalCallsRejectOverlappingAttempts()
     {
         var review = new ReviewAccounting();
         var call = review.BeginCall();
