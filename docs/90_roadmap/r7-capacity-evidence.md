@@ -17,3 +17,27 @@ Measurements start before snapshot construction and distinguish monotonic wall d
 The earliest deliberate failures are parser content admission, provider context admission, cumulative output accounting, bounded response transport and the monotonic deadline respectively. Restorable history can therefore fit SESSION/state byte ceilings yet fail the next provider context projection. Per-call response and output allowances also constrain usable growth before nominal message/tool ceilings. Reset is an explicit recovery choice and never converts an incomplete review into successful no-findings output.
 
 The gate's complete case verifier rejects missing/duplicate cases, wrong source/cleanliness, fabricated success or counts, missing associations, preservation/reset failures and false Host completion. Focused tests additionally exercise mutated receipts and a real large accepted history's role/association/policy/scope rejection. The configured-authority regression is required by TRX readback, so an empty test filter cannot silently pass. Old R3/R4/R5/R6 campaigns and runtime proof inventories remain intact.
+
+The following observations come from the complete clean-source gate at commit `397b58e15b8514270b93a526254278cb55a9c971`, tree `ca9996a026f773f80536bf4aaa35a10173070d83`, on Ubuntu 24.04 x64 under WSL with .NET SDK 10.0.109 and Node 24.21.0. All 15 child cases and eight Host cases passed in each mode; ten focused tests passed and semantic parity and cleanup were verified. The complete gate, including builds and tests, took 210 seconds. These are one-run synthetic observations, with no performance or provider reliability guarantee. Set `R7_CAPACITY_REPORT_DIR` to a local output directory to retain the sanitized JSON measurements from a new gate run.
+
+Serialized sizes and logical counts were identical in framework and AOT. Every row used a 11,679,360-byte canonical diff snapshot. Request counts below describe the largest projected request, while SESSION records describe the completed artifact.
+
+| Scenario                      | Model/tool calls | Request messages/parts | SESSION records | Max project/provider request bytes | SESSION plaintext/envelope bytes |
+| ----------------------------- | ---------------- | ---------------------- | --------------- | ---------------------------------- | -------------------------------- |
+| Default 64                    | 64 / 442         | 506 / 884              | 571             | 560,355 / 686,357                  | 678,412 / 678,521                |
+| Default fresh continuation    | 1 / 1            | 509 / 887              | 575             | 561,184 / 687,049                  | 680,732 / 680,841                |
+| Configured 128                | 128 / 382        | 510 / 764              | 639             | 539,362 / 645,326                  | 661,410 / 661,519                |
+| Configured fresh continuation | 1 / 1            | 513 / 767              | 643             | 540,206 / 646,033                  | 663,739 / 663,848                |
+
+| Mode/scenario                     | Wall milliseconds | Managed bytes allocated | Working/peak working set bytes |
+| --------------------------------- | ----------------- | ----------------------- | ------------------------------ |
+| Framework default 64              | 2,943             | 1,100,826,224           | 141,271,040 / 142,462,976      |
+| AOT default 64                    | 1,576             | 1,100,102,072           | 107,687,936 / 112,603,136      |
+| Framework default continuation    | 1,863             | 686,687,240             | 141,135,872 / 142,368,768      |
+| AOT default continuation          | 1,010             | 686,579,760             | 111,292,416 / 115,048,448      |
+| Framework configured 128          | 3,054             | 1,643,486,920           | 144,793,600 / 151,183,360      |
+| AOT configured 128                | 2,061             | 1,642,218,216           | 107,728,896 / 107,728,896      |
+| Framework configured continuation | 1,663             | 664,653,784             | 145,866,752 / 155,123,712      |
+| AOT configured continuation       | 945               | 664,932,136             | 113,233,920 / 118,837,248      |
+
+Managed allocation includes snapshot construction and the harness's repeated request serialization and history oracle; it measures allocation churn across the scenario, not simultaneously retained memory. Peak working set is the separate process observation. Accepted stored bytes were 681,484 for default 64 and 664,485 for configured 128; retaining their next accepted generations raised the aggregate to 1,364,150 and 1,330,161 bytes respectively. The configured case makes more model calls but fewer total tool observations, so its serialized history is smaller. The measured growth does not replace any independent ceiling or establish a universal memory bound.
