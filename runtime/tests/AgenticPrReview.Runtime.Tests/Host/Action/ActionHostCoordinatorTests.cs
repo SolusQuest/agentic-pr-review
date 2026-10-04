@@ -275,7 +275,7 @@ public sealed class ActionHostCoordinatorTests
             .ToArray();
 
         Assert.Equal(
-            ["AdapterId", "ModelId", "ProviderId"],
+            ["AdapterId", "LimitAuthority", "ModelId", "ProviderId"],
             properties);
         var create = Assert.Single(
             typeof(IActionHostProviderRunnerFactory).GetMethods());

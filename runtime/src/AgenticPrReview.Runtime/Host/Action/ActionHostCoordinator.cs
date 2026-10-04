@@ -6,6 +6,7 @@ using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Policy;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
@@ -25,7 +26,8 @@ namespace AgenticPrReview.Runtime.ActionHost;
 internal sealed record ActionHostProviderPolicy(
     string ProviderId,
     string ModelId,
-    string AdapterId);
+    string AdapterId,
+    AgentLimitAuthority? LimitAuthority = null);
 
 internal interface IActionHostProviderRunnerFactory
 {
@@ -126,7 +128,7 @@ internal sealed class ActionHostDeepSeekProviderRunnerFactory :
             var tools = new SnapshotToolExecutor(
                 snapshot,
                 new VerifiedReviewedFileAccess());
-            return new AgentLoop(client, tools, timeProvider)
+            return new AgentLoop(client, tools, timeProvider, policy.LimitAuthority)
                 .RunAsync(run, cancellationToken);
         }
 
@@ -288,7 +290,8 @@ internal sealed class ActionHostCoordinator
                                    new ActionHostProviderPolicy(
                                        policy.ProviderId,
                                        policy.ModelId,
-                                       policy.AdapterId),
+                                       policy.AdapterId,
+                                       policy.LimitAuthority),
                                    launch.Inputs.ProviderApiKey,
                                    snapshot.Snapshot,
                                    timeProvider))

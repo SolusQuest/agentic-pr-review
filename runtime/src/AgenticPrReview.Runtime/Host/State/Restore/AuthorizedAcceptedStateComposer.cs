@@ -698,7 +698,8 @@ internal sealed class AuthorizedAcceptedStateComposer
                     policy.BuildDiscriminator,
                     policy.ProviderId,
                     policy.ModelId,
-                    policy.AdapterId);
+                    policy.AdapterId,
+                    policy.LimitAuthority);
                 var currentReviewedIdentity = new ReviewedIdentity(
                     repositoryId,
                     invocation.PullRequest.Number,
@@ -1108,7 +1109,8 @@ internal sealed class AuthorizedAcceptedStateComposer
                 policy.BuildDiscriminator,
                 policy.ProviderId,
                 policy.ModelId,
-                policy.AdapterId);
+                policy.AdapterId,
+                policy.LimitAuthority);
             var currentReviewedIdentity = new ReviewedIdentity(
                 baseScope.RepositoryId,
                 invocation.PullRequest.Number,

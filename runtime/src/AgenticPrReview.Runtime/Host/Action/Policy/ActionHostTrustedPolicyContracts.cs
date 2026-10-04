@@ -3,6 +3,7 @@ using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Canonical;
 
 namespace AgenticPrReview.Runtime.ActionHost.Policy;
@@ -357,6 +358,7 @@ internal sealed partial class ActionHostTrustedPolicy
         PromptCachingEnabled = values.PromptCachingEnabled;
         ToolsetSha256 = values.ToolsetSha256;
         LimitsSha256 = values.LimitsSha256;
+        LimitAuthority = values.LimitAuthority;
         StateRetentionSeconds = values.StateRetentionSeconds;
         MaximumInlineComments = values.MaximumInlineComments;
         SecurityPolicyId = values.SecurityPolicyId;
@@ -391,6 +393,7 @@ internal sealed partial class ActionHostTrustedPolicy
     internal bool PromptCachingEnabled { get; }
     internal string ToolsetSha256 { get; }
     internal string LimitsSha256 { get; }
+    internal AgentLimitAuthority LimitAuthority { get; }
     internal long StateRetentionSeconds { get; }
     internal int MaximumInlineComments { get; }
     internal string SecurityPolicyId { get; }
@@ -427,6 +430,7 @@ internal sealed partial class ActionHostTrustedPolicy
         bool PromptCachingEnabled,
         string ToolsetSha256,
         string LimitsSha256,
+        AgentLimitAuthority LimitAuthority,
         long StateRetentionSeconds,
         int MaximumInlineComments,
         string SecurityPolicyId);

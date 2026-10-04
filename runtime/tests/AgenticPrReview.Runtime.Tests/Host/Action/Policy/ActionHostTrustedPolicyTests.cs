@@ -17,7 +17,7 @@ using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Policy;
 
-public sealed class ActionHostTrustedPolicyTests
+public sealed partial class ActionHostTrustedPolicyTests
 {
     [Fact]
     public async Task DefaultsMaterializeExactBytesAndProductOwnedIdentity()

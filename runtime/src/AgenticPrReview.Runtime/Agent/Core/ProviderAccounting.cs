@@ -186,9 +186,17 @@ internal sealed class ProviderLogicalCall(int ordinal, Func<bool> admitRetry)
 
 internal sealed class ReviewAccounting
 {
+    private readonly int modelCallLimit;
     private readonly List<ProviderLogicalCall> calls = [];
     private readonly object dispatchGate = new();
     private int retries;
+
+    internal ReviewAccounting(int modelCallLimit = AgentLimits.ModelCalls)
+    {
+        if (modelCallLimit is < 1 or > AgentLimits.ModelCallsCeiling)
+            throw new ArgumentOutOfRangeException(nameof(modelCallLimit));
+        this.modelCallLimit = modelCallLimit;
+    }
 
     internal bool CanRetry { get { lock (dispatchGate) return retries < ProviderRetryLimits.PerReview; } }
 
@@ -204,7 +212,7 @@ internal sealed class ReviewAccounting
 
     internal ProviderLogicalCall BeginCall()
     {
-        if (calls.Count >= AgentLimits.ModelCalls)
+        if (calls.Count >= modelCallLimit)
             throw new InvalidOperationException("Logical call accounting limit exceeded.");
         var call = new ProviderLogicalCall(calls.Count, AdmitRetry);
         calls.Add(call);
@@ -298,7 +306,7 @@ internal sealed class ProviderAccounting
                 if (previous is null || previous.Succeeded) return false;
             }
             if (attempt.LogicalCallOrdinal != logical || attempt.AttemptOrdinal != ordinal ||
-                ordinal > ProviderRetryLimits.PerCall || logical >= AgentLimits.ModelCalls)
+                ordinal > ProviderRetryLimits.PerCall || logical >= AgentLimits.ModelCallsCeiling)
                 return false;
             if (ordinal > 0 && attempt.Dispatched && ++retries > ProviderRetryLimits.PerReview)
                 return false;

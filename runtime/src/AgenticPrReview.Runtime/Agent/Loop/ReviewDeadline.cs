@@ -8,12 +8,13 @@ internal sealed class ReviewDeadline
     private readonly long started;
     private readonly TimeSpan allowance;
 
-    internal ReviewDeadline(TimeProvider time, AgentLimitProfile profile, TimeSpan? hostRemaining)
+    internal ReviewDeadline(TimeProvider time, AgentLimitProfile profile, TimeSpan? hostRemaining,
+        int timeoutSeconds = AgentLimits.DeadlineSeconds)
     {
         this.time = time;
         started = time.GetTimestamp();
         var selected = TimeSpan.FromSeconds(profile == AgentLimitProfile.Current
-            ? AgentLimits.DeadlineSeconds : AgentLimits.RetainedDeadlineSeconds);
+            ? timeoutSeconds : AgentLimits.RetainedDeadlineSeconds);
         allowance = hostRemaining is { } remaining && remaining < selected
             ? (remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero) : selected;
     }
