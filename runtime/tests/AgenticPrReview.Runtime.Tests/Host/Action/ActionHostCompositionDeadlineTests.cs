@@ -131,8 +131,10 @@ public sealed partial class ActionHostCompositionTests
         Assert.Single(publisher.Transport.Bodies);
     }
 
-    [Fact]
-    public async Task ExistingStateClassificationStopsAtPreStickyBoundaryWithoutNewWrites()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingStateClassificationCancellationPreservesConflictWithoutNewWrites(bool callerCancellation)
     {
         var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
         var launch = FullLaunch(scenario.Launch);
@@ -147,18 +149,20 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(ActionHostStatus.Reviewed, first.Status);
         var uploads = store.UploadCalls;
         var clock = new DeadlineTestClock(LocatorTestData.Now);
+        using var caller = new CancellationTokenSource();
         CancellationToken observed = default;
         publisher.Transport.OnList = () =>
         {
             observed = publisher.Transport.ListCancellationTokens[^1];
-            clock.Advance(TimeSpan.FromMinutes(24));
+            if (callerCancellation) caller.Cancel();
+            else clock.Advance(TimeSpan.FromMinutes(24));
         };
         var resumed = await new ActionHostComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath))
-            .RunAsync(WithoutProviderKey(launch), default);
+            .RunAsync(WithoutProviderKey(launch), caller.Token);
         Assert.True(observed.IsCancellationRequested);
-        Assert.NotEqual(ActionHostStatus.Reviewed, resumed.Status);
+        Assert.Equal(ActionHostStatus.StateConflict, resumed.Status);
         Assert.Equal(uploads, store.UploadCalls);
         Assert.Equal(1, provider.Runs);
         Assert.Single(publisher.Transport.Bodies);
