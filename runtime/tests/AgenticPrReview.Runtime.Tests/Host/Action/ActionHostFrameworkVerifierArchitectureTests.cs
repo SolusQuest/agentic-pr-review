@@ -146,7 +146,8 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Contains("APR_ACTION_HOST_FRAMEWORK_GLOBAL_DIAGNOSTIC", verifier,
             StringComparison.Ordinal);
         var goldenAssignment =
-            "golden=\"$repo_root/runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden\"";
+            "golden=\"$repo_root/runtime/tests/fixtures/action-host/r7-action-outputs/expected-evidence.json.golden\"";
+        Assert.Contains(goldenAssignment, verifier, StringComparison.Ordinal);
         Assert.True(verifier.IndexOf(goldenAssignment, StringComparison.Ordinal) <
             verifier.IndexOf("trap cleanup EXIT", StringComparison.Ordinal));
         Assert.Contains("--golden \"$golden\"", verifier,
@@ -181,6 +182,15 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             StringComparison.Ordinal);
         Assert.Contains("APR_R4_W13_SOURCE_TREE", runner,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OutputsGoldenPreservesPriorFactsWithTruthfulOutputMetric()
+    {
+        var root = FindRepositoryRoot();
+        var prior = File.ReadAllText(Path.Join(root, "runtime", "tests", "fixtures", "action-host", "r7-session-capacity", "expected-evidence.json.golden"));
+        var current = File.ReadAllText(Path.Join(root, "runtime", "tests", "fixtures", "action-host", "r7-action-outputs", "expected-evidence.json.golden"));
+        Assert.Equal(prior.Replace("output_file_unchanged", "outputs_match_summary", StringComparison.Ordinal), current);
     }
 
     [Fact]

@@ -16,6 +16,9 @@ await runPrivateActionWrapperWithSeams({
   toolkit: {
     getInput: () => '',
     setSecret: () => undefined,
+    setOutput: () => {
+      throw new Error('fatal_output_must_not_run');
+    },
     writeSummary: async () => undefined,
     warning: () => undefined,
     error: () => undefined,

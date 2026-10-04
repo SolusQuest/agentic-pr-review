@@ -24,6 +24,35 @@ inputs:
     description: State selection mode; reset is accepted only for an authorized workflow_dispatch route.
     required: false
     default: auto
+outputs:
+  status:
+    description: Validated Host status or fixed wrapper failed status.
+  termination-reason:
+    description: Closed review termination reason.
+  model-calls:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  provider-attempts:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  provider-retries:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  provider-failed-attempts:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  provider-unknown-usage-attempts:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  provider-unknown-cache-partition-attempts:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  attempt-accounting-completeness:
+    description: Independent accounting completeness.
+  usage-completeness:
+    description: Independent accounting completeness.
+  input-tokens:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  input-cache-hit-tokens:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  input-cache-miss-tokens:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+  output-tokens:
+    description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
 runs:
   using: node24
   main: dist/index.js
