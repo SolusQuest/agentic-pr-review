@@ -26,6 +26,8 @@ internal static class Program
     {
         try
         {
+            if (args.Length > 0 && args[0].StartsWith("r7-capacity-", StringComparison.Ordinal))
+                return await Capacity.CapacityCommand.InvokeAsync(args);
             if (args.Length > 0 && args[0] == "r6-gate") return await GateCommand.InvokeAsync(args);
             if (args is ["r6-prospective-verify", "--report", { } prospectiveReport])
                 return R6ProspectiveReportReader.Invoke(prospectiveReport);

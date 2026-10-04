@@ -1,0 +1,77 @@
+{
+  "schema": "r7-capacity-v1",
+  "changedFiles": 320,
+  "diffLines": 64,
+  "diffLineBytes": 512,
+  "cases": [
+    {
+      "id": "default64",
+      "mode": "success",
+      "calls": 64,
+      "toolsPerTurn": 7,
+      "modelCallAuthority": 64
+    },
+    {
+      "id": "default_restore",
+      "mode": "success",
+      "calls": 1,
+      "toolsPerTurn": 0,
+      "modelCallAuthority": 64
+    },
+    {
+      "id": "capacity",
+      "mode": "capacity",
+      "calls": 1,
+      "toolsPerTurn": 0,
+      "modelCallAuthority": 64
+    },
+    { "id": "context", "mode": "context", "calls": 0, "toolsPerTurn": 0, "modelCallAuthority": 64 },
+    { "id": "output", "mode": "output", "calls": 1, "toolsPerTurn": 0, "modelCallAuthority": 64 },
+    {
+      "id": "response",
+      "mode": "response",
+      "calls": 1,
+      "toolsPerTurn": 0,
+      "modelCallAuthority": 64
+    },
+    {
+      "id": "deadline",
+      "mode": "deadline",
+      "calls": 1,
+      "toolsPerTurn": 0,
+      "modelCallAuthority": 64
+    },
+    { "id": "role", "mode": "role", "calls": 0, "toolsPerTurn": 0, "modelCallAuthority": 64 },
+    {
+      "id": "association",
+      "mode": "association",
+      "calls": 0,
+      "toolsPerTurn": 0,
+      "modelCallAuthority": 64
+    },
+    { "id": "policy", "mode": "policy", "calls": 0, "toolsPerTurn": 0, "modelCallAuthority": 64 },
+    { "id": "scope", "mode": "scope", "calls": 0, "toolsPerTurn": 0, "modelCallAuthority": 64 },
+    { "id": "reset", "mode": "reset", "calls": 2, "toolsPerTurn": 1, "modelCallAuthority": 64 },
+    {
+      "id": "reset_restore",
+      "mode": "success",
+      "calls": 1,
+      "toolsPerTurn": 0,
+      "modelCallAuthority": 64
+    },
+    {
+      "id": "configured128",
+      "mode": "success",
+      "calls": 128,
+      "toolsPerTurn": 3,
+      "modelCallAuthority": 128
+    },
+    {
+      "id": "configured_restore",
+      "mode": "success",
+      "calls": 1,
+      "toolsPerTurn": 0,
+      "modelCallAuthority": 128
+    }
+  ]
+}
