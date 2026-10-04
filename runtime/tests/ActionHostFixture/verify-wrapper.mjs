@@ -232,7 +232,7 @@ try {
         assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
         assert.deepEqual(outputs, wrapper.projectCompletionOutputs(completion));
         assert.equal(summaries.length, 1);
-        assert.ok(summaries[0].includes(`Status: ${scenario.status}.`));
+        assert.ok(summaries[0].includes(`| Status | ${scenario.status} |`));
         assert.deepEqual(errors, [completion.annotations[0].message]);
       }
       const presentation = JSON.stringify({ outputs, summaries, errors, receipts });
