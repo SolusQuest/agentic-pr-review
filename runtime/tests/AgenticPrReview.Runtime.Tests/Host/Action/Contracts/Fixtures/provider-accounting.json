@@ -1,0 +1,3547 @@
+[
+  {
+    "name": "complete_success",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "retry_success",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "2",
+        "provider_retries": "1",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "10",
+        "input_cache_hit_tokens": "4",
+        "input_cache_miss_tokens": "6",
+        "output_tokens": "2",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "two_retries",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "3",
+        "provider_retries": "2",
+        "provider_failed_attempts": "2",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "15",
+        "input_cache_hit_tokens": "6",
+        "input_cache_miss_tokens": "9",
+        "output_tokens": "3",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "two_calls_three_retries",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "2",
+        "provider_attempts": "5",
+        "provider_retries": "3",
+        "provider_failed_attempts": "3",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "25",
+        "input_cache_hit_tokens": "10",
+        "input_cache_miss_tokens": "15",
+        "output_tokens": "5",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "physical_ceiling",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "128",
+        "provider_attempts": "136",
+        "provider_retries": "8",
+        "provider_failed_attempts": "8",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "136",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "136",
+        "output_tokens": "136",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "exact_int64",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "9223372036854775807",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "9223372036854775807",
+        "output_tokens": "9007199254740993",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "overflow_known_sum",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "2",
+        "provider_attempts": "2",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": null,
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unknown_usage_retry",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "2",
+        "provider_retries": "1",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unknown_partition",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "1",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unobserved_dispatch_usage",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unobserved_dispatch_zero_usage",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "incomplete_success_lower_bound",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "final_failure_unknown_usage",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "3",
+        "provider_retries": "2",
+        "provider_failed_attempts": "3",
+        "provider_unknown_usage_attempts": "3",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "provider_failure"
+    }
+  },
+  {
+    "name": "cancelled_unreconciled",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "cancelled"
+    }
+  },
+  {
+    "name": "model_limit",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "model_limit"
+    }
+  },
+  {
+    "name": "complete_observed_no_send",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "invalid_result"
+    }
+  },
+  {
+    "name": "missing_finalizer",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "pre_provider",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "0",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "not_started"
+    }
+  },
+  {
+    "name": "recovery_only",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "0",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "not_started"
+    }
+  },
+  {
+    "name": "skipped",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "skipped_draft",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_accessed"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "0",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "not_started"
+    }
+  },
+  {
+    "name": "missing_model_calls",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_provider_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_provider_retries",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_provider_failed_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_provider_unknown_usage_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_provider_unknown_cache_partition_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_input_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_input_cache_hit_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_input_cache_miss_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_output_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_attempt_accounting_completeness",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_usage_completeness",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_''",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'00'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "00",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'01'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "01",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'-1'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "-1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'+1'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "+1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'1.0'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1.0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'1e0'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1e0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_' 1'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": " 1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'1 '",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1 ",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'9223372036854775808'",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "9223372036854775808",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_'999999999999999999999999",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_1",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": 1,
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_1.0",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": 1.0,
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_True",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": true,
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_{}",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": {},
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "noncanonical_[]",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": [],
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_model_calls_129",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "129",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_provider_attempts_137",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "137",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_provider_retries_9",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "9",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_provider_retries_1",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "1",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_provider_failed_attempts_2",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "2",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_provider_unknown_usage_attempts_2",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "2",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_provider_unknown_cache_partition_attempts_2",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "2",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_input_cache_hit_tokens_6",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "6",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_input_cache_miss_tokens_4",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "4",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_usage_completeness_partial",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_attempt_accounting_completeness_partial",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "contradiction_usage_completeness_UNAVAILABLE",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "UNAVAILABLE"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "retry_without_initial",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "1",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "provider_failure"
+    }
+  },
+  {
+    "name": "three_retries_one_initial",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "2",
+        "provider_attempts": "4",
+        "provider_retries": "3",
+        "provider_failed_attempts": "3",
+        "provider_unknown_usage_attempts": "4",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "provider_failure"
+    }
+  },
+  {
+    "name": "mixed_null_model_calls",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "0",
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "mixed_null_provider_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": "0",
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "mixed_null_provider_retries",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": "0",
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "mixed_null_provider_failed_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "mixed_null_provider_unknown_usage_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "mixed_null_provider_unknown_cache_partition_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_finalizer_sum_input_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": "0",
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_positive_input_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_null_input_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": null,
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_finalizer_sum_input_cache_hit_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_positive_input_cache_hit_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "1",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_null_input_cache_hit_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_finalizer_sum_input_cache_miss_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": "0",
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_positive_input_cache_miss_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "1",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_null_input_cache_miss_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": null,
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "missing_finalizer_sum_output_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_positive_output_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_usage_null_output_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": null,
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_attempt_counter_provider_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_attempt_counter_provider_retries",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "1",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_attempt_counter_provider_failed_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_attempt_counter_provider_unknown_usage_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "1",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "unavailable_attempt_counter_provider_unknown_cache_partition_attempts",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "1",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "zero_calls_partial",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "0",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "0",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "0",
+        "output_tokens": "0",
+        "attempt_accounting_completeness": "partial",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "not_started"
+    }
+  },
+  {
+    "name": "complete_no_send_positive_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "0",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "1",
+        "input_cache_hit_tokens": "0",
+        "input_cache_miss_tokens": "1",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "invalid_result"
+    }
+  },
+  {
+    "name": "complete_all_failed_success",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "later_host_failure_cannot_relabel_failed_review",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "1",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "not_started_nonzero",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "not_started"
+    }
+  },
+  {
+    "name": "skip_unavailable",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "skipped_draft",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_accessed"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": null,
+        "provider_attempts": null,
+        "provider_retries": null,
+        "provider_failed_attempts": null,
+        "provider_unknown_usage_attempts": null,
+        "provider_unknown_cache_partition_attempts": null,
+        "input_tokens": null,
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": null,
+        "output_tokens": null,
+        "attempt_accounting_completeness": "unavailable",
+        "usage_completeness": "unavailable"
+      },
+      "termination_reason": "not_started"
+    }
+  },
+  {
+    "name": "review_with_limit_reason",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "model_limit"
+    }
+  },
+  {
+    "name": "arbitrary_reason_canary",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "SESSION_CREDENTIAL_RAW_RESPONSE_CANARY"
+    }
+  },
+  {
+    "name": "unknown_private_member",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete",
+        "raw_response": "PRIVATE_CANARY"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "reason_provider_failure",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "provider_failure"
+    }
+  },
+  {
+    "name": "reason_cancelled",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "cancelled"
+    }
+  },
+  {
+    "name": "reason_deadline_exceeded",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "deadline_exceeded"
+    }
+  },
+  {
+    "name": "reason_model_limit",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "model_limit"
+    }
+  },
+  {
+    "name": "reason_tool_limit",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "tool_limit"
+    }
+  },
+  {
+    "name": "reason_token_limit",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "token_limit"
+    }
+  },
+  {
+    "name": "reason_request_limit",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "request_limit"
+    }
+  },
+  {
+    "name": "reason_response_limit",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "response_limit"
+    }
+  },
+  {
+    "name": "reason_context_limit",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "context_limit"
+    }
+  },
+  {
+    "name": "reason_invalid_result",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "invalid_result"
+    }
+  },
+  {
+    "name": "reason_host_failure",
+    "valid": true,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "provider_failed",
+      "exit_class": "provider",
+      "process_exit_code": 1,
+      "summary": {
+        "reviewed_sha": null,
+        "publication_url": null,
+        "finding_count": null,
+        "state_disposition": "not_committed"
+      },
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "0",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "2",
+        "input_cache_miss_tokens": "3",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "complete"
+      },
+      "termination_reason": "host_failure"
+    }
+  },
+  {
+    "name": "partial_partition_exceeds_input_input_cache_hit_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "1",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": "6",
+        "input_cache_miss_tokens": null,
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  },
+  {
+    "name": "partial_partition_exceeds_input_input_cache_miss_tokens",
+    "valid": false,
+    "document": {
+      "build_discriminator": "r4-h1",
+      "status": "reviewed",
+      "exit_class": "success",
+      "process_exit_code": 0,
+      "summary": {
+        "reviewed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publication_url": "https://github.com/o/r/pull/1",
+        "finding_count": 0,
+        "state_disposition": "accepted"
+      },
+      "annotations": [],
+      "accounting": {
+        "model_calls": "1",
+        "provider_attempts": "1",
+        "provider_retries": "0",
+        "provider_failed_attempts": "0",
+        "provider_unknown_usage_attempts": "0",
+        "provider_unknown_cache_partition_attempts": "1",
+        "input_tokens": "5",
+        "input_cache_hit_tokens": null,
+        "input_cache_miss_tokens": "6",
+        "output_tokens": "1",
+        "attempt_accounting_completeness": "complete",
+        "usage_completeness": "partial"
+      },
+      "termination_reason": "review_completed"
+    }
+  }
+]

@@ -121,7 +121,7 @@ internal sealed class ActionHostDeepSeekProviderRunnerFactory :
                     AgentFailureCodes.ResponseInvalid,
                     0,
                     0,
-                    []));
+                    []) with { Accounting = ProviderAccounting.Aggregate([]) });
             }
 
             var client = DeepSeekChatBackend.CreateClient(adapter, transport);
@@ -134,6 +134,39 @@ internal sealed class ActionHostDeepSeekProviderRunnerFactory :
 
         public void Dispose() => transport.Dispose();
     }
+}
+
+// Per invocation, shared with composition. Never retained on a reusable coordinator.
+internal sealed class ActionHostAccountingCapture
+{
+    private ActionHostAccounting accounting = ActionHostAccounting.NoProvider;
+    private ActionHostTerminationReason reason = ActionHostTerminationReason.NotStarted;
+
+    internal void BeginProvider()
+    {
+        accounting = ActionHostAccounting.Unavailable;
+        reason = ActionHostTerminationReason.ProviderFailure;
+    }
+
+    internal void Complete(AgentRunOutcome outcome)
+    {
+        accounting = ActionHostAccounting.FromProvider(outcome.Accounting);
+        reason = outcome.Succeeded ? ActionHostTerminationReason.ReviewCompleted : outcome.Diagnostic?.Code switch
+        {
+            AgentFailureCodes.Cancelled => ActionHostTerminationReason.Cancelled,
+            AgentFailureCodes.DeadlineExceeded => ActionHostTerminationReason.DeadlineExceeded,
+            AgentFailureCodes.ChatFailed => ActionHostTerminationReason.ProviderFailure,
+            AgentFailureCodes.ModelLimit => ActionHostTerminationReason.ModelLimit,
+            AgentFailureCodes.ToolLimit => ActionHostTerminationReason.ToolLimit,
+            AgentFailureCodes.TokenLimit => ActionHostTerminationReason.TokenLimit,
+            AgentFailureCodes.RequestTooLarge => ActionHostTerminationReason.RequestLimit,
+            AgentFailureCodes.ResponseTooLarge => ActionHostTerminationReason.ResponseLimit,
+            AgentFailureCodes.ContextLimit => ActionHostTerminationReason.ContextLimit,
+            _ => ActionHostTerminationReason.InvalidResult,
+        };
+    }
+
+    internal ActionHostCompletion Apply(ActionHostCompletion completion) => completion.WithAccounting(accounting, reason);
 }
 
 internal enum ActionHostInlineHookResult
@@ -192,7 +225,23 @@ internal sealed class ActionHostCoordinator
         BoundedReviewedSnapshotLease snapshot,
         AuthorizedAcceptedStateRestoreContext state,
         R4PublicationScopeV1 scope,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ActionHostAccountingCapture? accountingCapture = null)
+    {
+        var capture = accountingCapture ?? new ActionHostAccountingCapture();
+        return capture.Apply(await RunCoreAsync(launch, invocation, policy, snapshot, state, scope,
+            cancellationToken, capture).ConfigureAwait(false));
+    }
+
+    private async Task<ActionHostCompletion> RunCoreAsync(
+        ActionHostLaunchContract launch,
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        ActionHostTrustedPolicy policy,
+        BoundedReviewedSnapshotLease snapshot,
+        AuthorizedAcceptedStateRestoreContext state,
+        R4PublicationScopeV1 scope,
+        CancellationToken cancellationToken,
+        ActionHostAccountingCapture capture)
     {
         ArgumentNullException.ThrowIfNull(launch);
         ArgumentNullException.ThrowIfNull(invocation);
@@ -296,10 +345,12 @@ internal sealed class ActionHostCoordinator
                                    snapshot.Snapshot,
                                    timeProvider))
                         {
+                            capture.BeginProvider();
                             outcome = await runner.RunAsync(
                                     run with { RemainingHostTime = journal.RemainingReviewTime },
                                     journal.ProviderCancellationToken)
                                 .ConfigureAwait(false);
+                            capture.Complete(outcome);
                         }
                     }
                     catch (Exception exception) when (IsNonFatal(exception))

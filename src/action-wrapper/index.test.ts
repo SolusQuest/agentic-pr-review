@@ -1,3 +1,4 @@
+import { unavailableAccounting } from './presentation/accounting-fixtures.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -54,6 +55,95 @@ afterEach(async () => {
 });
 
 describe('W1 production composition', () => {
+  it.each([
+    'retry_success',
+    'final_failure_unknown_usage',
+    'unknown_partition',
+    'model_limit',
+    'cancelled_unreconciled',
+    'missing_finalizer',
+    'recovery_only',
+    'skipped',
+  ])('presents actual strict Host accounting at the entrypoint: %s', async (name) => {
+    const cases = JSON.parse(
+      await readFile(
+        'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/provider-accounting.json',
+        'utf8',
+      ),
+    ) as {
+      name: string;
+      document: {
+        process_exit_code: number;
+        termination_reason: string;
+        accounting: { provider_failed_attempts: string | null };
+      };
+    }[];
+    const document = cases.find((item) => item.name === name)!.document;
+    const fixture = await wrapperFixture();
+    const presentation = recordingToolkit({ 'github-token': 'github-canary' });
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async () => ({
+        endpoint: '/tmp/apr-h2/bridge.sock',
+        stagingRoot: '/tmp/apr-h2/staging',
+        tempRoot: '/tmp/apr-h2',
+        stopAndDrain: async () => undefined,
+        cleanup: async () => undefined,
+      }),
+      createArtifactExecutor: async () => ({ execute: async () => ({ status: 'ok' }) as never }),
+      hostProcessRunner: async () => ({
+        completionBytes: Buffer.from(JSON.stringify(document)),
+        exitCode: document.process_exit_code,
+        trustedProofBudgetReceiptLines: [],
+      }),
+      fatalExit: () => {
+        throw new Error('unexpected fatal');
+      },
+    });
+    expect(exit).toBe(document.process_exit_code);
+    expect(presentation.summaries).toHaveLength(1);
+    expect(presentation.summaries[0]).toContain(
+      `| Review termination | ${document.termination_reason} |`,
+    );
+    expect(presentation.summaries[0]).toContain(
+      `| Failed provider attempts | ${document.accounting.provider_failed_attempts ?? 'Not available'} |`,
+    );
+    expect(presentation.summaries[0]).not.toContain('github-canary');
+  });
+
+  it('presents unavailable facts on input toolkit failure without forwarding its exception', async () => {
+    const fixture = await wrapperFixture();
+    const presentation = recordingToolkit({});
+    presentation.toolkit.getInput = () => {
+      throw new Error('PRIVATE_INPUT_CANARY');
+    };
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async () => {
+        throw new Error('must not start');
+      },
+      createArtifactExecutor: async () => {
+        throw new Error('must not start');
+      },
+      hostProcessRunner: async () => {
+        throw new Error('must not start');
+      },
+      fatalExit: () => undefined,
+    });
+    expect(exit).toBe(1);
+    expect(presentation.summaries).toHaveLength(1);
+    expect(presentation.summaries[0]).toContain('completeness: unavailable');
+    expect(presentation.summaries[0]).not.toMatch(/CANARY|accepted|Provider attempts: 0/);
+  });
+
   it('reads only the exact Actions facts and preserves the complete H2 workflow ref', () => {
     vi.stubEnv('GITHUB_EVENT_PATH', '/runner/event.json');
     vi.stubEnv('GITHUB_REPOSITORY', 'SolusQuest/agentic-pr-review');
@@ -755,6 +845,8 @@ function validCompletion(buildDiscriminator = 'r4-h1'): Buffer {
       status: 'reviewed',
       exit_class: 'success',
       process_exit_code: 0,
+      accounting: unavailableAccounting,
+      termination_reason: 'review_completed',
       summary: {
         reviewed_sha: 'c'.repeat(40),
         publication_url: 'https://github.com/SolusQuest/agentic-pr-review/pull/163',

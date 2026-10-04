@@ -128,7 +128,10 @@ export async function runPrivateActionWrapperWithSeams(
       return undefined;
     }
   })();
-  if (!inputs) return 1;
+  if (!inputs) {
+    await presentFixedWrapperFailure(seams.toolkit);
+    return 1;
+  }
   if (seams.platform !== 'linux') {
     await presentFixedWrapperFailure(seams.toolkit);
     return 1;

@@ -1,4 +1,6 @@
 using System.Text;
+using System.Globalization;
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -54,13 +56,30 @@ internal sealed record ActionHostAnnotationDocument(
     string Message);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed record ActionHostAccountingDocument(
+    [property: JsonRequired] string? ModelCalls,
+    [property: JsonRequired] string? ProviderAttempts,
+    [property: JsonRequired] string? ProviderRetries,
+    [property: JsonRequired] string? ProviderFailedAttempts,
+    [property: JsonRequired] string? ProviderUnknownUsageAttempts,
+    [property: JsonRequired] string? ProviderUnknownCachePartitionAttempts,
+    [property: JsonRequired] string? InputTokens,
+    [property: JsonRequired] string? InputCacheHitTokens,
+    [property: JsonRequired] string? InputCacheMissTokens,
+    [property: JsonRequired] string? OutputTokens,
+    [property: JsonRequired] string AttemptAccountingCompleteness,
+    [property: JsonRequired] string UsageCompleteness);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record ActionHostCompletionDocument(
     string BuildDiscriminator,
     string Status,
     string ExitClass,
     int? ProcessExitCode,
     ActionHostStepSummaryDocument Summary,
-    ActionHostAnnotationDocument[] Annotations);
+    ActionHostAnnotationDocument[] Annotations,
+    [property: JsonRequired] ActionHostAccountingDocument Accounting,
+    [property: JsonRequired] string TerminationReason);
 
 [JsonSerializable(typeof(ActionHostLaunchDocument))]
 [JsonSerializable(typeof(ActionHostCompletionDocument))]
@@ -201,7 +220,9 @@ internal static class ActionHostJsonCodec
                 completion.Summary.FindingCount,
                 StateDispositionString(
                     completion.Summary.StateDisposition)),
-            annotations);
+            annotations,
+            AccountingDocument(completion.Accounting),
+            TerminationString(completion.TerminationReason));
         return TryWrite(
             document,
             ActionHostJsonContext.Default.ActionHostCompletionDocument,
@@ -223,6 +244,8 @@ internal static class ActionHostJsonCodec
                 out ActionHostCompletionDocument? document) ||
             document?.Summary is null ||
             document.Annotations is null ||
+            !TryReadAccounting(document.Accounting, out var accounting) ||
+            !TryParseTermination(document.TerminationReason, out var termination) ||
             !TryParseStatus(document.Status, out var status) ||
             !TryParseExitClass(document.ExitClass, out var wireExitClass) ||
             !TryParseStateDisposition(
@@ -241,7 +264,9 @@ internal static class ActionHostJsonCodec
                 status,
                 summary,
                 annotations,
-                out completion) ||
+                out completion,
+                accounting,
+                termination) ||
             completion!.ExitClass != wireExitClass ||
             completion.ProcessExitCode != wireProcessExitCode)
         {
@@ -321,6 +346,102 @@ internal static class ActionHostJsonCodec
                 out ActionHostPrivateCommandResultEnvelope<
                     ActionHostNoPrivateCommandResultDocument>? document) &&
             document is { Payload: null };
+    }
+
+    private static string? Decimal(long? value) => value?.ToString(CultureInfo.InvariantCulture);
+
+    private static ActionHostAccountingDocument AccountingDocument(ActionHostAccounting value) => new(
+        Decimal(value.ModelCalls), Decimal(value.ProviderAttempts), Decimal(value.ProviderRetries),
+        Decimal(value.ProviderFailedAttempts), Decimal(value.UnknownUsageAttempts),
+        Decimal(value.UnknownCachePartitionAttempts), Decimal(value.InputTokens), Decimal(value.CacheHitTokens),
+        Decimal(value.CacheMissTokens), Decimal(value.OutputTokens),
+        CompletenessString(value.AttemptCompleteness), CompletenessString(value.UsageCompleteness));
+
+    private static string CompletenessString(AccountingCompleteness value) => value switch
+    {
+        AccountingCompleteness.Complete => "complete",
+        AccountingCompleteness.Partial => "partial",
+        AccountingCompleteness.Unavailable => "unavailable",
+        _ => throw new InvalidOperationException("Invalid accounting completeness."),
+    };
+
+    private static bool TryParseCompleteness(string? value, out AccountingCompleteness result)
+    {
+        result = value switch
+        {
+            "complete" => AccountingCompleteness.Complete,
+            "partial" => AccountingCompleteness.Partial,
+            "unavailable" => AccountingCompleteness.Unavailable,
+            _ => (AccountingCompleteness)(-1),
+        };
+        return Enum.IsDefined(result);
+    }
+
+    private static bool TryDecimal(string? text, out long? result)
+    {
+        result = null;
+        if (text is null) return true;
+        if (text.Length is < 1 or > 19 || (text.Length > 1 && text[0] == '0') ||
+            text.Any(character => character is < '0' or > '9') ||
+            !long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var value)) return false;
+        result = value;
+        return true;
+    }
+
+    private static bool TryReadAccounting(ActionHostAccountingDocument? value, out ActionHostAccounting? result)
+    {
+        result = null;
+        return value is not null &&
+            TryDecimal(value.ModelCalls, out var calls) && TryDecimal(value.ProviderAttempts, out var sends) &&
+            TryDecimal(value.ProviderRetries, out var retries) && TryDecimal(value.ProviderFailedAttempts, out var failed) &&
+            TryDecimal(value.ProviderUnknownUsageAttempts, out var unknownUsage) &&
+            TryDecimal(value.ProviderUnknownCachePartitionAttempts, out var unknownCache) &&
+            TryDecimal(value.InputTokens, out var input) && TryDecimal(value.InputCacheHitTokens, out var hit) &&
+            TryDecimal(value.InputCacheMissTokens, out var miss) && TryDecimal(value.OutputTokens, out var output) &&
+            TryParseCompleteness(value.AttemptAccountingCompleteness, out var attempts) &&
+            TryParseCompleteness(value.UsageCompleteness, out var usage) &&
+            ActionHostAccounting.TryCreate(calls, sends, retries, failed, unknownUsage, unknownCache,
+                input, hit, miss, output, attempts, usage, out result);
+    }
+
+    private static string TerminationString(ActionHostTerminationReason value) => value switch
+    {
+        ActionHostTerminationReason.ReviewCompleted => "review_completed",
+        ActionHostTerminationReason.NotStarted => "not_started",
+        ActionHostTerminationReason.ProviderFailure => "provider_failure",
+        ActionHostTerminationReason.Cancelled => "cancelled",
+        ActionHostTerminationReason.DeadlineExceeded => "deadline_exceeded",
+        ActionHostTerminationReason.ModelLimit => "model_limit",
+        ActionHostTerminationReason.ToolLimit => "tool_limit",
+        ActionHostTerminationReason.TokenLimit => "token_limit",
+        ActionHostTerminationReason.RequestLimit => "request_limit",
+        ActionHostTerminationReason.ResponseLimit => "response_limit",
+        ActionHostTerminationReason.ContextLimit => "context_limit",
+        ActionHostTerminationReason.InvalidResult => "invalid_result",
+        ActionHostTerminationReason.HostFailure => "host_failure",
+        _ => throw new InvalidOperationException("Invalid termination reason."),
+    };
+
+    private static bool TryParseTermination(string? value, out ActionHostTerminationReason result)
+    {
+        result = value switch
+        {
+            "review_completed" => ActionHostTerminationReason.ReviewCompleted,
+            "not_started" => ActionHostTerminationReason.NotStarted,
+            "provider_failure" => ActionHostTerminationReason.ProviderFailure,
+            "cancelled" => ActionHostTerminationReason.Cancelled,
+            "deadline_exceeded" => ActionHostTerminationReason.DeadlineExceeded,
+            "model_limit" => ActionHostTerminationReason.ModelLimit,
+            "tool_limit" => ActionHostTerminationReason.ToolLimit,
+            "token_limit" => ActionHostTerminationReason.TokenLimit,
+            "request_limit" => ActionHostTerminationReason.RequestLimit,
+            "response_limit" => ActionHostTerminationReason.ResponseLimit,
+            "context_limit" => ActionHostTerminationReason.ContextLimit,
+            "invalid_result" => ActionHostTerminationReason.InvalidResult,
+            "host_failure" => ActionHostTerminationReason.HostFailure,
+            _ => 0,
+        };
+        return result != 0;
     }
 
     private static ActionHostInputsDocument InputsDocument(
