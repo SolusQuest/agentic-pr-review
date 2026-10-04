@@ -1,3 +1,9 @@
+import {
+  validateAccounting,
+  validateTermination,
+  type ActionHostAccountingDocument,
+  type ActionHostTerminationReason,
+} from './accounting.js';
 import { H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES } from '../launcher/contracts.js';
 import { parseStrictJson } from '../launcher/strict-json.js';
 import {
@@ -16,6 +22,8 @@ const ROOT_KEYS = Object.freeze([
   'process_exit_code',
   'summary',
   'annotations',
+  'accounting',
+  'termination_reason',
 ]);
 const SUMMARY_KEYS = Object.freeze([
   'reviewed_sha',
@@ -58,6 +66,8 @@ export interface ActionHostCompletionDocument {
     readonly state_disposition: ActionHostStateDisposition;
   };
   readonly annotations: readonly ActionHostAnnotationDocument[];
+  readonly accounting: ActionHostAccountingDocument;
+  readonly termination_reason: ActionHostTerminationReason;
 }
 
 interface StatusRule {
@@ -195,6 +205,8 @@ export function parseCompletionDocument(
   ) {
     fail('wrapper_completion_invalid');
   }
+  const accounting = validateAccounting(root.accounting);
+  const termination = validateTermination(root.termination_reason, accounting, rule.summaryKind);
   const parsedSummary = validateSummary(summary, rule.summaryKind);
   const annotations = validateAnnotations(root.annotations, rule.annotation);
   return {
@@ -204,6 +216,8 @@ export function parseCompletionDocument(
     process_exit_code: rule.processExitCode,
     summary: parsedSummary,
     annotations,
+    accounting,
+    termination_reason: termination,
   };
 }
 
@@ -219,6 +233,28 @@ export function renderStepSummary(completion: ActionHostCompletionDocument): str
         : String(completion.summary.finding_count),
     ],
     ['State disposition', completion.summary.state_disposition],
+    ['Review termination', completion.termination_reason],
+    ['Attempt accounting completeness', completion.accounting.attempt_accounting_completeness],
+    ['Usage completeness', completion.accounting.usage_completeness],
+    ['Model calls', completion.accounting.model_calls ?? 'Not available'],
+    ['Provider attempts', completion.accounting.provider_attempts ?? 'Not available'],
+    ['Provider retries', completion.accounting.provider_retries ?? 'Not available'],
+    ['Failed provider attempts', completion.accounting.provider_failed_attempts ?? 'Not available'],
+    [
+      'Attempts with unknown usage',
+      completion.accounting.provider_unknown_usage_attempts ?? 'Not available',
+    ],
+    [
+      'Attempts with unknown cache partition',
+      completion.accounting.provider_unknown_cache_partition_attempts ?? 'Not available',
+    ],
+    ['Known input token sum', completion.accounting.input_tokens ?? 'Not available'],
+    ['Known cache hit token sum', completion.accounting.input_cache_hit_tokens ?? 'Not available'],
+    [
+      'Known cache miss token sum',
+      completion.accounting.input_cache_miss_tokens ?? 'Not available',
+    ],
+    ['Known output token sum', completion.accounting.output_tokens ?? 'Not available'],
   ];
   const summary = [
     '## Agentic PR Review',
@@ -226,6 +262,8 @@ export function renderStepSummary(completion: ActionHostCompletionDocument): str
     '| Field | Value |',
     '| --- | --- |',
     ...rows.map(([label, value]) => `| ${label} | ${escapeMarkdown(value)} |`),
+    '',
+    'Incomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.',
     '',
   ].join('\n');
   if (utf8Length(summary) > 8 * 1024 || summary.includes('::')) {

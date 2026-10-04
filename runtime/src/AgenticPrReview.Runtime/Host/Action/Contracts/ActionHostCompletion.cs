@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AgenticPrReview.Runtime.Agent.Core;
 
 namespace AgenticPrReview.Runtime.ActionHost.Contracts;
 
@@ -221,6 +222,97 @@ internal sealed class ActionHostStepSummary
     }
 }
 
+// Safe presentation facts only; the R2 aggregate remains the sole counter.
+internal sealed class ActionHostAccounting
+{
+    private ActionHostAccounting(long?[] counts, long?[] tokens,
+        AccountingCompleteness attempts, AccountingCompleteness usage)
+    {
+        ModelCalls = counts[0]; ProviderAttempts = counts[1]; ProviderRetries = counts[2];
+        ProviderFailedAttempts = counts[3]; UnknownUsageAttempts = counts[4];
+        UnknownCachePartitionAttempts = counts[5]; InputTokens = tokens[0];
+        CacheHitTokens = tokens[1]; CacheMissTokens = tokens[2]; OutputTokens = tokens[3];
+        AttemptCompleteness = attempts; UsageCompleteness = usage;
+    }
+
+    internal long? ModelCalls { get; }
+    internal long? ProviderAttempts { get; }
+    internal long? ProviderRetries { get; }
+    internal long? ProviderFailedAttempts { get; }
+    internal long? UnknownUsageAttempts { get; }
+    internal long? UnknownCachePartitionAttempts { get; }
+    internal long? InputTokens { get; }
+    internal long? CacheHitTokens { get; }
+    internal long? CacheMissTokens { get; }
+    internal long? OutputTokens { get; }
+    internal AccountingCompleteness AttemptCompleteness { get; }
+    internal AccountingCompleteness UsageCompleteness { get; }
+    internal bool IsCompleteZero => ModelCalls == 0 && ProviderAttempts == 0 &&
+        ProviderRetries == 0 && ProviderFailedAttempts == 0 && UnknownUsageAttempts == 0 &&
+        UnknownCachePartitionAttempts == 0 && InputTokens == 0 && CacheHitTokens == 0 &&
+        CacheMissTokens == 0 && OutputTokens == 0 &&
+        AttemptCompleteness == AccountingCompleteness.Complete &&
+        UsageCompleteness == AccountingCompleteness.Complete;
+
+    internal static ActionHostAccounting Unavailable { get; } = new(
+        new long?[6], new long?[4], AccountingCompleteness.Unavailable, AccountingCompleteness.Unavailable);
+    internal static ActionHostAccounting NoProvider { get; } = FromProvider(ProviderAccounting.Aggregate([]));
+
+    internal static ActionHostAccounting FromProvider(ProviderAccounting? value)
+    {
+        if (value is null) return Unavailable;
+        if (!TryCreate(value.ModelCalls, value.ProviderAttempts, value.ProviderRetries,
+                value.ProviderFailedAttempts, value.UnknownUsageAttempts, value.UnknownCachePartitionAttempts,
+                value.InputTokens, value.CacheHitTokens, value.CacheMissTokens, value.OutputTokens,
+                value.AttemptCompleteness, value.UsageCompleteness, out var result))
+            throw new InvalidOperationException("Invalid provider accounting projection.");
+        return result!;
+    }
+
+    internal static bool TryCreate(long? calls, long? sends, long? retries, long? failed,
+        long? unknownUsage, long? unknownCache, long? input, long? hit, long? miss, long? output,
+        AccountingCompleteness attempts, AccountingCompleteness usage, out ActionHostAccounting? result)
+    {
+        result = null;
+        long?[] counts = [calls, sends, retries, failed, unknownUsage, unknownCache];
+        long?[] tokens = [input, hit, miss, output];
+        if (!Enum.IsDefined(attempts) || !Enum.IsDefined(usage) ||
+            counts.Any(value => value < 0) || tokens.Any(value => value < 0)) return false;
+        if (counts.All(value => value is null))
+        {
+            if (tokens.Any(value => value is not null) || attempts != AccountingCompleteness.Unavailable ||
+                usage != AccountingCompleteness.Unavailable) return false;
+        }
+        else
+        {
+            if (counts.Any(value => value is null) || calls > 128 || sends > 136 || retries > 8 ||
+                retries > failed || failed > sends || unknownUsage > sends || unknownCache > sends ||
+                sends - retries > calls || sends < retries || retries > 2 * (sends - retries)) return false;
+            if (attempts == AccountingCompleteness.Unavailable && counts.Skip(1).Any(value => value != 0)) return false;
+            if (usage == AccountingCompleteness.Unavailable &&
+                (tokens.Any(value => value != 0) || unknownUsage != sends || unknownCache != 0)) return false;
+            var completeUsage = attempts == AccountingCompleteness.Complete && unknownUsage == 0 &&
+                unknownCache == 0 && tokens.All(value => value is not null);
+            if ((usage == AccountingCompleteness.Complete) != completeUsage) return false;
+            if (input is { } i && ((hit is { } h && h > i) || (miss is { } m && m > i) ||
+                (hit.HasValue && miss.HasValue && miss > i - hit))) return false;
+            if (usage == AccountingCompleteness.Complete && miss != input - hit) return false;
+            if (attempts == AccountingCompleteness.Complete && sends == 0 &&
+                (usage != AccountingCompleteness.Complete || tokens.Any(value => value != 0))) return false;
+            if (calls == 0 && (counts.Any(value => value != 0) || tokens.Any(value => value != 0) ||
+                attempts != AccountingCompleteness.Complete || usage != AccountingCompleteness.Complete)) return false;
+        }
+        result = new(counts, tokens, attempts, usage);
+        return true;
+    }
+}
+
+internal enum ActionHostTerminationReason
+{
+    ReviewCompleted = 1, NotStarted, ProviderFailure, Cancelled, DeadlineExceeded,
+    ModelLimit, ToolLimit, TokenLimit, RequestLimit, ResponseLimit, ContextLimit, InvalidResult, HostFailure,
+}
+
 internal sealed class ActionHostCompletion
 {
     private ActionHostCompletion(
@@ -229,7 +321,9 @@ internal sealed class ActionHostCompletion
         ActionHostExitClass exitClass,
         int processExitCode,
         ActionHostStepSummary summary,
-        ImmutableArray<ActionHostAnnotation> annotations)
+        ImmutableArray<ActionHostAnnotation> annotations,
+        ActionHostAccounting accounting,
+        ActionHostTerminationReason terminationReason)
     {
         BuildDiscriminator = buildDiscriminator;
         Status = status;
@@ -237,6 +331,8 @@ internal sealed class ActionHostCompletion
         ProcessExitCode = processExitCode;
         Summary = summary;
         Annotations = annotations;
+        Accounting = accounting;
+        TerminationReason = terminationReason;
     }
 
     internal string BuildDiscriminator { get; }
@@ -251,6 +347,10 @@ internal sealed class ActionHostCompletion
 
     internal ImmutableArray<ActionHostAnnotation> Annotations { get; }
 
+    internal ActionHostAccounting Accounting { get; }
+
+    internal ActionHostTerminationReason TerminationReason { get; }
+
     internal ActionHostPrivacyClass Privacy =>
         ActionHostPrivacyClass.WorkflowPresentation;
 
@@ -259,9 +359,24 @@ internal sealed class ActionHostCompletion
         ActionHostStatus status,
         ActionHostStepSummary? summary,
         IReadOnlyList<ActionHostAnnotation>? annotations,
-        out ActionHostCompletion? completion)
+        out ActionHostCompletion? completion,
+        ActionHostAccounting? accounting = null,
+        ActionHostTerminationReason? terminationReason = null)
     {
         completion = null;
+        var skipped = status is ActionHostStatus.SkippedUntrustedEvent or ActionHostStatus.SkippedFork or
+            ActionHostStatus.SkippedDraft or ActionHostStatus.SkippedClosed;
+        var reviewed = status is ActionHostStatus.Reviewed or ActionHostStatus.ReviewedWithInlineWarnings;
+        accounting ??= skipped ? ActionHostAccounting.NoProvider : ActionHostAccounting.Unavailable;
+        var reason = terminationReason ?? (skipped ? ActionHostTerminationReason.NotStarted :
+            reviewed ? ActionHostTerminationReason.ReviewCompleted : ActionHostTerminationReason.HostFailure);
+        if (!Enum.IsDefined(reason) ||
+            (reason == ActionHostTerminationReason.NotStarted && !accounting.IsCompleteZero) ||
+            (skipped && (reason != ActionHostTerminationReason.NotStarted || !accounting.IsCompleteZero)) ||
+            (reviewed && reason is not (ActionHostTerminationReason.ReviewCompleted or ActionHostTerminationReason.NotStarted)) ||
+            (reason == ActionHostTerminationReason.ReviewCompleted &&
+                accounting.AttemptCompleteness == AccountingCompleteness.Complete &&
+                accounting.ProviderAttempts <= accounting.ProviderFailedAttempts)) return false;
         if (!ActionHostContractValidation.IsBuildDiscriminator(
                 buildDiscriminator) ||
             summary is null ||
@@ -284,8 +399,17 @@ internal sealed class ActionHostCompletion
             exitClass,
             processExitCode,
             summary,
-            annotations.ToImmutableArray());
+            annotations.ToImmutableArray(),
+            accounting,
+            reason);
         return true;
+    }
+
+    internal ActionHostCompletion WithAccounting(ActionHostAccounting accounting, ActionHostTerminationReason reason)
+    {
+        if (!TryCreate(BuildDiscriminator, Status, Summary, Annotations, out var result, accounting, reason))
+            throw new InvalidOperationException("Invalid completion accounting.");
+        return result!;
     }
 
     private static bool AnnotationsAreValid(

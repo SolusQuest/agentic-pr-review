@@ -53549,10 +53549,10 @@ var require_light = __commonJS({
       Sync$1 = Sync_1;
       Bottleneck2 = (function() {
         class Bottleneck3 {
-          constructor(options = {}, ...invalid) {
+          constructor(options = {}, ...invalid2) {
             var storeInstanceOptions, storeOptions;
             this._addToQueue = this._addToQueue.bind(this);
-            this._validateOptions(options, invalid);
+            this._validateOptions(options, invalid2);
             parser$5.load(options, this.instanceDefaults, this);
             this._queues = new Queues$1(NUM_PRIORITIES$1);
             this._scheduled = {};
@@ -53582,8 +53582,8 @@ var require_light = __commonJS({
               return (ref = this._store.heartbeat) != null ? typeof ref.unref === "function" ? ref.unref() : void 0 : void 0;
             });
           }
-          _validateOptions(options, invalid) {
-            if (!(options != null && typeof options === "object" && invalid.length === 0)) {
+          _validateOptions(options, invalid2) {
+            if (!(options != null && typeof options === "object" && invalid2.length === 0)) {
               throw new Bottleneck3.prototype.BottleneckError("Bottleneck v2 takes a single object argument. Refer to https://github.com/SGrondin/bottleneck#upgrading-to-v2 if you're upgrading from Bottleneck v1.");
             }
           }
@@ -102025,6 +102025,103 @@ function sameFile(left, right) {
   return left.ino === right.ino && (process.platform === "win32" || left.dev === right.dev);
 }
 
+// src/action-wrapper/presentation/accounting.ts
+var ACCOUNTING_COUNT_KEYS = [
+  "model_calls",
+  "provider_attempts",
+  "provider_retries",
+  "provider_failed_attempts",
+  "provider_unknown_usage_attempts",
+  "provider_unknown_cache_partition_attempts"
+];
+var ACCOUNTING_TOKEN_KEYS = [
+  "input_tokens",
+  "input_cache_hit_tokens",
+  "input_cache_miss_tokens",
+  "output_tokens"
+];
+var TERMINATION_REASONS = [
+  "review_completed",
+  "not_started",
+  "provider_failure",
+  "cancelled",
+  "deadline_exceeded",
+  "model_limit",
+  "tool_limit",
+  "token_limit",
+  "request_limit",
+  "response_limit",
+  "context_limit",
+  "invalid_result",
+  "host_failure"
+];
+function validateAccounting(value) {
+  const record = exactRecord(
+    value,
+    [
+      ...ACCOUNTING_COUNT_KEYS,
+      ...ACCOUNTING_TOKEN_KEYS,
+      "attempt_accounting_completeness",
+      "usage_completeness"
+    ],
+    "wrapper_completion_invalid"
+  );
+  const counts = ACCOUNTING_COUNT_KEYS.map((key) => decimal(record[key]));
+  const tokens = ACCOUNTING_TOKEN_KEYS.map((key) => decimal(record[key]));
+  const attempts = completeness(record.attempt_accounting_completeness);
+  const usage = completeness(record.usage_completeness);
+  if (counts.every((value2) => value2 === null)) {
+    if (tokens.some((value2) => value2 !== null) || attempts !== "unavailable" || usage !== "unavailable")
+      invalid();
+  } else {
+    if (counts.some((value2) => value2 === null)) invalid();
+    const [calls, sends, retries, failed, unknownUsage, unknownCache] = counts;
+    if (calls > 128n || sends > 136n || retries > 8n || retries > failed || failed > sends || unknownUsage > sends || unknownCache > sends || sends - retries > calls || sends < retries || retries > 2n * (sends - retries))
+      invalid();
+    if (attempts === "unavailable" && counts.slice(1).some((value2) => value2 !== 0n)) invalid();
+    if (usage === "unavailable" && (tokens.some((value2) => value2 !== 0n) || unknownUsage !== sends || unknownCache !== 0n))
+      invalid();
+    const completeUsage = attempts === "complete" && unknownUsage === 0n && unknownCache === 0n && tokens.every((value2) => value2 !== null);
+    if (usage === "complete" !== completeUsage) invalid();
+    const [input, hit, miss] = tokens;
+    if (input != null && (hit != null && hit > input || miss != null && miss > input || hit != null && miss != null && miss > input - hit))
+      invalid();
+    if (usage === "complete" && miss !== input - hit) invalid();
+    if (attempts === "complete" && sends === 0n && (usage !== "complete" || tokens.some((value2) => value2 !== 0n)))
+      invalid();
+    if (calls === 0n && (counts.some((value2) => value2 !== 0n) || tokens.some((value2) => value2 !== 0n) || attempts !== "complete" || usage !== "complete"))
+      invalid();
+  }
+  return record;
+}
+function validateTermination(value, accounting, kind) {
+  if (typeof value !== "string" || !TERMINATION_REASONS.includes(value))
+    invalid();
+  if (value === "not_started" && !isCompleteZero(accounting)) invalid();
+  if (kind === "skipped" && (value !== "not_started" || !isCompleteZero(accounting))) invalid();
+  if (kind === "reviewed" && value !== "review_completed" && value !== "not_started") invalid();
+  if (value === "review_completed" && accounting.attempt_accounting_completeness === "complete" && BigInt(accounting.provider_attempts) <= BigInt(accounting.provider_failed_attempts))
+    invalid();
+  return value;
+}
+function isCompleteZero(value) {
+  return value.attempt_accounting_completeness === "complete" && value.usage_completeness === "complete" && [...ACCOUNTING_COUNT_KEYS, ...ACCOUNTING_TOKEN_KEYS].every((key) => value[key] === "0");
+}
+function decimal(value) {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length > 19 || !/^(0|[1-9][0-9]*)$/.test(value)) invalid();
+  const parsed = BigInt(value);
+  if (parsed > 9223372036854775807n) invalid();
+  return parsed;
+}
+function completeness(value) {
+  if (value !== "complete" && value !== "partial" && value !== "unavailable") invalid();
+  return value;
+}
+function invalid() {
+  return fail("wrapper_completion_invalid");
+}
+
 // src/action-wrapper/presentation/completion.ts
 var ROOT_KEYS = Object.freeze([
   "build_discriminator",
@@ -102032,7 +102129,9 @@ var ROOT_KEYS = Object.freeze([
   "exit_class",
   "process_exit_code",
   "summary",
-  "annotations"
+  "annotations",
+  "accounting",
+  "termination_reason"
 ]);
 var SUMMARY_KEYS = Object.freeze([
   "reviewed_sha",
@@ -102154,6 +102253,8 @@ function parseCompletionDocument(bytes, expectedBuildDiscriminator, actualProces
   if (root.exit_class !== rule2.exitClass || root.process_exit_code !== rule2.processExitCode || actualProcessExitCode !== rule2.processExitCode) {
     fail("wrapper_completion_invalid");
   }
+  const accounting = validateAccounting(root.accounting);
+  const termination = validateTermination(root.termination_reason, accounting, rule2.summaryKind);
   const parsedSummary = validateSummary(summary2, rule2.summaryKind);
   const annotations = validateAnnotations(root.annotations, rule2.annotation);
   return {
@@ -102162,7 +102263,9 @@ function parseCompletionDocument(bytes, expectedBuildDiscriminator, actualProces
     exit_class: rule2.exitClass,
     process_exit_code: rule2.processExitCode,
     summary: parsedSummary,
-    annotations
+    annotations,
+    accounting,
+    termination_reason: termination
   };
 }
 function renderStepSummary(completion) {
@@ -102174,7 +102277,29 @@ function renderStepSummary(completion) {
       "Finding count",
       completion.summary.finding_count === null ? "Not available" : String(completion.summary.finding_count)
     ],
-    ["State disposition", completion.summary.state_disposition]
+    ["State disposition", completion.summary.state_disposition],
+    ["Review termination", completion.termination_reason],
+    ["Attempt accounting completeness", completion.accounting.attempt_accounting_completeness],
+    ["Usage completeness", completion.accounting.usage_completeness],
+    ["Model calls", completion.accounting.model_calls ?? "Not available"],
+    ["Provider attempts", completion.accounting.provider_attempts ?? "Not available"],
+    ["Provider retries", completion.accounting.provider_retries ?? "Not available"],
+    ["Failed provider attempts", completion.accounting.provider_failed_attempts ?? "Not available"],
+    [
+      "Attempts with unknown usage",
+      completion.accounting.provider_unknown_usage_attempts ?? "Not available"
+    ],
+    [
+      "Attempts with unknown cache partition",
+      completion.accounting.provider_unknown_cache_partition_attempts ?? "Not available"
+    ],
+    ["Known input token sum", completion.accounting.input_tokens ?? "Not available"],
+    ["Known cache hit token sum", completion.accounting.input_cache_hit_tokens ?? "Not available"],
+    [
+      "Known cache miss token sum",
+      completion.accounting.input_cache_miss_tokens ?? "Not available"
+    ],
+    ["Known output token sum", completion.accounting.output_tokens ?? "Not available"]
   ];
   const summary2 = [
     "## Agentic PR Review",
@@ -102182,6 +102307,8 @@ function renderStepSummary(completion) {
     "| Field | Value |",
     "| --- | --- |",
     ...rows.map(([label, value]) => `| ${label} | ${escapeMarkdown(value)} |`),
+    "",
+    "Incomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.",
     ""
   ].join("\n");
   if (utf8Length(summary2) > 8 * 1024 || summary2.includes("::")) {
@@ -102259,7 +102386,7 @@ async function presentCompletion(toolkit, completion) {
 async function presentFixedWrapperFailure(toolkit) {
   try {
     await toolkit.writeSummary(
-      "## Agentic PR Review\n\nThe private review wrapper failed safely.\n"
+      "## Agentic PR Review\n\nThe private review wrapper failed safely.\n\nStatus: failed. Review termination: host_failure. Attempt accounting completeness: unavailable. Usage completeness: unavailable. Provider counts, token sums and state disposition: Not available.\n"
     );
     toolkit.error("The private review wrapper failed.");
   } catch {
@@ -102304,7 +102431,10 @@ async function runPrivateActionWrapperWithSeams(seams) {
       return void 0;
     }
   })();
-  if (!inputs) return 1;
+  if (!inputs) {
+    await presentFixedWrapperFailure(seams.toolkit);
+    return 1;
+  }
   if (seams.platform !== "linux") {
     await presentFixedWrapperFailure(seams.toolkit);
     return 1;
@@ -102551,4 +102681,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: ddccad9ba44ca690bb05759fff7b22cefb8ee823bd218c26ec99df33d008027a
+// Action source inventory sha256: 0c5bdeec501988ffde8bde98a479fc19bdb888e79123024f14f36f115e18a525

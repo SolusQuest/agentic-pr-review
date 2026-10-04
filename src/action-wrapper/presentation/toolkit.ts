@@ -39,7 +39,7 @@ export async function presentFixedWrapperFailure(
 ): Promise<void> {
   try {
     await toolkit.writeSummary(
-      '## Agentic PR Review\n\nThe private review wrapper failed safely.\n',
+      '## Agentic PR Review\n\nThe private review wrapper failed safely.\n\nStatus: failed. Review termination: host_failure. Attempt accounting completeness: unavailable. Usage completeness: unavailable. Provider counts, token sums and state disposition: Not available.\n',
     );
     toolkit.error('The private review wrapper failed.');
   } catch {

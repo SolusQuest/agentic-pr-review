@@ -1,3 +1,4 @@
+import { unavailableAccounting, zeroAccounting } from './accounting-fixtures.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -165,6 +166,8 @@ function completion(status: ActionHostStatus): ActionHostCompletionDocument {
       status,
       exit_class: 'success',
       process_exit_code: 0,
+      accounting: unavailableAccounting,
+      termination_reason: 'review_completed',
       summary: {
         reviewed_sha: reviewedSha,
         publication_url: 'https://github.com/SolusQuest/agentic-pr-review/pull/163',
@@ -189,6 +192,8 @@ function completion(status: ActionHostStatus): ActionHostCompletionDocument {
       status,
       exit_class: 'success',
       process_exit_code: 0,
+      accounting: zeroAccounting,
+      termination_reason: 'not_started',
       summary: emptySummary('not_accessed'),
       annotations: [],
     };
@@ -199,6 +204,8 @@ function completion(status: ActionHostStatus): ActionHostCompletionDocument {
     status,
     exit_class: exitClass,
     process_exit_code: 1,
+    accounting: unavailableAccounting,
+    termination_reason: 'host_failure',
     summary: emptySummary(status === 'state_conflict' ? 'conflict' : 'not_committed'),
     annotations: [{ code, severity: 'error', message }],
   };
