@@ -554,8 +554,8 @@ internal static partial class FrameworkSupervisor
                 ("delete", ReadInt(root, "official-delete-count")))),
             ("exact_child_environment", cases.All(result =>
                 result.ExactEnvironment)),
-            ("output_file_unchanged", cases.All(result =>
-                result.OutputUnchanged)),
+            ("outputs_match_summary", cases.All(result =>
+                result.OutputsMatchSummary)),
             ("canary_oracle_passed", canaryRoutesPassed),
             ("canary_route_coverage_digest",
                 CanaryRouteCoverageDigest(root)),
@@ -799,7 +799,9 @@ internal static partial class FrameworkSupervisor
         var stateReadClockAdvanced = !spec.TrustedProofPayload ||
             spec.ExpectedStatus is not ("reviewed" or "stale_head") ||
             ReadOptionalText(scenario, "state-read-clock-advanced") == "1\n";
-        var outputUnchanged = output == FrameworkCanaries.OutputSentinel;
+        var outputsMatchSummary = OutputsMatchSummary(output, summary,
+            spec.CrashHost || spec.CrashAfterProviderCheckpoint ||
+            spec.CrashAfterGate is not null || spec.ForceEscalation);
         var groupQuiet = !(spec.CrashHost ||
                 spec.CrashAfterProviderCheckpoint ||
                 spec.CrashAfterGate is not null || spec.ForceEscalation ||
@@ -933,7 +935,7 @@ internal static partial class FrameworkSupervisor
         var artifactRestBudgetSatisfied = trustedProofRequestBudgetSatisfied;
         var passed = exited && expected && barrierAfterPassed && noLeak &&
             closedEnvironment && reorderedHistoryRejected &&
-            stateReadClockAdvanced && outputUnchanged &&
+            stateReadClockAdvanced && outputsMatchSummary &&
             groupQuiet && platformQuiet && continuation &&
             canonicalRequestEvents &&
             successfulContinuation && sixTools && signalGateReached &&
@@ -962,7 +964,7 @@ internal static partial class FrameworkSupervisor
                     ("environment_recorded", closedEnvironment),
                     ("reordered_history_rejected", reorderedHistoryRejected),
                     ("state_read_clock_advanced", stateReadClockAdvanced),
-                    ("output_unchanged", outputUnchanged),
+                    ("outputs_match_summary", outputsMatchSummary),
                     ("process_group_quiet", groupQuiet),
                     ("platform_quiet", platformQuiet),
                     ("canonical_request_events", canonicalRequestEvents),
@@ -1013,7 +1015,7 @@ internal static partial class FrameworkSupervisor
             stickyMutations,
             ReadInt(scenario, "inline-batch-count"),
             closedEnvironment,
-            outputUnchanged,
+            outputsMatchSummary,
             groupQuiet,
             platformQuiet,
             noLeak,
@@ -4382,7 +4384,7 @@ internal static partial class FrameworkSupervisor
             ("StickyMutations", result.StickyMutations),
             ("InlineMutations", result.InlineMutations),
             ("ExactEnvironment", result.ExactEnvironment),
-            ("OutputUnchanged", result.OutputUnchanged),
+            ("OutputsMatchSummary", result.OutputsMatchSummary),
             ("ProcessGroupQuiet", result.ProcessGroupQuiet),
             ("PlatformQuiet", result.PlatformQuiet),
             ("CanarySafe", result.CanarySafe),
@@ -5732,7 +5734,7 @@ internal static partial class FrameworkSupervisor
         int StickyMutations,
         int InlineMutations,
         bool ExactEnvironment,
-        bool OutputUnchanged,
+        bool OutputsMatchSummary,
         bool ProcessGroupQuiet,
         bool PlatformQuiet,
         bool CanarySafe,

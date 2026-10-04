@@ -1,3 +1,12 @@
+import {
+  FIXED_WRAPPER_FAILURE_OUTPUTS,
+  projectCompletionOutputs,
+  type ActionOutputName,
+} from './presentation/outputs.js';
+import {
+  parseCompletionDocument,
+  type ActionHostCompletionDocument,
+} from './presentation/completion.js';
 import { unavailableAccounting } from './presentation/accounting-fixtures.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -64,6 +73,9 @@ describe('W1 production composition', () => {
     'missing_finalizer',
     'recovery_only',
     'skipped',
+    'exact_int64',
+    'overflow_known_sum',
+    'pre_provider',
   ])('presents actual strict Host accounting at the entrypoint: %s', async (name) => {
     const cases = JSON.parse(
       await readFile(
@@ -113,6 +125,15 @@ describe('W1 production composition', () => {
       `| Failed provider attempts | ${document.accounting.provider_failed_attempts ?? 'Not available'} |`,
     );
     expect(presentation.summaries[0]).not.toContain('github-canary');
+    expect(presentation.outputs).toEqual(
+      projectCompletionOutputs(
+        parseCompletionDocument(
+          Buffer.from(JSON.stringify(document)),
+          'r4-h1',
+          document.process_exit_code,
+        ),
+      ),
+    );
   });
 
   it('presents unavailable facts on input toolkit failure without forwarding its exception', async () => {
@@ -142,6 +163,146 @@ describe('W1 production composition', () => {
     expect(presentation.summaries).toHaveLength(1);
     expect(presentation.summaries[0]).toContain('completeness: unavailable');
     expect(presentation.summaries[0]).not.toMatch(/CANARY|accepted|Provider attempts: 0/);
+    expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
+  });
+
+  it.each(['cleanup', 'output-prefix', 'summary', 'warning', 'error'])(
+    'preserves the admitted lifecycle boundary on %s failure',
+    async (sink) => {
+      const fixture = await wrapperFixture();
+      let document = await accountingCompletion(
+        sink === 'error' ? 'final_failure_unknown_usage' : 'retry_success',
+      );
+      if (sink === 'warning') {
+        document = {
+          ...document,
+          status: 'reviewed_with_inline_warnings',
+          annotations: [
+            {
+              code: 'inline_publication_incomplete',
+              severity: 'warning',
+              message: 'Some inline annotations could not be published.',
+            },
+          ],
+        };
+      }
+      const presentation = recordingToolkit({});
+      const expected = projectCompletionOutputs(document);
+      const setter = presentation.toolkit.setOutput;
+      let attempts = 0;
+      if (sink === 'output-prefix')
+        presentation.toolkit.setOutput = (name, value) => {
+          if (++attempts === 4) throw new Error('PRIVATE_OUTPUT_CANARY');
+          setter(name, value);
+        };
+      if (sink === 'summary')
+        presentation.toolkit.writeSummary = async () => {
+          throw new Error('PRIVATE_SUMMARY_CANARY');
+        };
+      if (sink === 'warning')
+        presentation.toolkit.warning = () => {
+          throw new Error('PRIVATE_ANNOTATION_CANARY');
+        };
+      if (sink === 'error')
+        presentation.toolkit.error = () => {
+          throw new Error('PRIVATE_ANNOTATION_CANARY');
+        };
+      const exit = await runPrivateActionWrapperWithSeams({
+        toolkit: presentation.toolkit,
+        preparedPayload: fixture.proof,
+        platform: 'linux',
+        signal: new AbortController().signal,
+        runtimeFacts: () => fixture.facts,
+        bridgeRuntime: async () => ({
+          ...(await fakeBridge({
+            buildDiscriminator: 'r4-h1',
+            executorFactory: async () => ({ execute: async () => ({ status: 'ok' }) as never }),
+          })),
+          cleanup: async () => {
+            if (sink === 'cleanup') throw new Error('PRIVATE_CLEANUP_CANARY');
+          },
+        }),
+        createArtifactExecutor: async () => ({ execute: async () => ({ status: 'ok' }) as never }),
+        hostProcessRunner: async () => ({
+          completionBytes: Buffer.from(JSON.stringify(document)),
+          exitCode: document.process_exit_code,
+          trustedProofBudgetReceiptLines: [],
+        }),
+        fatalExit: () => {
+          throw new Error('unexpected fatal');
+        },
+      });
+      expect(exit).toBe(1);
+      if (sink === 'cleanup') {
+        expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
+        expect(presentation.summaries[0]).toContain('failed safely');
+      } else {
+        expect(presentation.outputs).toEqual(
+          sink === 'output-prefix'
+            ? Object.fromEntries(Object.entries(expected).slice(0, 3))
+            : expected,
+        );
+        expect(presentation.outputCalls).toHaveLength(
+          sink === 'output-prefix' ? 3 : Object.keys(expected).length,
+        );
+        expect(presentation.outputs.status).toBe(document.status);
+        expect(presentation.summaries).toHaveLength(
+          sink === 'summary' || sink === 'output-prefix' ? 0 : 1,
+        );
+      }
+      expect(
+        JSON.stringify(presentation.outputs) +
+          presentation.summaries.join('') +
+          presentation.errors.join(''),
+      ).not.toContain('CANARY');
+    },
+  );
+
+  it('attempts every fixed fallback sink once after actual input failure', async () => {
+    const fixture = await wrapperFixture();
+    const presentation = recordingToolkit({});
+    const attempts: string[] = [];
+    presentation.toolkit.getInput = () => {
+      throw new Error('PRIVATE_INPUT_CANARY');
+    };
+    presentation.toolkit.setOutput = (name) => {
+      attempts.push(name);
+      throw new Error('PRIVATE_SINK_CANARY');
+    };
+    presentation.toolkit.writeSummary = async () => {
+      attempts.push('summary');
+      throw new Error('PRIVATE_SUMMARY_CANARY');
+    };
+    presentation.toolkit.error = (message) => {
+      expect(message).toBe('The private review wrapper failed.');
+      attempts.push('error');
+      throw new Error('PRIVATE_ERROR_CANARY');
+    };
+    expect(
+      await runPrivateActionWrapperWithSeams({
+        toolkit: presentation.toolkit,
+        preparedPayload: fixture.proof,
+        platform: 'linux',
+        signal: new AbortController().signal,
+        runtimeFacts: () => fixture.facts,
+        bridgeRuntime: fakeBridge,
+        createArtifactExecutor: async () => {
+          throw new Error('must stay lazy');
+        },
+        hostProcessRunner: async () => {
+          throw new Error('must not spawn');
+        },
+        fatalExit: () => undefined,
+      }),
+    ).toBe(1);
+    expect(attempts).toEqual([
+      'status',
+      'termination-reason',
+      'attempt-accounting-completeness',
+      'usage-completeness',
+      'summary',
+      'error',
+    ]);
   });
 
   it('reads only the exact Actions facts and preserves the complete H2 workflow ref', () => {
@@ -333,6 +494,7 @@ describe('W1 production composition', () => {
     const fixture = await wrapperFixture('r4-w2');
     const presentation = recordingToolkit({});
     const events = presentation.events;
+    const document = await accountingCompletion('retry_success', 'r4-w2');
     let sinkInvocations = 0;
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
@@ -358,7 +520,7 @@ describe('W1 production composition', () => {
         execute: async () => ({ status: 'ok' }) as never,
       }),
       hostProcessRunner: async () => ({
-        completionBytes: validCompletion('r4-w2'),
+        completionBytes: Buffer.from(JSON.stringify(document)),
         exitCode: 0,
         trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
         trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
@@ -380,6 +542,8 @@ describe('W1 production composition', () => {
       events.indexOf('bridge:cleanup'),
     );
     expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+    expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
+    expect(presentation.summaries[0]).not.toContain('| Provider attempts | 2 |');
   });
 
   it.each([
@@ -472,6 +636,7 @@ describe('W1 production composition', () => {
       events.indexOf('bridge:cleanup'),
     );
     expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+    expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
   });
 
   it('does not enable the protected receipt from ordinary action inputs', async () => {
@@ -548,6 +713,7 @@ describe('W1 production composition', () => {
       expect(bridgeStarted).toBe(false);
       expect(hostStarted).toBe(false);
       expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+      expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
       expect(() =>
         readTrustedProofRequestBudgetProfile(
           'r4-w2',
@@ -603,6 +769,7 @@ describe('W1 production composition', () => {
     expect(exit).toBe(1);
     expect(presentation.summaries.join('')).not.toContain('provider-canary');
     expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+    expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
   });
 
   it('rejects the atomic wrapper/payload build mismatch before bridge or spawn', async () => {
@@ -674,6 +841,7 @@ describe('W1 production composition', () => {
     expect(exit).toBe(1);
     expect(fatal).toBe(1);
     expect(presentation.summaries).toEqual([]);
+    expect(presentation.outputs).toEqual({});
     expect(presentation.errors).toEqual([]);
   });
 
@@ -715,6 +883,7 @@ describe('W1 production composition', () => {
     expect(drained).toBe(1);
     expect(cleaned).toBe(1);
     expect(presentation.summaries).toEqual([]);
+    expect(presentation.outputs).toEqual({});
     expect(presentation.errors).toEqual([]);
     expect(presentation.events).toContain('mask:termination-canary');
   });
@@ -825,8 +994,14 @@ function recordingToolkit(values: Record<string, string>) {
   const events: string[] = [];
   const summaries: string[] = [];
   const errors: string[] = [];
+  const outputs: Partial<Record<ActionOutputName, string>> = {};
+  const outputCalls: [ActionOutputName, string][] = [];
   const toolkit: ActionPresentationToolkit = {
     getInput: (name) => values[name] ?? '',
+    setOutput: (name, value) => {
+      outputs[name] = value;
+      outputCalls.push([name, value]);
+    },
     setSecret: (value) => events.push(`mask:${value}`),
     writeSummary: async (value) => {
       summaries.push(value);
@@ -835,7 +1010,7 @@ function recordingToolkit(values: Record<string, string>) {
     warning: (value) => events.push(`warning:${value}`),
     error: (value) => errors.push(value),
   };
-  return { toolkit, events, summaries, errors };
+  return { toolkit, events, summaries, errors, outputs, outputCalls };
 }
 
 function validCompletion(buildDiscriminator = 'r4-h1'): Buffer {
@@ -890,4 +1065,17 @@ async function waitForFile(filePath: string): Promise<void> {
     }
   }
   throw new Error('fixture_not_ready');
+}
+
+async function accountingCompletion(
+  name: string,
+  build = 'r4-h1',
+): Promise<ActionHostCompletionDocument> {
+  const cases = JSON.parse(
+    await readFile(
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/provider-accounting.json',
+      'utf8',
+    ),
+  ) as { name: string; document: ActionHostCompletionDocument }[];
+  return { ...cases.find((item) => item.name === name)!.document, build_discriminator: build };
 }

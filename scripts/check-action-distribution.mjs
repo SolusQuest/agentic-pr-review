@@ -25,6 +25,22 @@ const exactInputs = Object.freeze({
   'pr-number': { required: false },
   'state-mode': { required: false, default: 'auto' },
 });
+const exactOutputs = Object.freeze([
+  'status',
+  'termination-reason',
+  'model-calls',
+  'provider-attempts',
+  'provider-retries',
+  'provider-failed-attempts',
+  'provider-unknown-usage-attempts',
+  'provider-unknown-cache-partition-attempts',
+  'attempt-accounting-completeness',
+  'usage-completeness',
+  'input-tokens',
+  'input-cache-hit-tokens',
+  'input-cache-miss-tokens',
+  'output-tokens',
+]);
 const exactRuntimeDependencies = Object.freeze({
   '@actions/artifact': '6.2.1',
   '@actions/core': '3.0.1',
@@ -132,7 +148,10 @@ async function inspectMetadata(repoRoot, report) {
     report(actionMetadataRelativePath, 'action-metadata-yaml-invalid');
     return;
   }
-  if (!isRecord(metadata) || !sameKeys(metadata, ['name', 'description', 'inputs', 'runs'])) {
+  if (
+    !isRecord(metadata) ||
+    !sameKeys(metadata, ['name', 'description', 'inputs', 'outputs', 'runs'])
+  ) {
     report(actionMetadataRelativePath, 'action-metadata-shape-invalid');
     return;
   }
@@ -152,6 +171,20 @@ async function inspectMetadata(repoRoot, report) {
         Object.entries(expected).some(([key, value]) => actual[key] !== value)
       ) {
         report(actionMetadataRelativePath, `action-input-${name}-invalid`);
+      }
+    }
+  }
+  if (!isRecord(metadata.outputs) || !sameKeys(metadata.outputs, exactOutputs)) {
+    report(actionMetadataRelativePath, 'action-output-set-invalid');
+  } else {
+    for (const name of exactOutputs) {
+      const actual = metadata.outputs[name];
+      if (
+        !isRecord(actual) ||
+        !sameKeys(actual, ['description']) ||
+        !boundedDescription(actual.description, 384)
+      ) {
+        report(actionMetadataRelativePath, `action-output-${name}-invalid`);
       }
     }
   }
