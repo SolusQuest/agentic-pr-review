@@ -280,6 +280,32 @@ public sealed class DeepSeekAccountingTests
         Assert.Equal(AccountingCompleteness.Partial, outcome.Accounting.UsageCompleteness);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeterministicAttemptTimeoutPreservesDispatchAccounting(bool preCancelled)
+    {
+        var clock = new AgenticPrReview.Runtime.Tests.Agent.Loop.DeadlineTestClock();
+        using var caller = new CancellationTokenSource();
+        if (preCancelled) caller.Cancel();
+        using var handler = new Handler(async (_, token) =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(300));
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return Http(Body());
+        });
+        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("test-key"),
+            handler, DeepSeekTransportPolicy.ProviderTimeout, clock);
+        var outcome = await new AgentLoop(DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider,
+            DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session"), transport), new NoTools(), clock)
+            .RunAsync(Run(), caller.Token);
+        Assert.False(outcome.CompletedSessionEligible);
+        Assert.Equal(preCancelled ? 0 : 1, handler.Sends);
+        Assert.Equal(preCancelled ? 0 : 1, outcome.Accounting!.ProviderAttempts);
+        Assert.Equal(preCancelled ? 0 : 1, outcome.Accounting.UnknownUsageAttempts);
+        Assert.Equal(preCancelled ? 0 : 1, outcome.Accounting.ProviderFailedAttempts);
+    }
+
     private static AgentLoop Loop(IDeepSeekTransport transport) => new(
         DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider,
             DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session"), transport), new NoTools());

@@ -10,6 +10,29 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.GitHub;
 public sealed class ActionHostGitHubAuthorizationTransportTests
 {
     [Fact]
+    public async Task RequestCancellationStopsTheActualConnectionAttempt()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = ActionHostGitHubAuthorizationTransport.CreateHandler(
+            TimeSpan.FromSeconds(15), async (_, token) =>
+            {
+                entered.SetResult(token);
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                finally { stopped.SetResult(); }
+                throw new InvalidOperationException();
+            });
+        using var transport = ActionHostGitHubAuthorizationTransport.CreateForTesting("synthetic-token", handler);
+        var read = transport.GetRepositoryAsync("SolusQuest/agentic-pr-review", cancellation.Token);
+        var actualConnectionToken = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(TimeSpan.FromSeconds(3)));
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.True(actualConnectionToken.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task RepositoryReadUsesExactOriginPathAndHeaders()
     {
         var handler = new CapturingHandler(_ => JsonResponse("""

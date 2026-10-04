@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Tests.Agent.Loop;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -366,6 +367,32 @@ public sealed class DeepSeekTransportTests
         var result = await transport.SendAsync(new byte[] { 1 }, default);
 
         Assert.Equal(DeepSeekTransportOutcome.ConnectTimeout, result.Outcome);
+    }
+
+    [Fact]
+    public async Task RemainingReviewCancelsProductionConnectBeforeFifteenSecondCap()
+    {
+        var clock = new DeadlineTestClock();
+        using var review = new CancellationTokenSource(TimeSpan.FromSeconds(9), clock);
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async ValueTask<Stream> Stall(SocketsHttpConnectionContext _, CancellationToken token)
+        {
+            entered.TrySetResult(token);
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); return Stream.Null; }
+            finally { stopped.TrySetResult(); }
+        }
+        using var handler = DeepSeekTransport.CreateHandler(DeepSeekTransportPolicy.ConnectTimeout, Stall);
+        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("test-key"),
+            handler, DeepSeekTransportPolicy.ProviderTimeout, clock);
+        var send = transport.SendAsync(new byte[] { 1 }, review.Token);
+        var connectToken = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(TimeSpan.FromSeconds(15), handler.ConnectTimeout);
+        clock.Advance(TimeSpan.FromSeconds(9));
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => send.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(review.Token, error.CancellationToken);
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(connectToken.IsCancellationRequested);
     }
 
     [Fact]
@@ -755,6 +782,67 @@ public sealed class DeepSeekTransportTests
 
         Assert.Equal(DeepSeekTransportOutcome.TransportFailure, result.Outcome);
         Assert.Equal(0, handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(121, true)]
+    [InlineData(299, true)]
+    [InlineData(300, false)]
+    public async Task InjectedDeadlineCoversTheCompleteBody(int seconds, bool success)
+    {
+        var clock = new DeadlineTestClock();
+        using var handler = new RecordingHandler(_ => Response(200, new ClockBody(clock, seconds)));
+        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("test-key"),
+            handler, DeepSeekTransportPolicy.ProviderTimeout, clock);
+        var result = await transport.SendAsync(new byte[] { 1 }, default);
+        Assert.Equal(success ? DeepSeekTransportOutcome.Success : DeepSeekTransportOutcome.ProviderTimeout, result.Outcome);
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal(TimeSpan.FromSeconds(300), DeepSeekTransportPolicy.ProviderTimeout);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(200)]
+    [InlineData(500)]
+    public async Task RemainingReviewCancelsHeadersAndBothBodyClasses(int status)
+    {
+        var clock = new DeadlineTestClock();
+        using var review = new CancellationTokenSource(TimeSpan.FromSeconds(9), clock);
+        using var handler = new RecordingHandler(async (_, token) =>
+        {
+            if (status != 0) return Response(status, new CallbackStallingStream(() => clock.Advance(TimeSpan.FromSeconds(9))));
+            clock.Advance(TimeSpan.FromSeconds(9));
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return Response(200, []);
+        });
+        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("test-key"),
+            handler, DeepSeekTransportPolicy.ProviderTimeout, clock);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.SendAsync(new byte[] { 1 }, review.Token));
+        Assert.Equal(1, handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(200)]
+    [InlineData(500)]
+    public async Task InjectedAttemptTimeoutCancelsStalledBodies(int status)
+    {
+        var clock = new DeadlineTestClock();
+        using var handler = new RecordingHandler(_ => Response(status,
+            new CallbackStallingStream(() => clock.Advance(TimeSpan.FromSeconds(300)))));
+        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("test-key"),
+            handler, DeepSeekTransportPolicy.ProviderTimeout, clock);
+        var result = await transport.SendAsync(new byte[] { 1 }, default);
+        Assert.Equal(DeepSeekTransportOutcome.ProviderTimeout, result.Outcome);
+    }
+
+    private sealed class ClockBody(DeadlineTestClock clock, int seconds) : TrackingStream(new byte[] { 42 })
+    {
+        private bool advanced;
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!advanced) { advanced = true; clock.Advance(TimeSpan.FromSeconds(seconds)); }
+            return base.ReadAsync(buffer, cancellationToken);
+        }
     }
 
     private static DeepSeekTransport Transport(

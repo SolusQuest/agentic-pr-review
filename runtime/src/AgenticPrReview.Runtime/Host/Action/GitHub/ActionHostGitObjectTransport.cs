@@ -190,7 +190,7 @@ internal sealed class ActionHostGitObjectTransport :
                     ActionHostGitObjectFailure.TransportFailure);
             }
 
-            using var redirect = await _client.SendAsync(source,
+            using var redirect = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(_client, source,
                 HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var redirectRateLimit =
                 await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
@@ -219,7 +219,7 @@ internal sealed class ActionHostGitObjectTransport :
                     ActionHostGitObjectFailure.TransportFailure);
             }
 
-            var response = await _client.SendAsync(request,
+            var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(_client, request,
                 HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var responseRateLimit =
                 await ActionHostGitHubRateLimitClassifier.ClassifyAsync(
@@ -325,7 +325,7 @@ internal sealed class ActionHostGitObjectTransport :
                     ActionHostGitObjectFailure.TransportFailure);
             }
 
-            using var response = await _client.SendAsync(
+            using var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(_client,
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);

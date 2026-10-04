@@ -215,7 +215,7 @@ internal sealed class ActionHostReviewedSnapshotTransport :
                     .Failed(ActionHostGitObjectFailure.TransportFailure);
             }
 
-            using var response = await _client.SendAsync(
+            using var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(_client,
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
@@ -341,7 +341,7 @@ internal sealed class ActionHostReviewedSnapshotTransport :
                     ActionHostGitObjectFailure.TransportFailure);
             }
 
-            using var response = await _client.SendAsync(
+            using var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(_client,
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);

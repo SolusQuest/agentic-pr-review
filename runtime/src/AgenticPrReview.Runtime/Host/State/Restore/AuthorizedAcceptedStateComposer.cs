@@ -25,7 +25,8 @@ internal sealed record ArtifactStateRestoreRequest(
     IAcceptedStateProductionDependencies? Dependencies = null,
     TimeProvider? TimeProvider = null,
     IStateReconciliationDiagnosticSink?
-        StateReconciliationDiagnosticSink = null);
+        StateReconciliationDiagnosticSink = null,
+    long? LatestAcceptanceUnixSeconds = null);
 
 internal sealed record AuthorizedAcceptedStateRestoreResult(
     string Code,
@@ -369,8 +370,13 @@ internal sealed class AuthorizedAcceptedStateComposer
                     AcceptedStateCodes.OutcomeUnknown);
             }
 
-            var latestCurrentRunAcceptance = checked(
+            var latestCurrentRunAcceptance = request.LatestAcceptanceUnixSeconds ?? checked(
                 now + StateRetentionRequirements.PreStickyBudgetSeconds);
+            // Only trusted composition supplies this anchored horizon. Retained
+            // direct proof callers keep their original pre-sticky authority.
+            if (latestCurrentRunAcceptance < now ||
+                latestCurrentRunAcceptance > checked(now + StateRetentionRequirements.CurrentHostSeconds))
+                return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.OutcomeUnknown);
             if (!RetainedStateRetention.TryAcceptance(
                     latestCurrentRunAcceptance,
                     out var logicalExpiry,

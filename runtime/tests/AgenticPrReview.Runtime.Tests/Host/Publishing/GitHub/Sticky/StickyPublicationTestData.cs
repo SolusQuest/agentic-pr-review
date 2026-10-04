@@ -87,7 +87,7 @@ internal sealed class FakePublisherTransportFactory :
     internal int Creates { get; private set; }
 
     public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
-        AuthorizedStickyPublicationRequest request)
+        AuthorizedStickyPublicationRequest request, CancellationToken reconciliationToken = default)
     {
         Creates++;
         Transport.Request = request;
@@ -96,7 +96,7 @@ internal sealed class FakePublisherTransportFactory :
     }
 
     public IStickyGitHubReadbackTransport CreateReadback(
-        ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request)
+        ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request, CancellationToken reconciliationToken = default)
     {
         Creates++;
         Transport.ExpectedIdentity = request.ExpectedIdentity;

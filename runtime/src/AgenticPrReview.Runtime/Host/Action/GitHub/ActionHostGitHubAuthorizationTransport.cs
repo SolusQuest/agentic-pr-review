@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -90,6 +91,7 @@ internal sealed class ActionHostGitHubCredentialException : Exception
 internal sealed class ActionHostGitHubAuthorizationTransport :
     IActionHostGitHubAuthorizationTransport
 {
+    private static readonly HttpRequestOptionsKey<CancellationToken> ConnectCancellation = new("ActionHostGitHub.ConnectCancellation");
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -134,6 +136,11 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
     }
 
     internal static SocketsHttpHandler CreateHandler(TimeSpan connectTimeout)
+        => CreateHandler(connectTimeout, null);
+
+    internal static SocketsHttpHandler CreateHandler(
+        TimeSpan connectTimeout,
+        Func<SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>>? connectCallback)
     {
         if (connectTimeout <= TimeSpan.Zero)
         {
@@ -147,6 +154,7 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.None,
             ConnectTimeout = connectTimeout,
+            ConnectCallback = (context, token) => ConnectAsync(context, token, connectCallback),
             Credentials = null,
             MaxResponseDrainSize = 0,
             PreAuthenticate = false,
@@ -160,6 +168,44 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
             UseCookies = false,
             UseProxy = false,
         };
+    }
+
+    internal static Task<HttpResponseMessage> SendWithConnectionCancellationAsync(
+        HttpClient client, HttpRequestMessage request, HttpCompletionOption completionOption,
+        CancellationToken cancellationToken)
+    {
+        request.Options.Set(ConnectCancellation, cancellationToken);
+        return client.SendAsync(request, completionOption, cancellationToken);
+    }
+
+    private static async ValueTask<Stream> ConnectAsync(
+        SocketsHttpConnectionContext context, CancellationToken connectionToken,
+        Func<SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>>? callback)
+    {
+        // A cancelled request waiter does not itself stop a pooled connection attempt.
+        context.InitialRequestMessage.Options.TryGetValue(ConnectCancellation, out var requestToken);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(connectionToken, requestToken);
+        try
+        {
+            linked.Token.ThrowIfCancellationRequested();
+            if (callback is not null) return await callback(context, linked.Token).ConfigureAwait(false);
+            var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                await socket.ConnectAsync(context.DnsEndPoint, linked.Token).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+        catch (OperationCanceledException) when (connectionToken.IsCancellationRequested && !requestToken.IsCancellationRequested)
+        {
+            connectionToken.ThrowIfCancellationRequested();
+            throw;
+        }
     }
 
     public async Task<ActionHostGitHubResult<ActionHostGitHubRepositoryFact>>
@@ -411,7 +457,7 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
 
             request.Headers.Authorization = authorization;
 
-            using var response = await _client.SendAsync(
+            using var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(_client,
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);

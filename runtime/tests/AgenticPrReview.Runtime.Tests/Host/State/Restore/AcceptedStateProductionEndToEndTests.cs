@@ -29,6 +29,29 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
 public sealed class AcceptedStateProductionEndToEndTests
 {
     [Theory]
+    [InlineData(1_200, true)]
+    [InlineData(1_680, true)]
+    [InlineData(1_681, false)]
+    public async Task ExplicitAnchoredRetentionAuthorityCoversLateObservationWithoutRestart(int elapsed, bool success)
+    {
+        var (request, store, time) = await BootstrapClockRequestAsync();
+        var started = time.UnixSeconds;
+        request = request with { LatestAcceptanceUnixSeconds = started + StateRetentionRequirements.CurrentHostSeconds };
+        AdvanceDuringFirstScopedRead(store, time, elapsed);
+        var result = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(request, default);
+        using var context = result.Context;
+        Assert.Equal(success, result.Succeeded);
+        if (success)
+        {
+            var lineage = Assert.Single(store.Objects.Where(item => item.Reference.Name.Value != LocatorRootFormat.StoreName));
+            Assert.Equal(started + StateRetentionRequirements.CurrentHostSeconds +
+                StateRetentionRequirements.LogicalWindowSeconds + StateRetentionRequirements.SentinelDependentMarginSeconds +
+                store.ExtraRetentionSeconds, lineage.ExpiresAtUnixSeconds);
+        }
+        else Assert.Equal(AcceptedStateCodes.OutcomeUnknown, result.Code);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(5)]

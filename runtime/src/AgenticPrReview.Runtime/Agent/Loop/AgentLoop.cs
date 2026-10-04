@@ -12,7 +12,8 @@ internal sealed record AgentRunRequest(
     StableAgentPlan StablePlan,
     string SessionId,
     ProjectChatMessage[] InitialMessages,
-    ProjectContinuation? Continuation = null);
+    ProjectContinuation? Continuation = null,
+    TimeSpan? RemainingHostTime = null);
 
 internal sealed class AgentLoop(
     IProjectChatClient chatClient,
@@ -36,7 +37,8 @@ internal sealed class AgentLoop(
         ReviewAccounting accounting,
         CancellationToken cancellationToken)
     {
-        var started = _timeProvider.GetTimestamp();
+        var started = new ReviewDeadline(_timeProvider,
+            limitAuthority?.Profile ?? AgentLimitProfile.Current, run.RemainingHostTime);
         var messages = run.InitialMessages.ToList();
         var continuation = run.Continuation;
         var observations = new List<AgentObservation>();
@@ -145,6 +147,9 @@ internal sealed class AgentLoop(
                     toolCalls,
                     events);
             }
+
+            stop = StopReason(started, cancellationToken);
+            if (stop is not null) return Failure(stop, modelCalls, toolCalls, events);
 
             // Local adapter/projection and transport failures still consume this
             // logical invocation; physical sends are observed independently.
@@ -340,6 +345,9 @@ internal sealed class AgentLoop(
                         terminalReason);
                 }
 
+                stop = StopReason(started, cancellationToken);
+                if (stop is not null) return Failure(stop, modelCalls, toolCalls, events);
+
                 events.Add(new AgentTerminalEvent(review!.TerminalSha256));
                 return AgentRunOutcome.Success(
                     review,
@@ -498,7 +506,7 @@ internal sealed class AgentLoop(
         ref long toolResultBytes,
         ref int contentParts,
         ref int toolBudgetCalls,
-        long started,
+        ReviewDeadline started,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string> preflightErrors)
     {
@@ -1721,29 +1729,26 @@ internal sealed class AgentLoop(
         }
     }
 
-    private string? StopReason(long started, CancellationToken cancellationToken)
+    private string? StopReason(ReviewDeadline started, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested)
         {
             return AgentFailureCodes.Cancelled;
         }
 
-        return _timeProvider.GetElapsedTime(started) >=
-            TimeSpan.FromSeconds(AgentLimits.DeadlineSeconds)
+        return started.Expired
             ? AgentFailureCodes.DeadlineExceeded
             : null;
     }
 
-    private TimeSpan Remaining(long started)
+    private TimeSpan Remaining(ReviewDeadline started)
     {
-        var remaining =
-            TimeSpan.FromSeconds(AgentLimits.DeadlineSeconds) -
-            _timeProvider.GetElapsedTime(started);
+        var remaining = started.Remaining;
         return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
     private string? OperationStopReason(
-        long started,
+        ReviewDeadline started,
         CancellationToken callerCancellation,
         CancellationTokenSource deadlineCancellation)
     {
@@ -1753,8 +1758,7 @@ internal sealed class AgentLoop(
         }
 
         if (deadlineCancellation.IsCancellationRequested ||
-            _timeProvider.GetElapsedTime(started) >=
-                TimeSpan.FromSeconds(AgentLimits.DeadlineSeconds))
+            started.Expired)
         {
             return AgentFailureCodes.DeadlineExceeded;
         }

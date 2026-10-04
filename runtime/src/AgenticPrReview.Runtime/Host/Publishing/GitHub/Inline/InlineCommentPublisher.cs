@@ -27,7 +27,7 @@ internal sealed class PostAcceptanceInlinePublisherHook :
         }
 
         var result = await _publisher.PublishAsync(
-            authorized, cancellationToken).ConfigureAwait(false);
+            authorized, cancellationToken, request.ReconciliationToken).ConfigureAwait(false);
         return result.IsComplete
             ? ActionHostInlineHookResult.Complete
             : ActionHostInlineHookResult.Incomplete;
@@ -44,9 +44,12 @@ internal sealed class InlineCommentPublisher
 
     internal async Task<InlinePublicationResult> PublishAsync(
         AuthorizedInlinePublicationRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken reconciliationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using var business = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, reconciliationToken);
+        cancellationToken = business.Token;
         var result = new ResultBuilder(request.CandidateMap.Candidates.Length);
         if (cancellationToken.IsCancellationRequested)
         {
@@ -66,7 +69,7 @@ internal sealed class InlineCommentPublisher
         IInlineGitHubPublisherTransport transport;
         try
         {
-            transport = _factory.Create(request);
+            transport = _factory.Create(request, reconciliationToken);
         }
         catch (Exception exception) when (IsNonFatal(exception))
         {
@@ -139,11 +142,11 @@ internal sealed class InlineCommentPublisher
                     BoundedGitHubPublisherReason.BatchValidationRejected)
             {
                 return await FallbackAsync(request, transport, pending,
-                    result, cancellationToken).ConfigureAwait(false);
+                    result, cancellationToken, reconciliationToken).ConfigureAwait(false);
             }
 
             var reconciliation = await DiscoverAsync(transport,
-                CancellationToken.None).ConfigureAwait(false);
+                reconciliationToken).ConfigureAwait(false);
             if (!reconciliation.Complete)
             {
                 result.Fail(pending.Count,
@@ -193,7 +196,8 @@ internal sealed class InlineCommentPublisher
         IInlineGitHubPublisherTransport transport,
         List<RenderedInlineComment> pending,
         ResultBuilder result,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken reconciliationToken)
     {
         if (cancellationToken.IsCancellationRequested)
         {
@@ -310,7 +314,7 @@ internal sealed class InlineCommentPublisher
             }
 
             var readback = await transport.GetReviewCommentAsync(
-                created.Value.Id, CancellationToken.None).ConfigureAwait(false);
+                created.Value.Id, reconciliationToken).ConfigureAwait(false);
             if (readback.Value is null ||
                 !IsExact(request, comment, readback.Value) ||
                 readback.Value.Id != created.Value.Id)

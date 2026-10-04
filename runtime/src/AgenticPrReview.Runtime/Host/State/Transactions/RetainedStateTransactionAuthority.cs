@@ -1532,7 +1532,7 @@ internal sealed class RetainedStateObservation : IDisposable
     public override string ToString() => "[PRIVATE]";
 }
 
-internal sealed class FrozenTimeProvider : TimeProvider
+internal sealed class FrozenTimeProvider : TimeProvider, IStateReconciliationDeadline
 {
     private readonly DateTimeOffset value;
     private readonly TimeProvider timerProvider;
@@ -1546,6 +1546,10 @@ internal sealed class FrozenTimeProvider : TimeProvider
     }
 
     public override DateTimeOffset GetUtcNow() => value;
+
+    public CancellationToken ReconciliationToken =>
+        (timerProvider as IStateReconciliationDeadline)?.ReconciliationToken
+            ?? CancellationToken.None;
 
     public override ITimer CreateTimer(
         TimerCallback callback,

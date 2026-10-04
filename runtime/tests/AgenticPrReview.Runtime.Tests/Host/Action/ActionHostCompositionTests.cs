@@ -1624,7 +1624,7 @@ public sealed partial class ActionHostCompositionTests
         internal int Creates { get; private set; }
 
         public IInlineGitHubPublisherTransport Create(
-            AuthorizedInlinePublicationRequest request)
+            AuthorizedInlinePublicationRequest request, CancellationToken reconciliationToken = default)
         {
             Creates++;
             return Transport;

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using AgenticPrReview.Runtime.Agent.Core;
 
@@ -7,6 +8,7 @@ namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 
 internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
 {
+    private static readonly HttpRequestOptionsKey<CancellationToken> ConnectCancellation = new("apr.connect-cancellation");
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -14,32 +16,46 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
     private readonly DeepSeekCredential _credential;
     private readonly HttpClient _client;
     private readonly TimeSpan _providerTimeout;
+    private readonly TimeProvider _timeProvider;
     private bool _disposed;
 
     private DeepSeekTransport(
         DeepSeekCredential credential,
         HttpClient client,
-        TimeSpan providerTimeout)
+        TimeSpan providerTimeout,
+        TimeProvider timeProvider)
     {
         _credential = credential;
         _client = client;
         _providerTimeout = providerTimeout;
+        _timeProvider = timeProvider;
     }
 
-    internal static DeepSeekTransport Create(DeepSeekCredential credential)
+    internal static DeepSeekTransport Create(DeepSeekCredential credential) => CreateCore(credential, TimeProvider.System);
+
+    internal static DeepSeekTransport Create(DeepSeekCredential credential, TimeProvider timeProvider) => CreateCore(credential, timeProvider);
+
+    private static DeepSeekTransport CreateCore(DeepSeekCredential credential, TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(credential);
         var handler = CreateHandler(DeepSeekTransportPolicy.ConnectTimeout);
         return new DeepSeekTransport(
             credential,
             CreateClient(handler),
-            DeepSeekTransportPolicy.ProviderTimeout);
+            DeepSeekTransportPolicy.ProviderTimeout,
+            timeProvider);
     }
 
     internal static DeepSeekTransport CreateForTesting(
         DeepSeekCredential credential,
         HttpMessageHandler handler,
-        TimeSpan providerTimeout)
+        TimeSpan providerTimeout) => CreateForTesting(credential, handler, providerTimeout, TimeProvider.System);
+
+    internal static DeepSeekTransport CreateForTesting(
+        DeepSeekCredential credential,
+        HttpMessageHandler handler,
+        TimeSpan providerTimeout,
+        TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(credential);
         ArgumentNullException.ThrowIfNull(handler);
@@ -53,7 +69,8 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
         return new DeepSeekTransport(
             credential,
             CreateClient(handler),
-            providerTimeout);
+            providerTimeout,
+            timeProvider);
     }
 
     internal static SocketsHttpHandler CreateHandler(
@@ -74,7 +91,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
                 DistributedContextPropagator.CreateNoOutputPropagator(),
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.None,
-            ConnectCallback = connectCallback,
+            ConnectCallback = (context, token) => ConnectAsync(context, token, connectCallback),
             ConnectTimeout = connectTimeout,
             Credentials = null,
             MaxResponseDrainSize = 0,
@@ -89,6 +106,40 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             UseCookies = false,
             UseProxy = false,
         };
+    }
+
+    private static async ValueTask<Stream> ConnectAsync(
+        SocketsHttpConnectionContext context,
+        CancellationToken connectionToken,
+        Func<SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>>? callback)
+    {
+        // The handler can keep connecting after its request waiter is cancelled.
+        // Bind the actual socket operation to this attempt's review/deadline token.
+        context.InitialRequestMessage.Options.TryGetValue(ConnectCancellation, out var requestToken);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(connectionToken, requestToken);
+        try
+        {
+            linked.Token.ThrowIfCancellationRequested();
+            if (callback is not null) return await callback(context, linked.Token).ConfigureAwait(false);
+            var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                await socket.ConnectAsync(context.DnsEndPoint, linked.Token).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+        catch (OperationCanceledException) when (connectionToken.IsCancellationRequested && !requestToken.IsCancellationRequested)
+        {
+            // Preserve the handler-owned cancellation identity used to classify
+            // its independent ConnectTimeout, rather than a generic failure.
+            connectionToken.ThrowIfCancellationRequested();
+            throw;
+        }
     }
 
     internal static Uri CreateEndpoint(string candidate)
@@ -129,8 +180,11 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
         var requestSnapshot = requestBody.ToArray();
         cancellationToken.ThrowIfCancellationRequested();
 
+        var started = _timeProvider.GetTimestamp();
         using var providerDeadline = new CancellationTokenSource(
-            _providerTimeout);
+            _providerTimeout, _timeProvider);
+        bool Expired() => providerDeadline.IsCancellationRequested ||
+            _timeProvider.GetElapsedTime(started) >= _providerTimeout;
         using var providerCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken,
@@ -144,6 +198,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             {
                 Content = new ByteArrayContent(requestSnapshot),
             };
+            request.Options.Set(ConnectCancellation, providerCancellation.Token);
             if (!request.Headers.TryAddWithoutValidation(
                     "Authorization",
                     $"Bearer {_credential.Value}") ||
@@ -155,6 +210,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             }
 
             providerCancellation.Token.ThrowIfCancellationRequested();
+            if (Expired()) return DeepSeekTransportResult.ProviderTimeout();
             if (accounting is not null && !accounting.TryBeginDispatch())
                 throw new OperationCanceledException(cancellationToken);
             using var response = await _client.SendAsync(
@@ -162,7 +218,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
                 HttpCompletionOption.ResponseHeadersRead,
                 providerCancellation.Token);
             cancellationToken.ThrowIfCancellationRequested();
-            if (providerDeadline.IsCancellationRequested)
+            if (Expired())
             {
                 return DeepSeekTransportResult.ProviderTimeout();
             }
@@ -176,7 +232,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
                     DeepSeekTransportPolicy.ResponseTooLargeCount,
                     providerCancellation.Token);
                 cancellationToken.ThrowIfCancellationRequested();
-                if (providerDeadline.IsCancellationRequested)
+                if (Expired())
                 {
                     return DeepSeekTransportResult.ProviderTimeout();
                 }
@@ -197,7 +253,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
                 DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes,
                 providerCancellation.Token);
             cancellationToken.ThrowIfCancellationRequested();
-            if (providerDeadline.IsCancellationRequested)
+            if (Expired())
             {
                 return DeepSeekTransportResult.ProviderTimeout();
             }
@@ -213,7 +269,7 @@ internal sealed class DeepSeekTransport : IAccountedDeepSeekTransport
             throw;
         }
         catch (OperationCanceledException)
-            when (providerDeadline.IsCancellationRequested)
+            when (Expired())
         {
             return DeepSeekTransportResult.ProviderTimeout();
         }

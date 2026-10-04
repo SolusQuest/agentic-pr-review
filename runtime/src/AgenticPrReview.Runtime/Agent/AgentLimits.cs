@@ -34,7 +34,8 @@ internal static class AgentLimits
     internal const int ToolCalls = 512;
     internal const int ToolCallsPerResponse = 16;
     internal const int ConcurrentToolCalls = 1;
-    internal const int DeadlineSeconds = 300;
+    internal const int DeadlineSeconds = 900;
+    internal const int RetainedDeadlineSeconds = 300;
     // Current input without a validated partition is conservatively debited here.
     internal const long InputTokens = 2_000_000;
     internal const long CachedInputTokens = 38_000_000;
@@ -100,7 +101,7 @@ internal static class AgentLimits
         new(2, "tool_calls", ToolCalls, "count"),
         new(3, "tool_calls_per_response", ToolCallsPerResponse, "count"),
         new(4, "concurrent_tool_calls", ConcurrentToolCalls, "count"),
-        new(5, "deadline_seconds", DeadlineSeconds, "seconds"),
+        new(5, "deadline_seconds", RetainedDeadlineSeconds, "seconds"),
         new(6, "input_tokens", RetainedInputTokens, "tokens"),
         new(7, "output_tokens", RetainedOutputTokens, "tokens"),
         new(8, "combined_tokens", RetainedCombinedTokens, "tokens"),
@@ -156,6 +157,7 @@ internal static class AgentLimits
     private static ImmutableArray<AgentLimit> CurrentRegistry(ReviewTokenBudget budget) =>
         RetainedRegistry.Select(row => row.Ordinal switch
         {
+            5 => row with { Value = DeadlineSeconds },
             6 => row with { Name = "uncached_input_tokens", Value = budget.UncachedInputTokens },
             7 => row with { Name = "cached_input_tokens", Value = budget.CachedInputTokens },
             8 => row with { Name = "output_tokens", Value = budget.OutputTokens },

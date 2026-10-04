@@ -129,7 +129,7 @@ public sealed class R5ReplayAdmissionTests
         Assert.Equal(6, fixture.Files.Length);
         var run = Assert.Single(fixture.Runs);
         Assert.Equal("db6a077771c3c87335e6726e0934ab4b50c849d125b222671f875cd3ce2a67da", run.Expected.Sha256);
-        Assert.Equal("2a8b878864fdb5609b3463d7907b2f1a71e7f7526edb46ea1215e0e8a478e68e", run.ConfigurationSha256);
+        Assert.Equal("879e9921efd31d797dd2298041feca79ae14beb932c69e9a5021bdc8887049bf", run.ConfigurationSha256);
         Assert.Equal("seed-safe-control", run.Expected.Input.Id);
         Assert.Equal(fixture.CorpusSha256, run.Expected.Input.CorpusSha256);
         Assert.Equal(EvaluationCode.Scored, run.ExpectedCode);
