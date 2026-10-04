@@ -16,7 +16,7 @@ public sealed class AgentContractTests
             ("tool_calls", 512, "count"),
             ("tool_calls_per_response", 16, "count"),
             ("concurrent_tool_calls", 1, "count"),
-            ("deadline_seconds", 300, "seconds"),
+            ("deadline_seconds", 900, "seconds"),
             ("uncached_input_tokens", 2_000_000, "tokens"),
             ("cached_input_tokens", 38_000_000, "tokens"),
             ("output_tokens", 524_288, "tokens"),
@@ -80,12 +80,13 @@ public sealed class AgentContractTests
     [Fact]
     public void Output8192LimitsChangeOnlyTheTwoCumulativeTokenRows()
     {
-        Assert.Equal("75e8c549b0a9a9cbee70f09da1bb58de0d517cafa9762260030964a015607902",
+        Assert.Equal("239b9a35e03c2f5a6679d9520975bdf048a392433558416f4b228fb893bb8a78",
             AgentCanonical.LimitsSha256());
         Assert.Equal("e05ed6796ddf0b3f01c09d1f4a9a7007ec772b4a070e1bbfefeef5ede5681bbe",
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output8192));
         var current = AgentLimits.Registry.Select(row => row.Ordinal switch
         {
+            5 => row with { Value = 300 },
             6 => row with { Name = "input_tokens", Value = 262_144 },
             7 => row with { Name = "output_tokens", Value = 32_768 },
             8 => row with { Name = "combined_tokens", Value = 294_912 },
@@ -115,6 +116,7 @@ public sealed class AgentContractTests
             AgentCanonical.LimitsSha256(AgentLimitProfile.Output65536));
         var current = AgentLimits.Registry.Select(row => row.Ordinal switch
         {
+            5 => row with { Value = 300 },
             6 => row with { Name = "input_tokens", Value = 262_144 },
             7 => row with { Name = "output_tokens", Value = 32_768 },
             8 => row with { Name = "combined_tokens", Value = 294_912 },
@@ -235,7 +237,7 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "75e8c549b0a9a9cbee70f09da1bb58de0d517cafa9762260030964a015607902",
+            "239b9a35e03c2f5a6679d9520975bdf048a392433558416f4b228fb893bb8a78",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
             "50acece85187a24d6f9b8df4501dabe89c51db1b82c14c50747ef2f1d632561f",

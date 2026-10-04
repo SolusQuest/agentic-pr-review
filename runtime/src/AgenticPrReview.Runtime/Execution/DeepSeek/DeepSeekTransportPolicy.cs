@@ -14,7 +14,7 @@ internal static class DeepSeekTransportPolicy
     internal const int RequestRejectedCount = RequestBodyMaxBytes + 1;
     internal const int ResponseTooLargeCount = SuccessBodyMaxBytes + 1;
     internal static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
-    internal static readonly TimeSpan ProviderTimeout = TimeSpan.FromSeconds(120);
+    internal static readonly TimeSpan ProviderTimeout = TimeSpan.FromSeconds(300);
 }
 
 internal enum DeepSeekTransportOutcome

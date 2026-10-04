@@ -317,7 +317,8 @@ public sealed partial class AgentCapabilityArchitectureTests
                 [
                     ExpectedCall(
                         actionHostTransportFactoryCreate,
-                        transportCreate,
+                        GetMethod(typeof(DeepSeekTransport), nameof(DeepSeekTransport.Create),
+                            typeof(DeepSeekCredential), typeof(TimeProvider)),
                         OpCodes.Call),
                     ExpectedCall(
                         transportFactoryCreate,

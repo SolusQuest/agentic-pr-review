@@ -12,10 +12,87 @@ using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.ActionHost;
+
+// One authority for this Host invocation, including work before Agent admission.
+// UTC is used only for persisted retention; elapsed time is always monotonic.
+internal sealed class ActionHostTimeBudget : TimeProvider, IStateReconciliationDeadline, IDisposable
+{
+    internal static readonly TimeSpan PreStickyAllowance = TimeSpan.FromSeconds(StateRetentionRequirements.CurrentPreStickySeconds);
+    internal static readonly TimeSpan FinalizationAllowance = TimeSpan.FromSeconds(StateRetentionRequirements.CurrentFinalizationSeconds);
+    internal static readonly TimeSpan HostAllowance = PreStickyAllowance + FinalizationAllowance;
+    private readonly TimeProvider inner;
+    private readonly long started;
+    private readonly object gate = new();
+    private long? finalizationStarted;
+    private readonly CancellationTokenSource preSticky;
+    private readonly CancellationTokenSource hard;
+    private readonly CancellationTokenSource finalization;
+    private readonly CancellationTokenSource business;
+    private readonly CancellationTokenSource reconciliation;
+
+    internal ActionHostTimeBudget(TimeProvider inner, CancellationToken caller)
+    {
+        this.inner = inner;
+        CallerToken = caller;
+        started = inner.GetTimestamp();
+        LatestAcceptanceUnixSeconds = checked(inner.GetUtcNow().ToUnixTimeSeconds() +
+            (long)HostAllowance.TotalSeconds);
+        preSticky = new CancellationTokenSource(PreStickyAllowance, inner);
+        hard = new CancellationTokenSource(HostAllowance, inner);
+        finalization = new CancellationTokenSource(Timeout.InfiniteTimeSpan, inner);
+        reconciliation = CancellationTokenSource.CreateLinkedTokenSource(hard.Token, finalization.Token);
+        business = CancellationTokenSource.CreateLinkedTokenSource(caller, preSticky.Token, reconciliation.Token);
+    }
+
+    internal CancellationToken CallerToken { get; }
+    internal long LatestAcceptanceUnixSeconds { get; }
+    internal TimeSpan RemainingPreSticky => Positive(PreStickyAllowance - inner.GetElapsedTime(started));
+    internal CancellationToken BusinessToken { get { ObserveTime(); return business.Token; } }
+    public CancellationToken ReconciliationToken { get { ObserveTime(); return reconciliation.Token; } }
+
+    internal void BeginFinalization()
+    {
+        TimeSpan remaining;
+        lock (gate)
+        {
+            if (finalizationStarted is not null) return;
+            finalizationStarted = inner.GetTimestamp();
+            remaining = Positive(HostAllowance - inner.GetElapsedTime(started));
+        }
+        preSticky.CancelAfter(Timeout.InfiniteTimeSpan);
+        finalization.CancelAfter(remaining < FinalizationAllowance ? remaining : FinalizationAllowance);
+    }
+
+    private void ObserveTime()
+    {
+        long? finalizationStart;
+        lock (gate) finalizationStart = finalizationStarted;
+        if (finalizationStart is null && RemainingPreSticky == TimeSpan.Zero) preSticky.Cancel();
+        if (inner.GetElapsedTime(started) >= HostAllowance) hard.Cancel();
+        if (finalizationStart is { } value && inner.GetElapsedTime(value) >= FinalizationAllowance)
+            finalization.Cancel();
+    }
+
+    private static TimeSpan Positive(TimeSpan value) => value > TimeSpan.Zero ? value : TimeSpan.Zero;
+    public override long TimestampFrequency => inner.TimestampFrequency;
+    public override long GetTimestamp() => inner.GetTimestamp();
+    public override DateTimeOffset GetUtcNow() => inner.GetUtcNow();
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        inner.CreateTimer(callback, state, dueTime, period);
+    public void Dispose()
+    {
+        business.Dispose();
+        reconciliation.Dispose();
+        finalization.Dispose();
+        hard.Dispose();
+        preSticky.Dispose();
+    }
+}
 
 internal enum ActionHostOperationResolution
 {
@@ -49,6 +126,7 @@ internal sealed class ActionHostTransactionJournal : IDisposable
     private readonly object admissionGate = new();
     private readonly CancellationToken callerCancellationToken;
     private readonly CancellationTokenRegistration cancellationRegistration;
+    private readonly ActionHostTimeBudget? timeBudget;
     private int cancellationObserved;
     private int currentRunMutationDispatched;
     private int currentRunTransactionAdvanced;
@@ -60,16 +138,18 @@ internal sealed class ActionHostTransactionJournal : IDisposable
 
     internal ActionHostTransactionJournal(
         ActionHostCancellationState cancellation,
-        CancellationToken callerCancellationToken = default)
+        CancellationToken callerCancellationToken = default,
+        ActionHostTimeBudget? timeBudget = null)
     {
-        this.callerCancellationToken = callerCancellationToken;
+        this.timeBudget = timeBudget;
+        this.callerCancellationToken = timeBudget?.BusinessToken ?? callerCancellationToken;
         if (cancellation == ActionHostCancellationState.Requested)
         {
             ObserveCancellationCore();
         }
 
-        cancellationRegistration = callerCancellationToken.CanBeCanceled
-            ? callerCancellationToken.UnsafeRegister(
+        cancellationRegistration = this.callerCancellationToken.CanBeCanceled
+            ? this.callerCancellationToken.UnsafeRegister(
                 static state =>
                     ((ActionHostTransactionJournal)state!).ObserveCancellationCore(),
                 this)
@@ -78,6 +158,17 @@ internal sealed class ActionHostTransactionJournal : IDisposable
 
     internal bool HasCurrentRunMutation =>
         Volatile.Read(ref currentRunMutationDispatched) != 0;
+
+    internal TimeSpan? RemainingReviewTime => timeBudget?.RemainingPreSticky;
+    internal CancellationToken ProviderCancellationToken => timeBudget?.CallerToken ?? callerCancellationToken;
+    internal CancellationToken ReconciliationToken => timeBudget?.ReconciliationToken ?? CancellationToken.None;
+
+    internal async Task<T> WithinHorizonAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken token)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, ReconciliationToken);
+        linked.Token.ThrowIfCancellationRequested();
+        return await operation(linked.Token).ConfigureAwait(false);
+    }
 
     internal bool HasCurrentRunActivity => HasCurrentRunMutation ||
         Volatile.Read(ref currentRunTransactionAdvanced) != 0;
@@ -90,6 +181,7 @@ internal sealed class ActionHostTransactionJournal : IDisposable
 
     internal bool ObserveCancellation(CancellationToken cancellationToken)
     {
+        _ = timeBudget?.BusinessToken;
         if (cancellationToken.IsCancellationRequested ||
             callerCancellationToken.IsCancellationRequested)
         {
@@ -107,6 +199,12 @@ internal sealed class ActionHostTransactionJournal : IDisposable
     {
         lock (admissionGate)
         {
+            _ = timeBudget?.BusinessToken;
+            if (ReconciliationToken.IsCancellationRequested)
+            {
+                scope = null;
+                return false;
+            }
             if (cancellationToken.IsCancellationRequested ||
                 callerCancellationToken.IsCancellationRequested)
             {
@@ -127,6 +225,8 @@ internal sealed class ActionHostTransactionJournal : IDisposable
             }
 
             activeOperation = operation;
+            if (operation == ActionHostOperationKind.StickyPublication)
+                timeBudget?.BeginFinalization();
             scope = new ActionHostOperationScope(
                 this,
                 operation,
@@ -139,6 +239,7 @@ internal sealed class ActionHostTransactionJournal : IDisposable
     {
         lock (admissionGate)
         {
+            ReconciliationToken.ThrowIfCancellationRequested();
             if (activeOperation is null)
             {
                 throw new InvalidOperationException(
@@ -197,6 +298,7 @@ internal sealed class ActionHostTransactionJournal : IDisposable
     {
         lock (admissionGate)
         {
+            timeBudget?.BeginFinalization();
             Interlocked.Exchange(ref cancellationObserved, 1);
             Interlocked.Exchange(
                 ref executionMode,
@@ -296,17 +398,17 @@ internal sealed class JournaledRestrictedStateStore(
     public Task<OpaqueStoreListResult> ListExactAsync(
         OpaqueStoreListRequest request,
         CancellationToken cancellationToken) =>
-        inner.ListExactAsync(request, cancellationToken);
+        journal.WithinHorizonAsync(token => inner.ListExactAsync(request, token), cancellationToken);
 
     public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
         OpaqueStoreMetadataRequest request,
         CancellationToken cancellationToken) =>
-        inner.ReadMetadataAsync(request, cancellationToken);
+        journal.WithinHorizonAsync(token => inner.ReadMetadataAsync(request, token), cancellationToken);
 
     public Task<OpaqueStoreDownloadResult> DownloadAsync(
         OpaqueStoreDownloadRequest request,
         CancellationToken cancellationToken) =>
-        inner.DownloadAsync(request, cancellationToken);
+        journal.WithinHorizonAsync(token => inner.DownloadAsync(request, token), cancellationToken);
 
     public async Task<OpaqueStoreUploadResult> UploadImmutableAsync(
         OpaqueStoreUploadRequest request,
@@ -315,9 +417,8 @@ internal sealed class JournaledRestrictedStateStore(
         journal.BeforeMutationDispatch(cancellationToken);
         try
         {
-            var result = await inner.UploadImmutableAsync(
-                    request,
-                    cancellationToken)
+            var result = await journal.WithinHorizonAsync(
+                    token => inner.UploadImmutableAsync(request, token), cancellationToken)
                 .ConfigureAwait(false);
             journal.Resolve(result.MutationState);
             return result;
@@ -332,7 +433,7 @@ internal sealed class JournaledRestrictedStateStore(
     public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
         OpaqueStoreReadBackRequest request,
         CancellationToken cancellationToken) =>
-        inner.ReadBackExactAsync(request, cancellationToken);
+        journal.WithinHorizonAsync(token => inner.ReadBackExactAsync(request, token), cancellationToken);
 
     public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
         OpaqueStoreDeleteRequest request,
@@ -341,9 +442,8 @@ internal sealed class JournaledRestrictedStateStore(
         journal.BeforeMutationDispatch(cancellationToken);
         try
         {
-            var result = await inner.DeleteExactAsync(
-                    request,
-                    cancellationToken)
+            var result = await journal.WithinHorizonAsync(
+                    token => inner.DeleteExactAsync(request, token), cancellationToken)
                 .ConfigureAwait(false);
             journal.Resolve(result.MutationState);
             return result;
@@ -371,7 +471,19 @@ internal sealed class JournaledStickyPublisherTransportFactory(
     public IStickyGitHubReadbackTransport CreateReadback(
         ActionHostGitHubToken token,
         AuthorizedStickyReadbackRequest request) =>
-        inner.CreateReadback(token, request);
+        new JournaledStickyReadbackTransport(inner.CreateReadback(token, request), journal);
+}
+
+internal sealed class JournaledStickyReadbackTransport(
+    IStickyGitHubReadbackTransport inner,
+    ActionHostTransactionJournal journal) : IStickyGitHubReadbackTransport
+{
+    public bool IsWithinOverallDeadline => !journal.ReconciliationToken.IsCancellationRequested && inner.IsWithinOverallDeadline;
+    public Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>> ListIssueCommentsAsync(int page, CancellationToken token) =>
+        journal.WithinHorizonAsync(linked => inner.ListIssueCommentsAsync(page, linked), token);
+    public Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>> GetIssueCommentAsync(long id, CancellationToken token) =>
+        journal.WithinHorizonAsync(linked => inner.GetIssueCommentAsync(id, linked), token);
+    public void Dispose() => inner.Dispose();
 }
 
 internal sealed class JournaledStickyPublisherTransport(
@@ -379,19 +491,19 @@ internal sealed class JournaledStickyPublisherTransport(
     ActionHostTransactionJournal journal) :
     IStickyGitHubPublisherTransport
 {
-    public bool IsWithinOverallDeadline => inner.IsWithinOverallDeadline;
+    public bool IsWithinOverallDeadline => !journal.ReconciliationToken.IsCancellationRequested && inner.IsWithinOverallDeadline;
 
     public Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
         ListIssueCommentsAsync(
             int page,
             CancellationToken cancellationToken) =>
-        inner.ListIssueCommentsAsync(page, cancellationToken);
+        journal.WithinHorizonAsync(token => inner.ListIssueCommentsAsync(page, token), cancellationToken);
 
     public Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
         GetIssueCommentAsync(
             long commentId,
             CancellationToken cancellationToken) =>
-        inner.GetIssueCommentAsync(commentId, cancellationToken);
+        journal.WithinHorizonAsync(token => inner.GetIssueCommentAsync(commentId, token), cancellationToken);
 
     public async Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
         MutateStickyCommentAsync(CancellationToken cancellationToken)
@@ -399,8 +511,8 @@ internal sealed class JournaledStickyPublisherTransport(
         journal.BeforeMutationDispatch(cancellationToken);
         try
         {
-            var result = await inner.MutateStickyCommentAsync(
-                    cancellationToken)
+            var result = await journal.WithinHorizonAsync(
+                    token => inner.MutateStickyCommentAsync(token), cancellationToken)
                 .ConfigureAwait(false);
             journal.Resolve(result.Outcome);
             return result;
@@ -532,9 +644,12 @@ internal sealed class ActionHostComposition
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(launch);
+        using var timeBudget = new ActionHostTimeBudget(dependencies.TimeProvider, cancellationToken);
         using var journal = new ActionHostTransactionJournal(
             launch.Cancellation,
-            cancellationToken);
+            cancellationToken,
+            timeBudget);
+        cancellationToken = timeBudget.BusinessToken;
         if (journal.ObserveCancellation(cancellationToken))
         {
             return Completion(
@@ -647,7 +762,7 @@ internal sealed class ActionHostComposition
             var treeResult = await new ReviewedTreeReader(
                     new ReviewedGitObjectTransportFactory(
                         dependencies.ReviewedHeadSourceFactory),
-                    dependencies.TimeProvider)
+                    timeBudget)
                 .MaterializeAsync(
                     invocation,
                     launch.Inputs.GitHubToken!,
@@ -751,8 +866,9 @@ internal sealed class ActionHostComposition
                             new JournaledAcceptedStateProductionDependencies(
                                 dependencies.StateDependencies,
                                 journal),
-                            dependencies.TimeProvider,
-                            dependencies.StateReconciliationDiagnosticSink),
+                            timeBudget,
+                            dependencies.StateReconciliationDiagnosticSink,
+                            timeBudget.LatestAcceptanceUnixSeconds),
                         cancellationToken)
                     .ConfigureAwait(false);
                 restoreOperation!.Resolve(StateOwnerResolution(restored.Code));
@@ -776,15 +892,15 @@ internal sealed class ActionHostComposition
                 (ulong)invocation.PullRequest.Number,
                 policy.PolicySha256,
                 AuthorizedAcceptedStateComposer.PayloadBuildIdentity(policy));
-            return await new ActionHostCoordinator(
+            var completion = await new ActionHostCoordinator(
                     new StickyCommentPublisher(
                         new JournaledStickyPublisherTransportFactory(
                             dependencies.PublisherFactory,
-                            journal), dependencies.TimeProvider),
+                            journal), timeBudget),
                     dependencies.SnapshotFactory,
                     dependencies.ProviderFactory,
                     journal,
-                    dependencies.TimeProvider,
+                    timeBudget,
                     dependencies.InlineHook)
                 .RunAsync(
                     launch,
@@ -795,6 +911,9 @@ internal sealed class ActionHostComposition
                     publicationScope,
                     cancellationToken)
                 .ConfigureAwait(false);
+            return timeBudget.ReconciliationToken.IsCancellationRequested
+                ? Completion(launch, journal.CancellationStatus, StateWasAccessed: true)
+                : completion;
         }
         catch (OperationCanceledException)
         {

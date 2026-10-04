@@ -19,8 +19,8 @@ public sealed class AgentProofContractTests
         "agent-loop");
 
     [Theory]
-    [InlineData("bootstrap", 0, 2, 5, "c3c73c74ddfee7e67b3c7985f4c771f1c59a2f45f65df16b4f5cd159c0aed533")]
-    [InlineData("continue", 1, 1, 1, "c60cc89e402caa46637a4de945b81037b428c4f6d3ae2ca63b014b719acaf02b")]
+    [InlineData("bootstrap", 0, 2, 5, "c53359bb8837d2c020d61eafeca756e52d8bebf0f2a81baccc43ded0c2608d4b")]
+    [InlineData("continue", 1, 1, 1, "ed04935185ee172f01b3575f3c767ec22175addd2e1e06ec299953b9504ffa6a")]
     public void CurrentProofGoldensPinActualR7TokenBudgetProducer(
         string phase, int generation, int modelCalls, int toolCalls, string expectedSha256)
     {
@@ -31,7 +31,7 @@ public sealed class AgentProofContractTests
         Assert.DoesNotContain((byte)'\r', bytes);
         AssertGolden(bytes, phase, generation, modelCalls, toolCalls);
         using var document = JsonDocument.Parse(bytes);
-        const string limits = "75e8c549b0a9a9cbee70f09da1bb58de0d517cafa9762260030964a015607902";
+        const string limits = "239b9a35e03c2f5a6679d9520975bdf048a392433558416f4b228fb893bb8a78";
         Assert.Equal(limits, document.RootElement.GetProperty("limits_sha256").GetString());
         Assert.Equal(limits, AgentCanonical.LimitsSha256());
     }

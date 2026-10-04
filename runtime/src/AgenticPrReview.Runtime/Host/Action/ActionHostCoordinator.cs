@@ -72,7 +72,7 @@ internal sealed class ActionHostDeepSeekProviderRunnerFactory :
         var credential = DeepSeekCredential.Create(
             key.ExportForPrivateLaunch());
         var transport = transportFactory is null
-            ? DeepSeekTransport.Create(credential)
+            ? DeepSeekTransport.Create(credential, timeProvider)
             : transportFactory(credential);
         try
         {
@@ -212,7 +212,7 @@ internal sealed class ActionHostCoordinator
                     invocation,
                     scope,
                     state,
-                    CancellationToken.None)
+                    journal.ReconciliationToken)
                 .ConfigureAwait(false);
             var observation = evaluation.Observation;
             var progressKey = string.Concat(
@@ -286,8 +286,8 @@ internal sealed class ActionHostCoordinator
                                    timeProvider))
                         {
                             outcome = await runner.RunAsync(
-                                    run,
-                                    cancellationToken)
+                                    run with { RemainingHostTime = journal.RemainingReviewTime },
+                                    journal.ProviderCancellationToken)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -435,7 +435,7 @@ internal sealed class ActionHostCoordinator
                             invocation,
                             state,
                             evaluation,
-                            CancellationToken.None)
+                            journal.ReconciliationToken)
                         .ConfigureAwait(false);
                     admittedCleanup.Resolve(StateOwnerResolution(cleanup.Code));
                     if (!cleanup.Completed)
@@ -493,7 +493,7 @@ internal sealed class ActionHostCoordinator
                             state,
                             evaluation,
                             cancellingBeforeIntent
-                                ? CancellationToken.None
+                                ? journal.ReconciliationToken
                                 : cancellationToken)
                         .ConfigureAwait(false);
                     admittedIntent.Resolve(
@@ -672,7 +672,7 @@ internal sealed class ActionHostCoordinator
                             evaluation,
                             evaluation.RetryTransitionAuthorization,
                             cancellingBeforeRetry
-                                ? CancellationToken.None
+                                ? journal.ReconciliationToken
                                 : cancellationToken)
                         .ConfigureAwait(false);
                     admittedRetryIntent.Resolve(
@@ -888,7 +888,7 @@ internal sealed class ActionHostCoordinator
                             scope,
                             state,
                             evaluation,
-                            CancellationToken.None)
+                            journal.ReconciliationToken)
                         .ConfigureAwait(false);
                     admittedStaleCleanup.Resolve(
                         StateOwnerResolution(cleanup.Code));
@@ -904,17 +904,18 @@ internal sealed class ActionHostCoordinator
 
                 case PublicationRecoveryAction.ResumeAnchoredWrite:
                 {
-                    _ = journal.TryBeginBusinessOperation(
+                    if (!journal.TryBeginBusinessOperation(
                         ActionHostOperationKind.Recovery,
-                        CancellationToken.None,
+                        journal.ReconciliationToken,
                         out var resumeWriteOperation,
-                        allowReconciliation: true);
+                        allowReconciliation: true))
+                        return Failure(launch, journal.CancellationStatus);
                     using var admittedResumeWrite = resumeWriteOperation!;
                     var resumedResult = await PublicationRecoveryService
                         .ResumeInterruptedWriteAsync(
                             state,
                             evaluation,
-                            CancellationToken.None)
+                            journal.ReconciliationToken)
                         .ConfigureAwait(false);
                     admittedResumeWrite.Resolve(
                         StateOwnerResolution(resumedResult.Code));
@@ -932,17 +933,18 @@ internal sealed class ActionHostCoordinator
 
                 case PublicationRecoveryAction.ResumeCleanup:
                 {
-                    _ = journal.TryBeginBusinessOperation(
+                    if (!journal.TryBeginBusinessOperation(
                         ActionHostOperationKind.Cleanup,
-                        CancellationToken.None,
+                        journal.ReconciliationToken,
                         out var resumeCleanupOperation,
-                        allowReconciliation: true);
+                        allowReconciliation: true))
+                        return Failure(launch, journal.CancellationStatus);
                     using var admittedResumeCleanup = resumeCleanupOperation!;
                     var cleanup = await PublicationRecoveryService
                         .ResumeInterruptedCleanupAsync(
                             state,
                             evaluation,
-                            CancellationToken.None)
+                            journal.ReconciliationToken)
                         .ConfigureAwait(false);
                     admittedResumeCleanup.Resolve(
                         StateOwnerResolution(cleanup.Code));
@@ -1048,7 +1050,7 @@ internal sealed class ActionHostCoordinator
         return new(result, null, null);
     }
 
-    private static async Task<string> RevalidateStickyOwnershipAsync(
+    private async Task<string> RevalidateStickyOwnershipAsync(
         AuthorizedAcceptedStateRestoreContext state,
         PublicationRecoveryObservation observation,
         PublicationStickyWriteAuthorization authorization)
@@ -1066,7 +1068,7 @@ internal sealed class ActionHostCoordinator
         }
 
         var recoveredResult = await RestrictedStateService
-            .RecoverRetainedCandidateAsync(state, CancellationToken.None)
+            .RecoverRetainedCandidateAsync(state, journal.ReconciliationToken)
             .ConfigureAwait(false);
         var candidate = recoveredResult.Value;
         if (!recoveredResult.Succeeded || candidate is null)
@@ -1091,7 +1093,7 @@ internal sealed class ActionHostCoordinator
                 candidate,
                 prior: null,
                 observation.Records,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var ownership = ownershipResult.Value;
         return ownershipResult.Succeeded &&
@@ -1120,7 +1122,7 @@ internal sealed class ActionHostCoordinator
     {
         if (!journal.TryBeginBusinessOperation(
                 ActionHostOperationKind.Recovery,
-                CancellationToken.None,
+                journal.ReconciliationToken,
                 out var recoveryOperation,
                 allowReconciliation: true))
         {
@@ -1129,7 +1131,7 @@ internal sealed class ActionHostCoordinator
 
         using var admittedRecovery = recoveryOperation!;
         var recoveredResult = await RestrictedStateService
-            .RecoverRetainedCandidateAsync(state, CancellationToken.None)
+            .RecoverRetainedCandidateAsync(state, journal.ReconciliationToken)
             .ConfigureAwait(false);
         var candidate = recoveredResult.Value;
         if (!recoveredResult.Succeeded || candidate is null)
@@ -1147,7 +1149,7 @@ internal sealed class ActionHostCoordinator
                 candidate,
                 prior: null,
                 observation.Records,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var ownership = ownershipResult.Value;
         if (!ownershipResult.Succeeded || ownership is null)
@@ -1213,7 +1215,7 @@ internal sealed class ActionHostCoordinator
                 state,
                 ownership,
                 request!,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var attempt = attemptResult.Value;
         if (!attemptResult.Succeeded || attempt is null)
@@ -1227,7 +1229,7 @@ internal sealed class ActionHostCoordinator
             .PersistPreparedRetainedOpaqueWriteAsync(
                 state,
                 attempt,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         if (!persisted.Succeeded || persisted.Value is null)
         {
@@ -1240,7 +1242,7 @@ internal sealed class ActionHostCoordinator
             .CleanupCompletedWriteAnchorAsync(
                 state,
                 attempt,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         admittedRecovery.Resolve(StateOwnerResolution(
             cleanup.Completed
@@ -1273,15 +1275,16 @@ internal sealed class ActionHostCoordinator
             return Failure(launch, ActionHostStatus.StateConflict);
         }
 
-        _ = journal.TryBeginBusinessOperation(
+        if (!journal.TryBeginBusinessOperation(
             ActionHostOperationKind.Acceptance,
-            CancellationToken.None,
+            journal.ReconciliationToken,
             out var acceptanceOperation,
-            allowReconciliation: true);
+            allowReconciliation: true))
+            return Failure(launch, journal.CancellationStatus);
         using var admittedAcceptance = acceptanceOperation!;
 
         var recoveredResult = await RestrictedStateService
-            .RecoverRetainedCandidateAsync(state, CancellationToken.None)
+            .RecoverRetainedCandidateAsync(state, journal.ReconciliationToken)
             .ConfigureAwait(false);
         var candidate = recoveredResult.Value;
         if (!recoveredResult.Succeeded || candidate is null)
@@ -1317,7 +1320,7 @@ internal sealed class ActionHostCoordinator
                 candidate,
                 prior: null,
                 observation.Records,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var ownership = ownershipResult.Value;
         if (!ownershipResult.Succeeded || ownership is null)
@@ -1334,7 +1337,7 @@ internal sealed class ActionHostCoordinator
                 state,
                 ownership,
                 receipt,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var preparation = preparationResult.Value;
         if (!preparationResult.Succeeded || preparation is null ||
@@ -1357,7 +1360,7 @@ internal sealed class ActionHostCoordinator
                 state,
                 preparation.Ownership,
                 recoveryWrite,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var attempt = attemptResult.Value;
         if (!attemptResult.Succeeded || attempt is null)
@@ -1373,7 +1376,7 @@ internal sealed class ActionHostCoordinator
             .PersistPreparedRetainedOpaqueWriteAsync(
                 state,
                 attempt,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var recoveryRecord = persistedResult.Value;
         if (!persistedResult.Succeeded || recoveryRecord is null)
@@ -1399,7 +1402,7 @@ internal sealed class ActionHostCoordinator
                 state,
                 preparation,
                 extraction,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var durability = durabilityResult.Value;
         if (!durabilityResult.Succeeded || durability is null)
@@ -1416,7 +1419,7 @@ internal sealed class ActionHostCoordinator
                 state,
                 preparation,
                 durability,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         for (var attemptIndex = 0;
             attemptIndex < 4 && StringComparer.Ordinal.Equals(
@@ -1429,7 +1432,7 @@ internal sealed class ActionHostCoordinator
                     state,
                     preparation,
                     durability,
-                    CancellationToken.None)
+                    journal.ReconciliationToken)
                 .ConfigureAwait(false);
         }
 
@@ -1451,7 +1454,7 @@ internal sealed class ActionHostCoordinator
                 candidate,
                 prior: null,
                 allP5,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var finalOwnership = finalOwnershipResult.Value;
         if (!finalOwnershipResult.Succeeded || finalOwnership is null)
@@ -1466,7 +1469,7 @@ internal sealed class ActionHostCoordinator
         var exact = await RevalidateAsync(
                 invocation,
                 launch,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         if (!exact.MayMutate)
         {
@@ -1488,7 +1491,7 @@ internal sealed class ActionHostCoordinator
                 durability,
                 finalOwnership,
                 exact,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         using var evidence = evidenceResult.Value;
         if (!evidenceResult.Succeeded || evidence is null)
@@ -1504,7 +1507,7 @@ internal sealed class ActionHostCoordinator
             .AcceptRetainedStateAsync(
                 state,
                 evidence,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         var acceptance = acceptedResult.Value;
         if (!acceptedResult.Succeeded || acceptance is null)
@@ -1585,7 +1588,7 @@ internal sealed class ActionHostCoordinator
         var acceptedResult = await RestrictedStateService
             .RecoverVerifiedRetainedStateAcceptanceAsync(
                 state,
-                CancellationToken.None)
+                journal.ReconciliationToken)
             .ConfigureAwait(false);
         var acceptance = acceptedResult.Value;
         if (!acceptedResult.Succeeded || acceptance is null ||
@@ -1731,7 +1734,7 @@ internal sealed class ActionHostCoordinator
                         invocation,
                         state,
                         existingEvaluation,
-                        CancellationToken.None)
+                        journal.ReconciliationToken)
                     .ConfigureAwait(false);
                 cleanupResolution = MergeResolution(
                     cleanupResolution,
@@ -1746,7 +1749,7 @@ internal sealed class ActionHostCoordinator
                         invocation,
                         scope,
                         state,
-                        CancellationToken.None)
+                        journal.ReconciliationToken)
                     .ConfigureAwait(false);
                 if (terminal.Decision.Action ==
                     PublicationRecoveryAction.ReturnCommitted)
@@ -1756,7 +1759,7 @@ internal sealed class ActionHostCoordinator
                             invocation,
                             state,
                             terminal,
-                            CancellationToken.None)
+                            journal.ReconciliationToken)
                         .ConfigureAwait(false);
                     cleanupResolution = MergeResolution(
                         cleanupResolution,
@@ -1768,7 +1771,7 @@ internal sealed class ActionHostCoordinator
                 .PlanRetainedStateCleanupAsync(
                     state,
                     acceptance,
-                    CancellationToken.None)
+                    journal.ReconciliationToken)
                 .ConfigureAwait(false);
             using var cleanupAuthorization = cleanupPlan.Value;
             if (cleanupPlan.Succeeded && cleanupAuthorization is not null)
@@ -1783,7 +1786,7 @@ internal sealed class ActionHostCoordinator
                             acceptance,
                             cleanupAuthorization,
                             semanticExpiry),
-                        CancellationToken.None)
+                        journal.ReconciliationToken)
                     .ConfigureAwait(false);
                 cleanupResolution = MergeResolution(
                     cleanupResolution,

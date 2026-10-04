@@ -2612,7 +2612,7 @@ public sealed partial class AgentLoopTests
         var clock = new AdvancingTimeProvider();
         var chat = new ThrowingChatClient(_ =>
         {
-            clock.Advance(TimeSpan.FromSeconds(301));
+            clock.Advance(TimeSpan.FromSeconds(901));
             return Task.FromResult(Response(
                 TerminalCall("finish", "done"),
                 0,
@@ -2634,7 +2634,7 @@ public sealed partial class AgentLoopTests
         var clock = new AdvancingTimeProvider();
         var chat = new CancellationCallbackChatClient((_, _) =>
         {
-            clock.Advance(TimeSpan.FromSeconds(301));
+            clock.Advance(TimeSpan.FromSeconds(901));
             return Task.FromException<ProjectChatResponse>(
                 new InvalidOperationException("backend canary"));
         });
@@ -2645,6 +2645,98 @@ public sealed partial class AgentLoopTests
             clock).RunAsync(Request(), CancellationToken.None);
 
         AssertFailure(outcome, "agent_deadline_exceeded");
+    }
+
+    [Theory]
+    [InlineData(301, true)]
+    [InlineData(899, true)]
+    [InlineData(900, false)]
+    [InlineData(901, false)]
+    public async Task CurrentDeadlineAdmitsBeyondOldBoundaryAndRejectsExactExpiry(int seconds, bool success)
+    {
+        var clock = new DeadlineTestClock();
+        var chat = new ThrowingChatClient(_ =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(seconds));
+            return Task.FromResult(Response(TerminalCall("finish", "done"), 0, 0));
+        });
+        var outcome = await new AgentLoop(chat, new ScriptedToolExecutor(), clock)
+            .RunAsync(Request(), CancellationToken.None);
+        Assert.Equal(success, outcome.CompletedSessionEligible);
+        if (!success) AssertFailure(outcome, AgentFailureCodes.DeadlineExceeded);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task RetainedDeadlineMatchesItsCanonicalIdentity(int profileValue)
+    {
+        var profile = (AgentLimitProfile)profileValue;
+        var clock = new DeadlineTestClock();
+        var request = Request();
+        request = request with { StablePlan = request.StablePlan with { LimitsSha256 = AgentCanonical.LimitsSha256(profile) } };
+        var chat = new ThrowingChatClient(_ =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(300));
+            return Task.FromResult(Response(TerminalCall("finish", "done"), 0, 0));
+        });
+        var outcome = await new AgentLoop(chat, new ScriptedToolExecutor(), clock,
+            new AgentLimitAuthority("adapter", profile)).RunAsync(request, CancellationToken.None);
+        AssertFailure(outcome, AgentFailureCodes.DeadlineExceeded);
+        Assert.Equal(300, AgentLimits.RegistryFor(profile).Single(r => r.Name == "deadline_seconds").Value);
+    }
+
+    [Fact]
+    public async Task HostHeadroomBoundsPendingCallWithoutChangingCanonicalIdentity()
+    {
+        var clock = new DeadlineTestClock();
+        var chat = new BlockingChatClient();
+        var request = Request() with { RemainingHostTime = TimeSpan.FromSeconds(17) };
+        var running = new AgentLoop(chat, new ScriptedToolExecutor(), clock).RunAsync(request, default);
+        await chat.Entered.Task;
+        clock.Advance(TimeSpan.FromSeconds(16));
+        Assert.False(running.IsCompleted);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        AssertFailure(await running.WaitAsync(TimeSpan.FromSeconds(5)), AgentFailureCodes.DeadlineExceeded);
+        Assert.True(chat.ObservedToken.IsCancellationRequested);
+        Assert.Equal(AgentCanonical.LimitsSha256(), request.StablePlan.LimitsSha256);
+    }
+
+    [Fact]
+    public async Task CancellationWinsAtTheSharedDeadline()
+    {
+        var clock = new DeadlineTestClock();
+        using var cancellation = new CancellationTokenSource();
+        var chat = new ThrowingChatClient(_ =>
+        {
+            cancellation.Cancel();
+            clock.Advance(TimeSpan.FromSeconds(900));
+            return Task.FromResult(Response(TerminalCall("finish", "done"), 0, 0));
+        });
+        var outcome = await new AgentLoop(chat, new ScriptedToolExecutor(), clock).RunAsync(Request(), cancellation.Token);
+        AssertFailure(outcome, AgentFailureCodes.Cancelled);
+    }
+
+    [Fact]
+    public async Task ToolConsumesRemainingReviewTimeRatherThanRestartingItsBudget()
+    {
+        var clock = new DeadlineTestClock();
+        var chat = new ThrowingChatClient(_ =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(850));
+            return Task.FromResult(new ProjectChatResponse(new ProjectChatMessage("assistant",
+                [new ProjectToolCallContent("one", "read_file", "{\"path\":\"a.txt\"}"),
+                 new ProjectToolCallContent("two", "read_file", "{\"path\":\"b.txt\"}")]), new ProjectChatUsage(1, 1), 1));
+        });
+        var tools = new BlockingToolExecutor();
+        var running = new AgentLoop(chat, tools, clock).RunAsync(Request(), default);
+        await tools.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        clock.Advance(TimeSpan.FromSeconds(49));
+        Assert.False(running.IsCompleted);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        AssertFailure(await running.WaitAsync(TimeSpan.FromSeconds(5)), AgentFailureCodes.DeadlineExceeded);
+        Assert.Single(tools.Order);
+        Assert.True(tools.ObservedToken.IsCancellationRequested);
     }
 
     private static AgentRunRequest Request() => new(

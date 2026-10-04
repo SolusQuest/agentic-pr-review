@@ -152,6 +152,13 @@ internal static class StateReconciliationDiagnosticFormatter
     };
 }
 
+// Only trusted Host composition supplies this capability. Ordinary cancellation
+// cannot cancel reconciliation of a write which may already have committed.
+internal interface IStateReconciliationDeadline
+{
+    CancellationToken ReconciliationToken { get; }
+}
+
 internal sealed class PostUploadVisibilityWindow
 {
     private static readonly TimeSpan[] Delays =
@@ -207,9 +214,17 @@ internal sealed class PostUploadVisibilityWindow
         }
 
         var delay = Delays[scheduleIndex++];
-        await Task.Delay(delay, timeProvider, CancellationToken.None)
-            .ConfigureAwait(false);
-        return true;
+        var token = (timeProvider as IStateReconciliationDeadline)?.ReconciliationToken
+            ?? CancellationToken.None;
+        try
+        {
+            await Task.Delay(delay, timeProvider, token).ConfigureAwait(false);
+            return !token.IsCancellationRequested;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     internal void ReportFailure(StateReconciliationTerminal terminal)
