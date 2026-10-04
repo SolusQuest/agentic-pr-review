@@ -1702,7 +1702,8 @@ internal sealed class ActionHostCoordinator
                     PostAcceptanceIssuer,
                     authorization,
                     transaction,
-                    map);
+                    map,
+                    journal.ReconciliationToken);
                 if (inlineHook is null)
                 {
                     inlineWarning = true;
@@ -2239,18 +2240,21 @@ internal sealed class ActionHostCoordinator
         private PostAcceptanceInlineRequest(
             PostAcceptanceInlineAuthorization authorization,
             PostAcceptanceInlineTransactionIdentity transaction,
-            InlineCandidateMap candidateMap)
+            InlineCandidateMap candidateMap,
+            CancellationToken reconciliationToken)
         {
             this.authorization = authorization;
             this.transaction = transaction;
             CandidateMap = candidateMap;
+            ReconciliationToken = reconciliationToken;
         }
 
         internal static PostAcceptanceInlineRequest Create(
             object issuer,
             object authorization,
             object transaction,
-            InlineCandidateMap candidateMap)
+            InlineCandidateMap candidateMap,
+            CancellationToken reconciliationToken = default)
         {
             if (!ReferenceEquals(issuer, PostAcceptanceIssuer) ||
                 authorization is not PostAcceptanceInlineAuthorization issued ||
@@ -2259,10 +2263,12 @@ internal sealed class ActionHostCoordinator
                 throw new InvalidOperationException();
             }
 
-            return new(issued, bound, candidateMap);
+            return new(issued, bound, candidateMap, reconciliationToken);
         }
 
         internal InlineCandidateMap CandidateMap { get; }
+
+        internal CancellationToken ReconciliationToken { get; }
 
         internal bool TryConsume(
             out PostAcceptanceInlineOperation? operation) =>

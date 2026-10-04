@@ -150,7 +150,7 @@ public sealed class ActionHostAuthorizationArchitectureTests
             method => method.Name == "Create");
         Assert.Equal(
             [typeof(ActionHostGitHubToken),
-                typeof(AuthorizedStickyPublicationRequest)],
+                typeof(AuthorizedStickyPublicationRequest), typeof(CancellationToken)],
             factoryMethod.GetParameters()
                 .Select(static parameter => parameter.ParameterType));
         var readbackFactory = Assert.Single(factoryMethods,
@@ -159,7 +159,7 @@ public sealed class ActionHostAuthorizationArchitectureTests
             readbackFactory.ReturnType);
         Assert.Equal(
             [typeof(ActionHostGitHubToken),
-                typeof(AuthorizedStickyReadbackRequest)],
+                typeof(AuthorizedStickyReadbackRequest), typeof(CancellationToken)],
             readbackFactory.GetParameters()
                 .Select(static parameter => parameter.ParameterType));
 

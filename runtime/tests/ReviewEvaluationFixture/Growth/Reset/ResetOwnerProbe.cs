@@ -229,7 +229,7 @@ internal sealed class ResetProbeRemote : IStickyGitHubPublisherTransportFactory
     internal void RemoveTarget() => Sticky = null;
     internal void EditTarget() => Sticky = Sticky! with { Body = Sticky.Body + "changed" };
     internal void DuplicateTarget() => Duplicate = Sticky! with { Id = 8, ApiUrl = Api + "8", HtmlUrl = Html + "8" };
-    public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token, AuthorizedStickyPublicationRequest request)
+    public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token, AuthorizedStickyPublicationRequest request, CancellationToken reconciliationToken = default)
     {
         var hook = BeforeCreate;
         BeforeCreate = null;
@@ -238,7 +238,7 @@ internal sealed class ResetProbeRemote : IStickyGitHubPublisherTransportFactory
             Sticky = new(9, Api + "9", Html + "9", request.Rendered.Comment);
         return new Transport(this, request);
     }
-    public IStickyGitHubReadbackTransport CreateReadback(ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request) => new Transport(this, null);
+    public IStickyGitHubReadbackTransport CreateReadback(ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request, CancellationToken reconciliationToken = default) => new Transport(this, null);
     private sealed class Transport(ResetProbeRemote owner, AuthorizedStickyPublicationRequest? request) : IStickyGitHubPublisherTransport, IStickyGitHubReadbackTransport
     {
         public bool IsWithinOverallDeadline => true;

@@ -348,9 +348,9 @@ internal sealed class AuthorizedStickyReadbackRequest
 internal interface IStickyGitHubPublisherTransportFactory
 {
     IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
-        AuthorizedStickyPublicationRequest request);
+        AuthorizedStickyPublicationRequest request, CancellationToken reconciliationToken = default);
     IStickyGitHubReadbackTransport CreateReadback(ActionHostGitHubToken token,
-        AuthorizedStickyReadbackRequest request);
+        AuthorizedStickyReadbackRequest request, CancellationToken reconciliationToken = default);
 }
 
 internal interface IStickyGitHubReadbackTransport :

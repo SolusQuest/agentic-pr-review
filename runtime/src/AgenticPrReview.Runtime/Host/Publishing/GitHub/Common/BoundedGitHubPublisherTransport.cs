@@ -27,21 +27,21 @@ internal sealed class BoundedGitHubPublisherTransportFactory :
             throw new ArgumentNullException(nameof(handlerFactory));
 
     public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
-        AuthorizedStickyPublicationRequest request)
+        AuthorizedStickyPublicationRequest request, CancellationToken reconciliationToken = default)
     {
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(request);
         var exported = token.ExportForPrivateLaunch();
         return handlerFactory is null
-            ? BoundedGitHubPublisherTransport.Create(exported, request)
+            ? BoundedGitHubPublisherTransport.Create(exported, request, reconciliationToken)
             : BoundedGitHubPublisherTransport.CreateForTesting(
                 exported,
                 request,
-                handlerFactory());
+                handlerFactory(), reconciliationToken: reconciliationToken);
     }
 
     public IStickyGitHubReadbackTransport CreateReadback(
-        ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request)
+        ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request, CancellationToken reconciliationToken = default)
     {
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(request);
@@ -49,24 +49,24 @@ internal sealed class BoundedGitHubPublisherTransportFactory :
         return handlerFactory is null
             ? BoundedGitHubPublisherTransport.CreateReadback(
                 exported,
-                request)
+                request, reconciliationToken)
             : BoundedGitHubPublisherTransport.CreateReadbackForTesting(
                 exported,
                 request,
-                handlerFactory());
+                handlerFactory(), reconciliationToken: reconciliationToken);
     }
 
     public IInlineGitHubPublisherTransport Create(
-        AuthorizedInlinePublicationRequest request)
+        AuthorizedInlinePublicationRequest request, CancellationToken reconciliationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         var exported = request.Token.ExportForPrivateLaunch();
         return handlerFactory is null
-            ? BoundedGitHubPublisherTransport.CreateInline(exported, request)
+            ? BoundedGitHubPublisherTransport.CreateInline(exported, request, reconciliationToken)
             : BoundedGitHubPublisherTransport.CreateInlineForTesting(
                 exported,
                 request,
-                handlerFactory());
+                handlerFactory(), reconciliationToken: reconciliationToken);
     }
 }
 
@@ -89,6 +89,7 @@ internal sealed class BoundedGitHubPublisherTransport :
     private readonly TimeSpan _requestTimeout;
     private readonly TimeSpan _overallTimeout;
     private readonly IBoundedGitHubOperationClock _operation;
+    private readonly CancellationToken _reconciliationToken;
     private readonly SemaphoreSlim _responseReadGate = new(1, 1);
     private readonly R4PublicationIdentityV1? _stickyIdentity;
     private readonly AuthorizedStickyPublicationRequest? _stickyRequest;
@@ -111,7 +112,8 @@ internal sealed class BoundedGitHubPublisherTransport :
         R4PublicationIdentityV1? stickyIdentity,
         AuthorizedStickyPublicationRequest? stickyRequest,
         HttpMessageHandler handler, TimeSpan requestTimeout,
-        TimeSpan overallTimeout, IBoundedGitHubOperationClock operation)
+        TimeSpan overallTimeout, IBoundedGitHubOperationClock operation,
+        CancellationToken reconciliationToken)
     {
         Validate(token, authorization);
         _stickyIdentity = stickyIdentity;
@@ -125,6 +127,7 @@ internal sealed class BoundedGitHubPublisherTransport :
         _overallTimeout = overallTimeout;
         _operation = operation ?? throw new ArgumentNullException(
             nameof(operation));
+        _reconciliationToken = reconciliationToken;
         _client = new HttpClient(handler, true)
         {
             Timeout = Timeout.InfiniteTimeSpan,
@@ -133,42 +136,43 @@ internal sealed class BoundedGitHubPublisherTransport :
     }
 
     internal static BoundedGitHubPublisherTransport Create(string token,
-        AuthorizedStickyPublicationRequest request) => new(token,
+        AuthorizedStickyPublicationRequest request, CancellationToken reconciliationToken = default) => new(token,
             request.Authorization, request.Rendered.Identity, request,
             ActionHostGitHubAuthorizationTransport.CreateHandler(
                 TimeSpan.FromSeconds(10)),
             BoundedGitHubPublisherPolicy.RequestTimeout,
             BoundedGitHubPublisherPolicy.OverallTimeout,
-            new StopwatchBoundedGitHubOperationClock());
+            new StopwatchBoundedGitHubOperationClock(), reconciliationToken);
 
     internal static BoundedGitHubPublisherTransport CreateInline(string token,
-        AuthorizedInlinePublicationRequest request) => new(token,
+        AuthorizedInlinePublicationRequest request, CancellationToken reconciliationToken = default) => new(token,
             request.Authorization, null, null,
             ActionHostGitHubAuthorizationTransport.CreateHandler(
                 TimeSpan.FromSeconds(10)),
             BoundedGitHubPublisherPolicy.RequestTimeout,
             BoundedGitHubPublisherPolicy.OverallTimeout,
-            new StopwatchBoundedGitHubOperationClock());
+            new StopwatchBoundedGitHubOperationClock(), reconciliationToken);
 
     internal static BoundedGitHubPublisherTransport CreateInlineForTesting(
         string token, AuthorizedInlinePublicationRequest request,
         HttpMessageHandler handler, TimeSpan? requestTimeout = null,
         TimeSpan? overallTimeout = null,
-        IBoundedGitHubOperationClock? operation = null) => new(token,
+        IBoundedGitHubOperationClock? operation = null,
+        CancellationToken reconciliationToken = default) => new(token,
             request.Authorization, null, null, handler,
             requestTimeout ?? BoundedGitHubPublisherPolicy.RequestTimeout,
             overallTimeout ?? BoundedGitHubPublisherPolicy.OverallTimeout,
-            operation ?? new StopwatchBoundedGitHubOperationClock());
+            operation ?? new StopwatchBoundedGitHubOperationClock(), reconciliationToken);
 
     internal static IStickyGitHubReadbackTransport CreateReadback(string token,
-        AuthorizedStickyReadbackRequest request) =>
+        AuthorizedStickyReadbackRequest request, CancellationToken reconciliationToken = default) =>
         new ReadbackTransport(new(token, request.Authorization,
             request.ExpectedIdentity, null,
             ActionHostGitHubAuthorizationTransport.CreateHandler(
                 TimeSpan.FromSeconds(10)),
             BoundedGitHubPublisherPolicy.RequestTimeout,
             BoundedGitHubPublisherPolicy.OverallTimeout,
-            new StopwatchBoundedGitHubOperationClock()));
+            new StopwatchBoundedGitHubOperationClock(), reconciliationToken));
 
     internal static IStickyGitHubReadbackTransport CreateReadbackForTesting(
         string token,
@@ -176,7 +180,8 @@ internal sealed class BoundedGitHubPublisherTransport :
         HttpMessageHandler handler,
         TimeSpan? requestTimeout = null,
         TimeSpan? overallTimeout = null,
-        IBoundedGitHubOperationClock? operation = null) =>
+        IBoundedGitHubOperationClock? operation = null,
+        CancellationToken reconciliationToken = default) =>
         new ReadbackTransport(new(
             token,
             request.Authorization,
@@ -185,20 +190,21 @@ internal sealed class BoundedGitHubPublisherTransport :
             handler,
             requestTimeout ?? BoundedGitHubPublisherPolicy.RequestTimeout,
             overallTimeout ?? BoundedGitHubPublisherPolicy.OverallTimeout,
-            operation ?? new StopwatchBoundedGitHubOperationClock()));
+            operation ?? new StopwatchBoundedGitHubOperationClock(), reconciliationToken));
 
     internal static BoundedGitHubPublisherTransport CreateForTesting(
         string token, AuthorizedStickyPublicationRequest request,
         HttpMessageHandler handler, TimeSpan? requestTimeout = null,
         TimeSpan? overallTimeout = null,
-        IBoundedGitHubOperationClock? operation = null) => new(token,
+        IBoundedGitHubOperationClock? operation = null,
+        CancellationToken reconciliationToken = default) => new(token,
             request.Authorization, request.Rendered.Identity, request, handler,
             requestTimeout ?? BoundedGitHubPublisherPolicy.RequestTimeout,
             overallTimeout ?? BoundedGitHubPublisherPolicy.OverallTimeout,
-            operation ?? new StopwatchBoundedGitHubOperationClock());
+            operation ?? new StopwatchBoundedGitHubOperationClock(), reconciliationToken);
 
     public bool IsWithinOverallDeadline =>
-        !_disposed && _operation.Elapsed < _overallTimeout;
+        !_disposed && !_reconciliationToken.IsCancellationRequested && _operation.Elapsed < _overallTimeout;
 
     public async Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
         ListIssueCommentsAsync(int page, CancellationToken cancellationToken)
@@ -643,7 +649,7 @@ internal sealed class BoundedGitHubPublisherTransport :
         CancellationToken callerCancellation,
         bool exactBatchValidation = false)
     {
-        if (callerCancellation.IsCancellationRequested)
+        if (callerCancellation.IsCancellationRequested || _reconciliationToken.IsCancellationRequested)
             return Fail<CapturedResponse>(
                 BoundedGitHubHttpOutcome.CancelledBeforeSend,
                 BoundedGitHubPublisherReason.Deadline);
@@ -660,10 +666,13 @@ internal sealed class BoundedGitHubPublisherTransport :
                 BoundedGitHubPublisherReason.Deadline);
         using var deadline = new CancellationTokenSource(
             remaining < _requestTimeout ? remaining : _requestTimeout);
-        using var linked = mutation ? null :
-            CancellationTokenSource.CreateLinkedTokenSource(
-                callerCancellation, deadline.Token);
-        var token = mutation ? deadline.Token : linked!.Token;
+        // Ordinary cancellation does not abandon an already dispatched mutation.
+        // The Host reconciliation deadline remains absolute for every request.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            mutation ? CancellationToken.None : callerCancellation,
+            deadline.Token, _reconciliationToken);
+        var token = linked.Token;
+        var dispatched = false;
         try
         {
             using var request = new HttpRequestMessage(method,
@@ -683,7 +692,10 @@ internal sealed class BoundedGitHubPublisherTransport :
                     new MediaTypeHeaderValue("application/json")
                     { CharSet = "utf-8" };
             }
-            using var response = await _client.SendAsync(request,
+            token.ThrowIfCancellationRequested();
+            callerCancellation.ThrowIfCancellationRequested();
+            dispatched = true;
+            using var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(_client, request,
                 HttpCompletionOption.ResponseHeadersRead, token);
             var read = await ReadBoundedAsync(response.Content, token);
             if (read.Body is null)
@@ -763,9 +775,9 @@ internal sealed class BoundedGitHubPublisherTransport :
         }
         catch (OperationCanceledException)
         {
-            return Fail<CapturedResponse>(mutation
+            return Fail<CapturedResponse>(mutation && dispatched
                     ? BoundedGitHubHttpOutcome.OutcomeUnknown
-                    : callerCancellation.IsCancellationRequested
+                    : callerCancellation.IsCancellationRequested || _reconciliationToken.IsCancellationRequested
                         ? BoundedGitHubHttpOutcome.CancelledBeforeSend
                         : BoundedGitHubHttpOutcome.KnownNotSent,
                 BoundedGitHubPublisherReason.Deadline);

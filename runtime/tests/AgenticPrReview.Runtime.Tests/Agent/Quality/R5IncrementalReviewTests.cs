@@ -483,17 +483,17 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             internal int FailedDiscovery { get; set; }
             internal int PrewriteDiscoveries { get; private set; }
             internal void CopyStickyToAnotherIdentity() => Sticky = Sticky! with { Id = 8, ApiUrl = Api + "/issues/comments/8", HtmlUrl = Html + "#issuecomment-8" };
-            public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token, AuthorizedStickyPublicationRequest request)
+            public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token, AuthorizedStickyPublicationRequest request, CancellationToken reconciliationToken = default)
             {
                 if (Sticky is not null) Assert.Equal(R4StickyMarker.Inspect(Sticky.Body).Identity!.ScopeSha256, request.Rendered.Identity.ScopeSha256);
                 return new StickyTransport(this, request);
             }
-            public IStickyGitHubReadbackTransport CreateReadback(ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request)
+            public IStickyGitHubReadbackTransport CreateReadback(ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request, CancellationToken reconciliationToken = default)
             {
                 var fail = FailedDiscovery != 0 && StickyWrites.Count == 1 && ++PrewriteDiscoveries == FailedDiscovery;
                 return new StickyTransport(this, null, fail);
             }
-            public IInlineGitHubPublisherTransport Create(AuthorizedInlinePublicationRequest request)
+            public IInlineGitHubPublisherTransport Create(AuthorizedInlinePublicationRequest request, CancellationToken reconciliationToken = default)
             { InlineCreates++; Maps.Add(request.CandidateMap); return new InlineTransport(this, request); }
 
             private sealed class StickyTransport(IncrementalRemote owner, AuthorizedStickyPublicationRequest? request, bool failDiscovery = false) : IStickyGitHubPublisherTransport, IStickyGitHubReadbackTransport

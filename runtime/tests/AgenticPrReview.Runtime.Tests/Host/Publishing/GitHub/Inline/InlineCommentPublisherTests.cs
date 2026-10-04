@@ -1524,7 +1524,7 @@ public sealed class InlineCommentPublisherTests
         IInlineGitHubPublisherTransportFactory
     {
         public IInlineGitHubPublisherTransport Create(
-            AuthorizedInlinePublicationRequest request) => transport;
+            AuthorizedInlinePublicationRequest request, CancellationToken reconciliationToken = default) => transport;
     }
 
     private sealed class FakeInlineTransport : IInlineGitHubPublisherTransport

@@ -246,7 +246,7 @@ internal sealed class InlinePublicationResult
 internal interface IInlineGitHubPublisherTransportFactory
 {
     IInlineGitHubPublisherTransport Create(
-        AuthorizedInlinePublicationRequest request);
+        AuthorizedInlinePublicationRequest request, CancellationToken reconciliationToken = default);
 }
 
 internal interface IInlineGitHubPublisherTransport : IDisposable

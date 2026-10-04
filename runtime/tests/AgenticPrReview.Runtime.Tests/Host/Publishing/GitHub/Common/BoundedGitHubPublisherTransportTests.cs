@@ -11,6 +11,52 @@ namespace AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Common;
 public sealed class BoundedGitHubPublisherTransportTests
 {
     [Fact]
+    public async Task DispatchedStickyIgnoresOrdinaryCancellationButStopsAtAbsoluteDeadline()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        using var caller = new CancellationTokenSource();
+        using var horizon = new CancellationTokenSource();
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<string>();
+        using var transport = BoundedGitHubPublisherTransport.CreateForTesting(
+            data.Token.ExportForPrivateLaunch(), data.Request,
+            new DelegateHandler(async (request, token) =>
+            {
+                calls.Add(request.Method.Method);
+                if (request.Method == HttpMethod.Get) return Json(HttpStatusCode.OK, "[]");
+                entered.SetResult(token);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                throw new InvalidOperationException();
+            }), reconciliationToken: horizon.Token);
+        await AuthorizeAbsentAsync(transport);
+        var mutation = transport.MutateStickyCommentAsync(caller.Token);
+        var observed = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        caller.Cancel();
+        Assert.False(observed.IsCancellationRequested);
+        horizon.Cancel();
+        var result = await mutation.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.True(observed.IsCancellationRequested);
+        Assert.Equal(BoundedGitHubHttpOutcome.OutcomeUnknown, result.Outcome);
+        var readback = await transport.ListIssueCommentsAsync(1, CancellationToken.None);
+        Assert.Null(readback.Value);
+        Assert.Equal(new[] { "GET", "POST" }, calls);
+    }
+
+    [Fact]
+    public async Task ExpiredAbsoluteDeadlineDoesNotEnterHttpHandler()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        using var horizon = new CancellationTokenSource();
+        horizon.Cancel();
+        using var transport = BoundedGitHubPublisherTransport.CreateForTesting(
+            data.Token.ExportForPrivateLaunch(), data.Request,
+            new DelegateHandler(_ => throw new InvalidOperationException("No dispatch is authorized.")),
+            reconciliationToken: horizon.Token);
+        var result = await transport.ListIssueCommentsAsync(1, CancellationToken.None);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
     public async Task FullPageWithoutNextRelationIsTerminalAndRequestIsExact()
     {
         var data = await StickyPublicationTestData.CreateAsync();

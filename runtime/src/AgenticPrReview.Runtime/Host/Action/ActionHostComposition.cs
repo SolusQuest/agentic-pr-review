@@ -497,15 +497,15 @@ internal sealed class JournaledStickyPublisherTransportFactory(
 {
     public IStickyGitHubPublisherTransport Create(
         ActionHostGitHubToken token,
-        AuthorizedStickyPublicationRequest request) =>
+        AuthorizedStickyPublicationRequest request, CancellationToken reconciliationToken = default) =>
         new JournaledStickyPublisherTransport(
-            inner.Create(token, request),
+            inner.Create(token, request, journal.ReconciliationToken),
             journal);
 
     public IStickyGitHubReadbackTransport CreateReadback(
         ActionHostGitHubToken token,
-        AuthorizedStickyReadbackRequest request) =>
-        new JournaledStickyReadbackTransport(inner.CreateReadback(token, request), journal);
+        AuthorizedStickyReadbackRequest request, CancellationToken reconciliationToken = default) =>
+        new JournaledStickyReadbackTransport(inner.CreateReadback(token, request, journal.ReconciliationToken), journal);
 }
 
 internal sealed class JournaledStickyReadbackTransport(
