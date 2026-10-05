@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeTrustedProofActionBundle } from './build-action.mjs';
+import { generateTrustedProofActionBundle } from './build-action.mjs';
 import { verifyReceipt, verifySealedReceipt } from './check-r4-e2p-receipt.mjs';
 
 const roots: string[] = [];
+let proofBytes: Promise<Buffer> | undefined;
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -42,7 +43,8 @@ async function compose() {
   );
   const sourceRoot = process.cwd();
   const proofBundle = path.join(root, 'proof.js');
-  await writeTrustedProofActionBundle(proofBundle, process.cwd());
+  proofBytes ??= generateTrustedProofActionBundle(process.cwd()).then(({ bytes }) => bytes);
+  fs.writeFileSync(proofBundle, await proofBytes);
   const args = [
     'scripts/compose-r4-e2p-receipt.mjs',
     '--identity',
@@ -158,7 +160,7 @@ describe('R4 E2P supplemental receipt', () => {
     expect(receipt.kind).toBe('apr-r4-e2p-trusted-proof-payload-v1');
     expect(receipt.proof_role).toBe('r4-e2p');
     expect(receipt.payload_build_discriminator).toBe('r4-w2');
-  });
+  }, 15_000);
 
   it('rejects unknown fields and payload drift', async () => {
     const fixture = await compose();

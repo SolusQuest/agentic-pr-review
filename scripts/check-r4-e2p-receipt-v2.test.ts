@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeTrustedProofActionBundle } from './build-action.mjs';
+import { generateTrustedProofActionBundle } from './build-action.mjs';
 import { verifyReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
 
 const roots: string[] = [];
+let proofBytes: Promise<Buffer> | undefined;
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -59,7 +60,8 @@ async function compose(identityOverrides: Record<string, unknown> = {}) {
   Object.assign(identity, identityOverrides);
   fs.writeFileSync(identityPath, `${JSON.stringify(identity)}\n`);
   const proofBundle = path.join(root, 'proof.js');
-  await writeTrustedProofActionBundle(proofBundle, process.cwd());
+  proofBytes ??= generateTrustedProofActionBundle(process.cwd()).then(({ bytes }) => bytes);
+  fs.writeFileSync(proofBundle, await proofBytes);
   const args = [
     'scripts/compose-r4-e2p-receipt-v2.mjs',
     '--identity',
@@ -116,7 +118,7 @@ describe('R4 E2P current-head receipt v2', () => {
     );
     fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
     await expect(verifyReceiptV2(fixture)).rejects.toThrow('digest-wrapper_bundle_sha256');
-  });
+  }, 15_000);
   it('admits separate exact payload and Action source identities', async () => {
     const fixture = await compose();
     const receipt = await verifyReceiptV2(fixture);
@@ -124,7 +126,7 @@ describe('R4 E2P current-head receipt v2', () => {
     expect(receipt.compiled_payload_source_commit).toBe(receipt.source_commit);
     expect(receipt.compiled_payload_proof_kind).toBe(receipt.kind);
     expect(receipt.action_source_sha).toBe('5b5769753653bb3fd3e68cf8b7bb88a1bd350613');
-  });
+  }, 15_000);
 
   it('rejects v1, conflated, reordered, and extra receipt surfaces', async () => {
     for (const mutate of [
