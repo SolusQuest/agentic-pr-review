@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { inspectPackage, sha256 } from '../../scripts/release/build-payload.format.mjs';
 
@@ -71,10 +71,12 @@ async function run(name, options = {}) {
   const root = join(work, String(results.length));
   const action = join(root, 'action'),
     temp = join(root, 'tmp'),
+    runnerTemp = join(root, 'runner-temp'),
     workspace = join(root, 'workspace');
   await Promise.all([
     mkdir(join(action, 'dist'), { recursive: true }),
     mkdir(temp, { recursive: true }),
+    mkdir(runnerTemp, { recursive: true }),
     mkdir(workspace, { recursive: true }),
   ]);
   await copyFile(
@@ -135,14 +137,21 @@ async function run(name, options = {}) {
     assert.equal(request.headers.authorization, undefined);
     const prefix = '/repos/' + repository;
     let document;
-    if (request.url === prefix + '/commits/' + receipt.identity.releaseVersion)
+    if (request.url === prefix + '/commits/' + receipt.identity.releaseVersion) {
+      assert.equal(request.headers.accept, 'application/vnd.github+json');
       document = { sha: actionT };
-    else if (request.url.startsWith(prefix + '/contents/')) {
+    } else if (request.url.startsWith(prefix + '/contents/')) {
       const relative = request.url
         .slice((prefix + '/contents/.github/actions/agentic-pr-review/').length)
         .split('?')[0];
       assert.equal(new URL(request.url, 'http://fixture').searchParams.get('ref'), actionT);
       document = metadata[relative];
+      // Real checked bundle exceeds 1 MB: generic Contents JSON is unsupported.
+      if (request.headers.accept !== 'application/vnd.github.object+json') {
+        response.writeHead(415).end();
+        return;
+      }
+      document = { ...document, content: '', encoding: 'none' };
     } else if (request.url === prefix + '/releases/tags/' + map.tag)
       document = { id: 123, tag_name: map.tag, draft: false };
     else if (request.url === prefix + '/releases/123/assets?per_page=100')
@@ -184,6 +193,7 @@ async function run(name, options = {}) {
     TMPDIR: temp,
     TMP: temp,
     TEMP: temp,
+    RUNNER_TEMP: options.runnerWorkspace ? workspace : runnerTemp,
     GITHUB_WORKSPACE: workspace,
     GITHUB_EVENT_PATH: event,
     GITHUB_REPOSITORY: repository,
@@ -215,6 +225,13 @@ async function run(name, options = {}) {
     INPUT_EXECUTABLE: 'PRIVATE_D3_PATH_CANARY',
     'INPUT_PROOF-PROFILE': 'final-bootstrap',
   };
+  if (options.genericTempKey) {
+    delete env.TMPDIR;
+    delete env.TMP;
+    delete env.TEMP;
+    env[options.genericTempKey] = workspace;
+  }
+  if (options.missingRunnerTemp) delete env.RUNNER_TEMP;
   const args = [
     '--import',
     join(repo, 'tests/distribution/generated-action-preload.mjs'),
@@ -306,6 +323,7 @@ async function run(name, options = {}) {
       assert.deepEqual(record, {
         kind: 'presentation',
         payloadGone: true,
+        payloadParentGone: true,
         bridgeGone: true,
         admittedHandleClosed: true,
       });
@@ -315,7 +333,9 @@ async function run(name, options = {}) {
       options.wrongRepository ||
       options.contentMismatch ||
       options.badDigest ||
-      options.acquisitionCancel
+      options.acquisitionCancel ||
+      options.runnerWorkspace ||
+      options.missingRunnerTemp
     ) {
       assert.equal(spawned, undefined);
       assert.equal(exit.code, 1);
@@ -334,6 +354,8 @@ async function run(name, options = {}) {
       assert.ok(spawned);
       assert.deepEqual(spawned.args, []);
       assert.equal(spawned.command, '/proc/self/fd/3');
+      assert.equal(dirname(spawned.stagingParent), runnerTemp);
+      assert.equal(spawned.parentMode, 0o700);
       assert.deepEqual(Object.keys(spawned.env).sort(), [
         'DOTNET_CLI_TELEMETRY_OPTOUT',
         'DOTNET_NOLOGO',
@@ -386,6 +408,17 @@ async function run(name, options = {}) {
         );
     }
     assert.deepEqual(await readdir(temp), []);
+    assert.deepEqual(await readdir(runnerTemp), []);
+    assert.deepEqual(await readdir(workspace), []);
+    const parents = records.filter((record) => record.kind === 'payload-parent');
+    for (const parent of parents) {
+      assert.equal(dirname(parent.path), runnerTemp);
+      assert.equal(parent.mode, 0o700);
+      assert.equal(
+        records.filter((record) => record.kind === 'removed' && record.path === parent.path).length,
+        1,
+      );
+    }
     results.push({
       name,
       status: actual.status,
@@ -414,6 +447,10 @@ try {
   await run('immutable-tag', { tag: true });
   await run('untrusted-event', { untrusted: true });
   await run('native-signal', { nativeCancel: true });
+  await run('runner-temp-in-workspace', { runnerWorkspace: true });
+  await run('missing-runner-temp', { missingRunnerTemp: true });
+  for (const genericTempKey of ['TMPDIR', 'TMP', 'TEMP'])
+    await run('hostile-' + genericTempKey, { genericTempKey });
   console.log(
     'D3_GENERATED_ACTION_NATIVE ' +
       JSON.stringify({

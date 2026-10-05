@@ -1,7 +1,5 @@
 import { DefaultArtifactClient } from '@actions/artifact';
 import { getOctokit } from '@actions/github';
-import { realpath } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,6 +7,7 @@ import { readBoundedFile } from '../../scripts/release/build-payload.format.mjs'
 import { resolveInstalledActionSource } from './launcher/action-source.js';
 import { parsePayloadMap, PAYLOAD_MAP_MAXIMUM_BYTES } from './launcher/payload-map.js';
 import { resolveReleasePayload } from './launcher/release-payload.js';
+import { acquireInPayloadStaging } from './launcher/payload-staging.js';
 import { parseStrictJson } from './launcher/strict-json.js';
 
 import {
@@ -164,18 +163,20 @@ export async function runProductionActionWrapper(
           fail('wrapper_payload_map_unbound');
         parsePayloadMap(mapBytes);
         const signal = AbortSignal.any([termination.signal, AbortSignal.timeout(60_000)]);
-        const stagingParent = await realpath(tmpdir());
-        const workspace = await realpath(required(process.env.GITHUB_WORKSPACE));
-        if (stagingParent === workspace || stagingParent.startsWith(`${workspace}${path.sep}`))
-          fail('wrapper_payload_invalid');
-        const actionSourceSha = await resolveInstalledActionSource({
-          actionRoot,
-          mapBytes,
-          actionRepository: process.env.GITHUB_ACTION_REPOSITORY,
-          actionRef: process.env.GITHUB_ACTION_REF,
-          signal,
+        return acquireInPayloadStaging({
+          runnerTemp: required(process.env.RUNNER_TEMP),
+          workspace: required(process.env.GITHUB_WORKSPACE),
+          acquire: async (stagingParent) => {
+            const actionSourceSha = await resolveInstalledActionSource({
+              actionRoot,
+              mapBytes,
+              actionRepository: process.env.GITHUB_ACTION_REPOSITORY,
+              actionRef: process.env.GITHUB_ACTION_REF,
+              signal,
+            });
+            return resolveReleasePayload({ mapBytes, actionSourceSha, stagingParent, signal });
+          },
         });
-        return resolveReleasePayload({ mapBytes, actionSourceSha, stagingParent, signal });
       },
     });
   } finally {

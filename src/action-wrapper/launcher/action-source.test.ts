@@ -15,7 +15,7 @@ afterEach(async () => {
   }
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function fixture(mutation?: string) {
+async function fixture(mutation?: string, largeBundle = false, defaultBundleMediaType = false) {
   const root = await mkdtemp(path.join(tmpdir(), 'apr-action-t-'));
   roots.push(root);
   const version = 'v0.0.0-internal.1',
@@ -57,10 +57,11 @@ async function fixture(mutation?: string) {
   const mapBytes = Buffer.from(JSON.stringify(map));
   await mkdir(path.join(root, 'dist'));
   await writeFile(path.join(root, 'action.yml'), 'metadata\n');
-  await writeFile(path.join(root, 'dist/index.js'), 'bundle\n');
+  const bundle = largeBundle ? Buffer.alloc(2 * 1024 * 1024, 'x') : Buffer.from('bundle\n');
+  await writeFile(path.join(root, 'dist/index.js'), bundle);
   const files: Record<string, Buffer> = {
     'action.yml': Buffer.from('metadata\n'),
-    'dist/index.js': Buffer.from('bundle\n'),
+    'dist/index.js': bundle,
     'payload-map.json': mapBytes,
   };
   const calls: string[] = [];
@@ -86,16 +87,31 @@ async function fixture(mutation?: string) {
       return;
     }
     if (url.pathname.includes('/commits/')) {
+      if (request.headers.accept !== 'application/vnd.github+json') {
+        response.writeHead(415).end();
+        return;
+      }
       response.end(JSON.stringify({ sha: mutation === 'bad-commit' ? 'main' : 'b'.repeat(40) }));
       return;
     }
     const relative = url.pathname.split('/.github/actions/agentic-pr-review/')[1]!;
     const bytes = files[relative]!;
+    // The Contents API only supports object/raw representations for 1-100 MB files.
+    // Raw would omit the object metadata this resolver needs; reject default JSON.
+    if (
+      bytes.length > 1024 * 1024 &&
+      request.headers.accept !== 'application/vnd.github.object+json'
+    ) {
+      response.writeHead(415).end();
+      return;
+    }
     response.end(
       JSON.stringify({
         type: mutation === 'directory' ? 'dir' : 'file',
         path: mutation === 'path' ? 'other' : '.github/actions/agentic-pr-review/' + relative,
         size: bytes.length + (mutation === 'size' ? 1 : 0),
+        content: '',
+        encoding: 'none',
         sha:
           mutation === 'digest'
             ? '0'.repeat(40)
@@ -114,7 +130,9 @@ async function fixture(mutation?: string) {
     calls.push(url.pathname + url.search);
     return httpRequest(
       new URL(url.pathname + url.search, `http://127.0.0.1:${address.port}`),
-      options,
+      defaultBundleMediaType && url.pathname.endsWith('/dist/index.js')
+        ? { ...options, headers: { ...options.headers, Accept: 'application/vnd.github+json' } }
+        : options,
       callback,
     );
   });
@@ -128,6 +146,22 @@ async function fixture(mutation?: string) {
   return { resolver, request, calls, version: map.payload.identity.releaseVersion };
 }
 describe('installed Action T binding', () => {
+  it('rejects default Contents media type specifically at the multi-megabyte bundle', async () => {
+    const { resolver, request, calls } = await fixture(undefined, true, true);
+    await expect(resolver(request)).rejects.toThrow('wrapper_action_source_invalid');
+    expect(calls).toHaveLength(3);
+    expect(calls[2]).toContain('/dist/index.js?ref=');
+  });
+  it.each([false, true])(
+    'binds a multi-megabyte bundle using bounded object metadata (tag=%s)',
+    async (tag) => {
+      const { resolver, request, calls, version } = await fixture(undefined, true);
+      expect(await resolver({ ...request, actionRef: tag ? version : request.actionRef })).toBe(
+        'b'.repeat(40),
+      );
+      expect(calls).toHaveLength(tag ? 4 : 3);
+    },
+  );
   it('uses exact SHA or protected version tag and verifies all three installed blobs', async () => {
     const { resolver, request, calls, version } = await fixture();
     expect(await resolver(request)).toBe('b'.repeat(40));

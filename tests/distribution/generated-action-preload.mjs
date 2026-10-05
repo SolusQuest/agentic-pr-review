@@ -10,7 +10,17 @@ const config = JSON.parse(fs.readFileSync(process.env.APR_D3_FIXTURE_CONFIG, 'ut
 const append = fs.appendFileSync.bind(fs);
 const log = (value) => append(config.audit, JSON.stringify(value) + '\n');
 const active = new Map();
+const parents = [];
 let native;
+const originalMkdtemp = fs.promises.mkdtemp.bind(fs.promises);
+fs.promises.mkdtemp = async (...args) => {
+  const result = await originalMkdtemp(...args);
+  if (path.basename(String(args[0])) === 'apr-payload-') {
+    parents.push(result);
+    log({ kind: 'payload-parent', path: result, mode: fs.statSync(result).mode & 0o777 });
+  }
+  return result;
+};
 const originalOpen = fs.promises.open.bind(fs.promises);
 fs.promises.open = async (...args) => {
   const handle = await originalOpen(...args);
@@ -52,6 +62,7 @@ childProcess.spawn = (command, args, options) => {
       fd,
       executable,
       payloadRoot: path.dirname(path.dirname(executable)),
+      stagingParent: path.dirname(path.dirname(path.dirname(executable))),
       bridgeRoot: options.cwd,
     };
     log({
@@ -63,6 +74,7 @@ childProcess.spawn = (command, args, options) => {
       env: options.env,
       dev: stat.dev,
       ino: stat.ino,
+      parentMode: fs.statSync(native.stagingParent).mode & 0o777,
     });
     const originalEnd = child.stdin.end.bind(child.stdin);
     child.stdin.end = (...endArgs) => {
@@ -96,6 +108,7 @@ fs.appendFileSync = (...args) => {
     log({
       kind: 'presentation',
       payloadGone: !native || !fs.existsSync(native.payloadRoot),
+      payloadParentGone: parents.every((parent) => !fs.existsSync(parent)),
       bridgeGone: !native || !fs.existsSync(native.bridgeRoot),
       admittedHandleClosed: !native || !active.has(native.fd),
     });

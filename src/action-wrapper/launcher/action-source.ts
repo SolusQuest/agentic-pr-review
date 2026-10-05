@@ -57,8 +57,14 @@ async function resolve(
     signal.throwIfAborted();
     const source = lowerHex(actionRef, 40)
       ? actionRef
-      : record(await metadata(`/commits/${map.payload.identity.releaseVersion}`, transport, signal))
-          .sha;
+      : record(
+          await metadata(
+            `/commits/${map.payload.identity.releaseVersion}`,
+            'application/vnd.github+json',
+            transport,
+            signal,
+          ),
+        ).sha;
     if (!lowerHex(source, 40)) fail('wrapper_action_source_invalid');
     for (const [relative, maximum] of installedFiles) {
       const bytes =
@@ -67,7 +73,12 @@ async function resolve(
           : await readBoundedFile(path.join(actionRoot, relative), maximum);
       signal.throwIfAborted();
       const info = record(
-        await metadata(`/contents/${ACTION_PATH}/${relative}?ref=${source}`, transport, signal),
+        await metadata(
+          `/contents/${ACTION_PATH}/${relative}?ref=${source}`,
+          'application/vnd.github.object+json',
+          transport,
+          signal,
+        ),
       );
       const blobSha = createHash('sha1')
         .update(`blob ${bytes.length}\0`)
@@ -90,6 +101,7 @@ async function resolve(
 
 async function metadata(
   route: string,
+  accept: 'application/vnd.github+json' | 'application/vnd.github.object+json',
   transport: RepositoryTestPayloadTransport,
   signal: AbortSignal,
 ): Promise<unknown> {
@@ -103,7 +115,7 @@ async function metadata(
         signal,
         headers: {
           'User-Agent': 'agentic-pr-review-action-source',
-          Accept: 'application/vnd.github+json',
+          Accept: accept,
           'X-GitHub-Api-Version': '2022-11-28',
         },
       },

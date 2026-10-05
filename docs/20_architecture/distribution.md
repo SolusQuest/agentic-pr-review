@@ -21,6 +21,8 @@ The distribution must:
 
 The checked-in nested Action metadata, payload-map.json and generated Node 24 bundle form the ordinary r7-d0 entrypoint. Repository-controlled r4-w2 prepared proof uses a separately generated fixed private bundle. The unbound ordinary map provides no release or supported downstream installation.
 
+With an authorized map, installed Action source binding uses bounded GitHub Contents object metadata, including for the multi-megabyte bundle. Payload acquisition owns a unique 0700 directory beneath runner-provided RUNNER_TEMP outside GITHUB_WORKSPACE; generic TMPDIR/TMP/TEMP values do not select that parent. Acquisition failures and completed payload disposal remove it before presentation.
+
 The wrapper may:
 
 - read Action inputs;
