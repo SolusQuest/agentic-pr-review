@@ -50,7 +50,7 @@ function assertSource(job, expected) {
   }
 }
 
-function assertIsolatedLane(job, proofCommands, terminalClean) {
+function assertIsolatedLane(job, proofCommands, terminalClean, exactPackageSdk = false) {
   assert.equal(job['runs-on'], 'ubuntu-24.04');
   assert.equal(job.needs, undefined, 'Proof lanes must be independently schedulable');
   assert.equal(job.concurrency, undefined, 'Proof lanes must not serialize through concurrency');
@@ -64,7 +64,12 @@ function assertIsolatedLane(job, proofCommands, terminalClean) {
   assert.equal(node[0].with?.['node-version'], 24);
   assert.equal(node[0].with?.cache, 'npm');
   assert.equal(dotnet.length, 1);
-  assert.equal(dotnet[0].with?.['global-json-file'], 'global.json');
+  if (exactPackageSdk) {
+    assert.deepEqual(dotnet[0].with, { 'dotnet-version': '10.0.109' });
+    assert.deepEqual(dotnet[0].env, { DOTNET_INSTALL_DIR: '${{ runner.temp }}/r7-d1-dotnet' });
+  } else {
+    assert.equal(dotnet[0].with?.['global-json-file'], 'global.json');
+  }
   const install = requireRun(job, 'npm ci');
   const apt = runs(job).find((step) =>
     step.run.includes('sudo apt-get install -y clang zlib1g-dev'),
@@ -299,7 +304,7 @@ export function verifyWorkflow(workflow) {
       }
     }
   }
-  assertIsolatedLane(jobs['runtime-core'], coreProofs, true);
+  assertIsolatedLane(jobs['runtime-core'], coreProofs, true, true);
   requireRun(jobs['runtime-core'], 'node scripts/verify-runtime-ci-workflow.mjs --self-test');
   const admissions = runs(jobs['runtime-core']).filter(
     (step) => step.run.trim() === 'npm run r4:trusted-proof:fixture-admission',
@@ -791,6 +796,36 @@ function verifyV2Mutations(workflow, programs) {
 
 function verifyMutations(workflow, program) {
   const mutations = [
+    (w) => {
+      const sdk = w.jobs['runtime-core'].steps.find(
+        (step) => step.uses === 'actions/setup-dotnet@v5',
+      );
+      sdk.with['dotnet-version'] = '10.0.112';
+    },
+    (w) => {
+      const sdk = w.jobs['runtime-core'].steps.find(
+        (step) => step.uses === 'actions/setup-dotnet@v5',
+      );
+      sdk.with = { 'global-json-file': 'global.json' };
+    },
+    (w) => {
+      const sdk = w.jobs['runtime-core'].steps.find(
+        (step) => step.uses === 'actions/setup-dotnet@v5',
+      );
+      delete sdk.env.DOTNET_INSTALL_DIR;
+    },
+    (w) => {
+      const sdk = w.jobs['runtime-core'].steps.find(
+        (step) => step.uses === 'actions/setup-dotnet@v5',
+      );
+      sdk.env.DOTNET_INSTALL_DIR = '/usr/share/dotnet';
+    },
+    (w) => {
+      const sdk = w.jobs['runtime-core'].steps.find(
+        (step) => step.uses === 'actions/setup-dotnet@v5',
+      );
+      sdk.with['global-json-file'] = 'global.json';
+    },
     (w) => {
       w.jobs['r4-action-host'].strategy.matrix.mode = ['framework'];
     },
