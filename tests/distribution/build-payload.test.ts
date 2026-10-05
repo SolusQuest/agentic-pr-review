@@ -33,7 +33,10 @@ const fixtureBinary = () => {
   return bytes;
 };
 const notices = Buffer.from('Synthetic test-only notice; no real binary or release candidate.\n');
-const native = { needed: ['libc.so.6', 'libm.so.6'], runtimeLoaded: ['libssl.so.3'] };
+const native = {
+  needed: ['ld-linux-x86-64.so.2', 'libc.so.6', 'libm.so.6'],
+  runtimeLoaded: ['libssl.so.3'],
+};
 function inputs(version = 'v0.0.0-internal.1') {
   return {
     releaseVersion: version,
@@ -600,4 +603,16 @@ test.each([
   const value = inputs();
   value.dependencies[0].id = id;
   expect(() => packageFixture(value)).toThrow('invalid_dependency_inventory');
+});
+
+test.each([
+  'ld-musl-x86_64.so.1',
+  '../ld-linux-x86-64.so.2',
+  '/lib64/ld-linux-x86-64.so.2',
+  'libc.so.6\0extra',
+])('rejects a wrong-platform or unsafe native soname %j', (name) => {
+  const p = inputs();
+  expect(() =>
+    encodePackage(fixtureBinary(), notices, p, { needed: [name], runtimeLoaded: ['libssl.so.3'] }),
+  ).toThrow('invalid_native_inventory');
 });

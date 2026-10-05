@@ -212,7 +212,8 @@ function validateNative(native) {
     for (const name of native[field]) {
       requireThat(
         typeof name === 'string' &&
-          /^lib[a-zA-Z0-9_.+-]+\.so(?:\.[0-9]+)*$/.test(name) &&
+          (/^lib[a-zA-Z0-9_.+-]+\.so(?:\.[0-9]+)*$/.test(name) ||
+            name === 'ld-linux-x86-64.so.2') &&
           name > previous,
         'invalid_native_inventory',
       );
