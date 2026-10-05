@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { parsePayloadMap } from '../../src/action-wrapper/launcher/payload-map.js';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import {
   CAPS,
@@ -54,6 +55,7 @@ describe('immutable candidate and the shared D2 consumer map projection', () => 
     });
     expect(c.buildInputs).toEqual(JSON.parse(f.record.bytes.toString()).buildInputs);
     expect(c.receipt.members).toHaveLength(3);
+    expect(parsePayloadMap(f.record.mapBytes)).toEqual(map);
   });
   test('matches the exact shared #343 synthetic map fixture without activating a consumer', () => {
     // Snapshot from the coordinator-approved #343 map-contract revision 2.
@@ -62,6 +64,7 @@ describe('immutable candidate and the shared D2 consumer map projection', () => 
     const producer = { ...producerFixture(), workflowCommit: shared.builder.workflowCommit };
     const map = proposedMap(shared.payload, producer);
     expect(map).toEqual(shared);
+    expect(parsePayloadMap(Buffer.from(canonicalJson(map)))).toEqual(shared);
     expect(sha256(canonicalJson(map))).toBe(
       'e829f6b9b8a7d10d3e563d934214ce8f7e9e8d1c412eee634a145d49eabdbf21',
     );

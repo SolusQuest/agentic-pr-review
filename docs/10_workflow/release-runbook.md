@@ -12,6 +12,8 @@ This implements the R7-P1 preparation boundary in the [release policy](release-p
 
 The manual `prepare-build` job has only `contents: read`. It receives no publication, signing, state or provider credentials. `prepare-record` adds only `actions: read` for exact storage readback. Checkout credentials are not persisted. Ordinary push/PR jobs run synthetic fake-API fixtures and a real local package smoke without uploading candidate artifacts. They cannot activate the manual preparation jobs. No environment, release-write permission or OIDC permission is requested.
 
+The repository's R4 policy checker admits this route only after checking the complete canonical parsed workflow against its reviewed topology identity in `scripts/release/candidate.mjs`. It permits exactly the two existing metadata read-token expressions and retains the historical proof-owner, credential, write-permission and other-artifact-route checks. Future workflow changes must update the reviewed topology identity and policy regression evidence together; a filename alone grants no artifact or credential authority.
+
 ## Preparation And Storage
 
 After separate authorization, dispatch the main-only **Candidate preparation** workflow with the exact `source-commit` and canonical `release-version` (`vMAJOR.MINOR.PATCH-internal.N`, positive `N`, at most 48 characters). The tooling admits `W` before checking out `S`, validates the control tooling, then uses the D1 producer to build and execute the original package from `S` with Node 24, .NET SDK 10.0.109 and clang 18.1.3. See [distribution](../20_architecture/distribution.md) for the package and dependency closure.
