@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -138,19 +139,149 @@ export function admitPublishInventory(names) {
     'unexpected_publish_inventory',
   );
 }
-async function verifyDependencies(packages, policy) {
+export async function verifyDependencies(packages, policy, assets) {
+  const expected = new Map();
+  assert(
+    Array.isArray(policy.dependencies) &&
+      policy.dependencies.length > 0 &&
+      policy.dependencies.length <= 16,
+    'invalid_dependency_policy',
+  );
+  for (const item of policy.dependencies) {
+    assert(
+      typeof item.id === 'string' &&
+        /^[a-z0-9][a-z0-9.-]{0,100}$/.test(item.id) &&
+        typeof item.version === 'string' &&
+        /^[0-9]+\.[0-9]+\.[0-9]+$/.test(item.version) &&
+        !expected.has(item.id),
+      'invalid_dependency_policy',
+    );
+    expected.set(item.id, item);
+  }
+  const pinnedKey = (id, version) => {
+    assert(
+      typeof id === 'string' && typeof version === 'string',
+      'unexpected_resolved_dependencies',
+    );
+    const item = expected.get(id.toLowerCase());
+    assert(item && item.version === version, 'unexpected_resolved_dependencies');
+    return item.id + '/' + version;
+  };
+  const libraryKey = (key) => {
+    const parts = key.split('/');
+    assert(parts.length === 2, 'unexpected_resolved_dependencies');
+    return pinnedKey(parts[0], parts[1]);
+  };
+  // The private cache is fresh: every top-level ID and version directory is a build input.
+  // PackageDownload/runtime packs need not appear in assets.libraries.
+  assert((await lstat(packages)).isDirectory(), 'unexpected_restored_inventory');
+  const ids = await readdir(packages, { withFileTypes: true });
+  assert(ids.length === expected.size, 'unexpected_restored_inventory');
+  for (const id of ids) {
+    assert(id.isDirectory() && expected.has(id.name), 'unexpected_restored_inventory');
+    const versions = await readdir(join(packages, id.name), { withFileTypes: true });
+    assert(
+      versions.length === 1 &&
+        versions[0].isDirectory() &&
+        versions[0].name === expected.get(id.name).version,
+      'unexpected_restored_inventory',
+    );
+  }
+  const cache = resolve(packages);
+  assert(
+    assets?.version === 3 &&
+      assets.project?.restore?.packagesPath === cache &&
+      canonicalJson(Object.keys(assets.packageFolders || {})) === canonicalJson([cache]) &&
+      (!assets.project.restore.fallbackFolders ||
+        assets.project.restore.fallbackFolders.length === 0),
+    'unexpected_package_folders',
+  );
+  const resolved = new Set(),
+    libraries = new Set(),
+    targets = new Set();
+  assert(
+    assets.libraries && Object.keys(assets.libraries).length > 0,
+    'unexpected_resolved_dependencies',
+  );
+  for (const [key, item] of Object.entries(assets.libraries)) {
+    const identity = libraryKey(key);
+    assert(
+      item.type === 'package' &&
+        item.path === identity &&
+        item.sha512 === expected.get(identity.split('/')[0]).contentHash &&
+        !libraries.has(identity),
+      'unexpected_resolved_dependencies',
+    );
+    libraries.add(identity);
+    resolved.add(identity);
+  }
+  assert(
+    assets.targets && Object.keys(assets.targets).length > 0,
+    'unexpected_resolved_dependencies',
+  );
+  for (const target of Object.values(assets.targets)) {
+    for (const [key, item] of Object.entries(target)) {
+      const identity = libraryKey(key);
+      assert(
+        item.type === 'package' && Object.hasOwn(assets.libraries, key),
+        'unexpected_resolved_dependencies',
+      );
+      for (const [id, version] of Object.entries(item.dependencies || {})) {
+        assert(libraries.has(pinnedKey(id, version)), 'unexpected_resolved_dependencies');
+      }
+      targets.add(identity);
+    }
+  }
+  assert(
+    canonicalJson([...targets].sort()) === canonicalJson([...libraries].sort()),
+    'unexpected_resolved_dependencies',
+  );
+  assert(
+    assets.project.frameworks && Object.keys(assets.project.frameworks).length > 0,
+    'unexpected_resolved_dependencies',
+  );
+  for (const framework of Object.values(assets.project.frameworks)) {
+    const downloads = framework.downloadDependencies || [];
+    assert(Array.isArray(downloads), 'unexpected_resolved_dependencies');
+    const seen = new Set();
+    for (const item of downloads) {
+      assert(typeof item.version === 'string', 'unexpected_resolved_dependencies');
+      const version = /^\[([^,\[\]\s]+)(?:,\s*\1)?\]$/.exec(item.version);
+      assert(version, 'unexpected_resolved_dependencies');
+      const identity = pinnedKey(item.name, version[1]);
+      assert(!seen.has(identity), 'unexpected_resolved_dependencies');
+      seen.add(identity);
+      resolved.add(identity);
+    }
+  }
+  assert(
+    canonicalJson([...resolved].sort()) ===
+      canonicalJson(policy.dependencies.map((item) => item.id + '/' + item.version).sort()),
+    'unexpected_resolved_dependencies',
+  );
+  const inventory = [];
   for (const item of policy.dependencies) {
     const root = join(packages, item.id, item.version);
     const archive = await readBoundedFile(
       join(root, item.id + '.' + item.version + '.nupkg'),
       128 * 1024 * 1024,
     );
-    const metadata = JSON.parse(await readFile(join(root, '.nupkg.metadata'), 'utf8'));
+    const metadata = JSON.parse(await readBoundedFile(join(root, '.nupkg.metadata'), 64 * 1024));
+    const rawContentHash = (
+      await readBoundedFile(join(root, item.id + '.' + item.version + '.nupkg.sha512'), 1024)
+    )
+      .toString('utf8')
+      .trim();
+    const archiveHash = sha256(archive);
     assert(
-      sha256(archive) === item.sha256 && metadata.contentHash === item.contentHash,
+      archiveHash === item.sha256 &&
+        metadata.contentHash === item.contentHash &&
+        rawContentHash === createHash('sha512').update(archive).digest('base64'),
       'dependency_hash_mismatch',
     );
+    inventory.push({ ...item, sha256: archiveHash, contentHash: metadata.contentHash });
   }
+  return inventory;
 }
 async function seedArchives(work, policy, cache) {
   // Raw archives only. Never copy extracted cache entries into the compilation cache.
@@ -321,31 +452,10 @@ export async function buildPayload({ repo, sourceCommit, releaseVersion, output 
         ')\n',
     );
     run(dotnet, restoreArgs, { cwd: source, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    await verifyDependencies(env.NUGET_PACKAGES, policy);
-    const assets = JSON.parse(
-      await readFile(
-        join(source, 'runtime/src/AgenticPrReview.Runtime/obj/project.assets.json'),
-        'utf8',
-      ),
-    );
-    const libraryIds = Object.keys(assets.libraries)
-      .map((key) => key.split('/')[0].toLowerCase())
-      .sort();
-    const expectedLibraries = policy.dependencies
-      .filter(
-        (item) =>
-          ![
-            'microsoft.netcore.app.runtime.nativeaot.linux-x64',
-            'microsoft.aspnetcore.app.runtime.linux-x64',
-          ].includes(item.id),
-      )
-      .map((item) => item.id)
-      .sort();
-    assert(
-      canonicalJson(libraryIds) === canonicalJson(expectedLibraries),
-      'unexpected_resolved_dependencies',
-    );
-    const notices = await noticesFrom(source, env.NUGET_PACKAGES, policy);
+    const assetsPath = join(source, 'runtime/src/AgenticPrReview.Runtime/obj/project.assets.json');
+    const readAssets = async () => JSON.parse(await readBoundedFile(assetsPath, 4 * 1024 * 1024));
+    const dependencies = await verifyDependencies(env.NUGET_PACKAGES, policy, await readAssets());
+    const notices = await noticesFrom(source, env.NUGET_PACKAGES, { dependencies });
     const buildInputs = {
       releaseVersion,
       platform: policy.platform,
@@ -355,7 +465,7 @@ export async function buildPayload({ repo, sourceCommit, releaseVersion, output 
       lockSha256: sha256(await readFile(join(source, lockPath))),
       noticesSha256: sha256(notices),
       toolchain,
-      dependencies: policy.dependencies,
+      dependencies,
     };
     const buildId = sha256(canonicalJson(buildInputs));
     const publish = join(work, 'publish');
@@ -379,6 +489,8 @@ export async function buildPayload({ repo, sourceCommit, releaseVersion, output 
       ],
       { cwd: source, env },
     );
+    // Publish must retain the same admitted restore inputs; no late package additions.
+    await verifyDependencies(env.NUGET_PACKAGES, policy, await readAssets());
     admitPublishInventory(await readdir(publish));
     const binary = join(publish, 'AgenticPrReview.Runtime');
     const executable = await readBoundedFile(binary, LIMITS.executable);

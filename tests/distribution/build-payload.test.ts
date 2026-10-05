@@ -1,4 +1,5 @@
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ import {
   admitOutput,
   admitToolchain,
   admitPublishInventory,
+  verifyDependencies,
 } from '../../scripts/release/build-payload.mjs';
 
 const fixtureBinary = () => {
@@ -615,4 +617,246 @@ test.each([
   expect(() =>
     encodePackage(fixtureBinary(), notices, p, { needed: [name], runtimeLoaded: ['libssl.so.3'] }),
   ).toThrow('invalid_native_inventory');
+});
+
+describe('R7-D1 complete restored package inventory', () => {
+  function fixture() {
+    const packages = mkdtempSync(join(tmpdir(), 'apr-d1-dependencies-'));
+    const dependencies = [
+      { id: 'fixture.managed', version: '1.2.3', role: 'managed' },
+      { id: 'fixture.runtime', version: '10.0.9', role: 'native-runtime' },
+    ].map((item) => {
+      const archive = Buffer.from('Synthetic raw package: ' + item.id);
+      const entry = {
+        ...item,
+        sha256: sha256(archive),
+        contentHash: createHash('sha512')
+          .update('synthetic content identity: ' + item.id)
+          .digest('base64'),
+      };
+      const directory = join(packages, item.id, item.version);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, item.id + '.' + item.version + '.nupkg'), archive);
+      writeFileSync(
+        join(directory, '.nupkg.metadata'),
+        JSON.stringify({ contentHash: entry.contentHash }),
+      );
+      writeFileSync(
+        join(directory, item.id + '.' + item.version + '.nupkg.sha512'),
+        createHash('sha512').update(archive).digest('base64'),
+      );
+      return entry;
+    });
+    const managed = dependencies[0];
+    const assets: any = {
+      version: 3,
+      libraries: {
+        'Fixture.Managed/1.2.3': {
+          type: 'package',
+          path: 'fixture.managed/1.2.3',
+          sha512: managed.contentHash,
+        },
+      },
+      targets: {
+        'net10.0/linux-x64': { 'Fixture.Managed/1.2.3': { type: 'package' } },
+      },
+      packageFolders: { [packages]: {} },
+      project: {
+        restore: { packagesPath: packages },
+        frameworks: {
+          'net10.0': {
+            downloadDependencies: [
+              { name: 'Fixture.Runtime', version: '[10.0.9, 10.0.9]' },
+              { name: 'Fixture.Managed', version: '[1.2.3]' },
+            ],
+          },
+        },
+      },
+    };
+    return { packages, assets, policy: { dependencies } };
+  }
+  const cases: [string, (value: ReturnType<typeof fixture>) => void][] = [
+    [
+      'undeclared physical package',
+      ({ packages }) => mkdirSync(join(packages, 'extra.download', '1.0.0'), { recursive: true }),
+    ],
+    [
+      'additional runtime-pack version',
+      ({ packages }) => mkdirSync(join(packages, 'fixture.runtime', '10.0.10')),
+    ],
+    [
+      'wrong physical version',
+      ({ packages }) =>
+        renameSync(
+          join(packages, 'fixture.runtime', '10.0.9'),
+          join(packages, 'fixture.runtime', '10.0.10'),
+        ),
+    ],
+    [
+      'missing physical download',
+      ({ packages }) => rmSync(join(packages, 'fixture.runtime'), { recursive: true }),
+    ],
+    [
+      'non-package cache entry',
+      ({ packages }) => writeFileSync(join(packages, 'unexpected-file'), 'x'),
+    ],
+    [
+      'metadata content hash drift',
+      ({ packages }) =>
+        writeFileSync(
+          join(packages, 'fixture.runtime', '10.0.9', '.nupkg.metadata'),
+          JSON.stringify({ contentHash: 'changed' }),
+        ),
+    ],
+    [
+      'raw archive drift',
+      ({ packages }) =>
+        writeFileSync(
+          join(packages, 'fixture.runtime', '10.0.9', 'fixture.runtime.10.0.9.nupkg'),
+          'changed',
+        ),
+    ],
+    [
+      'NuGet hash-file drift',
+      ({ packages }) =>
+        writeFileSync(
+          join(packages, 'fixture.runtime', '10.0.9', 'fixture.runtime.10.0.9.nupkg.sha512'),
+          'changed',
+        ),
+    ],
+    [
+      'library version drift',
+      ({ assets }) => {
+        assets.libraries['Fixture.Managed/1.2.4'] = assets.libraries['Fixture.Managed/1.2.3'];
+        delete assets.libraries['Fixture.Managed/1.2.3'];
+      },
+    ],
+    [
+      'library package-path drift',
+      ({ assets }) => {
+        assets.libraries['Fixture.Managed/1.2.3'].path = 'fixture.managed/1.2.4';
+      },
+    ],
+    [
+      'library content hash drift',
+      ({ assets }) => {
+        assets.libraries['Fixture.Managed/1.2.3'].sha512 = 'changed';
+      },
+    ],
+    [
+      'non-package library',
+      ({ assets }) => {
+        assets.libraries['Fixture.Managed/1.2.3'].type = 'project';
+      },
+    ],
+    [
+      'undeclared download metadata',
+      ({ assets }) =>
+        assets.project.frameworks['net10.0'].downloadDependencies.push({
+          name: 'Extra.Download',
+          version: '[1.0.0]',
+        }),
+    ],
+    [
+      'wrong runtime-pack download version',
+      ({ assets }) => {
+        assets.project.frameworks['net10.0'].downloadDependencies[0].version = '[10.0.10, 10.0.10]';
+      },
+    ],
+    [
+      'unpinned runtime-pack download range',
+      ({ assets }) => {
+        assets.project.frameworks['net10.0'].downloadDependencies[0].version = '[10.0.9, 10.0.10]';
+      },
+    ],
+    [
+      'missing download metadata',
+      ({ assets }) => {
+        assets.project.frameworks['net10.0'].downloadDependencies.shift();
+      },
+    ],
+    [
+      'wrong target version',
+      ({ assets }) => {
+        assets.targets['net10.0/linux-x64']['Fixture.Managed/1.2.4'] = { type: 'package' };
+      },
+    ],
+    [
+      'wrong target dependency version',
+      ({ assets }) => {
+        assets.targets['net10.0/linux-x64']['Fixture.Managed/1.2.3'].dependencies = {
+          'Fixture.Managed': '1.2.4',
+        };
+      },
+    ],
+    [
+      'duplicate download identity',
+      ({ assets }) =>
+        assets.project.frameworks['net10.0'].downloadDependencies.push({
+          name: 'fixture.runtime',
+          version: '[10.0.9]',
+        }),
+    ],
+    [
+      'missing target library',
+      ({ assets }) => {
+        assets.targets['net10.0/linux-x64'] = {};
+      },
+    ],
+    [
+      'alternate restore cache',
+      ({ packages, assets }) => {
+        assets.project.restore.packagesPath = join(packages, 'other');
+      },
+    ],
+    [
+      'fallback package folder',
+      ({ packages, assets }) => {
+        assets.packageFolders[join(packages, 'other')] = {};
+      },
+    ],
+  ];
+  test.each(cases)('rejects %s before publishing', async (_name, mutate) => {
+    const value = fixture();
+    try {
+      mutate(value);
+      await expect(
+        verifyDependencies(value.packages, value.policy, value.assets),
+      ).rejects.toThrow();
+    } finally {
+      rmSync(value.packages, { recursive: true, force: true });
+    }
+  });
+  test('accepts a complete physical and metadata inventory including library/download overlap', async () => {
+    const value = fixture();
+    try {
+      await expect(verifyDependencies(value.packages, value.policy, value.assets)).resolves.toEqual(
+        value.policy.dependencies,
+      );
+      value.assets.project.frameworks['net10.0'].downloadDependencies.reverse();
+      await expect(verifyDependencies(value.packages, value.policy, value.assets)).resolves.toEqual(
+        value.policy.dependencies,
+      );
+    } finally {
+      rmSync(value.packages, { recursive: true, force: true });
+    }
+  });
+  test.skipIf(process.platform !== 'linux')('rejects a symlinked package directory', async () => {
+    const value = fixture();
+    const external = mkdtempSync(join(tmpdir(), 'apr-d1-external-package-'));
+    try {
+      renameSync(join(value.packages, 'fixture.runtime'), join(external, 'runtime'));
+      execFileSync('/usr/bin/ln', [
+        '-s',
+        join(external, 'runtime'),
+        join(value.packages, 'fixture.runtime'),
+      ]);
+      await expect(verifyDependencies(value.packages, value.policy, value.assets)).rejects.toThrow(
+        'unexpected_restored_inventory',
+      );
+    } finally {
+      rmSync(value.packages, { recursive: true, force: true });
+      rmSync(external, { recursive: true, force: true });
+    }
+  });
 });
