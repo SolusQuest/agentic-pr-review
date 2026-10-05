@@ -107,6 +107,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/r4-trusted-proof-contract.mjs',
       'scripts/r4-trusted-proof-enrollment-schedule.mjs',
       'scripts/r4-trusted-proof-enrollment-schedule.test.ts',
+      'scripts/release/build-payload.format.d.mts',
       'scripts/release/build-payload.format.mjs',
       'scripts/release/build-payload.inputs.json',
       'scripts/release/build-payload.licenses.txt',
