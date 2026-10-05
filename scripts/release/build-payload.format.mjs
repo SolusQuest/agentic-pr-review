@@ -187,7 +187,7 @@ function validateInputs(input) {
   for (const item of input.dependencies) {
     keys(item, ['id', 'version', 'sha256', 'contentHash', 'role'], 'invalid_dependency_inventory');
     requireThat(
-      /^[a-z0-9][a-z0-9.]{0,100}$/.test(item.id) &&
+      /^[a-z0-9][a-z0-9.-]{0,100}$/.test(item.id) &&
         typeof item.id === 'string' &&
         item.id > previous &&
         /^[0-9]+\.[0-9]+\.[0-9]+$/.test(item.version) &&

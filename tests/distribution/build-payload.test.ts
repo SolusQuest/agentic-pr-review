@@ -578,3 +578,26 @@ describe('R7-D1 input/output filesystem admission', () => {
     },
   );
 });
+
+test('package schema admits the exact pinned production dependency inventory', () => {
+  const policy = JSON.parse(readFileSync('scripts/release/build-payload.inputs.json', 'utf8'));
+  const value = inputs();
+  value.dependencies = policy.dependencies;
+  const p = packageFixture(value);
+  expect(inspectPackage(p.archive, p.receipt).manifest.buildInputs.dependencies).toEqual(
+    policy.dependencies,
+  );
+});
+test.each([
+  '../escape',
+  'id/path',
+  'id\\path',
+  'id space',
+  'id+suffix',
+  '.leading',
+  'a'.repeat(102),
+])('package schema rejects unsafe dependency id %j', (id) => {
+  const value = inputs();
+  value.dependencies[0].id = id;
+  expect(() => packageFixture(value)).toThrow('invalid_dependency_inventory');
+});
