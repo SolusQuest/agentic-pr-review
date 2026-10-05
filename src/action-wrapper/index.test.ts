@@ -32,12 +32,16 @@ import {
 import {
   createProductionArtifactExecutor,
   readProductionRuntimeFacts,
+  runActionWrapperWithSeams,
   runPrivateActionWrapperWithSeams,
 } from './index.js';
 import { parseLaunchDocument, type ActionRuntimeFacts } from './launcher/contracts.js';
-import { HostProcessTerminationUnconfirmedError } from './launcher/host-process.js';
+import {
+  HostProcessTerminationUnconfirmedError,
+  type HostProcessRequest,
+} from './launcher/host-process.js';
 import { OfficialCallTracker } from './launcher/official-calls.js';
-import type { PreparedPayloadProof } from './launcher/prepared-payload.js';
+import { verifyPreparedPayload, type PreparedPayloadProof } from './launcher/prepared-payload.js';
 import {
   artifactRestRequestBudgetProfile,
   R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE,
@@ -61,6 +65,94 @@ afterEach(async () => {
   await Promise.all(
     roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })),
   );
+});
+
+describe('resolver-owned payload lifecycle', () => {
+  it.each([
+    'success',
+    'profile',
+    'event',
+    'bridge',
+    'host',
+    'completion',
+    'disposal',
+    'fatal-disposal',
+  ])('disposes the exact admitted handle before presentation on %s', async (failure) => {
+    const fixture = await wrapperFixture(failure === 'profile' ? 'r4-w2' : 'r7-d0');
+    const prepared = await verifyPreparedPayload(fixture.proof);
+    const order: string[] = [];
+    const presentation = recordingToolkit({ 'provider-api-key': 'MASK_BEFORE_ACQUISITION' });
+    const originalOutput = presentation.toolkit.setOutput;
+    presentation.toolkit.setOutput = (name, value) => {
+      order.push('output');
+      originalOutput(name, value);
+    };
+    if (failure === 'profile')
+      vi.stubEnv(R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE, 'invalid');
+    if (failure === 'event') await rm(fixture.facts.eventJsonPath);
+    const dispose = vi.fn(async () => {
+      order.push('dispose');
+      await prepared.executableHandle.close();
+      await rm(fixture.proof.trustedRoot, { recursive: true, force: true });
+      if (failure === 'disposal' || failure === 'fatal-disposal')
+        throw new Error('PRIVATE_DISPOSAL_CANARY');
+    });
+    const fatalExit = vi.fn(() => {
+      order.push('fatal');
+    });
+    const host = vi.fn(async (request: HostProcessRequest) => {
+      expect(request.executableHandle).toBe(prepared.executableHandle);
+      expect(request.requestBudgetProfile).toBeUndefined();
+      if (failure === 'fatal-disposal') throw new HostProcessTerminationUnconfirmedError();
+      if (failure === 'host') throw new Error('PRIVATE_HOST_CANARY');
+      return {
+        completionBytes: failure === 'completion' ? Buffer.from('{}') : validCompletion('r7-d0'),
+        exitCode: 0,
+        trustedProofBudgetReceiptLines: [],
+      };
+    });
+    const exit = await runActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      acquirePayload: async () => {
+        expect(presentation.events).toContain('mask:MASK_BEFORE_ACQUISITION');
+        return { ...prepared, dispose };
+      },
+      hostProcessRunner: host,
+      bridgeRuntime: async () => {
+        if (failure === 'bridge') throw new Error('PRIVATE_BRIDGE_CANARY');
+        return {
+          endpoint: '/tmp/apr-d3/bridge.sock',
+          stagingRoot: '/tmp/apr-d3/staging',
+          tempRoot: '/tmp/apr-d3',
+          stopAndDrain: async () => undefined,
+          cleanup: async () => {
+            order.push('bridge-cleanup');
+          },
+        };
+      },
+      createArtifactExecutor: async () => {
+        throw new Error('unused credentials');
+      },
+      fatalExit,
+    });
+    expect(exit).toBe(failure === 'success' ? 0 : 1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    await expect(prepared.executableHandle.stat()).rejects.toThrow();
+    await expect(access(fixture.proof.trustedRoot)).rejects.toThrow();
+    if (failure === 'fatal-disposal') {
+      expect(fatalExit).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(['dispose', 'bridge-cleanup', 'fatal']);
+      expect(presentation.outputs).toEqual({});
+    } else {
+      expect(fatalExit).not.toHaveBeenCalled();
+      expect(order.indexOf('dispose')).toBeLessThan(order.indexOf('output'));
+      expect(presentation.outputs.status).toBe(failure === 'success' ? 'reviewed' : 'failed');
+      expect(presentation.errors.join('')).not.toMatch(/CANARY/);
+    }
+  });
 });
 
 describe('W1 production composition', () => {

@@ -48,7 +48,34 @@ afterEach(async () => {
   );
 });
 
-describe('R4 Action distribution', () => {
+describe('R7 Action distribution and retained private proof', () => {
+  it('keeps the protected local consumer on an exact-source private proof overlay', async () => {
+    const preparation = await readFile(
+      'runtime/scripts/prepare-r4-trusted-proof-payload-current.sh',
+      'utf8',
+    );
+    const generation = preparation.indexOf('npm ci --prefix "$control_root" --ignore-scripts');
+    expect(generation).toBeGreaterThan(preparation.indexOf('fail source-tree'));
+    expect(generation).toBeGreaterThan(preparation.indexOf('fail output-parent'));
+    expect(generation).toBeGreaterThan(preparation.indexOf('ambient-credential-'));
+    expect(preparation).toContain(
+      "path.join(root, '.github/actions/agentic-pr-review/dist/index.js')",
+    );
+    expect(preparation).toContain('await writeTrustedProofActionBundle(output, root)');
+    expect(preparation).toContain(
+      'installed.equals((await generateTrustedProofActionBundle(root)).bytes)',
+    );
+    expect(preparation).toContain('"$(wc -l < "$output_lines")" -eq 7');
+    const workflow = await readFile('.github/workflows/r4-trusted-proof.yml', 'utf8');
+    expect(
+      workflow.match(/uses: \.\/control-root\/\.github\/actions\/agentic-pr-review/gu),
+    ).toHaveLength(2);
+    expect(
+      workflow.match(
+        /bash control-root\/runtime\/scripts\/prepare-r4-trusted-proof-payload-current.sh/gu,
+      ),
+    ).toHaveLength(2);
+  });
   it('declares the exact H1 inputs and fourteen H4 outputs', async () => {
     const metadata = parse(
       await readFile(path.join(repoRoot, actionRootRelativePath, 'action.yml'), 'utf8'),
@@ -81,7 +108,8 @@ describe('R4 Action distribution', () => {
   it('checks the generated source identity marker in the committed bundle', async () => {
     const bundle = await readFile(path.join(repoRoot, bundleRelativePath), 'utf8');
 
-    expect(bundle).toContain('WRAPPER_BUILD_DISCRIMINATOR = "r4-w2"');
+    expect(bundle).toContain('WRAPPER_BUILD_DISCRIMINATOR = "r7-d0"');
+    expect(bundle).not.toContain('process.env.AGENTIC_PR_REVIEW_PREPARED_ROOT');
     expect(bundle).toMatch(/\/\/ Action source inventory sha256: [0-9a-f]{64}\n$/u);
     expect(bundle).not.toContain('require("supports-color")');
   });
@@ -99,17 +127,19 @@ describe('R4 Action distribution', () => {
       buildModule.generateFrameworkFixtureActionBundle(repoRoot),
     ]);
 
-    expect(production.bytes.toString('utf8')).toContain('WRAPPER_BUILD_DISCRIMINATOR = "r4-w2"');
+    expect(production.bytes.toString('utf8')).toContain('WRAPPER_BUILD_DISCRIMINATOR = "r7-d0"');
     expect(frameworkFixture.bytes.toString('utf8')).toContain(
       'WRAPPER_BUILD_DISCRIMINATOR = "r4-h1"',
     );
     expect(frameworkFixture.bytes).not.toEqual(production.bytes);
   }, 15_000);
 
-  it('changes the source inventory identity for wrapper or build-script drift', async () => {
+  it('changes the source inventory identity for map, wrapper or build-script drift', async () => {
     const fixture = await temporaryDirectory('apr-action-source-identity-');
     await mkdir(path.join(fixture, 'scripts'), { recursive: true });
     await mkdir(path.join(fixture, 'src/action-wrapper'), { recursive: true });
+    await mkdir(path.join(fixture, actionRootRelativePath), { recursive: true });
+    await writeFile(path.join(fixture, actionRootRelativePath, 'payload-map.json'), 'null\n');
     const buildPath = path.join(fixture, 'scripts/build-action.mjs');
     const sourcePath = path.join(fixture, 'src/action-wrapper/probe.ts');
     await copyFile(path.join(repoRoot, 'scripts/build-action.mjs'), buildPath);
@@ -124,12 +154,15 @@ describe('R4 Action distribution', () => {
     };
     const metafile = { inputs: { 'src/action-wrapper/probe.ts': {} } };
     const original = await buildModule.actionSourceDigest(fixture, metafile);
+    await writeFile(path.join(fixture, actionRootRelativePath, 'payload-map.json'), 'null \n');
+    const mapDrift = await buildModule.actionSourceDigest(fixture, metafile);
     await writeFile(sourcePath, 'export const probe = 2;\n');
     const sourceDrift = await buildModule.actionSourceDigest(fixture, metafile);
     await writeFile(buildPath, `${await readFile(buildPath, 'utf8')}\n// build drift\n`);
     const buildDrift = await buildModule.actionSourceDigest(fixture, metafile);
 
-    expect(sourceDrift).not.toBe(original);
+    expect(mapDrift).not.toBe(original);
+    expect(sourceDrift).not.toBe(mapDrift);
     expect(buildDrift).not.toBe(sourceDrift);
   });
 
@@ -256,7 +289,7 @@ describe('R4 Action distribution', () => {
       'pre_provider',
       'unobserved_dispatch_usage',
     ])(
-    'executes real checked bundle native outputs for %s',
+    'executes private proof bundle output projection for %s',
     async (name) => {
       const cases = JSON.parse(
         await readFile(
@@ -399,7 +432,10 @@ async function runIsolatedBundle(
   const summaryPath = path.join(trustedRoot, 'step-summary.md');
   const outputPath = path.join(trustedRoot, 'outputs.txt');
   const eventPath = path.join(trustedRoot, 'event.json');
-  await copyFile(path.join(repoRoot, bundleRelativePath), bundlePath);
+  const buildModule = await import(
+    pathToFileURL(path.join(repoRoot, 'scripts/build-action.mjs')).href
+  );
+  await buildModule.writeTrustedProofActionBundle(bundlePath, repoRoot);
   await writeFile(path.join(trustedRoot, 'package.json'), '{"type":"module"}\n');
   await writeFile(eventPath, '{}\n');
   await writeFile(summaryPath, '');

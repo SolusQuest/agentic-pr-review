@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 export const ACTION_BUNDLE_RELATIVE_PATH = '.github/actions/agentic-pr-review/dist/index.js';
-export const WRAPPER_BUILD_DISCRIMINATOR = 'r4-w2';
+export const WRAPPER_BUILD_DISCRIMINATOR = 'r7-d0';
+export const TRUSTED_PROOF_WRAPPER_BUILD_DISCRIMINATOR = 'r4-w2';
 export const FRAMEWORK_FIXTURE_WRAPPER_BUILD_DISCRIMINATOR = 'r4-h1';
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -27,6 +28,18 @@ const optionalDebugColorStub = {
   },
 };
 function entryPointSource(wrapperBuildDiscriminator) {
+  if (wrapperBuildDiscriminator === WRAPPER_BUILD_DISCRIMINATOR) {
+    return `
+import { runProductionActionWrapper } from '../src/action-wrapper/index.js';
+
+const WRAPPER_BUILD_DISCRIMINATOR = ${JSON.stringify(wrapperBuildDiscriminator)};
+
+void runProductionActionWrapper(new URL('../', import.meta.url), WRAPPER_BUILD_DISCRIMINATOR).then(
+  (exitCode) => { process.exitCode = exitCode; },
+  () => { process.exitCode = 1; },
+);
+`;
+  }
   return `
 import { runPrivateActionWrapper } from '../src/action-wrapper/index.js';
 
@@ -117,6 +130,10 @@ async function actionSourceDigestForEntryPoint(repoRoot, metafile, generatedEntr
     ['scripts/action-entrypoint.generated.ts', Buffer.from(generatedEntryPoint, 'utf8')],
     ['action-build-stub:supports-color', Buffer.from(optionalDebugColorStubSource, 'utf8')],
     ['scripts/build-action.mjs', await readFile(path.join(repoRoot, 'scripts/build-action.mjs'))],
+    [
+      '.github/actions/agentic-pr-review/payload-map.json',
+      await readFile(path.join(repoRoot, '.github/actions/agentic-pr-review/payload-map.json')),
+    ],
   ]);
   for (const source of Object.keys(metafile.inputs)) {
     if (sources.has(source)) continue;
@@ -174,6 +191,23 @@ export async function generateFrameworkFixtureActionBundle(repoRoot = defaultRep
     repoRoot,
     FRAMEWORK_FIXTURE_WRAPPER_BUILD_DISCRIMINATOR,
   );
+}
+
+/** Fixed repository-only proof artifact; never a product entrypoint selector. */
+export async function generateTrustedProofActionBundle(repoRoot = defaultRepoRoot) {
+  return await generateActionBundleForDiscriminator(
+    repoRoot,
+    TRUSTED_PROOF_WRAPPER_BUILD_DISCRIMINATOR,
+  );
+}
+
+export async function writeTrustedProofActionBundle(outputPath, repoRoot = defaultRepoRoot) {
+  const generated = await generateTrustedProofActionBundle(repoRoot);
+  await writeGeneratedActionBundle(path.resolve(outputPath), generated);
+  // Verify the installed artifact that the protected consumer will execute.
+  if (!(await readFile(path.resolve(outputPath))).equals(generated.bytes)) {
+    throw new Error('trusted_proof_bundle_readback_invalid');
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {

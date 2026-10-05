@@ -31,7 +31,7 @@ jobs:
       - name: Install AOT build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y clang zlib1g-dev strace
 
       - name: Set up exact R7-D1 package .NET SDK
         uses: actions/setup-dotnet@v5

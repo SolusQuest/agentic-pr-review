@@ -1,5 +1,15 @@
 import { DefaultArtifactClient } from '@actions/artifact';
 import { getOctokit } from '@actions/github';
+import { realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { readBoundedFile } from '../../scripts/release/build-payload.format.mjs';
+import { resolveInstalledActionSource } from './launcher/action-source.js';
+import { parsePayloadMap, PAYLOAD_MAP_MAXIMUM_BYTES } from './launcher/payload-map.js';
+import { resolveReleasePayload } from './launcher/release-payload.js';
+import { parseStrictJson } from './launcher/strict-json.js';
 
 import {
   ArtifactBridgeStaging,
@@ -36,8 +46,9 @@ import {
   digestEventJson,
   verifyPreparedPayload,
   type PreparedPayloadProof,
+  type VerifiedPreparedPayload,
 } from './launcher/prepared-payload.js';
-import { fail } from './launcher/validation.js';
+import { ActionWrapperContractError, fail } from './launcher/validation.js';
 import {
   parseCompletionDocument,
   type ActionHostCompletionDocument,
@@ -113,6 +124,67 @@ export async function runPrivateActionWrapper(
 export async function runPrivateActionWrapperWithSeams(
   seams: PrivateActionWrapperSeams,
 ): Promise<number> {
+  return runActionWrapperWithSeams({
+    ...seams,
+    acquirePayload: async () => {
+      const prepared = await verifyPreparedPayload(seams.preparedPayload);
+      return { ...prepared, dispose: () => prepared.executableHandle.close() };
+    },
+  });
+}
+
+export interface ActionWrapperSeams extends Omit<PrivateActionWrapperSeams, 'preparedPayload'> {
+  readonly acquirePayload: () => Promise<VerifiedPreparedPayload & { dispose(): Promise<void> }>;
+}
+
+/** Ordinary entry owns acquisition; it exposes no prepared-proof or transport selector. */
+export async function runProductionActionWrapper(
+  actionRootUrl: URL,
+  wrapperBuildDiscriminator: string,
+): Promise<number> {
+  const termination = createTerminationSignal();
+  try {
+    return await runActionWrapperWithSeams({
+      toolkit: createActionsToolkit(),
+      platform: process.platform,
+      signal: termination.signal,
+      runtimeFacts: readProductionRuntimeFacts,
+      hostProcessRunner: runHostProcess,
+      bridgeRuntime: startArtifactBridgeRuntime,
+      createArtifactExecutor: createProductionArtifactExecutor,
+      fatalExit: (code) => process.exit(code),
+      acquirePayload: async () => {
+        if (wrapperBuildDiscriminator !== 'r7-d0') fail('wrapper_payload_invalid');
+        const actionRoot = fileURLToPath(actionRootUrl);
+        const mapBytes = await readBoundedFile(
+          path.join(actionRoot, 'payload-map.json'),
+          PAYLOAD_MAP_MAXIMUM_BYTES,
+        );
+        if (parseStrictJson(mapBytes, PAYLOAD_MAP_MAXIMUM_BYTES) === null)
+          fail('wrapper_payload_map_unbound');
+        parsePayloadMap(mapBytes);
+        const signal = AbortSignal.any([termination.signal, AbortSignal.timeout(60_000)]);
+        const stagingParent = await realpath(tmpdir());
+        const workspace = await realpath(required(process.env.GITHUB_WORKSPACE));
+        if (stagingParent === workspace || stagingParent.startsWith(`${workspace}${path.sep}`))
+          fail('wrapper_payload_invalid');
+        const actionSourceSha = await resolveInstalledActionSource({
+          actionRoot,
+          mapBytes,
+          actionRepository: process.env.GITHUB_ACTION_REPOSITORY,
+          actionRef: process.env.GITHUB_ACTION_REF,
+          signal,
+        });
+        return resolveReleasePayload({ mapBytes, actionSourceSha, stagingParent, signal });
+      },
+    });
+  } finally {
+    termination.dispose();
+  }
+}
+
+/** Repository tests exercise disposal across the shared lifecycle without replacing product admission. */
+export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Promise<number> {
   let bridge: ArtifactBridgeRuntime | undefined;
   let tracker: OfficialCallTracker | undefined;
   let completion: ActionHostCompletionDocument | undefined;
@@ -121,6 +193,8 @@ export async function runPrivateActionWrapperWithSeams(
   let hostStateReconciliationDiagnosticLine: string | undefined;
   let failed = false;
   let hostTerminationUnconfirmed = false;
+  let prepared: Awaited<ReturnType<ActionWrapperSeams['acquirePayload']>> | undefined;
+  let unboundMap = false;
   const inputs = (() => {
     try {
       return readAndMaskActionInputs(seams.toolkit);
@@ -140,7 +214,7 @@ export async function runPrivateActionWrapperWithSeams(
     const runtimeFacts = seams.runtimeFacts();
     validateRuntimeFacts(runtimeFacts);
     if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
-    const prepared = await verifyPreparedPayload(seams.preparedPayload);
+    prepared = await seams.acquirePayload();
     // This profile is an explicit, protected-process capability. It is never
     // inferred from an action input and ordinary r4-h1 payloads receive none.
     const requestBudgetProfile = readTrustedProofRequestBudgetProfile(prepared.buildDiscriminator);
@@ -163,55 +237,59 @@ export async function runPrivateActionWrapperWithSeams(
         ? {}
         : { profile: artifactRestRequestBudgetProfile(requestBudgetProfile) }),
     });
-    try {
-      const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
-      tracker = new OfficialCallTracker();
-      bridge = await seams.bridgeRuntime({
-        buildDiscriminator: prepared.buildDiscriminator,
-        executorFactory: async (stagingRoot) =>
-          await seams.createArtifactExecutor(
-            {
-              githubToken: inputs.github_token,
-              repositoryName: runtimeFacts.repositoryName,
-              runId: runtimeFacts.runId,
-              runAttempt: runtimeFacts.runAttempt,
-              stagingRoot,
-              verifiedPreparedPayload: prepared,
-              artifactRestRequestBudget: artifactRestRequestBudget!,
-            },
-            tracker!,
-          ),
-      });
-      const launch = buildLaunchDocument({
-        inputs,
-        runtimeFacts,
-        eventJsonSha256,
-        prepared,
-        artifactBridgeEndpoint: bridge.endpoint,
-        cancellation: 'active',
-      });
-      if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
-      const host = await seams.hostProcessRunner({
-        executableHandle: prepared.executableHandle,
-        launchBytes: serializeLaunchDocument(launch),
-        tempRoot: bridge.tempRoot,
-        signal: seams.signal,
-        ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
-      });
-      hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
-      hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
-      completion = parseCompletionDocument(
-        host.completionBytes,
-        prepared.buildDiscriminator,
-        host.exitCode,
-      );
-    } finally {
-      await prepared.executableHandle.close();
-    }
+    const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
+    tracker = new OfficialCallTracker();
+    bridge = await seams.bridgeRuntime({
+      buildDiscriminator: prepared.buildDiscriminator,
+      executorFactory: async (stagingRoot) =>
+        await seams.createArtifactExecutor(
+          {
+            githubToken: inputs.github_token,
+            repositoryName: runtimeFacts.repositoryName,
+            runId: runtimeFacts.runId,
+            runAttempt: runtimeFacts.runAttempt,
+            stagingRoot,
+            verifiedPreparedPayload: prepared!,
+            artifactRestRequestBudget: artifactRestRequestBudget!,
+          },
+          tracker!,
+        ),
+    });
+    const launch = buildLaunchDocument({
+      inputs,
+      runtimeFacts,
+      eventJsonSha256,
+      prepared,
+      artifactBridgeEndpoint: bridge.endpoint,
+      cancellation: 'active',
+    });
+    if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
+    const host = await seams.hostProcessRunner({
+      executableHandle: prepared.executableHandle,
+      launchBytes: serializeLaunchDocument(launch),
+      tempRoot: bridge.tempRoot,
+      signal: seams.signal,
+      ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
+    });
+    hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
+    hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
+    completion = parseCompletionDocument(
+      host.completionBytes,
+      prepared.buildDiscriminator,
+      host.exitCode,
+    );
   } catch (error) {
     if (error instanceof HostProcessTerminationUnconfirmedError) {
       hostTerminationUnconfirmed = true;
     } else {
+      failed = true;
+      unboundMap =
+        error instanceof ActionWrapperContractError && error.code === 'wrapper_payload_map_unbound';
+    }
+  } finally {
+    try {
+      await prepared?.dispose();
+    } catch {
       failed = true;
     }
   }
@@ -276,6 +354,13 @@ export async function runPrivateActionWrapperWithSeams(
   }
 
   if (failed || !completion) {
+    if (unboundMap) {
+      try {
+        seams.toolkit.error('No release payload has been authorized for this Action.');
+      } catch {
+        /* Fixed sinks remain independent. */
+      }
+    }
     await presentFixedWrapperFailure(seams.toolkit);
     return 1;
   }

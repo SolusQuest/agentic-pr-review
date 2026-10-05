@@ -1,6 +1,6 @@
 # Distribution Direction
 
-The development head now contains the replacement nested Action metadata and reproducibly generated Node 24 wrapper for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: release assets, automatic payload download and accounting outputs are not implemented at this baseline. The approved [R7 target](../90_roadmap/r7-plan.md) adds public experimental distribution and bounded maintainer adoption; it excludes a root alias and defers formal public/default graduation.
+The development head contains the nested Node 24 ordinary Action, strict release-map resolver, inherited-fd Native AOT launcher and fourteen accounting outputs. The checked map is explicitly null until separately authorized binding, so ordinary execution refuses before network access or launch. Credential-free fixtures execute the literal checked bundle and original packaged Runtime; they do not qualify a real release or successful downstream review. The [R7 target](../90_roadmap/r7-plan.md) retains separate qualification/publication gates, excludes a root alias and defers formal public/default graduation.
 
 See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, [`deepseek-flash-identity.md`](./deepseek-flash-identity.md) for the selected-current R7 provider identity and state boundary, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
 
@@ -19,7 +19,7 @@ The distribution must:
 
 ## Target Node.js Action Wrapper
 
-The checked-in nested Action metadata and generated Node 24 wrapper are the R4 repository-controlled prepared-payload proof entrypoint. They are not a supported downstream Action, root alias, release-download path, or stable output surface.
+The checked-in nested Action metadata, payload-map.json and generated Node 24 bundle form the ordinary r7-d0 entrypoint. Repository-controlled r4-w2 prepared proof uses a separately generated fixed private bundle. The unbound ordinary map provides no release or supported downstream installation.
 
 The wrapper may:
 
@@ -29,7 +29,7 @@ The wrapper may:
 - launch the .NET application;
 - forward cancellation;
 - bridge the official Actions artifact client;
-- render bounded Host-approved annotations and step summary; the current R4 proof has no Action outputs, while R7 targets matching [accounting outputs](../90_roadmap/r7-plan.md#summary-and-machine-readable-outputs);
+- render bounded Host-approved annotations, step summary and [accounting outputs](../90_roadmap/r7-plan.md#summary-and-machine-readable-outputs);
 - forward the host exit code.
 
 Business behavior does not belong in the distribution wrapper.
@@ -82,7 +82,9 @@ Platform expansion must not delay the first agent vertical slice.
 
 ## Payload Resolution
 
-The selected R7 ordinary downstream path downloads only the exact release asset authorized by the small strict map committed with the trusted Action. There is no public local-path/bundled-payload fallback, arbitrary URL or implicit latest selection. This is an approved target; current R4 proof still uses an explicitly prepared trusted payload.
+The ordinary entry reads only its fixed adjacent trusted Action map and downloads the exact authorized release asset. There is no public prepared-root/local-path fallback, arbitrary URL or implicit latest selection. The checked map is null until authorized binding. Seven consumer inputs cannot select proof, transport, map, identity or executable authority.
+
+Runner-owned Action repository/ref context supplies exact SHA T or the map's version tag. The latter resolves T under the required later immutable consumer-tag/protection publication invariant. Comparing the installed metadata, map and bundle to Git blob identities at T detects content mismatch; it does not expose the runner's resolved download SHA or independently detect identical-content tag retarget. Actual protection provisioning remains a maintainer-owned publication precondition.
 
 Fully verified repository-test overrides remain isolated and unreachable through ordinary downstream inputs. They bypass download, not executable/platform/manifest/build admission, and do not expand downstream support. Other distribution forms require a separate future contract.
 
@@ -94,9 +96,9 @@ The wrapper must not:
 - choose a runtime version unrelated to the Action release;
 - run a payload from the reviewed pull request workspace.
 
-Local override paths bypass download but not executable, platform, payload-manifest, or exact build validation.
+Repository-test local override paths bypass download but not executable, platform, payload-manifest, or exact build validation.
 
-R4 proves the thin wrapper and two-run workflow behavior using an explicitly prepared trusted local payload path. The wrapper holds the verified executable's opened identity through Linux process creation and executes that inherited descriptor, so replacing the admitted pathname after hashing cannot substitute another executable. Automatic release-asset download, exact default Action-to-payload resolution, and public release mapping belong to R7.
+Ordinary resolution returns the verified executable's opened identity and an owned-root disposer. The wrapper executes that inherited descriptor without pathname readmission and awaits disposal across completion, failure, cancellation and fatal termination, before presentation. Protected R4 proof retains its own prepared admission, closed profiles and strict canonical receipts. Its existing current preparation generates/readbacks a fixed private proof bundle only after exact source/control validation in the ephemeral protected runner checkout; the checked product bundle, workflow/template policy anchors and historical sealed evidence remain separate. See [distribution execution fixtures](../../tests/distribution/README.md).
 
 ## Version Mapping
 
