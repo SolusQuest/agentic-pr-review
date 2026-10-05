@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -6,7 +6,6 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   LIMITS,
-  MEMBERS,
   canonicalJson,
   compiledIdentity,
   encodePackage,
@@ -115,6 +114,8 @@ function buildEnvironment(work, dotnet, clang, linker) {
 function packageProps(source, version, buildId) {
   return [
     '-p:APRReleasePackage=true',
+    '-p:_IsPublishing=true',
+    '-p:PublishAotUsingRuntimePack=true',
     '-p:APRReleaseVersion=' + version,
     '-p:APRBuildId=' + buildId,
     '-p:DirectoryBuildPropsPath=' + join(source, 'runtime/Directory.Build.props'),
@@ -334,7 +335,7 @@ export async function buildPayload({ repo, sourceCommit, releaseVersion, output 
       .filter(
         (item) =>
           ![
-            'microsoft.netcore.app.runtime.linux-x64',
+            'microsoft.netcore.app.runtime.nativeaot.linux-x64',
             'microsoft.aspnetcore.app.runtime.linux-x64',
           ].includes(item.id),
       )

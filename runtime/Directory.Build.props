@@ -5,6 +5,7 @@
     <RestoreLockedMode>true</RestoreLockedMode>
     <NuGetLockFilePath>$(MSBuildThisFileDirectory)src/AgenticPrReview.Runtime/packages.release.lock.json</NuGetLockFilePath>
     <RuntimeFrameworkVersion>10.0.9</RuntimeFrameworkVersion>
+    <PublishAotUsingRuntimePack>true</PublishAotUsingRuntimePack>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <DebugType>None</DebugType>
