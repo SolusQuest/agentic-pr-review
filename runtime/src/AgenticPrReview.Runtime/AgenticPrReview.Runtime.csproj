@@ -9,7 +9,8 @@
     <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <InformationalVersion>0.1.0-dev</InformationalVersion>
+    <InformationalVersion Condition="'$(APRReleasePackage)' != 'true'">0.1.0-dev</InformationalVersion>
+    <InformationalVersion Condition="'$(APRReleasePackage)' == 'true'">$(APRReleaseVersion)+build.$(APRBuildId)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ActionHostVerifierFrameworkReference)' == 'true'">

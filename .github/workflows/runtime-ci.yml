@@ -33,9 +33,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang zlib1g-dev
 
-      - uses: actions/setup-dotnet@v5
+      - name: Set up exact R7-D1 package .NET SDK
+        uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-d1-dotnet
         with:
-          global-json-file: global.json
+          dotnet-version: 10.0.109
 
       - run: npm ci
 

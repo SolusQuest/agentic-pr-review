@@ -1,0 +1,16 @@
+<Project>
+  <!-- Only the release producer opts in; historical proof/dev restores stay unchanged. -->
+  <PropertyGroup Condition="'$(APRReleasePackage)' == 'true'">
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
+    <NuGetLockFilePath>$(MSBuildThisFileDirectory)src/AgenticPrReview.Runtime/packages.release.lock.json</NuGetLockFilePath>
+    <RuntimeFrameworkVersion>10.0.9</RuntimeFrameworkVersion>
+    <PublishAotUsingRuntimePack>true</PublishAotUsingRuntimePack>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <StripSymbols>true</StripSymbols>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+</Project>

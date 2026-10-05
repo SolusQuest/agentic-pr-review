@@ -169,7 +169,7 @@ agentic-pr-review/
   THIRD-PARTY-NOTICES.txt
 ```
 
-The package/map owners must freeze the exact layout for review and qualification before publication. This example chooses no actual first candidate or version.
+The example above chooses no actual first candidate or version. The R7-D1 package format 1 section below defines the implemented layout; later map and qualification owners bind it before publication.
 
 ## Dependency Policy
 
@@ -212,3 +212,57 @@ During migration:
 - the first post-removal release documents state reset and input changes.
 
 Do not keep two permanent distribution architectures. Every transitional TypeScript business module must have a target owner and deletion gate.
+
+## R7-D1 package format 1
+
+The producer scripts/release/build-payload.mjs owns the first package format. The archive name is agentic-pr-review-<releaseVersion>-linux-x64.tar.gz, where releaseVersion is canonical vMAJOR.MINOR.PATCH-internal.N, without leading zeroes, with positive N and at most 48 ASCII characters. These tools and fixtures select no real candidate version.
+
+One normalized gzip stream contains a USTAR archive with exactly these regular files in this order:
+
+| Member                                    | Mode | Maximum bytes |
+| ----------------------------------------- | ---- | ------------- |
+| agentic-pr-review/agentic-pr-review       | 0755 | 64 MiB        |
+| agentic-pr-review/manifest.json           | 0644 | 64 KiB        |
+| agentic-pr-review/THIRD-PARTY-NOTICES.txt | 0644 | 1 MiB         |
+
+All members are nonempty. The compressed archive is at most 32 MiB and total expansion at most 66 MiB. Gzip metadata is fixed, one raw deflate stream is followed by its CRC32 and length, and no concatenated stream or trailing bytes are accepted. Tar uid, gid, timestamps, owner names, links, prefix, device fields and reserved bytes are zero; names, modes, checksums, octal sizes, magic/version, member order, zero padding and exactly two zero end blocks are canonical. No directories, alternate spellings, extensions, symlinks, hardlinks or additional members are accepted.
+
+The UTF-8 manifest is sorted-key canonical JSON without whitespace or duplicate keys. Its closed fields are formatVersion (1), releaseVersion, platform (linux-x64), exact 40-hex sourceCommit and sourceTree, 64-hex buildId, informationalVersion, launcher (r7-d0), buildInputs, nativeDependencies, and two members entries for the executable/notices. Each member entry has only path, mode, size and sha256. Build inputs bind the source/tree/version/platform, policy/lock/notices SHA-256, actual toolchain and exact dependency inventory. Dependency entries contain id, version, raw nupkg SHA-256, NuGet signature-excluding contentHash, and managed/native-runtime/build role. Toolchain entries record selected SDK/compiler/linker and driver hashes, Node/zlib, Ubuntu identity and bounded system-package versions. Native dependencies distinguish ELF NEEDED from runtime-loaded ICU/OpenSSL requirements.
+
+buildId = SHA256(canonicalJson(buildInputs)) is computed before compilation. The compiled assembly informational version is exactly releaseVersion + "+build." + buildId, at most 119 characters under the retained 120-character runtime result/trace contracts. Source/tree are already committed by buildId and are not redundantly appended. Ordinary development and historical proof builds keep 0.1.0-dev; r7-d0 is a launcher discriminator, not another semantic version.
+
+The external receipt.json has only formatVersion, archiveName, archiveSize, archiveSha256, identity (the six release/platform/source/tree/build/informational fields) and all three inspected member entries, including the manifest's own size/hash. The archive digest is never put inside its content, and the manifest does not hash itself. A local producer-written receipt is build evidence, not authentication. Inspection requires an independently trusted receipt; #343's future reviewed release map owns consumer expectations and acquisition.
+
+From a clean checkout, build with explicit committed source S and the chosen version:
+
+    node scripts/release/build-payload.mjs build --source <40-hex-S> --version <releaseVersion> --output <new-directory>
+
+Inspect using a receipt obtained from an independent trusted source:
+
+    node scripts/release/build-payload.mjs inspect --archive <archive-file> --receipt <trusted-receipt-file>
+
+Run deterministic structural/identity/source-admission tests:
+
+    npx vitest run tests/distribution/build-payload.test.ts
+
+Run credential-free synthetic package build/extract/actual-executable proof:
+
+    node tests/distribution/verify-package.mjs
+
+Run the full retained runtime gates, including package proof inside the AOT subcommand:
+
+    npm run runtime:verify
+
+The builder supports Ubuntu 24.04 x64, Node 24, exact selected .NET SDK 10.0.109 and clang 18.1.3, with binutils and the existing Native AOT prerequisites (clang and zlib1g-dev). Its native child requires no downstream SDK, framework installation, PATH or DOTNET_ROOT. Ubuntu still supplies glibc, libgcc, zlib, ICU 74 and OpenSSL 3; the build records installed versions and actual ELF dependencies. This does not claim compatibility with arbitrary Linux images or an entirely static executable.
+
+Runtime CI installs SDK 10.0.109 into its fresh runner-temp r7-d1-dotnet directory for the core package lane. The workflow verifier requires that exact version and isolated install root and rejects roll-forward configuration, shared SDK roots and version drift. The repository-wide development global.json and other lane setup policies retain their existing behavior.
+
+The producer requires clean HEAD == explicit S before and after building. It validates regular Git objects in the admitted closure and creates a fresh Git-object snapshot of global.json, runtime, scripts/release and protocol/schemas. Ignored checkout bin/obj files are excluded. Compilation uses fresh publish/intermediate/private NuGet/home directories, explicit package-only props/config and disabled ambient parent/user MSBuild imports. The packages.release.lock.json file applies only to opted-in package builds. Restore and publish both receive explicit publish/Native AOT runtime-pack context; .NET 10 splits Microsoft.NETCore.App.Runtime.NativeAOT.linux-x64 from the compiler tools, so a plain standalone restore is insufficient. The actual Native AOT runtime pack is pinned and hashed; compiler-only packages and the SDK-requested ASP.NET download remain build inputs. If all exact raw nupkg archives are available in the caller's conventional NuGet cache, their pinned SHA-256 values are checked and only those archives seed a private feed; cached DLL/native files are never copied. Otherwise restore uses only the scoped nuget.org source. The complete fresh NuGet ID/version directory inventory must equal the pinned policy, including PackageDownload and implicit runtime packs outside assets.libraries. The union of versioned library/target and exact download metadata must match that inventory, use only the isolated package folder, and agree with the raw archive, metadata and NuGet hash file. The metadata/library content identity is pinned separately from the cache hash file, which is verified against the raw signed archive bytes. This admission runs before and after publishing; missing, extra or wrong-version packages and inconsistent hashes/paths are rejected. BuildInputs and notices use the admitted complete inventory, and unexpected published outputs are rejected.
+
+The notices member retains actual resolved package license/notices plus pinned source MIT/copyright material, including json-everything OSMFEULA and Humanizer's Inflector/ByteSize declarations. Build-only inputs are inventoried separately from compiled/runtime dependencies. The source tree declares no project LICENSE; these third-party notices do not assign one or settle future release licensing.
+
+Every produced archive is inspected and its actual extracted executable runs direct-runtime bootstrap identity and the existing production zero-argument ActionHost fixture before output acceptance. The CI supervisor reads the original archive again, extracts that member, verifies its digest, checks exact requested-version success and mismatch rejection, and repeats the executable fixture with an SDK-free child environment. This is bootstrap and production denial/cancellation/framing/signal proof; generated Action qualification stays #344 and full successful same-binary review stays #359.
+
+Create an authorized local candidate commit before full runtime:verify: a dirty implementation checkout is correctly refused by the strict producer. The producer rejects outputs inside the source tree, including symlinked parents, and refuses existing output destinations. Local proof runs and the existing credential-free runtime-core AOT gate invoke the same package supervisor; the CI topology and checked generated wrapper remain unchanged.
+
+Source S, future authorized builder W, original archive bytes B and later Action T retain separate identities. The build record closes the selected source, exact package inputs and observed tools/environment; system tool/library images and restore infrastructure remain external inputs. Normalized archive metadata reduces accidental differences but does not promise byte-identical unrelated rebuilds. Original verified B and its external digest remain the distribution authority. GitHub release/tag publication, attestation, network resolver, default generated Action selection and exact-pair successful qualification are later outcomes.
