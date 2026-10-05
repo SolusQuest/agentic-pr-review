@@ -1,0 +1,197 @@
+name: Candidate preparation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source-commit:
+        description: Separately authorized exact payload source S (40 lowercase hex)
+        required: true
+        type: string
+      release-version:
+        description: Separately authorized canonical vMAJOR.MINOR.PATCH-internal.N
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-fixtures:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run tests/release
+
+  candidate-smoke:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install selected AOT prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+      - uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-p1-dotnet
+        with:
+          dotnet-version: 10.0.109
+      - name: Real local package and candidate smoke (explicit fixtures only)
+        run: node tests/release/verify-candidate.mjs
+
+  prepare-build:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      archive-name: ${{ steps.build.outputs.archive_name }}
+      archive-sha256: ${{ steps.build.outputs.archive_sha256 }}
+      receipt-sha256: ${{ steps.build.outputs.receipt_sha256 }}
+      artifact-id: ${{ steps.payload.outputs.artifact-id }}
+      artifact-sha256: ${{ steps.payload.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: control/package-lock.json
+      - name: Admit main workflow W and explicit source/version
+        env:
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+        run: node control/scripts/release/prepare-candidate.mjs admit --source "$INPUT_SOURCE" --version "$INPUT_VERSION"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source-commit }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify current preparation tooling
+        working-directory: control
+        run: |
+          npm ci
+          npm run check
+          npm run dist:check
+      - name: Install selected AOT prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+      - uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-p1-dotnet
+        with:
+          dotnet-version: 10.0.109
+      - name: Build and execute original package from clean S without publication credentials
+        id: build
+        env:
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+        run: node control/scripts/release/prepare-candidate.mjs build --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --repo "$GITHUB_WORKSPACE/source" --output "$RUNNER_TEMP/r7-p1-package"
+      - name: Retain original archive and producer receipt
+        id: payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: r7-p1-payload-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/r7-p1-package/${{ steps.build.outputs.archive_name }}
+            ${{ runner.temp }}/r7-p1-package/receipt.json
+          archive: true
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: false
+          overwrite: false
+          retention-days: 7
+
+  prepare-record:
+    needs: prepare-build
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      candidate-sha256: ${{ steps.record.outputs.candidate_sha256 }}
+      map-sha256: ${{ steps.record.outputs.map_sha256 }}
+      metadata-id: ${{ steps.metadata.outputs.artifact-id }}
+      metadata-sha256: ${{ steps.metadata.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.prepare-build.outputs.artifact-id }}
+          path: ${{ runner.temp }}/r7-p1-original
+          merge-multiple: true
+          github-token: ${{ github.token }}
+      - name: Verify independent build hashes and exact payload storage before recording
+        id: record
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+          ARCHIVE_NAME: ${{ needs.prepare-build.outputs.archive-name }}
+          ARCHIVE_SHA256: ${{ needs.prepare-build.outputs.archive-sha256 }}
+          RECEIPT_SHA256: ${{ needs.prepare-build.outputs.receipt-sha256 }}
+          ARTIFACT_ID: ${{ needs.prepare-build.outputs.artifact-id }}
+          ARTIFACT_SHA256: ${{ needs.prepare-build.outputs.artifact-sha256 }}
+        run: node control/scripts/release/prepare-candidate.mjs workflow-record --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --archive "$RUNNER_TEMP/r7-p1-original/$ARCHIVE_NAME" --receipt "$RUNNER_TEMP/r7-p1-original/receipt.json" --archive-sha256 "$ARCHIVE_SHA256" --receipt-sha256 "$RECEIPT_SHA256" --artifact-id "$ARTIFACT_ID" --artifact-sha256 "$ARTIFACT_SHA256" --output "$RUNNER_TEMP/r7-p1-record"
+      - name: Retain canonical candidate and proposed map
+        id: metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: r7-p1-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/r7-p1-record/candidate.json
+            ${{ runner.temp }}/r7-p1-record/proposed-action-map.json
+            ${{ runner.temp }}/r7-p1-record/candidate.sha256
+            ${{ runner.temp }}/r7-p1-record/proposed-action-map.sha256
+            ${{ runner.temp }}/r7-p1-record/summary.txt
+          archive: true
+          if-no-files-found: error
+          include-hidden-files: false
+          overwrite: false
+          retention-days: 7
+      - name: Record external locator without self-hash cycle
+        env:
+          CANDIDATE_SHA256: ${{ steps.record.outputs.candidate_sha256 }}
+          METADATA_ID: ${{ steps.metadata.outputs.artifact-id }}
+          METADATA_SHA256: ${{ steps.metadata.outputs.artifact-digest }}
+        run: node control/scripts/release/prepare-candidate.mjs locator --candidate "$RUNNER_TEMP/r7-p1-record/candidate.json" --sha256 "$CANDIDATE_SHA256" --metadata-id "$METADATA_ID" --metadata-sha256 "$METADATA_SHA256"
