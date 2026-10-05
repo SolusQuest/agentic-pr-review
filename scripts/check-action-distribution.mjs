@@ -91,7 +91,7 @@ async function inspectActionInventory(repoRoot, report) {
     return;
   }
   await walkActionDirectory(root, '', discovered, report);
-  const expected = ['action.yml', 'dist/index.js'];
+  const expected = ['action.yml', 'payload-map.json', 'dist/index.js'];
   for (const relativePath of expected) {
     if (!discovered.includes(relativePath)) {
       report(`${actionRootRelativePath}/${relativePath}`, 'action-file-missing');
@@ -283,6 +283,7 @@ function inspectBundleInputs(metafile, report) {
       }
       continue;
     }
+    if (source === 'scripts/release/build-payload.format.mjs') continue;
     if (source.startsWith('src/action-wrapper/')) {
       if (
         /(?:\.test|\.fixture)\.ts$/u.test(source) ||

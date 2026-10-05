@@ -102,6 +102,26 @@ trap cleanup EXIT
 mkdir "$output_root"
 cleanup_output=true
 
+# This existing protected consumer runs the fixed proof artifact, never the
+# checked ordinary Action. Authority is the exact clean control source above.
+npm ci --prefix "$control_root" --ignore-scripts --no-audit --no-fund
+node --input-type=module - "$control_root" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const root = process.argv[2];
+const { writeTrustedProofActionBundle, generateTrustedProofActionBundle } =
+  await import(pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href);
+const output = path.join(root, '.github/actions/agentic-pr-review/dist/index.js');
+await writeTrustedProofActionBundle(output, root);
+const installed = await readFile(output);
+if (!installed.equals((await generateTrustedProofActionBundle(root)).bytes)) {
+  throw new Error('APR_R4_E2P_CURRENT_PREPARATION_INVALID proof-bundle-readback');
+}
+console.log('APR_R4_E2P_PROOF_WRAPPER_SHA256 ' + createHash('sha256').update(installed).digest('hex'));
+NODE
+
 project="$source_root/runtime/tests/ActionHostTrustedProofPayload/AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj"
 dotnet publish "$project" --configuration Release --runtime linux-x64 \
   --self-contained true --output "$output_root" --artifacts-path "$artifacts_root" \

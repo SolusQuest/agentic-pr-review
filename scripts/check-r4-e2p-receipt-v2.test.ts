@@ -4,9 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
+import { generateTrustedProofActionBundle } from './build-action.mjs';
 import { verifyReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
 
 const roots: string[] = [];
+let proofBytes: Promise<Buffer> | undefined;
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -15,7 +17,7 @@ function sha256(value: crypto.BinaryLike) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function compose(identityOverrides: Record<string, unknown> = {}) {
+async function compose(identityOverrides: Record<string, unknown> = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-e2p-v2-receipt-'));
   roots.push(root);
   const payloadPath = path.join(root, 'payload');
@@ -57,6 +59,9 @@ function compose(identityOverrides: Record<string, unknown> = {}) {
   );
   Object.assign(identity, identityOverrides);
   fs.writeFileSync(identityPath, `${JSON.stringify(identity)}\n`);
+  const proofBundle = path.join(root, 'proof.js');
+  proofBytes ??= generateTrustedProofActionBundle(process.cwd()).then(({ bytes }) => bytes);
+  fs.writeFileSync(proofBundle, await proofBytes);
   const args = [
     'scripts/compose-r4-e2p-receipt-v2.mjs',
     '--identity',
@@ -68,7 +73,7 @@ function compose(identityOverrides: Record<string, unknown> = {}) {
     '--action',
     '.github/actions/agentic-pr-review/action.yml',
     '--bundle',
-    '.github/actions/agentic-pr-review/dist/index.js',
+    proofBundle,
     '--workflow',
     'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template',
     '--preflight-contract',
@@ -105,16 +110,25 @@ function compose(identityOverrides: Record<string, unknown> = {}) {
 }
 
 describe('R4 E2P current-head receipt v2', () => {
-  it('admits separate exact payload and Action source identities', () => {
-    const fixture = compose();
-    const receipt = verifyReceiptV2(fixture);
+  it('rejects an ordinary product bundle fingerprint substituted for the executed proof', async () => {
+    const fixture = await compose();
+    const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8'));
+    value.wrapper_bundle_sha256 = sha256(
+      fs.readFileSync('.github/actions/agentic-pr-review/dist/index.js'),
+    );
+    fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
+    await expect(verifyReceiptV2(fixture)).rejects.toThrow('digest-wrapper_bundle_sha256');
+  }, 15_000);
+  it('admits separate exact payload and Action source identities', async () => {
+    const fixture = await compose();
+    const receipt = await verifyReceiptV2(fixture);
     expect(receipt.source_commit).toBe('1'.repeat(40));
     expect(receipt.compiled_payload_source_commit).toBe(receipt.source_commit);
     expect(receipt.compiled_payload_proof_kind).toBe(receipt.kind);
     expect(receipt.action_source_sha).toBe('5b5769753653bb3fd3e68cf8b7bb88a1bd350613');
-  });
+  }, 15_000);
 
-  it('rejects v1, conflated, reordered, and extra receipt surfaces', () => {
+  it('rejects v1, conflated, reordered, and extra receipt surfaces', async () => {
     for (const mutate of [
       (value: Record<string, unknown>) => {
         value.kind = 'apr-r4-e2p-trusted-proof-payload-v1';
@@ -131,18 +145,18 @@ describe('R4 E2P current-head receipt v2', () => {
         value.extra = true;
       },
     ]) {
-      const fixture = compose();
+      const fixture = await compose();
       const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')) as Record<
         string,
         unknown
       >;
       mutate(value);
       fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
-      expect(() => verifyReceiptV2(fixture)).toThrow();
+      await expect(verifyReceiptV2(fixture)).rejects.toThrow();
     }
   });
 
-  it('rejects a reintroduced partition and forged compiled payload-source identity', () => {
+  it('rejects a reintroduced partition and forged compiled payload-source identity', async () => {
     for (const mutate of [
       (value: Record<string, unknown>) => {
         value.transaction_partition = {};
@@ -157,14 +171,14 @@ describe('R4 E2P current-head receipt v2', () => {
         value.source_tree = '0'.repeat(40);
       },
     ]) {
-      const fixture = compose();
+      const fixture = await compose();
       const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')) as Record<
         string,
         unknown
       >;
       mutate(value);
       fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
-      expect(() => verifyReceiptV2(fixture)).toThrow();
+      await expect(verifyReceiptV2(fixture)).rejects.toThrow();
     }
   });
 
@@ -182,15 +196,15 @@ describe('R4 E2P current-head receipt v2', () => {
     ['executable_relative_path', 'other-payload'],
     ['verifier_executable_relative_path', 'other-verifier'],
     ['build_pair_sha256', '0'.repeat(64)],
-  ])('rejects closed receipt field drift: %s', (field, replacement) => {
-    const fixture = compose();
+  ])('rejects closed receipt field drift: %s', async (field, replacement) => {
+    const fixture = await compose();
     const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')) as Record<
       string,
       unknown
     >;
     value[field] = replacement;
     fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
-    expect(() => verifyReceiptV2(fixture)).toThrow();
+    await expect(verifyReceiptV2(fixture)).rejects.toThrow();
   });
 
   it.each([
@@ -198,7 +212,7 @@ describe('R4 E2P current-head receipt v2', () => {
     ['compiled source commit', { compiled_payload_source_commit: '3'.repeat(40) }],
     ['compiled source tree', { compiled_payload_source_tree: '3'.repeat(40) }],
     ['derived build pair', { build_pair_sha256: '0'.repeat(64) }],
-  ])('makes the composer reject inconsistent %s inputs', (_name, overrides) => {
-    expect(() => compose(overrides)).toThrow();
+  ])('makes the composer reject inconsistent %s inputs', async (_name, overrides) => {
+    await expect(compose(overrides)).rejects.toThrow();
   });
 });

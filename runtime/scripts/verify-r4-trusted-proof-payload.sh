@@ -191,6 +191,14 @@ NODE
 
 execute_proof() {
   cd "$repo_root"
+  proof_bundle="$temporary_root/proof-action.js"
+  node --input-type=module - "$repo_root" "$proof_bundle" <<'NODE'
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [root, output] = process.argv.slice(2);
+const { writeTrustedProofActionBundle } = await import(pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href);
+await writeTrustedProofActionBundle(output, root);
+NODE
   dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj \
     --configuration Release --nologo --filter FullyQualifiedName~TrustedProof -m:1
   if ! dotnet publish "$project" --configuration Release --runtime linux-x64 \
@@ -274,7 +282,7 @@ execute_proof() {
   set +e
   dotnet "$supervisor" supervise \
     --root "$proof_evidence" --repo "$repo_root" --payload "$verifier" \
-    --bundle "$repo_root/.github/actions/agentic-pr-review/dist/index.js" \
+    --bundle "$proof_bundle" \
     --record "$framework_fixture_root/replacement-record.json" \
     --inventory "$framework_fixture_root/e1-base-inventory.json" \
     --golden "$framework_fixture_root/expected-evidence.json.golden" \
@@ -345,7 +353,7 @@ NODE
     --identity "$identity" --contract "$fixture_root/aot/receipt-contract.json" \
     --predecessor "$fixture_root/predecessor-anchor.json" \
     --action .github/actions/agentic-pr-review/action.yml \
-    --bundle .github/actions/agentic-pr-review/dist/index.js \
+    --bundle "$proof_bundle" \
     --workflow "$fixture_root/workflow/r4-trusted-proof.yml.template" \
     --preflight-contract "$fixture_root/workflow/preflight-contract.json" \
     --provider-contract "$fixture_root/deterministic-provider-contract.json" \
@@ -375,6 +383,7 @@ verify_two_root_preparation() {
   git clone --quiet --no-checkout --no-local --no-hardlinks \
     "$repo_root" "$source_copy"
   git -C "$source_copy" checkout --quiet --detach "$source_commit"
+  npm ci --prefix "$source_copy" --ignore-scripts --no-audit --no-fund
   mkdir -p "$(dirname "$control_receipt")" "$runner_temp"
   cp "$receipt_json" "$control_receipt"
   : > "$github_output"

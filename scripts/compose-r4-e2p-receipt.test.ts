@@ -4,9 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
+import { generateTrustedProofActionBundle } from './build-action.mjs';
 import { verifyReceipt, verifySealedReceipt } from './check-r4-e2p-receipt.mjs';
 
 const roots: string[] = [];
+let proofBytes: Promise<Buffer> | undefined;
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -15,7 +17,7 @@ function sha256(bytes: Buffer) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-function compose() {
+async function compose() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-e2p-receipt-'));
   roots.push(root);
   const payloadPath = path.join(root, 'payload');
@@ -40,6 +42,9 @@ function compose() {
     })}\n`,
   );
   const sourceRoot = process.cwd();
+  const proofBundle = path.join(root, 'proof.js');
+  proofBytes ??= generateTrustedProofActionBundle(process.cwd()).then(({ bytes }) => bytes);
+  fs.writeFileSync(proofBundle, await proofBytes);
   const args = [
     'scripts/compose-r4-e2p-receipt.mjs',
     '--identity',
@@ -51,7 +56,7 @@ function compose() {
     '--action',
     '.github/actions/agentic-pr-review/action.yml',
     '--bundle',
-    '.github/actions/agentic-pr-review/dist/index.js',
+    proofBundle,
     '--workflow',
     'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof.yml.template',
     '--preflight-contract',
@@ -84,7 +89,7 @@ function compose() {
 }
 
 describe('R4 E2P supplemental receipt', () => {
-  it('retains the exact synthetic v1 handoff as a historical baseline', () => {
+  it('retains the exact synthetic v1 handoff as a historical baseline', async () => {
     const fixtureRoot = path.join(
       process.cwd(),
       'runtime/tests/fixtures/action-host/trusted-proof-payload/two-root-consumer',
@@ -149,35 +154,35 @@ describe('R4 E2P supplemental receipt', () => {
     expect(retained.result).toBe('passed');
   });
 
-  it('composes and verifies one canonical offline receipt', () => {
-    const fixture = compose();
-    const receipt = verifyReceipt(fixture);
+  it('composes and verifies one canonical offline receipt', async () => {
+    const fixture = await compose();
+    const receipt = await verifyReceipt(fixture);
     expect(receipt.kind).toBe('apr-r4-e2p-trusted-proof-payload-v1');
     expect(receipt.proof_role).toBe('r4-e2p');
     expect(receipt.payload_build_discriminator).toBe('r4-w2');
-  });
+  }, 15_000);
 
-  it('rejects unknown fields and payload drift', () => {
-    const fixture = compose();
+  it('rejects unknown fields and payload drift', async () => {
+    const fixture = await compose();
     const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8'));
     fs.writeFileSync(fixture.receiptPath, `${JSON.stringify({ ...value, extra: true })}\n`);
-    expect(() => verifyReceipt(fixture)).toThrow(/receipt-keys/u);
+    await expect(verifyReceipt(fixture)).rejects.toThrow(/receipt-keys/u);
 
-    const second = compose();
+    const second = await compose();
     fs.appendFileSync(second.payloadPath, 'drift');
-    expect(() => verifyReceipt(second)).toThrow(/payload-digest/u);
+    await expect(verifyReceipt(second)).rejects.toThrow(/payload-digest/u);
   });
 
-  it('rejects noncanonical and stale source identities', () => {
-    const fixture = compose();
+  it('rejects noncanonical and stale source identities', async () => {
+    const fixture = await compose();
     const original = fs.readFileSync(fixture.receiptPath, 'utf8');
     fs.writeFileSync(fixture.receiptPath, ` ${original}`);
-    expect(() => verifyReceipt(fixture)).toThrow(/canonical/u);
+    await expect(verifyReceipt(fixture)).rejects.toThrow(/canonical/u);
 
-    const second = compose();
+    const second = await compose();
     const value = JSON.parse(fs.readFileSync(second.receiptPath, 'utf8'));
     value.action_source_sha = '9'.repeat(40);
     fs.writeFileSync(second.receiptPath, `${JSON.stringify(value)}\n`);
-    expect(() => verifyReceipt(second)).toThrow(/values/u);
+    await expect(verifyReceipt(second)).rejects.toThrow(/values/u);
   });
 });

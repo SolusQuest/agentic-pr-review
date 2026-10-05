@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 function fail(code) {
   throw new Error(`APR_R4_E2P_RECEIPT_INVALID ${code}`);
@@ -99,11 +100,10 @@ export function verifySealedReceipt({ receiptPath, sourceRoot }) {
   return receipt;
 }
 
-export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
+export async function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
   const receipt = verifySealedReceipt({ receiptPath, sourceRoot });
   const fixedFiles = new Map([
     ['action_metadata_sha256', '.github/actions/agentic-pr-review/action.yml'],
-    ['wrapper_bundle_sha256', '.github/actions/agentic-pr-review/dist/index.js'],
     [
       'workflow_topology_sha256',
       'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof.yml.template',
@@ -148,10 +148,17 @@ export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
   if (payloadPath && receipt.payload_sha256 !== sha256(read(payloadPath, 256 * 1024 * 1024))) {
     fail('payload-digest');
   }
+  // Sealed historical verification above stays dependency-free, including isolated control roots.
+  const { generateTrustedProofActionBundle } = await import(
+    pathToFileURL(path.join(sourceRoot, 'scripts/build-action.mjs')).href
+  );
+  const expected = await generateTrustedProofActionBundle(sourceRoot);
+  if (receipt.wrapper_bundle_sha256 !== sha256(expected.bytes))
+    fail('digest-wrapper_bundle_sha256');
   return receipt;
 }
 
-function main() {
+async function main() {
   const names = ['--receipt', '--source-root', '--payload'];
   if (process.argv.length !== 2 + names.length * 2) fail('usage');
   const options = new Map();
@@ -159,7 +166,7 @@ function main() {
     if (!names.includes(process.argv[index]) || options.has(process.argv[index])) fail('arguments');
     options.set(process.argv[index], process.argv[index + 1]);
   }
-  verifyReceipt({
+  await verifyReceipt({
     receiptPath: options.get('--receipt'),
     sourceRoot: options.get('--source-root'),
     payloadPath: options.get('--payload'),
@@ -169,7 +176,7 @@ function main() {
 
 if (import.meta.url === `file://${process.argv[1]?.replaceAll('\\', '/')}`) {
   try {
-    main();
+    await main();
   } catch (error) {
     process.stderr.write(
       `${error instanceof Error ? error.message : 'APR_R4_E2P_RECEIPT_INVALID'}\n`,

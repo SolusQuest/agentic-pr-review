@@ -13,7 +13,7 @@ provide a stable public API.
 
 ## Development Head Status
 
-The current development head contains the nested R4 Action metadata and generated Node 24 wrapper only for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: there is no release payload selection, automatic download, root Action alias, or stable output surface. The approved [R7 target](docs/90_roadmap/r7-plan.md) owns a publicly downloadable experimental prerelease, checksums, exact automatic payload resolution and bounded maintainer adoption. Formal public/default graduation requires a later maintainer decision; this documentation activation provides no release or runtime support. See [`r4-actionhost-wrapper-plan.md`](docs/20_architecture/r4-actionhost-wrapper-plan.md).
+The current nested Node 24 Action implements ordinary exact release-map resolution and the Native AOT fd launcher, with seven inputs and fourteen accounting outputs. Its checked payload map is explicitly null: no payload has been authorized, so the entry fails clearly before network access or launch. Private prepared-proof bundles remain separate repository capabilities. No experimental release or supported downstream installation is available yet; the [R7 plan](docs/90_roadmap/r7-plan.md) retains separate binding, qualification and publication gates. Formal public/default graduation requires a later maintainer decision. See [distribution](docs/20_architecture/distribution.md) and [credential-free generated Action fixtures](tests/distribution/README.md).
 
 Do not reference `main` or another moving development-head commit as an Action.
 There is no compatibility wrapper or supported downstream bootstrap/reset path during this transition.
@@ -39,7 +39,7 @@ npm run dist:check
 npm run runtime:integration
 ```
 
-`npm run dist:check` validates the exact seven-input/no-output metadata, package and lockfile ownership, generated-wrapper input and external-import inventory, byte-for-byte bundle reproducibility, and retired root-alias/local-runner/workflow-invocation drift. The command is read-only; use `npm run build:action` to regenerate the checked bundle intentionally.
+`npm run dist:check` validates the exact seven-input/fourteen-output metadata, Action map/source inventory, package and lockfile ownership, generated-wrapper input and external-import inventory, byte-for-byte bundle reproducibility, and retired root-alias/local-runner/workflow-invocation drift. The command is read-only; use `npm run build:action` to regenerate the checked bundle intentionally.
 
 `npm run runtime:integration` publishes the framework-dependent C# runtime
 outside the repository workspace and exercises the retained Input/Result/Trace
@@ -65,7 +65,7 @@ roadmap phase explicitly introduces it.
   Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
 - R7 targets public versioned experimental distribution, exact automatic payload selection and bounded public/private/test adoption. Formal public/default graduation remains deferred.
 
-The [R7 plan](docs/90_roadmap/r7-plan.md) records the approved target budgets, trusted configuration, accounting outputs and two-tag release identity. These remain targets until their implementation and separately authorized release gates complete. The current checked Action still has seven inputs and no outputs; no installation command or release version is available from this activation.
+The [R7 plan](docs/90_roadmap/r7-plan.md) records the approved budgets, trusted configuration and two-tag release identity. Implemented accounting and ordinary resolution do not grant release authority. The Action map remains unbound; no installation command or release version is available.
 
 ## Project Documentation
 

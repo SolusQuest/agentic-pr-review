@@ -87,6 +87,16 @@ try {
     ],
     { cwd: work, env, stdio: 'inherit', timeout: 60_000 },
   );
+  execFileSync(
+    process.execPath,
+    [
+      join(repo, 'tests/distribution/verify-generated-action.mjs'),
+      repo,
+      join(output, receipt.archiveName),
+      join(output, 'receipt.json'),
+    ],
+    { cwd: work, env, stdio: 'inherit', timeout: 120_000 },
+  );
   console.log(
     'D1_PACKAGED_EXECUTABLE ' +
       JSON.stringify({
