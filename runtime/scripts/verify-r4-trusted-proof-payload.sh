@@ -383,7 +383,7 @@ verify_two_root_preparation() {
   git clone --quiet --no-checkout --no-local --no-hardlinks \
     "$repo_root" "$source_copy"
   git -C "$source_copy" checkout --quiet --detach "$source_commit"
-  ln -s "$repo_root/node_modules" "$source_copy/node_modules"
+  npm ci --prefix "$source_copy" --ignore-scripts --no-audit --no-fund
   mkdir -p "$(dirname "$control_receipt")" "$runner_temp"
   cp "$receipt_json" "$control_receipt"
   : > "$github_output"
