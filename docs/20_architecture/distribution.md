@@ -169,7 +169,7 @@ agentic-pr-review/
   THIRD-PARTY-NOTICES.txt
 ```
 
-The package/map owners must freeze the exact layout for review and qualification before publication. This example chooses no actual first candidate or version.
+The example above chooses no actual first candidate or version. The R7-D1 package format 1 section below defines the implemented layout; later map and qualification owners bind it before publication.
 
 ## Dependency Policy
 
@@ -261,6 +261,6 @@ The notices member retains actual resolved package license/notices plus pinned s
 
 Every produced archive is inspected and its actual extracted executable runs direct-runtime bootstrap identity and the existing production zero-argument ActionHost fixture before output acceptance. The CI supervisor reads the original archive again, extracts that member, verifies its digest, checks exact requested-version success and mismatch rejection, and repeats the executable fixture with an SDK-free child environment. This is bootstrap and production denial/cancellation/framing/signal proof; generated Action qualification stays #344 and full successful same-binary review stays #359.
 
-Create an authorized local candidate commit before full runtime:verify: a dirty implementation checkout is correctly refused by the strict producer. Keep outputs outside the source tree. Local proof runs and the existing credential-free runtime-core AOT gate invoke the same package supervisor; the CI topology and checked generated wrapper remain unchanged.
+Create an authorized local candidate commit before full runtime:verify: a dirty implementation checkout is correctly refused by the strict producer. The producer rejects outputs inside the source tree, including symlinked parents, and refuses existing output destinations. Local proof runs and the existing credential-free runtime-core AOT gate invoke the same package supervisor; the CI topology and checked generated wrapper remain unchanged.
 
 Source S, future authorized builder W, original archive bytes B and later Action T retain separate identities. The build record closes the selected source, exact package inputs and observed tools/environment; system tool/library images and restore infrastructure remain external inputs. Normalized archive metadata reduces accidental differences but does not promise byte-identical unrelated rebuilds. Original verified B and its external digest remain the distribution authority. GitHub release/tag publication, attestation, network resolver, default generated Action selection and exact-pair successful qualification are later outcomes.

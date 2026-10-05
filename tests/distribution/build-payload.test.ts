@@ -18,6 +18,7 @@ import {
 } from '../../scripts/release/build-payload.format.mjs';
 import {
   admitSource,
+  admitOutput,
   admitToolchain,
   admitPublishInventory,
 } from '../../scripts/release/build-payload.mjs';
@@ -535,4 +536,45 @@ describe('R7-D1 production build admission', () => {
     });
     expect(() => inspectPackage(p.bytes, p.expected)).toThrow('member_too_large_or_empty');
   });
+});
+
+describe('R7-D1 input/output filesystem admission', () => {
+  test('rejects source-tree output before publication and existing outside destinations', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'apr-d1-output-test-'));
+    const repo = join(parent, 'source');
+    mkdirSync(repo);
+    try {
+      expect(() => admitOutput(repo, join(repo, 'new-package'))).toThrow('output_inside_source');
+      expect(() => admitOutput(repo, repo)).toThrow('output_inside_source');
+      expect(() => admitOutput(repo, parent)).toThrow('output_already_exists');
+      expect(admitOutput(repo, join(parent, 'new-package'))).toBe(join(parent, 'new-package'));
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+  test.skipIf(process.platform !== 'linux')(
+    'refuses FIFO and symlink inputs without waiting on a writer',
+    async () => {
+      const parent = mkdtempSync(join(tmpdir(), 'apr-d1-special-input-test-'));
+      try {
+        const fifo = join(parent, 'fifo');
+        execFileSync('/usr/bin/mkfifo', [fifo]);
+        await expect(readBoundedFile(fifo, LIMITS.archive)).rejects.toThrow(
+          'invalid_or_excessive_file',
+        );
+        const regular = join(parent, 'regular');
+        writeFileSync(regular, 'x');
+        execFileSync('/usr/bin/ln', ['-s', regular, join(parent, 'link')]);
+        await expect(readBoundedFile(join(parent, 'link'), LIMITS.archive)).rejects.toThrow();
+        const repo = join(parent, 'source');
+        mkdirSync(repo);
+        execFileSync('/usr/bin/ln', ['-s', repo, join(parent, 'source-link')]);
+        expect(() => admitOutput(repo, join(parent, 'source-link', 'out'))).toThrow(
+          'output_inside_source',
+        );
+      } finally {
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
 });

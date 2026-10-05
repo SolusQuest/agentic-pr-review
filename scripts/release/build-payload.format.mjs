@@ -461,7 +461,10 @@ export function inspectPackage(bytes, expected) {
   return { manifest, receipt, files };
 }
 export async function readBoundedFile(path, cap) {
-  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  const handle = await open(
+    path,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+  );
   try {
     const before = await handle.stat();
     requireThat(

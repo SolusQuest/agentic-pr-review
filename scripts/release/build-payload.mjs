@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   LIMITS,
@@ -59,6 +59,16 @@ export function admitSource(repo, sourceCommit) {
     );
   }
   return tree;
+}
+export function admitOutput(repo, output) {
+  const sourceRoot = realpathSync(resolve(repo));
+  const destination = join(realpathSync(dirname(resolve(output))), basename(output));
+  assert(
+    destination !== sourceRoot && !destination.startsWith(sourceRoot + sep),
+    'output_inside_source',
+  );
+  assert(!existsSync(destination), 'output_already_exists');
+  return destination;
 }
 function tool(name, repo) {
   const path = realpathSync(text('/usr/bin/which', [name]));
@@ -216,7 +226,7 @@ export async function buildPayload({ repo, sourceCommit, releaseVersion, output 
   );
   const os = await readFile('/etc/os-release', 'utf8');
   assert(/^ID=ubuntu$/m.test(os) && /^VERSION_ID="24\.04"$/m.test(os), 'unsupported_builder_os');
-  assert(!existsSync(output), 'output_already_exists');
+  output = admitOutput(repo, output);
   const policy = JSON.parse(await readFile(join(repo, policyPath), 'utf8'));
   assert(
     policy.formatVersion === 1 &&
