@@ -27,7 +27,21 @@ function assert(condition, code) {
   if (!condition) throw new Error(code);
 }
 function run(command, args, options = {}) {
-  return execFileSync(command, args, { maxBuffer: 64 * 1024 * 1024, timeout: 600_000, ...options });
+  try {
+    return execFileSync(command, args, {
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 600_000,
+      ...options,
+    });
+  } catch (error) {
+    const diagnostics = [error.stdout, error.stderr]
+      .filter(Buffer.isBuffer)
+      .map((bytes) => bytes.subarray(Math.max(0, bytes.length - 32 * 1024)).toString('utf8'))
+      .join('\n');
+    throw new Error(
+      'build_command_failed: ' + basename(command) + ' exit=' + error.status + '\n' + diagnostics,
+    );
+  }
 }
 function text(command, args, options = {}) {
   return run(command, args, options).toString('utf8').trim();
