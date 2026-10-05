@@ -172,6 +172,7 @@ run_aot() {
   node "${ACTION_HOST_FIXTURE}" native "${binary}"
   _require_file "${ACTION_HOST_WRAPPER_FIXTURE}"
   node "${ACTION_HOST_WRAPPER_FIXTURE}" native "${binary}"
+  node "${REPO_ROOT}/tests/distribution/verify-package.mjs" "${REPO_ROOT}"
 }
 
 run_all() {
