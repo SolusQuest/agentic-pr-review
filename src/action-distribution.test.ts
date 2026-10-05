@@ -315,7 +315,7 @@ describe('R7 Action distribution and retained private proof', () => {
   );
 
   it.runIf(process.platform === 'linux')(
-    'runs the checked ESM bundle in its real package scope without node_modules and reaches the lazy executor locally',
+    'runs the private proof ESM bundle without node_modules and reaches the lazy executor locally',
     async () => {
       const execution = await runIsolatedBundle('r4-w2');
 
