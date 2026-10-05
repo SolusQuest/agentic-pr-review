@@ -943,6 +943,111 @@ describe('W1 production composition', () => {
   );
 });
 
+// Wrapper-only completion coverage; actual production Runtime denial/cancel is
+// exercised separately by the new ActionHostFixture framework/AOT supervisor.
+describe('D0 ordinary production handshake', () => {
+  it.each([undefined, 'measurement', 'final-bootstrap', 'invalid'])(
+    'presents an ordinary completion without proof receipts under ambient profile %s',
+    async (profile) => {
+      vi.stubEnv(R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE, profile);
+      const fixture = await wrapperFixture('r7-d0');
+      const presentation = recordingToolkit({});
+      const receipts: string[] = [];
+      const document = validCompletion('r7-d0');
+      const exit = await runPrivateActionWrapperWithSeams({
+        toolkit: presentation.toolkit,
+        preparedPayload: fixture.proof,
+        platform: 'linux',
+        signal: new AbortController().signal,
+        runtimeFacts: () => fixture.facts,
+        bridgeRuntime: async (input) => await fakeBridge(input),
+        createArtifactExecutor: async () => {
+          throw new Error('must remain lazy');
+        },
+        hostProcessRunner: async (request) => {
+          expect(request.requestBudgetProfile).toBeUndefined();
+          expect(parseLaunchDocument(request.launchBytes).build_discriminator).toBe('r7-d0');
+          return { completionBytes: document, exitCode: 0, trustedProofBudgetReceiptLines: [] };
+        },
+        trustedProofBudgetReceiptSink: (frame) => receipts.push(frame),
+        fatalExit: () => {
+          throw new Error('unexpected fatal');
+        },
+      });
+      expect(exit).toBe(0);
+      expect(receipts).toEqual([]);
+      expect(presentation.errors).toEqual([]);
+      expect(presentation.outputs).toEqual(
+        projectCompletionOutputs(parseCompletionDocument(document, 'r7-d0', 0)),
+      );
+    },
+  );
+
+  it.each(['malformed', 'foreign-build'])(
+    'keeps ordinary %s completions fail-closed',
+    async (kind) => {
+      const fixture = await wrapperFixture('r7-d0');
+      const presentation = recordingToolkit({});
+      const exit = await runPrivateActionWrapperWithSeams({
+        toolkit: presentation.toolkit,
+        preparedPayload: fixture.proof,
+        platform: 'linux',
+        signal: new AbortController().signal,
+        runtimeFacts: () => fixture.facts,
+        bridgeRuntime: async (input) => await fakeBridge(input),
+        createArtifactExecutor: async () => {
+          throw new Error('must remain lazy');
+        },
+        hostProcessRunner: async () => ({
+          completionBytes: kind === 'malformed' ? Buffer.from('{') : validCompletion('r4-w2'),
+          exitCode: 0,
+          trustedProofBudgetReceiptLines: [],
+        }),
+        fatalExit: () => {
+          throw new Error('unexpected fatal');
+        },
+      });
+      expect(exit).toBe(1);
+      expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
+      expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+    },
+  );
+
+  it('still rejects a valid r4-w2 completion without its required proof receipts', async () => {
+    vi.stubEnv(R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE, 'measurement');
+    const fixture = await wrapperFixture('r4-w2');
+    const presentation = recordingToolkit({});
+    let hostCalls = 0;
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async (input) => await fakeBridge(input),
+      createArtifactExecutor: async () => {
+        throw new Error('must remain lazy');
+      },
+      hostProcessRunner: async (request) => {
+        hostCalls++;
+        expect(request.requestBudgetProfile).toBe('measurement');
+        return {
+          completionBytes: validCompletion('r4-w2'),
+          exitCode: 0,
+          trustedProofBudgetReceiptLines: [],
+        };
+      },
+      fatalExit: () => {
+        throw new Error('unexpected fatal');
+      },
+    });
+    expect(hostCalls).toBe(1);
+    expect(exit).toBe(1);
+    expect(presentation.outputs).toEqual(FIXED_WRAPPER_FAILURE_OUTPUTS);
+    expect(presentation.errors).toEqual(['The private review wrapper failed.']);
+  });
+});
+
 async function fakeBridge(_input: {
   readonly buildDiscriminator: string;
   readonly executorFactory: (stagingRoot: string) => Promise<ArtifactBridgeExecutor>;
