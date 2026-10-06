@@ -9,6 +9,7 @@ import { verifySealedReceipt } from './check-r4-e2p-receipt.mjs';
 import { verifySealedReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
 import { generateCleanupPlan, projectTrustedProofEvidence } from './r4-trusted-proof-contract.mjs';
 import { verifyWorkflow as verifyRuntimeCiWorkflow } from './verify-runtime-ci-workflow.mjs';
+import { verifyCandidateWorkflow } from './release/candidate.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const fixtureRelative = 'runtime/tests/fixtures/action-host/trusted-proof';
@@ -774,14 +775,23 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     if (name !== 'r4-trusted-proof.yml' && proofAnchors.some((anchor) => source.includes(anchor))) {
       fail('repository-proof-route-owner');
     }
-    if (/actions\/(?:upload|download)-artifact/u.test(source)) {
-      if (name !== 'runtime-ci.yml') fail('repository-alternate-route');
+    if (name === 'release.yml') {
       try {
-        // Only CI2's complete closed topology can admit its bounded receipt transport.
-        // Every other gate still rejects artifact actions, including compiled-output reuse.
-        verifyRuntimeCiWorkflow(value);
+        verifyCandidateWorkflow(value);
       } catch {
         fail('repository-alternate-route');
+      }
+    }
+    if (/actions\/(?:upload|download)-artifact/u.test(source)) {
+      if (name !== 'release.yml') {
+        if (name !== 'runtime-ci.yml') fail('repository-alternate-route');
+        try {
+          // CI2 retains its existing closed receipt transport; P1 was fully
+          // checked above, including when its artifact actions are removed.
+          verifyRuntimeCiWorkflow(value);
+        } catch {
+          fail('repository-alternate-route');
+        }
       }
     }
     const expressions = [];
@@ -790,6 +800,9 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     validateActionTokenRoutes(name, value);
   }
   const expected = [
+    ...(workflowFiles.includes('release.yml')
+      ? Array.from({ length: 2 }, () => `release.yml\0\${{ github.token }}`)
+      : []),
     `r3-live-proof.yml\0\${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}`,
     ...Array.from({ length: 5 }, () => `r4-trusted-proof.yml\0\${{ secrets.GITHUB_TOKEN }}`),
     ...Array.from(

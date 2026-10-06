@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
+import { parse, stringify } from 'yaml';
 import { checkR4TrustedProof } from './check-r4-trusted-proof.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -45,6 +46,156 @@ function copiedWorkflowsRoot() {
 }
 
 describe('R4 E3 trusted proof policy', () => {
+  test.each([
+    [
+      'publication write',
+      (w: any) => {
+        w.permissions.contents = 'write';
+      },
+    ],
+    [
+      'storage write',
+      (w: any) => {
+        w.jobs['prepare-record'].permissions.actions = 'write';
+      },
+    ],
+    [
+      'signing authority',
+      (w: any) => {
+        w.jobs['prepare-build'].permissions['id-token'] = 'write';
+      },
+    ],
+    [
+      'protected environment',
+      (w: any) => {
+        w.jobs['prepare-build'].environment = 'publication';
+      },
+    ],
+    [
+      'main guard removed',
+      (w: any) => {
+        delete w.jobs['prepare-build'].if;
+      },
+    ],
+    [
+      'trusted event changed',
+      (w: any) => {
+        w.on.pull_request_target = null;
+      },
+    ],
+    [
+      'source substituted',
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.with?.path === 'source').with.ref = 'main';
+      },
+    ],
+    [
+      'persisted credentials',
+      (w: any) => {
+        w.jobs['prepare-build'].steps[0].with['persist-credentials'] = true;
+      },
+    ],
+    [
+      'unbounded payload paths',
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'payload').with.path =
+          '/private/**';
+      },
+    ],
+    [
+      'replacement upload',
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'payload').with.overwrite = true;
+      },
+    ],
+    [
+      'unknown retention',
+      (w: any) => {
+        delete w.jobs['prepare-build'].steps.find((s: any) => s.id === 'payload').with[
+          'retention-days'
+        ];
+      },
+    ],
+    [
+      'download by name',
+      (w: any) => {
+        const input = w.jobs['prepare-record'].steps.find(
+          (s: any) => s.uses === 'actions/download-artifact@v8',
+        ).with;
+        delete input['artifact-ids'];
+        input.name = 'latest';
+      },
+    ],
+    [
+      'cross-run download',
+      (w: any) => {
+        w.jobs['prepare-record'].steps.find(
+          (s: any) => s.uses === 'actions/download-artifact@v8',
+        ).with['run-id'] = 1;
+      },
+    ],
+    [
+      'record proof bypass',
+      (w: any) => {
+        w.jobs['prepare-record'].steps.find((s: any) => s.id === 'record').run = 'echo bypass';
+      },
+    ],
+    [
+      'extra credential route',
+      (w: any) => {
+        w.jobs['candidate-fixtures'].steps.push({
+          env: { GITHUB_TOKEN: '${{ github.token }}' },
+          run: 'echo unsafe',
+        });
+      },
+    ],
+    [
+      'extra artifact step',
+      (w: any) => {
+        w.jobs['candidate-fixtures'].steps.push({
+          uses: 'actions/upload-artifact@v7',
+          with: { path: '/private/**' },
+        });
+      },
+    ],
+    [
+      'extra job',
+      (w: any) => {
+        w.jobs.extra = structuredClone(w.jobs['prepare-record']);
+      },
+    ],
+    [
+      'removed artifact actions',
+      (w: any) => {
+        for (const j of Object.values(w.jobs) as any[])
+          j.steps = j.steps.filter(
+            (s: any) => !/actions\/(?:upload|download)-artifact/.test(s.uses || ''),
+          );
+      },
+    ],
+  ])('rejects a broadened P1 candidate route: %s', (_name, mutate) => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const pathname = path.join(workflowsRoot, 'release.yml');
+    const candidate = parse(fs.readFileSync(pathname, 'utf8'));
+    mutate(candidate);
+    fs.writeFileSync(pathname, stringify(candidate));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
+  });
+
+  test('rejects the reviewed candidate artifact route under any other owner', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.copyFileSync(
+      path.join(workflowsRoot, 'release.yml'),
+      path.join(workflowsRoot, 'candidate-copy.yml'),
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
+  });
+
+  test('retains historical R4 policy when no P1 workflow is present', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.unlinkSync(path.join(workflowsRoot, 'release.yml'));
+    expect(checkR4TrustedProof({ workflowsRoot })).toBe(true);
+  });
   test('admits the exact inert workflow, receipt, and closed fixture inventory', () => {
     expect(checkR4TrustedProof()).toBe(true);
   });

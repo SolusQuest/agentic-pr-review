@@ -113,6 +113,8 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/release/build-payload.licenses.txt',
       'scripts/release/build-payload.mjs',
       'scripts/release/build-payload.nuget.config',
+      'scripts/release/candidate.mjs',
+      'scripts/release/prepare-candidate.mjs',
       'scripts/run-clean-source-proof.mjs',
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-runtime-integration.mjs',
@@ -123,6 +125,7 @@ describe('R4 W13 closed migration inventory', () => {
       '.github/workflows/ci.yml',
       '.github/workflows/r3-live-proof.yml',
       '.github/workflows/r4-trusted-proof.yml',
+      '.github/workflows/release.yml',
       '.github/workflows/runtime-ci.yml',
     ]);
     expect(trackedFiles('protocol/schemas/*')).toEqual([

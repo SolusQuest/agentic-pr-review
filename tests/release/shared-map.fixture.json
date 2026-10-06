@@ -1,0 +1,44 @@
+{
+  "builder": {
+    "repository": "SolusQuest/agentic-pr-review",
+    "workflowCommit": "1111111111111111111111111111111111111111",
+    "workflowPath": ".github/workflows/release.yml"
+  },
+  "formatVersion": 1,
+  "payload": {
+    "archiveName": "agentic-pr-review-v0.0.0-internal.1-linux-x64.tar.gz",
+    "archiveSha256": "0850dadf8d59f4e45c811407cd2d13b1e47923a67b1b613cf732701f21ad2b63",
+    "archiveSize": 860,
+    "formatVersion": 1,
+    "identity": {
+      "buildId": "e29f0fe44cc9c4422f390f7a97588286c4c412e81f38b55bd87bd9d2968ed3e2",
+      "informationalVersion": "v0.0.0-internal.1+build.e29f0fe44cc9c4422f390f7a97588286c4c412e81f38b55bd87bd9d2968ed3e2",
+      "platform": "linux-x64",
+      "releaseVersion": "v0.0.0-internal.1",
+      "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceTree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "members": [
+      {
+        "mode": 493,
+        "path": "agentic-pr-review/agentic-pr-review",
+        "sha256": "1718b53ff99b468f194667a443674e70c6c912ddb4d1d1a30dc8e334947ca146",
+        "size": 128
+      },
+      {
+        "mode": 420,
+        "path": "agentic-pr-review/manifest.json",
+        "sha256": "8ea9fd6f0ab17a0562b5bcb8fec75f12678ade723056a9918e0fff86326e28c6",
+        "size": 1918
+      },
+      {
+        "mode": 420,
+        "path": "agentic-pr-review/THIRD-PARTY-NOTICES.txt",
+        "sha256": "d0580dafaab0f7216b25ef34b2bd3b4c606ee7376a128c42fcdfc9f9136095c0",
+        "size": 63
+      }
+    ]
+  },
+  "repository": "SolusQuest/agentic-pr-review",
+  "tag": "payload-v0.0.0-internal.1"
+}
