@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -22,7 +22,10 @@ function trackedFiles(root: string): string[] {
     encoding: 'utf8',
   })
     .split('\0')
-    .filter((relative) => relative !== '' && existsSync(path.join(root, relative)))
+    .filter((relative) => {
+      const fullPath = path.join(root, relative);
+      return relative !== '' && existsSync(fullPath) && statSync(fullPath).isFile();
+    })
     .sort();
 }
 
@@ -40,6 +43,16 @@ function ownersFor(relative: string, line: string) {
 }
 
 describe('R1 residual reference allowlist', () => {
+  it('keeps the handbook gitlink outside parent-owned file discovery', () => {
+    const root = process.cwd();
+    const entry = execFileSync('git', ['ls-files', '--stage', '--', 'docs/shared'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(entry).toMatch(/^160000 [a-f0-9]{40} 0\tdocs\/shared\r?\n$/u);
+    expect(trackedFiles(root)).not.toContain('docs/shared');
+  });
+
   it('owns every executable, contract, and documentary residual exactly once', async () => {
     const root = process.cwd();
     const hitCounts = new Map(residualReferenceRules.map((rule) => [rule.id, 0]));
@@ -94,17 +107,11 @@ describe('R1 residual reference allowlist', () => {
     expect("import '@anthropic-ai/claude-code';").toMatch(residualReferenceDiscovery);
   });
 
-  it('discovers and singly owns the real tracked CLAUDE.md entrypoint', async () => {
-    const relative = 'CLAUDE.md';
-    const text = decodeTrackedText(await readFile(path.join(process.cwd(), relative)));
-    expect(text).toBeDefined();
-
-    const matches = (text ?? '')
-      .split(/\r?\n/u)
-      .filter((line) => residualReferenceDiscovery.test(line));
-    expect(matches.length).toBeGreaterThan(0);
-    for (const line of matches) {
-      expect(ownersFor(relative, line).map(({ id }) => id)).toEqual(['RR-034']);
-    }
+  it('keeps the retired contributor adapter absent and the neutral entrypoint available', () => {
+    const root = process.cwd();
+    expect(existsSync(path.join(root, 'CLAUDE.md'))).toBe(false);
+    const tracked = trackedFiles(root);
+    expect(tracked).not.toContain('CLAUDE.md');
+    expect(tracked).toContain('AGENTS.md');
   });
 });

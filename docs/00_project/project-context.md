@@ -79,9 +79,10 @@ Use repository files as the durable source of truth:
 - `docs/20_architecture/architecture.md`: concise architecture direction;
 - `docs/20_architecture/security-boundary.md`: trust, credential, tool, and artifact boundaries;
 - `docs/20_architecture/`: current implementation contracts and architecture details;
-- `docs/50_ai/`: agent context and cross-agent procedures;
+- `docs/shared/`: pinned Solus Book engineering standards and common skills;
+- `docs/50_ai/`: APR agent context, handbook adoption, and local procedure additions;
 - `docs/90_roadmap/`: current sequencing and issue-planning direction.
 
 Current implementation contract documents remain authoritative for current code until migration removes their surfaces. When they conflict with the selected long-term direction, the rebaseline document controls new design work.
 
-GitHub issues track actionable design, refinement, and implementation work. Pull requests record accepted project decisions, implementation history, and validation. Chat discussions, local notes, and task prompts are not durable project truth until summarized into repository docs, issues, or PRs.
+Use [APR source-of-truth rules](source-of-truth.md) with the shared model for GitHub work records, durable decisions, and historical evidence.

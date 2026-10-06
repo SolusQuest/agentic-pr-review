@@ -4,40 +4,21 @@ This repository is public. Agents work from this repository, the current task pr
 
 ## Startup Reading Order
 
-1. `docs/50_ai/agent-context.md`
-2. `docs/50_ai/collaboration-layers.md`
-3. Task-specific procedures under `docs/50_ai/skills/`
-4. Relevant project, workflow, architecture, or roadmap docs under `docs/`
+1. [APR context](docs/50_ai/agent-context.md), [repository policy](docs/10_workflow/repository-policy.md), and [local collaboration placement](docs/50_ai/collaboration-layers.md).
+2. Shared [collaboration](docs/shared/standards/collaboration.md), [source of truth](docs/shared/standards/source-of-truth.md), and [conventions](docs/shared/standards/conventions.md).
+3. [Task routing](docs/shared/agents/task-routing.md), the selected shared skill, and its APR additions under `docs/50_ai/skills/`.
+4. Relevant project, workflow, architecture, or roadmap docs under `docs/`.
+
+The shared source is the pinned Solus Book submodule at `docs/shared/`. Initialize it with `git submodule update --init --recursive`. [Handbook adoption](docs/50_ai/handbook-adoption.md) records the revision, resource resolution, local requirements, and verification. Follow its loading-failure guidance if shared content is unavailable. Solus Book's own `AGENTS.md` applies to maintaining that submodule; APR uses the shared rules linked above.
 
 ## Code Conventions
 
-See `docs/00_project/conventions.md` for TypeScript, module, test, and formatting conventions.
+See [Code conventions](docs/00_project/conventions.md) for TypeScript, module, test, and formatting conventions.
 
-## Safety Rules
+## APR Requirements
 
-- Do not merge PRs.
-- Do not mutate repository settings, labels, milestones, Projects, branch protection, or secrets unless a task explicitly authorizes that metadata operation.
-- `pull_request` and `push` CI must run without provider secrets.
-- Do not use `pull_request_target` without explicit security review.
-- Use synthetic fixtures or test-only modes unless a task explicitly defines live provider validation.
-
-## Text Hygiene
-
-- Keep commit messages, PR bodies, issue bodies, and comments clear and focused.
-- Do not wrap text in decorative marker strings.
+[Repository policy](docs/10_workflow/repository-policy.md) owns APR's merge, metadata, CI, and live-provider restrictions.
 
 ## Validation
 
-For code changes, the default local validation is:
-
-```bash
-npm run check
-```
-
-Packaging, workflow, README, and distribution changes also run:
-
-```bash
-npm run dist:check
-```
-
-This command verifies the nested R4 metadata, checked generated bundle, package ownership, and retired-surface drift without mutating the bundle.
+Follow [APR validation](docs/10_workflow/validation.md) for the required commands and environments.

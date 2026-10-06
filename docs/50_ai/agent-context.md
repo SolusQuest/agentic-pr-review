@@ -4,9 +4,9 @@ You are working in `SolusQuest/agentic-pr-review`, a public GitHub PR review act
 
 ## Read First
 
-1. `docs/50_ai/collaboration-layers.md`
-2. Task-specific files under `docs/50_ai/skills/`
-3. Relevant project docs under `docs/`
+1. [Repository policy](../10_workflow/repository-policy.md), [collaboration placement](collaboration-layers.md), and [handbook adoption](handbook-adoption.md).
+2. Shared [task routing](../shared/agents/task-routing.md), the selected shared skill, and its APR additions under `docs/50_ai/skills/`.
+3. Relevant project docs under `docs/`.
 
 ## Repository Role
 
@@ -29,16 +29,4 @@ R1 is complete: the legacy mixed Action, TypeScript coordinator, and Claude Code
 
 ## Default Validation
 
-For code and docs changes:
-
-```bash
-npm run check
-```
-
-Packaging, workflow, README, and distribution changes also run:
-
-```bash
-npm run dist:check
-```
-
-This command verifies the nested R4 metadata, generated bundle reproducibility and inventory, package ownership, and retired-surface drift.
+Follow [APR validation](../10_workflow/validation.md) for the required commands and environments, using the shared [test-validation skill](../shared/skills/test-validation/SKILL.md) for execution and evidence reporting.

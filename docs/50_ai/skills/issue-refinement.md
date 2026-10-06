@@ -1,64 +1,7 @@
-# Issue Refinement
+# APR Issue Refinement
 
-Use this procedure when turning an idea, placeholder, or broad request into an agent-ready issue.
+Use the shared [issue-refinement skill](../../shared/skills/issue-refinement/SKILL.md) with [APR issue rules](../../10_workflow/issue-workflow.md) for required native types and local normalization, and [APR validation](../../10_workflow/validation.md) for actual commands.
 
-Follow `docs/10_workflow/issue-workflow.md` for issue type selection and body conventions.
-When creating or updating the remote issue, follow `docs/50_ai/skills/issue-publishing.md`.
+Use [APR runtime design additions](runtime-design-refinement.md) for the project-specific design triggers and constraints, including changes to fail-closed behavior. That document links the common design procedure.
 
-## Inputs
-
-- the current issue or task prompt;
-- repository docs;
-- code paths;
-- PRs or release notes.
-
-If important context is missing, ask for a clarification.
-
-## Preflight Decisions
-
-Do not hide high-impact decisions inside a long issue draft. Surface them first when the task changes:
-
-- action inputs or outputs;
-- JSON schema or runtime protocol;
-- runtime/provider naming or responsibility boundary;
-- GitHub token or side-effect boundary;
-- state artifact or memory model;
-- comment publishing behavior;
-- release, pinning, or runtime download policy;
-- failure mode or fail-closed behavior;
-- trace or artifact privacy contract.
-
-For each decision, provide:
-
-- recommended option;
-- alternatives;
-- why;
-- impact if wrong;
-- whether human confirmation is needed.
-
-## Agent-Ready Criteria
-
-An issue is agent-ready when:
-
-- objective is clear;
-- acceptance criteria are clear;
-- relevant docs or code paths are linked;
-- no unresolved design questions remain;
-- validation method is defined;
-- scope fits one focused PR.
-
-If a human decision is still needed, state that design is still needed and name the blocking decision.
-
-## Draft Shape
-
-Select the native issue type separately from the title and body. The title does not use a type prefix, and the body does not include a `Type:` metadata field.
-
-Keep body sections clear and execution-oriented:
-
-- objective or goal;
-- context;
-- scope;
-- expected output;
-- acceptance criteria;
-- related docs, issues, or PRs;
-- notes.
+For publication, use shared [issue publishing](../../shared/skills/issue-publishing/SKILL.md) with [APR client guidance](issue-publishing.md).

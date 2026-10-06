@@ -101,15 +101,14 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 ## Residual-reference ownership
 
-The guard enumerates cached tracked files plus non-ignored untracked files with `git ls-files --cached --others --exclude-standard`. It skips binary or invalid-UTF-8 content and excludes exactly four paths from match discovery: the W2-owned derived bundle `.github/actions/agentic-pr-review/dist/index.js`, the lifecycle machinery `src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts`, and the W15-owned detector vectors `src/root-shared-module-retirement.test.ts`. It scans all remaining text and enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
+The guard enumerates cached tracked files plus non-ignored untracked files with `git ls-files --cached --others --exclude-standard`. It reads parent-owned regular files; Git submodule entries identify separate repositories and are not regular files. The selected handbook revision and resource loading are verified under [handbook adoption](../50_ai/handbook-adoption.md). It skips binary or invalid-UTF-8 content and excludes exactly four paths from match discovery: the W2-owned derived bundle `.github/actions/agentic-pr-review/dist/index.js`, the lifecycle machinery `src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts`, and the W15-owned detector vectors `src/root-shared-module-retirement.test.ts`. It scans all remaining text and enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
 | Rules       | Owned residual                                  | Consumer and deletion gate                                                            |
 | ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------- |
 | RR-001..002 | Exact direct-runtime selector vocabulary        | Permanent narrow C# schema and synthetic-fixture conformance                          |
 | RR-009      | S2 artifact-provenance and provider vocabulary  | Permanent executable negative and transport evidence; preserve equivalent coverage    |
-| RR-014..030 | Governing or historical documentation           | Permanent path-specific status, owner, interpretation, and supersession records       |
+| RR-014..029 | Governing or historical documentation           | Permanent path-specific status, owner, interpretation, and supersession records       |
 | RR-031      | Claude provider/model identity fixtures         | Permanent narrow synthetic C# protocol/ledger conformance                             |
-| RR-034      | Root `CLAUDE.md` entrypoint                     | Supported thin agent instruction entrypoint governed by collaboration policy          |
 | RR-037      | R3 single-shot removal handoff                  | Permanent checked deletion, retained-consumer, and later-owner record                 |
 | RR-038      | E1 base inventory and replacement record        | Permanent framework source/deletion evidence; W13 replacement must preserve the proof |
 | RR-039      | E1 architecture assertions                      | Permanent exact W3/W11 reference-set conformance; replace only with equivalent proof  |
@@ -121,6 +120,8 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-045      | R6 v2 independent review boundary               | Names the retained structural override reason without restoring a retired route       |
 
 Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
+
+R1 retained the `CLAUDE.md` contributor adapter outside runtime-removal scope. The later harness-neutral handbook adoption removes that adapter and retires its active RR-030 and RR-034 ownership. Root [AGENTS.md](../../AGENTS.md) now supplies contributor routing; this does not change R1 runtime acceptance or the immutable R4 evidence.
 
 W13 closes the residual lifecycle with zero temporary rules. The exact selector and provider/model spellings remain only in the narrow embedded direct-runtime schema and synthetic fixture corpus owned by C# conformance tests. RR-009 permanently owns the S2 negative and transport evidence. Permanent documentation matches describe current governing boundaries or are explicitly historical, with their controlling supersession rule in the allowlist.
 
