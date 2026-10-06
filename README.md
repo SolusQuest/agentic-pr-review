@@ -33,6 +33,7 @@ development head. Their values are not printed or migrated.
 Install dependencies and run the source checks:
 
 ```bash
+git submodule update --init --recursive
 npm ci
 npm run check
 npm run dist:check
@@ -82,8 +83,8 @@ The [R7 plan](docs/90_roadmap/r7-plan.md) records the approved budgets, trusted 
 - [`docs/90_roadmap/roadmap-seed.md`](docs/90_roadmap/roadmap-seed.md) defines
   the R0-R7 critical path.
 - [`docs/90_roadmap/r7-plan.md`](docs/90_roadmap/r7-plan.md) defines the approved experimental distribution and adoption contract, with current implementation distinguished from its targets.
-- [`docs/50_ai/agent-context.md`](docs/50_ai/agent-context.md) is the shared
-  agent entrypoint.
+- [`docs/50_ai/agent-context.md`](docs/50_ai/agent-context.md) supplies APR's agent context.
+- [Solus Book adoption](docs/50_ai/handbook-adoption.md) records the pinned shared handbook, initialization, skill routing, and retained APR requirements. Common engineering standards and skills live in the `docs/shared/` Git submodule; APR owns its product documentation.
 
 Historical M1-M4 contract documents remain implementation and migration evidence.
 They do not describe current source ownership, re-enable the retired legacy Action

@@ -23,3 +23,6 @@ runtime/tests/fixtures/action-host/trusted-proof/**/*.json
 
 # R7 archived pre-C3 reports retain their captured byte digests.
 runtime/tests/fixtures/agent/r7/session-capacity/historical-*.json
+
+# Solus Book is a pinned dependency with independently maintained formatting.
+docs/shared/

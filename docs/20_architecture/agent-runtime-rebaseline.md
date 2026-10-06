@@ -895,7 +895,7 @@ Removal scope includes:
 - Claude-specific tests and documentation;
 - public inputs that no longer describe the project-owned runtime.
 
-The contributor entrypoint [`CLAUDE.md`](../../CLAUDE.md) is not runtime integration and is not removed merely because Claude Code CLI runtime support is removed.
+R1 runtime removal did not govern contributor instructions. The current contributor entrypoint is the harness-neutral root [AGENTS.md](../../AGENTS.md), as defined by [collaboration placement](../50_ai/collaboration-layers.md).
 
 The existing immutable `v0.1.0` tag already contains the last published legacy Action and Claude Code CLI path. It remains available as an unmaintained historical pin. Later untagged runtime and state work is not promoted into a new release merely to preserve an architecture the project has decided to remove.
 

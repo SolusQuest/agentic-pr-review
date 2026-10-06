@@ -1,6 +1,6 @@
 # Runtime Design Refinement
 
-Use this procedure before implementing high-impact runtime or action architecture changes.
+Use shared [design refinement](../../shared/skills/design-refinement/SKILL.md) before implementing high-impact runtime or Action architecture changes. This document supplies APR's triggers, architecture constraints, and non-goals; the shared skill owns the decision procedure and output structure.
 
 ## Trigger This Procedure For
 
@@ -14,19 +14,6 @@ Use this procedure before implementing high-impact runtime or action architectur
 - inline comment or publisher behavior changes;
 - trace, artifact, or debug capture privacy changes;
 - release, pinning, or runtime download policy changes.
-
-## Output
-
-Produce a short design decision summary before implementation:
-
-- decision;
-- recommended option;
-- alternatives considered;
-- rationale;
-- security/privacy impact;
-- migration impact;
-- validation plan;
-- open questions.
 
 ## Current Architectural Defaults
 

@@ -83,4 +83,4 @@ The first release that removes the Claude Code CLI path must state:
 - runtime/provider inputs changed;
 - any renamed or removed outputs.
 
-Do not publish later unshipped legacy work merely to create a final snapshot. Git history retains the exact pre-removal source for investigation without creating a new support or compatibility promise. Removing Claude runtime integration does not remove the repository contributor entrypoint `CLAUDE.md`.
+Do not publish later unshipped legacy work merely to create a final snapshot. Git history retains the exact pre-removal source for investigation without creating a new support or compatibility promise. Contributor instructions use the harness-neutral root [AGENTS.md](../../AGENTS.md); their routing is separate from runtime removal.

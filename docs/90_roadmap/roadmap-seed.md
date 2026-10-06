@@ -195,7 +195,7 @@ Delivered public direction:
 - fake/deterministic providers remain internal test infrastructure;
 - old state safely bootstraps;
 - the existing `v0.1.0` tag remains the unmaintained historical legacy pin; later unshipped legacy work is not published as a new snapshot;
-- the contributor entrypoint `CLAUDE.md` remains because it is not runtime integration.
+- R1 kept contributor instructions outside runtime removal; the current harness-neutral entrypoint is root [AGENTS.md](../../AGENTS.md).
 
 Exit criteria:
 

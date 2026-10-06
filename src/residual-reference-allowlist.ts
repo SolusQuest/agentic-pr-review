@@ -233,15 +233,6 @@ export const residualReferenceRules = [
     'legacy and Claude terms define the completed R1 scope, historical pin, or later cleanup boundaries',
     'project-context.md records current completion; accepted roadmap amendments supersede future sequencing',
   ),
-  permanent(
-    'RR-030',
-    /^docs\/50_ai\/collaboration-layers\.md$/u,
-    'governing',
-    'repository collaboration-policy maintainers',
-    'current layered collaboration and agent-entrypoint policy',
-    'Claude references identify the supported thin Claude-specific entrypoint and future agent-specific directory, not a provider/runtime execution path',
-    'an accepted collaboration-policy revision supersedes this rule',
-  ),
   narrowConformance(
     'RR-031',
     claudeBrandEvidence,
@@ -250,15 +241,6 @@ export const residualReferenceRules = [
     'permanent synthetic provider-model fixture conformance',
     'provider and model identity is inert synthetic fixture evidence, not an executable Claude runtime route',
     'an accepted protocol or ledger contract change must replace the manifest and owning C# fixture tests',
-  ),
-  permanent(
-    'RR-034',
-    /^CLAUDE\.md$/u,
-    'governing',
-    'repository agent-workflow maintainers',
-    'current thin Claude-specific contributor and agent entrypoint',
-    'Claude references define repository instruction routing only, not provider/runtime execution',
-    'AGENTS.md and docs/50_ai/collaboration-layers.md govern its scope; an accepted collaboration-policy revision supersedes this entrypoint',
   ),
   permanent(
     'RR-037',
