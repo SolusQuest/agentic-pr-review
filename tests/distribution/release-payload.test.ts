@@ -1110,7 +1110,8 @@ describe.runIf(supported)('CR1-D2 complete managed release staging', () => {
     const spy = vi
       .spyOn(fsPromises, 'open')
       .mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
-        if (opened.length === 14 && !injected) {
+        // Exhaustion persists until actual guard closure frees descriptor capacity.
+        if (opened.filter((handle) => handle.fd !== -1).length >= 7) {
           injected = true;
           throw Object.assign(new Error('descriptor exhaustion'), { code: 'EMFILE' });
         }
@@ -1122,7 +1123,7 @@ describe.runIf(supported)('CR1-D2 complete managed release staging', () => {
     try {
       await expect(c.acquire(c.request)).rejects.toThrow();
       expect(injected).toBe(true);
-      expect(opened.length).toBeGreaterThanOrEqual(14);
+      expect(opened.length).toBeGreaterThanOrEqual(7);
       expect(opened.every((handle) => handle.fd === -1)).toBe(true);
       expect(await readdir(c.parent)).toEqual([]);
     } finally {
