@@ -24,6 +24,7 @@ import {
 } from './build-payload.format.mjs';
 
 const closure = ['global.json', 'runtime', 'scripts/release', 'protocol/schemas'];
+const managedClosure = [...closure, 'protocol/fixtures/v1/cases/bootstrap/input.json'];
 const projectPath = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj';
 const lockPath = 'runtime/src/AgenticPrReview.Runtime/packages.release.lock.json';
 const policyPath = 'scripts/release/build-payload.inputs.json';
@@ -52,7 +53,7 @@ function run(command, args, options = {}) {
 function text(command, args, options = {}) {
   return run(command, args, options).toString('utf8').trim();
 }
-export function admitSource(repo, sourceCommit) {
+export function admitSource(repo, sourceCommit, paths = closure) {
   assert(/^[a-f0-9]{40}$/.test(sourceCommit), 'invalid_source_commit');
   assert(
     text('git', ['rev-parse', 'HEAD'], { cwd: repo }) === sourceCommit,
@@ -64,7 +65,7 @@ export function admitSource(repo, sourceCommit) {
     'dirty_source',
   );
   const tree = text('git', ['rev-parse', sourceCommit + '^{tree}'], { cwd: repo });
-  const entries = run('git', ['ls-tree', '-rz', '--full-tree', sourceCommit, '--', ...closure], {
+  const entries = run('git', ['ls-tree', '-rz', '--full-tree', sourceCommit, '--', ...paths], {
     cwd: repo,
   })
     .toString('utf8')
@@ -636,7 +637,7 @@ export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, 
   repo = resolve(repo);
   output = resolve(output);
   validateReleaseVersion(releaseVersion);
-  const sourceTree = admitSource(repo, sourceCommit);
+  const sourceTree = admitSource(repo, sourceCommit, managedClosure);
   assert(
     process.platform === 'linux' &&
       process.arch === 'x64' &&
@@ -657,7 +658,7 @@ export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, 
     const source = join(work, 'source');
     await mkdir(source);
     await mkdir(join(work, 'home'));
-    const snapshot = run('git', ['archive', '--format=tar', sourceCommit, ...closure], {
+    const snapshot = run('git', ['archive', '--format=tar', sourceCommit, ...managedClosure], {
       cwd: repo,
     });
     run('/usr/bin/tar', ['--no-same-owner', '-xf', '-', '-C', source], { input: snapshot });
@@ -797,7 +798,10 @@ export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, 
           compiledIdentity(releaseVersion, buildId),
         'compiled_identity_mismatch',
       );
-    assert(admitSource(repo, sourceCommit) === sourceTree, 'source_changed_during_build');
+    assert(
+      admitSource(repo, sourceCommit, managedClosure) === sourceTree,
+      'source_changed_during_build',
+    );
     await mkdir(output, { mode: 0o700 });
     const archivePath = join(output, packaged.receipt.archiveName);
     await writeFile(archivePath, packaged.archive, { flag: 'wx', mode: 0o600 });
