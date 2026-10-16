@@ -15,6 +15,7 @@
   </PropertyGroup>
   <!-- CR1-D1 producer-only profile; native defaults remain until CR1-D6 cutover. -->
   <PropertyGroup Condition="'$(APRManagedPackage)' == 'true'">
+    <SolusAgentVersion>0.1.0-internal.1</SolusAgentVersion>
     <UseAppHost>false</UseAppHost>
     <PublishAot>false</PublishAot>
     <PublishTrimmed>false</PublishTrimmed>
@@ -55,6 +56,22 @@
   <ItemGroup>
     <PackageReference Include="JsonSchema.Net" Version="9.2.2" />
   </ItemGroup>
+  <ItemGroup Condition="'$(APRManagedPackage)' == 'true'">
+    <PackageReference Update="JsonSchema.Net" Version="[9.2.2]" />
+    <PackageReference Include="SolusAgent.Api" Version="[$(SolusAgentVersion)]" />
+    <PackageReference Include="SolusAgent.Tools.Api" Version="[$(SolusAgentVersion)]" />
+    <PackageReference Include="SolusAgent.Runtime.Api" Version="[$(SolusAgentVersion)]" />
+    <PackageReference Include="SolusAgent.Runtime" Version="[$(SolusAgentVersion)]" />
+    <PackageReference Include="SolusAgent.Providers.DeepSeek" Version="[$(SolusAgentVersion)]" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(APRManagedPackage)' != 'true'">
+    <Compile Remove="Solus/**/*.cs" />
+  </ItemGroup>
+  <Target Name="ValidateSolusManagedProfile" BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences;PrepareForBuild"
+          Condition="'$(APRManagedPackage)' == 'true'">
+    <Error Condition="'$(APRReleasePackage)' == 'true' or '$(PublishAot)' != 'false' or '$(IsAotCompatible)' != 'false' or '$(SelfContained)' != 'false' or '$(PublishTrimmed)' == 'true' or '$(PublishSingleFile)' == 'true' or '$(UseAppHost)' != 'false' or '$(SolusAgentVersion)' != '0.1.0-internal.1' or '$(TargetFramework)' != 'net10.0'"
+           Text="APR_SOLUS_MANAGED_PROFILE_UNSUPPORTED" />
+  </Target>
   <ItemGroup>
     <EmbeddedResource Include="..\..\tests\fixtures\action-host\trusted-proof-payload\workflow\r4-trusted-proof.yml.template"
                       LogicalName="AgenticPrReview.Runtime.ActionHost.TrustedProofWorkflowTemplate" />
