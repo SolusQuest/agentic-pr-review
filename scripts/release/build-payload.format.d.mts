@@ -67,3 +67,47 @@ export function encodePackage(
   buildInputs: Readonly<Record<string, unknown>>,
   nativeDependencies: PackageManifest['nativeDependencies'],
 ): { archive: Buffer; receipt: PackageReceipt };
+
+export const MANAGED_LIMITS: Readonly<{
+  archive: number;
+  expanded: number;
+  file: number;
+  manifest: number;
+  entries: number;
+  path: number;
+  depth: number;
+}>;
+export const MANAGED_TARGET: Readonly<Record<string, string | boolean>>;
+export interface ManagedFile {
+  readonly path: string;
+  readonly bytes: Buffer;
+}
+export interface ManagedReceipt extends Omit<PackageReceipt, 'formatVersion'> {
+  readonly formatVersion: 'managed-v1';
+}
+export interface ManagedManifest extends PayloadIdentity {
+  readonly formatVersion: 'managed-v1';
+  readonly entrypoint: string;
+  readonly buildInputs: Readonly<Record<string, unknown>>;
+  readonly members: readonly PayloadMember[];
+}
+export function validateManagedPublishFiles(files: readonly ManagedFile[]): PayloadMember[];
+export function collectManagedPublishTree(root: string): Promise<ManagedFile[]>;
+export function encodeManagedPackage(
+  files: readonly ManagedFile[],
+  notices: Buffer,
+  buildInputs: Readonly<Record<string, unknown>>,
+): { archive: Buffer; receipt: ManagedReceipt };
+export function inspectManagedPackage(
+  bytes: Buffer,
+  expected: unknown,
+): {
+  manifest: ManagedManifest;
+  receipt: ManagedReceipt;
+  files: ManagedFile[];
+};
+export function materializeManagedPackage(
+  bytes: Buffer,
+  expected: unknown,
+  parent: string,
+): Promise<{ root: string; entrypoint: string; manifest: ManagedManifest }>;

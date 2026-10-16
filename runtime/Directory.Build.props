@@ -13,4 +13,12 @@
     <StripSymbols>true</StripSymbols>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(APRManagedPackage)' == 'true'">
+    <RuntimeFrameworkVersion>10.0.9</RuntimeFrameworkVersion>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
 </Project>

@@ -25228,7 +25228,7 @@ var require_readdir_glob = __commonJS({
     var { EventEmitter: EventEmitter3 } = __require("events");
     var { Minimatch } = require_minimatch();
     var { resolve: resolve4 } = __require("path");
-    function readdir2(dir, strict) {
+    function readdir3(dir, strict) {
       return new Promise((resolve5, reject) => {
         fs8.readdir(dir, { withFileTypes: true }, (err, files) => {
           if (err) {
@@ -25285,7 +25285,7 @@ var require_readdir_glob = __commonJS({
       });
     }
     async function* exploreWalkAsync(dir, path11, followSymlinks, useStat, shouldSkip, strict) {
-      let files = await readdir2(path11 + dir, strict);
+      let files = await readdir3(path11 + dir, strict);
       for (const file of files) {
         let name = file.name;
         if (name === void 0) {
@@ -27866,9 +27866,9 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$readdir = fs9.readdir;
-      fs9.readdir = readdir2;
+      fs9.readdir = readdir3;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir2(path11, options, cb) {
+      function readdir3(path11, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path12, options2, cb2, startTime) {
@@ -97547,8 +97547,8 @@ import { fileURLToPath } from "node:url";
 // scripts/release/build-payload.format.mjs
 import { createHash as createHash3 } from "node:crypto";
 import { constants as constants3 } from "node:fs";
-import { chmod as chmod2, mkdir as mkdir2, mkdtemp, open as open2, rm as rm2 } from "node:fs/promises";
-import { join as join2 } from "node:path";
+import { chmod as chmod2, lstat as lstat2, mkdir as mkdir2, mkdtemp, open as open2, readdir as readdir2, rm as rm2 } from "node:fs/promises";
+import { basename as basename3, join as join2 } from "node:path";
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
 var LIMITS = Object.freeze({
   archive: 32 * 1024 * 1024,
@@ -97971,6 +97971,30 @@ async function materializePackage(bytes, expected, parent) {
     throw error3;
   }
 }
+var MANAGED_LIMITS = Object.freeze({
+  archive: 64 * 1024 * 1024,
+  expanded: 128 * 1024 * 1024,
+  file: 32 * 1024 * 1024,
+  manifest: 256 * 1024,
+  entries: 512,
+  path: 100,
+  depth: 8
+});
+var managedRoot = "agentic-pr-review/";
+var managedManifestPath = managedRoot + "manifest.json";
+var managedNoticesPath = managedRoot + "THIRD-PARTY-NOTICES.txt";
+var MANAGED_TARGET = Object.freeze({
+  TargetFramework: "net10.0",
+  RuntimeIdentifier: "linux-x64",
+  RuntimeFrameworkVersion: "10.0.9",
+  UseAppHost: false,
+  PublishAot: false,
+  PublishTrimmed: false,
+  PublishSingleFile: false,
+  SelfContained: false,
+  IsAotCompatible: false,
+  VerifyReferenceAotCompatibility: false
+});
 
 // src/action-wrapper/launcher/action-source.ts
 import { createHash as createHash4 } from "node:crypto";
@@ -98339,20 +98363,20 @@ function record(value) {
 }
 
 // src/action-wrapper/launcher/release-payload.ts
-import { lstat as lstat3, realpath as realpath4, rm as rm3 } from "node:fs/promises";
+import { lstat as lstat4, realpath as realpath4, rm as rm3 } from "node:fs/promises";
 import { request as httpsRequest2 } from "node:https";
 import path6 from "node:path";
 
 // src/action-wrapper/launcher/prepared-payload.ts
 import { createHash as createHash5 } from "node:crypto";
-import { lstat as lstat2, open as open3, realpath as realpath3 } from "node:fs/promises";
+import { lstat as lstat3, open as open3, realpath as realpath3 } from "node:fs/promises";
 import path5 from "node:path";
 async function verifyPreparedPayload(proof) {
   if (!path5.isAbsolute(proof.trustedRoot) || !boundedStructure(proof.executableRelativePath, 1024) || path5.isAbsolute(proof.executableRelativePath) || !lowerHex(proof.payloadSha256, 64) || !lowerHex(proof.actionSourceSha, 40) || !buildDiscriminator(proof.buildDiscriminator) || !buildDiscriminator(proof.wrapperBuildDiscriminator) || proof.buildDiscriminator !== proof.wrapperBuildDiscriminator) {
     fail("wrapper_prepared_payload_invalid");
   }
   try {
-    const rootStat = await lstat2(proof.trustedRoot);
+    const rootStat = await lstat3(proof.trustedRoot);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
       fail("wrapper_prepared_payload_invalid");
     }
@@ -98362,7 +98386,7 @@ async function verifyPreparedPayload(proof) {
     if (relative.length === 0 || relative === ".." || relative.startsWith(`..${path5.sep}`) || path5.isAbsolute(relative)) {
       fail("wrapper_prepared_payload_invalid");
     }
-    const namedBefore = await lstat2(candidate);
+    const namedBefore = await lstat3(candidate);
     if (!namedBefore.isFile() || namedBefore.isSymbolicLink() || process.platform !== "win32" && (namedBefore.mode & 73) === 0) {
       fail("wrapper_prepared_payload_invalid");
     }
@@ -98376,7 +98400,7 @@ async function verifyPreparedPayload(proof) {
       if (!sameFile(namedBefore, openedBefore)) fail("wrapper_prepared_payload_invalid");
       const digest = await digestHandle(handle);
       const openedAfter = await handle.stat();
-      const namedAfter = await lstat2(candidate);
+      const namedAfter = await lstat3(candidate);
       if (digest !== proof.payloadSha256 || !sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter) || openedBefore.size !== openedAfter.size || openedBefore.mtimeMs !== openedAfter.mtimeMs) {
         fail("wrapper_prepared_payload_invalid");
       }
@@ -98397,7 +98421,7 @@ async function verifyPreparedPayload(proof) {
 }
 async function digestEventJson(eventJsonPath) {
   try {
-    const before = await lstat2(eventJsonPath);
+    const before = await lstat3(eventJsonPath);
     if (!before.isFile() || before.isSymbolicLink()) fail("wrapper_event_json_invalid");
     const handle = await open3(eventJsonPath, "r");
     try {
@@ -98405,7 +98429,7 @@ async function digestEventJson(eventJsonPath) {
       if (!sameFile(before, openedBefore)) fail("wrapper_event_json_invalid");
       const digest = await digestHandle(handle);
       const openedAfter = await handle.stat();
-      const namedAfter = await lstat2(eventJsonPath);
+      const namedAfter = await lstat3(eventJsonPath);
       if (!sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter) || openedBefore.size !== openedAfter.size || openedBefore.mtimeMs !== openedAfter.mtimeMs) {
         fail("wrapper_event_json_invalid");
       }
@@ -98453,7 +98477,7 @@ async function resolve3(request2, transport, localArchivePath, timeoutMs) {
   let retained = false;
   try {
     signal.throwIfAborted();
-    const parentStat = await lstat3(stagingParent);
+    const parentStat = await lstat4(stagingParent);
     if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
       fail("wrapper_release_payload_invalid");
     }
@@ -98607,7 +98631,7 @@ function positiveId(value) {
 }
 
 // src/action-wrapper/launcher/payload-staging.ts
-import { chmod as chmod3, lstat as lstat4, mkdtemp as mkdtemp2, realpath as realpath5, rm as rm4 } from "node:fs/promises";
+import { chmod as chmod3, lstat as lstat5, mkdtemp as mkdtemp2, realpath as realpath5, rm as rm4 } from "node:fs/promises";
 import path7 from "node:path";
 async function acquireInPayloadStaging(request2) {
   if (!path7.isAbsolute(request2.runnerTemp) || !path7.isAbsolute(request2.workspace))
@@ -98620,7 +98644,7 @@ async function acquireInPayloadStaging(request2) {
   const removeParent = () => rm4(stagingParent, { recursive: true, force: true });
   try {
     await chmod3(stagingParent, 448);
-    const stat2 = await lstat4(stagingParent);
+    const stat2 = await lstat5(stagingParent);
     if (!stat2.isDirectory() || (stat2.mode & 511) !== 448) fail("wrapper_payload_invalid");
     const payload = await request2.acquire(stagingParent);
     let disposal;
@@ -100749,7 +100773,7 @@ var ArtifactBridgeOperationBudget = class {
 
 // src/action-wrapper/artifact-bridge/staging.ts
 import { constants as constants4 } from "node:fs";
-import { lstat as lstat5, open as open4, realpath as realpath6 } from "node:fs/promises";
+import { lstat as lstat6, open as open4, realpath as realpath6 } from "node:fs/promises";
 import path8 from "node:path";
 var ArtifactBridgeStagingError = class extends Error {
   constructor() {
@@ -100767,13 +100791,13 @@ var ArtifactBridgeStaging = class _ArtifactBridgeStaging {
   static async create(configuredRoot) {
     const configured = path8.resolve(configuredRoot);
     try {
-      const configuredStat = await lstat5(configured);
+      const configuredStat = await lstat6(configured);
       if (configuredStat.isSymbolicLink()) throw new ArtifactBridgeStagingError();
     } catch {
       throw new ArtifactBridgeStagingError();
     }
     const canonicalRoot = await realpath6(configured);
-    const rootStat = await lstat5(canonicalRoot);
+    const rootStat = await lstat6(canonicalRoot);
     if (path8.relative(configured, canonicalRoot) !== "" || !safePrivateDirectory(rootStat)) {
       throw new ArtifactBridgeStagingError();
     }
@@ -100872,7 +100896,7 @@ var ArtifactBridgeStaging = class _ArtifactBridgeStaging {
     const resolved = await this.resolve(relative);
     const canonical = await realpath6(resolved);
     this.assertInside(canonical);
-    const stat2 = await lstat5(resolved);
+    const stat2 = await lstat6(resolved);
     if (!stat2.isFile() || stat2.isSymbolicLink()) {
       throw new ArtifactBridgeStagingError();
     }
@@ -100884,7 +100908,7 @@ var ArtifactBridgeStaging = class _ArtifactBridgeStaging {
     let current = this.canonicalRoot;
     for (const segment of segments.slice(0, -1)) {
       current = path8.join(current, segment);
-      const stat2 = await lstat5(current);
+      const stat2 = await lstat6(current);
       if (!safePrivateDirectory(stat2)) {
         throw new ArtifactBridgeStagingError();
       }
@@ -100900,7 +100924,7 @@ var ArtifactBridgeStaging = class _ArtifactBridgeStaging {
     }
   }
   async assertRoot() {
-    const rootStat = await lstat5(this.canonicalRoot);
+    const rootStat = await lstat6(this.canonicalRoot);
     if (!safePrivateDirectory(rootStat) || !sameIdentity(rootStat, this.rootIdentity)) {
       throw new ArtifactBridgeStagingError();
     }
@@ -100908,7 +100932,7 @@ var ArtifactBridgeStaging = class _ArtifactBridgeStaging {
   async assertOpenedPath(openedPath, openedStat) {
     const canonical = await realpath6(openedPath);
     this.assertInside(canonical);
-    const namedStat = await lstat5(openedPath);
+    const namedStat = await lstat6(openedPath);
     if (namedStat.isSymbolicLink() || !namedStat.isFile() || !sameIdentity(namedStat, identity(openedStat))) {
       throw new ArtifactBridgeStagingError();
     }
@@ -103634,4 +103658,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: bd5085c9b2cf1bddf556d2cf87fc85ef683dbb003441a7304a8fe289799497b8
+// Action source inventory sha256: e1bffde347fe1e3ec5402547f754c7b22be3f723a139dfb9975e2125540e9bc8

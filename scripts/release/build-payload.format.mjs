@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, rm } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 
 export const LIMITS = Object.freeze({
@@ -518,6 +518,527 @@ export async function materializePackage(bytes, expected, parent) {
       }
     }
     return { root, executable: join(root, MEMBERS[0].path), manifest: inspected.manifest };
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+// CR1-D1 producer contract. Native exports above remain selected until CR1-D6.
+export const MANAGED_LIMITS = Object.freeze({
+  archive: 64 * 1024 * 1024,
+  expanded: 128 * 1024 * 1024,
+  file: 32 * 1024 * 1024,
+  manifest: 256 * 1024,
+  entries: 512,
+  path: 100,
+  depth: 8,
+});
+const managedRoot = 'agentic-pr-review/';
+const managedManifestPath = managedRoot + 'manifest.json';
+const managedNoticesPath = managedRoot + 'THIRD-PARTY-NOTICES.txt';
+export const MANAGED_TARGET = Object.freeze({
+  TargetFramework: 'net10.0',
+  RuntimeIdentifier: 'linux-x64',
+  RuntimeFrameworkVersion: '10.0.9',
+  UseAppHost: false,
+  PublishAot: false,
+  PublishTrimmed: false,
+  PublishSingleFile: false,
+  SelfContained: false,
+  IsAotCompatible: false,
+  VerifyReferenceAotCompatibility: false,
+});
+function managedPath(path) {
+  requireThat(
+    typeof path === 'string' &&
+      path.length <= MANAGED_LIMITS.path &&
+      path.startsWith(managedRoot) &&
+      /^[a-zA-Z0-9_.+/-]+$/.test(path) &&
+      path.split('/').length <= MANAGED_LIMITS.depth &&
+      path.split('/').every((part) => part && part !== '.' && part !== '..'),
+    'invalid_managed_path',
+  );
+  return path;
+}
+function managedInventory(members) {
+  requireThat(
+    Array.isArray(members) && members.length > 0 && members.length <= MANAGED_LIMITS.entries,
+    'invalid_managed_inventory',
+  );
+  const aliases = new Set();
+  const spellings = new Map();
+  let previous = '',
+    total = 0;
+  for (const item of members) {
+    keys(item, ['path', 'mode', 'size', 'sha256'], 'invalid_managed_member');
+    managedPath(item.path);
+    requireThat(
+      item.path > previous &&
+        item.mode === 0o644 &&
+        Number.isSafeInteger(item.size) &&
+        item.size >= 0 &&
+        item.size <=
+          (item.path === managedManifestPath ? MANAGED_LIMITS.manifest : MANAGED_LIMITS.file) &&
+        matches(item.sha256, hex64),
+      'invalid_managed_member',
+    );
+    const alias = item.path.toLowerCase();
+    requireThat(!aliases.has(alias), 'managed_path_collision');
+    aliases.add(alias);
+    const parts = item.path.split('/');
+    for (let i = 1; i <= parts.length; i++) {
+      const prefix = parts.slice(0, i).join('/'),
+        key = prefix.toLowerCase();
+      requireThat(!spellings.has(key) || spellings.get(key) === prefix, 'managed_path_collision');
+      spellings.set(key, prefix);
+    }
+    total += 512 + Math.ceil(item.size / 512) * 512;
+    previous = item.path;
+  }
+  for (const path of aliases) {
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++)
+      requireThat(!aliases.has(parts.slice(0, i).join('/')), 'managed_path_collision');
+  }
+  requireThat(total + 1024 <= MANAGED_LIMITS.expanded, 'managed_expanded_limit');
+}
+function managedInputs(input) {
+  keys(
+    input,
+    [
+      'releaseVersion',
+      'platform',
+      'sourceCommit',
+      'sourceTree',
+      'policySha256',
+      'lockSha256',
+      'assetsSha256',
+      'noticesSha256',
+      'target',
+      'toolchain',
+      'dependencies',
+    ],
+    'invalid_managed_inputs',
+  );
+  validateReleaseVersion(input.releaseVersion);
+  requireThat(
+    input.platform === 'linux-x64' &&
+      matches(input.sourceCommit, hex40) &&
+      matches(input.sourceTree, hex40),
+    'invalid_managed_inputs',
+  );
+  for (const field of ['policySha256', 'lockSha256', 'assetsSha256', 'noticesSha256'])
+    requireThat(matches(input[field], hex64), 'invalid_managed_inputs');
+  requireThat(
+    canonicalJson(input.target) === canonicalJson(MANAGED_TARGET),
+    'invalid_managed_target',
+  );
+  keys(
+    input.toolchain,
+    ['sdk', 'sdkDriverSha256', 'node', 'zlib', 'os'],
+    'invalid_managed_toolchain',
+  );
+  requireThat(
+    input.toolchain.sdk === '10.0.109' &&
+      input.toolchain.os === 'ubuntu-24.04-x64' &&
+      matches(input.toolchain.sdkDriverSha256, hex64) &&
+      /^24\./.test(input.toolchain.node) &&
+      boundedText(input.toolchain.node) &&
+      boundedText(input.toolchain.zlib),
+    'invalid_managed_toolchain',
+  );
+  requireThat(
+    Array.isArray(input.dependencies) &&
+      input.dependencies.length > 0 &&
+      input.dependencies.length <= 16,
+    'invalid_managed_dependencies',
+  );
+  let previous = '';
+  for (const item of input.dependencies) {
+    keys(item, ['id', 'version', 'sha256', 'contentHash', 'role'], 'invalid_managed_dependencies');
+    requireThat(
+      typeof item.id === 'string' &&
+        /^[a-z0-9][a-z0-9.-]{0,100}$/.test(item.id) &&
+        item.id > previous &&
+        typeof item.version === 'string' &&
+        /^\d+\.\d+\.\d+$/.test(item.version) &&
+        matches(item.sha256, hex64) &&
+        typeof item.contentHash === 'string' &&
+        /^[A-Za-z0-9+/]{86}==$/.test(item.contentHash) &&
+        item.role === 'managed',
+      'invalid_managed_dependencies',
+    );
+    previous = item.id;
+  }
+}
+function managedName(version) {
+  return 'agentic-pr-review-' + validateReleaseVersion(version) + '-linux-x64-managed.tar.gz';
+}
+function managedIdentity(input) {
+  const buildId = sha256(canonicalJson(input));
+  return {
+    releaseVersion: input.releaseVersion,
+    platform: input.platform,
+    sourceCommit: input.sourceCommit,
+    sourceTree: input.sourceTree,
+    buildId,
+    informationalVersion: compiledIdentity(input.releaseVersion, buildId),
+  };
+}
+function validateManagedReceipt(receipt) {
+  keys(
+    receipt,
+    ['formatVersion', 'archiveName', 'archiveSize', 'archiveSha256', 'identity', 'members'],
+    'invalid_managed_receipt',
+  );
+  requireThat(
+    receipt.formatVersion === 'managed-v1' &&
+      Number.isSafeInteger(receipt.archiveSize) &&
+      receipt.archiveSize > 0 &&
+      receipt.archiveSize <= MANAGED_LIMITS.archive &&
+      matches(receipt.archiveSha256, hex64),
+    'invalid_managed_receipt',
+  );
+  validateIdentity(receipt.identity);
+  requireThat(
+    receipt.archiveName === managedName(receipt.identity.releaseVersion),
+    'invalid_managed_receipt',
+  );
+  managedInventory(receipt.members);
+  requireThat(
+    receipt.members.some((item) => item.path === managedManifestPath),
+    'missing_managed_manifest',
+  );
+}
+export function validateManagedPublishFiles(files) {
+  requireThat(Array.isArray(files), 'invalid_managed_files');
+  const entries = files.map(({ path, bytes }) => {
+    requireThat(Buffer.isBuffer(bytes), 'invalid_managed_file_bytes');
+    return inventory({ path: managedPath(managedRoot + path), mode: 0o644 }, bytes);
+  });
+  managedInventory([...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)));
+  const byPath = new Map(files.map((item) => [item.path, item.bytes]));
+  for (const path of [
+    'AgenticPrReview.Runtime.dll',
+    'AgenticPrReview.Runtime.deps.json',
+    'AgenticPrReview.Runtime.runtimeconfig.json',
+  ])
+    requireThat(byPath.has(path) && byPath.get(path).length > 0, 'missing_managed_required_file');
+  requireThat(
+    !byPath.has('AgenticPrReview.Runtime') &&
+      !byPath.has('AgenticPrReview.Runtime.exe') &&
+      !byPath.has('manifest.json') &&
+      !byPath.has('THIRD-PARTY-NOTICES.txt') &&
+      ![...byPath.keys()].some((path) =>
+        /^(?:lib)?(?:coreclr|hostfxr|hostpolicy)(?:\.|$)/i.test(basename(path)),
+      ),
+    'unexpected_managed_publish_file',
+  );
+  let config, deps;
+  try {
+    const decode = (bytes) => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    config = decode(byPath.get('AgenticPrReview.Runtime.runtimeconfig.json')).runtimeOptions;
+    deps = decode(byPath.get('AgenticPrReview.Runtime.deps.json'));
+  } catch {
+    throw new Error('invalid_managed_configuration');
+  }
+  requireThat(
+    config?.tfm === 'net10.0' &&
+      config.framework?.name === 'Microsoft.NETCore.App' &&
+      config.framework.version === '10.0.9' &&
+      !config.includedFrameworks &&
+      !config.frameworks &&
+      !config.additionalProbingPaths,
+    'invalid_managed_runtimeconfig',
+  );
+  const target = deps.targets?.[deps.runtimeTarget?.name];
+  requireThat(
+    deps.runtimeTarget?.name === '.NETCoreApp,Version=v10.0/linux-x64' &&
+      target &&
+      typeof target === 'object' &&
+      Object.keys(target).length > 0,
+    'invalid_managed_deps',
+  );
+  for (const library of Object.values(target)) {
+    for (const kind of ['runtime', 'native', 'resources', 'runtimeTargets']) {
+      for (const [path, meta] of Object.entries(library[kind] || {})) {
+        requireThat(
+          typeof path === 'string' &&
+            !path.includes('\\') &&
+            !path.startsWith('/') &&
+            path.split('/').every((part) => part && part !== '.' && part !== '..'),
+          'invalid_managed_deps_path',
+        );
+        if (basename(path) === '_._') continue;
+        const flat =
+          kind === 'resources' && meta.locale ? meta.locale + '/' + basename(path) : basename(path);
+        requireThat(byPath.has(path) || byPath.has(flat), 'missing_managed_dependency_asset');
+      }
+    }
+  }
+  return entries;
+}
+export async function collectManagedPublishTree(root) {
+  requireThat(
+    (await lstat(root)).isDirectory() && !(await lstat(root)).isSymbolicLink(),
+    'invalid_managed_publish_root',
+  );
+  const files = [];
+  let visited = 0,
+    total = 0;
+  async function walk(relative) {
+    for (const name of (await readdir(join(root, relative))).sort()) {
+      const path = relative ? relative + '/' + name : name;
+      managedPath(managedRoot + path);
+      requireThat(++visited <= MANAGED_LIMITS.entries, 'managed_entry_limit');
+      const source = join(root, path),
+        stat = await lstat(source);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        await walk(path);
+        continue;
+      }
+      requireThat(
+        stat.isFile() &&
+          !stat.isSymbolicLink() &&
+          stat.nlink === 1 &&
+          stat.size <= MANAGED_LIMITS.file,
+        'invalid_managed_publish_kind',
+      );
+      total += stat.size;
+      requireThat(total <= MANAGED_LIMITS.expanded, 'managed_expanded_limit');
+      const handle = await open(
+        source,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+      );
+      try {
+        const before = await handle.stat();
+        requireThat(
+          before.isFile() &&
+            before.ino === stat.ino &&
+            before.dev === stat.dev &&
+            before.size === stat.size,
+          'managed_publish_changed',
+        );
+        const bytes = Buffer.alloc(stat.size + 1);
+        let offset = 0;
+        while (offset < bytes.length) {
+          const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+          if (!bytesRead) break;
+          offset += bytesRead;
+        }
+        const after = await handle.stat();
+        requireThat(
+          offset === stat.size &&
+            before.size === after.size &&
+            before.mtimeMs === after.mtimeMs &&
+            before.ctimeMs === after.ctimeMs,
+          'managed_publish_changed',
+        );
+        files.push({ path, bytes: bytes.subarray(0, stat.size) });
+      } finally {
+        await handle.close();
+      }
+    }
+  }
+  await walk('');
+  validateManagedPublishFiles(files);
+  return files;
+}
+export function encodeManagedPackage(files, notices, buildInputs) {
+  managedInputs(buildInputs);
+  const publishMembers = validateManagedPublishFiles(files);
+  requireThat(
+    Buffer.isBuffer(notices) &&
+      notices.length > 0 &&
+      notices.length <= LIMITS.notices &&
+      sha256(notices) === buildInputs.noticesSha256,
+    'invalid_managed_notices',
+  );
+  new TextDecoder('utf-8', { fatal: true }).decode(notices);
+  const identity = managedIdentity(buildInputs);
+  const members = [
+    ...publishMembers,
+    inventory({ path: managedNoticesPath, mode: 0o644 }, notices),
+  ].sort((a, b) => (a.path < b.path ? -1 : 1));
+  const manifest = {
+    formatVersion: 'managed-v1',
+    ...identity,
+    entrypoint: managedRoot + 'AgenticPrReview.Runtime.dll',
+    buildInputs,
+    members,
+  };
+  const manifestBytes = Buffer.from(canonicalJson(manifest));
+  requireThat(manifestBytes.length <= MANAGED_LIMITS.manifest, 'managed_manifest_limit');
+  const all = [
+    ...files.map((file) => ({ path: managedRoot + file.path, bytes: file.bytes })),
+    { path: managedNoticesPath, bytes: notices },
+    { path: managedManifestPath, bytes: manifestBytes },
+  ].sort((a, b) => (a.path < b.path ? -1 : 1));
+  const inventoryAll = all.map((file) => inventory({ path: file.path, mode: 0o644 }, file.bytes));
+  managedInventory(inventoryAll);
+  const tar = Buffer.concat([
+    ...all.flatMap((file) => [
+      entryHeader({ path: file.path, mode: 0o644 }, file.bytes.length),
+      file.bytes,
+      Buffer.alloc((512 - (file.bytes.length % 512)) % 512),
+    ]),
+    Buffer.alloc(1024),
+  ]);
+  const trailer = Buffer.alloc(8);
+  trailer.writeUInt32LE(crc32(tar));
+  trailer.writeUInt32LE(tar.length, 4);
+  const archive = Buffer.concat([gzipHeader, deflateRawSync(tar, { level: 9 }), trailer]);
+  requireThat(archive.length <= MANAGED_LIMITS.archive, 'managed_archive_limit');
+  return {
+    archive,
+    receipt: {
+      formatVersion: 'managed-v1',
+      archiveName: managedName(buildInputs.releaseVersion),
+      archiveSize: archive.length,
+      archiveSha256: sha256(archive),
+      identity,
+      members: inventoryAll,
+    },
+  };
+}
+export function inspectManagedPackage(bytes, expected) {
+  validateManagedReceipt(expected);
+  requireThat(
+    Buffer.isBuffer(bytes) &&
+      bytes.length === expected.archiveSize &&
+      sha256(bytes) === expected.archiveSha256,
+    'managed_archive_digest_mismatch',
+  );
+  requireThat(
+    bytes.length >= 20 && bytes.subarray(0, 10).equals(gzipHeader),
+    'invalid_gzip_header',
+  );
+  let inflated;
+  try {
+    inflated = inflateRawSync(bytes.subarray(10), {
+      maxOutputLength: MANAGED_LIMITS.expanded,
+      info: true,
+    });
+  } catch {
+    throw new Error('invalid_or_excessive_gzip');
+  }
+  const tar = inflated.buffer,
+    end = 10 + inflated.engine.bytesWritten;
+  requireThat(
+    end + 8 === bytes.length &&
+      bytes.readUInt32LE(end) === crc32(tar) &&
+      bytes.readUInt32LE(end + 4) === tar.length,
+    'invalid_gzip_trailer',
+  );
+  let offset = 0;
+  const files = expected.members.map((spec) => {
+    requireThat(offset + 512 <= tar.length, 'truncated_tar_header');
+    requireThat(
+      tar.subarray(offset, offset + 512).equals(entryHeader(spec, spec.size)),
+      'noncanonical_managed_tar_header',
+    );
+    offset += 512;
+    const end = offset + spec.size,
+      padded = end + ((512 - (spec.size % 512)) % 512);
+    requireThat(
+      padded <= tar.length && tar.subarray(end, padded).every((byte) => byte === 0),
+      'invalid_tar_padding',
+    );
+    const bytes = tar.subarray(offset, end);
+    offset = padded;
+    requireThat(sha256(bytes) === spec.sha256, 'managed_member_digest_mismatch');
+    return { path: spec.path, bytes };
+  });
+  requireThat(
+    offset + 1024 === tar.length && tar.subarray(offset).every((byte) => byte === 0),
+    'invalid_tar_end_or_inventory',
+  );
+  let manifest;
+  const manifestFile = files.find((file) => file.path === managedManifestPath);
+  try {
+    manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(manifestFile.bytes));
+  } catch {
+    throw new Error('invalid_managed_manifest_json');
+  }
+  keys(
+    manifest,
+    [
+      'formatVersion',
+      'releaseVersion',
+      'platform',
+      'sourceCommit',
+      'sourceTree',
+      'buildId',
+      'informationalVersion',
+      'entrypoint',
+      'buildInputs',
+      'members',
+    ],
+    'invalid_managed_manifest',
+  );
+  requireThat(
+    canonicalJson(manifest) === manifestFile.bytes.toString('utf8') &&
+      manifest.formatVersion === 'managed-v1' &&
+      manifest.entrypoint === managedRoot + 'AgenticPrReview.Runtime.dll',
+    'invalid_managed_manifest',
+  );
+  managedInputs(manifest.buildInputs);
+  const identity = managedIdentity(manifest.buildInputs);
+  requireThat(
+    canonicalJson(identity) === canonicalJson(expected.identity) &&
+      Object.keys(identity).every((key) => manifest[key] === identity[key]),
+    'managed_identity_mismatch',
+  );
+  const payloadMembers = expected.members.filter((item) => item.path !== managedManifestPath);
+  requireThat(
+    canonicalJson(manifest.members) === canonicalJson(payloadMembers),
+    'managed_inventory_mismatch',
+  );
+  const notices = files.find((file) => file.path === managedNoticesPath);
+  requireThat(
+    notices &&
+      notices.bytes.length > 0 &&
+      notices.bytes.length <= LIMITS.notices &&
+      sha256(notices.bytes) === manifest.buildInputs.noticesSha256,
+    'invalid_managed_notices',
+  );
+  new TextDecoder('utf-8', { fatal: true }).decode(notices.bytes);
+  validateManagedPublishFiles(
+    files
+      .filter((file) => file.path !== managedManifestPath && file.path !== managedNoticesPath)
+      .map((file) => ({ path: file.path.slice(managedRoot.length), bytes: file.bytes })),
+  );
+  return { manifest, receipt: expected, files };
+}
+export async function materializeManagedPackage(bytes, expected, parent) {
+  const inspected = inspectManagedPackage(Buffer.from(bytes), expected);
+  const root = await mkdtemp(join(parent, 'apr-managed-package-'));
+  try {
+    await chmod(root, 0o700);
+    for (const file of inspected.files) {
+      const parts = file.path.split('/');
+      for (let i = 1; i < parts.length; i++)
+        await mkdir(join(root, ...parts.slice(0, i)), { mode: 0o700 }).catch((error) => {
+          if (error.code !== 'EEXIST') throw error;
+        });
+      const handle = await open(
+        join(root, file.path),
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+        0o644,
+      );
+      try {
+        await handle.writeFile(file.bytes);
+        await handle.chmod(0o644);
+      } finally {
+        await handle.close();
+      }
+    }
+    return {
+      root,
+      entrypoint: join(root, inspected.manifest.entrypoint),
+      manifest: inspected.manifest,
+    };
   } catch (error) {
     await rm(root, { recursive: true, force: true });
     throw error;

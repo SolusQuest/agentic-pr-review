@@ -9,9 +9,19 @@
     <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <InformationalVersion Condition="'$(APRReleasePackage)' != 'true'">0.1.0-dev</InformationalVersion>
-    <InformationalVersion Condition="'$(APRReleasePackage)' == 'true'">$(APRReleaseVersion)+build.$(APRBuildId)</InformationalVersion>
+    <InformationalVersion Condition="'$(APRReleasePackage)' != 'true' and '$(APRManagedPackage)' != 'true'">0.1.0-dev</InformationalVersion>
+    <InformationalVersion Condition="'$(APRReleasePackage)' == 'true' or '$(APRManagedPackage)' == 'true'">$(APRReleaseVersion)+build.$(APRBuildId)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+  <!-- CR1-D1 producer-only profile; native defaults remain until CR1-D6 cutover. -->
+  <PropertyGroup Condition="'$(APRManagedPackage)' == 'true'">
+    <UseAppHost>false</UseAppHost>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <IsAotCompatible>false</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>false</VerifyReferenceAotCompatibility>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ActionHostVerifierFrameworkReference)' == 'true'">
     <OutputType>Library</OutputType>

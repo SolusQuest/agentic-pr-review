@@ -7,6 +7,12 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   LIMITS,
+  MANAGED_LIMITS,
+  MANAGED_TARGET,
+  collectManagedPublishTree,
+  encodeManagedPackage,
+  inspectManagedPackage,
+  materializeManagedPackage,
   canonicalJson,
   compiledIdentity,
   encodePackage,
@@ -93,11 +99,11 @@ function tool(name, repo) {
   );
   return path;
 }
-function buildEnvironment(work, dotnet, clang, linker) {
+function buildEnvironment(work, dotnet, ...extraTools) {
   return {
-    PATH: [...new Set([dirname(dotnet), dirname(clang), dirname(linker), '/usr/bin', '/bin'])].join(
-      ':',
-    ),
+    PATH: [
+      ...new Set([dirname(dotnet), ...extraTools.map((path) => dirname(path)), '/usr/bin', '/bin']),
+    ].join(':'),
     HOME: join(work, 'home'),
     DOTNET_CLI_HOME: join(work, 'home'),
     DOTNET_ROOT: dirname(dotnet),
@@ -557,6 +563,19 @@ async function main() {
       releaseVersion: parsed['--version'],
       output: parsed['--output'],
     });
+  } else if (command === 'build-managed') {
+    const parsed = argumentsFor(args, ['--source', '--version', '--output']);
+    await buildManagedPayload({
+      repo: process.cwd(),
+      sourceCommit: parsed['--source'],
+      releaseVersion: parsed['--version'],
+      output: parsed['--output'],
+    });
+  } else if (command === 'inspect-managed') {
+    const parsed = argumentsFor(args, ['--archive', '--receipt']);
+    const receipt = JSON.parse(await readBoundedFile(parsed['--receipt'], MANAGED_LIMITS.manifest));
+    const bytes = await readBoundedFile(parsed['--archive'], MANAGED_LIMITS.archive);
+    process.stdout.write(canonicalJson(inspectManagedPackage(bytes, receipt).receipt) + '\n');
   } else if (command === 'inspect') {
     const parsed = argumentsFor(args, ['--archive', '--receipt']);
     const receipt = JSON.parse(await readBoundedFile(parsed['--receipt'], LIMITS.manifest));
@@ -564,7 +583,7 @@ async function main() {
     process.stdout.write(canonicalJson(inspectPackage(bytes, receipt).receipt) + '\n');
   } else
     throw new Error(
-      'Usage: node scripts/release/build-payload.mjs build --source SHA --version VERSION --output NEW_DIRECTORY | inspect --archive FILE --receipt TRUSTED_RECEIPT',
+      'Usage: node scripts/release/build-payload.mjs build --source SHA --version VERSION --output NEW_DIRECTORY | inspect --archive FILE --receipt TRUSTED_RECEIPT | build-managed --source SHA --version VERSION --output NEW_DIRECTORY | inspect-managed --archive FILE --receipt TRUSTED_RECEIPT',
     );
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -572,4 +591,242 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.stderr.write((error instanceof Error ? error.message : 'build_payload_failed') + '\n');
     process.exitCode = 1;
   });
+}
+
+function managedProps(source, version, buildId, lock) {
+  return [
+    '-p:APRManagedPackage=true',
+    '-p:APRReleasePackage=false',
+    '-p:_IsPublishing=true',
+    '-p:APRReleaseVersion=' + version,
+    '-p:APRBuildId=' + buildId,
+    '-p:DirectoryBuildPropsPath=' + join(source, 'runtime/Directory.Build.props'),
+    '-p:ImportDirectoryBuildTargets=false',
+    '-p:ImportDirectoryPackagesProps=false',
+    '-p:RestorePackagesWithLockFile=true',
+    '-p:NuGetLockFilePath=' + lock,
+    ...Object.entries(MANAGED_TARGET).map(([key, value]) => '-p:' + key + '=' + value),
+  ];
+}
+export function managedDependencyPolicy(policy) {
+  const selected = policy.managed;
+  assert(
+    policy.sdk === '10.0.109' &&
+      policy.platform === 'linux-x64' &&
+      selected?.formatVersion === 'managed-v1' &&
+      selected.targetFramework === 'net10.0' &&
+      selected.runtimeMinimum === '10.0.9' &&
+      Array.isArray(selected.dependencyIds) &&
+      selected.dependencyIds.length > 0 &&
+      new Set(selected.dependencyIds).size === selected.dependencyIds.length,
+    'invalid_managed_build_policy',
+  );
+  const dependencies = selected.dependencyIds
+    .map((id) => {
+      const matches = policy.dependencies.filter(
+        (item) => item.id === id && item.role === 'managed',
+      );
+      assert(matches.length === 1, 'invalid_managed_build_policy');
+      return matches[0];
+    })
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  return { dependencies };
+}
+export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, output }) {
+  repo = resolve(repo);
+  output = resolve(output);
+  validateReleaseVersion(releaseVersion);
+  const sourceTree = admitSource(repo, sourceCommit);
+  assert(
+    process.platform === 'linux' &&
+      process.arch === 'x64' &&
+      process.versions.node.startsWith('24.'),
+    'unsupported_managed_builder',
+  );
+  const os = await readFile('/etc/os-release', 'utf8');
+  assert(/^ID=ubuntu$/m.test(os) && /^VERSION_ID="24\.04"$/m.test(os), 'unsupported_builder_os');
+  output = admitOutput(repo, output);
+  const policyBytes = await readFile(join(repo, policyPath));
+  const policy = JSON.parse(policyBytes),
+    managedPolicy = managedDependencyPolicy(policy);
+  const cache = process.env.NUGET_PACKAGES || join(homedir(), '.nuget/packages');
+  const dotnet = tool('dotnet', repo);
+  const work = await mkdtemp(join(tmpdir(), 'apr-managed-build-'));
+  try {
+    await chmod(work, 0o700);
+    const source = join(work, 'source');
+    await mkdir(source);
+    await mkdir(join(work, 'home'));
+    const snapshot = run('git', ['archive', '--format=tar', sourceCommit, ...closure], {
+      cwd: repo,
+    });
+    run('/usr/bin/tar', ['--no-same-owner', '-xf', '-', '-C', source], { input: snapshot });
+    const env = buildEnvironment(work, dotnet),
+      project = join(source, projectPath);
+    const sdk = text(dotnet, ['--version'], { cwd: source, env });
+    assert(sdk === policy.sdk, 'toolchain_version_mismatch');
+    const lock = join(work, 'managed.lock.json');
+    const props = managedProps(source, releaseVersion, '0'.repeat(64), lock);
+    const evaluated = JSON.parse(
+      text(
+        dotnet,
+        [
+          'msbuild',
+          project,
+          '-nologo',
+          '-getProperty:' + Object.keys(MANAGED_TARGET).join(','),
+          ...props,
+        ],
+        { cwd: source, env },
+      ),
+    ).Properties;
+    const target = Object.fromEntries(
+      Object.entries(MANAGED_TARGET).map(([key, value]) => {
+        assert(evaluated[key] === String(value), 'managed_effective_target_mismatch');
+        return [key, typeof value === 'boolean' ? evaluated[key] === 'true' : evaluated[key]];
+      }),
+    );
+    const seeded = await seedArchives(work, managedPolicy, cache);
+    const restore = [
+      'restore',
+      project,
+      '-r',
+      'linux-x64',
+      '--force-evaluate',
+      '--nologo',
+      '--configfile',
+      join(source, configPath),
+      '-p:RestoreLockedMode=false',
+      ...props,
+    ];
+    if (seeded) restore.push('--source', join(work, 'feed'));
+    run(dotnet, restore, { cwd: source, env });
+    const assetsPath = join(source, 'runtime/src/AgenticPrReview.Runtime/obj/project.assets.json');
+    const assetsBytes = await readBoundedFile(assetsPath, 4 * 1024 * 1024);
+    const readAssets = async () => JSON.parse(await readBoundedFile(assetsPath, 4 * 1024 * 1024));
+    const dependencies = await verifyDependencies(
+      env.NUGET_PACKAGES,
+      managedPolicy,
+      JSON.parse(assetsBytes),
+    );
+    const notices = await noticesFrom(source, env.NUGET_PACKAGES, managedPolicy);
+    const buildInputs = {
+      releaseVersion,
+      platform: policy.platform,
+      sourceCommit,
+      sourceTree,
+      policySha256: sha256(policyBytes),
+      lockSha256: sha256(await readBoundedFile(lock, 256 * 1024)),
+      assetsSha256: sha256(assetsBytes),
+      noticesSha256: sha256(notices),
+      target,
+      toolchain: {
+        sdk,
+        sdkDriverSha256: sha256(await readBoundedFile(dotnet, 32 * 1024 * 1024)),
+        node: process.versions.node,
+        zlib: process.versions.zlib,
+        os: 'ubuntu-24.04-x64',
+      },
+      dependencies,
+    };
+    const buildId = sha256(canonicalJson(buildInputs)),
+      publish = join(work, 'publish');
+    run(
+      dotnet,
+      [
+        'publish',
+        project,
+        '-c',
+        'Release',
+        '-r',
+        'linux-x64',
+        '--self-contained',
+        'false',
+        '--no-restore',
+        '--nologo',
+        '-o',
+        publish,
+        ...managedProps(source, releaseVersion, buildId, lock),
+      ],
+      { cwd: source, env },
+    );
+    await verifyDependencies(env.NUGET_PACKAGES, managedPolicy, await readAssets());
+    assert(
+      sha256(await readBoundedFile(assetsPath, 4 * 1024 * 1024)) === buildInputs.assetsSha256 &&
+        sha256(await readBoundedFile(lock, 256 * 1024)) === buildInputs.lockSha256,
+      'managed_restore_changed',
+    );
+    // The original census comes from the actual fresh publish tree, not the manifest.
+    const original = await collectManagedPublishTree(publish);
+    const packaged = encodeManagedPackage(original, notices, buildInputs);
+    const inspected = inspectManagedPackage(packaged.archive, packaged.receipt);
+    const extracted = await materializeManagedPackage(packaged.archive, packaged.receipt, work);
+    const payload = inspected.files.filter(
+      (file) =>
+        !['agentic-pr-review/manifest.json', 'agentic-pr-review/THIRD-PARTY-NOTICES.txt'].includes(
+          file.path,
+        ),
+    );
+    assert(payload.length === original.length, 'managed_roundtrip_inventory_mismatch');
+    for (const file of original) {
+      const decoded = payload.find((item) => item.path === 'agentic-pr-review/' + file.path);
+      assert(
+        decoded &&
+          decoded.bytes.equals(file.bytes) &&
+          (await readFile(join(extracted.root, 'agentic-pr-review', file.path))).equals(file.bytes),
+        'managed_roundtrip_bytes_mismatch',
+      );
+    }
+    // Verify compiled identity with a bounded bootstrap only; this is not D3/D5 loading qualification.
+    const input = join(work, 'identity-input.json'),
+      result = join(work, 'identity-result.json'),
+      trace = join(work, 'identity-trace.json');
+    await writeFile(
+      input,
+      await readFile(join(source, 'protocol/fixtures/v1/cases/bootstrap/input.json')),
+      { flag: 'wx' },
+    );
+    run(
+      dotnet,
+      [extracted.entrypoint, 'review', '--input', input, '--output', result, '--trace', trace],
+      { cwd: work, env: { DOTNET_ROOT: dirname(dotnet), TMPDIR: work, TMP: work, TEMP: work } },
+    );
+    for (const path of [result, trace])
+      assert(
+        JSON.parse(await readFile(path, 'utf8')).runtimeVersion ===
+          compiledIdentity(releaseVersion, buildId),
+        'compiled_identity_mismatch',
+      );
+    assert(admitSource(repo, sourceCommit) === sourceTree, 'source_changed_during_build');
+    await mkdir(output, { mode: 0o700 });
+    const archivePath = join(output, packaged.receipt.archiveName);
+    await writeFile(archivePath, packaged.archive, { flag: 'wx', mode: 0o600 });
+    inspectManagedPackage(
+      await readBoundedFile(archivePath, MANAGED_LIMITS.archive),
+      packaged.receipt,
+    );
+    await writeFile(join(output, 'receipt.json'), canonicalJson(packaged.receipt) + '\n', {
+      flag: 'wx',
+      mode: 0o600,
+    });
+    process.stdout.write(
+      'CR1_D1_MANAGED_ARCHIVE ' +
+        canonicalJson({
+          sourceCommit,
+          sourceTree,
+          buildId,
+          archiveSha256: packaged.receipt.archiveSha256,
+          archiveSize: packaged.receipt.archiveSize,
+          publishFiles: original.length,
+          roundtrip: true,
+          compiledIdentity: compiledIdentity(releaseVersion, buildId),
+          runtimeMinimum: target.RuntimeFrameworkVersion,
+          executionQualified: false,
+        }) +
+        '\n',
+    );
+    return packaged.receipt;
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
 }

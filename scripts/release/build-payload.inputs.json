@@ -68,5 +68,11 @@
       "role": "build"
     }
   ],
-  "sdk": "10.0.109"
+  "sdk": "10.0.109",
+  "managed": {
+    "formatVersion": "managed-v1",
+    "targetFramework": "net10.0",
+    "runtimeMinimum": "10.0.9",
+    "dependencyIds": ["humanizer.core", "json.more.net", "jsonpointer.net", "jsonschema.net"]
+  }
 }
