@@ -1,14 +1,19 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
-import {
-  SOLUS_VERSION,
-  SOLUS_FEED,
-  PUBLIC_FEED,
-  SOLUS_IDS,
-  packageHashes,
-} from './solus-package-contract.mjs';
-import { managedDependencyPolicy, verifyDependencies } from './build-payload.mjs';
+// Capture restore authority before loading project modules or running commands.
+// Child environments are still explicit: deleting only the parent token would
+// leave other inherited NuGet/GitHub credentials available to new call sites.
+const token = process.env.GITHUB_TOKEN;
+const actor = process.env.GITHUB_ACTOR;
+for (const key of Object.keys(process.env)) {
+  if (/^(GITHUB_TOKEN|GH_TOKEN|NUGET_AUTH_TOKEN|NuGetPackageSourceCredentials_.*)$/i.test(key))
+    delete process.env[key];
+}
+const commandEnv = { PATH: process.env.PATH, DOTNET_ROOT: process.env.DOTNET_ROOT };
+const { SOLUS_VERSION, SOLUS_FEED, PUBLIC_FEED, SOLUS_IDS, packageHashes } =
+  await import('./solus-package-contract.mjs');
+const { managedDependencyPolicy, verifyDependencies } = await import('./build-payload.mjs');
 
 const version = SOLUS_VERSION,
   privateFeed = SOLUS_FEED,
@@ -24,14 +29,15 @@ async function collect(output, verify) {
   requireThat(process.platform === 'linux' && process.arch === 'x64', 'APR_SOLUS_RUNNER');
   const os = await readFile('/etc/os-release', 'utf8');
   requireThat(/^ID=ubuntu$/m.test(os) && /^VERSION_ID="24\.04"$/m.test(os), 'APR_SOLUS_RUNNER');
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+    env: commandEnv,
+    encoding: 'utf8',
+  }).trim();
   requireThat(head === process.env.EXPECTED_HEAD && /^[a-f0-9]{40}$/.test(head), 'APR_SOLUS_HEAD');
   requireThat(
-    execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }) === '',
+    execFileSync('git', ['status', '--porcelain'], { env: commandEnv, encoding: 'utf8' }) === '',
     'APR_SOLUS_DIRTY',
   );
-  const token = process.env.GITHUB_TOKEN;
-  const actor = process.env.GITHUB_ACTOR;
   requireThat(token && actor && /^[\w-]+(?:\[bot\])?$/.test(actor), 'APR_SOLUS_AUTH_UNAVAILABLE');
   output = resolve(output);
   requireThat(output.startsWith(resolve(process.env.RUNNER_TEMP) + sep), 'APR_SOLUS_OUTPUT');
@@ -39,8 +45,7 @@ async function collect(output, verify) {
   for (const directory of ['packages', 'http', 'plugins', 'home', 'tmp'])
     await mkdir(join(output, directory), { mode: 0o700 });
   const env = {
-    PATH: process.env.PATH,
-    DOTNET_ROOT: process.env.DOTNET_ROOT,
+    ...commandEnv,
     HOME: join(output, 'home'),
     DOTNET_CLI_HOME: join(output, 'home'),
     DOTNET_NOLOGO: '1',
@@ -224,6 +229,7 @@ async function collect(output, verify) {
         `${name.toLowerCase()}.${version}.nupkg`,
       );
       const original = execFileSync('/usr/bin/unzip', ['-p', archive, `lib/net10.0/${name}.dll`], {
+        env,
         maxBuffer: 64 * 1024 * 1024,
       });
       requireThat(
@@ -273,7 +279,7 @@ async function collect(output, verify) {
       );
     }
     requireThat(
-      execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }) === '',
+      execFileSync('git', ['status', '--porcelain'], { env, encoding: 'utf8' }) === '',
       'APR_SOLUS_DIRTY',
     );
     constructed = true;

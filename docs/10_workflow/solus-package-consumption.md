@@ -16,6 +16,8 @@ The managed NuGet configuration maps `SolusAgent.*` only to `https://nuget.pkg.g
 
 The existing authorized repository token reaches only the authenticated restore subprocess through `NuGetPackageSourceCredentials_solus`. It is absent from committed configuration, arguments, lock/inventory, publish and runtime environments. Credential-bearing restore diagnostics are reduced to fixed failures. No new secret, token or repository setting is needed; unavailable authorized access blocks the relevant proof.
 
+The proof captures restore authority and removes inherited GitHub/NuGet credential variables before loading project modules or running Git. Every Git, unzip and .NET child receives an explicit environment; only the authenticated restore child receives the captured credential. Producer source-admission and tool-discovery helpers also default to a minimal environment, including when the producer caller supplies direct restore credentials. Subprocess instrumentation covers collect/verify, project import, early/final Git, startup and failure paths; it supplements the mandatory real cold-cache proof.
+
 The reproducible producer can intentionally seed a fresh offline feed from raw archives already in a verified cache. It checks their original selected source, logical identity and pinned archive hashes before copying; it does not copy extracted cache entries. The process-created seed configuration and resulting local-feed metadata are recognized explicitly. This is verified archive reuse, **not** a fresh registry-origin claim. The independent cold registry proof remains mandatory. No automatic alternate feed, inherited cache or changed lock can make qualification pass.
 
 ## Exact-head trusted proof and ordinary CI

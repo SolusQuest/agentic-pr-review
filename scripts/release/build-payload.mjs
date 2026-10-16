@@ -48,6 +48,9 @@ function run(command, args, options = {}) {
       maxBuffer: 64 * 1024 * 1024,
       timeout: 600_000,
       ...options,
+      // Source admission and tool discovery run before buildEnvironment exists.
+      // Never inherit caller restore credentials in these default helper calls.
+      env: options.env ?? { PATH: process.env.PATH },
     });
   } catch (error) {
     const diagnostics = [error.stdout, error.stderr]
