@@ -21,4 +21,13 @@
     <DebugSymbols>false</DebugSymbols>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
+  <!-- Temporary CR1 build isolation; D6 retires the native closure. -->
+  <PropertyGroup Condition="'$(APRManagedPackage)' == 'true' and '$(MSBuildProjectName)' == 'AgenticPrReview.Runtime'">
+    <BaseIntermediateOutputPath>obj/managed/</BaseIntermediateOutputPath>
+    <BaseOutputPath>bin/managed/</BaseOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
+    <NuGetLockFilePath Condition="'$(NuGetLockFilePath)' == ''">$(MSBuildThisFileDirectory)src/AgenticPrReview.Runtime/packages.managed.lock.json</NuGetLockFilePath>
+  </PropertyGroup>
 </Project>

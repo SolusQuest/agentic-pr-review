@@ -751,13 +751,28 @@ function validateFixtureContracts(fixtureRoot) {
   }
   return documents;
 }
-// The one-time M5 installer is a separately authorized, read-only token route.
+// The CR1 actual APR package proof is a separately authorized, read-only token route.
 // Keep its complete reviewed semantics closed; formatting alone is irrelevant.
 function validateSolusAgentInstallWorkflow(workflow) {
   const expected = {
-    name: 'SolusAgent first internal install proof',
+    name: 'SolusAgent APR managed package proof',
     on: {
-      workflow_dispatch: null,
+      workflow_dispatch: {
+        inputs: {
+          'expected-head-sha': {
+            description: 'Exact reviewed source SHA for this authorized manual proof',
+            required: true,
+            type: 'string',
+          },
+          mode: {
+            description: 'Verify is mandatory for acceptance; collect only prepares metadata',
+            required: true,
+            default: 'verify',
+            type: 'choice',
+            options: ['collect', 'verify'],
+          },
+        },
+      },
     },
     permissions: {
       contents: 'read',
@@ -768,22 +783,27 @@ function validateSolusAgentInstallWorkflow(workflow) {
         'runs-on': 'ubuntu-24.04',
         steps: [
           {
-            name: 'Require trusted manual main invocation',
-            run: 'test "$GITHUB_EVENT_NAME" = workflow_dispatch\ntest "$GITHUB_REF" = refs/heads/main\ntest "$(uname -m)" = x86_64\n',
+            name: 'Bind the trusted manual source before package access',
+            env: {
+              EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+              WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+            },
+            run: 'test "$GITHUB_EVENT_NAME" = workflow_dispatch\ntest "$GITHUB_REPOSITORY" = SolusQuest/agentic-pr-review\ntest "$(uname -m)" = x86_64\n[[ "$EXPECTED_HEAD" =~ ^[a-f0-9]{40}$ ]]\ntest "$EXPECTED_HEAD" = "$GITHUB_SHA"\ntest "$WORKFLOW_HEAD" = "$GITHUB_SHA"\n',
           },
           {
-            name: 'Check out the qualified public consumer fixtures',
             uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
             with: {
-              repository: 'SolusQuest/solus-agent',
-              ref: '076bcda2fbe1da2677ac5c6fd03d75bc0fef66ad',
+              ref: '${{ github.sha }}',
               'persist-credentials': false,
             },
           },
           {
             uses: 'actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
+            env: {
+              DOTNET_INSTALL_DIR: '${{ runner.temp }}/apr-solus-sdk',
+            },
             with: {
-              'global-json-file': 'global.json',
+              'dotnet-version': '10.0.109',
             },
           },
           {
@@ -794,12 +814,47 @@ function validateSolusAgentInstallWorkflow(workflow) {
             },
           },
           {
-            name: 'Install exact private packages and execute all required offline consumers',
+            name: 'Install public proof tooling',
+            if: "inputs.mode == 'verify'",
+            run: 'npm ci',
+          },
+          {
+            name: 'Cold-cache actual APR managed construction and pin proof',
             env: {
+              EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
               GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
               GITHUB_ACTOR: '${{ github.actor }}',
+              PROOF_MODE: '${{ inputs.mode }}',
             },
-            run: 'node scripts/packages/verify-consumers.ts --feed https://nuget.pkg.github.com/SolusQuest/index.json --version 0.1.0-internal.1 --scenario all --require foundation,apr,scribe,smoke-offline',
+            run: 'node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"',
+          },
+          {
+            name: 'Actual managed publish archive inventory and roundtrip',
+            if: "inputs.mode == 'verify'",
+            env: {
+              APR_CR1_MANAGED_PROOF: '1',
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'npm test -- tests/distribution/build-payload.test.ts --maxWorkers=2 --minWorkers=1',
+          },
+          {
+            name: 'CR1 managed release acquisition and staging proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              APR_CR1_MANAGED_STAGING_PROOF: '1',
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'npm test -- tests/distribution/release-payload.test.ts --maxWorkers=2 --minWorkers=1',
+          },
+          {
+            name: 'Retain only sanitized identity and lock metadata',
+            uses: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+            with: {
+              name: 'solus-package-metadata',
+              path: '${{ runner.temp }}/apr-solus-facts/metadata.json',
+              'if-no-files-found': 'error',
+              'retention-days': 1,
+            },
           },
         ],
       },
@@ -842,7 +897,9 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       }
     }
     if (/actions\/(?:upload|download)-artifact/u.test(source)) {
-      if (name !== 'release.yml') {
+      // The Solus route was checked in full above; its sole artifact is
+      // sanitized identity/lock metadata, with no private package bytes.
+      if (name !== 'release.yml' && name !== 'solus-agent-package-proof.yml') {
         if (name !== 'runtime-ci.yml') fail('repository-alternate-route');
         try {
           // CI2 retains its existing closed receipt transport; P1 was fully

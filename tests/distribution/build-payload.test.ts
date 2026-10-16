@@ -1120,7 +1120,12 @@ describe('CR1-D1 managed publish-tree producer contract', () => {
   test('admits managed policy only from checked package identities without native toolchain packs', () => {
     const policy = JSON.parse(readFileSync('scripts/release/build-payload.inputs.json', 'utf8'));
     const managed = managedDependencyPolicy(policy);
-    expect(managed.dependencies).toHaveLength(4);
+    expect(managed.dependencies).toHaveLength(9);
+    expect(policy.dependencies).toHaveLength(9);
+    expect(policy.dependencies.some((item: any) => item.id.startsWith('solusagent.'))).toBe(false);
+    expect(
+      managed.dependencies.filter((item: any) => item.id.startsWith('solusagent.')),
+    ).toHaveLength(5);
     expect(managed.dependencies.every((item: any) => item.role === 'managed')).toBe(true);
     expect(() =>
       managedDependencyPolicy({
