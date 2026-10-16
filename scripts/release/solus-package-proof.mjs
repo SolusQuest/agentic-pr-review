@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
+import { packageHashes } from './solus-package-contract.mjs';
 
 const version = '0.1.0-internal.1';
 const privateFeed = 'https://nuget.pkg.github.com/SolusQuest/index.json';
@@ -16,8 +16,6 @@ const ids = [
 function requireThat(value, code) {
   if (!value) throw new Error(code);
 }
-const digest = (bytes, algorithm = 'sha256', encoding = 'hex') =>
-  createHash(algorithm).update(bytes).digest(encoding);
 
 // Metadata collection is preparatory evidence, never final package/startup qualification.
 // No package bytes or raw subprocess diagnostics are emitted or uploaded.
@@ -96,19 +94,16 @@ async function collect(output) {
     const expectedFeed = ids.includes(lower) ? privateFeed : publicFeed;
     requireThat(metadata.source?.replace(/\/$/, '') === expectedFeed, 'APR_SOLUS_SOURCE');
     const bytes = await readFile(join(root, `${lower}.${resolvedVersion}.nupkg`));
-    const contentHash = digest(bytes, 'sha512', 'base64');
-    requireThat(
-      metadata.contentHash === contentHash &&
-        library.sha512 === contentHash &&
-        (await readFile(join(root, `${lower}.${resolvedVersion}.nupkg.sha512`), 'utf8')).trim() ===
-          contentHash,
-      'APR_SOLUS_HASH',
+    const hashes = packageHashes(
+      bytes,
+      metadata.contentHash,
+      library.sha512,
+      (await readFile(join(root, `${lower}.${resolvedVersion}.nupkg.sha512`), 'utf8')).trim(),
     );
     packages.push({
       id: lower,
       version: resolvedVersion,
-      sha256: digest(bytes),
-      contentHash,
+      ...hashes,
       role: 'managed',
       source: expectedFeed,
     });
@@ -118,7 +113,7 @@ async function collect(output) {
     'APR_SOLUS_MISSING',
   );
   requireThat(packages.length <= 16, 'APR_SOLUS_INVENTORY');
-  packages.sort((a, b) => a.id.localeCompare(b.id));
+  packages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const facts = {
     qualification: false,
     mode: 'collect',
