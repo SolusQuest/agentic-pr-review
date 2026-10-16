@@ -1,8 +1,16 @@
 # R7: Versioned Experimental Distribution And Maintainer Adoption
 
+## CR1/CR2 Precedence
+
+The [CR1/CR2 plan](cr1-cr2-plan.md) supersedes this plan’s future APR-owned generic-runtime, Native AOT, permanent Node-entry and release-order assumptions after its documentation merge. CR1 owns SolusAgent migration, practical capacity acceptance and complete managed-payload qualification; CR2 owns CLI/Action consolidation and artifact-bridge disposition. Remaining first-candidate preparation, qualification, publication and adoption follow both. Independently useful preparation may continue only without superseded assumptions.
+
+Preserve this milestone, existing issue identities and completed evidence. Re-refine affected unfinished contracts before executing them; the graph below is the original dependency baseline, not authority to proceed with obsolete targets. The current Node/AOT implementation and checks remain until replaced. Its unbound map, fourteen outputs and implemented resolver are described in [README](../../README.md); the table below intentionally records the earlier pinned baseline. Old capacity figures are current/original contracts, not proof that Solus `.1` supports them or a mandate to retain every maximum.
+
+Unaffected Host safety, exact `S/W/B/T` release identities, original-byte immutability and separate release/adoption authorities remain. A single opened-executable identity must be replaced by CR1’s verified managed loading closure; old AOT qualification cannot qualify new bytes. Public redistribution of included Solus binaries also needs explicit authority before release. This documentation changes no R7 metadata or accepted result.
+
 ## Authority And Activation
 
-This records the approved R7 target contract. Activation requires the coordinated documentation change to merge for [R7-C1 #329](https://github.com/SolusQuest/agentic-pr-review/issues/329). It translates the maintainer-approved 2026-10-01 decision appendix in [R7-MASTER #322](https://github.com/SolusQuest/agentic-pr-review/issues/322) into durable repository authority for [milestone 13](https://github.com/SolusQuest/agentic-pr-review/milestone/13).
+This records the original approved R7 target contract, subject to CR1/CR2 precedence above. Its original activation required the coordinated documentation change to merge for [R7-C1 #329](https://github.com/SolusQuest/agentic-pr-review/issues/329). It translates the maintainer-approved 2026-10-01 decision appendix in [R7-MASTER #322](https://github.com/SolusQuest/agentic-pr-review/issues/322) into durable repository authority for [milestone 13](https://github.com/SolusQuest/agentic-pr-review/milestone/13).
 
 - Design and implementation baseline: [`93fa835e8932eed30e706a79825a367ac02b9247`](https://github.com/SolusQuest/agentic-pr-review/tree/93fa835e8932eed30e706a79825a367ac02b9247).
 - Master decision source SHA-256: `61c993ee1917928df52dedd90f50700ff3b3830e4312ae5fe284b7f4f24f573f`, as recorded in the approved master appendix.

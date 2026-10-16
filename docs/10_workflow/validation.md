@@ -20,6 +20,8 @@ The distribution check is read-only. It verifies nested Node 24 Action metadata,
 
 The pinned handbook has its own formatting conventions and source history. APR does not reformat or edit it during ordinary project work. Validate changed APR references, the selected source identity, and the shared resources affected by an adoption update.
 
+The [CR1/CR2 direction](../90_roadmap/cr1-cr2-plan.md) changes future qualification requirements, not the checks for current code. Keep existing AOT/Node gates until their owners replace or retire those surfaces with evidence. Documentation checks and historical AOT proof do not establish managed publish-tree loading, Solus-backed execution or practical review capacity.
+
 ## Runtime And Workflow Changes
 
 For affected direct-runtime integration, run `npm run runtime:integration`. The complete runtime command is `bash runtime/scripts/verify-runtime.sh all`. Follow [local runtime validation](local-runtime-validation.md) and [parallel runtime CI](runtime-ci-parallel-validation.md) for the actual platform and qualification requirements. A source or documentation check does not establish those runtime proofs.

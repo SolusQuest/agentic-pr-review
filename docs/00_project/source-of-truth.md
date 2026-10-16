@@ -5,7 +5,8 @@ Use the shared [source-of-truth model](../shared/standards/source-of-truth.md) f
 ## Current Implementation And Selected Target
 
 - `README.md` and current implementation-contract documents describe behavior that exists on the development head.
-- `docs/20_architecture/agent-runtime-rebaseline.md`, `docs/20_architecture/architecture.md`, and `docs/90_roadmap/roadmap-seed.md` govern new runtime design and migration sequencing after the breaking reset is activated.
+- `docs/90_roadmap/cr1-cr2-plan.md` owns the selected SolusAgent, managed distribution, CLI/Action and sequencing changes after its documentation merge. `architecture.md` and `roadmap-seed.md` summarize that direction.
+- `docs/20_architecture/agent-runtime-rebaseline.md` and `docs/90_roadmap/r7-plan.md` retain earlier contracts and evidence. Their conflicting generic-runtime ownership, AOT, permanent Node-entry and execution-order assumptions are superseded within the CR1/CR2 scope; unaffected safety/release identities and current operating contracts remain.
 - Historical roadmap documents remain evidence only when marked superseded.
 - Until migration removes a current surface, its implementation contract remains authoritative for operating or validating that surface. It does not override the selected target for new design work.
 
