@@ -155,6 +155,19 @@ async function collect(output, verify) {
           ),
         ];
         console.error(JSON.stringify({ stage: code, errorCodes: errors }));
+        // The build is credential-free. Emit only bounded C# diagnostics from
+        // the APR-owned source tree, never restore output or arbitrary logs.
+        if (code === 'APR_SOLUS_FIXTURE_BUILD') {
+          const diagnostics = [
+            ...new Set(
+              (result.stdout || '')
+                .split(/\r?\n/)
+                .filter((line) => line.includes('/runtime/') && /error CS\d{4}:/.test(line))
+                .map((line) => line.slice(line.indexOf('/runtime/') + 1, 2048)),
+            ),
+          ];
+          console.error(JSON.stringify({ diagnostics: diagnostics.slice(0, 20) }));
+        }
       }
       requireThat(result.status === 0, code);
       return result.stdout;
