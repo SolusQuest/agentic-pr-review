@@ -591,8 +591,44 @@ ${jobPermissions}    runs-on: ubuntu-24.04
   });
 });
 
-describe('M5 authorized private package install route', () => {
+describe('CR1 authorized actual APR private package proof route', () => {
   test.each([
+    [
+      'missing head input',
+      (w: any) => {
+        delete w.on.workflow_dispatch.inputs['expected-head-sha'];
+      },
+    ],
+    [
+      'collect by default',
+      (w: any) => {
+        w.on.workflow_dispatch.inputs.mode.default = 'collect';
+      },
+    ],
+    [
+      'workflow SHA unbound',
+      (w: any) => {
+        w.jobs['install-proof'].steps[0].env.WORKFLOW_HEAD = '${{ github.sha }}';
+      },
+    ],
+    [
+      'producer token',
+      (w: any) => {
+        w.jobs['install-proof'].steps[6].env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+      },
+    ],
+    [
+      'private artifact bytes',
+      (w: any) => {
+        w.jobs['install-proof'].steps[7].with.path = '${{ runner.temp }}/apr-solus-facts/packages';
+      },
+    ],
+    [
+      'producer bypassed',
+      (w: any) => {
+        w.jobs['install-proof'].steps[6].run = 'true';
+      },
+    ],
     [
       'checkout mutable',
       (w: any) => {
@@ -669,30 +705,30 @@ describe('M5 authorized private package install route', () => {
       },
     ],
     [
-      'other version',
+      'different proof entrypoint',
       (w: any) => {
-        w.jobs['install-proof'].steps[4].run = w.jobs['install-proof'].steps[4].run.replace(
-          'internal.1',
-          'internal.2',
+        w.jobs['install-proof'].steps[5].run = w.jobs['install-proof'].steps[5].run.replace(
+          'solus-package-proof.mjs',
+          'unreviewed-package-proof.mjs',
         );
       },
     ],
     [
       'live route',
       (w: any) => {
-        w.jobs['install-proof'].steps[4].run += ' --live';
+        w.jobs['install-proof'].steps[5].run += ' --live';
       },
     ],
     [
       'other credential spelling',
       (w: any) => {
-        w.jobs['install-proof'].steps[4].env.GITHUB_TOKEN = '${{ github.token }}';
+        w.jobs['install-proof'].steps[5].env.GITHUB_TOKEN = '${{ github.token }}';
       },
     ],
     [
       'provider credential',
       (w: any) => {
-        w.jobs['install-proof'].steps[4].env.KEY = '${{ secrets.PROVIDER_KEY }}';
+        w.jobs['install-proof'].steps[5].env.KEY = '${{ secrets.PROVIDER_KEY }}';
       },
     ],
     [

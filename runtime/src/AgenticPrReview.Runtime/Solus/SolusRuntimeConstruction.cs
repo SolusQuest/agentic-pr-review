@@ -2,6 +2,7 @@ using AgenticPrReview.Runtime.Agent;
 using SolusAgent.Api.Execution;
 using SolusAgent.Runtime.Api.Configuration;
 using SolusAgent.Runtime.Startup;
+using SolusRuntimeOptions = SolusAgent.Runtime.Startup.RuntimeOptions;
 
 namespace AgenticPrReview.Runtime.Solus;
 
@@ -25,7 +26,7 @@ internal static class SolusRuntimeConstruction
         return RuntimeAgentFactory.Create(configuration, Options());
     }
 
-    internal static RuntimeOptions Options() => new(
+    internal static SolusRuntimeOptions Options() => new(
         maximumAttempts: Cr1DevelopmentProfile.RetainedAttempts,
         maximumRecords: Cr1DevelopmentProfile.RetainedRecords,
         maximumRetainedBytes: Cr1DevelopmentProfile.RetainedBytes,
