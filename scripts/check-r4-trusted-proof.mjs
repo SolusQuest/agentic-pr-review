@@ -856,6 +856,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
               'retention-days': 1,
             },
           },
+          {
+            name: 'CR1-S1 authenticated Solus state and capture proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'node runtime/tests/SolusStateEnvelopeFixture/verify.mjs',
+          },
         ],
       },
     },

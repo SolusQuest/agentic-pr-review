@@ -175,3 +175,51 @@ Deterministic tests pin authorization denial, the exact action/code taxonomy, th
 Checked-in state fixtures and test values are synthetic and public-safe. The state-encryption canary may appear only at the dedicated Host cryptographic boundary and never in persisted state, Agent/provider inputs, tool data, model-visible content, diagnostics, results, handoff receipts, outputs, summaries, annotations, or publications.
 
 Issue [#88](https://github.com/SolusQuest/agentic-pr-review/issues/88) consumed the Host state integration interface and proved authorization-before-capability, encrypted completed-session acceptance, exact restore, independent Host lineage, same-head/verified-ahead transition behavior, replay/tamper/header/cross-scope failure, and two-fresh-process framework and Native AOT execution through the real local store. The synthetic transport oracle is now the runtime CI source of truth and the comparison fixture is deleted. R4 owns the downstream GitHub Actions artifact adapter, public metadata/ciphertext model, private Node bridge, key provisioning, immutable candidate/acceptance records, retention cleanup, and publication transaction; the local conformance store does not claim those product guarantees.
+
+## CR1-S1 authenticated Solus record
+
+[S1 #405](https://github.com/SolusQuest/agentic-pr-review/issues/405) adds an independently testable Solus record boundary. Current production continues selecting the native SESSION reader above. S1 does not activate production restore, select artifact families, implement a transaction/reset, claim a runtime grant, or accept APR findings. S2 owns exclusive runtime authority, S3 owns persistence/restore orchestration, and S4 owns an actual subsequent review. A successful codec or capture result does not satisfy those gates.
+
+`SolusRestrictedStateSnapshotCodec` reuses the unchanged APRAST01 AES-256-GCM wrapper and full `RestrictedStateBinding` AAD. The new plaintext is a separate `APRSOL01` record; the native SESSION reader never reinterprets it. The outer namespace/discriminator, original R2 AAD vectors and frozen native action/code taxonomy remain unchanged. Metadata and complete opaque payload are authenticated together; snapshot metadata and unkeyed hashes cannot authorize restoration.
+
+The exact inner layout is:
+
+| Field                                                            | Wire representation                                                                                   |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Magic / record version                                           | ASCII `APRSOL01`; uint16 little endian `1`                                                            |
+| Package pin                                                      | uint16 byte length; exact ASCII `0.1.0-internal.1`                                                    |
+| Profile                                                          | uint16 byte length; exact ASCII `cr1-solus-internal1-dev`                                             |
+| Mode                                                             | uint8 `1`, completed candidate context                                                                |
+| Solus implementation                                             | 16 RFC 4122/network-order bytes for `3f520f02-3b59-431e-8acf-a62544f28760`                            |
+| Solus format / compatibility                                     | two uint32 little endian values, both `1`                                                             |
+| Package closure / runtime configuration / provider configuration | three SHA-256 digests, 32 decoded bytes each, in this order                                           |
+| Checkpoint correlation                                           | four nonempty GUIDs, 16 RFC 4122/network-order bytes each: checkpoint, logical work, round, execution |
+| Opaque context                                                   | uint32 little endian length; exactly that many unchanged bytes; EOF                                   |
+
+There are no optional fields or alternate readers. Fixed framing is 242 bytes. Payload length is 1–196,608 bytes, the selected profile's retained ceiling rather than Solus's internal 2 MiB codec constant. Complete plaintext is at most 196,850 bytes; the existing wrapper's maximum 64-byte key ID gives a complete encrypted maximum of 197,011 bytes. Record and encrypted framing, declared lengths, metadata and EOF are checked before the corresponding allocation/copy/decode. Payload bytes are never text-decoded, parsed as runtime JSON, rewritten, truncated, converted or compacted.
+
+The selected package-closure fingerprint is SHA-256 of the exact checked `packages.managed.lock.json` bytes: `954b5183b4160f833827c410114e1031a5194dfeea31e21b2a05e7266e2098ee`. R2's trusted package proof establishes installed package/source/hash equality with that lock. A saved fingerprint cannot select a pin or establish an installation. Any selected pin/closure change requires explicit consumer update and saved-context requalification; incompatible selected-current state remains a visible failure unless an authorized reset establishes a new epoch/session.
+
+Current trusted compatibility inputs additionally supply runtime and provider configuration fingerprints. The consuming Host must derive them from actual selected tool descriptors/recovery, provider scope, runtime bounds/options, acknowledgement/guarantees, and provider endpoint/model/token/body/time limits, excluding credentials. S1 authenticates and compares the exact supplied fingerprints; it does not implement the future materializers or prove that an arbitrary caller computed them correctly. No saved/default value chooses the expected configuration.
+
+### Capture correlation and accepted source
+
+The managed-only `SolusRestrictedStateCapture` is a call-scoped restricted sink bound to one Host-selected execution ID and current compatibility. The trusted Host gives it only to that invocation and completes it once with that invocation's actual result. It accepts exactly one size/metadata-checked capture, then requires Delivered capture, matching nonempty checkpoint/execution identity, a completed outcome and candidate stop, and one **current** acknowledged Accept/End receipt. Historical accepted receipts do not substitute current completion. Supported intent is Fresh or NewRunFromContext; unfinished ContinueRun recovery is excluded. Missing, duplicate, late, malformed, failed or incomplete capture cannot yield record material. The sink has no key, store, provider, claim or runtime invocation capability.
+
+The tuple is safe correlation, not cryptographic attestation of opaque internal grammar or a durable claim. Solus independently validates its own context representation/source at subsequent runtime admission. Capture delivery, runtime completion, APR findings acceptance, durable successor acceptance and exclusive claim remain separate.
+
+Restore receives `AuthorizedStateAccess`, trusted binding, independent `AcceptedLineage`, current compatibility and a trusted clock. It requires exact scope, generation, predecessor and acceptance/expiry agreement, authorized transition and unexpired lifetime (`now < expiresAt`). The selected encrypted digest must equal independent `EnvelopeSha256`. After AEAD authentication, the complete inner record digest is:
+
+```text
+SHA256(ASCII("apr.solus-state.cr1") || 0x00 || complete APRSOL01 record)
+```
+
+It must equal independent `AcceptedLineage.SessionSha256`. Candidate paths additionally require candidate binding, both candidate digests and the binding-dependent object identity to agree; recomputing unkeyed candidate fields does not repair independent-lineage disagreement. The authenticated selected record supplies its checkpoint tuple to the fresh process. No extra checkpoint expectation, invented registry or record-derived expected compatibility is required or permitted. S2 later checks a source-bound grant against that authenticated source and independent Host authority.
+
+Structural encode/decode alone grants no authority. The authenticated restore operation exposes only a restricted record on success and a closed `SolusRestrictedStateFailure` on failure. Failures distinguish malformed/oversized input, incompatible selected state, access/lineage failure, expiry, unavailable key and failed authentication. They contain no restricted content and never report bootstrap or reset. This codec cannot enumerate or try an older generation. Native SESSION chosen as Solus current, wrong pin/format/provider/configuration and corrupted or missing selected-current state fail visibly. Only a separately authorized Host reset may establish a new epoch/session; it cannot convert these bytes or serve as an admission bypass.
+
+### Independent conformance evidence
+
+`Cr1SolusStateEnvelopeTests` pins an independently authored Node Buffer binary oracle, including RFC 4122 checkpoint `00112233-4455-6677-8899-aabbccddeeff` represented by `00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff`. With the complete selected metadata, non-symmetric remaining GUIDs and binary payload `00 ff 80 c0 41 0a 7b 7d`, its 250-byte literal record has domain digest `4246a4165adb62db2cbc0e2c9c35d58191a40fa536d6e17113dda1d30701788b`. Writer and reader must match that literal independently; their mutual round-trip alone is insufficient.
+
+The independent managed `SolusStateEnvelopeFixture` uses actual installed `.1` types and a real controlled candidate-End capture, then seals, opens and reconstructs the exact carrier. Its synthetic provider makes no HTTP request. Negative cases cover execution/capture/completion association, runtime metadata, checkpoint constructor rules, unsupported/incomplete capture and byte bounds. It proves carrier integration, not an actual restored APR review or durable acceptance. The trusted exact-head package workflow runs it on Ubuntu 24.04 x64 after verified package restore, with an explicit credential-free child environment. Ordinary source/runtime checks remain separate; Mac platform failures or skips do not qualify that runner.

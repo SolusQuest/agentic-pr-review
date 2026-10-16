@@ -939,3 +939,383 @@ internal static partial class NativeRestrictedStateFiles
         internal long Nanoseconds;
     }
 }
+
+// The existing snapshot and outer crypto formats remain unchanged. This is the
+// separate protected Solus plaintext record and its independent admission seam.
+internal static class SolusRestrictedStateSnapshotCodec
+{
+    internal const int FramingBytes = 242;
+    internal const int MaximumRecordBytes =
+        FramingBytes + SolusRestrictedStateFormat.MaximumPayloadBytes;
+    // Maximum APRAST01 header (64-byte key ID), nonce and tag, without padding.
+    internal const int MaximumEnvelopeBytes = MaximumRecordBytes + 161;
+    private static readonly byte[] Prefix = BuildPrefix();
+
+    internal static bool TryWrite(SolusRestrictedStateRecord? record, out byte[] bytes)
+    {
+        bytes = [];
+        if (record is null ||
+            record.PayloadByteCount is < 1 or > SolusRestrictedStateFormat.MaximumPayloadBytes ||
+            !SolusRestrictedStateAdmission.IsSupported(record.Compatibility) ||
+            !SolusRestrictedStateAdmission.IsValidCheckpoint(record.Checkpoint))
+        {
+            return false;
+        }
+
+        bytes = new byte[FramingBytes + record.PayloadByteCount];
+        Prefix.CopyTo(bytes, 0);
+        var offset = Prefix.Length;
+        var value = record.Compatibility;
+        bytes[offset++] = value.Mode;
+        WriteGuid(bytes, ref offset, value.ImplementationId);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value.FormatVersion);
+        offset += 4;
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value.CompatibilityVersion);
+        offset += 4;
+        foreach (var hash in new[] { value.PackageClosureSha256,
+                     value.RuntimeConfigurationSha256, value.ProviderConfigurationSha256 })
+        {
+            Convert.FromHexString(hash).CopyTo(bytes, offset);
+            offset += 32;
+        }
+
+        var source = record.Checkpoint;
+        WriteGuid(bytes, ref offset, source.CheckpointId);
+        WriteGuid(bytes, ref offset, source.LogicalWorkId);
+        WriteGuid(bytes, ref offset, source.RoundId);
+        WriteGuid(bytes, ref offset, source.ExecutionId);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), (uint)record.PayloadByteCount);
+        offset += 4;
+        record.RestrictedPayload.CopyTo(bytes.AsSpan(offset));
+        return true;
+    }
+
+    // Structural decoding alone confers no authority. Call TryRestore for
+    // independently selected, authenticated state.
+    internal static bool TryRead(
+        ReadOnlySpan<byte> bytes,
+        SolusRestrictedStateCompatibility? expected,
+        out SolusRestrictedStateRecord? record,
+        out SolusRestrictedStateFailure failure)
+    {
+        record = null;
+        failure = SolusRestrictedStateFailure.Malformed;
+        if (bytes.Length > MaximumRecordBytes)
+        {
+            failure = SolusRestrictedStateFailure.Oversized;
+            return false;
+        }
+
+        if (!SolusRestrictedStateAdmission.IsSupported(expected))
+        {
+            failure = SolusRestrictedStateFailure.Incompatible;
+            return false;
+        }
+
+        if (bytes.Length < FramingBytes + 1)
+        {
+            return false;
+        }
+
+        if (!bytes[..Prefix.Length].SequenceEqual(Prefix))
+        {
+            failure = SolusRestrictedStateFailure.Incompatible;
+            return false;
+        }
+
+        // Validate length/EOF before even allocating fixed metadata objects.
+        var length = BinaryPrimitives.ReadUInt32LittleEndian(bytes[(FramingBytes - 4)..]);
+        if (length is 0 or > SolusRestrictedStateFormat.MaximumPayloadBytes ||
+            bytes.Length - FramingBytes != length)
+        {
+            return false;
+        }
+
+        var offset = Prefix.Length;
+        var mode = bytes[offset++];
+        var implementation = ReadGuid(bytes, ref offset);
+        var format = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..]);
+        offset += 4;
+        var compatibility = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..]);
+        offset += 4;
+        var packageHash = ReadHash(bytes, ref offset);
+        var runtimeHash = ReadHash(bytes, ref offset);
+        var providerHash = ReadHash(bytes, ref offset);
+        var actual = new SolusRestrictedStateCompatibility(
+            SolusRestrictedStateFormat.PackageVersion, SolusRestrictedStateFormat.Profile,
+            mode, implementation, format, compatibility, packageHash, runtimeHash, providerHash);
+        if (actual != expected)
+        {
+            failure = SolusRestrictedStateFailure.Incompatible;
+            return false;
+        }
+
+        var checkpoint = new SolusRestrictedStateCheckpoint(
+            ReadGuid(bytes, ref offset), ReadGuid(bytes, ref offset),
+            ReadGuid(bytes, ref offset), ReadGuid(bytes, ref offset));
+        if (!SolusRestrictedStateRecord.TryCreate(actual, checkpoint, bytes[FramingBytes..], out record))
+        {
+            return false;
+        }
+
+        failure = SolusRestrictedStateFailure.None;
+        return true;
+    }
+
+    internal static string RecordSha256(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length is < 1 or > MaximumRecordBytes)
+            throw new ArgumentException("APR_SOLUS_RECORD_INVALID");
+        return AgentCanonical.HashDomain(SolusRestrictedStateFormat.RecordDomain, bytes);
+    }
+
+    internal static bool TrySeal(
+        AuthorizedStateAccess? access,
+        RestrictedStateBinding? binding,
+        SolusRestrictedStateRecord? record,
+        IRestrictedStateKeyResolver? keys,
+        out byte[]? envelope,
+        out string? recordSha256,
+        out SolusRestrictedStateFailure failure)
+    {
+        envelope = null;
+        recordSha256 = null;
+        failure = SolusRestrictedStateFailure.AccessDenied;
+        if (access is null || binding is null || binding.Scope != access.Scope || keys is null)
+        {
+            return false;
+        }
+
+        failure = SolusRestrictedStateFailure.Malformed;
+        if (!RestrictedStateValidation.IsValidBinding(binding) || !TryWrite(record, out var plaintext))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!RestrictedStateEnvelope.TryEncrypt(access, binding, plaintext, keys,
+                    out envelope, out var code))
+            {
+                failure = CryptoFailure(code);
+                return false;
+            }
+
+            recordSha256 = RecordSha256(plaintext);
+            failure = SolusRestrictedStateFailure.None;
+            return true;
+        }
+        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException))
+        {
+            envelope = null;
+            failure = SolusRestrictedStateFailure.KeyUnavailable;
+            return false;
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(plaintext);
+        }
+    }
+
+    internal static bool TryRestoreCandidate(
+        AuthorizedStateAccess? access,
+        RestrictedStateBinding? trustedBinding,
+        AcceptedLineage? lineage,
+        RestrictedStateCandidate? candidate,
+        SolusRestrictedStateCompatibility? expected,
+        long nowUnixSeconds,
+        IRestrictedStateKeyResolver? keys,
+        out SolusRestrictedStateRecord? record,
+        out SolusRestrictedStateFailure failure)
+    {
+        record = null;
+        failure = SolusRestrictedStateFailure.AccessDenied;
+        if (access is null || trustedBinding is null || keys is null ||
+            trustedBinding.Scope != access.Scope)
+        {
+            return false;
+        }
+
+        failure = SolusRestrictedStateFailure.LineageMismatch;
+        // Bound before the existing candidate validator hashes/copies any bytes.
+        if (candidate?.Envelope is null || candidate.Envelope.Length > MaximumEnvelopeBytes ||
+            candidate.Binding != trustedBinding || lineage is null ||
+            candidate.SessionSha256 != lineage.SessionSha256 ||
+            candidate.EnvelopeSha256 != lineage.EnvelopeSha256 ||
+            !RestrictedStateValidation.IsValidCandidate(candidate))
+        {
+            return false;
+        }
+
+        return TryRestore(access, trustedBinding, lineage, candidate.Envelope,
+            expected, nowUnixSeconds, keys, out record, out failure);
+    }
+
+    internal static bool TryRestore(
+        AuthorizedStateAccess? access,
+        RestrictedStateBinding? trustedBinding,
+        AcceptedLineage? lineage,
+        ReadOnlySpan<byte> envelope,
+        SolusRestrictedStateCompatibility? expected,
+        long nowUnixSeconds,
+        IRestrictedStateKeyResolver? keys,
+        out SolusRestrictedStateRecord? record,
+        out SolusRestrictedStateFailure failure)
+    {
+        record = null;
+        failure = SolusRestrictedStateFailure.AccessDenied;
+        if (access is null || trustedBinding is null || keys is null ||
+            trustedBinding.Scope != access.Scope)
+        {
+            return false;
+        }
+
+        if (envelope.Length > MaximumEnvelopeBytes)
+        {
+            failure = SolusRestrictedStateFailure.Oversized;
+            return false;
+        }
+
+        failure = SolusRestrictedStateFailure.Incompatible;
+        if (!SolusRestrictedStateAdmission.IsSupported(expected))
+        {
+            return false;
+        }
+
+        failure = SolusRestrictedStateFailure.LineageMismatch;
+        if (lineage is null || !RestrictedStateValidation.IsValidBinding(trustedBinding) ||
+            !RestrictedStateValidation.IsValidLineage(lineage) || !lineage.TransitionAuthorized ||
+            lineage.Scope != access.Scope || lineage.Generation != trustedBinding.Generation ||
+            lineage.ExpectedPredecessorEnvelopeSha256 != trustedBinding.PredecessorEnvelopeSha256 ||
+            lineage.AcceptedAtUnixSeconds != trustedBinding.AcceptedAtUnixSeconds ||
+            lineage.ExpiresAtUnixSeconds != trustedBinding.ExpiresAtUnixSeconds ||
+            nowUnixSeconds < 0 || nowUnixSeconds > RestrictedStateFormat.MaximumUnixSeconds ||
+            nowUnixSeconds < lineage.AcceptedAtUnixSeconds ||
+            RestrictedStateEnvelope.EnvelopeSha256(envelope) != lineage.EnvelopeSha256)
+        {
+            return false;
+        }
+
+        if (nowUnixSeconds >= lineage.ExpiresAtUnixSeconds)
+        {
+            failure = SolusRestrictedStateFailure.Expired;
+            return false;
+        }
+
+        if (!HasBoundedCiphertext(envelope, out failure))
+        {
+            return false;
+        }
+
+        byte[]? plaintext = null;
+        try
+        {
+            if (!RestrictedStateEnvelope.TryDecrypt(access, trustedBinding, envelope, keys,
+                    out plaintext, out var code))
+            {
+                failure = CryptoFailure(code);
+                return false;
+            }
+
+            if (plaintext!.Length > MaximumRecordBytes)
+            {
+                failure = SolusRestrictedStateFailure.Oversized;
+                return false;
+            }
+
+            if (RecordSha256(plaintext) != lineage.SessionSha256)
+            {
+                failure = SolusRestrictedStateFailure.LineageMismatch;
+                return false;
+            }
+
+            // The selected authenticated record is the checkpoint source. No
+            // extra caller-selected checkpoint can replace its provenance.
+            return TryRead(plaintext, expected, out record, out failure);
+        }
+        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException))
+        {
+            record = null;
+            failure = SolusRestrictedStateFailure.KeyUnavailable;
+            return false;
+        }
+        finally
+        {
+            if (plaintext is not null)
+            {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(plaintext);
+            }
+        }
+    }
+
+    private static SolusRestrictedStateFailure CryptoFailure(string code) => code switch
+    {
+        RestrictedStateCodes.AuthenticationFailed => SolusRestrictedStateFailure.AuthenticationFailed,
+        RestrictedStateCodes.KeyUnavailable => SolusRestrictedStateFailure.KeyUnavailable,
+        _ => SolusRestrictedStateFailure.Malformed,
+    };
+
+    // Inspect only bounded APRAST01 length fields before the existing crypto
+    // parser allocates ciphertext/decrypted buffers. Crypto validates contents.
+    private static bool HasBoundedCiphertext(ReadOnlySpan<byte> bytes,
+        out SolusRestrictedStateFailure failure)
+    {
+        failure = SolusRestrictedStateFailure.Malformed;
+        var offset = 12; // magic, version, algorithm
+        foreach (var maximum in new[] { 128, 64, 64, RestrictedStateFormat.NonceBytes })
+        {
+            if (bytes.Length - offset < 2) return false;
+            var length = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..]);
+            offset += 2;
+            if (length == 0 || length > maximum || bytes.Length - offset < length) return false;
+            offset += length;
+        }
+
+        if (bytes.Length - offset < 4) return false;
+        var ciphertextLength = BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..]);
+        if (ciphertextLength > MaximumRecordBytes)
+        {
+            failure = SolusRestrictedStateFailure.Oversized;
+            return false;
+        }
+
+        return ciphertextLength > 0;
+    }
+
+    private static byte[] BuildPrefix()
+    {
+        var writer = new ArrayBufferWriter<byte>();
+        writer.Write(Encoding.ASCII.GetBytes(SolusRestrictedStateFormat.Magic));
+        Span<byte> number = stackalloc byte[2];
+        BinaryPrimitives.WriteUInt16LittleEndian(number, SolusRestrictedStateFormat.Version);
+        writer.Write(number);
+        foreach (var text in new[] { SolusRestrictedStateFormat.PackageVersion, SolusRestrictedStateFormat.Profile })
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(number, (ushort)text.Length);
+            writer.Write(number);
+            writer.Write(Encoding.ASCII.GetBytes(text));
+        }
+
+        return writer.WrittenSpan.ToArray();
+    }
+
+    private static void WriteGuid(Span<byte> bytes, ref int offset, Guid value)
+    {
+        value.TryWriteBytes(bytes.Slice(offset, 16), bigEndian: true, out _);
+        offset += 16;
+    }
+
+    private static Guid ReadGuid(ReadOnlySpan<byte> bytes, ref int offset)
+    {
+        var value = new Guid(bytes.Slice(offset, 16), bigEndian: true);
+        offset += 16;
+        return value;
+    }
+
+    private static string ReadHash(ReadOnlySpan<byte> bytes, ref int offset)
+    {
+        var value = Convert.ToHexStringLower(bytes.Slice(offset, 32));
+        offset += 32;
+        return value;
+    }
+}
