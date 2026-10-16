@@ -1,5 +1,7 @@
 # Runtime integration validation
 
+The [CR1 integration contract](./cr1-integration-contract.md) inventories this deterministic protocol smoke separately from actual Solus review qualification. D5 owns the affected managed replacement commands and selected-runner archive/Action proof. The framework/AOT evidence below remains limited to the current implementation; it does not establish Solus execution or managed loading closure.
+
 `npm run runtime:integration` is the repository-owned retained CLI integration entry point. It publishes the framework-dependent C# runtime into a temporary directory outside the repository workspace, runs the deterministic `review` command directly, and verifies schema-valid Input/Result/Trace artifacts without recreating the removed TypeScript launcher.
 
 On Linux the command also publishes the `linux-x64` Native AOT runtime and runs the same direct CLI smoke. On non-Linux it runs the portable framework subset and prints explicit `NON_PORTABLE_CASES_SKIPPED` and `AOT_SKIPPED_NON_LINUX` notices. Linux CI is the release-gating proof for Native AOT. The separate ActionHost framework verifier owns the real W2 wrapper, process lifecycle, cancellation, closed-environment, and privacy proof.

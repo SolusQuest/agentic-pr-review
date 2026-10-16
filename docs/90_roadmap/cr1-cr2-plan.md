@@ -36,6 +36,8 @@ The runtime receives only sanitized input and narrow capabilities. GitHub/Action
 
 ### Package And Capacity Feedback
 
+The [CR1 integration contract](../20_architecture/cr1-integration-contract.md) owns R1’s bounded `.1` development profile, explicit candidate Final terminal carrier, live ownership inventory, early upstream gap ledger and practical fresh/restored scenario gates. It does not activate that route or replace the Current product limits.
+
 Begin bounded integration with the published `0.1.0-internal.1`. Pin exact equality and verify that every resolved direct and transitive Solus dependency uses the selected version. Keep restore credentials in the build/restore boundary; downstream execution must not need private-feed credentials. Published identities are immutable: upstream corrections require new internal versions and explicit consumer pin changes, never replacement bytes or an implicit latest version.
 
 Before exercising the migrated route, define an explicit development profile that the selected package can admit. During integration, identify concrete semantic/capacity gaps early, coordinate separately owned upstream corrections and publication, then revalidate the new exact pin. Do not defer all upstream work until milestone closeout. Final practical capacity acceptance belongs to CR1; `.1` is a starting dependency, not a permanent product ceiling or a claim of equivalence.
