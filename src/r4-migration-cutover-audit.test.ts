@@ -127,6 +127,7 @@ describe('R4 W13 closed migration inventory', () => {
       '.github/workflows/r4-trusted-proof.yml',
       '.github/workflows/release.yml',
       '.github/workflows/runtime-ci.yml',
+      '.github/workflows/solus-agent-package-proof.yml',
     ]);
     expect(trackedFiles('protocol/schemas/*')).toEqual([
       'protocol/schemas/provider-session-ledger.v1.json',

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -750,6 +751,63 @@ function validateFixtureContracts(fixtureRoot) {
   }
   return documents;
 }
+// The one-time M5 installer is a separately authorized, read-only token route.
+// Keep its complete reviewed semantics closed; formatting alone is irrelevant.
+function validateSolusAgentInstallWorkflow(workflow) {
+  const expected = {
+    name: 'SolusAgent first internal install proof',
+    on: {
+      workflow_dispatch: null,
+    },
+    permissions: {
+      contents: 'read',
+      packages: 'read',
+    },
+    jobs: {
+      'install-proof': {
+        'runs-on': 'ubuntu-24.04',
+        steps: [
+          {
+            name: 'Require trusted manual main invocation',
+            run: 'test "$GITHUB_EVENT_NAME" = workflow_dispatch\ntest "$GITHUB_REF" = refs/heads/main\ntest "$(uname -m)" = x86_64\n',
+          },
+          {
+            name: 'Check out the qualified public consumer fixtures',
+            uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+            with: {
+              repository: 'SolusQuest/solus-agent',
+              ref: '076bcda2fbe1da2677ac5c6fd03d75bc0fef66ad',
+              'persist-credentials': false,
+            },
+          },
+          {
+            uses: 'actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
+            with: {
+              'global-json-file': 'global.json',
+            },
+          },
+          {
+            uses: 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+            with: {
+              'node-version': '24',
+              architecture: 'x64',
+            },
+          },
+          {
+            name: 'Install exact private packages and execute all required offline consumers',
+            env: {
+              GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
+              GITHUB_ACTOR: '${{ github.actor }}',
+            },
+            run: 'node scripts/packages/verify-consumers.ts --feed https://nuget.pkg.github.com/SolusQuest/index.json --version 0.1.0-internal.1 --scenario all --require foundation,apr,scribe,smoke-offline',
+          },
+        ],
+      },
+    },
+  };
+  if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
+}
+
 function validateRepositorySecretRoutes(workflowsRoot) {
   const workflowFiles = fs
     .readdirSync(workflowsRoot)
@@ -772,6 +830,7 @@ function validateRepositorySecretRoutes(workflowsRoot) {
   for (const name of workflowFiles) {
     const { source, value } = parseWorkflow(path.join(workflowsRoot, name));
     allSource += `${source}\n`;
+    if (name === 'solus-agent-package-proof.yml') validateSolusAgentInstallWorkflow(value);
     if (name !== 'r4-trusted-proof.yml' && proofAnchors.some((anchor) => source.includes(anchor))) {
       fail('repository-proof-route-owner');
     }
@@ -800,6 +859,9 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     validateActionTokenRoutes(name, value);
   }
   const expected = [
+    ...(workflowFiles.includes('solus-agent-package-proof.yml')
+      ? ['solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
+      : []),
     ...(workflowFiles.includes('release.yml')
       ? Array.from({ length: 2 }, () => `release.yml\0\${{ github.token }}`)
       : []),
