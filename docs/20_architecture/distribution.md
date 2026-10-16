@@ -2,7 +2,17 @@
 
 The development head contains the nested Node 24 ordinary Action, strict release-map resolver, inherited-fd Native AOT launcher and fourteen accounting outputs. The checked map is explicitly null until separately authorized binding, so ordinary execution refuses before network access or launch. Credential-free fixtures execute the literal checked bundle and original packaged Runtime; they do not qualify a real release or successful downstream review. The [R7 target](../90_roadmap/r7-plan.md) retains separate qualification/publication gates, excludes a root alias and defers formal public/default graduation.
 
-See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, [`deepseek-flash-identity.md`](./deepseek-flash-identity.md) for the selected-current R7 provider identity and state boundary, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
+See the [CR1/CR2 plan](../90_roadmap/cr1-cr2-plan.md) for selected ownership and sequencing, the [runtime rebaseline](./agent-runtime-rebaseline.md) for earlier implementation contracts, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, [`deepseek-flash-identity.md`](./deepseek-flash-identity.md) for the selected-current R7 provider identity and state boundary, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
+
+## CR1/CR2 Selected Target
+
+CR1 replaces the AOT production target with a framework-dependent managed .NET 10 DLL archive, invoked as `dotnet <dll>` without apphost. Preserve the complete publish tree: entry DLL, `.deps.json`, `.runtimeconfig.json`, dependency assemblies and required resources/native assets. AOT, trimming, single-file and self-contained publishing are excluded. APR execution needs a trusted compatible runtime, not the SDK/MSBuild facilities required by ContractScribe's semantic commands; building/restoring still needs the SDK.
+
+CR1 owns exact archive and whole-tree inventory verification, safe extraction, runtime prerequisites and selection, trusted dependency loading/environment controls, cleanup/cancellation and representative execution from the actual archive on GitHub-hosted `ubuntu-24.04` x64. The current executable-only descriptor proof and three-file package format below do not qualify that managed closure. Do not load reviewed-workspace code or allow ambient probing/startup injection to replace verified files.
+
+CR1 adapts the existing nested Action/official artifact bridge. CR2 makes the .NET CLI the sole product entry behind a thin composite host and resolves the bridge's retain/reduce/replace disposition with evidence. It does not preselect Python, move the Action to the repository root or rewrite state transport.
+
+The current acquisition, descriptor-launch and package-format sections below remain operating contracts until replacement. Their AOT-only details do not override the selected target. Preserve exact release identities and immutable original bytes; re-refine affected unfinished R7 contracts before execution, and complete CR1/CR2 before remaining first-candidate work. Public redistribution of Solus assemblies needs separate authority before release.
 
 ## Distribution Goals
 
@@ -12,12 +22,14 @@ The distribution must:
 - select exact payload bytes;
 - fail closed on checksum or compatibility mismatch;
 - start quickly enough for GitHub Actions use;
-- keep the Node wrapper reproducible and small;
-- keep the first .NET payload to one executable and one build identity;
+- keep Action integration reproducible and small;
+- keep one product entry DLL and one payload build identity, with its complete dependency tree;
 - avoid dynamic `latest` selection;
-- allow framework-dependent execution for development and tests without making it the downstream default.
+- make framework-dependent managed execution the selected downstream target, with explicit runtime prerequisites.
 
 ## Target Node.js Action Wrapper
+
+This section describes the current entry and its CR1 adaptation boundary. CR2 owns the later CLI/composite replacement.
 
 The checked-in nested Action metadata, payload-map.json and generated Node 24 bundle form the ordinary r7-d0 entrypoint. Repository-controlled r4-w2 prepared proof uses a separately generated fixed private bundle. The unbound ordinary map provides no release or supported downstream installation.
 
@@ -48,30 +60,15 @@ This read-only command verifies the exact metadata surface, package and lockfile
 
 ## .NET Payload
 
-Native AOT remains the selected production distribution form.
+The selected CR1 payload is the managed publish-tree archive above. It keeps Host, review product, Solus runtime/provider integration, state and publisher under one application entry; dependency assemblies do not become independently selected APR components. Package restore pins are distinct from APR release identities.
 
-The target payload contains:
+The current Native AOT implementation is preserved in the R7-D1 package-format section and existing qualification commands below. Current framework-dependent/AOT checks remain applicable until their paths are replaced or retired with evidence. Future CR1 validation must execute representative managed Host, Agent, fake-provider, tool, state and publisher paths from the actual publish tree; a successful publish alone is insufficient.
 
-- one `agentic-pr-review` .NET executable containing Host, Agent, tools, provider adapters, state, and publisher modules;
-- shared runtime libraries required by that executable;
-- a payload manifest identifying release, platform, files, sizes, and checksums.
-
-The first target does not maintain separate Host and Worker executables or an internal version matrix. If later evidence requires kill, resource, extension, or trust isolation, a same-binary `worker` subcommand should be evaluated before adding a second artifact.
-
-Native AOT provides:
-
-- no downstream .NET SDK requirement;
-- fast startup;
-- self-contained execution;
-- exact platform-specific assets;
-- checksum-verifiable files;
-- earlier discovery of reflection and trimming incompatibilities.
-
-Framework-dependent and selected Native AOT paths continue to run in CI. A successful publish is not sufficient; CI must execute representative Host, Agent, fake-provider, tool-loop, and publisher paths from the published output.
+A separate Host/Worker process remains deferred pending concrete isolation needs.
 
 ## Initial Platform Scope
 
-The approved R7 experimental payload target is one `linux-x64` executable for GitHub-hosted `ubuntu-24.04`, consumed through the existing nested Node 24 Action without a .NET SDK. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
+The selected CR1 managed payload targets GitHub-hosted `ubuntu-24.04` x64, initially through the existing nested Action, with a compatible .NET 10 runtime and no downstream SDK requirement. CR2 changes the Action integration; the original R7 AOT profile remains current implementation evidence. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
 
 Additional targets are outside R7 and require separately scoped downstream demand and CI publish/execution proof:
 
@@ -90,7 +87,7 @@ Runner-owned Action repository/ref context supplies exact SHA T or the map's ver
 
 Fully verified repository-test overrides remain isolated and unreachable through ordinary downstream inputs. They bypass download, not executable/platform/manifest/build admission, and do not expand downstream support. Other distribution forms require a separate future contract.
 
-The wrapper must not:
+For the current native payload path, the wrapper must not:
 
 - search `PATH` for an arbitrary runtime;
 - download implicit `latest`;
@@ -115,7 +112,7 @@ vX.Y.Z-internal.N at reviewed Action T -> exact map of B, S and builder W
 
 Prepare/test original `B` from `S` without publication credentials; review the binding map and obtain maintainer merge to `T`; qualify exact original `B` with `T`; stage that qualified pair as an unpublished draft; publish and verify payload assets, then create the consumer Action tag last. A fixed Action SHA resolves the same map. Promotion never rebuilds/repackages. Changed build inputs need a new candidate; expiry or ambiguous external state fails closed/reconciles by exact identity, never duplicates/replaces a version.
 
-Mandatory producer attestation and final publish verification restrict expected repository, signer workflow, hosted runner and actual source claims. Attestation of `W` alone cannot prove detached `S` without independently verified candidate/build-policy binding. Consumers must verify SHA-256 against the reviewed map and retain opened-executable identity through spawn. Mandatory online consumer attestation is deferred; independent verifier commands belong to the later runbook. See the full [release identity and authority contract](../90_roadmap/r7-plan.md#exact-release-identities-and-trust); this activation creates no release or tag.
+Mandatory producer attestation and final publish verification restrict expected repository, signer workflow, hosted runner and actual source claims. Attestation of `W` alone cannot prove detached `S` without independently verified candidate/build-policy binding. Consumers must verify SHA-256 against the reviewed map. The current native path retains opened-executable identity through spawn; CR1 must replace that proof with verified managed entrypoint/dependency loading without weakening source or workspace boundaries. Mandatory online consumer attestation is deferred; independent verifier commands belong to the later runbook. See the full [release identity and authority contract](../90_roadmap/r7-plan.md#exact-release-identities-and-trust); this activation creates no release or tag.
 
 ## Durable State Compatibility
 
@@ -131,7 +128,7 @@ Before 1.0, a Host-classified non-current historical namespace or discriminator 
 
 ## Restricted State Transport
 
-The Agent session has project-owned logical records plus a separate provider-scoped continuation envelope. Because it may contain readable reasoning and bounded repository tool results, it is more sensitive than the existing M4 metadata-oriented state. R4 selects downstream-owned GitHub Actions artifacts as the sole built-in production/default adapter.
+The current Agent session has project-owned logical records plus a separate provider-scoped continuation envelope. CR1 replaces generic context mechanics with Solus context while APR retains this section’s storage, authentication, scope, lineage and acceptance authority. Because it may contain readable reasoning and bounded repository tool results, it is more sensitive than the existing M4 metadata-oriented state. R4 selects downstream-owned GitHub Actions artifacts as the sole built-in production/default adapter.
 
 Production transport must document:
 
@@ -164,7 +161,7 @@ Examples:
 - `SHA256SUMS`;
 - a machine-readable payload manifest.
 
-An archive should contain a fixed top-level layout such as:
+The current native archive uses a layout such as:
 
 ```text
 agentic-pr-review/
@@ -173,17 +170,17 @@ agentic-pr-review/
   THIRD-PARTY-NOTICES.txt
 ```
 
-The example above chooses no actual first candidate or version. The R7-D1 package format 1 section below defines the implemented layout; later map and qualification owners bind it before publication.
+The example chooses no actual candidate/version and is not the CR1 managed layout. The R7-D1 section defines the current implemented native format; CR1 replaces it with a complete managed tree before new candidate binding/qualification.
 
 ## Dependency Policy
 
-- If R2 adopts `Microsoft.Extensions.AI`, pin it and provider dependencies to exact stable versions through repository package management.
-- Do not consume preview packages in the production payload without an explicit architecture exception.
-- Run framework-dependent and Native AOT validation on dependency updates.
-- Preserve source-generated JSON and reflection-disabled execution.
-- Treat provider SDK request-shape changes as cache and compatibility risks.
+- CR1 explicitly selects the experimental SolusAgent internal packages. Start bounded integration at `0.1.0-internal.1`, pin exact equality for all resolved direct/transitive Solus dependencies, and consume only newly published immutable versions for corrections.
+- Private-feed authentication belongs to build/restore; the distributed publish tree must execute without package-feed credentials. Authorized internal consumption does not grant public redistribution rights.
+- Revalidate APIs, behavior, retained-context compatibility and practical capacity on pin changes. Do not silently substitute versions or fall back to fresh state.
+- Preserve existing validation for dependencies on current AOT paths until replacement. CR1's new target needs managed archive execution and whole-tree loading proof, not new AOT qualification.
+- Treat provider request-shape and continuation changes as cache/state compatibility risks. Other preview dependency adoption still requires an explicit architecture decision.
 
-R2 compares `Microsoft.Extensions.AI.Abstractions` with project-minimal exchange types. Either choice keeps the provider adapter and durable/side-effect semantics project-owned.
+The historical R2 MEAI/project-minimal selection does not constrain the approved Solus migration. See the [package and capacity contract](../90_roadmap/cr1-cr2-plan.md#package-and-capacity-feedback).
 
 ## Secret And Source Boundary
 
@@ -203,7 +200,7 @@ Trusted workflows should:
 
 ## Migration From The Current Distribution
 
-During migration:
+The following records the earlier R1-R7 transition. Current new migration work follows CR1/CR2 above:
 
 - the existing `v0.1.0` tag remains the unmaintained historical pin for the last tagged legacy Action; no new tag promotes later unshipped legacy work;
 - R1 removes the current mixed Action metadata and generated bundle from the development head instead of publishing a partially migrated compatibility Action;
@@ -218,6 +215,8 @@ During migration:
 Do not keep two permanent distribution architectures. Every transitional TypeScript business module must have a target owner and deletion gate.
 
 ## R7-D1 package format 1
+
+This is the implemented native format and its validation contract. CR1 must replace its executable-only layout and launch proof for the selected managed target; retain the original evidence and checks until replacement.
 
 The producer scripts/release/build-payload.mjs owns the first package format. The archive name is agentic-pr-review-<releaseVersion>-linux-x64.tar.gz, where releaseVersion is canonical vMAJOR.MINOR.PATCH-internal.N, without leading zeroes, with positive N and at most 48 ASCII characters. These tools and fixtures select no real candidate version.
 

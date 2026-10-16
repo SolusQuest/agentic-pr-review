@@ -1,29 +1,25 @@
 # Architecture Direction
 
-The selected target architecture is a narrow, GitHub-first code review agent implemented primarily in C#:
+The selected architecture remains a narrow GitHub-first C# review product. [CR1/CR2](../90_roadmap/cr1-cr2-plan.md) owns the changed direction and acceptance boundaries:
 
-1. a thin Node.js GitHub Action wrapper;
-2. one Native AOT C# executable with a trusted `ActionHost`, an in-process review `Agent`, bounded tools, and provider adapters;
-3. explicit data and capability boundaries that prevent GitHub credentials from entering provider-visible, model-visible, or durable channels;
-4. an optional future worker process only when fault, resource, extension, or trust evidence justifies it.
+1. CR1 moves generic agent/provider execution and runtime context to exact-version SolusAgent packages while APR retains review, state and publication authority.
+2. CR1 replaces the production AOT target with a complete framework-dependent managed .NET 10 DLL archive, invoked through a trusted compatible runtime, and adapts the existing Action.
+3. CR2 makes the .NET CLI the sole product entry, with a thin composite Action and explicit official artifact-bridge disposition.
+4. Credential/data/capability boundaries remain explicit; a worker process needs separate fault, resource, extension or trust evidence.
 
-The detailed decision, rationale, migration sequence, tools, `Microsoft.Extensions.AI` policy, versioning rules, and validation gates are defined in [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md).
+The [runtime rebaseline](./agent-runtime-rebaseline.md) retains the earlier R-series decisions and current implementation contracts. Its project-owned generic loop, AOT and permanent Node-entry assumptions do not govern new migration design.
 
 ## Status
 
-This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path. R2 established the project-minimal Agent product path: the selected chat seam, explicit loop and tools, current SESSION format, restricted encrypted STATE, and two-fresh-process framework and Linux x64 Native AOT proof. R3 then proved the real Agent transport path and removed the superseded single-request C# application and executor family; see the checked [`r3-single-shot-removal-handoff.md`](./r3-single-shot-removal-handoff.md). R4 includes the nested generated Node 24 wrapper and official artifact bridge for repository-controlled prepared-payload proof. R5 delivered evaluation engineering but its live model-quality baseline remains [inconclusive](../90_roadmap/r5-evaluation-results.md). R6 established an offline economics gate and one bounded live restored continuation; its [evidence conclusion](../90_roadmap/r6-economics-results.md) does not establish complete comparable costs, representative resumed operation or quality graduation. The development-head wrapper is not a supported downstream Action; R7 still owns release payload delivery and the public default. The earlier two-candidate comparison infrastructure is also deleted; see [`ai-abstraction-decision.md`](./ai-abstraction-decision.md).
+Current code still uses the APR-owned Agent loop, project chat seam, DeepSeek adapter, SESSION and Native AOT payload. The nested Node 24 Action implements ordinary exact-map resolution, descriptor launch, seven inputs and fourteen outputs; the checked map remains null and there is no experimental release or supported downstream installation. Solus `.1` installation proof is dependency evidence only.
 
-New work must distinguish:
+R1-R4 completed the legacy removal and C# Host/state/publication cutover; see the [R4 handoff](./r4-migration-cutover-handoff.md). R5's earlier live quality remains inconclusive. [R6 final acceptance](https://github.com/SolusQuest/agentic-pr-review/issues/271#issuecomment-5928401721) accepts bounded engineering/evaluation closeout while preserving native-history, live-prefix, formal-regression, billing and default-capacity unknowns. These results do not qualify migrated execution.
 
-- **current compatibility work**: a narrow fix required to keep the existing branch safe until removal;
-- **migration work**: code that moves ownership toward the selected target and has an explicit deletion gate;
-- **target work**: code that belongs in the thin wrapper or the C# Host, Agent, tools, provider, state, and publisher modules after migration.
-
-Do not expand a current compatibility surface merely because it already exists.
+Keep current operating contracts until replacement; new migration work follows CR1/CR2 with named replacement/retirement evidence. Remaining R7 first-candidate work follows both and re-refinement of affected unfinished contracts. Formal public/default graduation remains a later maintainer decision.
 
 ## Architecture Decision And Rationale
 
-The project keeps C# and Native AOT as runtime and distribution commitments, but no longer treats a broad TypeScript/C# protocol boundary as an engineering goal.
+The project keeps C# product ownership while reusing SolusAgent generic execution and the managed distribution approach already demonstrated by ContractScribe. Broad cross-language product contracts remain outside the engineering goals.
 
 The prior split proved:
 
@@ -50,11 +46,13 @@ The architecture therefore optimizes for:
 
 ```mermaid
 flowchart LR
-    Wrapper["Thin Node.js wrapper"] --> App["Single .NET Native AOT executable"]
-    App --> Host["ActionHost module<br/>GitHub and publisher authority"]
-    Host -->|"sanitized context and narrow capabilities"| Agent["Review Agent module<br/>loop, tools, session"]
-    Agent -->|"narrow chat client"| Provider["Provider adapter<br/>provider-only credential"]
-    Agent -->|"candidate result and state"| Host
+    Wrapper["Action host<br/>CR1 existing Node / CR2 thin composite"] --> App["Managed .NET CLI<br/>verified publish tree"]
+    App --> Host["APR Host<br/>GitHub, state and publisher authority"]
+    Host -->|"sanitized context and narrow capabilities"| Product["APR review product<br/>policy, tools and evidence acceptance"]
+    Product --> Runtime["SolusAgent<br/>generic execution and runtime context"]
+    Runtime --> Provider["Provider transport<br/>provider-only credential"]
+    Runtime -->|"untrusted outcomes and restricted context"| Product
+    Product -->|"candidate result and state"| Host
 ```
 
 The model cannot inspect process memory. It observes only provider requests and tool results deliberately sent to it. For the initial trusted, project-owned tool set, security therefore depends on explicit data flow, narrow capabilities, separate credential-bearing clients, and canary tests—not on a mandatory Host/Agent process split.
@@ -63,7 +61,7 @@ Separate `csproj` files can enforce dependency direction but are not a security 
 
 ## Thin Node.js Wrapper Responsibilities
 
-The wrapper may own:
+The current Node wrapper and CR1 bridge may own:
 
 - Action input and output bridging;
 - secret masking;
@@ -73,7 +71,7 @@ The wrapper may own:
 - step annotations and summary forwarding;
 - final exit-code forwarding.
 
-It must not own GitHub business operations, prompts, provider selection semantics, tools, findings, session compatibility, prefix construction, or publisher policy.
+It must not own GitHub business operations, prompts, provider selection semantics, tools, findings, session compatibility, prefix construction, or publisher policy. CR2 consolidates product input/configuration semantics in the CLI and replaces the Action entry with thin composite integration; its artifact bridge must receive an evidenced retain/reduce/replace disposition.
 
 ## .NET ActionHost Responsibilities
 
@@ -93,22 +91,11 @@ The Host may receive GitHub and Actions service credentials. The Agent may not r
 
 ## .NET Review Agent Responsibilities
 
-The Agent owns:
+APR's review layer owns trusted instructions/policy, domain tool definitions and validation, admitted evidence, product budgets, findings acceptance and interpretation of incomplete outcomes. Solus supplies generic loop/provider/tool execution mechanics and runtime context. Exact limits and result/context integration are CR1 refinement and acceptance work; neither a package install nor a successful shared-runtime result establishes product correctness.
 
-- a narrow chat-client capability whose credential remains encapsulated by the provider adapter;
-- a project-owned bounded agent loop;
-- stable instructions, policy, and tool declarations;
-- read-only repository tool validation and execution;
-- canonical logical session messages;
-- stable-prefix and dynamic-suffix classification;
-- a provider-neutral logical request plan and logical prefix identity;
-- model, tool, byte, token, and time budgets;
-- structured proposed findings and evidence references;
-- candidate session state and sanitized telemetry.
+Agent orchestration receives no `ActionConfig`, `HostSecrets`, GitHub/Actions client or credential, environment abstraction, generic `HttpClient`, service locator or shell/process capability. The provider credential remains in a separate narrow transport with allowlisted endpoint and bounded request/response handling. GitHub and provider clients do not share credentials or handlers.
 
-The Agent orchestration never receives `ActionConfig`, `HostSecrets`, a GitHub or Actions client or credential, an environment abstraction, a generic `HttpClient`, `IServiceProvider`, or a shell/process capability. It never owns GitHub writes, artifact publication, repository mutation, arbitrary shell execution, or untrusted build/test execution in the R2 spike or R3 initial live profile.
-
-The provider adapter owns provider-specific role/message/block/tool projection from the logical request plan, the provider request envelope and wire serialization, continuation placement, any provider-specific cache-relevant projection or identity, HTTP transport, usage mapping, and provider-error mapping. It owns a separate provider-specific `HttpClient`, handler, endpoint allowlist, redirect policy, and authorization header. It does not share handlers or default headers with the GitHub client.
+Restricted context capture/admission is separate from APR storage/lineage and publication acceptance. Rebind current tools, providers and authority on restore; serialized data cannot confer capabilities. See the [CR1 context and cutover contract](../90_roadmap/cr1-cr2-plan.md#context-and-cutover).
 
 ## Agent Tools
 
@@ -128,28 +115,13 @@ Tools are implemented and enforced in C#. The model cannot construct commands or
 
 ## Microsoft.Extensions.AI
 
-R2 compared `Microsoft.Extensions.AI.Abstractions` 10.8.1 with project-minimal exchange types under the same reasoning-enabled tool-loop, fresh-process restoration, and Native AOT proof. Both passed. Project-minimal exchange was selected because it preserves the same one-operation Agent capability and project ownership without an additional production package. The real product proof has now replaced that comparison and its fixture/package are deleted. The historical evidence and completed deletion gate are in [`ai-abstraction-decision.md`](./ai-abstraction-decision.md).
+The historical R2 comparison selected project-minimal exchange types after both candidates passed framework-dependent and Native AOT proof; its fixture/package were then deleted. See the [decision record](./ai-abstraction-decision.md). That evidence remains a record of the current APR-owned seam, not a requirement to preserve generic loop/provider ownership after CR1.
 
-The selection accounts for DeepSeek as the initial live provider and MiMo as the intended second provider. Multiple providers do not require MEAI ownership of the Agent boundary: each provider adapter still owns wire projection, reasoning continuation, capabilities, cache identity, usage mapping, and failures, while the Agent consumes one project-owned capability. The second real adapter is an evidence gate for reconsidering whether MEAI would materially reduce duplication.
-
-The comparison confirmed that an AI abstraction must never own:
-
-- the durable ledger;
-- the agent loop;
-- tool dispatch and ordering;
-- budgets;
-- provider capabilities;
-- checkpoint and commit semantics;
-- prefix identity;
-- terminal result validation.
-
-The initial production loop invokes the selected narrow chat-client abstraction directly and handles function-call content itself. It uses explicit tool schemas, explicit dispatch, project-owned DTOs, and source-generated JSON metadata. `FunctionInvokingChatClient`, reflection-driven tool schema generation, Microsoft Agent Framework, and Semantic Kernel are not part of the initial target.
-
-MEAI adoption and multi-agent orchestration are separate decisions. A main-agent/sub-agent topology does not by itself require MEAI; adopting Microsoft Agent Framework would require a later focused proof of orchestration ownership, scoped capabilities, session continuity, Native AOT, security, and provider-reasoning preservation. MEAI may be introduced behind the project-owned chat seam without changing the Agent loop or durable project-owned records if later provider or pipeline evidence justifies it.
+CR1 selects SolusAgent; it does not reopen MEAI selection or introduce Microsoft Agent Framework, Semantic Kernel or multi-agent orchestration. Future abstraction decisions require actual consumer evidence and cannot weaken APR's product authority.
 
 ## Runtime Replacement
 
-The project-owned runtime is the only live runtime direction for the new development head.
+The APR-owned runtime remains current until CR1 replaces its generic mechanics with SolusAgent. There is no new dual production route or legacy fallback requirement.
 
 The Claude Code CLI path has been removed rather than maintained as a fallback. Historical tags preserve historical behavior. The first release after removal is breaking and safely bootstraps instead of migrating Claude session state.
 
@@ -163,28 +135,11 @@ Deterministic and fake providers remain internal CI and fixture infrastructure.
 
 ## Session Continuity
 
-R2 and R3 first prove completed-review continuation across two fresh executable invocations using persisted state. R4 then proves the product guarantee across two independent GitHub Actions runs, including state bootstrap/select, continuation, acceptance, stale-writer protection, and deterministic publication. Mid-run crash recovery is deferred.
+Completed-review continuation across separate workflow runs remains the product requirement. The current APR SESSION representation and R2-R4 proofs remain current/historical contracts until replaced. CR1 must integrate Solus context with APR-authenticated scope, provenance, lineage and acceptance without assuming format or upgrade compatibility.
 
-The project-owned session ledger must contain enough canonical logical history to continue:
+Solus context admission, execution outcome, capture and durable product acceptance are distinct. APR must preserve required bounded tool observations and value-exact provider continuation associations, rebind current capabilities and prevent untrusted data from becoming control records. Useful fresh and restored reviews require new migration evidence. Stable prefix behavior is a testable constraint; cache hits remain observed outcomes.
 
-- stable instruction, policy, tool, provider, model, and adapter identities;
-- admitted review-context and assistant messages;
-- validated tool calls and complete bounded tool results;
-- terminal review results;
-- bounded provider continuation state required to replay thinking-enabled history;
-- repository, pull request, and reviewed commit identity;
-- predecessor and integrity evidence.
-
-The durable model has two layers:
-
-- project-owned canonical logical records for bounded user/assistant-visible content, repository tool calls/results, and terminal outcomes;
-- a separate provider-scoped continuation envelope whose opaque byte/string payloads remain value-exact and whose structured items preserve validated fields, array order, association, and adapter-required placement.
-
-Provider-owned artifacts are not normalized, interpreted, synthesized, or reused across providers. This restriction does not prevent canonical project-owned logical records.
-
-The ledger does not persist credentials, raw HTTP bodies, headers, unrelated provider fields, unrestricted provider captures, transport framing, unbounded source content, private runner paths, or debug captures. Provider-returned reasoning text, signatures, signed blocks, or encrypted reasoning may be retained only as validated, bounded continuation records required or recommended for adapter-defined replay. The project does not request, reconstruct, or infer hidden chain-of-thought.
-
-A content hash alone is not sufficient when the corresponding logical tool result cannot be reconstructed byte-for-byte. The first implementation persists the exact bounded tool result used in the conversation.
+A completed context used for new work and an unfinished context resumed under supported semantics are different operations. Neither authorizes replay of unknown effects or adds arbitrary-kill/mid-operation recovery. Selected-current incompatibility fails closed; authorized reset is explicit, with no silent conversion, truncation or fresh fallback.
 
 Restricted session state is never repository-visible plaintext. Reasoning, repository tool results, and provider continuation material must not enter Git objects, repository-visible state refs, caches, or unencrypted public artifacts. R4 selects downstream-owned GitHub Actions artifacts containing authenticated ciphertext; public-repository metadata and encrypted bytes may be visible, while the key is stored separately as a Host credential. Without that key path, readable continuation content is not persisted.
 
@@ -204,7 +159,7 @@ The stable prefix includes stable instructions, policy, ordered tool declaration
 
 The dynamic suffix includes the current PR delta, current-run tool activity, run identity, timestamps, request ids, and transient diagnostics.
 
-The Agent/core owns the canonical logical records, stable-prefix and dynamic-suffix classification, provider-neutral logical request plan, and logical prefix identity. The provider adapter owns deterministic provider-specific role/message/block/tool projection, continuation placement, request-envelope and wire serialization, and any provider-specific cache-relevant projection or identity. Neither the selected narrow chat-client abstraction nor a provider SDK may silently reorder or rewrite that cache-relevant projection.
+These responsibilities currently live in APR core/adapter modules. CR1 moves generic context/request/provider mechanics to Solus while APR retains trusted policy and product acceptance. Migration evidence must establish required continuation and prefix preservation; neither shared-runtime reuse nor an SDK permits silent cache-relevant history rewriting.
 
 Existing M4 prefix and ledger contracts remain evidence for canonicalization, invalidation, and adversarial validation. They are not automatically the final agent-session wire format.
 
@@ -224,17 +179,9 @@ Before 1.0, new Agent state uses its own namespace and one current-format discri
 
 ## Native AOT
 
-Native AOT remains the production distribution target for the .NET payload.
+Native AOT remains the current payload implementation and historical qualification surface. Keep its applicable tests until CR1 explicitly replaces or retires those paths; old AOT evidence cannot qualify the managed target.
 
-Every new provider, AI abstraction, serializer, tool, and host dependency must:
-
-- pass framework-dependent tests;
-- publish successfully for the selected Native AOT target;
-- execute a representative published-binary path;
-- preserve reflection-disabled serialization;
-- avoid introducing unreviewed trimming or AOT failures.
-
-Compilation alone is not sufficient evidence.
+CR1 selects framework-dependent managed .NET 10, with no AOT, trimming, single-file, self-contained or apphost publishing. The complete publish tree, compatible trusted runtime, safe loading and actual archive execution need new proof. See [distribution](./distribution.md) and the [CR1 exit conditions](../90_roadmap/cr1-cr2-plan.md#entry-and-exit). Compilation alone is insufficient.
 
 ## Security Invariants
 

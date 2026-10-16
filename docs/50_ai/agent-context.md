@@ -19,13 +19,16 @@ Downstream consumers may request features or pin releases, but internal planning
 For new runtime design and sequencing, read:
 
 1. `docs/00_project/project-context.md`;
-2. `docs/20_architecture/agent-runtime-rebaseline.md`;
+2. `docs/90_roadmap/cr1-cr2-plan.md` and `docs/20_architecture/architecture.md`;
 3. `docs/20_architecture/security-boundary.md`;
-4. `docs/90_roadmap/roadmap-seed.md`.
+4. `docs/90_roadmap/roadmap-seed.md`;
+5. `docs/20_architecture/agent-runtime-rebaseline.md` for earlier contracts and implementation evidence.
+
+CR1 selects SolusAgent generic execution and a framework-dependent managed .NET 10 publish tree. CR2 then consolidates product behavior in the CLI and a thin composite Action, with explicit artifact-bridge disposition. Remaining R7 first-candidate work follows both; affected unfinished contracts require re-refinement. These are selected targets, not implemented migration or release proof.
 
 R1 is complete: the legacy mixed Action, TypeScript coordinator, and Claude Code CLI execution path are gone. The nested generated Node 24 Action now has the ordinary R7 release-map entry and fourteen outputs, with an explicit unbound map until authorized binding/publication; it provides no released downstream installation. Protected R4 prepared proof uses a separate fixed private bundle. W3-W15 removed the superseded TypeScript invocation, state, publisher, protocol, prefix, provider-metadata, canonical-json, and root shared-module families after their C# replacements and assertion dispositions were pinned. The direct-runtime schemas and fixtures remain live C# contracts, and the S2 artifact-provenance vectors remain the sole retained negative migration evidence. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence. Read [`r4-migration-cutover-handoff.md`](../20_architecture/r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree E1 gate, and `r1-legacy-removal-handoff.md` before changing historical deletion evidence.
 
-`README.md` and current-position documents describe the live repository boundary. Older contracts that mention deleted surfaces are historical or migration evidence unless the R1 handoff assigns them a retained current consumer; they do not by themselves describe current implementation behavior. Historical roadmap files do not override the R0-R7 sequence.
+`README.md` and current-position documents describe the live repository boundary. Older contracts that mention deleted surfaces are historical or migration evidence unless the R1 handoff assigns them a retained current consumer; they do not by themselves describe current implementation behavior. Historical roadmap files do not override the selected CR1/CR2 direction or its relationship to remaining R7 work.
 
 ## Default Validation
 

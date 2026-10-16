@@ -1,16 +1,22 @@
 # Agent Runtime Architecture Rebaseline
 
-Status: selected target architecture; R1-R4 are complete. The R4 handoff records W13/E1 migration closure and E2 Native AOT verification; [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) records the trusted two-run proof. R5 delivered evaluation engineering with inconclusive earlier live model quality. [R6 final acceptance](https://github.com/SolusQuest/agentic-pr-review/issues/271#issuecomment-5928401721) accepts bounded closeout while preserving native-history equivalence, live-prefix association, formal-regression, billing and default-capacity unknowns. The [R7 plan](../90_roadmap/r7-plan.md) activates experimental distribution/adoption targets through the C1 docs merge, not implemented features or formal public/default graduation.
+Status: earlier R-series architecture and surviving current implementation contracts; R1-R4 are complete. The R4 handoff records W13/E1 migration closure and E2 Native AOT verification; [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) records the trusted two-run proof. R5 delivered evaluation engineering with inconclusive earlier live model quality. [R6 final acceptance](https://github.com/SolusQuest/agentic-pr-review/issues/271#issuecomment-5928401721) accepts bounded closeout while preserving native-history equivalence, live-prefix association, formal-regression, billing and default-capacity unknowns. The [R7 plan](../90_roadmap/r7-plan.md) activates experimental distribution/adoption targets through the C1 docs merge, not implemented features or formal public/default graduation.
 
 Drafted: 2026-07-24.
 
-Last revised: 2026-10-02.
+Last revised: 2026-10-16 (scoped CR1/CR2 precedence; historical evidence unchanged).
 
 Rebaseline activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative reset activation point. The R4 contract was activated by the merged docs gate; [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) records the completed W13/E1 and E2 evidence.
 
 This document records the architecture rebaseline for the project-owned code review agent. It supersedes the earlier long-term assumption that TypeScript remains the business-capable GitHub Action host and C# remains behind a broad language-neutral protocol. Dated M0-M4 planning documents are historical evidence; current implementation contracts, the R3 removal handoff, and the R4 migration cutover handoff describe the surviving development-head surfaces.
 
 The breaking-reset governance gate and post-merge transition were completed through [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75) and documentation PR #76. Issue #75 is closed; the R1, R2, and R3 milestones and their implementation graphs subsequently completed.
+
+## CR1/CR2 Precedence
+
+The [CR1/CR2 plan](../90_roadmap/cr1-cr2-plan.md) governs new migration work after its documentation merge. It supersedes this document’s future requirements for an APR-owned generic loop/provider/session implementation, Native AOT production distribution, permanent Node Action entry and release sequencing. CR1 selects SolusAgent and framework-dependent managed .NET 10; CR2 selects the CLI product entry and thin composite host. Completed R-series evidence and current operating contracts remain at their original scope.
+
+The decisions and ordering below record the earlier baseline. They do not require CR1 to preserve every old numeric ceiling, validate new packages under AOT or keep a duplicate generic runtime. APR’s product, credential, state-acceptance and publication authority remains. Current AOT/Node checks still apply until their surfaces are replaced; they are not migrated qualification.
 
 ## R2-R3 Implementation Record And Remaining R4 Migration Inventory
 

@@ -3,10 +3,7 @@
 `agentic-pr-review` is a GitHub-first, stateful code review agent and
 deterministic publishing runtime.
 
-The project is being rebuilt around one Native AOT C# application containing a
-trusted Host, an in-process review Agent, bounded read-only repository tools, and
-provider adapters. The model proposes findings; deterministic Host code validates
-and performs every GitHub side effect.
+The selected [CR1/CR2 direction](docs/90_roadmap/cr1-cr2-plan.md) moves generic agent execution to SolusAgent and distribution to a framework-dependent managed .NET 10 DLL, then consolidates product behavior in the .NET CLI behind a thin composite Action. The model proposes findings; deterministic APR Host code validates and performs every GitHub side effect. The current implementation below still uses the APR-owned Agent and Native AOT payload path.
 
 This repository is experimental public tooling. The pre-1.0 line does not
 provide a stable public API.
@@ -64,16 +61,18 @@ roadmap phase explicitly introduces it.
 - R3 completed the trusted no-publish live-provider route and initial six-tool read-only profile.
 - R4 introduces the replacement thin Node wrapper, C# `ActionHost`, public
   Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
-- R7 targets public versioned experimental distribution, exact automatic payload selection and bounded public/private/test adoption. Formal public/default graduation remains deferred.
+- CR1 migrates generic execution to SolusAgent and replaces the AOT payload target with a complete managed publish tree, adapting the existing Action.
+- CR2 makes the .NET CLI the sole product entry and simplifies the Action, with explicit artifact-bridge disposition.
+- Remaining R7 first-candidate preparation, qualification, publication and adoption follow CR1/CR2 and affected contract refinement. R7 targets public versioned experimental distribution, exact automatic payload selection and bounded public/private/test adoption. Formal public/default graduation remains deferred.
 
-The [R7 plan](docs/90_roadmap/r7-plan.md) records the approved budgets, trusted configuration and two-tag release identity. Implemented accounting and ordinary resolution do not grant release authority. The Action map remains unbound; no installation command or release version is available.
+R1-R6 are implementation/evidence history. [CR1/CR2](docs/90_roadmap/cr1-cr2-plan.md) governs the changed target and sequence; completed evidence and R7 issue identities remain. The [R7 plan](docs/90_roadmap/r7-plan.md) records the original approved budgets, trusted configuration and two-tag release identity. Implemented accounting and ordinary resolution do not grant release authority. The Action map remains unbound; no installation command or release version is available.
 
 ## Project Documentation
 
 - [`docs/00_project/project-context.md`](docs/00_project/project-context.md)
   defines the product role and source-of-truth model.
-- [`docs/20_architecture/agent-runtime-rebaseline.md`](docs/20_architecture/agent-runtime-rebaseline.md)
-  records the selected architecture and migration sequence.
+- [`docs/90_roadmap/cr1-cr2-plan.md`](docs/90_roadmap/cr1-cr2-plan.md) owns the selected migration direction, acceptance boundaries and remaining R7 sequence.
+- [`docs/20_architecture/agent-runtime-rebaseline.md`](docs/20_architecture/agent-runtime-rebaseline.md) records the earlier R-series architecture and surviving implementation contracts.
 - [`docs/20_architecture/security-boundary.md`](docs/20_architecture/security-boundary.md)
   defines credential, tool, state, and side-effect boundaries.
 - [`docs/20_architecture/distribution.md`](docs/20_architecture/distribution.md)
@@ -81,7 +80,7 @@ The [R7 plan](docs/90_roadmap/r7-plan.md) records the approved budgets, trusted 
 - [`docs/20_architecture/r4-migration-cutover-handoff.md`](docs/20_architecture/r4-migration-cutover-handoff.md)
   records the closed R4 migration inventory and the exact-tree E1 handoff gate.
 - [`docs/90_roadmap/roadmap-seed.md`](docs/90_roadmap/roadmap-seed.md) defines
-  the R0-R7 critical path.
+  the historical R0-R7 sequence and current CR1/CR2 dependency path.
 - [`docs/90_roadmap/r7-plan.md`](docs/90_roadmap/r7-plan.md) defines the approved experimental distribution and adoption contract, with current implementation distinguished from its targets.
 - [`docs/50_ai/agent-context.md`](docs/50_ai/agent-context.md) supplies APR's agent context.
 - [Solus Book adoption](docs/50_ai/handbook-adoption.md) records the pinned shared handbook, initialization, skill routing, and retained APR requirements. Common engineering standards and skills live in the `docs/shared/` Git submodule; APR owns its product documentation.

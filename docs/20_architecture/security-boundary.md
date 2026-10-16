@@ -4,19 +4,22 @@ The core safety rule is:
 
 > The model and review Agent may propose findings; deterministic `ActionHost` code validates and performs GitHub side effects.
 
-The target runtime architecture and migration sequence are defined in [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md). Existing deterministic and M4 sections in older documents continue to describe current implementation behavior until their replacement lands.
+The selected changes are defined in the [CR1/CR2 plan](../90_roadmap/cr1-cr2-plan.md); the [runtime rebaseline](./agent-runtime-rebaseline.md) retains earlier implementation contracts. CR1 moves generic execution/context to SolusAgent and managed .NET, preserving the product authority and safety invariants here. CR2 changes the Action/CLI integration with explicit artifact-transport disposition. Neither migration grants shared-runtime results or captured context product acceptance authority.
 
 ## Trust And Capability Domains
 
-The selected initial target has two executable domains:
+The current implementation has two executable domains:
 
-1. **Thin Node.js wrapper**: Actions toolkit, secret masking, payload launch, cancellation, artifact bridge, and bounded Host-approved annotations and summary; R4 declares no stable Action outputs.
+1. **Thin Node.js wrapper**: Actions toolkit, secret masking, payload launch, cancellation, artifact bridge, and bounded Host-approved annotations, summary and fourteen accounting outputs.
 2. **Single .NET application**: Host, Agent, tools, provider adapters, state, and deterministic publisher.
+
+CR1 keeps the Action/bridge and adapts managed launch; its complete verified publish tree and trusted runtime/loading environment need new proof. CR2 targets a thin composite host and sole CLI product entry without presuming Node artifact transport can be deleted. The credential table below describes current bindings; later transport changes must preserve its authority restrictions.
 
 Inside the C# process, narrow capability domains remain explicit:
 
 - **Host**: GitHub authority, PR snapshot, state acceptance, candidate validation, publisher policy, and side effects;
-- **Agent**: sanitized review context, bounded loop, read-only tools, logical session state, and candidate findings;
+- **APR review product**: sanitized review context, domain tools, evidence rules, product limits and candidate findings acceptance;
+- **generic runtime**: currently APR-owned, selected to move to Solus in CR1; bounded execution, provider/tool mechanics and restricted runtime context confer no GitHub/storage/publication authority;
 - **provider adapter**: provider-only credential, allowlisted endpoint, request construction, and bounded response parsing.
 
 The model cannot inspect process memory. It observes bytes sent in provider requests and bounded tool results returned to the conversation. The initial security objective is therefore to prevent GitHub or unrelated secret-derived bytes and capabilities from entering model-visible, provider-visible, durable, or published channels.

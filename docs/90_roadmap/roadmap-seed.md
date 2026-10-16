@@ -1,8 +1,8 @@
 # Roadmap
 
-This roadmap records the post-M4 architecture rebaseline for `agentic-pr-review`.
+This roadmap records the selected CR1/CR2 direction and preserves the earlier post-M4 R-series sequence.
 
-The detailed target architecture is [`docs/20_architecture/agent-runtime-rebaseline.md`](../20_architecture/agent-runtime-rebaseline.md). Existing M1-M4 contract documents remain current implementation references until migration removes their surfaces.
+The [CR1/CR2 plan](cr1-cr2-plan.md) owns the selected shared-runtime, managed distribution and CLI/Action changes. The [runtime rebaseline](../20_architecture/agent-runtime-rebaseline.md) retains earlier architecture and surviving implementation contracts; completed M/R evidence remains at its original scope.
 
 The R0 governance gate and post-merge metadata transition are tracked by [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75).
 
@@ -29,7 +29,17 @@ The project optimizes for:
 - GitHub-first practicality;
 - a small maintainable implementation surface.
 
+## Current Change Sequence
+
+1. **CR1: SolusAgent migration and managed runtime** — migrate generic execution and context mechanics, preserve APR product authority, qualify practical fresh/restored capacity and the complete framework-dependent .NET 10 payload through the existing Action.
+2. **CR2: CLI-first Action integration** — make the CLI the sole product entry and simplify the Action toward a thin composite host, with validated artifact-bridge disposition.
+3. **Remaining R7** — re-refine affected unfinished contracts, then prepare, qualify, publish and adopt the first candidate after CR1/CR2. Independently useful preparation may continue without superseded assumptions. Preserve completed leaves and existing identities.
+
+CR means Change Request, a product change batch; numbering follows initiation order and dependencies determine execution order. Detailed entry/exit requirements and post-merge milestone/graph authority live in the [owning plan](cr1-cr2-plan.md). This documentation creates no milestones or execution graph.
+
 ## Rebaseline Decision
+
+The following explains the earlier R0-R7 baseline, not a new instruction to repeat completed work.
 
 The previous roadmap intentionally completed protocol, deterministic CLI, cross-language integration, state, ledger, prefix, provider metadata, live-provider, and state-acceptance foundations before repository tool orchestration.
 
@@ -41,7 +51,7 @@ That sequence proved important safety and runtime properties, but it also:
 - preserved migration-only runtime/provider concepts in the public shape;
 - started broad cache-cost graduation work before representative agent tool traffic existed.
 
-The new critical path prioritizes the product vertical slice:
+The original R-series critical path prioritized the product vertical slice:
 
 1. remove the legacy Claude Code CLI path from the development head and collapse public runtime selection;
 2. prove a C# agent loop, tools, session round-trip, Native AOT, and model-visible secret boundary;
@@ -53,23 +63,15 @@ Sunk implementation cost does not determine which boundaries remain in the targe
 
 ## Selected Engineering Direction
 
-The selected target is:
-
 ```text
-GitHub Action
-  -> thin Node.js wrapper
-  -> one .NET Native AOT application
-       -> Host with GitHub and publisher authority
-       -> in-process Agent with bounded tools and session
-       -> provider adapter with provider-only credential
-  -> Host validation and deterministic publication
+Current: nested Node Action -> APR-owned Agent and Native AOT application
+CR1: existing Action -> dotnet <dll> -> APR Host/product + SolusAgent execution
+CR2: thin composite Action -> the same .NET CLI product entry
 ```
 
-C# and Native AOT remain selected commitments.
+C# remains the product language. CR1 selects a complete framework-dependent managed publish tree, a compatible .NET 10 runtime prerequisite and exact Solus package pins. APR retains policy, evidence acceptance, restricted storage, lineage/reset and deterministic side effects. Solus owns generic loop/provider/tool execution mechanics and runtime context.
 
-TypeScript is no longer a business-host commitment. It remains only where the official Actions JavaScript toolkit or payload launcher materially reduces risk and maintenance.
-
-R2 compares a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal exchange types and selects the smaller Native AOT-proven surface. The project owns the agent loop, tool execution, durable state, provider capability policy, budgets, and side effects either way. Agent/core owns the provider-neutral logical request plan and logical prefix identity; the provider adapter owns provider-specific projection, continuation placement, wire serialization, and any provider-specific cache-relevant identity.
+CR2 removes duplicate product semantics while resolving the official artifact bridge explicitly. It does not preselect Python, a root Action path or a replacement state transport. The old R2 MEAI/project-minimal comparison and AOT proofs remain historical evidence; they do not constrain CR1 to retain the APR-owned generic loop.
 
 ## Non-Goals
 
@@ -93,7 +95,7 @@ The near-term roadmap does not include:
 
 The current implementation on `main` includes:
 
-- nested seven-input/no-output Action metadata and a generated Node 24 wrapper for repository-controlled prepared-payload proof, without downstream support, release delivery or accounting outputs; R7 targets experimental distribution, not formal default graduation;
+- nested seven-input/fourteen-output Action metadata and a generated Node 24 wrapper with ordinary release-map resolution and Native AOT descriptor launch; its checked map is null, so there is no experimental release or supported downstream installation;
 - no Claude Code CLI, legacy TypeScript coordinator, or superseded single-request C# product route;
 - one project-minimal C# chat seam and bounded multi-turn Agent with six read-only repository tools;
 - validated tool arguments/results, canonical SESSION history, grounded structured findings, and must-find/must-not-find quality evaluation;
@@ -131,6 +133,8 @@ The following is a completed transition record, not current execution instructio
 The earlier plan to create R1/R2 immediately and defer R3-R7 refinement was executed through R3. It no longer instructs agents to create, close, or defer those completed milestones. R6 may reuse ideas or tests from #54 or PR #74 only after real resumed Agent traffic exists and a new issue proves they fit the actual thinking, tool, session, telemetry, and cost model. Existing implementation effort is not a reason to merge an obsolete ordering or contract dependency.
 
 ## New Critical Path
+
+This section retains the original R0-R7 baseline and milestone evidence. The current execution dependency is CR1 → CR2 → remaining R7 first-candidate work as defined above. Conflicting old ownership, AOT, permanent Node-entry and ordering assumptions are superseded; current contracts remain until replacement.
 
 ### R0: Architecture And Roadmap Rebaseline
 
