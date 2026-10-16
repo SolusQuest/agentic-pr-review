@@ -17,15 +17,15 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           test "$(uname -m)" = x86_64
       - name: Check out the qualified public consumer fixtures
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           repository: SolusQuest/solus-agent
           ref: 076bcda2fbe1da2677ac5c6fd03d75bc0fef66ad
           persist-credentials: false
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           global-json-file: global.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
           architecture: x64

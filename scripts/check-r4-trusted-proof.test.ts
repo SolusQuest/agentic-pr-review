@@ -594,6 +594,45 @@ ${jobPermissions}    runs-on: ubuntu-24.04
 describe('M5 authorized private package install route', () => {
   test.each([
     [
+      'checkout mutable',
+      (w: any) => {
+        w.jobs['install-proof'].steps[1].uses = 'actions/checkout@v4';
+      },
+    ],
+    [
+      'checkout wrong SHA',
+      (w: any) => {
+        w.jobs['install-proof'].steps[1].uses =
+          'actions/checkout@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      },
+    ],
+    [
+      'setup-dotnet mutable',
+      (w: any) => {
+        w.jobs['install-proof'].steps[2].uses = 'actions/setup-dotnet@v4';
+      },
+    ],
+    [
+      'setup-dotnet wrong SHA',
+      (w: any) => {
+        w.jobs['install-proof'].steps[2].uses =
+          'actions/setup-dotnet@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      },
+    ],
+    [
+      'setup-node mutable',
+      (w: any) => {
+        w.jobs['install-proof'].steps[3].uses = 'actions/setup-node@v4';
+      },
+    ],
+    [
+      'setup-node wrong SHA',
+      (w: any) => {
+        w.jobs['install-proof'].steps[3].uses =
+          'actions/setup-node@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      },
+    ],
+    [
       'extra trigger',
       (w: any) => {
         w.on.push = null;
