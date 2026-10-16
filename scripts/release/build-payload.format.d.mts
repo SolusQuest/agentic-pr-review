@@ -111,3 +111,5 @@ export function materializeManagedPackage(
   expected: unknown,
   parent: string,
 ): Promise<{ root: string; entrypoint: string; manifest: ManagedManifest }>;
+
+export function validateManagedReceipt(receipt: unknown): asserts receipt is ManagedReceipt;

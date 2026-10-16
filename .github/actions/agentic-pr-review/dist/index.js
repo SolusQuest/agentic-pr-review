@@ -27971,7 +27971,7 @@ var require_graceful_fs = __commonJS({
       }
       function ReadStream$open() {
         var that = this;
-        open5(that.path, that.flags, that.mode, function(err, fd) {
+        open6(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             if (that.autoClose)
               that.destroy();
@@ -27991,7 +27991,7 @@ var require_graceful_fs = __commonJS({
       }
       function WriteStream$open() {
         var that = this;
-        open5(that.path, that.flags, that.mode, function(err, fd) {
+        open6(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             that.destroy();
             that.emit("error", err);
@@ -28008,8 +28008,8 @@ var require_graceful_fs = __commonJS({
         return new fs9.WriteStream(path11, options);
       }
       var fs$open = fs9.open;
-      fs9.open = open5;
-      function open5(path11, flags, mode, cb) {
+      fs9.open = open6;
+      function open6(path11, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
         return go$open(path11, flags, mode, cb);
@@ -39631,8 +39631,8 @@ var require_commonjs3 = __commonJS({
           });
           return pp.filter((p) => p !== exports2.GLOBSTAR).join("/");
         }).join("|");
-        const [open5, close] = set.length > 1 ? ["(?:", ")"] : ["", ""];
-        re = "^" + open5 + re + close + "$";
+        const [open6, close] = set.length > 1 ? ["(?:", ")"] : ["", ""];
+        re = "^" + open6 + re + close + "$";
         if (this.negate)
           re = "^(?!" + re + ").+$";
         try {
@@ -98242,6 +98242,7 @@ function parsePayloadMap(bytes) {
 function positiveSize(value, maximum) {
   return Number.isSafeInteger(value) && value > 0 && value <= maximum;
 }
+var MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES = 256 * 1024;
 
 // src/action-wrapper/launcher/action-source.ts
 var ACTION_PATH = ".github/actions/agentic-pr-review";
@@ -98339,44 +98340,103 @@ function record(value) {
 }
 
 // src/action-wrapper/launcher/release-payload.ts
-import { lstat as lstat3, realpath as realpath4, rm as rm3 } from "node:fs/promises";
+import { lstat as lstat4, realpath as realpath5, rm as rm4 } from "node:fs/promises";
 import { request as httpsRequest2 } from "node:https";
-import path6 from "node:path";
+import path7 from "node:path";
+
+// src/action-wrapper/launcher/payload-staging.ts
+import {
+  chmod as chmod3,
+  lstat as lstat2,
+  mkdtemp as mkdtemp2,
+  open as open3,
+  opendir,
+  realpath as realpath3,
+  rm as rm3
+} from "node:fs/promises";
+import path5 from "node:path";
+async function acquireInPayloadStaging(request2) {
+  if (!path5.isAbsolute(request2.runnerTemp) || !path5.isAbsolute(request2.workspace))
+    fail("wrapper_payload_invalid");
+  const runnerTemp = await realpath3(request2.runnerTemp);
+  const workspace = await realpath3(request2.workspace);
+  if (runnerTemp === workspace || runnerTemp.startsWith(`${workspace}${path5.sep}`))
+    fail("wrapper_payload_invalid");
+  const stagingParent = await mkdtemp2(path5.join(runnerTemp, "apr-payload-"));
+  const removeParent = () => rm3(stagingParent, { recursive: true, force: true });
+  try {
+    await chmod3(stagingParent, 448);
+    const stat2 = await lstat2(stagingParent);
+    if (!stat2.isDirectory() || (stat2.mode & 511) !== 448) fail("wrapper_payload_invalid");
+    const payload = await request2.acquire(stagingParent);
+    const managed = registeredManagedPayload(payload);
+    let disposal;
+    return {
+      ...payload,
+      dispose: () => disposal ??= (async () => {
+        try {
+          await payload.dispose();
+        } catch (error3) {
+          if (managed) disposal = void 0;
+          else await removeParent().catch(() => {
+          });
+          throw error3;
+        }
+        try {
+          await removeParent();
+        } catch (error3) {
+          if (managed) disposal = void 0;
+          throw error3;
+        }
+      })()
+    };
+  } catch (error3) {
+    await removeParent().catch(() => {
+    });
+    throw error3;
+  }
+}
+var managedOwners;
+function registeredManagedPayload(value) {
+  if (value === null || typeof value !== "object") return false;
+  const token = value.tree;
+  return typeof token === "object" && token !== null && managedOwners?.has(token) === true;
+}
 
 // src/action-wrapper/launcher/prepared-payload.ts
 import { createHash as createHash5 } from "node:crypto";
-import { lstat as lstat2, open as open3, realpath as realpath3 } from "node:fs/promises";
-import path5 from "node:path";
+import { lstat as lstat3, open as open4, realpath as realpath4 } from "node:fs/promises";
+import path6 from "node:path";
 async function verifyPreparedPayload(proof) {
-  if (!path5.isAbsolute(proof.trustedRoot) || !boundedStructure(proof.executableRelativePath, 1024) || path5.isAbsolute(proof.executableRelativePath) || !lowerHex(proof.payloadSha256, 64) || !lowerHex(proof.actionSourceSha, 40) || !buildDiscriminator(proof.buildDiscriminator) || !buildDiscriminator(proof.wrapperBuildDiscriminator) || proof.buildDiscriminator !== proof.wrapperBuildDiscriminator) {
+  if (!path6.isAbsolute(proof.trustedRoot) || !boundedStructure(proof.executableRelativePath, 1024) || path6.isAbsolute(proof.executableRelativePath) || !lowerHex(proof.payloadSha256, 64) || !lowerHex(proof.actionSourceSha, 40) || !buildDiscriminator(proof.buildDiscriminator) || !buildDiscriminator(proof.wrapperBuildDiscriminator) || proof.buildDiscriminator !== proof.wrapperBuildDiscriminator) {
     fail("wrapper_prepared_payload_invalid");
   }
   try {
-    const rootStat = await lstat2(proof.trustedRoot);
+    const rootStat = await lstat3(proof.trustedRoot);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
       fail("wrapper_prepared_payload_invalid");
     }
-    const canonicalRoot = await realpath3(proof.trustedRoot);
-    const candidate = path5.resolve(canonicalRoot, proof.executableRelativePath);
-    const relative = path5.relative(canonicalRoot, candidate);
-    if (relative.length === 0 || relative === ".." || relative.startsWith(`..${path5.sep}`) || path5.isAbsolute(relative)) {
+    const canonicalRoot = await realpath4(proof.trustedRoot);
+    const candidate = path6.resolve(canonicalRoot, proof.executableRelativePath);
+    const relative = path6.relative(canonicalRoot, candidate);
+    if (relative.length === 0 || relative === ".." || relative.startsWith(`..${path6.sep}`) || path6.isAbsolute(relative)) {
       fail("wrapper_prepared_payload_invalid");
     }
-    const namedBefore = await lstat2(candidate);
+    const namedBefore = await lstat3(candidate);
     if (!namedBefore.isFile() || namedBefore.isSymbolicLink() || process.platform !== "win32" && (namedBefore.mode & 73) === 0) {
       fail("wrapper_prepared_payload_invalid");
     }
-    if (path5.relative(candidate, await realpath3(candidate)) !== "") {
+    if (path6.relative(candidate, await realpath4(candidate)) !== "") {
       fail("wrapper_prepared_payload_invalid");
     }
-    const handle = await open3(candidate, "r");
+    const handle = await open4(candidate, "r");
     let retainHandle = false;
     try {
       const openedBefore = await handle.stat();
       if (!sameFile(namedBefore, openedBefore)) fail("wrapper_prepared_payload_invalid");
       const digest = await digestHandle(handle);
       const openedAfter = await handle.stat();
-      const namedAfter = await lstat2(candidate);
+      const namedAfter = await lstat3(candidate);
       if (digest !== proof.payloadSha256 || !sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter) || openedBefore.size !== openedAfter.size || openedBefore.mtimeMs !== openedAfter.mtimeMs) {
         fail("wrapper_prepared_payload_invalid");
       }
@@ -98397,15 +98457,15 @@ async function verifyPreparedPayload(proof) {
 }
 async function digestEventJson(eventJsonPath) {
   try {
-    const before = await lstat2(eventJsonPath);
+    const before = await lstat3(eventJsonPath);
     if (!before.isFile() || before.isSymbolicLink()) fail("wrapper_event_json_invalid");
-    const handle = await open3(eventJsonPath, "r");
+    const handle = await open4(eventJsonPath, "r");
     try {
       const openedBefore = await handle.stat();
       if (!sameFile(before, openedBefore)) fail("wrapper_event_json_invalid");
       const digest = await digestHandle(handle);
       const openedAfter = await handle.stat();
-      const namedAfter = await lstat2(eventJsonPath);
+      const namedAfter = await lstat3(eventJsonPath);
       if (!sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter) || openedBefore.size !== openedAfter.size || openedBefore.mtimeMs !== openedAfter.mtimeMs) {
         fail("wrapper_event_json_invalid");
       }
@@ -98445,7 +98505,7 @@ async function resolve3(request2, transport, localArchivePath, timeoutMs) {
   if (process.platform !== "linux" || process.arch !== "x64") {
     fail("wrapper_payload_platform_unsupported");
   }
-  if (!lowerHex(actionSourceSha, 40) || !path6.isAbsolute(stagingParent)) {
+  if (!lowerHex(actionSourceSha, 40) || !path7.isAbsolute(stagingParent)) {
     fail("wrapper_release_payload_invalid");
   }
   let root;
@@ -98453,11 +98513,11 @@ async function resolve3(request2, transport, localArchivePath, timeoutMs) {
   let retained = false;
   try {
     signal.throwIfAborted();
-    const parentStat = await lstat3(stagingParent);
+    const parentStat = await lstat4(stagingParent);
     if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
       fail("wrapper_release_payload_invalid");
     }
-    const parent = await realpath4(stagingParent);
+    const parent = await realpath5(stagingParent);
     const archive = localArchivePath === void 0 ? await download(map, transport, signal) : await readBoundedFile(localArchivePath, map.payload.archiveSize);
     signal.throwIfAborted();
     const materialized = await materializePackage(archive, map.payload, parent);
@@ -98480,7 +98540,7 @@ async function resolve3(request2, transport, localArchivePath, timeoutMs) {
         try {
           await ownedHandle.close();
         } finally {
-          await rm3(ownedRoot, { recursive: true, force: true });
+          await rm4(ownedRoot, { recursive: true, force: true });
         }
       })();
       return disposing;
@@ -98494,7 +98554,7 @@ async function resolve3(request2, transport, localArchivePath, timeoutMs) {
       try {
         await verified?.executableHandle.close();
       } finally {
-        if (root !== void 0) await rm3(root, { recursive: true, force: true });
+        if (root !== void 0) await rm4(root, { recursive: true, force: true });
       }
     }
   }
@@ -98604,44 +98664,6 @@ function record2(value) {
 }
 function positiveId(value) {
   return Number.isSafeInteger(value) && value > 0;
-}
-
-// src/action-wrapper/launcher/payload-staging.ts
-import { chmod as chmod3, lstat as lstat4, mkdtemp as mkdtemp2, realpath as realpath5, rm as rm4 } from "node:fs/promises";
-import path7 from "node:path";
-async function acquireInPayloadStaging(request2) {
-  if (!path7.isAbsolute(request2.runnerTemp) || !path7.isAbsolute(request2.workspace))
-    fail("wrapper_payload_invalid");
-  const runnerTemp = await realpath5(request2.runnerTemp);
-  const workspace = await realpath5(request2.workspace);
-  if (runnerTemp === workspace || runnerTemp.startsWith(`${workspace}${path7.sep}`))
-    fail("wrapper_payload_invalid");
-  const stagingParent = await mkdtemp2(path7.join(runnerTemp, "apr-payload-"));
-  const removeParent = () => rm4(stagingParent, { recursive: true, force: true });
-  try {
-    await chmod3(stagingParent, 448);
-    const stat2 = await lstat4(stagingParent);
-    if (!stat2.isDirectory() || (stat2.mode & 511) !== 448) fail("wrapper_payload_invalid");
-    const payload = await request2.acquire(stagingParent);
-    let disposal;
-    return {
-      ...payload,
-      dispose: () => disposal ??= (async () => {
-        try {
-          await payload.dispose();
-        } catch (error3) {
-          await removeParent().catch(() => {
-          });
-          throw error3;
-        }
-        await removeParent();
-      })()
-    };
-  } catch (error3) {
-    await removeParent().catch(() => {
-    });
-    throw error3;
-  }
 }
 
 // src/action-wrapper/artifact-bridge/artifact-cache-ledger.ts
@@ -100749,7 +100771,7 @@ var ArtifactBridgeOperationBudget = class {
 
 // src/action-wrapper/artifact-bridge/staging.ts
 import { constants as constants4 } from "node:fs";
-import { lstat as lstat5, open as open4, realpath as realpath6 } from "node:fs/promises";
+import { lstat as lstat5, open as open5, realpath as realpath6 } from "node:fs/promises";
 import path8 from "node:path";
 var ArtifactBridgeStagingError = class extends Error {
   constructor() {
@@ -100930,7 +100952,7 @@ function safePrivateDirectory(stat2) {
 }
 async function openStagedFile(filePath, flags) {
   try {
-    return await open4(filePath, flags);
+    return await open5(filePath, flags);
   } catch {
     throw new ArtifactBridgeStagingError();
   }
@@ -103634,4 +103656,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 321636a6eed4dc60d46a3c90fc882f5894798c2699fde4d359d8f970bfaf2585
+// Action source inventory sha256: e74d9e1f20257a0a81ae24416530a8f05f0891a1eb01d6028cfa2d15b9948f2d
