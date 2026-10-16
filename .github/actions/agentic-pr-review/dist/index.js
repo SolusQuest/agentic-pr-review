@@ -97546,6 +97546,17 @@ import { fileURLToPath } from "node:url";
 
 // scripts/release/build-payload.format.mjs
 import { createHash as createHash3 } from "node:crypto";
+
+// scripts/release/solus-package-contract.mjs
+var SOLUS_IDS = Object.freeze([
+  "solusagent.api",
+  "solusagent.providers.deepseek",
+  "solusagent.runtime",
+  "solusagent.runtime.api",
+  "solusagent.tools.api"
+]);
+
+// scripts/release/build-payload.format.mjs
 import { constants as constants3 } from "node:fs";
 import { chmod as chmod2, mkdir as mkdir2, mkdtemp, open as open2, rm as rm2 } from "node:fs/promises";
 import { join as join2 } from "node:path";
@@ -103656,4 +103667,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: e74d9e1f20257a0a81ae24416530a8f05f0891a1eb01d6028cfa2d15b9948f2d
+// Action source inventory sha256: 5dec75ab284c7567ee81b0bc8f58e0b41198ab3589bb371f61336a9db2c3f2b5

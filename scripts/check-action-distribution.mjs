@@ -284,6 +284,7 @@ function inspectBundleInputs(metafile, report) {
       continue;
     }
     if (source === 'scripts/release/build-payload.format.mjs') continue;
+    if (source === 'scripts/release/solus-package-contract.mjs') continue;
     if (source.startsWith('src/action-wrapper/')) {
       if (
         /(?:\.test|\.fixture)\.ts$/u.test(source) ||

@@ -1,25 +1,26 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
-import { packageHashes } from './solus-package-contract.mjs';
+import {
+  SOLUS_VERSION,
+  SOLUS_FEED,
+  PUBLIC_FEED,
+  SOLUS_IDS,
+  packageHashes,
+} from './solus-package-contract.mjs';
+import { managedDependencyPolicy, verifyDependencies } from './build-payload.mjs';
 
-const version = '0.1.0-internal.1';
-const privateFeed = 'https://nuget.pkg.github.com/SolusQuest/index.json';
-const publicFeed = 'https://api.nuget.org/v3/index.json';
-const ids = [
-  'solusagent.api',
-  'solusagent.tools.api',
-  'solusagent.runtime.api',
-  'solusagent.runtime',
-  'solusagent.providers.deepseek',
-];
+const version = SOLUS_VERSION,
+  privateFeed = SOLUS_FEED,
+  publicFeed = PUBLIC_FEED,
+  ids = SOLUS_IDS;
 function requireThat(value, code) {
   if (!value) throw new Error(code);
 }
 
 // Metadata collection is preparatory evidence, never final package/startup qualification.
 // No package bytes or raw subprocess diagnostics are emitted or uploaded.
-async function collect(output) {
+async function collect(output, verify) {
   requireThat(process.platform === 'linux' && process.arch === 'x64', 'APR_SOLUS_RUNNER');
   const os = await readFile('/etc/os-release', 'utf8');
   requireThat(/^ID=ubuntu$/m.test(os) && /^VERSION_ID="24\.04"$/m.test(os), 'APR_SOLUS_RUNNER');
@@ -49,17 +50,19 @@ async function collect(output) {
     TMPDIR: join(output, 'tmp'),
   };
   const lock = join(output, 'actual-apr.lock.json');
+  const checkedLock = 'runtime/src/AgenticPrReview.Runtime/packages.managed.lock.json';
+  if (verify) await writeFile(lock, await readFile(checkedLock), { flag: 'wx' });
   const args = [
     'restore',
     'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj',
     '-r',
     'linux-x64',
     '--no-http-cache',
-    '--force-evaluate',
+    verify ? '--locked-mode' : '--force-evaluate',
     '--configfile',
     'scripts/release/build-payload.managed.nuget.config',
     '-p:APRManagedPackage=true',
-    '-p:RestoreLockedMode=false',
+    '-p:RestoreLockedMode=' + verify,
     '-p:NuGetLockFilePath=' + lock,
     '-p:NuGetAudit=false',
     '-p:RestoreFallbackFolders=',
@@ -87,6 +90,10 @@ async function collect(output) {
     requireThat(library.type === 'package', 'APR_SOLUS_FOREIGN_PROJECT');
     const [id, resolvedVersion] = identity.split('/');
     const lower = id.toLowerCase();
+    requireThat(
+      /^[a-z0-9][a-z0-9.-]{0,100}$/.test(lower) && library.path === lower + '/' + resolvedVersion,
+      'APR_SOLUS_PATH',
+    );
     if (lower.startsWith('solusagent.'))
       requireThat(ids.includes(lower) && resolvedVersion === version, 'APR_SOLUS_PIN');
     const root = join(env.NUGET_PACKAGES, library.path);
@@ -114,12 +121,158 @@ async function collect(output) {
   );
   requireThat(packages.length <= 16, 'APR_SOLUS_INVENTORY');
   packages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  let constructed = false;
+  if (verify) {
+    const policy = managedDependencyPolicy(
+      JSON.parse(await readFile('scripts/release/build-payload.inputs.json', 'utf8')),
+    );
+    await verifyDependencies(env.NUGET_PACKAGES, policy, assets);
+    requireThat(
+      (await readFile(lock)).equals(await readFile(checkedLock)),
+      'APR_SOLUS_LOCK_CHANGED',
+    );
+    const fixture =
+      'runtime/tests/SolusStartupFixture/AgenticPrReview.Runtime.SolusStartupFixture.csproj';
+    const properties = [
+      '-p:APRManagedPackage=true',
+      '-p:APRReleaseVersion=v0.0.0-internal.1',
+      '-p:APRBuildId=' + '0'.repeat(64),
+      '-p:NuGetAudit=false',
+    ];
+    const cleanRun = (args, code) => {
+      const result = spawnSync('dotnet', args, {
+        env,
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+        timeout: 300_000,
+      });
+      if (result.status !== 0) {
+        const errors = [
+          ...new Set(
+            ((result.stdout || '') + (result.stderr || '')).match(
+              /\b(?:CS|MSB|NU)\d{4}\b|APR_SOLUS_[A-Z_]+/g,
+            ) || [],
+          ),
+        ];
+        console.error(JSON.stringify({ stage: code, errorCodes: errors }));
+      }
+      requireThat(result.status === 0, code);
+      return result.stdout;
+    };
+    cleanRun(
+      [
+        'restore',
+        fixture,
+        '-r',
+        'linux-x64',
+        '--configfile',
+        'scripts/release/build-payload.managed.nuget.config',
+        ...properties,
+      ],
+      'APR_SOLUS_FIXTURE_RESTORE',
+    );
+    const startup = join(output, 'startup');
+    cleanRun(
+      [
+        'build',
+        fixture,
+        '-c',
+        'Release',
+        '-r',
+        'linux-x64',
+        '--no-restore',
+        '--nologo',
+        '-o',
+        startup,
+        ...properties,
+      ],
+      'APR_SOLUS_FIXTURE_BUILD',
+    );
+    const proof = cleanRun(
+      [join(startup, 'AgenticPrReview.Runtime.SolusStartupFixture.dll')],
+      'APR_SOLUS_STARTUP',
+    );
+    requireThat(
+      proof.includes('constructed=true dispatches=0 negative_checks=8 credential_free=true'),
+      'APR_SOLUS_STARTUP',
+    );
+    const names = [
+      'SolusAgent.Api',
+      'SolusAgent.Tools.Api',
+      'SolusAgent.Runtime.Api',
+      'SolusAgent.Runtime',
+      'SolusAgent.Providers.DeepSeek',
+    ];
+    for (const name of names) {
+      const archive = join(
+        env.NUGET_PACKAGES,
+        name.toLowerCase(),
+        version,
+        `${name.toLowerCase()}.${version}.nupkg`,
+      );
+      const original = execFileSync('/usr/bin/unzip', ['-p', archive, `lib/net10.0/${name}.dll`], {
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      requireThat(
+        original.equals(await readFile(join(startup, name + '.dll'))),
+        'APR_SOLUS_ASSEMBLY_BYTES',
+      );
+    }
+    const native = JSON.parse(
+      cleanRun(
+        [
+          'msbuild',
+          'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj',
+          '-nologo',
+          '-p:APRManagedPackage=false',
+          '-getItem:PackageReference,Compile',
+        ],
+        'APR_SOLUS_NATIVE_SELECTION',
+      ),
+    );
+    requireThat(
+      !native.Items.PackageReference.some((item) =>
+        item.Identity.toLowerCase().startsWith('solusagent.'),
+      ) && !native.Items.Compile.some((item) => /(^|[/\\])Solus[/\\]/.test(item.Identity)),
+      'APR_SOLUS_NATIVE_CLOSURE',
+    );
+    for (const property of [
+      'PublishAot=true',
+      'SelfContained=true',
+      'APRReleasePackage=true',
+      'SolusAgentVersion=0.1.0-internal.2',
+    ]) {
+      const rejected = spawnSync(
+        'dotnet',
+        [
+          'msbuild',
+          'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj',
+          '-nologo',
+          '-t:ValidateSolusManagedProfile',
+          '-p:APRManagedPackage=true',
+          '-p:' + property,
+        ],
+        { env, encoding: 'utf8', timeout: 30_000 },
+      );
+      requireThat(
+        rejected.status !== 0 && rejected.stdout.includes('APR_SOLUS_MANAGED_PROFILE_UNSUPPORTED'),
+        'APR_SOLUS_PROPERTY_REFUSAL',
+      );
+    }
+    requireThat(
+      execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }) === '',
+      'APR_SOLUS_DIRTY',
+    );
+    constructed = true;
+  }
   const facts = {
     qualification: false,
-    mode: 'collect',
+    mode: verify ? 'verify' : 'collect',
     sourceCommit: head,
     version,
     coldCache: true,
+    constructed,
+    producerProof: false,
     packages,
     actualAprLock: JSON.parse(await readFile(lock, 'utf8')),
   };
@@ -129,17 +282,22 @@ async function collect(output) {
   console.log(
     JSON.stringify({
       qualification: false,
-      mode: 'collect',
+      mode: verify ? 'verify' : 'collect',
       sourceCommit: head,
       version,
       coldCache: true,
       packages: packages.length,
+      constructed,
+      producerProof: false,
     }),
   );
 }
 try {
-  requireThat(process.argv[2] === 'collect' && process.argv.length === 4, 'APR_SOLUS_USAGE');
-  await collect(process.argv[3]);
+  requireThat(
+    ['collect', 'verify'].includes(process.argv[2]) && process.argv.length === 4,
+    'APR_SOLUS_USAGE',
+  );
+  await collect(process.argv[3], process.argv[2] === 'verify');
 } catch (error) {
   // Fixed code only: never echo credential-bearing subprocess output or arbitrary exceptions.
   console.error(

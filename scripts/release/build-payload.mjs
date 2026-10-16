@@ -1,4 +1,11 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  SOLUS_IDS,
+  SOLUS_VERSION,
+  dependencyVersionAllowed,
+  packageSource,
+  assertSolusAssetPins,
+} from './solus-package-contract.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -29,6 +36,8 @@ const projectPath = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime
 const lockPath = 'runtime/src/AgenticPrReview.Runtime/packages.release.lock.json';
 const policyPath = 'scripts/release/build-payload.inputs.json';
 const configPath = 'scripts/release/build-payload.nuget.config';
+const managedConfigPath = 'scripts/release/build-payload.managed.nuget.config';
+const managedLockPath = 'runtime/src/AgenticPrReview.Runtime/packages.managed.lock.json';
 
 function assert(condition, code) {
   if (!condition) throw new Error(code);
@@ -146,7 +155,8 @@ export function admitPublishInventory(names) {
     'unexpected_publish_inventory',
   );
 }
-export async function verifyDependencies(packages, policy, assets) {
+export async function verifyDependencies(packages, policy, assets, seededSource = null) {
+  if (policy.solusVersion) assertSolusAssetPins(assets);
   const expected = new Map();
   assert(
     Array.isArray(policy.dependencies) &&
@@ -159,7 +169,7 @@ export async function verifyDependencies(packages, policy, assets) {
       typeof item.id === 'string' &&
         /^[a-z0-9][a-z0-9.-]{0,100}$/.test(item.id) &&
         typeof item.version === 'string' &&
-        /^[0-9]+\.[0-9]+\.[0-9]+$/.test(item.version) &&
+        dependencyVersionAllowed(item.id, item.version, policy.solusVersion) &&
         !expected.has(item.id),
       'invalid_dependency_policy',
     );
@@ -274,6 +284,11 @@ export async function verifyDependencies(packages, policy, assets) {
       128 * 1024 * 1024,
     );
     const metadata = JSON.parse(await readBoundedFile(join(root, '.nupkg.metadata'), 64 * 1024));
+    if (policy.solusVersion)
+      assert(
+        metadata.source?.replace(/\/$/, '') === (seededSource ?? packageSource(item.id)),
+        'dependency_source_mismatch',
+      );
     const rawContentHash = (
       await readBoundedFile(join(root, item.id + '.' + item.version + '.nupkg.sha512'), 1024)
     )
@@ -301,6 +316,16 @@ async function seedArchives(work, policy, cache) {
   for (let index = 0; index < paths.length; index++) {
     const bytes = await readBoundedFile(paths[index], 128 * 1024 * 1024);
     const item = policy.dependencies[index];
+    if (policy.solusVersion) {
+      const metadata = JSON.parse(
+        await readBoundedFile(join(cache, item.id, item.version, '.nupkg.metadata'), 64 * 1024),
+      );
+      assert(
+        metadata.source?.replace(/\/$/, '') === packageSource(item.id) &&
+          metadata.contentHash === item.contentHash,
+        'cached_archive_source_mismatch',
+      );
+    }
     assert(sha256(bytes) === item.sha256, 'cached_archive_hash_mismatch');
     await writeFile(join(feed, item.id + '.' + item.version + '.nupkg'), bytes, {
       flag: 'wx',
@@ -622,16 +647,34 @@ export function managedDependencyPolicy(policy) {
       new Set(selected.dependencyIds).size === selected.dependencyIds.length,
     'invalid_managed_build_policy',
   );
+  assert(
+    selected.solusVersion === SOLUS_VERSION &&
+      Array.isArray(selected.additionalDependencies) &&
+      selected.additionalDependencies.length === SOLUS_IDS.length &&
+      SOLUS_IDS.every((id) =>
+        selected.additionalDependencies.some(
+          (item) => item.id === id && item.version === SOLUS_VERSION && item.role === 'managed',
+        ),
+      ),
+    'invalid_managed_build_policy',
+  );
+  const catalog = [...policy.dependencies, ...selected.additionalDependencies];
+  assert(
+    new Set(catalog.map((item) => item.id)).size === catalog.length,
+    'invalid_managed_build_policy',
+  );
   const dependencies = selected.dependencyIds
     .map((id) => {
-      const matches = policy.dependencies.filter(
-        (item) => item.id === id && item.role === 'managed',
-      );
+      const matches = catalog.filter((item) => item.id === id && item.role === 'managed');
       assert(matches.length === 1, 'invalid_managed_build_policy');
       return matches[0];
     })
     .sort((a, b) => (a.id < b.id ? -1 : 1));
-  return { dependencies };
+  assert(
+    SOLUS_IDS.every((id) => dependencies.some((item) => item.id === id)),
+    'invalid_managed_build_policy',
+  );
+  return { dependencies, solusVersion: selected.solusVersion };
 }
 export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, output }) {
   repo = resolve(repo);
@@ -667,6 +710,9 @@ export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, 
     const sdk = text(dotnet, ['--version'], { cwd: source, env });
     assert(sdk === policy.sdk, 'toolchain_version_mismatch');
     const lock = join(work, 'managed.lock.json');
+    await writeFile(lock, await readBoundedFile(join(source, managedLockPath), 256 * 1024), {
+      flag: 'wx',
+    });
     const props = managedProps(source, releaseVersion, '0'.repeat(64), lock);
     const evaluated = JSON.parse(
       text(
@@ -688,27 +734,62 @@ export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, 
       }),
     );
     const seeded = await seedArchives(work, managedPolicy, cache);
+    let restoreConfig = join(source, managedConfigPath);
+    if (seeded) {
+      restoreConfig = join(work, 'verified-seed.nuget.config');
+      const feed = join(work, 'feed')
+        .replaceAll('&', '&amp;')
+        .replaceAll('"', '&quot;')
+        .replaceAll('<', '&lt;');
+      await writeFile(
+        restoreConfig,
+        `<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear/><add key="verified-seed" value="${feed}"/></packageSources><packageSourceMapping><clear/><packageSource key="verified-seed"><package pattern="*"/></packageSource></packageSourceMapping><fallbackPackageFolders><clear/></fallbackPackageFolders></configuration>`,
+        { flag: 'wx' },
+      );
+    }
     const restore = [
       'restore',
       project,
       '-r',
       'linux-x64',
-      '--force-evaluate',
+      '--locked-mode',
       '--nologo',
       '--configfile',
-      join(source, configPath),
-      '-p:RestoreLockedMode=false',
+      restoreConfig,
+      '-p:RestoreLockedMode=true',
       ...props,
     ];
-    if (seeded) restore.push('--source', join(work, 'feed'));
-    run(dotnet, restore, { cwd: source, env });
-    const assetsPath = join(source, 'runtime/src/AgenticPrReview.Runtime/obj/project.assets.json');
+    let restoreEnv = env;
+    if (!seeded) {
+      assert(
+        typeof process.env.NuGetPackageSourceCredentials_solus === 'string' &&
+          process.env.NuGetPackageSourceCredentials_solus.length > 0,
+        'managed_restore_auth_unavailable',
+      );
+      restoreEnv = {
+        ...env,
+        NuGetPackageSourceCredentials_solus: process.env.NuGetPackageSourceCredentials_solus,
+      };
+    }
+    // Never attach credential-bearing restore diagnostics to a public error.
+    const restored = spawnSync(dotnet, restore, {
+      cwd: source,
+      env: restoreEnv,
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 600_000,
+    });
+    assert(restored.status === 0, 'managed_restore_failed');
+    const assetsPath = join(
+      source,
+      'runtime/src/AgenticPrReview.Runtime/obj/managed/project.assets.json',
+    );
     const assetsBytes = await readBoundedFile(assetsPath, 4 * 1024 * 1024);
     const readAssets = async () => JSON.parse(await readBoundedFile(assetsPath, 4 * 1024 * 1024));
     const dependencies = await verifyDependencies(
       env.NUGET_PACKAGES,
       managedPolicy,
       JSON.parse(assetsBytes),
+      seeded ? join(work, 'feed') : null,
     );
     const notices = await noticesFrom(source, env.NUGET_PACKAGES, managedPolicy);
     const buildInputs = {
@@ -751,7 +832,12 @@ export async function buildManagedPayload({ repo, sourceCommit, releaseVersion, 
       ],
       { cwd: source, env },
     );
-    await verifyDependencies(env.NUGET_PACKAGES, managedPolicy, await readAssets());
+    await verifyDependencies(
+      env.NUGET_PACKAGES,
+      managedPolicy,
+      await readAssets(),
+      seeded ? join(work, 'feed') : null,
+    );
     assert(
       sha256(await readBoundedFile(assetsPath, 4 * 1024 * 1024)) === buildInputs.assetsSha256 &&
         sha256(await readBoundedFile(lock, 256 * 1024)) === buildInputs.lockSha256,

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { SOLUS_IDS, SOLUS_VERSION, dependencyVersionAllowed } from './solus-package-contract.mjs';
 import { constants } from 'node:fs';
 import { chmod, mkdir, mkdtemp, open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -665,7 +666,7 @@ function managedInputs(input) {
         /^[a-z0-9][a-z0-9.-]{0,100}$/.test(item.id) &&
         item.id > previous &&
         typeof item.version === 'string' &&
-        /^\d+\.\d+\.\d+$/.test(item.version) &&
+        dependencyVersionAllowed(item.id, item.version, SOLUS_VERSION) &&
         matches(item.sha256, hex64) &&
         typeof item.contentHash === 'string' &&
         /^[A-Za-z0-9+/]{86}==$/.test(item.contentHash) &&
@@ -674,6 +675,13 @@ function managedInputs(input) {
     );
     previous = item.id;
   }
+  const solus = input.dependencies.filter((item) => item.id.startsWith('solusagent.'));
+  requireThat(
+    solus.length === 0 ||
+      (solus.length === SOLUS_IDS.length &&
+        SOLUS_IDS.every((id) => solus.some((item) => item.id === id))),
+    'invalid_managed_dependencies',
+  );
 }
 function managedName(version) {
   return 'agentic-pr-review-' + validateReleaseVersion(version) + '-linux-x64-managed.tar.gz';

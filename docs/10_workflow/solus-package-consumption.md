@@ -1,0 +1,42 @@
+# Solus package consumption in the APR managed build
+
+CR1-R2 consumes the five immutable `0.1.0-internal.1` packages in the actual APR project. The [integration contract](../20_architecture/cr1-integration-contract.md) owns development bounds and later review/state/capacity gates. Package construction does not activate migrated reviews, qualify tool schemas or grant redistribution rights. The release map remains unbound. Public release and private-binary publication require separate authority.
+
+## Temporary build separation
+
+`APRManagedPackage=true` selects the managed package references and `Solus/` construction source in `AgenticPrReview.Runtime.csproj`. All five references use exact NuGet bracket equality, and the actual resolved graph is checked again, including transitives. The managed profile disables AOT, trimming, self-contained, single-file and apphost output. Conflicting native/managed properties and a different selected Solus version reject before restore/build work.
+
+Managed intermediate/output files use `obj/managed/` and `bin/managed/`. The checked managed lock is `runtime/src/AgenticPrReview.Runtime/packages.managed.lock.json`. It describes the actual APR project, not a throwaway consumer. Default framework/native consumers exclude both Solus references and construction source; their existing `packages.release.lock.json` and public restore configuration remain unchanged. CR1-D6 removes this temporary native closure after the owning replacement gates. This is one application with temporary build configurations, not another product executable or production fallback.
+
+The measured managed closure has nine packages: the four existing public dependencies and five Solus packages. The native catalog still has nine entries. Managed-only additional entries are selected separately in `scripts/release/build-payload.inputs.json`; appending them to the native catalog would break its closed inventory. Both finite 16-entry validation bounds remain. Version admission permits the exact selected Solus identities only in the managed policy and rejects floating, mixed, unknown or alternate identities. The native receipt version contract stays unchanged.
+
+## Registry, integrity and credential boundary
+
+The managed NuGet configuration maps `SolusAgent.*` only to `https://nuget.pkg.github.com/SolusQuest/index.json`, with other admitted packages on nuget.org and no fallback folders. Cold proof uses fresh package, HTTP, plugin and CLI-home directories and checks the real assets graph, exact direct constraints, selected `.nupkg.metadata.source`, package archive hashes and checked lock. NuGet's logical content hash can differ from the raw signed archive hash: check logical metadata against assets/lock, raw SHA-512 against the archive declaration and bytes, and archive SHA-256 against the reviewed inventory independently.
+
+The existing authorized repository token reaches only the authenticated restore subprocess through `NuGetPackageSourceCredentials_solus`. It is absent from committed configuration, arguments, lock/inventory, publish and runtime environments. Credential-bearing restore diagnostics are reduced to fixed failures. No new secret, token or repository setting is needed; unavailable authorized access blocks the relevant proof.
+
+The reproducible producer can intentionally seed a fresh offline feed from raw archives already in a verified cache. It checks their original selected source, logical identity and pinned archive hashes before copying; it does not copy extracted cache entries. The process-created seed configuration and resulting local-feed metadata are recognized explicitly. This is verified archive reuse, **not** a fresh registry-origin claim. The independent cold registry proof remains mandatory. No automatic alternate feed, inherited cache or changed lock can make qualification pass.
+
+## Exact-head trusted proof and ordinary CI
+
+The existing `solus-agent-package-proof.yml` manual workflow uses its already granted contents/read and packages/read token. Before package access it verifies repository/event, expected source SHA and workflow SHA, then checks out that exact commit without persisted credentials. Maintainer-authorized branch dispatch allows pre-merge proof without merging unverified code into main. It is not a PR/fork event and does not grant ordinary PR jobs private package access.
+
+```sh
+gh workflow run solus-agent-package-proof.yml --ref REVIEWED_BRANCH \
+  -f expected-head-sha=REVIEWED_SHA -f mode=verify
+```
+
+Acceptance requires the actual `verify` run on the final source: cold selected-feed restore with the checked actual APR lock, compilation of APR's managed project, and the APR-owned `SolusStartupFixture` invoking `SolusRuntimeConstruction` from that assembly. It constructs the real installed factory under R1 bounds with zero provider dispatch/tool entry, checks unsupported profile/options/capabilities/hooks and conflicting build properties, and verifies loaded dependency bytes against the packages. It does not equate CLR assembly version with NuGet prerelease identity. The fixture runs without registry credentials. The actual managed producer/archive roundtrip is a separate mandatory step using verified archives and no restore token.
+
+`mode=collect` only obtains sanitized identities, hashes and the actual APR restore graph to prepare a reviewed pin/lock. It is explicitly non-qualifying. A successful collection or metadata artifact cannot substitute for construction or producer proof. Final handoff checks the exact run/head, `verify` mode, successful construction and actual producer step separately. Only safe metadata is retained; no private nupkg, runtime payload or package contents are uploaded.
+
+Ordinary PR/fork CI retains native/runtime checks and credential-free managed format/policy negatives. The real producer flag is moved from unconditional runtime-core execution to the trusted workflow; its acceptance is not deleted or waived. CR1-D2 owns the separate `CR1 managed release acquisition and staging proof` fixture/step (`APR_CR1_MANAGED_STAGING_PROOF=1`, `npm test -- tests/distribution/release-payload.test.ts --maxWorkers=2 --minWorkers=1`). After its source integrates, that actual producer/transport/stager step belongs at the trusted build boundary, with transport and staging credential-free. Each owner adapts and revalidates the second merged source; the ordinary format/stager unit checks remain runnable without private access.
+
+Required evidence includes `npm run check`, `npm run dist:check`, retained runtime tests/native qualification and actual trusted construction/producer proof. Local unsupported-platform or credential failures are reported honestly; they do not establish selected-runner success. The selected runner is GitHub-hosted Ubuntu 24.04 x64. R3 tool/schema/correction, R4 provider/accounting, S1–S4 state/context and D2/D3/D5 loading/execution proofs remain separate.
+
+## Corrective pin adoption
+
+Never overwrite `.1` or use an implicit latest version. For a newly authorized immutable version, review the actual registry identities/hashes/source and evaluated APR graph. Update exact project selection and its guards, `solus-package-contract.mjs`, managed inventory, checked lock and the associated profile/version contract together. Preserve the independent native selection until D6. Re-run cold restore, actual construction, negative source/version/hash tests and producer proof, then applicable consumers at the new exact source/pin.
+
+Package implementation or provider-option changes can invalidate saved context even when its external shape appears unchanged. Requalification includes exact implementation/format/pin, candidate-versus-ordinary mode, profile/tools, provider persistence options and authenticated APR authority at S1–S4, plus affected R3–R5/V3/D5 evidence. No upgrade reader, conversion, discriminator rewrite or silent fresh fallback is promised. Selected-current incompatibility fails closed; reset requires its existing explicit authorization. Internal-use permission does not authorize public redistribution of the included assemblies.

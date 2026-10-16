@@ -53,10 +53,9 @@ jobs:
           test -z "$(git status --porcelain)"
           printf 'source_commit=%s\n' "$EXPECTED_SOURCE_SHA"
 
-      # D1 additive producer proof; D5 owns later managed gate replacement.
-      - name: CR1 managed publish archive inventory and roundtrip
-        env:
-          APR_CR1_MANAGED_PROOF: '1'
+      # Actual private producer proof is mandatory in the trusted exact-head
+      # package workflow. Ordinary PR/fork checks have no private package token.
+      - name: CR1 managed format and package policy checks
         run: npm test -- tests/distribution/build-payload.test.ts --maxWorkers=2 --minWorkers=1
 
       - name: Runtime tests
