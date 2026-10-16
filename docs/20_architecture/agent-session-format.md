@@ -1,5 +1,7 @@
 # Current Agent Session Format
 
+The [CR1 integration contract](./cr1-integration-contract.md) selects Solus candidate/context execution, exact pin/options/mode compatibility and APR-owned encrypted acceptance/lineage. These are replacement gates, not an additional SESSION reader or automatic conversion. The current format and historical vectors below remain applicable to their existing consumers until S1–S5 cut over and retire them.
+
 Status: normative current-format contract implemented by issue [#89](https://github.com/SolusQuest/agentic-pr-review/issues/89), extended to the complete R3 read-only observation surface by issue [#102](https://github.com/SolusQuest/agentic-pr-review/issues/102), bound to the final DeepSeek reasoning-continuation adapter by issue [#106](https://github.com/SolusQuest/agentic-pr-review/issues/106), and exercised across two fresh runtime processes by issue [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109).
 
 This document is the durable copy of the current Agent session contract refined under [#78](https://github.com/SolusQuest/agentic-pr-review/issues/78). It defines the bounded plaintext SESSION artifact and deterministic restore boundary. It does not define encryption, storage, transport, authorization, retention, or accepted-lineage persistence; [#87](https://github.com/SolusQuest/agentic-pr-review/issues/87) owns those responsibilities.

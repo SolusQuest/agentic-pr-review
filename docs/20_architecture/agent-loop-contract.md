@@ -1,5 +1,7 @@
 # Agent Loop Contract
 
+CR1 selects a different generic execution owner and an explicit candidate Final terminal carrier. The [CR1 integration contract](./cr1-integration-contract.md) owns that development profile, API mapping, correction requirements and consuming gates. This document continues to describe the current APR loop until its replacements and retirement gates land; the selected carrier does not change the operating six-tool protocol here.
+
 Status: R2 LOOP implementation contract introduced by issue [#86](https://github.com/SolusQuest/agentic-pr-review/issues/86).
 
 Last revised: 2026-07-30.

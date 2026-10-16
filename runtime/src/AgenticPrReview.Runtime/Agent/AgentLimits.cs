@@ -232,3 +232,97 @@ internal sealed record ReviewTokenBudget(long UncachedInputTokens, long CachedIn
         CachedInputTokens is > 0 and <= AgentLimits.CachedInputTokens &&
         OutputTokens is > 0 and <= AgentLimits.OutputTokens;
 }
+
+// CR1's isolated .1 numeric contract; not a selectable AgentLimitProfile or
+// permission to dispatch. Current limits/identities remain unchanged. The caller
+// must supply complete measured inventories and prospective reservations from
+// the actual runtime serializer, including full response/candidate bookkeeping.
+internal readonly record struct Cr1RetainedInventory(
+    long Attempts, long Records, long ProviderInputs, long RetainedBytes)
+{
+    internal bool IsNonnegative =>
+        Attempts >= 0 && Records >= 0 && ProviderInputs >= 0 && RetainedBytes >= 0;
+}
+
+internal enum Cr1DevelopmentRefusal
+{
+    None,
+    UnknownProfile,
+    InvalidInventory,
+    CurrentWorkExceeded,
+    AttemptCapacityExceeded,
+    RecordCapacityExceeded,
+    ProviderInputCapacityExceeded,
+    RetainedByteCapacityExceeded,
+}
+
+internal static class Cr1DevelopmentProfile
+{
+    internal const string Id = "cr1-solus-internal1-dev";
+    internal const string PackageVersion = "0.1.0-internal.1";
+    internal const int RetainedAttempts = 64;
+    internal const int RetainedRecords = 64;
+    internal const int RetainedBytes = 196_608;
+    internal const int ProviderInputs = 32;
+    internal const int LogicalCalls = 6;
+    internal const int PhysicalAttempts = 6;
+    internal const int WorkUnits = 6;
+    internal const int ToolInvocations = 6;
+    internal const int ToolCallsPerBatch = 3;
+    internal const int ConcurrentTools = 1;
+    internal const int AttemptsPerLogicalCall = 1;
+    internal const int DurationSeconds = 120;
+    internal const int ProviderTimeoutSeconds = 30;
+    internal const int SettlementGraceSeconds = 1;
+    internal const int NonterminalDefinitions = 5;
+    internal const int RequestPayloadBytes = 65_536;
+    internal const int ResponsePayloadBytes = 16_384;
+    internal const int InstructionsBytes = 4_096;
+    internal const int DataItemBytes = 4_096;
+    internal const int ToolArgumentsBytes = 2_048;
+    internal const int ToolResultBytes = 4_096;
+    internal const int ContinuationBytes = 2_048;
+    internal const int WireRequestBytes = 1_048_576;
+    internal const int WireResponseBytes = 524_288;
+    internal const int ProviderOutputTokens = 1_024;
+    internal const int InputTokenThreshold = 65_536;
+    internal const int OutputTokenThreshold = 8_192;
+    internal const int InputTokenReservation = 8_192;
+    internal const int OutputTokenReservation = 1_024;
+    internal const int InputTokenAllowance = 65_536;
+    internal const int OutputTokenAllowance = 8_192;
+    internal const int CandidateSubmissions = 1;
+    internal const int CandidateRepairs = 0;
+    internal const int CandidateContinuations = 0;
+    internal const bool RequireContinuation = true;
+
+    // Numeric eligibility only. It cannot establish serializer correctness,
+    // context authenticity, runtime acceptance, or useful workload capacity.
+    // Growth reserves the requested no-retry attempts, not merely sends.
+    internal static Cr1DevelopmentRefusal Admit(
+        string profileId,
+        long requestedLogicalCalls,
+        Cr1RetainedInventory retained,
+        Cr1RetainedInventory growth)
+    {
+        if (!StringComparer.Ordinal.Equals(profileId, Id))
+            return Cr1DevelopmentRefusal.UnknownProfile;
+        if (!retained.IsNonnegative || !growth.IsNonnegative)
+            return Cr1DevelopmentRefusal.InvalidInventory;
+        if (requestedLogicalCalls is < 1 or > LogicalCalls ||
+            growth.Attempts != requestedLogicalCalls)
+            return Cr1DevelopmentRefusal.CurrentWorkExceeded;
+        if (!Fits(retained.Attempts, growth.Attempts, RetainedAttempts))
+            return Cr1DevelopmentRefusal.AttemptCapacityExceeded;
+        if (!Fits(retained.Records, growth.Records, RetainedRecords))
+            return Cr1DevelopmentRefusal.RecordCapacityExceeded;
+        if (!Fits(retained.ProviderInputs, growth.ProviderInputs, ProviderInputs))
+            return Cr1DevelopmentRefusal.ProviderInputCapacityExceeded;
+        if (!Fits(retained.RetainedBytes, growth.RetainedBytes, RetainedBytes))
+            return Cr1DevelopmentRefusal.RetainedByteCapacityExceeded;
+        return Cr1DevelopmentRefusal.None;
+    }
+
+    private static bool Fits(long retained, long growth, long ceiling) =>
+        growth <= ceiling && retained <= ceiling - growth;
+}
