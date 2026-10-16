@@ -14,6 +14,29 @@ CR1 adapts the existing nested Action/official artifact bridge. CR2 makes the .N
 
 The current acquisition, descriptor-launch and package-format sections below remain operating contracts until replacement. Their AOT-only details do not override the selected target. Preserve exact release identities and immutable original bytes; re-refine affected unfinished R7 contracts before execution, and complete CR1/CR2 before remaining first-candidate work. Public redistribution of Solus assemblies needs separate authority before release.
 
+## CR1-D1 Local Managed Archive
+
+The explicit local `build-managed` producer supplies the selected complete managed archive without changing ordinary Action acquisition or candidate preparation. Those consumers still use `build` and the native codec until their owning cutover; the temporary native producer and format retire under CR1-D6. D1's additive `runtime-core` CI step exercises the actual managed producer on the exact PR head with Ubuntu 24.04 x64, Node 24 and SDK 10.0.109. D5 owns later CI gate replacement and integrated Action/Solus qualification. Neither path binds the null release map or publishes a payload.
+
+From a clean source checkout, with a new output directory outside the checkout:
+
+```bash
+node scripts/release/build-payload.mjs build-managed --source FULL_SOURCE_SHA --version v0.0.0-internal.1 --output NEW_DIRECTORY
+node scripts/release/build-payload.mjs inspect-managed --archive ARCHIVE_FILE --receipt TRUSTED_RECEIPT_FILE
+```
+
+`APRManagedPackage=true` selects the `net10.0` executable DLL with `UseAppHost=false`, `PublishAot=false`, `PublishTrimmed=false`, `PublishSingleFile=false`, `SelfContained=false` and no AOT-compatibility tooling. The profile disables unused runtime/apphost and transitive framework pack downloads; reference assemblies come from the pinned SDK. Build/restore requires SDK 10.0.109; it does not require clang, a linker, Native AOT packs or successful native compilation. Execution requires a trusted compatible `Microsoft.NETCore.App` shared runtime in major version 10, at least 10.0.9 as specified by the emitted runtimeconfig. The downstream SDK, MSBuild and Roslyn discovery requirements of ContractScribe do not transfer to APR. D3 owns trusted runtime selection and managed loading, and D5 owns representative execution qualification.
+
+The producer snapshots the exact admitted clean source commit and tree. It restores into a fresh private cache through the checked NuGet configuration, admits every resolved package and raw archive against the checked managed dependency policy, and repeats admission after publish. The generated isolated managed lock records actual resolution; the checked dependency policy, rather than the newly generated lock, grants admission. Native release locks and dependency/toolchain admission remain intact. Build inputs record the evaluated publish settings, SDK driver hash and version, Node/zlib and selected OS, policy/lock/assets/notices hashes and complete package identities. The DLL embeds the release version and build-input digest. Assets hashes record actual restore bytes, including build-local paths; deterministic encoding of the same files and inputs does not promise identical independent builds.
+
+The producer recursively inventories every actual publish file, including dependency assemblies, resources and native assets. It rejects links, hard links, special files and unsafe paths rather than skipping them. The archive is canonical gzip/ustar with regular-file entries only, implicit parent directories, mode 0644, zero owner/time fields and ordinal path order beneath `agentic-pr-review/`. Empty files are allowed; empty directory entries have no payload bytes. The required DLL, deps and runtimeconfig must exist; deps-referenced runtime/resource/native assets must be present. A bundled apphost or shared-runtime host library is rejected.
+
+The codec owns fixed bounds: 64 MiB compressed, 128 MiB expanded including tar framing, 32 MiB per file, 256 KiB manifest, 512 entries, 100 ASCII bytes per full archive path and depth 8. Paths admit only letters, digits, `_`, `.`, `+`, `-` and `/`, with no empty, dot or parent components. Duplicate names, case aliases, file/directory collisions, noncanonical headers/padding, forbidden entry kinds, trailing gzip/tar data, omitted/extra entries and hash mismatches fail closed. Unsupported longer paths fail visibly; they are never truncated.
+
+`manifest.json` has discriminator `managed-v1`, entrypoint, source/build identity, truthful build inputs and the complete publish/notices inventory without a self-hash. The independently trusted `receipt.json` binds every member including the manifest and the exact original archive length/SHA-256. Inspection checks that receipt before bounded decompression and verifies exact member equality. The producer compares the decoded and locally extracted files byte-for-byte against the independently collected original publish tree, then performs a bounded bootstrap identity check on the extracted DLL. That check proves compiled identity only; it does not qualify production managed loading or migrated review execution.
+
+The output archive is the original tested byte sequence. Promotion must retain those bytes; changed source or inputs require a new candidate, never reconstruction under an existing identity. This local artifact and its codec are not public redistribution authorization, a released installation, Action adoption or CR1 completion. D2 owns production staging/extraction, D3 loading/runtime selection, D4 semantic Action adoption, D5 final qualification and D6 native retirement. R2 owns subsequent package pins and their exact managed dependency-policy update.
+
 ## Distribution Goals
 
 The distribution must:

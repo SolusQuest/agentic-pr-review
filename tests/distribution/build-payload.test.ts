@@ -7,6 +7,12 @@ import { crc32, deflateRawSync, gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 import {
   LIMITS,
+  MANAGED_LIMITS,
+  MANAGED_TARGET,
+  collectManagedPublishTree,
+  encodeManagedPackage,
+  inspectManagedPackage,
+  materializeManagedPackage,
   MEMBERS,
   canonicalJson,
   compiledIdentity,
@@ -23,6 +29,7 @@ import {
   admitToolchain,
   admitPublishInventory,
   verifyDependencies,
+  managedDependencyPolicy,
 } from '../../scripts/release/build-payload.mjs';
 
 const fixtureBinary = () => {
@@ -859,4 +866,350 @@ describe('R7-D1 complete restored package inventory', () => {
       rmSync(external, { recursive: true, force: true });
     }
   });
+});
+
+describe('CR1-D1 managed publish-tree producer contract', () => {
+  function managedInputs() {
+    const nativeInputs = inputs();
+    return {
+      ...nativeInputs,
+      assetsSha256: '3'.repeat(64),
+      target: MANAGED_TARGET,
+      toolchain: {
+        sdk: '10.0.109',
+        sdkDriverSha256: 'e'.repeat(64),
+        node: process.versions.node,
+        zlib: process.versions.zlib,
+        os: 'ubuntu-24.04-x64',
+      },
+    };
+  }
+  function publishFiles() {
+    return [
+      { path: 'AgenticPrReview.Runtime.dll', bytes: Buffer.from('synthetic managed PE bytes') },
+      {
+        path: 'AgenticPrReview.Runtime.deps.json',
+        bytes: Buffer.from(
+          JSON.stringify({
+            runtimeTarget: { name: '.NETCoreApp,Version=v10.0/linux-x64' },
+            targets: {
+              '.NETCoreApp,Version=v10.0/linux-x64': {
+                'Product/1.0.0': { runtime: { 'AgenticPrReview.Runtime.dll': {} } },
+                'Dependency/1.0.0': {
+                  runtime: { 'lib/net10.0/Dependency.dll': {} },
+                  native: { 'runtimes/linux-x64/native/libexample.so': {} },
+                  resources: { 'lib/net10.0/fr/Dependency.resources.dll': { locale: 'fr' } },
+                },
+              },
+            },
+          }),
+        ),
+      },
+      {
+        path: 'AgenticPrReview.Runtime.runtimeconfig.json',
+        bytes: Buffer.from(
+          JSON.stringify({
+            runtimeOptions: {
+              tfm: 'net10.0',
+              framework: { name: 'Microsoft.NETCore.App', version: '10.0.9' },
+            },
+          }),
+        ),
+      },
+      { path: 'Dependency.dll', bytes: Buffer.from('synthetic dependency') },
+      { path: 'fr/Dependency.resources.dll', bytes: Buffer.from('synthetic satellite') },
+      { path: 'libexample.so', bytes: Buffer.from('synthetic native asset') },
+      { path: 'resources/empty.txt', bytes: Buffer.alloc(0) },
+    ];
+  }
+  const fixture = () => encodeManagedPackage(publishFiles(), notices, managedInputs());
+  function mutateTar(change: (tar: Buffer) => Buffer | void) {
+    const p = fixture(),
+      tar = gunzipSync(p.archive);
+    const changed = change(tar) || tar,
+      archive = gzip(changed);
+    return { archive, receipt: expectationFor(archive, p.receipt) };
+  }
+  test('deterministic encoding preserves nested resources/native assets and empty files', async () => {
+    const p = fixture(),
+      expected = publishFiles();
+    expect(encodeManagedPackage([...expected].reverse(), notices, managedInputs())).toEqual(p);
+    const inspected = inspectManagedPackage(p.archive, p.receipt);
+    expect(inspected.manifest.formatVersion).toBe('managed-v1');
+    expect(inspected.manifest.buildInputs.target).toEqual(MANAGED_TARGET);
+    expect(p.receipt.members).toHaveLength(expected.length + 2);
+    const parent = mkdtempSync(join(tmpdir(), 'apr-managed-roundtrip-'));
+    try {
+      const extracted = await materializeManagedPackage(p.archive, p.receipt, parent);
+      for (const file of expected) {
+        expect(readFileSync(join(extracted.root, 'agentic-pr-review', file.path))).toEqual(
+          file.bytes,
+        );
+      }
+      expect(extracted.entrypoint.endsWith('AgenticPrReview.Runtime.dll')).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+    expect(() => inspectPackage(p.archive, p.receipt)).toThrow();
+    expect(() =>
+      inspectManagedPackage(packageFixture().archive, packageFixture().receipt),
+    ).toThrow();
+  });
+  test.each([
+    'AgenticPrReview.Runtime.dll',
+    'AgenticPrReview.Runtime.deps.json',
+    'AgenticPrReview.Runtime.runtimeconfig.json',
+    'Dependency.dll',
+    'fr/Dependency.resources.dll',
+    'libexample.so',
+  ])('rejects omitted required asset %s', (path) => {
+    expect(() =>
+      encodeManagedPackage(
+        publishFiles().filter((file) => file.path !== path),
+        notices,
+        managedInputs(),
+      ),
+    ).toThrow();
+  });
+  test.each([
+    '../escape',
+    '/absolute',
+    'x\\y',
+    './dot',
+    'x//y',
+    'x/../y',
+    'x\0y',
+    '雪.dll',
+    'a'.repeat(100),
+    'a/b/c/d/e/f/g/h/file',
+  ])('rejects noncanonical path %j', (path) => {
+    expect(() =>
+      encodeManagedPackage(
+        [...publishFiles(), { path, bytes: Buffer.from('x') }],
+        notices,
+        managedInputs(),
+      ),
+    ).toThrow('invalid_managed_path');
+  });
+  test.each(['Dependency.dll', 'dependency.dll', 'resources', 'fr', 'FR/other.dll'])(
+    'rejects duplicate/colliding path %s',
+    (path) => {
+      expect(() =>
+        encodeManagedPackage(
+          [...publishFiles(), { path, bytes: Buffer.from('x') }],
+          notices,
+          managedInputs(),
+        ),
+      ).toThrow();
+    },
+  );
+  test.each([
+    'AgenticPrReview.Runtime',
+    'AgenticPrReview.Runtime.exe',
+    'libcoreclr.so',
+    'libhostfxr.so',
+    'manifest.json',
+    'THIRD-PARTY-NOTICES.txt',
+  ])('rejects bundled host or reserved file %s', (path) => {
+    expect(() =>
+      encodeManagedPackage(
+        [...publishFiles(), { path, bytes: Buffer.from('x') }],
+        notices,
+        managedInputs(),
+      ),
+    ).toThrow('unexpected_managed_publish_file');
+  });
+  test.each(['1', '2', '3', '4', '5', '6', 'x', 'L', 'K'])(
+    'rejects tar link/special/extension kind %s',
+    (kind) => {
+      const p = mutateTar((tar) => {
+        tar[156] = kind.charCodeAt(0);
+      });
+      expect(() => inspectManagedPackage(p.archive, p.receipt)).toThrow(
+        'noncanonical_managed_tar_header',
+      );
+    },
+  );
+  test('rejects omitted/extra archive entries, mutated paths and file hashes beyond outer digest admission', () => {
+    const p = fixture(),
+      tar = gunzipSync(p.archive),
+      firstSize = p.receipt.members[0].size;
+    const entrySize = 512 + Math.ceil(firstSize / 512) * 512;
+    for (const changed of [
+      tar.subarray(entrySize),
+      Buffer.concat([tar.subarray(0, entrySize), tar]),
+      Buffer.concat([tar, Buffer.alloc(512)]),
+    ]) {
+      const archive = gzip(changed);
+      expect(() => inspectManagedPackage(archive, expectationFor(archive, p.receipt))).toThrow();
+    }
+    const wrongPath = mutateTar((tar) => {
+      tar.write('../escape', 0);
+    });
+    expect(() => inspectManagedPackage(wrongPath.archive, wrongPath.receipt)).toThrow(
+      'noncanonical_managed_tar_header',
+    );
+    const wrongHash = mutateTar((tar) => {
+      tar[512] ^= 1;
+    });
+    expect(() => inspectManagedPackage(wrongHash.archive, wrongHash.receipt)).toThrow(
+      'managed_member_digest_mismatch',
+    );
+  });
+  test('rejects padding, trailing gzip, noncanonical receipt and identity drift', () => {
+    const p = fixture();
+    const padding = mutateTar((tar) => {
+      tar[512 + p.receipt.members[0].size] = 1;
+    });
+    expect(() => inspectManagedPackage(padding.archive, padding.receipt)).toThrow(
+      'invalid_tar_padding',
+    );
+    const concatenated = Buffer.concat([p.archive, p.archive]);
+    expect(() =>
+      inspectManagedPackage(concatenated, expectationFor(concatenated, p.receipt)),
+    ).toThrow('invalid_gzip_trailer');
+    expect(() =>
+      inspectManagedPackage(p.archive, { ...p.receipt, members: [...p.receipt.members].reverse() }),
+    ).toThrow();
+    expect(() =>
+      inspectManagedPackage(p.archive, {
+        ...p.receipt,
+        identity: { ...p.receipt.identity, sourceCommit: 'f'.repeat(40) },
+      }),
+    ).toThrow('managed_identity_mismatch');
+    expect(() =>
+      inspectManagedPackage(p.archive, { ...p.receipt, archiveSha256: '0'.repeat(64) }),
+    ).toThrow('managed_archive_digest_mismatch');
+  });
+  test('enforces file/count/expanded/metadata caps before archive construction', () => {
+    expect(() =>
+      encodeManagedPackage(
+        [...publishFiles(), { path: 'large', bytes: Buffer.alloc(MANAGED_LIMITS.file + 1) }],
+        notices,
+        managedInputs(),
+      ),
+    ).toThrow('invalid_managed_member');
+    expect(() =>
+      encodeManagedPackage(
+        [
+          ...publishFiles(),
+          ...Array.from({ length: MANAGED_LIMITS.entries }, (_, i) => ({
+            path: 'extra' + i,
+            bytes: Buffer.alloc(0),
+          })),
+        ],
+        notices,
+        managedInputs(),
+      ),
+    ).toThrow('invalid_managed_inventory');
+    const large = Buffer.alloc(MANAGED_LIMITS.file);
+    expect(() =>
+      encodeManagedPackage(
+        [
+          ...publishFiles(),
+          ...Array.from({ length: 4 }, (_, i) => ({ path: 'large' + i, bytes: large })),
+        ],
+        notices,
+        managedInputs(),
+      ),
+    ).toThrow('managed_expanded_limit');
+    expect(() =>
+      encodeManagedPackage(publishFiles(), Buffer.alloc(LIMITS.notices + 1), managedInputs()),
+    ).toThrow('invalid_managed_notices');
+  });
+  test('admits managed policy only from checked package identities without native toolchain packs', () => {
+    const policy = JSON.parse(readFileSync('scripts/release/build-payload.inputs.json', 'utf8'));
+    const managed = managedDependencyPolicy(policy);
+    expect(managed.dependencies).toHaveLength(4);
+    expect(managed.dependencies.every((item: any) => item.role === 'managed')).toBe(true);
+    expect(() =>
+      managedDependencyPolicy({
+        ...policy,
+        managed: { ...policy.managed, dependencyIds: ['unknown'] },
+      }),
+    ).toThrow();
+    expect(() =>
+      encodeManagedPackage(publishFiles(), notices, {
+        ...managedInputs(),
+        target: { ...MANAGED_TARGET, PublishAot: true },
+      }),
+    ).toThrow('invalid_managed_target');
+  });
+  // This fixture invokes Unix link tools; Windows must report it as skipped.
+  test.skipIf(process.platform === 'win32')(
+    'collects complete actual file tree and rejects links/special files rather than skipping them',
+    async () => {
+      const parent = mkdtempSync(join(tmpdir(), 'apr-managed-collector-'));
+      try {
+        for (const file of publishFiles()) {
+          const path = join(parent, file.path);
+          mkdirSync(join(path, '..'), { recursive: true });
+          writeFileSync(path, file.bytes);
+        }
+        const collected = await collectManagedPublishTree(parent);
+        expect(collected.map((file) => file.path).sort()).toEqual(
+          publishFiles()
+            .map((file) => file.path)
+            .sort(),
+        );
+        for (const file of collected)
+          expect(file.bytes).toEqual(publishFiles().find((item) => item.path === file.path)!.bytes);
+        execFileSync('/bin/ln', ['-s', 'Dependency.dll', join(parent, 'link')]);
+        await expect(collectManagedPublishTree(parent)).rejects.toThrow(
+          'invalid_managed_publish_kind',
+        );
+        rmSync(join(parent, 'link'));
+        if (process.platform === 'linux') {
+          execFileSync('/usr/bin/mkfifo', [join(parent, 'fifo')]);
+          await expect(collectManagedPublishTree(parent)).rejects.toThrow(
+            'invalid_managed_publish_kind',
+          );
+          rmSync(join(parent, 'fifo'));
+        }
+        execFileSync('/bin/ln', [join(parent, 'Dependency.dll'), join(parent, 'hardlink')]);
+        await expect(collectManagedPublishTree(parent)).rejects.toThrow(
+          'invalid_managed_publish_kind',
+        );
+      } finally {
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
+  test.runIf(process.env.APR_CR1_MANAGED_PROOF === '1')(
+    'real selected-runner producer archives and roundtrips the complete publish output',
+    () => {
+      expect(process.platform).toBe('linux');
+      expect(process.arch).toBe('x64');
+      const parent = mkdtempSync(join(tmpdir(), 'apr-managed-real-proof-'));
+      try {
+        const source = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
+        const output = join(parent, 'output');
+        const proof = execFileSync(
+          process.execPath,
+          [
+            'scripts/release/build-payload.mjs',
+            'build-managed',
+            '--source',
+            source,
+            '--version',
+            'v0.0.0-internal.1',
+            '--output',
+            output,
+          ],
+          { timeout: 600_000, maxBuffer: 4 * 1024 * 1024 },
+        ).toString();
+        const receipt = JSON.parse(readFileSync(join(output, 'receipt.json'), 'utf8'));
+        const archive = readFileSync(join(output, receipt.archiveName));
+        const inspected = inspectManagedPackage(archive, receipt);
+        expect(inspected.manifest.sourceCommit).toBe(source);
+        expect(inspected.files.length).toBeGreaterThanOrEqual(9);
+        expect(proof).toContain('"roundtrip":true');
+        expect(proof).toContain('"executionQualified":false');
+        console.log(proof.trim());
+      } finally {
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+    660_000,
+  );
 });
