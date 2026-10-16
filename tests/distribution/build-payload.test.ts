@@ -1135,42 +1135,46 @@ describe('CR1-D1 managed publish-tree producer contract', () => {
       }),
     ).toThrow('invalid_managed_target');
   });
-  test('collects complete actual file tree and rejects links/special files rather than skipping them', async () => {
-    const parent = mkdtempSync(join(tmpdir(), 'apr-managed-collector-'));
-    try {
-      for (const file of publishFiles()) {
-        const path = join(parent, file.path);
-        mkdirSync(join(path, '..'), { recursive: true });
-        writeFileSync(path, file.bytes);
-      }
-      const collected = await collectManagedPublishTree(parent);
-      expect(collected.map((file) => file.path).sort()).toEqual(
-        publishFiles()
-          .map((file) => file.path)
-          .sort(),
-      );
-      for (const file of collected)
-        expect(file.bytes).toEqual(publishFiles().find((item) => item.path === file.path)!.bytes);
-      execFileSync('/bin/ln', ['-s', 'Dependency.dll', join(parent, 'link')]);
-      await expect(collectManagedPublishTree(parent)).rejects.toThrow(
-        'invalid_managed_publish_kind',
-      );
-      rmSync(join(parent, 'link'));
-      if (process.platform === 'linux') {
-        execFileSync('/usr/bin/mkfifo', [join(parent, 'fifo')]);
+  // This fixture invokes Unix link tools; Windows must report it as skipped.
+  test.skipIf(process.platform === 'win32')(
+    'collects complete actual file tree and rejects links/special files rather than skipping them',
+    async () => {
+      const parent = mkdtempSync(join(tmpdir(), 'apr-managed-collector-'));
+      try {
+        for (const file of publishFiles()) {
+          const path = join(parent, file.path);
+          mkdirSync(join(path, '..'), { recursive: true });
+          writeFileSync(path, file.bytes);
+        }
+        const collected = await collectManagedPublishTree(parent);
+        expect(collected.map((file) => file.path).sort()).toEqual(
+          publishFiles()
+            .map((file) => file.path)
+            .sort(),
+        );
+        for (const file of collected)
+          expect(file.bytes).toEqual(publishFiles().find((item) => item.path === file.path)!.bytes);
+        execFileSync('/bin/ln', ['-s', 'Dependency.dll', join(parent, 'link')]);
         await expect(collectManagedPublishTree(parent)).rejects.toThrow(
           'invalid_managed_publish_kind',
         );
-        rmSync(join(parent, 'fifo'));
+        rmSync(join(parent, 'link'));
+        if (process.platform === 'linux') {
+          execFileSync('/usr/bin/mkfifo', [join(parent, 'fifo')]);
+          await expect(collectManagedPublishTree(parent)).rejects.toThrow(
+            'invalid_managed_publish_kind',
+          );
+          rmSync(join(parent, 'fifo'));
+        }
+        execFileSync('/bin/ln', [join(parent, 'Dependency.dll'), join(parent, 'hardlink')]);
+        await expect(collectManagedPublishTree(parent)).rejects.toThrow(
+          'invalid_managed_publish_kind',
+        );
+      } finally {
+        rmSync(parent, { recursive: true, force: true });
       }
-      execFileSync('/bin/ln', [join(parent, 'Dependency.dll'), join(parent, 'hardlink')]);
-      await expect(collectManagedPublishTree(parent)).rejects.toThrow(
-        'invalid_managed_publish_kind',
-      );
-    } finally {
-      rmSync(parent, { recursive: true, force: true });
-    }
-  });
+    },
+  );
   test.runIf(process.env.APR_CR1_MANAGED_PROOF === '1')(
     'real selected-runner producer archives and roundtrips the complete publish output',
     () => {
