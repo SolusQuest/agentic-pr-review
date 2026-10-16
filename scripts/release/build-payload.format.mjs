@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, mkdtemp, open, readdir, rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { chmod, mkdir, mkdtemp, open, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 
 export const LIMITS = Object.freeze({
@@ -525,19 +525,19 @@ export async function materializePackage(bytes, expected, parent) {
 }
 
 // CR1-D1 producer contract. Native exports above remain selected until CR1-D6.
-export const MANAGED_LIMITS = Object.freeze({
-  archive: 64 * 1024 * 1024,
-  expanded: 128 * 1024 * 1024,
-  file: 32 * 1024 * 1024,
-  manifest: 256 * 1024,
+export const MANAGED_LIMITS = /* @__PURE__ */ Object.freeze({
+  archive: 67_108_864,
+  expanded: 134_217_728,
+  file: 33_554_432,
+  manifest: 262_144,
   entries: 512,
   path: 100,
   depth: 8,
 });
 const managedRoot = 'agentic-pr-review/';
-const managedManifestPath = managedRoot + 'manifest.json';
-const managedNoticesPath = managedRoot + 'THIRD-PARTY-NOTICES.txt';
-export const MANAGED_TARGET = Object.freeze({
+const managedManifestPath = 'agentic-pr-review/manifest.json';
+const managedNoticesPath = 'agentic-pr-review/THIRD-PARTY-NOTICES.txt';
+export const MANAGED_TARGET = /* @__PURE__ */ Object.freeze({
   TargetFramework: 'net10.0',
   RuntimeIdentifier: 'linux-x64',
   RuntimeFrameworkVersion: '10.0.9',
@@ -548,6 +548,9 @@ export const MANAGED_TARGET = Object.freeze({
   SelfContained: false,
   IsAotCompatible: false,
   VerifyReferenceAotCompatibility: false,
+  EnableRuntimePackDownload: false,
+  EnableAppHostPackDownload: false,
+  DisableTransitiveFrameworkReferenceDownloads: true,
 });
 function managedPath(path) {
   requireThat(
@@ -731,7 +734,7 @@ export function validateManagedPublishFiles(files) {
       !byPath.has('manifest.json') &&
       !byPath.has('THIRD-PARTY-NOTICES.txt') &&
       ![...byPath.keys()].some((path) =>
-        /^(?:lib)?(?:coreclr|hostfxr|hostpolicy)(?:\.|$)/i.test(basename(path)),
+        /^(?:lib)?(?:coreclr|hostfxr|hostpolicy)(?:\.|$)/i.test(path.split('/').at(-1)),
       ),
     'unexpected_managed_publish_file',
   );
@@ -770,9 +773,11 @@ export function validateManagedPublishFiles(files) {
             path.split('/').every((part) => part && part !== '.' && part !== '..'),
           'invalid_managed_deps_path',
         );
-        if (basename(path) === '_._') continue;
+        if (path.split('/').at(-1) === '_._') continue;
         const flat =
-          kind === 'resources' && meta.locale ? meta.locale + '/' + basename(path) : basename(path);
+          kind === 'resources' && meta.locale
+            ? meta.locale + '/' + path.split('/').at(-1)
+            : path.split('/').at(-1);
         requireThat(byPath.has(path) || byPath.has(flat), 'missing_managed_dependency_asset');
       }
     }
@@ -780,6 +785,7 @@ export function validateManagedPublishFiles(files) {
   return entries;
 }
 export async function collectManagedPublishTree(root) {
+  const { lstat, readdir } = await import('node:fs/promises');
   requireThat(
     (await lstat(root)).isDirectory() && !(await lstat(root)).isSymbolicLink(),
     'invalid_managed_publish_root',

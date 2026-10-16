@@ -22,6 +22,9 @@
     <SelfContained>false</SelfContained>
     <IsAotCompatible>false</IsAotCompatible>
     <VerifyReferenceAotCompatibility>false</VerifyReferenceAotCompatibility>
+    <EnableRuntimePackDownload>false</EnableRuntimePackDownload>
+    <EnableAppHostPackDownload>false</EnableAppHostPackDownload>
+    <DisableTransitiveFrameworkReferenceDownloads>true</DisableTransitiveFrameworkReferenceDownloads>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ActionHostVerifierFrameworkReference)' == 'true'">
     <OutputType>Library</OutputType>
