@@ -590,3 +590,90 @@ ${jobPermissions}    runs-on: ubuntu-24.04
     expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
   });
 });
+
+describe('M5 authorized private package install route', () => {
+  test.each([
+    [
+      'extra trigger',
+      (w: any) => {
+        w.on.push = null;
+      },
+    ],
+    [
+      'guard removed',
+      (w: any) => {
+        w.jobs['install-proof'].steps[0].run = 'true';
+      },
+    ],
+    [
+      'write permission',
+      (w: any) => {
+        w.permissions.packages = 'write';
+      },
+    ],
+    [
+      'job override',
+      (w: any) => {
+        w.jobs['install-proof'].permissions = { contents: 'write' };
+      },
+    ],
+    [
+      'moving source',
+      (w: any) => {
+        w.jobs['install-proof'].steps[1].with.ref = 'main';
+      },
+    ],
+    [
+      'persisted credentials',
+      (w: any) => {
+        w.jobs['install-proof'].steps[1].with['persist-credentials'] = true;
+      },
+    ],
+    [
+      'other version',
+      (w: any) => {
+        w.jobs['install-proof'].steps[4].run = w.jobs['install-proof'].steps[4].run.replace(
+          'internal.1',
+          'internal.2',
+        );
+      },
+    ],
+    [
+      'live route',
+      (w: any) => {
+        w.jobs['install-proof'].steps[4].run += ' --live';
+      },
+    ],
+    [
+      'other credential spelling',
+      (w: any) => {
+        w.jobs['install-proof'].steps[4].env.GITHUB_TOKEN = '${{ github.token }}';
+      },
+    ],
+    [
+      'provider credential',
+      (w: any) => {
+        w.jobs['install-proof'].steps[4].env.KEY = '${{ secrets.PROVIDER_KEY }}';
+      },
+    ],
+    [
+      'extra executable step',
+      (w: any) => {
+        w.jobs['install-proof'].steps.push({ run: 'echo extra' });
+      },
+    ],
+  ])('rejects %s without weakening historical secret routes', (_label, mutate) => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const candidate = path.join(workflowsRoot, 'solus-agent-package-proof.yml');
+    const value = parse(fs.readFileSync(candidate, 'utf8'));
+    mutate(value);
+    fs.writeFileSync(candidate, stringify(value));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/solus-agent-install-route/u);
+  });
+
+  test('historical policy remains valid when the one-time installer is absent', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.unlinkSync(path.join(workflowsRoot, 'solus-agent-package-proof.yml'));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
+  });
+});
