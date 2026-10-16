@@ -64,9 +64,7 @@ jobs:
       - name: Framework-dependent bootstrap smoke
         run: bash runtime/scripts/verify-runtime.sh framework
 
-      - name: CR1 managed release acquisition and staging proof
-        env:
-          APR_CR1_MANAGED_STAGING_PROOF: '1'
+      - name: CR1 managed release and staging unit checks
         run: npm test -- tests/distribution/release-payload.test.ts --maxWorkers=2 --minWorkers=1
 
       - name: Native AOT bootstrap smoke

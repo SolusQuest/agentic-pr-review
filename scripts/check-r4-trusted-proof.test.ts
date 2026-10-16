@@ -594,6 +594,24 @@ ${jobPermissions}    runs-on: ubuntu-24.04
 describe('CR1 authorized actual APR private package proof route', () => {
   test.each([
     [
+      'stager bypassed',
+      (w: any) => {
+        w.jobs['install-proof'].steps[7].run = 'true';
+      },
+    ],
+    [
+      'stager credential',
+      (w: any) => {
+        w.jobs['install-proof'].steps[7].env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+      },
+    ],
+    [
+      'stager unverified cache',
+      (w: any) => {
+        delete w.jobs['install-proof'].steps[7].env.NUGET_PACKAGES;
+      },
+    ],
+    [
       'missing head input',
       (w: any) => {
         delete w.on.workflow_dispatch.inputs['expected-head-sha'];
@@ -620,7 +638,7 @@ describe('CR1 authorized actual APR private package proof route', () => {
     [
       'private artifact bytes',
       (w: any) => {
-        w.jobs['install-proof'].steps[7].with.path = '${{ runner.temp }}/apr-solus-facts/packages';
+        w.jobs['install-proof'].steps[8].with.path = '${{ runner.temp }}/apr-solus-facts/packages';
       },
     ],
     [
