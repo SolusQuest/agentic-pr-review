@@ -9,7 +9,13 @@ import {
   readBoundedFile,
   sha256,
 } from '../../../scripts/release/build-payload.format.mjs';
-import { parsePayloadMap, type PayloadMap } from './payload-map.js';
+import {
+  parsePayloadMap,
+  parseManagedPayloadMap,
+  type PayloadMap,
+  type ManagedPayloadMap,
+} from './payload-map.js';
+import { stageManagedPayload, type VerifiedManagedPayload } from './payload-staging.js';
 import { verifyPreparedPayload, type VerifiedPreparedPayload } from './prepared-payload.js';
 import { parseStrictJson } from './strict-json.js';
 import { fail, lowerHex } from './validation.js';
@@ -144,7 +150,7 @@ async function resolve(
 }
 
 async function download(
-  map: PayloadMap,
+  map: PayloadMap | ManagedPayloadMap,
   transport: RepositoryTestPayloadTransport,
   signal: AbortSignal,
 ): Promise<Buffer> {
@@ -291,4 +297,70 @@ function record(value: unknown): Record<string, unknown> {
 
 function positiveId(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+export interface ManagedReleasePayloadRequest extends ReleasePayloadRequest {
+  /** Trusted runner workspace context, solely to exclude it from the staging namespace. */
+  readonly workspace: string;
+}
+export function resolveManagedReleasePayload(
+  request: ManagedReleasePayloadRequest,
+): Promise<VerifiedManagedPayload> {
+  return resolveManaged(request, publicTransport, undefined, ACQUISITION_TIMEOUT_MS);
+}
+export function createRepositoryTestManagedPayloadResolver(options: {
+  readonly transport: RepositoryTestPayloadTransport;
+  readonly localArchivePath?: string;
+  readonly timeoutMs?: number;
+}): (request: ManagedReleasePayloadRequest) => Promise<VerifiedManagedPayload> {
+  const { transport, localArchivePath, timeoutMs = ACQUISITION_TIMEOUT_MS } = options;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > ACQUISITION_TIMEOUT_MS)
+    fail('wrapper_release_payload_invalid');
+  return (request) => resolveManaged(request, transport, localArchivePath, timeoutMs);
+}
+async function resolveManaged(
+  request: ManagedReleasePayloadRequest,
+  transport: RepositoryTestPayloadTransport,
+  localArchivePath: string | undefined,
+  timeoutMs: number,
+): Promise<VerifiedManagedPayload> {
+  const map = parseManagedPayloadMap(Buffer.from(request.mapBytes));
+  const { actionSourceSha, stagingParent, workspace } = request;
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
+  if (process.platform !== 'linux' || process.arch !== 'x64')
+    fail('wrapper_payload_platform_unsupported');
+  if (
+    !lowerHex(actionSourceSha, 40) ||
+    !path.isAbsolute(stagingParent) ||
+    !path.isAbsolute(workspace)
+  )
+    fail('wrapper_release_payload_invalid');
+  let staged: VerifiedManagedPayload | undefined;
+  try {
+    signal.throwIfAborted();
+    const stat = await lstat(stagingParent);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) fail('wrapper_release_payload_invalid');
+    const parent = await realpath(stagingParent);
+    const trustedWorkspace = await realpath(workspace);
+    if (parent === trustedWorkspace || parent.startsWith(`${trustedWorkspace}${path.sep}`))
+      fail('wrapper_release_payload_invalid');
+    const archive =
+      localArchivePath === undefined
+        ? await download(map, transport, signal)
+        : await readBoundedFile(localArchivePath, map.payload.archiveSize);
+    signal.throwIfAborted();
+    staged = await stageManagedPayload({
+      archive,
+      map,
+      actionSourceSha,
+      stagingParent: parent,
+      workspace: trustedWorkspace,
+      signal,
+    });
+    signal.throwIfAborted();
+    return staged;
+  } catch {
+    await staged?.dispose();
+    return fail(signal.aborted ? 'wrapper_payload_cancelled' : 'wrapper_release_payload_invalid');
+  }
 }

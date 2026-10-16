@@ -252,6 +252,16 @@ A same-binary worker mode or separate executable requires a new decision when th
 
 Process separation alone is insufficient when the worker shares the runner user, filesystem, handles, and unrestricted network. Stronger threat models require corresponding OS or container isolation.
 
+## Managed Payload Staging Boundary
+
+CR1-D2 trusts the runner, launcher and launcher-owned private staging namespace. Malicious concurrent processes running as the same UID and compromise of the trusted launcher or runner are outside this guarantee. Release/archive metadata, reviewed-workspace paths and model inputs remain untrusted: they cannot select a loading root, create links or admit files outside the exact verified inventory. Private modes, read-only descriptors and repeated whole-tree checks are ownership and integrity controls, not an OS-enforced immutable seal against a hostile same-UID writer. Stronger isolation requires a separately reviewed OS or container mechanism.
+
+Managed admission verifies the independently trusted receipt and original archive before writing, then audits the complete private disk tree through opened directory anchors. Every file, including dependency assemblies, resources, native assets, manifest and notices, receives an identity and digest check. The opaque verified-tree token grants no pathname authority by itself; only the owner's lease constructor can return its pinned directory descriptor, fixed entrypoint, complete descriptor inventory and frozen release/source/build identity. Reviewed-workspace paths are excluded from staging and cannot become assembly or probing sources through this handoff.
+
+Lease acquisition reserves ownership before asynchronous verification. Beginning disposal closes admission to new leases. Active or in-flight leases cause a finite typed in-use error while all files and handles remain available; cancellation does not release an already granted lease. The consumer must confirm it can no longer load dependencies before releasing its lease, then explicitly retry disposal. Unconfirmed termination retains the tree without indefinitely blocking the wrapper. Failed cleanup is observable and retryable; the outer staging owner cannot bypass a managed retention decision by deleting its parent. Native disposal fallback and the existing opened-executable pathname-substitution proof remain separate operating guarantees.
+
+D3 owns trusted .NET runtime selection, inherited descriptor mapping, actual dependency loading/probing and confirmed process lifetime. D2's verified tree does not establish those loading properties. D4 owns ordinary Action adoption; the checked release map remains unbound until separately authorized activation.
+
 ## Side-Effect Barrier
 
 No model or Agent output is publishable until `ActionHost`:

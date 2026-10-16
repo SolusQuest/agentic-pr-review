@@ -4,6 +4,8 @@ import {
   archiveName,
   compiledIdentity,
   validateReleaseVersion,
+  validateManagedReceipt,
+  type ManagedReceipt,
   type PackageReceipt,
 } from '../../../scripts/release/build-payload.format.mjs';
 import { parseStrictJson } from './strict-json.js';
@@ -124,4 +126,52 @@ export function parsePayloadMap(bytes: Uint8Array): PayloadMap {
 
 function positiveSize(value: unknown, maximum: number): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0 && (value as number) <= maximum;
+}
+
+/** Independent managed authority; ordinary native consumers retain their 16 KiB contract. */
+export const MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES = 256 * 1024;
+export interface ManagedPayloadMap extends Omit<PayloadMap, 'payload'> {
+  readonly payload: ManagedReceipt;
+}
+
+export function parseManagedPayloadMap(bytes: Uint8Array): ManagedPayloadMap {
+  try {
+    const map = exactRecord(parseStrictJson(bytes, MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES), [
+      'formatVersion',
+      'repository',
+      'tag',
+      'builder',
+      'payload',
+    ]);
+    const builder = exactRecord(map.builder, ['repository', 'workflowPath', 'workflowCommit']);
+    validateManagedReceipt(map.payload);
+    const receipt = map.payload;
+    if (
+      map.formatVersion !== 1 ||
+      map.repository !== PAYLOAD_REPOSITORY ||
+      map.tag !== `payload-${receipt.identity.releaseVersion}` ||
+      builder.repository !== PAYLOAD_REPOSITORY ||
+      typeof builder.workflowPath !== 'string' ||
+      !/^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.ya?ml$/u.test(builder.workflowPath) ||
+      !lowerHex(builder.workflowCommit, 40)
+    )
+      fail('wrapper_payload_map_invalid');
+    return Object.freeze({
+      formatVersion: 1,
+      repository: PAYLOAD_REPOSITORY,
+      tag: map.tag as string,
+      builder: Object.freeze({
+        repository: PAYLOAD_REPOSITORY,
+        workflowPath: builder.workflowPath,
+        workflowCommit: builder.workflowCommit,
+      }),
+      payload: Object.freeze({
+        ...receipt,
+        identity: Object.freeze({ ...receipt.identity }),
+        members: Object.freeze(receipt.members.map((member) => Object.freeze({ ...member }))),
+      }),
+    });
+  } catch {
+    fail('wrapper_payload_map_invalid');
+  }
 }

@@ -689,7 +689,7 @@ function managedIdentity(input) {
     informationalVersion: compiledIdentity(input.releaseVersion, buildId),
   };
 }
-function validateManagedReceipt(receipt) {
+export function validateManagedReceipt(receipt) {
   keys(
     receipt,
     ['formatVersion', 'archiveName', 'archiveSize', 'archiveSha256', 'identity', 'members'],
