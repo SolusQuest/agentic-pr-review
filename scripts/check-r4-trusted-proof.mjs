@@ -799,8 +799,11 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             uses: 'actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
+            env: {
+              DOTNET_INSTALL_DIR: '${{ runner.temp }}/apr-solus-sdk',
+            },
             with: {
-              'global-json-file': 'global.json',
+              'dotnet-version': '10.0.109',
             },
           },
           {
