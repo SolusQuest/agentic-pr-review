@@ -52,6 +52,29 @@ internal sealed class SolusSnapshotTools
         get { lock (gate) return observations.ToImmutableArray(); }
     }
 
+    // Select only the compiled APR policy from a complete live registry. Names,
+    // metadata and the presence of a classifier are not construction authority.
+    internal static ToolArgumentCorrectionPolicy? ArgumentCorrectionFor(
+        IReadOnlyList<RuntimeToolRegistration> registrations, ReviewedSnapshot snapshot)
+    {
+        if (registrations.All(r => r.Tool is not SnapshotFunction &&
+                r.Capability is not SnapshotCapability && r.ArgumentCorrection is null)) return null;
+        if (registrations.Count != 5 || registrations[0].Capability is not SnapshotCapability first ||
+            !ReferenceEquals(first.Snapshot, snapshot))
+            throw new ArgumentException("APR_SOLUS_TARGET_PROFILE_UNSUPPORTED");
+        var expected = first.Owner.Registrations;
+        for (var index = 0; index < registrations.Count; index++)
+        {
+            var actual = registrations[index]; var bound = expected[index];
+            if (!ReferenceEquals(actual.Tool, bound.Tool) ||
+                !ReferenceEquals(actual.Capability, bound.Capability) ||
+                !ReferenceEquals(actual.ArgumentCorrection, bound.ArgumentCorrection) ||
+                !ReferenceEquals(actual.Descriptor, bound.Descriptor))
+                throw new ArgumentException("APR_SOLUS_TARGET_PROFILE_UNSUPPORTED");
+        }
+        return SolusToolCorrection.Policy;
+    }
+
     internal bool TryBindCandidateHost(Guid executionId)
     {
         lock (gate)

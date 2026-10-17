@@ -90,28 +90,34 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
         var tools = targets.Tools.ToArray();
         if (tools.Any(tool => tool is null || tool.Recovery is not null))
             throw new ArgumentException("APR_SOLUS_TARGET_PROFILE_UNSUPPORTED");
+        var correction = SolusSnapshotTools.ArgumentCorrectionFor(tools, context.Snapshot);
+        var guarantees = RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds;
+        if (correction is not null) guarantees |= RuntimeGuarantee.ToolArgumentCorrection;
         var bounds = new ProviderExchangeBounds(Cr1DevelopmentProfile.ProviderInputs,
             Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
             Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes,
             Cr1DevelopmentProfile.ContinuationBytes);
         // Compute compatibility from current trusted construction. These hashes
         // reject mismatches; the live context and exact references grant authority.
-        var compatibility = Compatibility(context, targets.Provider, tools, targets.Hooks, bounds);
+        var compatibility = Compatibility(context, targets.Provider, tools, targets.Hooks, bounds, guarantees, correction);
         RuntimeConfiguration? configuration = null;
         bool CurrentTargets() => context.IsLive && configuration is not null &&
             ReferenceEquals(configuration.Provider, targets.Provider) &&
             ReferenceEquals(configuration.Hooks, targets.Hooks) &&
+            ReferenceEquals(configuration.ToolArgumentCorrection, correction) &&
+            configuration.RequiredGuarantees == guarantees &&
             configuration.Provider.Scope.Provider == context.Policy.ProviderId &&
             configuration.Provider.Scope.Model == context.Policy.ModelId &&
             configuration.Tools.Count == tools.Length && tools.Select((tool, index) =>
                 ReferenceEquals(configuration.Tools[index].Tool, tool.Tool) &&
                 ReferenceEquals(configuration.Tools[index].Capability, tool.Capability) &&
+                ReferenceEquals(configuration.Tools[index].ArgumentCorrection, tool.ArgumentCorrection) &&
                 ReferenceEquals(tool.Descriptor, tool.Tool.Descriptor)).All(value => value);
         var authority = new SolusRuntimeContextAuthority(context, compatibility, CurrentTargets);
         try
         {
             configuration = new RuntimeConfiguration(targets.Provider, tools, targets.Hooks, bounds,
-                contextAuthority: authority);
+                requiredGuarantees: guarantees, contextAuthority: authority, toolArgumentCorrection: correction);
             var agent = SolusRuntimeConstruction.Create(configuration, Cr1DevelopmentProfile.Id);
             return new(agent, authority, new(context, compatibility));
         }
@@ -141,13 +147,13 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
 
     private static SolusRestrictedStateCompatibility Compatibility(SolusFreshHostContext context,
         IModelProvider provider, RuntimeToolRegistration[] tools, IRuntimeExposureHooks? hooks,
-        ProviderExchangeBounds bounds)
+        ProviderExchangeBounds bounds, RuntimeGuarantee guarantees, ToolArgumentCorrectionPolicy? correction)
     {
         var runtime = new LineageBinaryWriter(1024 * 1024);
         runtime.WriteString("apr.solus-runtime-configuration.v1");
         runtime.WriteString(Cr1DevelopmentProfile.Id);
         runtime.WriteInt64((long)ExposureStrength.Volatile);
-        runtime.WriteInt64((long)(RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds));
+        runtime.WriteInt64((long)guarantees);
         foreach (var number in new[] { bounds.MaximumInputs, bounds.MaximumTools, bounds.MaximumToolCalls,
             bounds.MaximumRequestBytes, bounds.MaximumResponseBytes, bounds.MaximumContinuationBytes,
             Cr1DevelopmentProfile.RetainedAttempts,
@@ -169,6 +175,23 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
             runtime.WriteInt64((long)descriptor.Effect);
             runtime.WriteInt64(descriptor.MaximumArgumentBytes);
             runtime.WriteInt64(descriptor.MaximumResultBytes);
+        }
+        // Preserve the existing policyless byte sequence. Correction mode binds
+        // fixed semantics and canonical per-tool declarations, never delegates
+        // or transient capability identity; exact references are checked above.
+        if (correction is not null)
+        {
+            runtime.WriteString("apr.solus-argument-correction.v1");
+            runtime.WriteString(correction.Identity);
+            runtime.WriteString(correction.MarkerProperty);
+            runtime.WriteString(correction.SemanticFingerprint);
+            foreach (var tool in tools)
+            {
+                var binding = tool.ArgumentCorrection!;
+                runtime.WriteString(binding.Identity);
+                runtime.WriteInt64(binding.AllowedErrorKeys.Count);
+                foreach (var key in binding.AllowedErrorKeys) runtime.WriteString(key);
+            }
         }
         var options = new LineageBinaryWriter(16 * 1024);
         options.WriteString("apr.solus-provider-configuration.v1");
