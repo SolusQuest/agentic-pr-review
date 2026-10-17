@@ -554,8 +554,25 @@ async function run(name, options = {}) {
       if (options.unbound || options.wrongRef || options.wrongRepository)
         assert.equal(requests.length, 0);
       if (options.unbound) assert.match(publicText, /No release payload has been authorized/u);
-      if (options.unsupportedRuntime || options.payloadSubstitution)
-        assert.ok(records.some((record) => record.kind === 'resource-fault' && record.applied));
+      if (options.unsupportedRuntime || options.payloadSubstitution) {
+        const target = options.payloadSubstitution ? 'verified-nonentry' : 'runtime-prerequisite';
+        const fault = records.find(
+          (record) => record.kind === 'resource-fault' && record.target === target,
+        );
+        assert.ok(
+          fault?.applied,
+          JSON.stringify({
+            case: name,
+            faultErrorCodes: records
+              .filter((record) => record.kind === 'resource-fault-error')
+              .map((record) => record.code),
+          }),
+        );
+        if (options.payloadSubstitution) {
+          assert.equal(fault.originalMode, 0o400);
+          assert.equal(fault.restoredMode, fault.originalMode);
+        }
+      }
     } else if (options.failedExec) {
       assert.ok(spawned);
       assert.equal(spawned.executedCommand, '/definitely-absent-d4-host-exec');

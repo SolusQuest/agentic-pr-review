@@ -80,11 +80,33 @@ fs.promises.rm = async (...args) => {
       const original = fs.readFileSync(member);
       const changed = Buffer.from(original);
       changed[changed.length - 1] ^= 1;
-      fs.writeFileSync(member, changed);
+      const originalMode = fs.statSync(member).mode & 0o777;
+      // D2 makes verified files 0400. The explicit owner-controlled test fault
+      // must also work as the non-root hosted runner, then restore that mode.
+      try {
+        fs.chmodSync(member, originalMode | 0o200);
+        try {
+          fs.writeFileSync(member, changed);
+        } finally {
+          fs.chmodSync(member, originalMode);
+        }
+      } catch (error) {
+        log({
+          kind: 'resource-fault-error',
+          target: 'verified-nonentry',
+          code:
+            typeof error.code === 'string' && /^[A-Z_]+$/u.test(error.code)
+              ? error.code
+              : 'fixture_fault_failed',
+        });
+        throw error;
+      }
       log({
         kind: 'resource-fault',
         target: 'verified-nonentry',
         applied: !fs.readFileSync(member).equals(original),
+        originalMode,
+        restoredMode: fs.statSync(member).mode & 0o777,
       });
     }
   }
