@@ -5,8 +5,11 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.Application.Solus;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.Execution.Solus;
 using AgenticPrReview.Runtime.Solus;
 using SolusAgent.Api.Context;
+using SolusAgent.Runtime.Api.Providers;
 
 namespace AgenticPrReview.Runtime.SolusFreshHostProof;
 
@@ -21,6 +24,7 @@ internal static class Program
             Proof.Require(OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture ==
                 System.Runtime.InteropServices.Architecture.X64, "linux_x64");
             using var corpus = new Corpus(args.Length == 1 ? args[0] : "runtime/tests/fixtures/agent/r5/quality/bundle");
+            ValidateProviderWrappers(corpus);
             await DefaultProviderPath(corpus);
             foreach (var id in Corpus.Cases) await QualityCase(corpus, id);
             await CaptureCases(corpus);
@@ -38,6 +42,29 @@ internal static class Program
                 (exception is ProofFailure failure ? failure.Code : "unexpected_" + Proof.Stage));
             return 1;
         }
+    }
+
+    private static void ValidateProviderWrappers(Corpus corpus)
+    {
+        Proof.Stage = "provider_validation_forwarding";
+        using var handler = new ScriptedHandler(corpus, "cs-safe");
+        using var provider = new SolusDeepSeekAdapter(DeepSeekCredential.Create(HostFixture.ProviderKey),
+            new SolusReviewFacts(Guid.NewGuid(), SolusReviewBridge.BoundBudget(null)), handler);
+        IProviderRequestValidation[] validators = [provider, new MeteredProvider(provider), new ExportFailure(provider)];
+        ProviderRequest Request(ProviderScope scope) => new(scope,
+            new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+            [ProviderInput.Instruction("fixed test instructions"), ProviderInput.Data("synthetic data")]);
+        foreach (var validator in validators)
+        {
+            Proof.Require(validator.ValidateRequest(Request(provider.Scope)) == ProviderError.None,
+                "delegated_valid_request_admission");
+            Proof.Require(validator.ValidateRequest(Request(new("wrong-provider", "deepseek-flash"))) ==
+                ProviderError.InvalidAssociation && handler.Sends == 0, "delegated_invalid_request_no_dispatch");
+        }
+        provider.Dispose();
+        foreach (var validator in validators)
+            Proof.Require(validator.ValidateRequest(Request(provider.Scope)) == ProviderError.ProviderFailed &&
+                handler.Sends == 0, "delegated_actual_provider_refusal_no_dispatch");
     }
 
     private static async Task DefaultProviderPath(Corpus corpus)
