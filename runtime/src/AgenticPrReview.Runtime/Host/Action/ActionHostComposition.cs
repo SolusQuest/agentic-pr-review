@@ -894,7 +894,8 @@ internal sealed class ActionHostComposition
                     .ConfigureAwait(false)
                 : null;
             if (OperatingSystem.IsLinux() && contextExclusion is null)
-                return Completion(launch, ActionHostStatus.InternalFailure, StateWasAccessed: false);
+                return Completion(launch, journal.ObserveCancellation(cancellationToken)
+                    ? journal.CancellationStatus : ActionHostStatus.InternalFailure, StateWasAccessed: false);
             using var freshSolusTargets = contextExclusion is null ? null :
                 SolusFreshHostContext.TryCreate(restoreRequest, snapshot, contextExclusion);
 
