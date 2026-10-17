@@ -102951,6 +102951,7 @@ var TERMINATION_REASONS = [
   "request_limit",
   "response_limit",
   "context_limit",
+  "resource_limit",
   "invalid_result",
   "host_failure"
 ];
@@ -103667,4 +103668,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 5dec75ab284c7567ee81b0bc8f58e0b41198ab3589bb371f61336a9db2c3f2b5
+// Action source inventory sha256: de2512d5352fb5dfac6cf4d10b78ebb0b8dd4e29bab63b552a0db0dedb1cf1e8
