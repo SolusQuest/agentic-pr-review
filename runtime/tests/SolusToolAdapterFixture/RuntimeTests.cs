@@ -60,6 +60,8 @@ internal static class RuntimeTests
             new(Proof.Request(injectedExecution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), injectedHost);
         Proof.Check(injectedHost.TryComplete(injected, out _) && injectedProvider.Calls == 2 && injectedExecutor.Invocations == 1);
 
+        await DiffEof(fixture);
+
         Proof.Stage = "actual-runtime-correction-atomic";
         foreach (var reverse in new[] { false, true })
         foreach (var schemaInvalid in new[] { false, true })
@@ -72,6 +74,47 @@ internal static class RuntimeTests
         await RejectedFinal(fixture);
         Proof.Stage = "actual-context-restore-current-evidence";
         await Restore(fixture, sink.Context!, result.Context.Checkpoint!, tools.CurrentObservations[3].ObservationId);
+    }
+
+    private static async Task DiffEof(SnapshotFixture fixture)
+    {
+        Proof.Stage = "actual-runtime-diff-eof-capture-restore";
+        var execution = Guid.NewGuid(); var (tools, executor) = fixture.Tools(execution);
+        var provider = new Provider((request, n) =>
+        {
+            if (n == 1) return Proof.Response(request, [new("eof", "read_diff", "{\"path\":\"changed.cs\",\"start_hunk\":2}")]);
+            var data = request.Inputs.Single(i => i.ToolResult is not null);
+            using var document = System.Text.Json.JsonDocument.Parse(data.ToolResult!.Json!);
+            Proof.Check(data.Kind == ProviderInputKind.ToolResultData && document.RootElement.GetProperty("status").GetString() == "eof");
+            Proof.Check(tools.CurrentObservations.Single().ReturnedLines.Count == 0);
+            return Proof.Response(request, []);
+        });
+        var host = new SolusReviewCandidateHost(execution, tools); var sink = new Sink();
+        var result = await Proof.Agent(Proof.Configuration(tools, provider)).ExecuteCandidatesWithContextAsync(
+            new(Proof.Request(execution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), host, sink);
+        Proof.Check(host.TryComplete(result, out var review) && review!.Findings.Length == 0 && provider.Calls == 2 && executor.Invocations == 1);
+        Proof.Check(sink.Context is not null && result.Context.Checkpoint is not null);
+        var observation = tools.CurrentObservations.Single();
+        var restoredExecution = Guid.NewGuid(); var (restoredTools, restoredExecutor) = fixture.Tools(restoredExecution);
+        var grant = new ContextRoundGrant(Guid.NewGuid(), result.Context.Checkpoint!, restoredExecution, Guid.NewGuid());
+        var authority = new Authority(sink.Context!, grant);
+        var restoredProvider = new Provider((request, _) =>
+        {
+            var data = request.Inputs.Single(i => i.ToolResult is not null);
+            using var document = System.Text.Json.JsonDocument.Parse(data.ToolResult!.Json!);
+            Proof.Check(data.ToolResult.IsHistorical && data.Kind == ProviderInputKind.ToolResultData &&
+                document.RootElement.GetProperty("status").GetString() == "eof");
+            Proof.Check(restoredTools.CurrentObservations.Length == 0 &&
+                AgentToolArguments.TryFinishReviewProvider(Proof.Grounded(observation.ObservationId), out var prior) &&
+                !TerminalReviewValidator.TryValidate(prior!, restoredTools.Identity, restoredTools.CurrentObservations, out _));
+            return Proof.Response(request, []);
+        });
+        var restoredHost = new SolusReviewCandidateHost(restoredExecution, restoredTools);
+        var restored = await Proof.Agent(Proof.Configuration(restoredTools, restoredProvider, authority)).ExecuteCandidatesWithContextAsync(
+            new(Proof.Request(restoredExecution), ContextExecutionIntent.NewRunFromContext, sink.Context, grant),
+            SolusReviewCandidateHost.Bounds(), restoredHost);
+        Proof.Check(restoredHost.TryComplete(restored, out var restoredReview) && restoredReview!.Findings.Length == 0 &&
+            restoredProvider.Calls == 1 && restoredExecutor.Invocations == 0 && restoredTools.CurrentObservations.Length == 0);
     }
 
     private static async Task Correction(SnapshotFixture fixture, bool reverse, bool schemaInvalid)

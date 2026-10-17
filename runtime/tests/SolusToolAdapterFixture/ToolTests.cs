@@ -21,6 +21,7 @@ internal static class ToolTests
         Catalog();
         using var fixture = new SnapshotFixture();
         Construction(fixture);
+        await ResultStatuses(fixture);
         Proof.Stage = "five-tools-schemas-history";
         var (tools, executor) = fixture.Tools(Guid.NewGuid());
         Proof.Check(tools.Registrations.Count == 5 && !tools.Registrations.Any(r => r.Descriptor.Name == "finish_review"));
@@ -79,6 +80,65 @@ internal static class ToolTests
         var result = await r.Tool.InvokeAsync(preparation.Prepared!, call, r.Capability, token);
         if (result.Json is not null) Proof.MaxResult = Math.Max(Proof.MaxResult, Encoding.UTF8.GetByteCount(result.Json));
         return result;
+    }
+
+    private static async Task ResultStatuses(SnapshotFixture fixture)
+    {
+        Proof.Stage = "complete-result-statuses-and-history";
+        Proof.Check(fixture.Snapshot.TryGetDiffSource("changed.cs", out var original));
+        Proof.Check(fixture.Snapshot.TryGetChangedFile("changed.cs", out var change));
+        foreach (var status in new[] { "ok", "empty", "eof", "unavailable", "binary" })
+        {
+            var source = status is "ok" or "eof" ? original : status == "empty"
+                ? new ReviewedDiffSource(fixture.Snapshot.Identity, "changed.cs", null, "modified", false, []) : null;
+            var snapshot = new ReviewedSnapshot(fixture.Snapshot.Identity, fixture.Root, ["changed.cs"],
+                [change! with { Additions = source?.RepresentedAdditions ?? 0, Deletions = source?.RepresentedDeletions ?? 0,
+                    Changes = (source?.RepresentedAdditions ?? 0) + (source?.RepresentedDeletions ?? 0),
+                    PatchStatus = source is null ? status : "available", PatchSha256 = source?.PatchSha256,
+                    SourceTruncated = source?.SourceTruncated ?? false }], source is null ? [] : [source]);
+            var executor = new CountingExecutor(new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()));
+            var tools = new SolusSnapshotTools(Guid.NewGuid(), snapshot, executor);
+            var call = new ToolCall("diff_" + status, "read_diff", "{\"path\":\"changed.cs\",\"start_hunk\":" +
+                (status == "eof" ? "2" : "1") + "}");
+            Proof.Check(SolusToolCorrection.TryParse(call, out var parsed, out _));
+            var native = await new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()).ExecuteAsync(parsed!, default);
+            Proof.Check(native.Succeeded && native.CanonicalResult is not null);
+            var result = await Invoke(tools, call);
+            Proof.Check(result.Outcome == ToolOutcome.Succeeded && result.InvocationStarted && result.Call.Matches(call));
+            Proof.Check(result.Json == Encoding.UTF8.GetString(native.CanonicalResult!));
+            using var document = JsonDocument.Parse(result.Json!);
+            var root = document.RootElement;
+            Proof.Check(root.GetProperty("status").GetString() == status);
+            var observation = tools.CurrentObservations.Single();
+            Proof.Check(observation.ObservationId == native.Observation!.ObservationId);
+            var descriptor = tools.Registrations.Single(r => r.Descriptor.Name == "read_diff").Descriptor;
+            var historical = ToolResult.RestoreHistorical(descriptor, call, result.Call,
+                result.Outcome, result.Error, result.InvocationStarted, result.Json);
+            Proof.Check(historical.IsHistorical && historical.Json == result.Json && executor.Invocations == 1);
+            Proof.Reject(() => ToolResult.RestoreHistorical(descriptor, call, call, result.Outcome, result.Error, true,
+                result.Json!.Replace("\"status\":\"" + status + "\"", "\"status\":\"unsupported\"", StringComparison.Ordinal)));
+            Proof.Reject(() => ToolResult.RestoreHistorical(descriptor, call, call, result.Outcome, result.Error, true,
+                result.Json![..^1] + ",\"unknown\":true}"));
+            if (status == "ok") Proof.Check(observation.ReturnedLines["changed.cs"].SetEquals([1, 2]));
+            else
+            {
+                Proof.Check(root.GetProperty("hunks").GetArrayLength() == 0 &&
+                    root.GetProperty("returned_start_hunk").ValueKind == JsonValueKind.Null &&
+                    root.GetProperty("returned_end_hunk").ValueKind == JsonValueKind.Null &&
+                    root.GetProperty("next_start_hunk").ValueKind == JsonValueKind.Null && !root.GetProperty("truncated").GetBoolean());
+                Proof.Check(observation.ReturnedLines.Count == 0 && !TerminalReviewValidator.TryValidate(
+                    ParseFinal(Proof.Grounded(observation.ObservationId)), tools.Identity, tools.CurrentObservations, out _));
+            }
+        }
+        // The other multi-status result family must preserve its empty EOF page too.
+        var (fileTools, _) = fixture.Tools(Guid.NewGuid());
+        var fileCall = new ToolCall("file_eof", "read_file", "{\"path\":\"changed.cs\",\"start_line\":4}");
+        var file = await Invoke(fileTools, fileCall);
+        using var fileDocument = JsonDocument.Parse(file.Json!);
+        Proof.Check(file.Outcome == ToolOutcome.Succeeded && fileDocument.RootElement.GetProperty("status").GetString() == "start_after_eof" &&
+            fileTools.CurrentObservations.Single().ReturnedLines.Count == 0);
+        var fileDescriptor = fileTools.Registrations.Single(r => r.Descriptor.Name == "read_file").Descriptor;
+        Proof.Check(ToolResult.RestoreHistorical(fileDescriptor, fileCall, file.Call, file.Outcome, file.Error, true, file.Json).IsHistorical);
     }
 
     private static async Task Guards(SnapshotFixture fixture)

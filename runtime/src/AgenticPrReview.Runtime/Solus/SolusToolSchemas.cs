@@ -58,7 +58,7 @@ internal static class SolusToolSchemas
                 ("text", Text)), AgentLimits.SearchMatches)),
             ("truncated", Flag), ("truncation_reason", NullableText), ("observation_id", Text)),
         AgentToolRegistry.ReadDiffName => Object(
-            ("status", Enum("ok", "empty", "unavailable", "binary")), ("reviewed_identity", Identity),
+            ("status", Enum("ok", "empty", "eof", "unavailable", "binary")), ("reviewed_identity", Identity),
             ("path", Text), ("patch_sha256", NullableText), ("source_truncated", Flag),
             ("requested_start_hunk", Positive), ("requested_hunk_count", Integer(1, AgentLimits.ReadDiffHunks)),
             ("returned_start_hunk", NullableLine), ("returned_end_hunk", NullableLine),
