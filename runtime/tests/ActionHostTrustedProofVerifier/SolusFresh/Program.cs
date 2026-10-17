@@ -14,6 +14,7 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        AppDomain.CurrentDomain.FirstChanceException += ObserveBoundaryFault;
         try
         {
             foreach (var key in new[] { "GITHUB_TOKEN", "GH_TOKEN", "NUGET_AUTH_TOKEN", "NuGetPackageSourceCredentials_solus" })
@@ -37,6 +38,32 @@ internal static class Program
                 (exception is ProofFailure failure ? failure.Code : "unexpected_" + Proof.Stage));
             return 1;
         }
+        finally { AppDomain.CurrentDomain.FirstChanceException -= ObserveBoundaryFault; }
+    }
+
+    // This controlled, credential-free fixture observes only closed source-authored
+    // failure identifiers. Exception text, stacks and provider content stay private.
+    private static void ObserveBoundaryFault(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs args)
+    {
+        var code = args.Exception.Message switch {
+            "APR_SOLUS_REVIEW_AUTHORITY" => "review_authority",
+            "APR_SOLUS_EXECUTION_INVALID" => "execution_identity",
+            "APR_SOLUS_TARGET_AUTHORITY" => "construction_authority",
+            "APR_SOLUS_TARGET_PROFILE_UNSUPPORTED" => "construction_profile",
+            "APR_SOLUS_PROFILE_UNSUPPORTED" => "runtime_profile",
+            "APR_SOLUS_REVIEW_ALREADY_USED" => "review_reused",
+            "APR_SOLUS_FRESH_OUTCOME" => "fresh_outcome",
+            _ => args.Exception switch {
+                ArgumentNullException => "argument_null",
+                ArgumentOutOfRangeException => "argument_range",
+                ArgumentException => "argument",
+                InvalidCastException => "invalid_cast",
+                NotSupportedException => "not_supported",
+                InvalidOperationException => "invalid_operation",
+                _ => null,
+            },
+        };
+        if (code is not null) Proof.BoundaryFault = code;
     }
 
     private static async Task QualityCase(Corpus corpus, string id)
@@ -56,7 +83,8 @@ internal static class Program
                 "_work_" + result.Work?.Termination + "_runtime_" + result.Work?.RuntimeReason +
                 "_admission_" + result.Context?.Admission + "_capture_" + result.Context?.CaptureStatus +
                 "_terminal_" + result.TerminalAccepted + "_sends_" + handler.Sends +
-                "_observations_" + result.Observations.Length + "_transport_" + handler.FailureCode).ToLowerInvariant());
+                "_observations_" + result.Observations.Length + "_transport_" + handler.FailureCode +
+                "_boundary_" + Proof.BoundaryFault).ToLowerInvariant());
         Proof.Require(handler.Sends == handler.Turns && handler.Sends <= 6, "script_complete_" + id);
         if (code == "Scored")
         {
@@ -305,6 +333,7 @@ internal static class Proof
 {
     internal static int Checks, Sends;
     internal static string Stage = "startup";
+    internal static string BoundaryFault = "none";
     internal static void Require(bool condition, string code)
     { Interlocked.Increment(ref Checks); if (!condition) throw new ProofFailure(code); }
     internal static readonly string[] DecisiveFacts = [
