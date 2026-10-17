@@ -98,7 +98,7 @@ try
             Proof.Require(later.ExitCode == 10 && (await later.StandardOutput.ReadToEndAsync()).StartsWith("DENIED", StringComparison.Ordinal), "third_process_spent");
         }
         var negatives = 0;
-        foreach (var variant in new[] { "valid", "payload", "grant", "checkpoint", "execution", "round", "disposed", "expired", "snapshot-replaced", "exclusion-disposed", "source-work", "source-round", "source-execution" })
+        foreach (var variant in new[] { "valid", "near-expiry", "payload", "grant", "checkpoint", "execution", "round", "disposed", "expired", "snapshot-replaced", "exclusion-disposed", "source-work", "source-round", "source-execution" })
         {
             var root = Path.Join(parent, variant);
             Directory.CreateDirectory(root);
@@ -108,6 +108,7 @@ try
                 fixture.Request with { SolusSourceSelection = fixture.Runtime.SourceSelection }, default);
             using var source = selection.SolusSource;
             Proof.Require(source is not null, "sequential_source");
+            if (variant == "near-expiry") fixture.Clock.Now = source!.Selection.Current.Generation.PreparedExpiresAtUnixSeconds - 1;
             using var consumed = await source!.PrepareAsync(Guid.NewGuid(), Guid.NewGuid(), default);
             Proof.Require(consumed is not null && fixture.Provider.Imports == 0 && fixture.Provider.Calls == 0 && fixture.Tool.Calls == 0, "consume_without_effects");
             Proof.Require(fixture.Runtime.TryArm(consumed!, out var context, out var grant), "sequential_arm");
@@ -136,7 +137,7 @@ try
             var host = new CandidateHost();
             var result = await ((IContextCandidateAgent)fixture.Runtime.Agent).ExecuteCandidatesWithContextAsync(
                 new(Proof.Request(grant!.ExecutionId), ContextExecutionIntent.NewRunFromContext, context, grant), new(1, 0, 0), host);
-            if (variant == "valid")
+            if (variant is "valid" or "near-expiry")
                 Proof.Require(consumed!.WasClaimed && fixture.Provider.Imports > 0 && fixture.Provider.Calls == 2 && fixture.Tool.Calls == 1 && host.Calls == 1 && result.Context.Outcome?.IsCompleted == true, "legitimate_fresh_targets");
             else
             {
@@ -219,6 +220,28 @@ try
             Proof.Require(rotated.Provider.Imports == 0 && rotated.Provider.Calls == 0 && rotated.Tool.Calls == 0, "key_denial_no_effects");
             negatives++;
         }
+        {
+            var root = Path.Join(parent, "early-compatibility"); Directory.CreateDirectory(root);
+            await using var fixture = await Fixture.OpenAsync(root, default);
+            var invalid = fixture.Runtime.SourceSelection with
+            {
+                Compatibility = fixture.Runtime.SourceSelection.Compatibility with { PackageVersion = "unsupported" },
+            };
+            var denied = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                fixture.Request with { SolusSourceSelection = invalid }, default);
+            using var source = denied.SolusSource;
+            Proof.Require(source is null && fixture.Dependencies.StoreCreates == 0 &&
+                fixture.Provider.Imports == 0 && fixture.Provider.Calls == 0 && fixture.Tool.Calls == 0, "early_compatibility_no_store");
+            var entered = false;
+            try
+            {
+                using var duplicate = SolusRuntimeConstruction.CreateForAuthorizedReview(fixture.Targets, _ =>
+                { entered = true; throw new InvalidOperationException(); });
+                throw new ProofFailure("duplicate_construction_accepted");
+            }
+            catch (ArgumentException) { Proof.Require(!entered, "duplicate_construction_no_callback"); }
+            negatives++;
+        }
         Console.WriteLine($"APR_SOLUS_CONTEXT_PROOF negative_checks={negatives} races=2 winners=2 import_burn=true third_process_spent=true credential_free=true http_calls=0");
         return 0;
     }
@@ -251,6 +274,7 @@ sealed class Fixture : IAsyncDisposable
 {
     internal required ArtifactStateRestoreRequest Request { get; init; }
     internal required FixtureClock Clock { get; init; }
+    internal required FixtureDependencies Dependencies { get; init; }
     internal required LocalRestrictedStateStore Store { get; init; }
     internal required SolusContextExclusion Exclusion { get; init; }
     internal required SolusFreshHostContext Targets { get; init; }
@@ -299,8 +323,9 @@ sealed class Fixture : IAsyncDisposable
             producingRun: new(launch.RunId.ToString(CultureInfo.InvariantCulture), launch.RunAttempt),
             objectIdFactory: () => new(((BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8)) & (ulong)LineageFormat.MaximumJavaScriptInteger) | 1UL).ToString(CultureInfo.InvariantCulture)));
         var clock = new FixtureClock();
+        var dependencies = new FixtureDependencies(store, github);
         var request = new ArtifactStateRestoreRequest(launch, invocation, materialized.Policy!, review!,
-            DeepSeekReasoningContinuationCodec.Instance, new Dependencies(store, github), clock);
+            DeepSeekReasoningContinuationCodec.Instance, dependencies, clock);
         var exclusion = await SolusContextExclusion.AcquireInvocationAsync(request, token);
         Proof.Require(exclusion is not null, "gate");
         var targets = SolusFreshHostContext.TryCreate(request, built.Lease, exclusion!);
@@ -312,7 +337,7 @@ sealed class Fixture : IAsyncDisposable
             tool = new();
             return new(provider, [new RuntimeToolRegistration(tool, new SnapshotCapability(context))], new Hooks());
         });
-        return new() { Clock = clock, Request = request, Store = store, Exclusion = exclusion!, Targets = targets!, Runtime = runtime,
+        return new() { Dependencies = dependencies, Clock = clock, Request = request, Store = store, Exclusion = exclusion!, Targets = targets!, Runtime = runtime,
             Provider = provider!, Tool = tool!, Snapshot = built.Lease, Tree = treeResult.Snapshot!, Staging = staging };
     }
 
@@ -462,9 +487,10 @@ sealed class Fixture : IAsyncDisposable
         Directory.Delete(Staging, recursive: true);
     }
 
-    private sealed class Dependencies(IRestrictedStateStore store, FullPathGitHubFactory github) : IAcceptedStateProductionDependencies
+    internal sealed class FixtureDependencies(IRestrictedStateStore store, FullPathGitHubFactory github) : IAcceptedStateProductionDependencies
     {
-        public IRestrictedStateStore CreateArtifactStore(ActionHostLaunchContract launch) => store;
+        internal int StoreCreates;
+        public IRestrictedStateStore CreateArtifactStore(ActionHostLaunchContract launch) { StoreCreates++; return store; }
         public IActionHostGitObjectTransport CreateAncestryTransport(ActionHostGitHubToken token) => github.CreateExactObjectTransport(token);
     }
     private sealed class SeedKeys(LocatorContext locator, AuthorizedLocatorAccess authority) : IRestrictedStateKeyResolver
