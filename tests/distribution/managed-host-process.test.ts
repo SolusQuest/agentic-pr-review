@@ -631,7 +631,7 @@ describe.runIf(actualProof)(
       expect(body.framework).toBe(
         path.join(
           fixture.runtime,
-          'shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll',
+          `shared/Microsoft.NETCore.App/${fixture.frameworkVersion}/System.Private.CoreLib.dll`,
         ),
       );
       expect(body.env).toEqual(managedChildEnvironment(c.tempRoot));

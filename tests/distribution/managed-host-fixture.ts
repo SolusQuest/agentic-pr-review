@@ -164,6 +164,12 @@ export async function buildLoaderFixture() {
       for (const name of await readdir(named)) await ownRuntimeCopy(path.join(named, name));
   };
   await ownRuntimeCopy(runtime);
+  const installedFrameworks = (await readdir(path.join(runtime, 'shared/Microsoft.NETCore.App')))
+    .filter((version) => /^10\.0\.(0|[1-9][0-9]*)$/.test(version))
+    .sort((left, right) => Number(right.split('.')[2]) - Number(left.split('.')[2]));
+  const frameworkVersion = installedFrameworks[0];
+  if (!frameworkVersion || Number(frameworkVersion.split('.')[2]) < 9)
+    throw new Error('compatible_runtime_fixture_missing');
   const emptyFeed = path.join(root, 'empty-feed');
   await mkdir(emptyFeed);
   const source = path.resolve('tests/distribution/managed-loader');
@@ -247,6 +253,7 @@ export async function buildLoaderFixture() {
       workspace,
       marker,
       runtime,
+      frameworkVersion,
       verified,
       poison,
       hook: path.join(hook, 'StartupHook.dll'),
