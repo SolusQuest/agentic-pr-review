@@ -185,18 +185,64 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     }
 
     [Fact]
-    public void OutputsGoldenPreservesPriorFactsExceptOutputMetricAndDerivedSourceCommitment()
+    public void OutputsGoldenPreservesPriorFactsWithExactContextClaimCensusDeltas()
     {
         var root = FindRepositoryRoot();
         var prior = File.ReadAllText(Path.Join(root, "runtime", "tests", "fixtures", "action-host", "r7-session-capacity", "expected-evidence.json.golden"));
         var current = File.ReadAllText(Path.Join(root, "runtime", "tests", "fixtures", "action-host", "r7-action-outputs", "expected-evidence.json.golden"));
-        using var priorDocument = JsonDocument.Parse(prior);
-        using var currentDocument = JsonDocument.Parse(current);
-        var priorDigest = priorDocument.RootElement.GetProperty("source_inventory_digest").GetString()!;
-        var currentDigest = currentDocument.RootElement.GetProperty("source_inventory_digest").GetString()!;
-        Assert.NotEqual(priorDigest, currentDigest);
-        Assert.Equal(prior.Replace("output_file_unchanged", "outputs_match_summary", StringComparison.Ordinal)
-            .Replace(priorDigest, currentDigest, StringComparison.Ordinal), current);
+        var expected = JsonNode.Parse(prior.Replace("output_file_unchanged", "outputs_match_summary", StringComparison.Ordinal))!;
+        var actual = JsonNode.Parse(current)!;
+        Assert.NotEqual(expected["source_inventory_digest"]!.GetValue<string>(),
+            actual["source_inventory_digest"]!.GetValue<string>());
+        expected["source_inventory_digest"] = actual["source_inventory_digest"]!.GetValue<string>();
+
+        // One empty context_claim list per completed scoped census. The three
+        // populated-inventory cases have 565 background artifacts and six pages;
+        // every other affected case has one page. These are finite trace-derived
+        // increments, not exclusions from the historical comparison.
+        (string Name, int Censuses, int Pages)[] increments =
+        [
+            ("dispatch-bootstrap", 56, 6),
+            ("dispatch-continuation", 88, 6),
+            ("dispatch-cross-head-conflict", 1, 1),
+            ("artifact-delayed-visibility", 58, 6),
+            ("artifact-upload-outcome-unknown", 56, 1),
+            ("artifact-delete-outcome-unknown", 56, 1),
+            ("workflow-run", 56, 1),
+            ("delete-exact", 56, 1),
+            ("inline", 56, 1),
+            ("inline-warning", 56, 1),
+            ("stale-head", 4, 1),
+            ("provider-malformed", 4, 1),
+            ("public-result", 4, 1),
+            ("credentials-missing", 4, 1),
+            ("crash-mutation", 21, 1),
+            ("crash-recovery", 37, 1),
+            ("cancel-before-dispatch", 7, 1),
+            ("cancel-known-commit", 33, 1),
+            ("cancel-outcome-unknown", 51, 1),
+        ];
+        Assert.Equal(704, increments.Sum(value => value.Censuses));
+        foreach (var (name, censuses, _) in increments)
+        {
+            var scenario = Assert.Single(expected["scenarios"]!.AsArray(),
+                value => value!["name"]!.GetValue<string>() == name)!;
+            scenario["StateOperations"] = scenario["StateOperations"]!.GetValue<int>() + censuses;
+        }
+        var conditionalRequests = increments.Sum(value => value.Censuses * value.Pages);
+        Assert.Equal(1714, conditionalRequests);
+        foreach (var field in new[] { "rest", "rest_not_modified", "rest_secondary_points" })
+            expected["official_bridge"]![field] = expected["official_bridge"]![field]!.GetValue<int>() + conditionalRequests;
+
+        // Independent full-trace replay: removing the 88 empty tenth-class list
+        // rows and renumbering first-seen identities reproduces the old bytes and
+        // digest. With those rows present, the canonical SHA-256 is fixed below.
+        Assert.Equal("cd65ca1767ee6134cbcf0be82b06923b7a19f64f4988e88762e3698075677370",
+            expected["continuation"]!["state_identity_digest"]!.GetValue<string>());
+        expected["continuation"]!["state_identity_digest"] =
+            "7cf174b62656c3b08fff62ddc74c5d6a1c7af8a9eeffd30a19b5ef5f36871573";
+        Assert.True(JsonNode.DeepEquals(expected, actual),
+            "Every historical field must match after only the exact census-derived increments.");
     }
 
     [Fact]

@@ -66,6 +66,7 @@
   </ItemGroup>
   <ItemGroup Condition="'$(APRManagedPackage)' != 'true'">
     <Compile Remove="Solus/**/*.cs" />
+    <Compile Remove="Execution/Solus/**/*.cs" />
   </ItemGroup>
   <Target Name="ValidateSolusManagedProfile" BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences;PrepareForBuild"
           Condition="'$(APRManagedPackage)' == 'true'">

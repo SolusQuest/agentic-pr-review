@@ -54,6 +54,17 @@ internal sealed class ProviderUsageObservation
         return new(input, output, hit, miss);
     }
 
+    // A validated provider can report an input subset while its parent count
+    // is unavailable. Keep that independent fact; presentation must still
+    // admit the resulting lower bounds. The native Create policy is unchanged.
+    internal static ProviderUsageObservation FromIndependentMeasurements(
+        long? input, long? output, long? hit, long? miss)
+    {
+        var core = Create(input, output);
+        return core.InputTokens.HasValue ? Create(input, output, hit, miss)
+            : new(core.InputTokens, core.OutputTokens, Nonnegative(hit), Nonnegative(miss));
+    }
+
     private static long? Nonnegative(long? value) => value >= 0 ? value : null;
     public override string ToString() => "provider_usage_observation";
 }
