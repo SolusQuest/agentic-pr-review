@@ -67,12 +67,15 @@ internal sealed class HostFixture : IDisposable
     internal Task<ActionHostPreparedResult<SolusFreshReviewResult>> Run(ScriptedHandler handler,
         IRestrictedContextSink? sink = null, CancellationToken token = default,
         Func<IModelProvider, IModelProvider>? decorator = null,
-        Func<ReviewedSnapshot, IReviewedFileAccess>? files = null) =>
-        new SolusFreshReviewComposition(Host, () => handler, provider => {
+        Func<ReviewedSnapshot, IReviewedFileAccess>? files = null, bool metered = true)
+    {
+        Func<IModelProvider, IModelProvider>? wrap = !metered ? null : provider => {
             Meter = new MeteredProvider(provider);
             return decorator?.Invoke(Meter) ?? Meter;
-        }, files).RunAsync(Launch, sink, token,
+        };
+        return new SolusFreshReviewComposition(Host, () => handler, wrap, files).RunAsync(Launch, sink, token,
             [new(SolusAgent.Api.Execution.AgentInputSource.Repository, handler.Focus)]);
+    }
     internal void AssertEffectsAbsent()
     {
         Proof.Require(Effects.Calls == 0, "zero_state_publication_native_runner_calls");
@@ -129,12 +132,13 @@ internal sealed class RestrictedSink(bool failAfterCopy = false) : IRestrictedCo
 
 // Trusted fixture-only failure at actual runtime capture, after real provider
 // work. No package result or Host work outcome is mocked.
-internal sealed class ExportFailure(IModelProvider inner) : IModelProvider, IProviderContextPersistence
+internal sealed class ExportFailure(IModelProvider inner) : IModelProvider, IProviderContextPersistence, IProviderRequestValidation
 {
     public ProviderScope Scope => inner.Scope;
     public ProviderCapabilities Capabilities => inner.Capabilities;
     public ValueTask<ProviderExchangeResult> ExchangeAsync(ProviderRequest request, CancellationToken cancellationToken = default) =>
         inner.ExchangeAsync(request, cancellationToken);
+    public ProviderError ValidateRequest(ProviderRequest request) => ((IProviderRequestValidation)inner).ValidateRequest(request);
     public ProviderSavedState? ExportContext(ProviderContextBinding binding) =>
         throw new InvalidOperationException("R5_PRIVATE_EXPORT_EXCEPTION_CANARY");
     public bool AdmitContext(ProviderContextBinding binding, ProviderSavedState state) => false;
@@ -142,7 +146,7 @@ internal sealed class ExportFailure(IModelProvider inner) : IModelProvider, IPro
 
 // Numeric witness around the real R4 adapter; all exchanges and persistence
 // delegate unchanged. No response, continuation or source bytes are retained.
-internal sealed class MeteredProvider(IModelProvider inner) : IModelProvider, IProviderContextPersistence
+internal sealed class MeteredProvider(IModelProvider inner) : IModelProvider, IProviderContextPersistence, IProviderRequestValidation
 {
     internal int MaxRequestBytes, MaxResponseBytes, MaxInputs;
     public ProviderScope Scope => inner.Scope;
@@ -155,6 +159,7 @@ internal sealed class MeteredProvider(IModelProvider inner) : IModelProvider, IP
         MaxResponseBytes = Math.Max(MaxResponseBytes, result.Response?.PayloadByteCount ?? 0);
         return result;
     }
+    public ProviderError ValidateRequest(ProviderRequest request) => ((IProviderRequestValidation)inner).ValidateRequest(request);
     public ProviderSavedState? ExportContext(ProviderContextBinding binding) => ((IProviderContextPersistence)inner).ExportContext(binding);
     public bool AdmitContext(ProviderContextBinding binding, ProviderSavedState state) => ((IProviderContextPersistence)inner).AdmitContext(binding, state);
 }
