@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Server, Socket } from 'node:net';
@@ -16,6 +16,8 @@ export interface ArtifactBridgeRuntime {
   readonly endpoint: string;
   readonly stagingRoot: string;
   readonly tempRoot: string;
+  /** Managed callers require this capability before launching a child. */
+  sealAdmission?(): void;
   stopAndDrain(): Promise<void>;
   cleanup(): Promise<void>;
 }
@@ -23,9 +25,29 @@ export interface ArtifactBridgeRuntime {
 export async function startArtifactBridgeRuntime(input: {
   readonly buildDiscriminator: string;
   readonly executorFactory: (stagingRoot: string) => Promise<ArtifactBridgeExecutor>;
+  readonly runnerStorage?: { readonly runnerTemp: string; readonly workspace: string };
 }): Promise<ArtifactBridgeRuntime> {
   if (process.platform !== 'linux') fail('wrapper_platform_unsupported');
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'apr-w1-'));
+  let parent = tmpdir();
+  if (input.runnerStorage) {
+    const { runnerTemp, workspace } = input.runnerStorage;
+    if (!path.isAbsolute(runnerTemp) || !path.isAbsolute(workspace)) fail('wrapper_bridge_invalid');
+    parent = await realpath(runnerTemp);
+    const reviewedWorkspace = await realpath(workspace);
+    if (parent === reviewedWorkspace || parent.startsWith(reviewedWorkspace + path.sep))
+      fail('wrapper_bridge_invalid');
+    for (let ancestor = parent; ; ancestor = path.dirname(ancestor)) {
+      const storage = await lstat(ancestor);
+      if (
+        !storage.isDirectory() ||
+        (storage.uid !== 0 && storage.uid !== process.getuid?.()) ||
+        ((storage.mode & 0o022) !== 0 && !(storage.uid === 0 && (storage.mode & 0o1000) !== 0))
+      )
+        fail('wrapper_bridge_invalid');
+      if (path.dirname(ancestor) === ancestor) break;
+    }
+  }
+  const tempRoot = await mkdtemp(path.join(parent, 'apr-w1-'));
   await chmod(tempRoot, 0o700);
   const endpoint = path.join(tempRoot, 'bridge.sock');
   if (Buffer.byteLength(endpoint, 'utf8') > SOCKET_PATH_LIMIT) {
@@ -77,14 +99,19 @@ export async function startArtifactBridgeRuntime(input: {
   }
   let stopped = false;
   let cleaned = false;
+  const sealAdmission = (): void => {
+    // Do not stop admitted reconciliation, seal tracked SDK calls or release storage here.
+    executorAccepting = false;
+  };
   return {
     endpoint,
     stagingRoot,
     tempRoot,
+    sealAdmission,
     stopAndDrain: async () => {
       if (stopped) return;
       stopped = true;
-      executorAccepting = false;
+      sealAdmission();
       // Close listener admission and executor command admission together.
       // Existing connections may finish framing while the socket drain runs,
       // but their executor calls now fail before any lifecycle work starts.
@@ -95,6 +122,7 @@ export async function startArtifactBridgeRuntime(input: {
     cleanup: async () => {
       if (cleaned) return;
       cleaned = true;
+      sealAdmission();
       try {
         await lazyExecutor.dispose?.();
       } finally {

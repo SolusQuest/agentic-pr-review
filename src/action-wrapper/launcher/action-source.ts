@@ -4,13 +4,20 @@ import { request as httpsRequest } from 'node:https';
 import path from 'node:path';
 
 import { readBoundedFile } from '../../../scripts/release/build-payload.format.mjs';
-import { parsePayloadMap, PAYLOAD_REPOSITORY } from './payload-map.js';
+import {
+  MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES,
+  parseManagedPayloadMap,
+  parsePayloadMap,
+  PAYLOAD_REPOSITORY,
+} from './payload-map.js';
 import type { RepositoryTestPayloadTransport } from './release-payload.js';
 import { parseStrictJson } from './strict-json.js';
 import { fail, lowerHex } from './validation.js';
 
 const ACTION_PATH = '.github/actions/agentic-pr-review';
 const METADATA_LIMIT = 256 * 1024;
+// GitHub's object response includes Base64 content for a <=1 MiB map.
+const MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
 const installedFiles = [
   ['action.yml', 64 * 1024],
   ['payload-map.json', 16 * 1024],
@@ -29,23 +36,37 @@ export interface InstalledActionSourceRequest {
 export async function resolveInstalledActionSource(
   request: InstalledActionSourceRequest,
 ): Promise<string> {
-  return resolve(request, (url, options, callback) => httpsRequest(url, options, callback));
+  return resolve(request, (url, options, callback) => httpsRequest(url, options, callback), false);
+}
+
+/** The ordinary managed Action selects this capability explicitly, never by fallback. */
+export async function resolveInstalledManagedActionSource(
+  request: InstalledActionSourceRequest,
+): Promise<string> {
+  return resolve(request, (url, options, callback) => httpsRequest(url, options, callback), true);
 }
 
 /** Explicit repository transport seam; no input/environment selects it in the product. */
 export function createRepositoryTestActionSourceResolver(
   transport: RepositoryTestPayloadTransport,
 ): typeof resolveInstalledActionSource {
-  return (request) => resolve(request, transport);
+  return (request) => resolve(request, transport, false);
+}
+
+export function createRepositoryTestManagedActionSourceResolver(
+  transport: RepositoryTestPayloadTransport,
+): typeof resolveInstalledManagedActionSource {
+  return (request) => resolve(request, transport, true);
 }
 
 async function resolve(
   request: InstalledActionSourceRequest,
   transport: RepositoryTestPayloadTransport,
+  managed: boolean,
 ): Promise<string> {
   const { actionRoot, actionRepository, actionRef, signal } = request;
   const mapBytes = Buffer.from(request.mapBytes);
-  const map = parsePayloadMap(mapBytes);
+  const map = managed ? parseManagedPayloadMap(mapBytes) : parsePayloadMap(mapBytes);
   if (
     actionRepository !== PAYLOAD_REPOSITORY ||
     !path.isAbsolute(actionRoot) ||
@@ -66,11 +87,14 @@ async function resolve(
           ),
         ).sha;
     if (!lowerHex(source, 40)) fail('wrapper_action_source_invalid');
-    for (const [relative, maximum] of installedFiles) {
+    for (const [relative, nativeMaximum] of installedFiles) {
+      const managedMap = managed && relative === 'payload-map.json';
+      const maximum = managedMap ? MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES : nativeMaximum;
       const bytes =
         relative === 'payload-map.json'
           ? mapBytes
           : await readBoundedFile(path.join(actionRoot, relative), maximum);
+      if (bytes.length > maximum) fail('wrapper_action_source_invalid');
       signal.throwIfAborted();
       const info = record(
         await metadata(
@@ -78,6 +102,7 @@ async function resolve(
           'application/vnd.github.object+json',
           transport,
           signal,
+          managedMap ? MANAGED_MAP_METADATA_LIMIT : METADATA_LIMIT,
         ),
       );
       const blobSha = createHash('sha1')
@@ -104,6 +129,7 @@ async function metadata(
   accept: 'application/vnd.github+json' | 'application/vnd.github.object+json',
   transport: RepositoryTestPayloadTransport,
   signal: AbortSignal,
+  maximum = METADATA_LIMIT,
 ): Promise<unknown> {
   signal.throwIfAborted();
   const response: IncomingMessage = await new Promise((resolveResponse, reject) => {
@@ -131,8 +157,7 @@ async function metadata(
       response.headers.link !== undefined ||
       (response.headers['content-encoding'] !== undefined &&
         response.headers['content-encoding'] !== 'identity') ||
-      (declared !== undefined &&
-        (!/^[1-9][0-9]*$/u.test(declared) || Number(declared) > METADATA_LIMIT))
+      (declared !== undefined && (!/^[1-9][0-9]*$/u.test(declared) || Number(declared) > maximum))
     ) {
       fail('wrapper_action_source_invalid');
     }
@@ -141,11 +166,11 @@ async function metadata(
     for await (const value of response) {
       const bytes = Buffer.from(value as Uint8Array);
       size += bytes.length;
-      if (size > METADATA_LIMIT) fail('wrapper_action_source_invalid');
+      if (size > maximum) fail('wrapper_action_source_invalid');
       chunks.push(bytes);
     }
     if (!response.complete || size === 0) fail('wrapper_action_source_invalid');
-    return parseStrictJson(Buffer.concat(chunks, size), METADATA_LIMIT);
+    return parseStrictJson(Buffer.concat(chunks, size), maximum);
   } finally {
     response.destroy();
   }

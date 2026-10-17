@@ -1,6 +1,6 @@
 # Internal fresh Solus review
 
-CR1-R5 provides the compiled `Application/Solus/SolusFreshReviewComposition` entry. The ordinary Action route remains native until R6. There is no public CLI, Action input or environment selector for this entry.
+CR1-R5 provides the compiled `Application/Solus/SolusFreshReviewComposition` entry. The ordinary Action uses D4's managed package while retaining the APR-native review engine until R6. There is no public CLI, Action input or environment selector for this entry.
 
 The entry shares `ActionHostComposition` preparation: event authorization, trusted exact-object policy, immutable tree and bounded snapshot, Host deadline and live exclusion authority. Its continuation runs before native selected-current restoration. The default continuation retains existing restoration, publisher and bounded recovery. Fresh execution does not access accepted state, fabricate a native SESSION, or invoke GitHub mutations.
 

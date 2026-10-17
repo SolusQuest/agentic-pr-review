@@ -1,5 +1,5 @@
 name: Agentic PR Review
-description: Run the exact Native AOT review payload authorized by this Action's release map.
+description: Run the exact managed review payload authorized by this Action's release map.
 inputs:
   github-token:
     description: GitHub token supplied only to supported trusted routes.

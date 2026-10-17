@@ -667,6 +667,18 @@ describe('CR1 authorized actual APR private package proof route', () => {
         ).with.path = '${{ runner.temp }}/apr-solus-facts/packages';
       },
     ],
+    ...(['credential', 'unverified cache', 'bypassed'] as const).map((mutation) => [
+      'managed generated Action ' + mutation,
+      (w: any) => {
+        const step = w.jobs['install-proof'].steps.find(
+          (item: any) =>
+            item.name === 'CR1 actual generated managed Action and official bridge proof',
+        );
+        if (mutation === 'credential') step.env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+        else if (mutation === 'unverified cache') step.env.NUGET_PACKAGES = '/tmp/unverified';
+        else step.if = 'false';
+      },
+    ]),
     [
       'producer bypassed',
       (w: any) => {
