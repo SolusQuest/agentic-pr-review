@@ -74,6 +74,7 @@ try
     Directory.CreateDirectory(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     try
     {
+        await R3AuthorizedToolsTests.Run(parent);
         foreach (var sameGrant in new[] { true, false })
         {
             var root = Path.Join(parent, sameGrant ? "same-grant" : "different-grants");
