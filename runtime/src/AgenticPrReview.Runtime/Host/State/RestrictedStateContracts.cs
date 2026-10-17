@@ -394,3 +394,100 @@ internal sealed record RestrictedStateHandoffReceipt(
 internal sealed record RestrictedStateHandoffResult(
     StateResult Result,
     RestrictedStateHandoffReceipt? Receipt);
+
+// CR1-S1 is additive: no current SESSION/store caller selects this record.
+internal static class SolusRestrictedStateFormat
+{
+    internal const string Magic = "APRSOL01";
+    internal const ushort Version = 1;
+    internal const string PackageVersion = "0.1.0-internal.1";
+    internal const string Profile = "cr1-solus-internal1-dev";
+    internal const string PackageClosureSha256 =
+        "954b5183b4160f833827c410114e1031a5194dfeea31e21b2a05e7266e2098ee";
+    internal const string RecordDomain = "apr.solus-state.cr1";
+    internal const int MaximumPayloadBytes = 196_608;
+    internal const byte CompletedCandidateMode = 1;
+    internal static readonly Guid Implementation =
+        new("3f520f02-3b59-431e-8acf-a62544f28760");
+    internal const int ContextFormat = 1;
+    internal const int ContextCompatibility = 1;
+}
+
+// These fingerprints are supplied from current trusted Host configuration,
+// never chosen from the record. Their materialization belongs to integration.
+internal sealed record SolusRestrictedStateCompatibility(
+    string PackageVersion,
+    string Profile,
+    byte Mode,
+    Guid ImplementationId,
+    int FormatVersion,
+    int CompatibilityVersion,
+    string PackageClosureSha256,
+    string RuntimeConfigurationSha256,
+    string ProviderConfigurationSha256)
+{
+    public override string ToString() => nameof(SolusRestrictedStateCompatibility);
+}
+
+internal sealed record SolusRestrictedStateCheckpoint(
+    Guid CheckpointId,
+    Guid LogicalWorkId,
+    Guid RoundId,
+    Guid ExecutionId);
+
+// A structural value is not proof of authentication, runtime grammar, an
+// exclusive claim, product acceptance, or durable persistence.
+internal sealed class SolusRestrictedStateRecord
+{
+    private readonly byte[] payload;
+
+    private SolusRestrictedStateRecord(
+        SolusRestrictedStateCompatibility compatibility,
+        SolusRestrictedStateCheckpoint checkpoint,
+        ReadOnlySpan<byte> payload)
+    {
+        Compatibility = compatibility;
+        Checkpoint = checkpoint;
+        this.payload = payload.ToArray();
+    }
+
+    internal SolusRestrictedStateCompatibility Compatibility { get; }
+    internal SolusRestrictedStateCheckpoint Checkpoint { get; }
+    internal int PayloadByteCount => payload.Length;
+    internal ReadOnlySpan<byte> RestrictedPayload => payload;
+    internal byte[] CopyRestrictedPayload() => payload.ToArray();
+
+    internal static bool TryCreate(
+        SolusRestrictedStateCompatibility compatibility,
+        SolusRestrictedStateCheckpoint checkpoint,
+        ReadOnlySpan<byte> payload,
+        out SolusRestrictedStateRecord? record)
+    {
+        record = null;
+        if (payload.Length is < 1 or > SolusRestrictedStateFormat.MaximumPayloadBytes ||
+            !SolusRestrictedStateAdmission.IsSupported(compatibility) ||
+            !SolusRestrictedStateAdmission.IsValidCheckpoint(checkpoint))
+        {
+            return false;
+        }
+
+        record = new(compatibility, checkpoint, payload);
+        return true;
+    }
+
+    public override string ToString() => nameof(SolusRestrictedStateRecord);
+}
+
+internal enum SolusRestrictedStateFailure
+{
+    None,
+    AccessDenied,
+    Malformed,
+    Oversized,
+    Incompatible,
+    LineageMismatch,
+    Expired,
+    KeyUnavailable,
+    AuthenticationFailed,
+    CaptureInvalid,
+}
