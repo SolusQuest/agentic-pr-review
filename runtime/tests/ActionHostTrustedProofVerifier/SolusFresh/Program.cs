@@ -24,6 +24,7 @@ internal static class Program
             Proof.Require(OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture ==
                 System.Runtime.InteropServices.Architecture.X64, "linux_x64");
             using var corpus = new Corpus(args.Length == 1 ? args[0] : "runtime/tests/fixtures/agent/r5/quality/bundle");
+            VerifyInventoryCounter();
             ValidateProviderWrappers(corpus);
             await DefaultProviderPath(corpus);
             foreach (var id in Corpus.Cases) await QualityCase(corpus, id);
@@ -299,6 +300,30 @@ internal static class Program
             Proof.Require(!ordinary.Contains(canary, StringComparison.Ordinal), "ordinary_sinks_private");
     }
 
+    // Numeric metadata only; this never admits or fabricates runtime context.
+    private static (int Total, int Ordinary, int Candidates, int Recovery) CountRetainedRecords(JsonElement context)
+    {
+        var ordinary = context.GetProperty("Records").GetArrayLength();
+        var candidates = 0;
+        if (context.TryGetProperty("Candidates", out var ledger) && ledger.ValueKind != JsonValueKind.Null)
+            candidates = checked(ledger.GetProperty("Episodes").GetArrayLength() +
+                ledger.GetProperty("Submissions").GetArrayLength());
+        var recovery = 0;
+        foreach (var round in context.GetProperty("Rounds").EnumerateArray())
+            if (round.TryGetProperty("RecoveryActions", out var actions) && actions.ValueKind != JsonValueKind.Null)
+                recovery = checked(recovery + actions.GetArrayLength());
+        return (checked(ordinary + candidates + recovery), ordinary, candidates, recovery);
+    }
+
+    private static void VerifyInventoryCounter()
+    {
+        // Independent cardinalities include nonzero recovery metadata, which the
+        // current read-only fresh route does not produce. This is no envelope.
+        using var packet = JsonDocument.Parse("{\"Records\":[0,0,0],\"Candidates\":{\"Episodes\":[0]," +
+            "\"Submissions\":[0,0]},\"Rounds\":[{\"RecoveryActions\":[0]},{\"RecoveryActions\":[0]}]}");
+        Proof.Require(CountRetainedRecords(packet.RootElement) == (8, 3, 3, 2), "complete_inventory_counter");
+    }
+
     private static void Emit(Corpus corpus, string id, string evaluation, SolusFreshReviewResult result,
         ScriptedHandler handler, RestrictedSink sink, MeteredProvider meter)
     {
@@ -306,8 +331,14 @@ internal static class Program
         var retainedRecords = 0; var retainedAttempts = 0;
         if (sink.Bytes is not null)
         {
+            sink.AssertMatches(result);
             using var context = JsonDocument.Parse(sink.Bytes);
-            retainedRecords = context.RootElement.GetProperty("Records").GetArrayLength();
+            var inventory = CountRetainedRecords(context.RootElement);
+            retainedRecords = inventory.Total;
+            Proof.Require(inventory.Candidates >= 2 && retainedRecords >= checked(inventory.Ordinary + 2),
+                "candidate_metadata_charged");
+            if (id == "cs-defect")
+                Proof.Require(inventory == (14, 12, 2, 0), "fixed_actual_candidate_inventory");
             retainedAttempts = context.RootElement.GetProperty("Rounds").EnumerateArray()
                 .Sum(round => round.GetProperty("Facts").GetArrayLength());
         }
