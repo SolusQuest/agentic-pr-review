@@ -847,6 +847,16 @@ function validateSolusAgentInstallWorkflow(workflow) {
             run: 'npm test -- tests/distribution/release-payload.test.ts --maxWorkers=2 --minWorkers=1',
           },
           {
+            name: 'CR1 actual APR managed loader proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              APR_CR1_MANAGED_LOADER_PROOF: '1',
+              APR_CR1_MANAGED_APR_LOADER_PROOF: '1',
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'npm test -- tests/distribution/managed-host-process.test.ts --maxWorkers=2 --minWorkers=1',
+          },
+          {
             name: 'Retain only sanitized identity and lock metadata',
             uses: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
             with: {
