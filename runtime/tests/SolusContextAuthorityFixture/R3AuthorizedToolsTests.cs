@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
@@ -12,6 +13,7 @@ using SolusAgent.Api.Capabilities;
 using SolusAgent.Api.Candidates;
 using SolusAgent.Api.Context;
 using SolusAgent.Api.Execution;
+using SolusAgent.Api.Usage;
 using SolusAgent.Runtime.Api.Configuration;
 using SolusAgent.Runtime.Api.Exposure;
 using SolusAgent.Runtime.Api.Providers;
