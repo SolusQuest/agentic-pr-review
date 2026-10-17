@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { inspectPackage, sha256 } from '../../scripts/release/build-payload.format.mjs';
+import { readGeneratedActionAudit as audit } from './generated-action-audit.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.arch, 'x64');
@@ -49,13 +50,6 @@ function outputs(source) {
     result[name] = lines[index + 1];
   }
   return result;
-}
-async function audit(path) {
-  return (await readFile(path, 'utf8').catch(() => ''))
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
 }
 async function until(predicate, timeout = 15_000) {
   const end = performance.now() + timeout;
@@ -307,7 +301,7 @@ async function run(name, options = {}) {
     }
     const exit = await closed;
     assert.equal(exit.signal, null);
-    const records = await audit(auditPath),
+    const records = await audit(auditPath, { settled: true }),
       spawned = records.find((record) => record.kind === 'spawn');
     const actual = outputs(await readFile(output, 'utf8'));
     const summaryText = await readFile(summary, 'utf8');

@@ -53,7 +53,16 @@ describe('Solus proof subprocess credential boundary', () => {
   for (const mode of ['collect', 'verify']) {
     it.each(
       mode === 'verify'
-        ? ['success', 'early-git', 'restore', 'build', 'unzip', 'late-git', 'import']
+        ? [
+            'success',
+            'early-git',
+            'restore',
+            'build',
+            'unzip',
+            'source-commit',
+            'late-git',
+            'import',
+          ]
         : ['success', 'early-git', 'restore', 'import'],
     )('%s ' + mode + ' confines credentials to authenticated restore', (scenario) => {
       const { result, events } = exercise(mode, scenario);
@@ -70,13 +79,14 @@ describe('Solus proof subprocess credential boundary', () => {
         restore: 'authenticated-restore',
         build: 'build',
         unzip: 'unzip',
+        'source-commit': 'unzip',
         'late-git': 'git:status --porcelain',
       };
       if (scenario !== 'success') expect(events.at(-1)?.stage).toBe(failureStage[scenario]);
       if (scenario === 'success') {
         expect(events.some((e) => e.stage === 'authenticated-restore')).toBe(true);
         if (mode === 'verify') {
-          expect(events.filter((e) => e.stage === 'unzip')).toHaveLength(5);
+          expect(events.filter((e) => e.stage === 'unzip')).toHaveLength(10);
           expect(events.filter((e) => e.stage === 'git:status --porcelain')).toHaveLength(2);
           expect(events.some((e) => e.stage === 'startup')).toBe(true);
         }

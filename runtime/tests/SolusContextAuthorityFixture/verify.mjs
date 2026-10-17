@@ -49,7 +49,7 @@ try {
       const failures = (result.stderr || '')
         .split(/\r?\n/)
         .filter((line) =>
-          /^APR_SOLUS_CONTEXT_(?:PHASE [a-z-]+|FAILED [A-Za-z]+(?: [a-z_]+)?)$/.test(line),
+          /^APR_SOLUS_CONTEXT_(?:PHASE [a-z0-9-]+|FAILED [A-Za-z]+(?: [a-z0-9_]+)?)$/.test(line),
         )
         .slice(0, 4);
       console.error(
@@ -102,7 +102,7 @@ try {
   ]);
   const proof = run([join(output, 'AgenticPrReview.Runtime.SolusContextAuthorityFixture.dll')]);
   check(
-    /^APR_SOLUS_CONTEXT_PROOF negative_checks=23 races=3 winners=3 shared_lease=true pending_checks=3 import_burn=true third_process_spent=true credential_free=true http_calls=0\s*$/.test(
+    /^APR_SOLUS_CONTEXT_PROOF negative_checks=23 races=3 winners=3 shared_lease=true pending_checks=3 import_burn=true third_process_spent=true credential_free=true http_calls=0 authorized_r3=true correction_variants=21 reachable_variants=18 atomic_orders=2 durable_history=true\s*$/.test(
       proof,
     ),
   );

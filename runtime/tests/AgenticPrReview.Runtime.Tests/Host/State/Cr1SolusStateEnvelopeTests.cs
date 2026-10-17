@@ -7,13 +7,15 @@ namespace AgenticPrReview.Runtime.Tests.Host.State;
 public sealed class Cr1SolusStateEnvelopeTests
 {
     // Independently authored Node Buffer/RFC4122 oracle, not C# round-trip output.
-    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuMRcAY3IxLXNvbHVzLWludGVybmFsMS1kZXYBP1IPAjtZQx6Kz6YlRPKHYAEAAAABAAAAlUtRg7QWD4M4J8QQEU4QMaUZTf7qMeIbKgXnJm4gmO4RERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
-    private const string GoldenHash = "4246a4165adb62db2cbc0e2c9c35d58191a40fa536d6e17113dda1d30701788b";
+    private const string HistoricalInternal1Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuMRcAY3IxLXNvbHVzLWludGVybmFsMS1kZXYBP1IPAjtZQx6Kz6YlRPKHYAEAAAABAAAAlUtRg7QWD4M4J8QQEU4QMaUZTf7qMeIbKgXnJm4gmO4RERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
+    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNBcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAreUFzf9ppSaulRCbYlgAQwTntQSy6zt8mx/sOWTXSUkRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
+    private const string GoldenHash = "3dcd06b687f726cfd44ca13ecbe3459d71039ca660ec13b872cc0dbc6efd462e";
     private static readonly byte[] Payload = [0, 255, 128, 192, 65, 10, 123, 125];
 
     private static SolusRestrictedStateCompatibility Compatibility() => new(
         SolusRestrictedStateFormat.PackageVersion, SolusRestrictedStateFormat.Profile, 1,
-        SolusRestrictedStateFormat.Implementation, 1, 1, SolusRestrictedStateFormat.PackageClosureSha256,
+        SolusRestrictedStateFormat.Implementation, SolusRestrictedStateFormat.ContextFormat,
+        SolusRestrictedStateFormat.ContextCompatibility, SolusRestrictedStateFormat.PackageClosureSha256,
         new string('1', 64), new string('2', 64));
 
     private static SolusRestrictedStateCheckpoint Checkpoint() => new(
@@ -51,6 +53,22 @@ public sealed class Cr1SolusStateEnvelopeTests
         Assert.Equal(Checkpoint(), read!.Checkpoint);
         Assert.Equal(Payload, read.CopyRestrictedPayload());
         Assert.Equal(Convert.FromHexString("00112233445566778899aabbccddeeff"), literal.AsSpan(174, 16).ToArray());
+    }
+
+    [Fact]
+    public void HistoricalInternal1RecordCannotSelectAnOlderReaderOrFreshFallback()
+    {
+        var literal = Convert.FromBase64String(HistoricalInternal1Golden);
+        Assert.False(SolusRestrictedStateSnapshotCodec.TryRead(literal, Compatibility(), out var read, out var failure));
+        Assert.Null(read);
+        Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);
+        var access = RestrictedStateTestData.Access(); var binding = RestrictedStateTestData.Binding(); var keys = new TestKeyResolver();
+        Assert.True(RestrictedStateEnvelope.TryEncrypt(access, binding, literal, keys, out var envelope, out _));
+        var lineage = Lineage(binding, envelope!, SolusRestrictedStateSnapshotCodec.RecordSha256(literal));
+        Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, lineage, envelope, Compatibility(),
+            RestrictedStateTestData.Now, keys, out read, out failure));
+        Assert.Null(read);
+        Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);
     }
 
     [Fact]
@@ -95,7 +113,7 @@ public sealed class Cr1SolusStateEnvelopeTests
             1 => expected with { Profile = "other" },
             2 => expected with { Mode = 2 },
             3 => expected with { ImplementationId = Guid.NewGuid() },
-            4 => expected with { FormatVersion = 2 },
+            4 => expected with { FormatVersion = 1 },
             5 => expected with { CompatibilityVersion = 2 },
             6 => expected with { PackageClosureSha256 = new string('a', 64) },
             7 => expected with { RuntimeConfigurationSha256 = "" },

@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { SOLUS_VERSION } from '../../../scripts/release/solus-package-contract.mjs';
 
 const fixture =
   'runtime/tests/SolusProviderAccountingFixture/AgenticPrReview.Runtime.SolusProviderAccountingFixture.csproj';
@@ -93,12 +94,7 @@ try {
     'SolusAgent.Providers.DeepSeek',
   ]) {
     const id = name.toLowerCase();
-    const archive = join(
-      env.NUGET_PACKAGES,
-      id,
-      '0.1.0-internal.1',
-      `${id}.0.1.0-internal.1.nupkg`,
-    );
+    const archive = join(env.NUGET_PACKAGES, id, SOLUS_VERSION, `${id}.${SOLUS_VERSION}.nupkg`);
     const original = spawnSync('/usr/bin/unzip', ['-p', archive, `lib/net10.0/${name}.dll`], {
       env,
       maxBuffer: 64 * 1024 * 1024,

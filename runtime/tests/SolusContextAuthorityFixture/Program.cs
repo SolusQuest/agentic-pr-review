@@ -74,6 +74,7 @@ try
     Directory.CreateDirectory(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     try
     {
+        await R3AuthorizedToolsTests.Run(parent);
         foreach (var sameGrant in new[] { true, false })
         {
             var root = Path.Join(parent, sameGrant ? "same-grant" : "different-grants");
@@ -341,7 +342,7 @@ try
             catch (ArgumentException) { Proof.Require(!entered, "duplicate_construction_no_callback"); }
             negatives++;
         }
-        Console.WriteLine($"APR_SOLUS_CONTEXT_PROOF negative_checks={negatives} races=3 winners=3 shared_lease=true pending_checks=3 import_burn=true third_process_spent=true credential_free=true http_calls=0");
+        Console.WriteLine($"APR_SOLUS_CONTEXT_PROOF negative_checks={negatives} races=3 winners=3 shared_lease=true pending_checks=3 import_burn=true third_process_spent=true credential_free=true http_calls=0 authorized_r3=true correction_variants=21 reachable_variants=18 atomic_orders=2 durable_history=true");
         return 0;
     }
     finally { Directory.Delete(parent, recursive: true); }
@@ -453,19 +454,23 @@ sealed class Fixture : IAsyncDisposable
             Provider = provider!, Tool = tool!, Snapshot = built.Lease, Tree = treeResult.Snapshot!, Staging = staging };
     }
 
-    internal async Task<SolusRestrictedStateRecord> SeedAsync()
+    internal async Task<SolusRestrictedStateRecord> SeedAsync(SolusRestrictedStateRecord? suppliedRecord = null)
     {
         var bootstrap = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(Request, default);
         using var bootstrapContext = bootstrap.Context;
         Proof.Require(bootstrap.IsBootstrap && bootstrapContext is not null &&
             bootstrapContext.TryGetLineageSnapshot(out _), "bootstrap");
         bootstrapContext!.TryGetLineageSnapshot(out var selected);
-        Provider.FailImport = false;
-        var execution = Guid.NewGuid();
-        using var capture = new SolusRestrictedStateCapture(execution, Runtime.SourceSelection.Compatibility);
-        var fresh = await ((IContextCandidateAgent)Runtime.Agent).ExecuteCandidatesWithContextAsync(
-            new(Proof.Request(execution), ContextExecutionIntent.Fresh), new(1, 0, 0), new CandidateHost(), capture);
-        Proof.Require(capture.TryComplete(fresh, out var record) && Provider.Calls == 2 && Tool.Calls == 1, "fresh_capture");
+        var record = suppliedRecord;
+        if (record is null)
+        {
+            Provider.FailImport = false;
+            var execution = Guid.NewGuid();
+            using var capture = new SolusRestrictedStateCapture(execution, Runtime.SourceSelection.Compatibility);
+            var fresh = await ((IContextCandidateAgent)Runtime.Agent).ExecuteCandidatesWithContextAsync(
+                new(Proof.Request(execution), ContextExecutionIntent.Fresh), new(1, 0, 0), new CandidateHost(), capture);
+            Proof.Require(capture.TryComplete(fresh, out record) && Provider.Calls == 2 && Tool.Calls == 1, "fresh_capture");
+        }
         Proof.Require(AcceptedStateProductionAuthorization.TryAuthorize(Request, out var authorization), "seed_authorization");
         var repository = Request.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture);
         using var access = AuthorizedLocatorAccess.Issue(authorization!, repository);

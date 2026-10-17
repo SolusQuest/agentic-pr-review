@@ -5,6 +5,7 @@ export function packageHashes(
   rawHash: string,
 ): { sha256: string; contentHash: string };
 export const SOLUS_VERSION: string;
+export const SOLUS_RELEASE_SOURCE: string;
 export const SOLUS_FEED: string;
 export const PUBLIC_FEED: string;
 export const SOLUS_IDS: readonly string[];
