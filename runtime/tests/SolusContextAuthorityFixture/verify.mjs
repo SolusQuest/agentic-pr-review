@@ -102,7 +102,7 @@ try {
   ]);
   const proof = run([join(output, 'AgenticPrReview.Runtime.SolusContextAuthorityFixture.dll')]);
   check(
-    /^APR_SOLUS_CONTEXT_PROOF negative_checks=23 races=2 winners=2 import_burn=true third_process_spent=true credential_free=true http_calls=0\s*$/.test(
+    /^APR_SOLUS_CONTEXT_PROOF negative_checks=23 races=3 winners=3 shared_lease=true pending_checks=3 import_burn=true third_process_spent=true credential_free=true http_calls=0\s*$/.test(
       proof,
     ),
   );

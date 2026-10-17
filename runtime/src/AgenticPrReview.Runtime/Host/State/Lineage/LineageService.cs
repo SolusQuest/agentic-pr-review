@@ -26,6 +26,23 @@ internal sealed class LineageService
         this.diagnosticSink = diagnosticSink;
     }
 
+    // Read-only subset of RecoverInterruptedTransitionAsync: S2 may only
+    // proceed when no transition or successor cleanup owns further work.
+    internal static bool HasNoPendingTransition(
+        LineageReadOnlyObservationContext observation, LineageResolveRequest request)
+    {
+        if (observation.Snapshot is not { } snapshot ||
+            !snapshot.Unknown.IsEmpty || !snapshot.UnderRetained.IsEmpty ||
+            observation.Selection.Selection is not { } selection) return false;
+        var pending = SelectPendingIntent(snapshot, selection.Head, observation.CurrentKeyId,
+            request.RequiredLogicalExpiresAtUnixSeconds, observation.RequiredPlatformExpiresAtUnixSeconds);
+        if (!pending.Succeeded || pending.Intent is not null) return false;
+        var staleCleanup = FindAuthorizedStaleCleanup(snapshot, selection, pending.Intent);
+        return staleCleanup is not null &&
+            !(selection.Head.Head.Transition is LineageTransitionKind.Expiry or LineageTransitionKind.Reset &&
+                (!staleCleanup.Value.IsEmpty || !selection.SafeToDelete.IsEmpty));
+    }
+
     internal async Task<LineageReadOnlyObservationResult> ObserveReadOnlyAsync(
         LocatorContext context,
         LineageResolveRequest? request,

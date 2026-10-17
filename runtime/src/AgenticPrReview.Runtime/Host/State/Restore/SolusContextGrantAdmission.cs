@@ -143,6 +143,9 @@ internal sealed class SolusContextSource : IDisposable
         // One preparation attempt per live source capability, including unknown outcomes.
         try
         {
+            using var preparation = await Request.Targets.Exclusion.EnterPreparationAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (preparation is null || !IsLive) return null;
             var observed = await new LineageService(store, clock, diagnostics)
                 .ObserveReadOnlyAsync(Locator, lineageRequest, cancellationToken).ConfigureAwait(false);
             using var observation = observed.Context;
@@ -150,6 +153,9 @@ internal sealed class SolusContextSource : IDisposable
                 return null;
             var current = new AcceptedStateSelector(clock).Select(observation, lineageRequest);
             if (!current.Succeeded || current.Selection is not { } selected ||
+                !LineageService.HasNoPendingTransition(observation, lineageRequest) ||
+                !RetainedStateTransactionService.HasNoPendingPublicationWork(inventory, selected,
+                    clock.GetUtcNow().ToUnixTimeSeconds()) ||
                 selected.LineageHead.Header.ObjectIdentity != Selection.LineageHead.Header.ObjectIdentity ||
                 selected.Current.LogicalGenerationIdentity != Selection.Current.LogicalGenerationIdentity ||
                 selected.Current.ReceiptPhysical.Header.ObjectIdentity != Selection.Current.ReceiptPhysical.Header.ObjectIdentity ||

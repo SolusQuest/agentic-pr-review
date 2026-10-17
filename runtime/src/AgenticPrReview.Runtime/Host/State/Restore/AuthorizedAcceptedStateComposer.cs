@@ -892,7 +892,10 @@ internal sealed class AuthorizedAcceptedStateComposer
         using var observation = observed.Context;
         if (!observed.Succeeded || observation is null) return null;
         var selected = new AcceptedStateSelector(timeProvider).Select(observation, lineageRequest);
-        if (!selected.Succeeded || selected.Selection is not { } selection) return null;
+        if (!selected.Succeeded || selected.Selection is not { } selection ||
+            !LineageService.HasNoPendingTransition(observation, lineageRequest) ||
+            !RetainedStateTransactionService.HasNoPendingPublicationWork(observation.Snapshot!, selection,
+                timeProvider.GetUtcNow().ToUnixTimeSeconds())) return null;
         var policy = request.TrustedPolicy;
         var policyBinding = new AcceptedStatePolicyBinding(policy.PolicySha256, policy.ConfigSha256,
             policy.InstructionsSha256, policy.PayloadSha256, policy.PayloadContinuityMode,

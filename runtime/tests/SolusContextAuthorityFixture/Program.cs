@@ -97,6 +97,103 @@ try
             await later.WaitForExitAsync(deadline.Token);
             Proof.Require(later.ExitCode == 10 && (await later.StandardOutput.ReadToEndAsync()).StartsWith("DENIED", StringComparison.Ordinal), "third_process_spent");
         }
+        Proof.Stage = "shared-lease";
+        var sharedRoot = Path.Join(parent, "shared-lease");
+        Directory.CreateDirectory(sharedRoot);
+        await using (var seed = await Fixture.OpenAsync(sharedRoot, default)) await seed.SeedAsync();
+        await using (var fixture = await Fixture.OpenAsync(sharedRoot, default))
+        {
+            var controlled = new PausedUploadStore(fixture.Store);
+            fixture.Dependencies.StoreOverride = controlled;
+            using var targets = SolusFreshHostContext.TryCreate(fixture.Request, fixture.Snapshot, fixture.Exclusion);
+            Proof.Require(targets is not null, "shared_targets");
+            ControlledProvider? provider = null; SnapshotTool? tool = null;
+            using var runtime = SolusRuntimeConstruction.CreateForAuthorizedReview(targets!, context =>
+            {
+                provider = new(context.Policy.ProviderId, context.Policy.ModelId);
+                tool = new();
+                return new(provider, [new RuntimeToolRegistration(tool, new SnapshotCapability(context))], new Hooks());
+            });
+            var firstSelected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                fixture.Request with { SolusSourceSelection = fixture.Runtime.SourceSelection }, default);
+            var secondSelected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                fixture.Request with { SolusSourceSelection = runtime.SourceSelection }, default);
+            using var firstSource = firstSelected.SolusSource;
+            using var secondSource = secondSelected.SolusSource;
+            Proof.Require(firstSource is not null && secondSource is not null, "shared_sources");
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            controlled.Pause = true;
+            var first = firstSource!.PrepareAsync(Guid.NewGuid(), Guid.NewGuid(), deadline.Token);
+            await controlled.Entered.Task.WaitAsync(deadline.Token);
+            var reads = controlled.Reads;
+            var cancelledSelected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                fixture.Request with { SolusSourceSelection = runtime.SourceSelection }, default);
+            var disposedSelected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                fixture.Request with { SolusSourceSelection = runtime.SourceSelection }, default);
+            using var cancelledSource = cancelledSelected.SolusSource;
+            using var disposedSource = disposedSelected.SolusSource;
+            Proof.Require(cancelledSource is not null && disposedSource is not null, "shared_waiter_sources");
+            reads = controlled.Reads;
+            using var cancelled = new CancellationTokenSource();
+            var cancelledPreparation = cancelledSource!.PrepareAsync(Guid.NewGuid(), Guid.NewGuid(), cancelled.Token);
+            cancelled.Cancel();
+            using var cancelledConsumption = await cancelledPreparation;
+            Proof.Require(cancelledConsumption is null && controlled.Reads == reads, "shared_waiter_cancelled");
+            var disposedPreparation = disposedSource!.PrepareAsync(Guid.NewGuid(), Guid.NewGuid(), deadline.Token);
+            disposedSource.Dispose();
+            // Prepare begins synchronously: without a lease-owned gate its first
+            // inventory ListExact enters before this call returns. The first
+            // upload remains suspended until the second preparation has begun.
+            var second = secondSource!.PrepareAsync(Guid.NewGuid(), Guid.NewGuid(), deadline.Token);
+            var serialized = controlled.Reads == reads && !second.IsCompleted;
+            controlled.Release.TrySetResult();
+            using var firstConsumed = await first;
+            using var secondConsumed = await second;
+            using var disposedConsumption = await disposedPreparation;
+            Proof.Require(disposedConsumption is null, "shared_waiter_disposed");
+            Proof.Require(serialized, "shared_lease_serialization");
+            Proof.Require(firstConsumed is not null && secondConsumed is null, "shared_exactly_one");
+            Proof.Require(fixture.Runtime.TryArm(firstConsumed!, out var context, out var grant), "shared_arm");
+            var host = new CandidateHost();
+            _ = await ((IContextCandidateAgent)fixture.Runtime.Agent).ExecuteCandidatesWithContextAsync(
+                new(Proof.Request(grant!.ExecutionId), ContextExecutionIntent.NewRunFromContext, context, grant),
+                new(1, 0, 0), host);
+            Proof.Require(firstConsumed!.WasClaimed && fixture.Provider.Imports == 1 && fixture.Provider.Calls == 0 &&
+                fixture.Tool.Calls == 0 && provider!.Imports == 0 && provider.Calls == 0 && tool!.Calls == 0 && host.Calls == 0,
+                "shared_effects");
+        }
+        File.WriteAllText(Path.Join(sharedRoot, "go"), "go");
+        using (var later = Proof.Start(sharedRoot, "later", Guid.NewGuid(), Guid.NewGuid()))
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            await later.WaitForExitAsync(deadline.Token);
+            Proof.Require(later.ExitCode == 10 && (await later.StandardOutput.ReadToEndAsync()).StartsWith("DENIED", StringComparison.Ordinal),
+                "shared_third_process_spent");
+        }
+        var pendingDenied = true;
+        foreach (var variant in new[] { "pending-candidate", "pending-reset", "pending-expiry" })
+        {
+            Proof.Stage = variant;
+            var root = Path.Join(parent, variant); Directory.CreateDirectory(root);
+            SolusRestrictedStateRecord record;
+            await using (var seed = await Fixture.OpenAsync(root, default)) record = await seed.SeedAsync();
+            await using var fixture = await Fixture.OpenAsync(root, default);
+            var selected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                fixture.Request with { SolusSourceSelection = fixture.Runtime.SourceSelection }, default);
+            using var source = selected.SolusSource;
+            Proof.Require(source is not null, "pending_initial_source");
+            await fixture.InjectInventoryAsync(source!, variant, record);
+            var writes = Directory.GetFiles(Path.Join(root, "state"), "*", SearchOption.AllDirectories).Length;
+            var reselected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                fixture.Request with { SolusSourceSelection = fixture.Runtime.SourceSelection }, default);
+            using var rejectedSource = reselected.SolusSource;
+            using var consumed = await source!.PrepareAsync(Guid.NewGuid(), Guid.NewGuid(), default);
+            pendingDenied &= rejectedSource is null && consumed is null &&
+                writes == Directory.GetFiles(Path.Join(root, "state"), "*", SearchOption.AllDirectories).Length;
+            Proof.Require(fixture.Provider.Imports == 0 && fixture.Provider.Calls == 0 && fixture.Tool.Calls == 0,
+                "pending_no_effects");
+        }
+        Proof.Require(pendingDenied, "pending_work_refused");
         var negatives = 0;
         foreach (var variant in new[] { "valid", "near-expiry", "payload", "grant", "checkpoint", "execution", "round", "disposed", "expired", "snapshot-replaced", "exclusion-disposed", "source-work", "source-round", "source-execution" })
         {
@@ -244,7 +341,7 @@ try
             catch (ArgumentException) { Proof.Require(!entered, "duplicate_construction_no_callback"); }
             negatives++;
         }
-        Console.WriteLine($"APR_SOLUS_CONTEXT_PROOF negative_checks={negatives} races=2 winners=2 import_burn=true third_process_spent=true credential_free=true http_calls=0");
+        Console.WriteLine($"APR_SOLUS_CONTEXT_PROOF negative_checks={negatives} races=3 winners=3 shared_lease=true pending_checks=3 import_burn=true third_process_spent=true credential_free=true http_calls=0");
         return 0;
     }
     finally { Directory.Delete(parent, recursive: true); }
@@ -356,7 +453,7 @@ sealed class Fixture : IAsyncDisposable
             Provider = provider!, Tool = tool!, Snapshot = built.Lease, Tree = treeResult.Snapshot!, Staging = staging };
     }
 
-    internal async Task SeedAsync()
+    internal async Task<SolusRestrictedStateRecord> SeedAsync()
     {
         var bootstrap = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(Request, default);
         using var bootstrapContext = bootstrap.Context;
@@ -436,9 +533,10 @@ sealed class Fixture : IAsyncDisposable
             _ = await Upload(StateObjectClass.Acceptance, receiptBytes);
             CryptographicOperations.ZeroMemory(envelope!);
         }
+        return record!;
     }
 
-    internal async Task InjectInventoryAsync(SolusContextSource source, string variant)
+    internal async Task InjectInventoryAsync(SolusContextSource source, string variant, SolusRestrictedStateRecord? sourceRecord = null)
     {
         Proof.Require(AcceptedStateProductionAuthorization.TryAuthorize(Request, out var authorization), "inventory_authorization");
         var repository = Request.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture);
@@ -466,6 +564,46 @@ sealed class Fixture : IAsyncDisposable
                     kind = StateObjectClass.Acceptance;
                     predecessor = selection.Current.Receipt.PreviousAcceptanceReceiptIdentity; successor = null;
                     Proof.Require(AcceptedStateAcceptanceReceiptCodec.TryEncode(selection.Current.Receipt, out payload), "inventory_receipt");
+                }
+                else if (variant == "pending-candidate")
+                {
+                    kind = StateObjectClass.Candidate;
+                    successor = null;
+                    var policy = Request.TrustedPolicy;
+                    var scope = new RestrictedStateScope(repository, baseScope.TrustedWorkflowIdentity,
+                        Request.Invocation.PullRequest.Number, head.SessionId, policy.ProviderId, policy.ModelId,
+                        policy.AdapterId, policy.InstructionsSha256, policy.LimitsSha256, policy.ToolsetSha256, policy.BuildDiscriminator);
+                    AuthorizedStateAccess.Authorize(new(scope, scope, true, true, false), out var stateAccess);
+                    var binding = new RestrictedStateBinding(scope, generation.ProducerBaseSha, generation.ProducerHeadSha,
+                        generation.Generation + 1, generation.StateEnvelopeSha256, now, generation.PreparedExpiresAtUnixSeconds);
+                    Proof.Require(SolusRestrictedStateSnapshotCodec.TrySeal(stateAccess, binding, sourceRecord!,
+                        new SeedKeys(locator, access!), out var envelope, out var digest, out _), "pending_seal");
+                    var pending = generation with
+                    {
+                        EncryptedStateEnvelope = ImmutableArray.CreateRange(envelope!),
+                        StateEnvelopeSha256 = RestrictedStateEnvelope.EnvelopeSha256(envelope!),
+                        SessionSha256 = digest!, Generation = generation.Generation + 1,
+                        PredecessorEnvelopeSha256 = generation.StateEnvelopeSha256,
+                        PreviousLogicalGenerationIdentity = selection.Current.LogicalGenerationIdentity,
+                        PreparedAtUnixSeconds = now,
+                    };
+                    Proof.Require(AcceptedStateGenerationRecordCodec.TryEncode(pending, out payload), "pending_candidate");
+                    CryptographicOperations.ZeroMemory(envelope!);
+                }
+                else if (variant is "pending-reset" or "pending-expiry")
+                {
+                    var reset = variant == "pending-reset";
+                    kind = reset ? StateObjectClass.Reset : StateObjectClass.ExpiryTransition;
+                    predecessor = head.ObjectIdentity; successor = null;
+                    var targets = ImmutableArray.Create(LineageHeadCodec.Evidence(selection.Current.Physical.Metadata),
+                        LineageHeadCodec.Evidence(selection.Current.ReceiptPhysical.Metadata));
+                    var intent = new LineageTransitionIntentV1(reset ? LineageTransitionIntentKind.Reset : LineageTransitionIntentKind.Expiry,
+                        head.ObjectIdentity, head.Epoch, selection.Current.ReceiptPhysical.Header.ObjectIdentity,
+                        reset ? null : generation.PreparedExpiresAtUnixSeconds,
+                        new(generation.ProducerBaseSha, generation.ProducerHeadSha), LineageCryptography.InventoryDigest(targets), targets,
+                        reset ? Request.Launch.RunId.ToString(CultureInfo.InvariantCulture) : null,
+                        reset ? Request.Launch.RunAttempt : null);
+                    Proof.Require(LineageTransitionIntentCodec.TryEncode(intent, out payload), "pending_transition");
                 }
                 else
                 {
@@ -514,7 +652,8 @@ sealed class Fixture : IAsyncDisposable
     internal sealed class FixtureDependencies(IRestrictedStateStore store, FullPathGitHubFactory github) : IAcceptedStateProductionDependencies
     {
         internal int StoreCreates;
-        public IRestrictedStateStore CreateArtifactStore(ActionHostLaunchContract launch) { StoreCreates++; return store; }
+        internal IRestrictedStateStore? StoreOverride;
+        public IRestrictedStateStore CreateArtifactStore(ActionHostLaunchContract launch) { StoreCreates++; return StoreOverride ?? store; }
         public IActionHostGitObjectTransport CreateAncestryTransport(ActionHostGitHubToken token) => github.CreateExactObjectTransport(token);
     }
     private sealed class SeedKeys(LocatorContext locator, AuthorizedLocatorAccess authority) : IRestrictedStateKeyResolver
@@ -599,4 +738,25 @@ sealed class FixtureFaults
 {
     internal bool BeforeWrite;
     internal bool DirectorySync;
+}
+
+// Real local storage with a deterministic pause immediately before the first
+// claim write. No inventory bytes or authentication outcomes are substituted.
+sealed class PausedUploadStore(IRestrictedStateStore inner) : IRestrictedStateStore
+{
+    internal bool Pause;
+    internal int Reads;
+    internal readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Task<OpaqueStoreListResult> ListExactAsync(OpaqueStoreListRequest request, CancellationToken token)
+    { Interlocked.Increment(ref Reads); return inner.ListExactAsync(request, token); }
+    public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(OpaqueStoreMetadataRequest request, CancellationToken token) => inner.ReadMetadataAsync(request, token);
+    public Task<OpaqueStoreDownloadResult> DownloadAsync(OpaqueStoreDownloadRequest request, CancellationToken token) => inner.DownloadAsync(request, token);
+    public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(OpaqueStoreReadBackRequest request, CancellationToken token) => inner.ReadBackExactAsync(request, token);
+    public Task<OpaqueStoreDeleteResult> DeleteExactAsync(OpaqueStoreDeleteRequest request, CancellationToken token) => inner.DeleteExactAsync(request, token);
+    public async Task<OpaqueStoreUploadResult> UploadImmutableAsync(OpaqueStoreUploadRequest request, CancellationToken token)
+    {
+        if (Pause && Entered.TrySetResult()) await Release.Task.WaitAsync(token);
+        return await inner.UploadImmutableAsync(request, token);
+    }
 }

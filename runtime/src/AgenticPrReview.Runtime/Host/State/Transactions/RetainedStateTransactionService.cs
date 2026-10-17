@@ -29,6 +29,28 @@ internal sealed class RetainedStateTransactionService
         this.issuer = issuer;
     }
 
+    // The no-pending subset of publication recovery admission. Live publication
+    // records, including terminal accepted records, still own reconciliation or
+    // cleanup; S2 refuses them rather than performing those operations itself.
+    internal static bool HasNoPendingPublicationWork(
+        ScopedStateInventorySnapshot snapshot, AcceptedStateSelection selection, long trustedNow)
+    {
+        if (!LineageValidation.IsTime(trustedNow) || !snapshot.Unknown.IsEmpty ||
+            !snapshot.UnderRetained.IsEmpty) return false;
+        var head = selection.LineageHead.Header;
+        var receipt = selection.Current.ReceiptPhysical.Header.ObjectIdentity;
+        if (PublicationCandidateFamilySelector.SelectLive(snapshot.Authenticated, snapshot.Authenticated,
+                head.Epoch, head.SessionId, trustedNow).Any(item =>
+                    StringComparer.Ordinal.Equals(item.Header.PredecessorIdentity, receipt))) return false;
+        return !snapshot.Authenticated.Any(item =>
+            Active(item, head.Epoch, head.SessionId) &&
+            (item.Header.ObjectClass == StateObjectClass.Acceptance &&
+                StringComparer.Ordinal.Equals(item.Header.PredecessorIdentity, receipt) ||
+            item.Header.LogicalExpiresAtUnixSeconds >= trustedNow &&
+                item.Header.ObjectClass is StateObjectClass.PublicationIntent or StateObjectClass.PublicationFailure or
+                    StateObjectClass.Abandonment or StateObjectClass.Cleanup));
+    }
+
     internal async Task<RetainedStateTransactionResult<
         RetainedStatePreparedCandidate>> PrepareAsync(
         RetainedStateTransactionAuthority authority,
@@ -6468,12 +6490,11 @@ internal sealed class RetainedStateTransactionService
     private static bool Active(
         AuthenticatedStateObject item,
         RetainedStateTransactionBinding binding) =>
-        StringComparer.Ordinal.Equals(
-            item.Header.Epoch,
-            binding.SelectedLineage.Epoch) &&
-        StringComparer.Ordinal.Equals(
-            item.Header.SessionId,
-            binding.SelectedLineage.SessionId);
+        Active(item, binding.SelectedLineage.Epoch, binding.SelectedLineage.SessionId);
+
+    private static bool Active(AuthenticatedStateObject item, string epoch, string sessionId) =>
+        StringComparer.Ordinal.Equals(item.Header.Epoch, epoch) &&
+        StringComparer.Ordinal.Equals(item.Header.SessionId, sessionId);
 
     private static bool ActiveAt(
         AuthenticatedStateObject item,

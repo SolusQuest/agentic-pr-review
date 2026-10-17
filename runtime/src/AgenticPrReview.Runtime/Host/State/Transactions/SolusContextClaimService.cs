@@ -11,6 +11,7 @@ namespace AgenticPrReview.Runtime.Host.State.Transactions;
 // lifetime stays live across selection, durable consumption and runtime handoff.
 internal sealed partial class SolusContextExclusion : IDisposable
 {
+    private readonly SemaphoreSlim preparation = new(1, 1);
     private SafeFileHandle? handle;
     private SafeFileHandle? parent;
     private string? invocationScope;
@@ -47,6 +48,23 @@ internal sealed partial class SolusContextExclusion : IDisposable
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or
                 ObjectDisposedException) { return false; }
         }
+    }
+
+    // flock excludes independent owners; this gate also excludes concurrent
+    // preparations borrowing this already-acquired lease.
+    internal async Task<IDisposable?> EnterPreparationAsync(CancellationToken cancellationToken)
+    {
+        if (!IsLive) return null;
+        await preparation.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (IsLive) return new PreparationLease(preparation);
+        preparation.Release();
+        return null;
+    }
+
+    private sealed class PreparationLease(SemaphoreSlim gate) : IDisposable
+    {
+        private SemaphoreSlim? held = gate;
+        public void Dispose() => Interlocked.Exchange(ref held, null)?.Release();
     }
 
     internal bool MatchesInvocation(ArtifactStateRestoreRequest request) =>
@@ -150,6 +168,8 @@ internal sealed partial class SolusContextExclusion : IDisposable
 
     public void Dispose()
     {
+        // Do not dispose the managed gate while borrowers may be waiting. They
+        // recheck IsLive on entry and release it without accessing storage.
         Interlocked.Exchange(ref handle, null)?.Dispose();
         Interlocked.Exchange(ref parent, null)?.Dispose();
     }
