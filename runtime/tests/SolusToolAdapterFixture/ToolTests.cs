@@ -9,7 +9,7 @@ using AgenticPrReview.Runtime.Solus;
 using SolusAgent.Api.Candidates;
 using SolusAgent.Runtime.Api.Configuration;
 using SolusAgent.Runtime.Api.Providers;
-using SolusAgent.Runtime.Startup;
+using SolusRuntimeOptions = SolusAgent.Runtime.Startup.RuntimeOptions;
 using SolusAgent.Tools.Api;
 
 namespace AgenticPrReview.Runtime.SolusToolAdapterFixture;
@@ -238,10 +238,10 @@ internal static class ToolTests
         var configuration = Proof.Configuration(tools, provider);
         Proof.Check(configuration.RequiredGuarantees == (RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds | RuntimeGuarantee.ToolArgumentCorrection));
         Proof.Reject(() => SolusRuntimeConstruction.Create(configuration, "cr1-solus-internal1-dev"));
-        foreach (var options in new[] { new RuntimeOptions(maximumAttempts: 63, requireContinuation: true),
-            new RuntimeOptions(maximumRecords: 63, requireContinuation: true),
-            new RuntimeOptions(maximumRetainedBytes: 196607, requireContinuation: true),
-            new RuntimeOptions(requireContinuation: false), new RuntimeOptions(settlementGrace: TimeSpan.FromSeconds(2), requireContinuation: true) })
+        foreach (var options in new[] { new SolusRuntimeOptions(maximumAttempts: 63, requireContinuation: true),
+            new SolusRuntimeOptions(maximumRecords: 63, requireContinuation: true),
+            new SolusRuntimeOptions(maximumRetainedBytes: 196607, requireContinuation: true),
+            new SolusRuntimeOptions(requireContinuation: false), new SolusRuntimeOptions(settlementGrace: TimeSpan.FromSeconds(2), requireContinuation: true) })
             Proof.Reject(() => SolusRuntimeConstruction.Create(configuration, Cr1DevelopmentProfile.Id, options: options));
         Proof.Check(flagOnly.Calls == 0 && absentFlag.Calls == 0 && provider.Calls == 0 && executor.Invocations == 0);
     }
