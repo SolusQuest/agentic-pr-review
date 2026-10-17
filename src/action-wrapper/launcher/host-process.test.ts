@@ -73,6 +73,28 @@ describe('W1 private Host framing', () => {
     await expect(readSingleFrame(stream, 32)).rejects.toThrow('wrapper_frame_invalid');
   });
 
+  it.each([0, 33])(
+    'rejects declared length %s without waiting for a live stream to end',
+    async (length) => {
+      const stream = new PassThrough();
+      const reading = readSingleFrame(stream, 32);
+      let rejected = false;
+      void reading.catch(() => {
+        rejected = true;
+      });
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(length);
+      try {
+        stream.write(header);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(rejected).toBe(true);
+      } finally {
+        stream.end();
+        await reading.catch(() => {});
+      }
+    },
+  );
+
   it('constructs a closed temp-only child environment without ambient leakage', () => {
     process.env.R4_AMBIENT_SECRET_CANARY = 'must-not-cross';
     expect(closedChildEnvironment('/tmp/apr-private')).toEqual({
