@@ -98,7 +98,7 @@ internal static class RuntimeTests
         var restoredExecution = Guid.NewGuid(); var (restoredTools, restoredExecutor) = fixture.Tools(restoredExecution);
         var grant = new ContextRoundGrant(Guid.NewGuid(), result.Context.Checkpoint!, restoredExecution, Guid.NewGuid());
         var authority = new Authority(sink.Context!, grant);
-        var restoredProvider = new Provider((request, _) =>
+        var restoredProvider = new Provider((request, attempt) =>
         {
             var data = request.Inputs.Single(i => i.ToolResult is not null);
             using var document = System.Text.Json.JsonDocument.Parse(data.ToolResult!.Json!);
