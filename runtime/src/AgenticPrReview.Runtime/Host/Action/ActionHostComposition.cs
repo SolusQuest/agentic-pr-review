@@ -16,6 +16,7 @@ using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Host.State.Transactions;
 
 namespace AgenticPrReview.Runtime.ActionHost;
 
@@ -882,6 +883,22 @@ internal sealed class ActionHostComposition
                     StateWasAccessed: false);
             }
 
+            var restoreRequest = new ArtifactStateRestoreRequest(
+                launch, invocation, policy, reviewContext,
+                DeepSeekReasoningContinuationCodec.Instance,
+                new JournaledAcceptedStateProductionDependencies(dependencies.StateDependencies, journal),
+                timeBudget, dependencies.StateReconciliationDiagnosticSink,
+                timeBudget.LatestAcceptanceUnixSeconds);
+            using var contextExclusion = OperatingSystem.IsLinux()
+                ? await SolusContextExclusion.AcquireInvocationAsync(restoreRequest, cancellationToken)
+                    .ConfigureAwait(false)
+                : null;
+            if (OperatingSystem.IsLinux() && contextExclusion is null)
+                return Completion(launch, journal.ObserveCancellation(cancellationToken)
+                    ? journal.CancellationStatus : ActionHostStatus.InternalFailure, StateWasAccessed: false);
+            using var freshSolusTargets = contextExclusion is null ? null :
+                SolusFreshHostContext.TryCreate(restoreRequest, snapshot, contextExclusion);
+
             if (!journal.TryBeginBusinessOperation(
                     ActionHostOperationKind.StateSetup,
                     cancellationToken,
@@ -898,18 +915,7 @@ internal sealed class ActionHostComposition
             {
                 restored = await RestrictedStateService
                     .RestoreAuthorizedArtifactStateAsync(
-                        new ArtifactStateRestoreRequest(
-                            launch,
-                            invocation,
-                            policy,
-                            reviewContext,
-                            DeepSeekReasoningContinuationCodec.Instance,
-                            new JournaledAcceptedStateProductionDependencies(
-                                dependencies.StateDependencies,
-                                journal),
-                            timeBudget,
-                            dependencies.StateReconciliationDiagnosticSink,
-                            timeBudget.LatestAcceptanceUnixSeconds),
+                        restoreRequest,
                         cancellationToken)
                     .ConfigureAwait(false);
                 restoreOperation!.Resolve(StateOwnerResolution(restored.Code));

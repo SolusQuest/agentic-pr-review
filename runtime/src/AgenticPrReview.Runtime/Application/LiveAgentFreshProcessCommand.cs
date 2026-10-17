@@ -100,6 +100,15 @@ internal static class LiveAgentFreshProcessCommand
         }
         using var authorizedRootScope = authorizedRoot;
 
+        // Linux is the supported Solus claim platform. Native callers sharing
+        // this authorized root participate for their complete read/write lifetime.
+        if (OperatingSystem.IsLinux() && fileSystem is LiveAgentFreshProcessFileSystem disk &&
+            !await disk.AcquireContextExclusionAsync(authorizedRoot, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return Failure(exitCode: 10, LiveAgentFreshProcessCodes.RootInvalid);
+        }
+
         var reviewedRead = fileSystem.ReadReviewedInput(authorizedRoot);
         var manifestRead = fileSystem.ReadSnapshotManifest(authorizedRoot);
         var reviewed = reviewedRead is null

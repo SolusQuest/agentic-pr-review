@@ -195,6 +195,14 @@ internal sealed class ScopedStateInventory
                         LineageCodes.AuthenticationFailed);
                 }
 
+                if (header.ObjectClass == StateObjectClass.ContextClaim &&
+                    (!SolusContextClaimRecordCodec.TryDecode(payload, out var claim) ||
+                        claim is null || !SolusContextClaimRecordCodec.MatchesHeader(claim, header)))
+                {
+                    CryptographicOperations.ZeroMemory(payload);
+                    return ScopedStateInventoryResult.Fail(LineageCodes.AuthenticationFailed);
+                }
+
                 if (item.Metadata.ExpiresAtUnixSeconds <
                     header.RequiredPlatformExpiresAtUnixSeconds)
                 {

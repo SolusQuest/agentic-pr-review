@@ -760,6 +760,7 @@ internal sealed class RetainedStatePersistence
         StateObjectClass.ExpiryTransition =>
             StateReconciliationOwner.ExpiryTransition,
         StateObjectClass.Cleanup => StateReconciliationOwner.Cleanup,
+        StateObjectClass.ContextClaim => StateReconciliationOwner.ContextClaim,
         _ => throw new ArgumentOutOfRangeException(nameof(objectClass)),
     };
 
