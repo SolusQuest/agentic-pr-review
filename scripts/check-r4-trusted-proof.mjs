@@ -857,6 +857,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             run: 'npm test -- tests/distribution/managed-host-process.test.ts --maxWorkers=2 --minWorkers=1',
           },
           {
+            name: 'CR1 actual generated managed Action and official bridge proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'node tests/distribution/verify-managed-action.mjs',
+          },
+          {
             name: 'Retain only sanitized identity and lock metadata',
             uses: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
             with: {
