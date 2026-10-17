@@ -17,13 +17,17 @@ internal sealed class SolusReviewFacts
     private readonly Dictionary<Guid, RuntimeExposure> exposures = [];
     private readonly Dictionary<Guid, ProviderFinish?> finishes = [];
     private readonly List<SolusAttemptFact> settled = [];
-    private long uncached, cached, output;
-    private bool frozen, missingCore, refused;
+    private static readonly long ProfileInputLimit = Math.Min(Cr1DevelopmentProfile.InputTokenThreshold, Cr1DevelopmentProfile.InputTokenAllowance);
+    private long uncached, cached, output, totalInput;
+    private bool frozen, missingCore, refused, budgetStopped, hostStopped;
     private ProviderAccounting? projection;
 
     internal SolusReviewFacts(Guid executionId, ReviewTokenBudget budget)
     {
-        if (executionId == Guid.Empty || !budget.IsValid) throw new ArgumentException("APR_SOLUS_REVIEW_POLICY");
+        if (executionId == Guid.Empty || !budget.IsValid ||
+            budget.UncachedInputTokens > Cr1DevelopmentProfile.InputTokenAllowance ||
+            budget.CachedInputTokens > Cr1DevelopmentProfile.InputTokenAllowance ||
+            budget.OutputTokens > Math.Min(Cr1DevelopmentProfile.OutputTokenThreshold, Cr1DevelopmentProfile.OutputTokenAllowance)) throw new ArgumentException("APR_SOLUS_REVIEW_POLICY");
         ExecutionId = executionId;
         this.budget = budget;
     }
@@ -31,9 +35,11 @@ internal sealed class SolusReviewFacts
     internal Guid ExecutionId { get; }
     internal bool MissingCore { get { lock (gate) return missingCore; } }
     internal bool Refused { get { lock (gate) return refused; } }
+    internal bool BudgetStopped { get { lock (gate) return budgetStopped; } }
+    internal bool HostStopped { get { lock (gate) return hostStopped; } }
     internal bool Overrun { get { lock (gate) return OverrunLocked; } }
-    private bool OverrunLocked => uncached > budget.UncachedInputTokens || cached > budget.CachedInputTokens || output > budget.OutputTokens;
-    private bool ExhaustedLocked => uncached >= budget.UncachedInputTokens || cached >= budget.CachedInputTokens || output >= budget.OutputTokens;
+    private bool OverrunLocked => totalInput > ProfileInputLimit || uncached > budget.UncachedInputTokens || cached > budget.CachedInputTokens || output > budget.OutputTokens;
+    private bool ExhaustedLocked => totalInput >= ProfileInputLimit || uncached >= budget.UncachedInputTokens || cached >= budget.CachedInputTokens || output >= budget.OutputTokens;
 
     internal bool Admit(RuntimeExposure exposure)
     {
@@ -93,6 +99,7 @@ internal sealed class SolusReviewFacts
                     cached = Debit(cached, measuredHit, budget.CachedInputTokens);
                 if (usage.InputTokens is { } input)
                 {
+                    totalInput = Debit(totalInput, input, ProfileInputLimit);
                     if (usage.CacheHitTokens is { } hit && usage.CacheMissTokens is { } miss)
                     {
                         uncached = Debit(uncached, miss, budget.UncachedInputTokens);
@@ -105,6 +112,15 @@ internal sealed class SolusReviewFacts
                 finishes.GetValueOrDefault(observation.PhysicalAttemptId) == ProviderFinish.Final;
             return !final && (missingCore || ExhaustedLocked);
         }
+    }
+
+    internal void RecordBudgetStop()
+    {
+        lock (gate) { if (!frozen && ExhaustedLocked) budgetStopped = true; }
+    }
+    internal void RecordHostStop()
+    {
+        lock (gate) { if (!frozen) hostStopped = true; }
     }
 
     internal bool CanAdmitTerminal(Guid executionId)

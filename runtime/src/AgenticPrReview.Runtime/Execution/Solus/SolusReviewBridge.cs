@@ -66,7 +66,8 @@ internal sealed class SolusReviewBridge : IDisposable
         var accounting = Facts.Freeze(result.Outcome.Usage);
         var reason = cancellationToken.IsCancellationRequested ? ActionHostTerminationReason.Cancelled
             : deadline.IsCancellationRequested || result.StopReason == CandidateStopReason.DurationLimit ? ActionHostTerminationReason.DeadlineExceeded
-            : Facts.Overrun || Facts.Refused ? ActionHostTerminationReason.TokenLimit
+            : Facts.HostStopped ? ActionHostTerminationReason.HostFailure
+            : Facts.Overrun || Facts.Refused || Facts.BudgetStopped ? ActionHostTerminationReason.TokenLimit
             : Facts.MissingCore || accounting is null ? ActionHostTerminationReason.ProviderFailure
             : result.StopReason == CandidateStopReason.RuntimeLimit || result.Outcome.Reason == AgentTerminationReason.ResourceLimit ? ActionHostTerminationReason.ResourceLimit
             : result.Outcome.Reason == AgentTerminationReason.Cancelled ? ActionHostTerminationReason.Cancelled

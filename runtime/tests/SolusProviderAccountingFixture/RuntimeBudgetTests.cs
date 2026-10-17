@@ -58,9 +58,92 @@ static class RuntimeBudgetTests
                 result.Accounting.InputTokens == 10 && result.Accounting.OutputTokens == 7 &&
                 result.Accounting.UsageCompleteness == AccountingCompleteness.Partial, "independent_detail_subtotals");
         }
+        await ProfileInputAndAdmission();
+        await HostClosureCauses();
         await ToolsAndHeadroom();
         await CancellationAndDeadline();
         await ProductionRetryAndRefusal();
+    }
+
+    private static async Task ProfileInputAndAdmission()
+    {
+        // Orthogonal selected total-input ceiling; neither cache bucket alone
+        // exceeds its product ceiling for these valid split measurements.
+        foreach (var tools in new[] { false, true })
+        foreach (var amount in new long[] { 65536, 65537 })
+        {
+            using var handler = new ControlledHandler((_, _) => Task.FromResult(F.Http(F.Response(
+                F.Usage(amount, 5, amount - 32768, 32768), tools: tools))));
+            using var bridge = F.Bridge(handler); var domain = new ProofDomain();
+            var capability = new PauseCapability(_ => Task.CompletedTask);
+            var result = await F.Run(bridge, domain, [new(new PauseTool(), capability)]);
+            var accepted = !tools && amount == 65536;
+            F.Check(result.Accounting?.InputTokens == amount && result.Accounting.CacheMissTokens == 32768 &&
+                result.Accounting.CacheHitTokens == amount - 32768, "profile_total_measurement");
+            F.Check(result.EligibleForProductValidation == accepted && domain.Calls == (accepted ? 1 : 0) &&
+                result.Termination == (accepted ? ActionHostTerminationReason.ReviewCompleted : ActionHostTerminationReason.TokenLimit) &&
+                handler.Sends == 1 && capability.Entries == 0, "profile_total_final_and_tool_boundary");
+        }
+        foreach (var amount in new long[] { 65536, 65537 })
+        {
+            var calls = 0;
+            using var handler = new ControlledHandler((_, _) =>
+            {
+                var first = ++calls == 1; var input = first ? 32768 : amount - 32768;
+                return Task.FromResult(F.Http(F.Response(F.Usage(input, 5, input - 16384, 16384), tools: first)));
+            });
+            using var bridge = F.Bridge(handler); var domain = new ProofDomain();
+            var capability = new PauseCapability(_ => Task.CompletedTask);
+            var result = await F.Run(bridge, domain, [new(new PauseTool(), capability)]);
+            F.Check(result.Accounting?.InputTokens == amount && handler.Sends == 2 && capability.Entries == 1 &&
+                result.EligibleForProductValidation == (amount == 65536) && domain.Calls == (amount == 65536 ? 1 : 0) &&
+                result.Termination == (amount == 65536 ? ActionHostTerminationReason.ReviewCompleted : ActionHostTerminationReason.TokenLimit),
+                "profile_total_cumulative_boundary");
+        }
+        foreach (var budget in new[] { new ReviewTokenBudget(65537, 65536, 8192), new(65536, 65537, 8192),
+            new(65536, 65536, 8193), ReviewTokenBudget.Default })
+        {
+            using var handler = new ControlledHandler((_, _) => throw new ProofFailure("unsupported_profile_send"));
+            F.Throws<ArgumentException>(() => { using var bridge = F.Bridge(handler, budget); }, "profile_budget_admission");
+            F.Check(handler.Sends == 0, "unsupported_profile_no_send");
+        }
+        foreach (var amount in new long[] { 8192, 8193 })
+        {
+            using var handler = new ControlledHandler((_, _) => Task.FromResult(F.Http(F.Response(F.Usage(output: amount)))));
+            using var bridge = F.Bridge(handler, new(65536, 65536, 8192)); var domain = new ProofDomain();
+            var result = await F.Run(bridge, domain);
+            F.Check(result.Accounting?.OutputTokens == amount && result.EligibleForProductValidation == (amount == 8192) &&
+                domain.Calls == (amount == 8192 ? 1 : 0) &&
+                result.Termination == (amount == 8192 ? ActionHostTerminationReason.ReviewCompleted : ActionHostTerminationReason.TokenLimit),
+                "profile_output_exact_overrun");
+        }
+    }
+
+    private static async Task HostClosureCauses()
+    {
+        foreach (var mode in new[] { "missing", "failed", "unknown", "mismatched", "throw" })
+        {
+            using var handler = new ControlledHandler((_, _) => throw new ProofFailure("host_exposure_failure_send"));
+            var hooks = new ProofHooks { BeforeMode = mode };
+            using var bridge = F.Bridge(handler, hooks: hooks); var domain = new ProofDomain();
+            var result = await F.Run(bridge, domain);
+            F.Check(result.Termination == ActionHostTerminationReason.HostFailure && !result.EligibleForProductValidation &&
+                domain.Calls == 0 && handler.Sends == 0 && hooks.Before == 1, "host_exposure_failure_cause");
+        }
+        foreach (var mode in new[] { "missing", "failed", "unknown", "mismatched", "throw", "stop" })
+        foreach (var amount in new long[] { 5, 1024, 1025 })
+        {
+            using var handler = new ControlledHandler((_, _) => Task.FromResult(F.Http(F.Response(F.Usage(output: amount), tools: true))));
+            var hooks = new ProofHooks { SettlementMode = mode };
+            using var bridge = F.Bridge(handler, new(100, 100, 1024), hooks); var domain = new ProofDomain();
+            var capability = new PauseCapability(_ => Task.CompletedTask);
+            var result = await F.Run(bridge, domain, [new(new PauseTool(), capability)]);
+            F.Check(result.Termination == ActionHostTerminationReason.HostFailure && !result.EligibleForProductValidation &&
+                domain.Calls == 0 && capability.Entries == 0 && handler.Sends == 1 && hooks.After == 1,
+                "host_closure_cause_not_numeric_stop");
+            F.Check(result.Accounting?.ProviderAttempts == 1 && result.Accounting.OutputTokens == amount &&
+                result.Accounting.ProviderFailedAttempts == 0, "host_closure_keeps_provider_measurements");
+        }
     }
 
     private static async Task ToolsAndHeadroom()
@@ -82,7 +165,8 @@ static class RuntimeBudgetTests
         var unused = new PauseCapability(_ => Task.CompletedTask);
         using var exhausted = F.Bridge(exhaustedHandler, new(100, 100, 1024));
         var refusal = await F.Run(exhausted, tools: [new(new PauseTool(), unused)]);
-        F.Check(unused.Entries == 0 && exhaustedHandler.Sends == 1 && !refusal.EligibleForProductValidation, "nonterminal_exhaustion_zero_tools");
+        F.Check(unused.Entries == 0 && exhaustedHandler.Sends == 1 && !refusal.EligibleForProductValidation &&
+            refusal.Termination == ActionHostTerminationReason.TokenLimit, "nonterminal_exhaustion_zero_tools");
     }
 
     private static async Task CancellationAndDeadline()

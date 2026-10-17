@@ -105,17 +105,37 @@ sealed class ProofHooks : IRuntimeExposureHooks
 {
     internal int Before, After;
     internal bool Deny;
+    internal string BeforeMode = "permit", SettlementMode = "continue";
     public ValueTask<ExposureAcknowledgement?> BeforeDispatchAsync(RuntimeExposure exposure, CancellationToken token)
     {
         Before++;
-        return ValueTask.FromResult<ExposureAcknowledgement?>(new(exposure, RuntimeHookStatus.Acknowledged,
-            Deny ? ExposureDecision.Deny : ExposureDecision.Permit, Deny ? null : exposure.RequiredAcknowledgement));
+        ExposureAcknowledgement? receipt = BeforeMode switch
+        {
+            "missing" => null,
+            "failed" => new(exposure, RuntimeHookStatus.Failed),
+            "unknown" => new(exposure, RuntimeHookStatus.Unknown),
+            "mismatched" => new(new(new("deepseek", "wrong"), exposure.Attempt, exposure.RequiredAcknowledgement, exposure.Accounting),
+                RuntimeHookStatus.Acknowledged, ExposureDecision.Permit, exposure.RequiredAcknowledgement),
+            "throw" => throw new InvalidOperationException("SYNTHETIC_HOST_FAILURE"),
+            _ => new(exposure, RuntimeHookStatus.Acknowledged, Deny ? ExposureDecision.Deny : ExposureDecision.Permit,
+                Deny ? null : exposure.RequiredAcknowledgement),
+        };
+        return ValueTask.FromResult(receipt);
     }
     public ValueTask<SettlementAcknowledgement?> AfterAttemptAsync(RuntimeSettlement settlement, CancellationToken token)
     {
         After++;
-        return ValueTask.FromResult<SettlementAcknowledgement?>(new(settlement.Exposure,
-            RuntimeHookStatus.Acknowledged, RuntimeContinuation.Continue, settlement.Accounting));
+        SettlementAcknowledgement? receipt = SettlementMode switch
+        {
+            "missing" => null,
+            "failed" => new(settlement.Exposure, RuntimeHookStatus.Failed, accounting: settlement.Accounting),
+            "unknown" => new(settlement.Exposure, RuntimeHookStatus.Unknown, accounting: settlement.Accounting),
+            "mismatched" => new(settlement.Exposure, RuntimeHookStatus.Acknowledged, RuntimeContinuation.Continue),
+            "throw" => throw new InvalidOperationException("SYNTHETIC_HOST_FAILURE"),
+            "stop" => new(settlement.Exposure, RuntimeHookStatus.Acknowledged, RuntimeContinuation.Stop, settlement.Accounting),
+            _ => new(settlement.Exposure, RuntimeHookStatus.Acknowledged, RuntimeContinuation.Continue, settlement.Accounting),
+        };
+        return ValueTask.FromResult(receipt);
     }
 }
 
