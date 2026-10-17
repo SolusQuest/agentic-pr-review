@@ -23,6 +23,7 @@ internal static class SolusRuntimeConstruction
             configuration.Bounds.MaximumRequestBytes != Cr1DevelopmentProfile.RequestPayloadBytes ||
             configuration.Bounds.MaximumResponseBytes != Cr1DevelopmentProfile.ResponsePayloadBytes ||
             configuration.Bounds.MaximumContinuationBytes != Cr1DevelopmentProfile.ContinuationBytes ||
+            configuration.Bounds.MaximumTextBytes != Cr1DevelopmentProfile.ResponsePayloadBytes ||
             configuration.RequiredGuarantees != guarantees)
             throw new ArgumentException("APR_SOLUS_PROFILE_UNSUPPORTED");
         options ??= Options();

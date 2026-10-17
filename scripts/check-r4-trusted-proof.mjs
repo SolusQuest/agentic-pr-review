@@ -874,6 +874,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             },
             run: 'node runtime/tests/SolusStateEnvelopeFixture/verify.mjs',
           },
+          {
+            name: 'CR1-R3 bounded tool and terminal adapter proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'node runtime/tests/SolusToolAdapterFixture/verify.mjs',
+          },
         ],
       },
     },
