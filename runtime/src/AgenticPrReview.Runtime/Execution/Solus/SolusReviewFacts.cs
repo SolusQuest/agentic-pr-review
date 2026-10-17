@@ -21,6 +21,7 @@ internal sealed class SolusReviewFacts
     private long uncached, cached, output, totalInput;
     private bool frozen, missingCore, refused, budgetStopped, hostStopped;
     private ProviderAccounting? projection;
+    private int pendingHostFeedback;
 
     internal SolusReviewFacts(Guid executionId, ReviewTokenBudget budget)
     {
@@ -114,6 +115,15 @@ internal sealed class SolusReviewFacts
         }
     }
 
+    internal void BeginHostFeedback()
+    {
+        lock (gate) { if (!frozen) pendingHostFeedback++; }
+    }
+    internal void EndHostFeedback()
+    {
+        lock (gate) { if (!frozen) pendingHostFeedback--; }
+    }
+
     internal void RecordBudgetStop()
     {
         lock (gate) { if (!frozen && ExhaustedLocked) budgetStopped = true; }
@@ -138,6 +148,9 @@ internal sealed class SolusReviewFacts
         lock (gate)
         {
             if (frozen) return projection;
+            // A callback still pending when the runtime returns supplied no
+            // usable Host receipt, independently of provider exchange success.
+            hostStopped |= pendingHostFeedback != 0;
             frozen = true;
             // This leaf admits completed-context NEW work, not unfinished-call
             // recovery. Missing/partial inventory cannot manufacture known zero.

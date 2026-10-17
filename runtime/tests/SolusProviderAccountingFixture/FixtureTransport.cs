@@ -107,11 +107,14 @@ sealed class ProofHooks : IRuntimeExposureHooks
     internal bool Deny;
     internal string BeforeMode = "permit", SettlementMode = "continue";
     internal List<SolusAttemptFact> Attempts { get; } = [];
+    internal TaskCompletionSource ExposureRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal TaskCompletionSource ExposureReturned { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource SettlementRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource SettlementReturned { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public ValueTask<ExposureAcknowledgement?> BeforeDispatchAsync(RuntimeExposure exposure, CancellationToken token)
     {
         Before++;
+        if (BeforeMode == "held") return new(HeldExposure(exposure));
         ExposureAcknowledgement? receipt = BeforeMode switch
         {
             "missing" => null,
@@ -141,6 +144,12 @@ sealed class ProofHooks : IRuntimeExposureHooks
             _ => new(settlement.Exposure, RuntimeHookStatus.Acknowledged, RuntimeContinuation.Continue, settlement.Accounting),
         };
         return ValueTask.FromResult(receipt);
+    }
+    private async Task<ExposureAcknowledgement?> HeldExposure(RuntimeExposure exposure)
+    {
+        await ExposureRelease.Task;
+        ExposureReturned.TrySetResult();
+        return new(exposure, RuntimeHookStatus.Acknowledged, ExposureDecision.Permit, exposure.RequiredAcknowledgement);
     }
     private async Task<SettlementAcknowledgement?> HeldSettlement(RuntimeSettlement settlement)
     {

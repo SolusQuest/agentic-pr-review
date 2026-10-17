@@ -16,7 +16,7 @@ static class PostHandoffRegressionTests
         await IndependentProviderOutcomes();
         await ActualRuntimeStops();
         await CandidateFeedback();
-        await HeldSettlementCounterexample();
+        await PendingHostFeedback();
     }
 
     private static async Task IndependentProviderOutcomes()
@@ -94,7 +94,7 @@ static class PostHandoffRegressionTests
         }
     }
 
-    private static async Task HeldSettlementCounterexample()
+    private static async Task PendingHostFeedback()
     {
         using var handler = new ControlledHandler((_, _) => Task.FromResult(F.Http(F.Response(F.Usage()))));
         var hooks = new ProofHooks { SettlementMode = "held" };
@@ -102,15 +102,27 @@ static class PostHandoffRegressionTests
         var result = await F.Run(bridge, domain).WaitAsync(TimeSpan.FromSeconds(10));
         try
         {
-            // Temporary pre-fix counterexample: actual closure grace expires
-            // without Host feedback, yet current projection says provider failure.
-            F.Check(result.Termination == ActionHostTerminationReason.ProviderFailure && domain.Calls == 0 && hooks.After == 1,
-                "held_settlement_pre_fix_counterexample");
+            F.Check(result.Termination == ActionHostTerminationReason.HostFailure && domain.Calls == 0 && hooks.After == 1 &&
+                bridge.Facts.HostStopped, "held_settlement_unknown_host_failure");
             F.Check(result.Accounting?.ProviderAttempts == 1 && result.Accounting.ProviderFailedAttempts == 0 &&
                 result.Accounting.InputTokens == 10, "held_settlement_provider_facts");
         }
         finally { hooks.SettlementRelease.TrySetResult(); }
         await F.Wait(hooks.SettlementReturned.Task);
+        await Task.Delay(50);
+        F.Check(result.Termination == ActionHostTerminationReason.HostFailure && bridge.Facts.HostStopped &&
+            result.Accounting?.ProviderFailedAttempts == 0 && result.Accounting.InputTokens == 10, "held_settlement_late_freeze");
+
+        using var beforeHandler = new ControlledHandler((_, _) => throw new ProofFailure("late_host_permit_send"));
+        var beforeHooks = new ProofHooks { BeforeMode = "held" };
+        using var before = F.Bridge(beforeHandler, hooks: beforeHooks); var beforeDomain = new ProofDomain();
+        var cut = await F.Run(before, beforeDomain, remaining: TimeSpan.FromSeconds(2)).WaitAsync(TimeSpan.FromSeconds(10));
+        beforeHooks.ExposureRelease.TrySetResult();
+        await F.Wait(beforeHooks.ExposureReturned.Task);
+        await Task.Delay(50);
+        F.Check(cut.Termination == ActionHostTerminationReason.DeadlineExceeded && !cut.EligibleForProductValidation &&
+            beforeHandler.Sends == 0 && beforeDomain.Calls == 0 && cut.Accounting?.ProviderAttempts == 0,
+            "pending_exposure_deadline_not_host_or_budget");
     }
 
     private static AgentRequest Request(Guid execution) => new(execution, "trusted policy",

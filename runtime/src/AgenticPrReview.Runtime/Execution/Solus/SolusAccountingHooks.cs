@@ -10,24 +10,27 @@ internal sealed class SolusAccountingHooks(SolusReviewFacts facts, IRuntimeExpos
     {
         if (!facts.Admit(exposure))
             return new(exposure, RuntimeHookStatus.Acknowledged, ExposureDecision.Deny);
+        facts.BeginHostFeedback();
         try
         {
             var receipt = await host.BeforeDispatchAsync(exposure, token).ConfigureAwait(false);
-            if (receipt?.Assess(exposure) != RuntimeStop.None) facts.RecordHostStop();
+            if (token.IsCancellationRequested || receipt?.Assess(exposure) != RuntimeStop.None) facts.RecordHostStop();
             return receipt;
         }
         catch { facts.RecordHostStop(); throw; }
+        finally { facts.EndHostFeedback(); }
     }
 
     public async ValueTask<SettlementAcknowledgement?> AfterAttemptAsync(RuntimeSettlement settlement, CancellationToken token)
     {
         var stop = facts.Settle(settlement);
+        facts.BeginHostFeedback();
         try
         {
             var receipt = await host.AfterAttemptAsync(settlement, token).ConfigureAwait(false);
             // Failed/missing/mismatched/Host-stopped receipts retain their cause,
             // including when numeric usage independently exhausted its budget.
-            if (receipt?.Assess(settlement) != RuntimeStop.None) facts.RecordHostStop();
+            if (token.IsCancellationRequested || receipt?.Assess(settlement) != RuntimeStop.None) facts.RecordHostStop();
             else if (stop)
             {
                 facts.RecordBudgetStop();
@@ -36,6 +39,7 @@ internal sealed class SolusAccountingHooks(SolusReviewFacts facts, IRuntimeExpos
             return receipt;
         }
         catch { facts.RecordHostStop(); throw; }
+        finally { facts.EndHostFeedback(); }
     }
     public override string ToString() => nameof(SolusAccountingHooks);
 }
