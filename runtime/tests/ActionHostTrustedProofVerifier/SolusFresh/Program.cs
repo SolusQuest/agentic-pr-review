@@ -51,7 +51,12 @@ internal static class Program
         fixture.AssertEffectsAbsent();
         using var expected = corpus.Expected(id);
         var code = Score(expected.RootElement, result!);
-        Proof.Require(code == expected.RootElement.GetProperty("expected_code").GetString(), "quality_disposition_" + id);
+        Proof.Require(code == expected.RootElement.GetProperty("expected_code").GetString(),
+            ("quality_disposition_" + id + "_actual_" + code + "_host_" + result!.Failure +
+                "_work_" + result.Work?.Termination + "_runtime_" + result.Work?.RuntimeReason +
+                "_admission_" + result.Context?.Admission + "_capture_" + result.Context?.CaptureStatus +
+                "_terminal_" + result.TerminalAccepted + "_sends_" + handler.Sends +
+                "_observations_" + result.Observations.Length + "_transport_" + handler.FailureCode).ToLowerInvariant());
         Proof.Require(handler.Sends == handler.Turns && handler.Sends <= 6, "script_complete_" + id);
         if (code == "Scored")
         {

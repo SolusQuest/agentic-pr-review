@@ -8,6 +8,7 @@ internal sealed class ScriptedHandler : HttpMessageHandler
 {
     private readonly JsonDocument script;
     internal int Sends;
+    internal string FailureCode = "none";
     internal long RequestBytes, ResponseBytes;
     internal readonly HashSet<string> ReadFacts = new(StringComparer.Ordinal);
     internal readonly List<string> FirstInstructions = [];
@@ -22,6 +23,17 @@ internal sealed class ScriptedHandler : HttpMessageHandler
     }
     internal int Turns { get; }
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+    {
+        try { return await SendControlledAsync(request, token); }
+        catch (Exception exception)
+        {
+            FailureCode = exception is ProofFailure failure ? failure.Code :
+                exception is KeyNotFoundException ? "wire_missing_property" :
+                exception is OperationCanceledException ? "cancelled" : "transport_contract";
+            throw;
+        }
+    }
+    private async Task<HttpResponseMessage> SendControlledAsync(HttpRequestMessage request, CancellationToken token)
     {
         Proof.Require(request.RequestUri?.AbsoluteUri == "https://api.deepseek.com/chat/completions" &&
             request.Method == HttpMethod.Post && request.Headers.Authorization?.Scheme == "Bearer" &&
