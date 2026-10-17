@@ -73,9 +73,9 @@ async function until(predicate, timeout = 15_000) {
   throw new Error('generated_action_fixture_barrier_timeout');
 }
 
-async function probeOfficialBridge(launch) {
+async function probeOfficialBridge(launch, officialCount) {
   let correlation = 0;
-  const command = (payload) =>
+  const command = (payload, discriminator = 'r7-d0', expectedFailure = 'none') =>
     new Promise((resolve, reject) => {
       const socket = createConnection(launch.artifact_bridge_endpoint);
       const chunks = [];
@@ -90,7 +90,7 @@ async function probeOfficialBridge(launch) {
       socket.once('connect', () => {
         const bytes = Buffer.from(
           JSON.stringify({
-            build_discriminator: 'r7-d0',
+            build_discriminator: discriminator,
             payload: { ...payload, correlation_id: 'd4-proof-' + ++correlation },
           }),
         );
@@ -107,7 +107,7 @@ async function probeOfficialBridge(launch) {
           assert.equal(result.build_discriminator, 'r7-d0');
           assert.equal(result.payload.operation, payload.operation);
           assert.equal(result.payload.correlation_id, 'd4-proof-' + correlation);
-          assert.equal(result.payload.failure, 'none');
+          assert.equal(result.payload.failure, expectedFailure);
           resolve(result.payload);
         } catch (error) {
           reject(error);
@@ -115,6 +115,37 @@ async function probeOfficialBridge(launch) {
       });
     });
   const name = 'd4-generated-managed-proof';
+  const before = officialCount();
+  const denied = await command(
+    { operation: 'list_exact', name, maximum_objects: '4' },
+    'r4-w2',
+    'invalid',
+  );
+  assert.equal(denied.complete, false);
+  await new Promise((resolve, reject) => {
+    const socket = createConnection(launch.artifact_bridge_endpoint);
+    const received = [];
+    socket.setTimeout(5_000, () =>
+      socket.destroy(new Error('malformed_bridge_frame_not_rejected')),
+    );
+    socket.once('error', reject);
+    socket.on('data', (bytes) => received.push(bytes));
+    socket.once('connect', () => {
+      const bytes = Buffer.alloc(10);
+      bytes.writeUInt32BE(2);
+      bytes.write('{}', 4);
+      socket.write(bytes);
+    });
+    socket.once('end', () => {
+      try {
+        assert.equal(Buffer.concat(received).length, 0);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+  assert.equal(officialCount(), before);
   const initial = await command({ operation: 'list_exact', name, maximum_objects: '4' });
   assert.deepEqual(initial.objects, []);
   const staging = join(dirname(launch.artifact_bridge_endpoint), 'artifact-staging');
@@ -186,7 +217,15 @@ async function run(name, options = {}) {
       join(repo, '.github/actions/agentic-pr-review/payload-map.json'),
       join(action, 'payload-map.json'),
     );
-  else await writeFile(join(action, 'payload-map.json'), JSON.stringify(map) + '\n');
+  else
+    await writeFile(
+      join(action, 'payload-map.json'),
+      JSON.stringify(map) + (options.largeMap ? ' '.repeat(20 * 1024) : '') + '\n',
+    );
+  if (options.largeMap) {
+    const size = (await readFile(join(action, 'payload-map.json'))).length;
+    assert.ok(size > 16 * 1024 && size <= 256 * 1024);
+  }
   const metadata = {};
   for (const relative of ['action.yml', 'payload-map.json', 'dist/index.js']) {
     const bytes = await readFile(join(action, relative));
@@ -232,7 +271,21 @@ async function run(name, options = {}) {
     assert.equal(request.headers.authorization, undefined);
     if (request.url === '/dotnet/Runtime/10.0.13/dotnet-runtime-10.0.13-linux-x64.tar.gz') {
       runtimeStarted = true;
+      if (options.runtimeRedirect) {
+        response.writeHead(302, { location: 'https://example.invalid/runtime' }).end();
+        return;
+      }
+      if (options.runtimeOversize) {
+        response.writeHead(200);
+        response.write(runtimeArchive);
+        response.end(Buffer.from([0]));
+        return;
+      }
       response.writeHead(200, { 'Content-Length': runtimeArchive.length });
+      if (options.runtimeTruncated) {
+        response.end(runtimeArchive.subarray(0, 1024));
+        return;
+      }
       if (options.runtimeCancel) {
         response.write(runtimeArchive.subarray(0, 1));
         return;
@@ -307,6 +360,9 @@ async function run(name, options = {}) {
       origin: `http://127.0.0.1:${server.address().port}`,
       bridgeProbe: !!options.bridgeProbe,
       bridgeRelease: join(root, 'release-host'),
+      failedExec: !!options.failedExec,
+      unsupportedRuntime: !!options.unsupportedRuntime,
+      payloadSubstitution: !!options.payloadSubstitution,
     }),
   );
   const env = {
@@ -415,7 +471,7 @@ async function run(name, options = {}) {
       const launch = await until(async () =>
         (await audit(auditPath)).find((record) => record.kind === 'launch'),
       );
-      await probeOfficialBridge(launch.document);
+      await probeOfficialBridge(launch.document, () => platform.calls.length);
       assert.ok(platform.calls.some((route) => route.endsWith('/CreateArtifact')));
       assert.ok(platform.calls.some((route) => route.endsWith('/FinalizeArtifact')));
       assert.ok(platform.calls.includes('signed-download'));
@@ -463,7 +519,7 @@ async function run(name, options = {}) {
       assert.deepEqual(record, {
         kind: 'presentation',
         payloadGone: true,
-        payloadParentGone: true,
+        ownedParentsGone: true,
         bridgeGone: true,
         admittedHandleClosed: true,
         runtimeGone: true,
@@ -476,6 +532,11 @@ async function run(name, options = {}) {
       options.badDigest ||
       options.runtimeBadDigest ||
       options.runtimeCancel ||
+      options.runtimeRedirect ||
+      options.runtimeOversize ||
+      options.runtimeTruncated ||
+      options.unsupportedRuntime ||
+      options.payloadSubstitution ||
       options.acquisitionCancel ||
       options.runnerWorkspace ||
       options.missingRunnerTemp
@@ -493,6 +554,20 @@ async function run(name, options = {}) {
       if (options.unbound || options.wrongRef || options.wrongRepository)
         assert.equal(requests.length, 0);
       if (options.unbound) assert.match(publicText, /No release payload has been authorized/u);
+      if (options.unsupportedRuntime || options.payloadSubstitution)
+        assert.ok(records.some((record) => record.kind === 'resource-fault' && record.applied));
+    } else if (options.failedExec) {
+      assert.ok(spawned);
+      assert.equal(spawned.executedCommand, '/definitely-absent-d4-host-exec');
+      assert.equal(spawned.pid, undefined);
+      const close = records.find((record) => record.kind === 'managed-close');
+      assert.ok(close);
+      assert.notEqual(close.code, 0);
+      assert.equal(close.signal, null);
+      assert.equal(close.completion, undefined);
+      assert.equal(exit.code, 1);
+      assert.equal(actual.status, 'failed');
+      assert.equal(Object.keys(actual).length, 4);
     } else {
       assert.ok(spawned);
       assert.deepEqual(spawned.args, [
@@ -580,7 +655,8 @@ async function run(name, options = {}) {
       name,
       status: actual.status,
       exit: exit.code,
-      managed: !!spawned,
+      managed: !!spawned?.pid,
+      failedExec: !!options.failedExec,
       requests: requests.length,
       officialRequests: platform.calls.length,
     });
@@ -603,8 +679,15 @@ try {
   await run('archive-digest-mismatch', { badDigest: true });
   await run('runtime-digest-mismatch', { runtimeBadDigest: true });
   await run('runtime-acquisition-signal', { runtimeCancel: true });
+  await run('runtime-redirect', { runtimeRedirect: true });
+  await run('runtime-chunked-overflow', { runtimeOversize: true });
+  await run('runtime-truncated', { runtimeTruncated: true });
+  await run('unsupported-runtime-prerequisite', { unsupportedRuntime: true });
+  await run('verified-nonentry-substitution', { payloadSubstitution: true });
   await run('acquisition-signal', { acquisitionCancel: true });
   await run('exact-sha');
+  await run('large-managed-map', { largeMap: true });
+  await run('real-failed-exec', { failedExec: true });
   await run('immutable-tag', { tag: true });
   await run('untrusted-event', { untrusted: true });
   await run('official-bridge-roundtrip', { untrusted: true, bridgeProbe: true });

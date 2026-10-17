@@ -10,15 +10,21 @@ const config = JSON.parse(fs.readFileSync(process.env.APR_D4_FIXTURE_CONFIG, 'ut
 const append = fs.appendFileSync.bind(fs);
 const log = (value) => append(config.audit, JSON.stringify(value) + '\n');
 const active = new Map();
-const parents = [];
+const ownedParents = [];
 let host;
 const originalMkdtemp = fs.promises.mkdtemp.bind(fs.promises);
 fs.promises.mkdtemp = async (...args) => {
   const result = await originalMkdtemp(...args);
-  if (['apr-payload-', 'apr-dotnet-'].includes(path.basename(String(args[0])))) {
-    parents.push(result);
+  const prefix = path.basename(String(args[0]));
+  if (['apr-payload-', 'apr-dotnet-', 'apr-w1-'].includes(prefix)) {
+    ownedParents.push(result);
     log({
-      kind: path.basename(String(args[0])) === 'apr-payload-' ? 'payload-parent' : 'runtime-parent',
+      kind:
+        prefix === 'apr-payload-'
+          ? 'payload-parent'
+          : prefix === 'apr-dotnet-'
+            ? 'runtime-parent'
+            : 'bridge-parent',
       path: result,
       mode: fs.statSync(result).mode & 0o777,
     });
@@ -47,6 +53,41 @@ const originalRm = fs.promises.rm.bind(fs.promises);
 fs.promises.rm = async (...args) => {
   const result = await originalRm(...args);
   log({ kind: 'removed', path: String(args[0]), absent: !fs.existsSync(args[0]) });
+  if (path.basename(String(args[0])) === 'runtime.tar.gz') {
+    if (config.unsupportedRuntime) {
+      const core = path.join(
+        path.dirname(args[0]),
+        'runtime/shared/Microsoft.NETCore.App/10.0.13/System.Private.CoreLib.dll',
+      );
+      await originalRm(core);
+      log({
+        kind: 'resource-fault',
+        target: 'runtime-prerequisite',
+        applied: !fs.existsSync(core),
+      });
+    }
+    if (config.payloadSubstitution) {
+      const parent = ownedParents.find((named) => path.basename(named).startsWith('apr-payload-'));
+      const roots = fs
+        .readdirSync(parent)
+        .filter((name) => name.startsWith('apr-managed-package-'));
+      if (roots.length !== 1) throw new Error('fixture_managed_root_ambiguous');
+      const member = path.join(
+        parent,
+        roots[0],
+        'agentic-pr-review/AgenticPrReview.Runtime.deps.json',
+      );
+      const original = fs.readFileSync(member);
+      const changed = Buffer.from(original);
+      changed[changed.length - 1] ^= 1;
+      fs.writeFileSync(member, changed);
+      log({
+        kind: 'resource-fault',
+        target: 'verified-nonentry',
+        applied: !fs.readFileSync(member).equals(original),
+      });
+    }
+  }
   return result;
 };
 https.request = (url, options, callback) => {
@@ -64,7 +105,11 @@ globalThis.fetch = (input, options) => {
   return originalFetch(input, options);
 };
 childProcess.spawn = (command, args, options) => {
-  const child = originalSpawn(command, args, options);
+  const executedCommand =
+    config.failedExec && command === '/proc/self/fd/3' && args[0] === 'exec'
+      ? '/definitely-absent-d4-host-exec'
+      : command;
+  const child = originalSpawn(executedCommand, args, options);
   if (command === '/proc/self/fd/3' && args[0] === 'exec') {
     const fd = options.stdio[3];
     const stat = fs.fstatSync(fd);
@@ -86,6 +131,7 @@ childProcess.spawn = (command, args, options) => {
       kind: 'spawn',
       ...host,
       command,
+      executedCommand,
       args,
       wrapperPid: process.pid,
       env: options.env,
@@ -136,7 +182,7 @@ fs.appendFileSync = (...args) => {
     log({
       kind: 'presentation',
       payloadGone: !host || !fs.existsSync(host.payloadRoot),
-      payloadParentGone: parents.every((parent) => !fs.existsSync(parent)),
+      ownedParentsGone: ownedParents.every((parent) => !fs.existsSync(parent)),
       bridgeGone: !host || !fs.existsSync(host.bridgeRoot),
       admittedHandleClosed: !host || (!active.has(host.fd) && !active.has(host.treeFd)),
       runtimeGone: !host || !fs.existsSync(host.runtimeParent),
