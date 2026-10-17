@@ -33,8 +33,8 @@ const assets = {
   packageFolders: { [process.env.RUNNER_TEMP + '/proof/packages']: {} },
   libraries: Object.fromEntries(
     ids.map((id) => [
-      id + '/0.1.0-internal.1',
-      { type: 'package', path: id + '/0.1.0-internal.1', sha512: hash },
+      id + '/0.1.0-internal.4',
+      { type: 'package', path: id + '/0.1.0-internal.4', sha512: hash },
     ]),
   ),
 };

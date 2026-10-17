@@ -11,7 +11,7 @@ for (const key of Object.keys(process.env)) {
     delete process.env[key];
 }
 const commandEnv = { PATH: process.env.PATH, DOTNET_ROOT: process.env.DOTNET_ROOT };
-const { SOLUS_VERSION, SOLUS_FEED, PUBLIC_FEED, SOLUS_IDS, packageHashes } =
+const { SOLUS_VERSION, SOLUS_RELEASE_SOURCE, SOLUS_FEED, PUBLIC_FEED, SOLUS_IDS, packageHashes } =
   await import('./solus-package-contract.mjs');
 const { managedDependencyPolicy, verifyDependencies } = await import('./build-payload.mjs');
 
@@ -288,6 +288,7 @@ async function collect(output, verify) {
     qualification: false,
     mode: verify ? 'verify' : 'collect',
     sourceCommit: head,
+    publishedSourceAnchor: SOLUS_RELEASE_SOURCE,
     version,
     coldCache: true,
     constructed,
@@ -303,6 +304,7 @@ async function collect(output, verify) {
       qualification: false,
       mode: verify ? 'verify' : 'collect',
       sourceCommit: head,
+      publishedSourceAnchor: SOLUS_RELEASE_SOURCE,
       version,
       coldCache: true,
       packages: packages.length,
