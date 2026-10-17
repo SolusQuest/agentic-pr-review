@@ -439,3 +439,9 @@ Migration work may simplify or replace their shape, but it must not remove:
 - candidate-before-acceptance transaction semantics;
 
 without an explicitly documented equivalent.
+
+## Ordinary managed Action runtime ownership
+
+The ordinary Action uses the verified managed tree and D3 loading boundary. Runtime-only .NET 10.0.13 provisioning is compiled maintainer policy: fixed credential-free official HTTPS asset, exact size and SHA512, admitted bounded layout, trusted fixed extractor and a fresh private runner namespace outside the workspace. It accepts no input-selected runtime, ambient installation or installer script. Archive admission does not replace D3's effective loader/configuration checks or make the namespace a physical seal; the trusted runner and exclusion of hostile same-UID writers remain assumptions.
+
+An unconfirmed managed Host immediately loses admission to new bridge commands. Already admitted official work can finish its bounded reconciliation while its storage remains owned. Actual child close, runtime-guard release, verified-tree lease release and official quiescence remain independent barriers. Neither TERM/KILL delivery nor a caller timeout permits deletion or normal presentation, and late cleanup cannot retrospectively emit outputs. Extractor termination also retains its installation until actual close. Fixed ordinary failures and fourteen validated completion outputs retain the existing secret-exclusion contract.

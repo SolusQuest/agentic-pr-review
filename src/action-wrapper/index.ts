@@ -4,10 +4,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { readBoundedFile } from '../../scripts/release/build-payload.format.mjs';
-import { resolveInstalledActionSource } from './launcher/action-source.js';
-import { parsePayloadMap, PAYLOAD_MAP_MAXIMUM_BYTES } from './launcher/payload-map.js';
-import { resolveReleasePayload } from './launcher/release-payload.js';
-import { acquireInPayloadStaging } from './launcher/payload-staging.js';
+import { resolveInstalledManagedActionSource } from './launcher/action-source.js';
+import {
+  parseManagedPayloadMap,
+  MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES,
+} from './launcher/payload-map.js';
+import { resolveManagedReleasePayload } from './launcher/release-payload.js';
+import { acquireInPayloadStaging, type VerifiedManagedTree } from './launcher/payload-staging.js';
+import {
+  acquireRuntimePrerequisite,
+  RuntimePrerequisiteTerminationUnconfirmedError,
+} from './launcher/runtime-prerequisite.js';
+import { ManagedRuntimeCleanupError } from './launcher/managed-runtime.js';
 import { parseStrictJson } from './launcher/strict-json.js';
 
 import {
@@ -27,12 +35,17 @@ import {
   parseProductionWorkflowRef,
   serializeLaunchDocument,
   type ActionRuntimeFacts,
+  type PreparedPayloadIdentity,
   validateRuntimeFacts,
 } from './launcher/contracts.js';
 import {
   canonicalStateReconciliationDiagnostic,
   HostProcessTerminationUnconfirmedError,
+  ManagedHostProcessTerminationUnconfirmedError,
   runHostProcess,
+  runManagedHostProcess,
+  type HostProcessRequest,
+  type HostProcessResult,
   type HostProcessRunner,
 } from './launcher/host-process.js';
 import { readAndMaskActionInputs } from './launcher/inputs.js';
@@ -91,7 +104,7 @@ export interface ProductionArtifactExecutorContext {
   readonly runId: string;
   readonly runAttempt: string;
   readonly stagingRoot: string;
-  /** Passed only after verifyPreparedPayload admits the exact payload receipt. */
+  /** Passed only after the selected native or managed payload admission succeeds. */
   readonly verifiedPreparedPayload: {
     readonly buildDiscriminator: string;
   };
@@ -136,19 +149,94 @@ export interface ActionWrapperSeams extends Omit<PrivateActionWrapperSeams, 'pre
   readonly acquirePayload: () => Promise<VerifiedPreparedPayload & { dispose(): Promise<void> }>;
 }
 
+export interface ManagedActionPayload extends PreparedPayloadIdentity {
+  readonly tree: VerifiedManagedTree;
+  readonly trustedRuntimeRoot: string;
+  readonly runnerStorage: { readonly runnerTemp: string; readonly workspace: string };
+  dispose(): Promise<void>;
+}
+
+export interface ManagedActionWrapperSeams extends Omit<
+  PrivateActionWrapperSeams,
+  'preparedPayload' | 'hostProcessRunner'
+> {
+  readonly acquirePayload: () => Promise<ManagedActionPayload>;
+  readonly hostProcessRunner: typeof runManagedHostProcess;
+  /** Keeps the production cancellation owner alive while retained resources settle. */
+  readonly onRetainedResources?: (settlement: Promise<void>) => void;
+}
+
+type CommonHostRequest = Omit<HostProcessRequest, 'executableHandle'>;
+interface OwnedActionPayload extends PreparedPayloadIdentity {
+  readonly kind: 'native' | 'managed';
+  readonly runnerStorage?: ManagedActionPayload['runnerStorage'];
+  launch(request: CommonHostRequest): Promise<HostProcessResult>;
+  dispose(): Promise<void>;
+}
+interface OwnedActionWrapperSeams extends Omit<
+  ActionWrapperSeams,
+  'acquirePayload' | 'hostProcessRunner'
+> {
+  readonly acquirePayload: () => Promise<OwnedActionPayload>;
+  readonly onRetainedResources?: (settlement: Promise<void>) => void;
+}
+
+/** Native prepared consumers retain their real handle and existing fatal policy. */
+export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Promise<number> {
+  return runOwnedActionWrapperWithSeams({
+    ...seams,
+    acquirePayload: async () => {
+      const payload = await seams.acquirePayload();
+      return {
+        ...payload,
+        kind: 'native',
+        launch: (request) =>
+          seams.hostProcessRunner({ ...request, executableHandle: payload.executableHandle }),
+      };
+    },
+  });
+}
+
+/** Repository lifecycle seam; production always acquires the real tree and pinned runtime below. */
+export async function runManagedActionWrapperWithSeams(
+  seams: ManagedActionWrapperSeams,
+): Promise<number> {
+  return runOwnedActionWrapperWithSeams({
+    ...seams,
+    acquirePayload: async () => {
+      const payload = await seams.acquirePayload();
+      return {
+        ...payload,
+        kind: 'managed',
+        launch: (request) =>
+          seams.hostProcessRunner({
+            ...request,
+            tree: payload.tree,
+            trustedRuntimeRoot: payload.trustedRuntimeRoot,
+            workspace: payload.runnerStorage.workspace,
+          }),
+      };
+    },
+  });
+}
+
 /** Ordinary entry owns acquisition; it exposes no prepared-proof or transport selector. */
 export async function runProductionActionWrapper(
   actionRootUrl: URL,
   wrapperBuildDiscriminator: string,
 ): Promise<number> {
   const termination = createTerminationSignal();
+  let retainedResources: Promise<void> | undefined;
   try {
-    return await runActionWrapperWithSeams({
+    return await runManagedActionWrapperWithSeams({
       toolkit: createActionsToolkit(),
       platform: process.platform,
       signal: termination.signal,
       runtimeFacts: readProductionRuntimeFacts,
-      hostProcessRunner: runHostProcess,
+      hostProcessRunner: runManagedHostProcess,
+      onRetainedResources: (settlement) => {
+        retainedResources = settlement;
+      },
       bridgeRuntime: startArtifactBridgeRuntime,
       createArtifactExecutor: createProductionArtifactExecutor,
       fatalExit: (code) => process.exit(code),
@@ -157,35 +245,80 @@ export async function runProductionActionWrapper(
         const actionRoot = fileURLToPath(actionRootUrl);
         const mapBytes = await readBoundedFile(
           path.join(actionRoot, 'payload-map.json'),
-          PAYLOAD_MAP_MAXIMUM_BYTES,
+          MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES,
         );
-        if (parseStrictJson(mapBytes, PAYLOAD_MAP_MAXIMUM_BYTES) === null)
+        if (parseStrictJson(mapBytes, MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES) === null)
           fail('wrapper_payload_map_unbound');
-        parsePayloadMap(mapBytes);
+        const map = parseManagedPayloadMap(mapBytes);
         const signal = AbortSignal.any([termination.signal, AbortSignal.timeout(60_000)]);
-        return acquireInPayloadStaging({
+        const runnerStorage = {
           runnerTemp: required(process.env.RUNNER_TEMP),
           workspace: required(process.env.GITHUB_WORKSPACE),
+        };
+        // Return the original registered managed payload through the staging owner first.
+        const payload = await acquireInPayloadStaging({
+          ...runnerStorage,
           acquire: async (stagingParent) => {
-            const actionSourceSha = await resolveInstalledActionSource({
+            const actionSourceSha = await resolveInstalledManagedActionSource({
               actionRoot,
               mapBytes,
               actionRepository: process.env.GITHUB_ACTION_REPOSITORY,
               actionRef: process.env.GITHUB_ACTION_REF,
               signal,
             });
-            return resolveReleasePayload({ mapBytes, actionSourceSha, stagingParent, signal });
+            return resolveManagedReleasePayload({
+              mapBytes,
+              actionSourceSha,
+              stagingParent,
+              signal,
+              workspace: runnerStorage.workspace,
+            });
           },
         });
+        try {
+          const runtime = await acquireRuntimePrerequisite({
+            ...runnerStorage,
+            signal: termination.signal,
+          });
+          return {
+            tree: payload.tree,
+            actionSourceSha: payload.actionSourceSha,
+            payloadSha256: map.payload.archiveSha256,
+            buildDiscriminator: wrapperBuildDiscriminator,
+            trustedRuntimeRoot: runtime.trustedRuntimeRoot,
+            runnerStorage,
+            dispose: async () => {
+              const results = await Promise.allSettled([payload.dispose(), runtime.dispose()]);
+              const failures = results.flatMap((result) =>
+                result.status === 'rejected' ? [result.reason] : [],
+              );
+              if (failures.length > 0)
+                throw new AggregateError(failures, 'wrapper_owned_resource_cleanup_failed');
+            },
+          };
+        } catch (error) {
+          if (error instanceof RuntimePrerequisiteTerminationUnconfirmedError)
+            retainedResources = error.resourcesReleased;
+          try {
+            await payload.dispose();
+          } catch (cleanupError) {
+            if (error instanceof Error)
+              Object.defineProperty(error, 'payloadCleanupError', { value: cleanupError });
+          }
+          throw error;
+        }
       },
     });
   } finally {
-    termination.dispose();
+    if (retainedResources) {
+      void retainedResources.then(termination.dispose, termination.dispose);
+    } else {
+      termination.dispose();
+    }
   }
 }
 
-/** Repository tests exercise disposal across the shared lifecycle without replacing product admission. */
-export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Promise<number> {
+async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): Promise<number> {
   let bridge: ArtifactBridgeRuntime | undefined;
   let tracker: OfficialCallTracker | undefined;
   let completion: ActionHostCompletionDocument | undefined;
@@ -194,7 +327,11 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
   let hostStateReconciliationDiagnosticLine: string | undefined;
   let failed = false;
   let hostTerminationUnconfirmed = false;
-  let prepared: Awaited<ReturnType<ActionWrapperSeams['acquirePayload']>> | undefined;
+  let managedTerminationUnconfirmed: HostProcessTerminationUnconfirmedError | undefined;
+  let prerequisiteTerminationUnconfirmed:
+    | RuntimePrerequisiteTerminationUnconfirmedError
+    | undefined;
+  let prepared: OwnedActionPayload | undefined;
   let unboundMap = false;
   const inputs = (() => {
     try {
@@ -242,6 +379,7 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
     tracker = new OfficialCallTracker();
     bridge = await seams.bridgeRuntime({
       buildDiscriminator: prepared.buildDiscriminator,
+      ...(prepared.kind === 'managed' ? { runnerStorage: prepared.runnerStorage! } : {}),
       executorFactory: async (stagingRoot) =>
         await seams.createArtifactExecutor(
           {
@@ -256,6 +394,8 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
           tracker!,
         ),
     });
+    if (prepared.kind === 'managed' && typeof bridge.sealAdmission !== 'function')
+      fail('wrapper_bridge_invalid');
     const launch = buildLaunchDocument({
       inputs,
       runtimeFacts,
@@ -265,8 +405,7 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
       cancellation: 'active',
     });
     if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
-    const host = await seams.hostProcessRunner({
-      executableHandle: prepared.executableHandle,
+    const host = await prepared.launch({
       launchBytes: serializeLaunchDocument(launch),
       tempRoot: bridge.tempRoot,
       signal: seams.signal,
@@ -280,8 +419,16 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
       host.exitCode,
     );
   } catch (error) {
-    if (error instanceof HostProcessTerminationUnconfirmedError) {
-      hostTerminationUnconfirmed = true;
+    if (error instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
+      prerequisiteTerminationUnconfirmed = error;
+    } else if (error instanceof HostProcessTerminationUnconfirmedError) {
+      if (prepared?.kind === 'managed') {
+        managedTerminationUnconfirmed = error;
+        // Revoke new effects now; admitted work and its storage retain their own barriers.
+        bridge!.sealAdmission!();
+      } else {
+        hostTerminationUnconfirmed = true;
+      }
     } else {
       failed = true;
       unboundMap =
@@ -289,10 +436,32 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
     }
   } finally {
     try {
-      await prepared?.dispose();
+      if (prepared?.kind !== 'managed') await prepared?.dispose();
     } catch {
       failed = true;
     }
+  }
+
+  if (prerequisiteTerminationUnconfirmed) {
+    const settlement = prerequisiteTerminationUnconfirmed.resourcesReleased;
+    void settlement.catch(() => {});
+    seams.onRetainedResources?.(settlement);
+    return 1;
+  }
+
+  if (managedTerminationUnconfirmed && prepared && bridge && tracker) {
+    // No presentation or immediate process.exit can bypass the actual-child retention.
+    const settlement = retainManagedResources(
+      managedTerminationUnconfirmed,
+      prepared,
+      bridge,
+      tracker,
+      seams.officialQuiescenceTimeoutMs ?? OFFICIAL_QUIESCENCE_TIMEOUT_MS,
+      seams.fatalExit,
+    );
+    void settlement.catch(() => {});
+    seams.onRetainedResources?.(settlement);
+    return 1;
   }
 
   if (hostTerminationUnconfirmed) {
@@ -343,14 +512,23 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
       failed = true;
     } finally {
       try {
-        await bridge.cleanup();
+        if (quiet || prepared?.kind !== 'managed') await bridge.cleanup();
       } catch {
         failed = true;
       }
     }
     if (!quiet) {
+      if (prepared?.kind === 'managed') await prepared.dispose().catch(() => {});
       seams.fatalExit(1);
       return 1;
+    }
+  }
+
+  if (prepared?.kind === 'managed') {
+    try {
+      await prepared.dispose();
+    } catch {
+      failed = true;
     }
   }
 
@@ -371,6 +549,49 @@ export async function runActionWrapperWithSeams(seams: ActionWrapperSeams): Prom
   } catch {
     return 1;
   }
+}
+
+async function retainManagedResources(
+  error: HostProcessTerminationUnconfirmedError,
+  payload: OwnedActionPayload,
+  bridge: ArtifactBridgeRuntime,
+  tracker: OfficialCallTracker,
+  quiescenceMs: number,
+  fatalExit: (code: 1) => void,
+): Promise<void> {
+  if (!error.terminationConfirmed) return await new Promise<void>(() => {});
+  const bridgeSettlement = error.terminationConfirmed.then(async () => {
+    let quiet = false;
+    try {
+      await bridge.stopAndDrain();
+      quiet = await tracker.awaitQuiescence(quiescenceMs);
+    } catch {
+      /* Unsettled official work never authorizes normal presentation. */
+    }
+    if (!quiet) {
+      fatalExit(1);
+      throw new Error('wrapper_official_quiescence_failed');
+    }
+    await bridge.cleanup();
+  });
+  const payloadSettlement =
+    error instanceof ManagedHostProcessTerminationUnconfirmedError
+      ? error.terminationConfirmed.then(async () => {
+          try {
+            await error.resourcesReleased;
+          } catch (cleanupError) {
+            if (!(cleanupError instanceof ManagedRuntimeCleanupError)) throw cleanupError;
+            await cleanupError.retryCleanup();
+          }
+          await payload.dispose();
+        })
+      : new Promise<void>(() => {});
+  const results = await Promise.allSettled([bridgeSettlement, payloadSettlement]);
+  if (results.some((result) => result.status === 'rejected'))
+    throw new AggregateError(
+      results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
+      'wrapper_retained_resource_cleanup_failed',
+    );
 }
 
 export function readProductionRuntimeFacts(): ActionRuntimeFacts {
