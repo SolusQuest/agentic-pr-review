@@ -100,6 +100,7 @@ try
         var negatives = 0;
         foreach (var variant in new[] { "valid", "near-expiry", "payload", "grant", "checkpoint", "execution", "round", "disposed", "expired", "snapshot-replaced", "exclusion-disposed", "source-work", "source-round", "source-execution" })
         {
+            Proof.Stage = variant;
             var root = Path.Join(parent, variant);
             Directory.CreateDirectory(root);
             await using (var seed = await Fixture.OpenAsync(root, default)) await seed.SeedAsync();
@@ -129,8 +130,7 @@ try
             if (variant == "expired") fixture.Clock.Now = consumed!.Claim.SourceExpiresAtUnixSeconds;
             if (variant == "snapshot-replaced")
             {
-                var original = fixture.Targets.Snapshot.AbsoluteRoot;
-                Directory.Move(original, original + "-displaced"); Directory.CreateDirectory(original);
+                fixture.ReplaceSnapshotRootForProof();
             }
             if (variant == "exclusion-disposed") fixture.Exclusion.Dispose();
             fixture.Provider.FailImport = false;
@@ -147,6 +147,7 @@ try
         }
         foreach (var variant in new[] { "precommit", "committed-error", "cancelled", "disposed-source", "expiry-before" })
         {
+            Proof.Stage = variant;
             var root = Path.Join(parent, variant); Directory.CreateDirectory(root);
             await using (var seed = await Fixture.OpenAsync(root, default)) await seed.SeedAsync();
             var faults = new FixtureFaults();
@@ -179,6 +180,7 @@ try
         }
         foreach (var variant in new[] { "capacity", "under-retained", "stale-receipt" })
         {
+            Proof.Stage = variant;
             var root = Path.Join(parent, variant); Directory.CreateDirectory(root);
             await using (var seed = await Fixture.OpenAsync(root, default)) await seed.SeedAsync();
             await using var fixture = await Fixture.OpenAsync(root, default);
@@ -249,6 +251,7 @@ try
 }
 catch (Exception error)
 {
+    Console.Error.WriteLine("APR_SOLUS_CONTEXT_PHASE " + Proof.Stage);
     // No restricted record or provider content in diagnostics.
     Console.Error.WriteLine("APR_SOLUS_CONTEXT_FAILED " + error.GetType().Name +
         (error is ProofFailure failure ? " " + failure.Stage : string.Empty));
@@ -258,6 +261,7 @@ catch (Exception error)
 sealed class ProofFailure(string stage) : Exception { internal string Stage { get; } = stage; }
 static class Proof
 {
+    internal static string Stage = "startup";
     internal static void Require(bool condition, string stage) { if (!condition) throw new ProofFailure(stage); }
     internal static AgentRequest Request(Guid execution) => new(execution, "Review the exact snapshot.", [],
         new(3, TimeSpan.FromSeconds(10)), AgentCapability.None);
@@ -272,6 +276,17 @@ static class Proof
 
 sealed class Fixture : IAsyncDisposable
 {
+    private string? displacedSnapshot;
+
+    internal void ReplaceSnapshotRootForProof()
+    {
+        var original = Targets.Snapshot.AbsoluteRoot;
+        var displaced = original + "-displaced";
+        Directory.Move(original, displaced);
+        displacedSnapshot = displaced;
+        Directory.CreateDirectory(original);
+    }
+
     internal required ArtifactStateRestoreRequest Request { get; init; }
     internal required FixtureClock Clock { get; init; }
     internal required FixtureDependencies Dependencies { get; init; }
@@ -483,6 +498,15 @@ sealed class Fixture : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Runtime.Dispose(); Targets.Dispose(); Exclusion.Dispose();
+        if (displacedSnapshot is not null)
+        {
+            // Restore the fixture-owned inode so the real lease can clean its
+            // read-only tree. Never recursively delete a replacement root.
+            var original = Targets.Snapshot.AbsoluteRoot;
+            if (Directory.Exists(original)) Directory.Delete(original, recursive: false);
+            Directory.Move(displacedSnapshot, original);
+            displacedSnapshot = null;
+        }
         await Snapshot.DisposeAsync(); await Tree.DisposeAsync();
         Directory.Delete(Staging, recursive: true);
     }

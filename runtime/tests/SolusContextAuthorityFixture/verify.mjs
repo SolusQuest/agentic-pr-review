@@ -41,10 +41,27 @@ try {
     if (result.status !== 0) {
       const codes = [
         ...new Set(
-          ((result.stdout || '') + (result.stderr || '')).match(/\b(?:CS|MSB|NU)\d{4}\b/g) || [],
+          ((result.stdout || '') + (result.stderr || '')).match(/\b(?:CS|MSB|NU|NETSDK)\d{4}\b/g) ||
+            [],
         ),
       ];
-      console.error(JSON.stringify({ stage: 'S2', codes }));
+      const phase = args[0] === 'restore' || args[0] === 'build' ? args[0] : 'proof';
+      const failures = (result.stderr || '')
+        .split(/\r?\n/)
+        .filter((line) =>
+          /^APR_SOLUS_CONTEXT_(?:PHASE [a-z-]+|FAILED [A-Za-z]+(?: [a-z_]+)?)$/.test(line),
+        )
+        .slice(0, 4);
+      console.error(
+        JSON.stringify({
+          stage: 'S2',
+          phase,
+          status: result.status,
+          signal: result.signal,
+          codes,
+          failures,
+        }),
+      );
       if (args[0] === 'build') {
         const diagnostics = [
           ...new Set(
