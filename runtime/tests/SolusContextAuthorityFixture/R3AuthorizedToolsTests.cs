@@ -30,25 +30,27 @@ static class R3AuthorizedToolsTests
     {
         Proof.Stage = "authorized-r3-construction";
         var root = Path.Join(parent, "authorized-r3"); Directory.CreateDirectory(root);
-        await using var fixture = await Fixture.OpenAsync(root, default);
-        Require(fixture.Runtime.SourceSelection.Compatibility.RuntimeConfigurationSha256 ==
-            LegacyHash(fixture.Targets, fixture.Provider,
-                [new(fixture.Tool, new SnapshotCapability(fixture.Targets))], correction: false), "legacy_identity");
-        await Construction(fixture, parent);
         SolusRestrictedStateRecord? record = null;
         string? historicalId = null;
-        var variants = Variants().ToArray();
-        Require(variants.Length == 18, "reachable_variant_count");
-        foreach (var variant in variants)
-            await Correct(fixture, variant.Call, variant.Feedback, reverse: false, capture: false);
-        foreach (var reverse in new[] { false, true })
-        foreach (var schemaInvalid in new[] { false, true })
+        await using (var fixture = await Fixture.OpenAsync(root, default))
         {
-            var result = await Correct(fixture,
-                new("invalid", "read_file", "{\"path\":" + Json(Rejected) + (schemaInvalid ? ",\"unknown\":true}" : "}")),
-                schemaInvalid ? AgentRecoveryFeedback.ArgumentsInvalid : AgentRecoveryFeedback.TrackedPathMissing,
-                reverse, capture: !reverse && !schemaInvalid);
-            if (result.Record is not null) { record = result.Record; historicalId = result.Observation; }
+            Require(fixture.Runtime.SourceSelection.Compatibility.RuntimeConfigurationSha256 ==
+                CompatibilityHash(fixture.Targets, fixture.Provider,
+                    [new(fixture.Tool, new SnapshotCapability(fixture.Targets))], correction: false), "policyless_identity");
+            Construction(fixture);
+            var variants = Variants().ToArray();
+            Require(variants.Length == 18, "reachable_variant_count");
+            foreach (var variant in variants)
+                await Correct(fixture, variant.Call, variant.Feedback, reverse: false, capture: false);
+            foreach (var reverse in new[] { false, true })
+            foreach (var schemaInvalid in new[] { false, true })
+            {
+                var result = await Correct(fixture,
+                    new("invalid", "read_file", "{\"path\":" + Json(Rejected) + (schemaInvalid ? ",\"unknown\":true}" : "}")),
+                    schemaInvalid ? AgentRecoveryFeedback.ArgumentsInvalid : AgentRecoveryFeedback.TrackedPathMissing,
+                    reverse, capture: !reverse && !schemaInvalid);
+                if (result.Record is not null) { record = result.Record; historicalId = result.Observation; }
+            }
         }
         Require(record is not null && historicalId is not null, "captured");
         // Distinct stores keep each genuine one-shot context claim independent.
@@ -57,15 +59,19 @@ static class R3AuthorizedToolsTests
         Proof.Stage = "startup";
     }
 
-    private static async Task Construction(Fixture fixture, string parent)
+    private static void Construction(Fixture fixture)
     {
         Proof.Stage = "authorized-r3-bindings";
-        var foreignRoot = Path.Join(parent, "authorized-foreign"); Directory.CreateDirectory(foreignRoot);
-        await using var foreign = await Fixture.OpenAsync(foreignRoot, default);
+        var snapshot = fixture.Snapshot.Snapshot;
+        // A copied snapshot with identical metadata/root still has no authority
+        // to replace the exact snapshot installed in the fresh Host context.
+        var foreign = new ReviewedSnapshot(snapshot.Identity, snapshot.AbsoluteRoot,
+            snapshot.OrderedTrackedFiles, snapshot.OrderedReviewedHeadPaths,
+            snapshot.OrderedChangedFiles, snapshot.DiffByChangedPath.Values);
         var executor = new AuthorizedExecutor(new SnapshotToolExecutor(fixture.Snapshot.Snapshot, new VerifiedReviewedFileAccess()));
         var tools = new SolusSnapshotTools(Guid.NewGuid(), fixture.Snapshot.Snapshot, executor);
         var other = new SolusSnapshotTools(Guid.NewGuid(), fixture.Snapshot.Snapshot, executor);
-        var foreignTools = new SolusSnapshotTools(Guid.NewGuid(), foreign.Snapshot.Snapshot, executor);
+        var foreignTools = new SolusSnapshotTools(Guid.NewGuid(), foreign, executor);
         var generic = new RuntimeToolRegistration(fixture.Tool, new SnapshotCapability(fixture.Targets));
         foreach (var mode in new[] { "stripped_all", "stripped_one", "cloned", "changed_keys", "mixed", "foreign", "subset", "generic" })
         {
@@ -143,7 +149,7 @@ static class R3AuthorizedToolsTests
         };
         using var runtime = SolusRuntimeConstruction.CreateForAuthorizedReview(targets, _ => new(provider, tools.Registrations, new Hooks()));
         var compatibility = runtime.SourceSelection.Compatibility;
-        Require(compatibility.RuntimeConfigurationSha256 == LegacyHash(targets, provider, tools.Registrations, correction: true),
+        Require(compatibility.RuntimeConfigurationSha256 == CompatibilityHash(targets, provider, tools.Registrations, correction: true),
             "correction_identity");
         Require(compatibility.Profile == fixture.Runtime.SourceSelection.Compatibility.Profile &&
             compatibility.ProviderConfigurationSha256 == fixture.Runtime.SourceSelection.Compatibility.ProviderConfigurationSha256 &&
@@ -268,7 +274,7 @@ static class R3AuthorizedToolsTests
             policy.GetError("batch_not_executed").Json == AgentRecoveryFeedback.BatchNotExecuted, "installed_builtins");
     }
 
-    private static string LegacyHash(SolusFreshHostContext context, IModelProvider provider,
+    private static string CompatibilityHash(SolusFreshHostContext context, IModelProvider provider,
         IReadOnlyList<RuntimeToolRegistration> tools, bool correction)
     {
         // Independent frozen pre-fix serialization, with the explicit correction
