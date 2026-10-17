@@ -49,7 +49,7 @@ try {
       const failures = (result.stderr || '')
         .split(/\r?\n/)
         .filter((line) =>
-          /^APR_SOLUS_CONTEXT_(?:PHASE [a-z-]+|FAILED [A-Za-z]+(?: [a-z_]+)?)$/.test(line),
+          /^APR_SOLUS_CONTEXT_(?:PHASE [a-z0-9-]+|FAILED [A-Za-z]+(?: [a-z0-9_]+)?)$/.test(line),
         )
         .slice(0, 4);
       console.error(
