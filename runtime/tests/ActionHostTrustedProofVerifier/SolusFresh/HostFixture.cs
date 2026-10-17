@@ -30,7 +30,7 @@ internal sealed class HostFixture : IDisposable
     internal MeteredProvider? Meter;
 
     internal HostFixture(Corpus corpus, byte[]? instructions = null, string? reviewJson = null,
-        bool providerKey = true, bool rejectAuthorization = false)
+        bool providerKey = true, bool rejectAuthorization = false, TimeProvider? clock = null)
     {
         Directory.CreateDirectory(Root);
         Authorization = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch,
@@ -62,7 +62,7 @@ internal sealed class HostFixture : IDisposable
         Launch = launch!;
         GitHub = new(corpus, transport.PullRequest, Launch.WorkflowSha, instructions, reviewJson);
         Host = new(new ActionHostCompositionDependencies(Authorization.EventReader, Authorization.Factory,
-            GitHub, GitHub, Effects, Effects, Effects, TimeProvider.System, () => Path.Join(Root, "stage")));
+            GitHub, GitHub, Effects, Effects, Effects, clock ?? TimeProvider.System, () => Path.Join(Root, "stage")));
     }
     internal Task<ActionHostPreparedResult<SolusFreshReviewResult>> Run(ScriptedHandler handler,
         IRestrictedContextSink? sink = null, CancellationToken token = default,
@@ -149,10 +149,13 @@ internal sealed class ExportFailure(IModelProvider inner) : IModelProvider, IPro
 internal sealed class MeteredProvider(IModelProvider inner) : IModelProvider, IProviderContextPersistence, IProviderRequestValidation
 {
     internal int MaxRequestBytes, MaxResponseBytes, MaxInputs;
+    internal Guid? ExecutionId;
     public ProviderScope Scope => inner.Scope;
     public ProviderCapabilities Capabilities => inner.Capabilities;
     public async ValueTask<ProviderExchangeResult> ExchangeAsync(ProviderRequest request, CancellationToken cancellationToken = default)
     {
+        ExecutionId ??= request.Attempt.ExecutionId;
+        Proof.Require(ExecutionId == request.Attempt.ExecutionId, "provider_execution_witness");
         MaxRequestBytes = Math.Max(MaxRequestBytes, request.PayloadByteCount);
         MaxInputs = Math.Max(MaxInputs, request.Inputs.Count);
         var result = await inner.ExchangeAsync(request, cancellationToken);
@@ -175,5 +178,54 @@ internal sealed class CancellingFiles(CancellationTokenSource cancellation) : IR
     {
         var read = await inner.ReadAsync(snapshot, path, expected, token);
         Reads++; cancellation.Cancel(); return read;
+    }
+}
+
+// Real reads arm an infrastructure fault in the existing Host clock seam.
+// Underlying timers are disposed before the one-shot throw; no runtime result
+// or tool evidence is fabricated by this fixture.
+internal sealed class AbortClock(CancellationTokenSource? cancellation = null) : TimeProvider
+{
+    private int timerCount, armedTimer, consumed;
+    internal int Faults;
+    internal void Arm() => Interlocked.CompareExchange(ref armedTimer, Volatile.Read(ref timerCount), 0);
+    public override long TimestampFrequency => TimeProvider.System.TimestampFrequency;
+    public override long GetTimestamp() => TimeProvider.System.GetTimestamp();
+    public override DateTimeOffset GetUtcNow() => TimeProvider.System.GetUtcNow();
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        new AbortTimer(this, Interlocked.Increment(ref timerCount), TimeProvider.System.CreateTimer(callback, state, dueTime, period));
+    private void AfterDispose(int timer)
+    {
+        if (timer != Volatile.Read(ref armedTimer) || Interlocked.CompareExchange(ref consumed, 1, 0) != 0) return;
+        Interlocked.Increment(ref Faults);
+        if (cancellation is not null)
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellation.Token);
+        }
+        throw new InvalidOperationException("R5_PRIVATE_ABORT_EXCEPTION_CANARY");
+    }
+    private sealed class AbortTimer(AbortClock owner, int id, ITimer inner) : ITimer
+    {
+        public bool Change(TimeSpan dueTime, TimeSpan period) => inner.Change(dueTime, period);
+        public void Dispose() { inner.Dispose(); owner.AfterDispose(id); }
+        public async ValueTask DisposeAsync()
+        {
+            await inner.DisposeAsync().ConfigureAwait(false); owner.AfterDispose(id);
+        }
+    }
+}
+
+internal sealed class ReadWitness(AbortClock clock) : IReviewedFileAccess
+{
+    private readonly VerifiedReviewedFileAccess inner = new();
+    internal int Reads;
+    public ReviewedFileMetadata InspectMetadata(ReviewedSnapshot snapshot, string path) => inner.InspectMetadata(snapshot, path);
+    public ReviewedFileProbe Probe(ReviewedSnapshot snapshot, string path) => inner.Probe(snapshot, path);
+    public async ValueTask<ReviewedFileRead> ReadAsync(ReviewedSnapshot snapshot, string path,
+        ReviewedFileProbe expected, CancellationToken token)
+    {
+        var read = await inner.ReadAsync(snapshot, path, expected, token);
+        Reads++; clock.Arm(); return read;
     }
 }

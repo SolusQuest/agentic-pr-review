@@ -26,6 +26,7 @@ internal static class Program
             using var corpus = new Corpus(args.Length == 1 ? args[0] : "runtime/tests/fixtures/agent/r5/quality/bundle");
             VerifyInventoryCounter();
             ValidateProviderWrappers(corpus);
+            await AbortedObservationCases(corpus);
             await DefaultProviderPath(corpus);
             foreach (var id in Corpus.Cases) await QualityCase(corpus, id);
             await CaptureCases(corpus);
@@ -66,6 +67,45 @@ internal static class Program
         foreach (var validator in validators)
             Proof.Require(validator.ValidateRequest(Request(provider.Scope)) == ProviderError.ProviderFailed &&
                 handler.Sends == 0, "delegated_actual_provider_refusal_no_dispatch");
+    }
+
+    private static async Task AbortedObservationCases(Corpus corpus)
+    {
+        Proof.Stage = "aborted_observations";
+        Guid? previous = null;
+        foreach (var mode in new[] { "exception", "cancellation" })
+        {
+            using var cancellation = new CancellationTokenSource();
+            var clock = new AbortClock(mode == "cancellation" ? cancellation : null);
+            using var fixture = new HostFixture(corpus, clock: clock);
+            using var handler = new ScriptedHandler(corpus, "cs-defect");
+            var reads = new ReadWitness(clock);
+            var prepared = await fixture.Run(handler, token: cancellation.Token, files: _ => reads);
+            var result = prepared.Value;
+            Proof.Require(prepared.Failure is null && result is not null && clock.Faults == 1 &&
+                reads.Reads == 2 && handler.Sends == handler.Turns, "actual_read_then_abort_" + mode);
+            Proof.Require(result!.Failure == (mode == "cancellation" ? SolusFreshReviewFailure.Cancelled :
+                SolusFreshReviewFailure.HostFailure) && cancellation.IsCancellationRequested == (mode == "cancellation") &&
+                result.Work is null && result.Context is null && result.Review is null && !result.TerminalAccepted &&
+                !result.ProductReviewAccepted && result.Publication?.CandidateEligible != true &&
+                !result.DurableStateAccepted && !result.EffectsAuthorized, "aborted_not_clean_" + mode);
+            using var expected = corpus.Expected("cs-defect");
+            var ids = expected.RootElement.GetProperty("required_observations").EnumerateArray()
+                .Select(o => o.GetProperty("observation_id").GetString()).ToArray();
+            Proof.Require(result.Observations.Length == 4 && result.Observations.Select(o => o.ObservationId).SequenceEqual(ids),
+                "aborted_observations_retained_" + mode);
+            Proof.Require(result.ExecutionId != Guid.Empty && result.ExecutionId == fixture.Meter!.ExecutionId &&
+                result.ExecutionId != previous && result.Observations.All(o => o.Identity.HeadSha == new string('2', 40)),
+                "aborted_execution_identity_" + mode);
+            previous = result.ExecutionId; fixture.AssertEffectsAbsent(); SafeResult(result);
+        }
+        using var early = new HostFixture(corpus);
+        using var earlyHandler = new ScriptedHandler(corpus, "cs-safe");
+        var absent = (await early.Run(earlyHandler, files: _ =>
+            throw new InvalidOperationException("R5_PRIVATE_ABORT_EXCEPTION_CANARY"))).Value!;
+        Proof.Require(absent.Failure == SolusFreshReviewFailure.HostFailure && absent.Observations.IsEmpty &&
+            !absent.ProductReviewAccepted && earlyHandler.Sends == 0, "pre_tool_fault_has_no_observations");
+        early.AssertEffectsAbsent(); SafeResult(absent);
     }
 
     private static async Task DefaultProviderPath(Corpus corpus)
@@ -231,6 +271,8 @@ internal static class Program
             if (mode == "cancel_tool") Proof.Require(cancellingFiles.Reads == 1 &&
                 (result.Work?.Termination == ActionHostTerminationReason.Cancelled || result.Failure == SolusFreshReviewFailure.Cancelled),
                 "real_tool_cancellation");
+            if (mode == "cancel_tool") Proof.Require(result.Observations.Length == 2 &&
+                result.ExecutionId == fixture.Meter!.ExecutionId, "handled_cancellation_retains_prior_observations");
             if (mode == "timeout") Proof.Require(handler.Sends == 1 &&
                 result.Work?.Termination == ActionHostTerminationReason.DeadlineExceeded, "trusted_smaller_timeout");
             fixture.AssertEffectsAbsent(); SafeResult(result);
@@ -295,7 +337,7 @@ internal static class Program
     {
         var ordinary = string.Join("|", result, result.Work, result.Context, result.Publication);
         foreach (var canary in new[] { HostFixture.ProviderKey, HostFixture.GitHubKey, HostFixture.StateKey,
-            "R5_PRIVATE_REASONING_CANARY", "R5_PRIVATE_SINK_EXCEPTION_CANARY", "R5_PRIVATE_EXPORT_EXCEPTION_CANARY",
+            "R5_PRIVATE_ABORT_EXCEPTION_CANARY", "R5_PRIVATE_REASONING_CANARY", "R5_PRIVATE_SINK_EXCEPTION_CANARY", "R5_PRIVATE_EXPORT_EXCEPTION_CANARY",
             "APR242_CANDIDATE_CANARY", "APR242_TERMINAL_CANARY" })
             Proof.Require(!ordinary.Contains(canary, StringComparison.Ordinal), "ordinary_sinks_private");
     }
