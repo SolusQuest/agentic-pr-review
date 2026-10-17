@@ -906,6 +906,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             },
             run: 'node runtime/tests/SolusToolAdapterFixture/verify.mjs',
           },
+          {
+            name: 'CR1-R5 actual managed fresh Host review and capture proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'node runtime/tests/ActionHostFixture/verify-solus-fresh.mjs',
+          },
         ],
       },
     },

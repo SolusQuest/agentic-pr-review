@@ -13,6 +13,7 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="SolusFresh/**/*.cs" />
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
                       AdditionalProperties="ActionHostTrustedProofPayloadReference=true" />
     <ProjectReference Include="..\ActionHostTrustedProofPayload\AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj" />

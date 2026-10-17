@@ -7,7 +7,7 @@ namespace AgenticPrReview.Runtime.Execution.Solus;
 
 // No Host/environment configuration reaches the actual provider. The optional
 // terminal handler is a trusted test capability, never repository/model input.
-internal sealed class SolusDeepSeekAdapter : IModelProvider, IProviderContextPersistence, IDisposable
+internal sealed class SolusDeepSeekAdapter : IModelProvider, IProviderContextPersistence, IProviderRequestValidation, IDisposable
 {
     private readonly DeepSeekProvider provider;
     private readonly SolusReviewFacts facts;
@@ -36,6 +36,8 @@ internal sealed class SolusDeepSeekAdapter : IModelProvider, IProviderContextPer
             ? result.Response?.Finish : null);
         return result;
     }
+
+    public ProviderError ValidateRequest(ProviderRequest request) => provider.ValidateRequest(request);
 
     public ProviderSavedState? ExportContext(ProviderContextBinding binding) => provider.ExportContext(binding);
     public bool AdmitContext(ProviderContextBinding binding, ProviderSavedState state) => provider.AdmitContext(binding, state);
