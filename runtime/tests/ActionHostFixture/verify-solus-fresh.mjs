@@ -214,7 +214,11 @@ try {
     stage = `row_${index}_runtime`;
     check(['Completed', 'Partial', 'Failed', 'Cancelled', 'ResourceLimit'].includes(row.runtime));
     if (row.runtime === 'Partial')
-      check(row.evaluation === 'ExecutionFailed' && row.terminal_accepted === false && row.head === null);
+      check(
+        row.evaluation === 'ExecutionFailed' &&
+          row.terminal_accepted === false &&
+          row.head === null,
+      );
     stage = `row_${index}_capture`;
     check(['NotRequested', 'Unavailable', 'Delivered', 'Failed'].includes(row.capture));
     stage = `row_${index}_head`;
