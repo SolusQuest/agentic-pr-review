@@ -8,6 +8,8 @@ try
     await AccountingBridgeTests.Run();
     F.Stage = "budget";
     await RuntimeBudgetTests.Run();
+    F.Stage = "post_handoff";
+    await PostHandoffRegressionTests.Run();
     F.Stage = "supplemental_retry";
     await SupplementalRetryTests.Run();
     Console.WriteLine($"APR_SOLUS_PROVIDER_PROOF checks={F.Checks} controlled_sends={F.Sends} live_calls=0 credential_free=true candidate_gate=true");

@@ -180,7 +180,7 @@ internal sealed class SolusReviewFacts
                 var dispatched = current.Exposure == DispatchExposure.Dispatched;
                 observations.Add(new(logical, current.AttemptNumber - 1, known, dispatched,
                     known && (result?.Outcome is not null || !dispatched),
-                    result is { Outcome: ProviderOutcome.Succeeded, Stop: RuntimeStop.None }, Measurement(current.Usage)));
+                    result is { Outcome: ProviderOutcome.Succeeded }, Measurement(current.Usage)));
             }
             logical++;
         }

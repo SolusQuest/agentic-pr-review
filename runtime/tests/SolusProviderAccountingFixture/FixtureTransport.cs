@@ -106,6 +106,9 @@ sealed class ProofHooks : IRuntimeExposureHooks
     internal int Before, After;
     internal bool Deny;
     internal string BeforeMode = "permit", SettlementMode = "continue";
+    internal List<SolusAttemptFact> Attempts { get; } = [];
+    internal TaskCompletionSource SettlementRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal TaskCompletionSource SettlementReturned { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public ValueTask<ExposureAcknowledgement?> BeforeDispatchAsync(RuntimeExposure exposure, CancellationToken token)
     {
         Before++;
@@ -125,6 +128,8 @@ sealed class ProofHooks : IRuntimeExposureHooks
     public ValueTask<SettlementAcknowledgement?> AfterAttemptAsync(RuntimeSettlement settlement, CancellationToken token)
     {
         After++;
+        Attempts.Add(new(settlement.Observation, settlement.ProviderOutcome, settlement.Stop));
+        if (SettlementMode == "held") return new(HeldSettlement(settlement));
         SettlementAcknowledgement? receipt = SettlementMode switch
         {
             "missing" => null,
@@ -137,17 +142,34 @@ sealed class ProofHooks : IRuntimeExposureHooks
         };
         return ValueTask.FromResult(receipt);
     }
+    private async Task<SettlementAcknowledgement?> HeldSettlement(RuntimeSettlement settlement)
+    {
+        await SettlementRelease.Task;
+        SettlementReturned.TrySetResult();
+        return new(settlement.Exposure, RuntimeHookStatus.Acknowledged, RuntimeContinuation.Continue, settlement.Accounting);
+    }
 }
 
 sealed class ProofDomain : ICandidateHost
 {
     internal int Calls;
     internal bool Accept = true;
+    internal string Mode = "decision";
     public ValueTask<CandidateFeedback?> SubmitAsync(CandidateSubmission submission, CancellationToken token = default)
     {
         Calls++;
-        return ValueTask.FromResult<CandidateFeedback?>(new(submission.ExecutionId, submission.SubmissionId,
-            CandidateAcknowledgement.Acknowledged, Accept ? CandidateDecision.Accept : CandidateDecision.Reject, CandidateContinuation.End));
+        CandidateFeedback? receipt = Mode switch
+        {
+            "missing" => null,
+            "failed" => new(submission.ExecutionId, submission.SubmissionId, CandidateAcknowledgement.Failed),
+            "unknown" => new(submission.ExecutionId, submission.SubmissionId, CandidateAcknowledgement.Unknown),
+            "wrong_execution" => new(Guid.NewGuid(), submission.SubmissionId, CandidateAcknowledgement.Acknowledged, CandidateDecision.Reject, CandidateContinuation.End),
+            "wrong_submission" => new(submission.ExecutionId, Guid.NewGuid(), CandidateAcknowledgement.Acknowledged, CandidateDecision.Reject, CandidateContinuation.End),
+            "throw" => throw new InvalidOperationException("SYNTHETIC_CANDIDATE_HOST_FAILURE"),
+            _ => new(submission.ExecutionId, submission.SubmissionId, CandidateAcknowledgement.Acknowledged,
+                Accept ? CandidateDecision.Accept : CandidateDecision.Reject, CandidateContinuation.End),
+        };
+        return ValueTask.FromResult(receipt);
     }
 }
 
