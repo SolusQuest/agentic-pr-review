@@ -208,7 +208,7 @@ _run_focused_tests() {
   if [[ "$(uname -s)" == MINGW* ]]; then
     trx_arg="$(cygpath -w "${trx}")"
   fi
-  "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
+  "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo --maxcpucount:1 \
       --filter "FullyQualifiedName~R5IncrementalReviewTests|FullyQualifiedName~R5SessionGrowthTests|FullyQualifiedName~R5CapacityResetTests|FullyQualifiedName~R5ResetHandoffTests|FullyQualifiedName~R5VerifierCoverageTests|FullyQualifiedName~R6QualitySandboxTests|FullyQualifiedName~R6ProspectivePipelineTests|FullyQualifiedName~R6ProspectiveRubricTests" \
       --logger "trx;LogFileName=${trx_arg}" >"${BUILD}/focused.log" 2>&1 ||
     _fail "APR_R5_EVAL_FOCUSED_TESTS_FAILED"
