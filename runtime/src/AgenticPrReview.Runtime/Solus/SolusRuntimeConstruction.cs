@@ -10,8 +10,11 @@ namespace AgenticPrReview.Runtime.Solus;
 internal static class SolusRuntimeConstruction
 {
     internal static IAgent Create(RuntimeConfiguration configuration, string profileId,
-        int logicalCalls = Cr1DevelopmentProfile.LogicalCalls)
+        int logicalCalls = Cr1DevelopmentProfile.LogicalCalls, SolusRuntimeOptions? options = null)
     {
+        var guarantees = RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds;
+        if (configuration.ToolArgumentCorrection is not null)
+            guarantees |= RuntimeGuarantee.ToolArgumentCorrection;
         if (!StringComparer.Ordinal.Equals(profileId, Cr1DevelopmentProfile.Id) ||
             logicalCalls is < 1 or > Cr1DevelopmentProfile.LogicalCalls ||
             configuration.Bounds.MaximumInputs != Cr1DevelopmentProfile.ProviderInputs ||
@@ -20,10 +23,16 @@ internal static class SolusRuntimeConstruction
             configuration.Bounds.MaximumRequestBytes != Cr1DevelopmentProfile.RequestPayloadBytes ||
             configuration.Bounds.MaximumResponseBytes != Cr1DevelopmentProfile.ResponsePayloadBytes ||
             configuration.Bounds.MaximumContinuationBytes != Cr1DevelopmentProfile.ContinuationBytes ||
-            configuration.RequiredGuarantees !=
-                (RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds))
+            configuration.RequiredGuarantees != guarantees)
             throw new ArgumentException("APR_SOLUS_PROFILE_UNSUPPORTED");
-        return RuntimeAgentFactory.Create(configuration, Options());
+        options ??= Options();
+        if (options.MaximumAttempts != Cr1DevelopmentProfile.RetainedAttempts ||
+            options.MaximumRecords != Cr1DevelopmentProfile.RetainedRecords ||
+            options.MaximumRetainedBytes != Cr1DevelopmentProfile.RetainedBytes ||
+            options.SettlementGrace != TimeSpan.FromSeconds(Cr1DevelopmentProfile.SettlementGraceSeconds) ||
+            options.RequireContinuation != Cr1DevelopmentProfile.RequireContinuation)
+            throw new ArgumentException("APR_SOLUS_PROFILE_UNSUPPORTED");
+        return RuntimeAgentFactory.Create(configuration, options);
     }
 
     internal static SolusRuntimeOptions Options() => new(

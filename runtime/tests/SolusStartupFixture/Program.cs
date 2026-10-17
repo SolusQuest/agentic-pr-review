@@ -25,9 +25,12 @@ try
     Rejected(() => SolusRuntimeConstruction.Create(Configuration(provider, null), Cr1DevelopmentProfile.Id));
     var unsupported = new NoDispatchProvider(false);
     Rejected(() => SolusRuntimeConstruction.Create(Configuration(unsupported, hooks), Cr1DevelopmentProfile.Id));
-    Rejected(() => new RuntimeOptions(maximumAttempts: 65));
-    Rejected(() => new RuntimeOptions(maximumRecords: 65));
-    Rejected(() => new RuntimeOptions(maximumRetainedBytes: 196_609));
+    Rejected(() => SolusRuntimeConstruction.Create(config, Cr1DevelopmentProfile.Id,
+        options: new RuntimeOptions(maximumAttempts: 65, requireContinuation: true)));
+    Rejected(() => SolusRuntimeConstruction.Create(config, Cr1DevelopmentProfile.Id,
+        options: new RuntimeOptions(maximumRecords: 65, requireContinuation: true)));
+    Rejected(() => SolusRuntimeConstruction.Create(config, Cr1DevelopmentProfile.Id,
+        options: new RuntimeOptions(maximumRetainedBytes: 196_609, requireContinuation: true)));
     Rejected(() => SolusRuntimeConstruction.Create(Configuration(provider, hooks, 65_537), Cr1DevelopmentProfile.Id));
     Check(provider.Dispatches == 0 && unsupported.Dispatches == 0 && hooks.Entries == 0 && negatives == 8);
     Check(typeof(SolusAgent.Api.Execution.IAgent).Assembly.GetName().Name == "SolusAgent.Api");
