@@ -680,12 +680,29 @@ internal sealed class ActionHostComposition
     {
         ArgumentNullException.ThrowIfNull(launch);
         var capture = new ActionHostAccountingCapture();
-        return capture.Apply(await RunCoreAsync(launch, cancellationToken, capture).ConfigureAwait(false));
+        return capture.Apply(await RunCoreAsync(launch, cancellationToken,
+            prepared => RunNativePreparedAsync(prepared, capture), completion => completion).ConfigureAwait(false));
     }
 
-    private async Task<ActionHostCompletion> RunCoreAsync(
-        ActionHostLaunchContract launch, CancellationToken cancellationToken, ActionHostAccountingCapture capture)
+    // Compiled trusted continuation only: no public selector or restoration fallback.
+    // The callback is awaited while authorization, snapshot and exclusion leases are live.
+    internal Task<ActionHostPreparedResult<T>> RunPreparedFreshAsync<T>(
+        ActionHostLaunchContract launch, Func<ActionHostPreparedReview, Task<T>> execute,
+        CancellationToken cancellationToken) where T : class
     {
+        ArgumentNullException.ThrowIfNull(launch);
+        ArgumentNullException.ThrowIfNull(execute);
+        return RunCoreAsync(launch, cancellationToken,
+            async prepared => ActionHostPreparedResult<T>.Completed(await execute(prepared).ConfigureAwait(false)),
+            ActionHostPreparedResult<T>.Rejected);
+    }
+
+    private async Task<T> RunCoreAsync<T>(
+        ActionHostLaunchContract launch, CancellationToken cancellationToken,
+        Func<ActionHostPreparedReview, Task<T>> execute, Func<ActionHostCompletion, T> rejected)
+    {
+        T Failure(ActionHostLaunchContract value, ActionHostStatus status, bool StateWasAccessed) =>
+            rejected(Completion(value, status, StateWasAccessed));
         using var timeBudget = new ActionHostTimeBudget(dependencies.TimeProvider, cancellationToken);
         using var journal = new ActionHostTransactionJournal(
             launch.Cancellation,
@@ -694,7 +711,7 @@ internal sealed class ActionHostComposition
         cancellationToken = timeBudget.BusinessToken;
         if (journal.ObserveCancellation(cancellationToken))
         {
-            return Completion(
+            return Failure(
                 launch,
                 journal.CancellationStatus,
                 StateWasAccessed: false);
@@ -714,7 +731,7 @@ internal sealed class ActionHostComposition
         catch (OperationCanceledException)
         {
             _ = journal.ObserveCancellation(cancellationToken);
-            return Completion(
+            return Failure(
                 launch,
                 journal.CancellationStatus,
                 StateWasAccessed: false);
@@ -722,7 +739,7 @@ internal sealed class ActionHostComposition
 
         if (authorization.Invocation is not { } invocation)
         {
-            return Completion(
+            return Failure(
                 launch,
                 authorization.RejectionStatus ??
                     ActionHostStatus.InternalFailure,
@@ -731,7 +748,7 @@ internal sealed class ActionHostComposition
 
         if (journal.ObserveCancellation(cancellationToken))
         {
-            return Completion(
+            return Failure(
                 launch,
                 journal.CancellationStatus,
                 StateWasAccessed: false);
@@ -744,7 +761,7 @@ internal sealed class ActionHostComposition
                 out var bindingFailure) ||
             policyRequest is null)
         {
-            return Completion(
+            return Failure(
                 launch,
                 PolicyStatus(bindingFailure),
                 StateWasAccessed: false);
@@ -764,14 +781,14 @@ internal sealed class ActionHostComposition
         catch (OperationCanceledException)
         {
             _ = journal.ObserveCancellation(cancellationToken);
-            return Completion(
+            return Failure(
                 launch,
                 journal.CancellationStatus,
                 StateWasAccessed: false);
         }
         catch (Exception exception) when (IsNonFatal(exception))
         {
-            return Completion(
+            return Failure(
                 launch,
                 ActionHostStatus.SnapshotIncomplete,
                 StateWasAccessed: false);
@@ -780,7 +797,7 @@ internal sealed class ActionHostComposition
         if (!materialized.Succeeded ||
             materialized.Policy is not { } policy)
         {
-            return Completion(
+            return Failure(
                 launch,
                 PolicyStatus(materialized.Failure),
                 StateWasAccessed: false);
@@ -788,7 +805,7 @@ internal sealed class ActionHostComposition
 
         if (journal.ObserveCancellation(cancellationToken))
         {
-            return Completion(
+            return Failure(
                 launch,
                 journal.CancellationStatus,
                 StateWasAccessed: false);
@@ -814,7 +831,7 @@ internal sealed class ActionHostComposition
             tree = treeResult.Snapshot;
             if (tree is null)
             {
-                return Completion(
+                return Failure(
                     launch,
                     TreeStatus(treeResult.Failure),
                     StateWasAccessed: false);
@@ -822,7 +839,7 @@ internal sealed class ActionHostComposition
 
             if (journal.ObserveCancellation(cancellationToken))
             {
-                return Completion(
+                return Failure(
                     launch,
                     journal.CancellationStatus,
                     StateWasAccessed: false);
@@ -841,7 +858,7 @@ internal sealed class ActionHostComposition
             snapshot = snapshotResult.Lease;
             if (snapshot is null)
             {
-                return Completion(
+                return Failure(
                     launch,
                     SnapshotStatus(snapshotResult.Failure),
                     StateWasAccessed: false);
@@ -849,7 +866,7 @@ internal sealed class ActionHostComposition
 
             if (journal.ObserveCancellation(cancellationToken))
             {
-                return Completion(
+                return Failure(
                     launch,
                     journal.CancellationStatus,
                     StateWasAccessed: false);
@@ -861,7 +878,7 @@ internal sealed class ActionHostComposition
                     out var reviewContext) ||
                 reviewContext is null)
             {
-                return Completion(
+                return Failure(
                     launch,
                     ActionHostStatus.InternalFailure,
                     StateWasAccessed: false);
@@ -869,7 +886,7 @@ internal sealed class ActionHostComposition
 
             if (journal.ObserveCancellation(cancellationToken))
             {
-                return Completion(
+                return Failure(
                     launch,
                     journal.CancellationStatus,
                     StateWasAccessed: false);
@@ -877,7 +894,7 @@ internal sealed class ActionHostComposition
 
             if (launch.Inputs.StateKey is null)
             {
-                return Completion(
+                return Failure(
                     launch,
                     ActionHostStatus.CredentialsMissing,
                     StateWasAccessed: false);
@@ -894,86 +911,25 @@ internal sealed class ActionHostComposition
                     .ConfigureAwait(false)
                 : null;
             if (OperatingSystem.IsLinux() && contextExclusion is null)
-                return Completion(launch, journal.ObserveCancellation(cancellationToken)
+                return Failure(launch, journal.ObserveCancellation(cancellationToken)
                     ? journal.CancellationStatus : ActionHostStatus.InternalFailure, StateWasAccessed: false);
             using var freshSolusTargets = contextExclusion is null ? null :
                 SolusFreshHostContext.TryCreate(restoreRequest, snapshot, contextExclusion);
 
-            if (!journal.TryBeginBusinessOperation(
-                    ActionHostOperationKind.StateSetup,
-                    cancellationToken,
-                    out var restoreOperation))
-            {
-                return Completion(
-                    launch,
-                    journal.CancellationStatus,
-                    StateWasAccessed: false);
-            }
-
-            AuthorizedAcceptedStateRestoreResult restored;
-            using (restoreOperation!)
-            {
-                restored = await RestrictedStateService
-                    .RestoreAuthorizedArtifactStateAsync(
-                        restoreRequest,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                restoreOperation!.Resolve(StateOwnerResolution(restored.Code));
-            }
-            using var state = restored.Context;
-            if (!restored.Succeeded || state is null)
-            {
-                return Completion(
-                    launch,
-                    journal.ObserveCancellation(cancellationToken)
-                        ? journal.CancellationStatus
-                        : StateStatus(restored.Code),
-                    StateWasAccessed: true);
-            }
-
-            var publicationScope = new R4PublicationScopeV1(
-                (ulong)launch.RepositoryId,
-                (ulong)launch.RepositoryId,
-                invocation.WorkflowPath,
-                launch.WorkflowRef,
-                (ulong)invocation.PullRequest.Number,
-                policy.PolicySha256,
-                AuthorizedAcceptedStateComposer.PayloadBuildIdentity(policy));
-            var completion = await new ActionHostCoordinator(
-                    new StickyCommentPublisher(
-                        new JournaledStickyPublisherTransportFactory(
-                            dependencies.PublisherFactory,
-                            journal), timeBudget),
-                    dependencies.SnapshotFactory,
-                    dependencies.ProviderFactory,
-                    journal,
-                    timeBudget,
-                    dependencies.InlineHook)
-                .RunAsync(
-                    launch,
-                    invocation,
-                    policy,
-                    snapshot,
-                    state,
-                    publicationScope,
-                    cancellationToken,
-                    capture)
-                .ConfigureAwait(false);
-            return timeBudget.ReconciliationToken.IsCancellationRequested &&
-                completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted
-                ? Completion(launch, journal.CancellationStatus, StateWasAccessed: true)
-                : completion;
+            return await execute(new ActionHostPreparedReview(
+                launch, invocation, policy, snapshot, restoreRequest, freshSolusTargets,
+                journal, timeBudget, dependencies.SnapshotFactory, cancellationToken)).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            return Completion(
+            return Failure(
                 launch,
                 journal.CancellationStatus,
                 StateWasAccessed: journal.HasCurrentRunActivity);
         }
         catch (Exception exception) when (IsNonFatal(exception))
         {
-            return Completion(
+            return Failure(
                 launch,
                 journal.HasCurrentRunActivity &&
                     journal.LatestResolution ==
@@ -1007,6 +963,83 @@ internal sealed class ActionHostComposition
                 // The bounded leases expose cleanup debt; H1 must remain closed.
             }
         }
+    }
+
+    private async Task<ActionHostCompletion> RunNativePreparedAsync(
+        ActionHostPreparedReview prepared, ActionHostAccountingCapture capture)
+    {
+        var launch = prepared.Launch;
+        var invocation = prepared.Invocation;
+        var policy = prepared.Policy;
+        var snapshot = prepared.Snapshot;
+        var restoreRequest = prepared.RestoreRequest;
+        var journal = prepared.Journal;
+        var timeBudget = prepared.TimeBudget;
+        var cancellationToken = prepared.CancellationToken;
+        if (!journal.TryBeginBusinessOperation(
+                ActionHostOperationKind.StateSetup,
+                cancellationToken,
+                out var restoreOperation))
+        {
+            return Completion(
+                launch,
+                journal.CancellationStatus,
+                StateWasAccessed: false);
+        }
+
+        AuthorizedAcceptedStateRestoreResult restored;
+        using (restoreOperation!)
+        {
+            restored = await RestrictedStateService
+                .RestoreAuthorizedArtifactStateAsync(
+                    restoreRequest,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            restoreOperation!.Resolve(StateOwnerResolution(restored.Code));
+        }
+        using var state = restored.Context;
+        if (!restored.Succeeded || state is null)
+        {
+            return Completion(
+                launch,
+                journal.ObserveCancellation(cancellationToken)
+                    ? journal.CancellationStatus
+                    : StateStatus(restored.Code),
+                StateWasAccessed: true);
+        }
+
+        var publicationScope = new R4PublicationScopeV1(
+            (ulong)launch.RepositoryId,
+            (ulong)launch.RepositoryId,
+            invocation.WorkflowPath,
+            launch.WorkflowRef,
+            (ulong)invocation.PullRequest.Number,
+            policy.PolicySha256,
+            AuthorizedAcceptedStateComposer.PayloadBuildIdentity(policy));
+        var completion = await new ActionHostCoordinator(
+                new StickyCommentPublisher(
+                    new JournaledStickyPublisherTransportFactory(
+                        dependencies.PublisherFactory,
+                        journal), timeBudget),
+                dependencies.SnapshotFactory,
+                dependencies.ProviderFactory,
+                journal,
+                timeBudget,
+                dependencies.InlineHook)
+            .RunAsync(
+                launch,
+                invocation,
+                policy,
+                snapshot,
+                state,
+                publicationScope,
+                cancellationToken,
+                capture)
+            .ConfigureAwait(false);
+        return timeBudget.ReconciliationToken.IsCancellationRequested &&
+            completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted
+            ? Completion(launch, journal.CancellationStatus, StateWasAccessed: true)
+            : completion;
     }
 
     private static ActionHostStatus PolicyStatus(
@@ -1164,4 +1197,32 @@ internal sealed class ActionHostComposition
         exception is not OutOfMemoryException and
         not StackOverflowException and
         not AccessViolationException;
+}
+
+// Capability-bearing prepared invocation. Never serialize or retain beyond its callback.
+internal sealed record ActionHostPreparedReview(
+    ActionHostLaunchContract Launch,
+    ActionHostAuthorizer.AuthorizedInvocation Invocation,
+    ActionHostTrustedPolicy Policy,
+    BoundedReviewedSnapshotLease Snapshot,
+    ArtifactStateRestoreRequest RestoreRequest,
+    SolusFreshHostContext? FreshContext,
+    ActionHostTransactionJournal Journal,
+    ActionHostTimeBudget TimeBudget,
+    IActionHostReviewedSnapshotTransportFactory RevalidationFactory,
+    CancellationToken CancellationToken)
+{
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed class ActionHostPreparedResult<T> where T : class
+{
+    private ActionHostPreparedResult(T? value, ActionHostCompletion? failure)
+    { Value = value; Failure = failure; }
+    internal T? Value { get; }
+    internal ActionHostCompletion? Failure { get; }
+    internal static ActionHostPreparedResult<T> Completed(T value) => new(
+        value ?? throw new ArgumentNullException(nameof(value)), null);
+    internal static ActionHostPreparedResult<T> Rejected(ActionHostCompletion failure) => new(null, failure);
+    public override string ToString() => nameof(ActionHostPreparedResult<T>);
 }

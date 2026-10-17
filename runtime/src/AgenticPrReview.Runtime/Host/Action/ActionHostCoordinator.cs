@@ -23,6 +23,28 @@ using AgenticPrReview.Runtime.Host.State.Transactions;
 
 namespace AgenticPrReview.Runtime.ActionHost;
 
+internal enum ActionHostFreshPublicationStatus
+{
+    NotEvaluated,
+    ProjectionRejected,
+    HeadRejected,
+    Cancelled,
+    AuthorityUnavailable,
+    CurrentHeadCandidate,
+}
+
+internal sealed record ActionHostFreshPublication(ActionHostFreshPublicationStatus Status,
+    ExactHeadRevalidationStatus? Head = null, R4ValidatedPublicationReview? Review = null,
+    R4RenderedStickyComment? Rendered = null)
+{
+    // Eligibility is observed only at this call's barrier. A later effect still
+    // requires its own authority, state transaction and exact-head check.
+    internal bool CandidateEligible => Status == ActionHostFreshPublicationStatus.CurrentHeadCandidate;
+    internal bool EffectsAuthorized => false;
+    internal bool DurableStateAccepted => false;
+    public override string ToString() => nameof(ActionHostFreshPublication);
+}
+
 internal sealed record ActionHostProviderPolicy(
     string ProviderId,
     string ModelId,
@@ -216,6 +238,44 @@ internal sealed class ActionHostCoordinator
         this.timeProvider = timeProvider ??
             throw new ArgumentNullException(nameof(timeProvider));
         this.inlineHook = inlineHook;
+    }
+
+    // A current-head observation for the explicit fresh development route. It
+    // grants no publisher/state capability and is not a transaction receipt.
+    internal static async Task<ActionHostFreshPublication> ValidateFreshPublicationAsync(
+        ActionHostPreparedReview prepared, AgentTerminalReview terminal)
+    {
+        var token = prepared.CancellationToken;
+        if (prepared.Journal.ObserveCancellation(token))
+            return new(ActionHostFreshPublicationStatus.Cancelled);
+        if (prepared.FreshContext?.IsLive != true)
+            return new(ActionHostFreshPublicationStatus.AuthorityUnavailable);
+        var scope = new R4PublicationScopeV1((ulong)prepared.Launch.RepositoryId,
+            (ulong)prepared.Launch.RepositoryId, prepared.Invocation.WorkflowPath,
+            prepared.Launch.WorkflowRef, (ulong)prepared.Invocation.PullRequest.Number,
+            prepared.Policy.PolicySha256, AuthorizedAcceptedStateComposer.PayloadBuildIdentity(prepared.Policy));
+        if (!R4ValidatedPublicationReview.TryCreateProjection(terminal,
+                prepared.Snapshot.Snapshot.Identity, scope, out var review))
+            return new(ActionHostFreshPublicationStatus.ProjectionRejected);
+        R4RenderedStickyComment rendered;
+        try { rendered = R4StickyRenderer.Render(review!); }
+        catch (R4PublicationException) { return new(ActionHostFreshPublicationStatus.ProjectionRejected); }
+        if (!prepared.Journal.TryBeginBusinessOperation(ActionHostOperationKind.HeadRevalidation,
+                token, out var operation))
+            return new(ActionHostFreshPublicationStatus.Cancelled);
+        ExactHeadRevalidationResult exact;
+        using (operation!)
+        {
+            exact = await ExactHeadRevalidator.RevalidateAsync(prepared.Invocation.PullRequest,
+                prepared.Launch.Inputs.GitHubToken!, prepared.RevalidationFactory, token).ConfigureAwait(false);
+            operation!.Resolve(ActionHostOperationResolution.ResolvedNoCommit);
+        }
+        var status = prepared.Journal.ObserveCancellation(token)
+            ? ActionHostFreshPublicationStatus.Cancelled
+            : prepared.FreshContext.IsLive != true ? ActionHostFreshPublicationStatus.AuthorityUnavailable
+            : exact.MayMutate ? ActionHostFreshPublicationStatus.CurrentHeadCandidate
+            : ActionHostFreshPublicationStatus.HeadRejected;
+        return new(status, exact.Status, review, rendered);
     }
 
     internal async Task<ActionHostCompletion> RunAsync(

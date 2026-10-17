@@ -3,9 +3,11 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Solus;
 using SolusAgent.Api.Capabilities;
 using SolusAgent.Api.Candidates;
+using SolusAgent.Api.Context;
 using SolusAgent.Api.Execution;
 using SolusAgent.Api.Usage;
 using SolusAgent.Runtime.Api.Configuration;
@@ -22,6 +24,7 @@ internal sealed class SolusReviewBridge : IDisposable
     private readonly IRuntimeExposureHooks hooks;
     private readonly ExposureStrength acknowledgement;
     private readonly TimeProvider clock;
+    private readonly ReviewTokenBudget selectedBudget;
     private int used;
     internal SolusReviewFacts Facts { get; }
 
@@ -33,8 +36,9 @@ internal sealed class SolusReviewBridge : IDisposable
         if (!Enum.IsDefined(acknowledgement)) throw new ArgumentOutOfRangeException(nameof(acknowledgement));
         this.acknowledgement = acknowledgement;
         this.clock = clock ?? TimeProvider.System;
-        Facts = new(executionId, budget ?? new(Cr1DevelopmentProfile.InputTokenAllowance,
-            Cr1DevelopmentProfile.InputTokenAllowance, Cr1DevelopmentProfile.OutputTokenAllowance));
+        selectedBudget = budget ?? new(Cr1DevelopmentProfile.InputTokenAllowance,
+            Cr1DevelopmentProfile.InputTokenAllowance, Cr1DevelopmentProfile.OutputTokenAllowance);
+        Facts = new(executionId, selectedBudget);
         provider = new(credential, Facts, controlledTransport);
         hooks = new SolusAccountingHooks(Facts, hostHooks);
     }
@@ -63,6 +67,61 @@ internal sealed class SolusReviewBridge : IDisposable
         var result = await agent.ExecuteCandidatesAsync(new(request,
             new(Cr1DevelopmentProfile.CandidateSubmissions, Cr1DevelopmentProfile.CandidateRepairs,
                 Cr1DevelopmentProfile.CandidateContinuations)), terminal, cancellationToken: linked.Token).ConfigureAwait(false);
+        return Complete(result, terminal.Refused, cancellationToken, deadline.Token);
+    }
+
+    // R5's trusted Host entry. Construction consumes the actual live authority;
+    // it never creates native SESSION/state or a publication capability.
+    internal async Task<SolusContextReviewOutcome> RunAuthorizedAsync(SolusFreshHostContext context,
+        string instructions, IReadOnlyList<AgentInput> data, SolusSnapshotTools tools,
+        SolusReviewCandidateHost domain, IRestrictedContextSink? sink,
+        TimeSpan hostRemaining, CancellationToken cancellationToken,
+        Func<IModelProvider, IModelProvider>? trustedProviderDecorator = null)
+    {
+        if (Interlocked.Exchange(ref used, 1) != 0) throw new InvalidOperationException("APR_SOLUS_REVIEW_ALREADY_USED");
+        var limits = context.Policy.LimitAuthority;
+        if (acknowledgement != ExposureStrength.Volatile || !context.IsLive || tools.ExecutionId != Facts.ExecutionId ||
+            selectedBudget != BoundBudget(limits.TokenBudget) ||
+            SolusSnapshotTools.ArgumentCorrectionFor(tools.Registrations, context.Snapshot) is null ||
+            !AgentLimitAuthority.TryResolve(context.Policy.AdapterId, limits, out var profile) ||
+            profile != AgentLimitProfile.Current)
+            throw new ArgumentException("APR_SOLUS_REVIEW_AUTHORITY");
+        var duration = TimeSpan.FromSeconds(Math.Min(Cr1DevelopmentProfile.DurationSeconds, limits.TimeoutSeconds));
+        if (hostRemaining < duration) duration = hostRemaining;
+        if (duration <= TimeSpan.Zero)
+        {
+            var empty = new AgentRunUsage(Facts.ExecutionId, UsageInventoryCoverage.Complete, []);
+            return new(new(AgentTerminationReason.ResourceLimit, Facts.Freeze(empty),
+                ActionHostTerminationReason.DeadlineExceeded, false, empty), null);
+        }
+        ValidateText(instructions, data);
+        using var deadline = new CancellationTokenSource(duration, clock);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        // A compiled fixture can fault only capture/export after real provider
+        // work; no repository, environment or model field selects this delegate.
+        var currentProvider = trustedProviderDecorator?.Invoke(provider) ?? provider;
+        using var runtime = SolusRuntimeConstruction.CreateForAuthorizedReview(context,
+            _ => new(currentProvider, tools.Registrations, hooks));
+        var request = Request(instructions, data, duration,
+            Math.Min(Cr1DevelopmentProfile.LogicalCalls, limits.ModelCalls), admitToolCalls: true);
+        var terminal = new SolusTerminalAccountingGate(Facts, domain);
+        var result = await ((IContextCandidateAgent)runtime.Agent).ExecuteCandidatesWithContextAsync(
+            new(request, ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), terminal, sink,
+            cancellationToken: linked.Token).ConfigureAwait(false);
+        var candidates = result.Candidates ?? throw new InvalidOperationException("APR_SOLUS_FRESH_OUTCOME");
+        // Capture happens after work. Its latency/failure cannot rewrite an
+        // actually completed work outcome; Host eligibility separately observes
+        // the caller/deadline before any prospective effect.
+        var completed = candidates.StopReason == CandidateStopReason.Completed &&
+            candidates.Outcome.Reason == AgentTerminationReason.Completed;
+        return new(Complete(candidates, terminal.Refused,
+            completed ? CancellationToken.None : cancellationToken,
+            completed ? CancellationToken.None : deadline.Token), result);
+    }
+
+    private SolusReviewOutcome Complete(CandidateExecutionResult result, bool terminalRefused,
+        CancellationToken cancellationToken, CancellationToken deadline)
+    {
         var accounting = Facts.Freeze(result.Outcome.Usage);
         var reason = cancellationToken.IsCancellationRequested ? ActionHostTerminationReason.Cancelled
             : deadline.IsCancellationRequested || result.StopReason == CandidateStopReason.DurationLimit ? ActionHostTerminationReason.DeadlineExceeded
@@ -72,7 +131,7 @@ internal sealed class SolusReviewBridge : IDisposable
             : result.StopReason == CandidateStopReason.RuntimeLimit || result.Outcome.Reason == AgentTerminationReason.ResourceLimit ? ActionHostTerminationReason.ResourceLimit
             : result.Outcome.Reason == AgentTerminationReason.Cancelled ? ActionHostTerminationReason.Cancelled
             : result.Outcome.Reason == AgentTerminationReason.Completed && result.Receipts.Count == 1 &&
-                result.Receipts[0].IsAccepted && !terminal.Refused ? ActionHostTerminationReason.ReviewCompleted
+                result.Receipts[0].IsAccepted && !terminalRefused ? ActionHostTerminationReason.ReviewCompleted
             : result.StopReason is CandidateStopReason.ProductionStopped or CandidateStopReason.FailedAcknowledgement or
                 CandidateStopReason.MissingAcknowledgement or CandidateStopReason.UnknownAcknowledgement or
                 CandidateStopReason.MismatchedFeedback or CandidateStopReason.DuplicateFeedback or
@@ -82,14 +141,17 @@ internal sealed class SolusReviewBridge : IDisposable
         return new(result.Outcome.Reason, accounting, reason, reason == ActionHostTerminationReason.ReviewCompleted, result.Outcome.Usage);
     }
 
-    internal AgentRequest Request(string instructions, IReadOnlyList<AgentInput> data, TimeSpan duration) => new(
+    internal AgentRequest Request(string instructions, IReadOnlyList<AgentInput> data, TimeSpan duration,
+        int maximumCalls = Cr1DevelopmentProfile.LogicalCalls, bool admitToolCalls = false) => new(
         Facts.ExecutionId, instructions, data, new(Cr1DevelopmentProfile.WorkUnits, duration),
         AgentCapability.WorkUnitLimit | AgentCapability.DurationLimit | AgentCapability.Cancellation |
         AgentCapability.UsageReporting | AgentCapability.DispatchLimits | AgentCapability.UsageThresholds |
-        AgentCapability.ToolInvocationLimit | AgentCapability.UsageAccounting,
-        new(maximumLogicalCalls: Cr1DevelopmentProfile.LogicalCalls, maximumPhysicalDispatches: Cr1DevelopmentProfile.PhysicalAttempts,
+        AgentCapability.ToolInvocationLimit | AgentCapability.UsageAccounting |
+        (admitToolCalls ? AgentCapability.ToolCallAdmissionLimit : AgentCapability.None),
+        new(maximumLogicalCalls: maximumCalls, maximumPhysicalDispatches: maximumCalls,
             inputTokenThreshold: Cr1DevelopmentProfile.InputTokenThreshold, outputTokenThreshold: Cr1DevelopmentProfile.OutputTokenThreshold,
             maximumToolInvocations: Cr1DevelopmentProfile.ToolInvocations,
+            maximumToolCallAdmissions: admitToolCalls ? Cr1DevelopmentProfile.ToolInvocations : null,
             accountingPolicy: new(new(Cr1DevelopmentProfile.InputTokenReservation, Cr1DevelopmentProfile.OutputTokenReservation),
                 Cr1DevelopmentProfile.InputTokenAllowance, Cr1DevelopmentProfile.OutputTokenAllowance, UnknownUsagePolicy.Stop),
             retryPolicy: new(Cr1DevelopmentProfile.AttemptsPerLogicalCall)));
@@ -97,7 +159,14 @@ internal sealed class SolusReviewBridge : IDisposable
     internal static ProviderExchangeBounds Bounds() => new(Cr1DevelopmentProfile.ProviderInputs,
         Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
         Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes, Cr1DevelopmentProfile.ContinuationBytes);
-    private static void ValidateText(string instructions, IReadOnlyList<AgentInput> data)
+    internal static ReviewTokenBudget BoundBudget(ReviewTokenBudget? configured)
+    {
+        configured ??= ReviewTokenBudget.Default;
+        return new(Math.Min(configured.UncachedInputTokens, Cr1DevelopmentProfile.InputTokenAllowance),
+            Math.Min(configured.CachedInputTokens, Cr1DevelopmentProfile.InputTokenAllowance),
+            Math.Min(configured.OutputTokens, Cr1DevelopmentProfile.OutputTokenAllowance));
+    }
+    internal static void ValidateText(string instructions, IReadOnlyList<AgentInput> data)
     {
         var utf8 = new UTF8Encoding(false, true);
         try
@@ -110,6 +179,11 @@ internal sealed class SolusReviewBridge : IDisposable
     }
     public void Dispose() => provider.Dispose();
     public override string ToString() => nameof(SolusReviewBridge);
+}
+
+internal sealed record SolusContextReviewOutcome(SolusReviewOutcome Work, ContextCandidateExecutionResult? Execution)
+{
+    public override string ToString() => nameof(SolusContextReviewOutcome);
 }
 
 internal sealed record SolusReviewOutcome(AgentTerminationReason RuntimeReason, ProviderAccounting? Accounting,

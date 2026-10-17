@@ -1,5 +1,7 @@
 # New R7-D0 executable fixture
 
+The separate [CR1-R5 internal fresh review proof](../../../docs/20_architecture/solus-fresh-review.md) is run by `verify-solus-fresh.mjs` against the verified managed package cache. It exercises the explicitly selected Host library composition through a managed proof executable, with real authorization/policy/snapshot and controlled actual provider/runtime/tools. It does not turn the zero-argument production route below into a successful Solus review or qualify generated Action adoption.
+
 This directory is new coverage for #341. `verify-entrypoint.mjs` launches the actual `AgenticPrReview.Runtime` executable with zero arguments, matching the existing private Node launcher. It loads no linked Host library or fake provider into that child. It exercises the BE32 framed launch, strict malformed-input rejection, production-composition credential-free denial, requested cancellation, safe current completion/accounting/exit parity, and Linux SIGTERM/SIGINT while framing is stalled. Synthetic private canaries must remain absent from both child streams. Native execution has neither `PATH` nor `DOTNET_ROOT` in its closed environment and requires no consumer SDK.
 
 The existing Runtime CI gate now runs these checks after the retained deterministic bootstrap smoke:
