@@ -636,9 +636,35 @@ describe('CR1 authorized actual APR private package proof route', () => {
       },
     ],
     [
+      'loader credential',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1 actual APR managed loader proof',
+        ).env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+      },
+    ],
+    [
+      'loader unverified cache',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1 actual APR managed loader proof',
+        ).env.NUGET_PACKAGES = '/tmp/unverified';
+      },
+    ],
+    [
+      'loader bypassed',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1 actual APR managed loader proof',
+        ).if = 'false';
+      },
+    ],
+    [
       'private artifact bytes',
       (w: any) => {
-        w.jobs['install-proof'].steps[8].with.path = '${{ runner.temp }}/apr-solus-facts/packages';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Retain only sanitized identity and lock metadata',
+        ).with.path = '${{ runner.temp }}/apr-solus-facts/packages';
       },
     ],
     [

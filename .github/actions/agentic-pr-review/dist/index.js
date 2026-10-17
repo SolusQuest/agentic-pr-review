@@ -102310,6 +102310,18 @@ import { spawn } from "node:child_process";
 import { finished } from "node:stream/promises";
 import { TextDecoder as TextDecoder2 } from "node:util";
 
+// src/action-wrapper/launcher/managed-runtime.ts
+var MAXIMUM_RUNTIME_FILE_BYTES = 64 * 1024 * 1024;
+var MAXIMUM_RUNTIME_BYTES = 512 * 1024 * 1024;
+var MAXIMUM_CONFIGURATION_BYTES = 256 * 1024;
+var ManagedRuntimePrerequisiteError = class extends Error {
+  code = "wrapper_managed_runtime_prerequisite";
+  constructor() {
+    super("wrapper_managed_runtime_prerequisite");
+    this.name = "ManagedRuntimePrerequisiteError";
+  }
+};
+
 // src/action-wrapper/launcher/request-budget-profile.ts
 var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
 var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
@@ -102405,12 +102417,17 @@ var GITHUB_REQUEST_BUDGET_PREFIX = "APR_R4_E2P_GITHUB_REQUEST_BUDGET ";
 var CONTROL_REQUEST_BUDGET_PREFIX = "APR_R4_E2P_CONTROL_REQUEST_BUDGET ";
 var STATE_RECONCILIATION_DIAGNOSTIC_PREFIX = "APR_R4_E2P_STATE_RECONCILIATION ";
 var HostProcessTerminationUnconfirmedError = class extends Error {
-  constructor() {
+  constructor(terminationConfirmed) {
     super("wrapper_host_termination_unconfirmed");
+    this.terminationConfirmed = terminationConfirmed;
     this.name = "HostProcessTerminationUnconfirmedError";
   }
+  terminationConfirmed;
 };
 async function runHostProcess(request2) {
+  return runProcess(request2, {});
+}
+async function runProcess(request2, launch) {
   if (request2.signal.aborted) fail("wrapper_cancelled_before_spawn");
   const cancellationKillGraceMs = duration2(
     request2.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS
@@ -102420,12 +102437,19 @@ async function runHostProcess(request2) {
   );
   let child;
   try {
-    child = spawn(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [], {
+    child = spawn(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [...launch.args ?? []], {
+      ...launch.argv0 === void 0 ? {} : { argv0: launch.argv0 },
       cwd: request2.tempRoot,
-      env: closedChildEnvironment(request2.tempRoot, request2.requestBudgetProfile),
+      env: launch.environment ?? closedChildEnvironment(request2.tempRoot, request2.requestBudgetProfile),
       shell: false,
       windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe", request2.executableHandle.fd]
+      stdio: [
+        "pipe",
+        "pipe",
+        "pipe",
+        request2.executableHandle.fd,
+        ...launch.directoryFd === void 0 ? [] : [launch.directoryFd]
+      ]
     });
   } catch {
     return fail("wrapper_host_process_failed");
@@ -102460,7 +102484,8 @@ async function runHostProcess(request2) {
   const armCloseDeadline = () => {
     if (closeDeadline || closeObserved) return;
     closeDeadline = setTimeout(
-      () => rejectUnconfirmed(new HostProcessTerminationUnconfirmedError()),
+      () => rejectUnconfirmed(new HostProcessTerminationUnconfirmedError(closePromise.then(() => {
+      }))),
       postKillCloseGraceMs
     );
   };
@@ -102485,10 +102510,10 @@ async function runHostProcess(request2) {
   };
   request2.signal.addEventListener("abort", forwardCancellation, { once: true });
   if (request2.signal.aborted) forwardCancellation();
-  const outputPromise = readSingleFrame(child.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
+  const outputPromise = launch.probe ? readProbeOutput(child.stdout) : readSingleFrame(child.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
   const stderrPromise = readTrustedProofStderr(child.stderr, request2.requestBudgetProfile);
   try {
-    child.stdin.end(encodeFrame(request2.launchBytes));
+    child.stdin.end(launch.probe ? void 0 : encodeFrame(request2.launchBytes));
     const [, completionBytes, admittedStderr, closed] = await Promise.race([
       Promise.all([finished(child.stdin), outputPromise, stderrPromise, closePromise]),
       processErrorPromise,
@@ -102757,15 +102782,28 @@ function encodeFrame(document2) {
 async function readSingleFrame(stream4, maximumBytes) {
   const chunks = [];
   let total = 0;
+  const header3 = Buffer.alloc(4);
+  let headerBytes = 0;
+  let declared;
   for await (const value of stream4) {
     const chunk = Buffer.from(value);
     total += chunk.byteLength;
     if (total > maximumBytes + 4) fail("wrapper_frame_invalid");
+    if (headerBytes < 4) {
+      const take = Math.min(4 - headerBytes, chunk.length);
+      chunk.copy(header3, headerBytes, 0, take);
+      headerBytes += take;
+      if (headerBytes === 4) {
+        declared = header3.readUInt32BE(0);
+        if (declared < 1 || declared > maximumBytes) fail("wrapper_frame_invalid");
+      }
+    }
+    if (declared !== void 0 && total > declared + 4) fail("wrapper_frame_invalid");
     chunks.push(chunk);
   }
   const frame = Buffer.concat(chunks, total);
   if (frame.byteLength < 4) fail("wrapper_frame_invalid");
-  const declared = frame.readUInt32BE(0);
+  declared = frame.readUInt32BE(0);
   if (declared < 1 || declared > maximumBytes || frame.byteLength !== declared + 4) {
     fail("wrapper_frame_invalid");
   }
@@ -102783,6 +102821,16 @@ function closedChildEnvironment(tempRoot, requestBudgetProfile) {
 function duration2(value) {
   if (!Number.isSafeInteger(value) || value < 1) fail("wrapper_host_process_failed");
   return value;
+}
+async function readProbeOutput(stream4) {
+  const chunks = [];
+  let total = 0;
+  for await (const value of stream4) {
+    const chunk = Buffer.from(value);
+    if ((total += chunk.length) > 64 * 1024) throw new ManagedRuntimePrerequisiteError();
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, total);
 }
 
 // src/action-wrapper/launcher/inputs.ts
@@ -102951,6 +102999,7 @@ var TERMINATION_REASONS = [
   "request_limit",
   "response_limit",
   "context_limit",
+  "resource_limit",
   "invalid_result",
   "host_failure"
 ];
@@ -103667,4 +103716,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 5dec75ab284c7567ee81b0bc8f58e0b41198ab3589bb371f61336a9db2c3f2b5
+// Action source inventory sha256: e18569c236d7c4961f691c46c6e7594c1db8a67bcfeccb0da5d7200d96060273
