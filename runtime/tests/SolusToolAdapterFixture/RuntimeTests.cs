@@ -36,9 +36,29 @@ internal static class RuntimeTests
         Proof.Check(provider.Calls == 3 && executor.Invocations == 5 && tools.CurrentObservations.Length == 5);
         Proof.Check(result.Context.Outcome!.Usage!.Attempts.Count == 3 && result.Context.Outcome.Usage.ToolInvocations!.Invoked == 5 &&
             result.Context.Outcome.Usage.ToolCallAdmissions!.Admitted == 5);
+        var accounting = result.Context.Outcome.Usage.Accounting!;
+        Proof.Check(accounting.Input.AccountedTokens == 36 && accounting.Output.AccountedTokens == 9 &&
+            accounting.Input.Allowance == 65536 && accounting.Output.Allowance == 8192 && accounting.Attempts.Count == 3);
         Proof.Check(result.Context.CaptureStatus == ContextCaptureStatus.Delivered && sink.Context!.FormatVersion == 2 &&
             sink.Context.CompatibilityVersion == 1 && result.Candidates!.RepairsAdmitted == 0 && result.Candidates.ContinuationsAdmitted == 0);
         Proof.Check(provider.Requests[1].Inputs.Where(i => i.ToolResult is not null).All(i => i.Kind == ProviderInputKind.ToolResultData));
+
+        Proof.Stage = "repository-instructions-remain-data";
+        var injectedExecution = Guid.NewGuid(); var (injectedTools, injectedExecutor) = fixture.Tools(injectedExecution);
+        var injectedProvider = new Provider((request, n) =>
+        {
+            if (n == 1) return Proof.Response(request, [new("read_untrusted", "read_file", "{\"path\":\"changed.cs\"}")]);
+            var data = request.Inputs.Single(i => i.ToolResult is not null);
+            Proof.Check(data.Kind == ProviderInputKind.ToolResultData && data.ToolResult!.Json!.Contains(Proof.InstructionCanary, StringComparison.Ordinal));
+            Proof.Check(request.Inputs.Where(i => i.Kind == ProviderInputKind.HostInstruction).All(i =>
+                !i.Text!.Contains(Proof.InstructionCanary, StringComparison.Ordinal)));
+            Proof.Check(request.Tools.Count == 5 && request.Tools.All(t => t.Effect == ToolEffect.ReadOnly));
+            return Proof.Response(request, [], Proof.Grounded(injectedTools.CurrentObservations.Single().ObservationId));
+        });
+        var injectedHost = new SolusReviewCandidateHost(injectedExecution, injectedTools);
+        var injected = await Proof.Agent(Proof.Configuration(injectedTools, injectedProvider)).ExecuteCandidatesWithContextAsync(
+            new(Proof.Request(injectedExecution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), injectedHost);
+        Proof.Check(injectedHost.TryComplete(injected, out _) && injectedProvider.Calls == 2 && injectedExecutor.Invocations == 1);
 
         Proof.Stage = "actual-runtime-correction-atomic";
         foreach (var reverse in new[] { false, true })

@@ -7,7 +7,9 @@ using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Solus;
 using SolusAgent.Api.Candidates;
+using SolusAgent.Runtime.Api.Configuration;
 using SolusAgent.Runtime.Api.Providers;
+using SolusAgent.Runtime.Startup;
 using SolusAgent.Tools.Api;
 
 namespace AgenticPrReview.Runtime.SolusToolAdapterFixture;
@@ -18,6 +20,7 @@ internal static class ToolTests
     {
         Catalog();
         using var fixture = new SnapshotFixture();
+        Construction(fixture);
         Proof.Stage = "five-tools-schemas-history";
         var (tools, executor) = fixture.Tools(Guid.NewGuid());
         Proof.Check(tools.Registrations.Count == 5 && !tools.Registrations.Any(r => r.Descriptor.Name == "finish_review"));
@@ -116,6 +119,11 @@ internal static class ToolTests
         Proof.Check(pair.Count(x => x.Outcome == ToolOutcome.Succeeded) == 1 && executor.Invocations == 1);
         Proof.Check(pair.Single(x => x.Outcome != ToolOutcome.Succeeded).Error == ToolError.AlreadyInvoked);
         Proof.Check(r.Tool.ValidateInvocation(prepared, call, r.Capability) == ToolError.AlreadyInvoked);
+        using var during = new CancellationTokenSource();
+        var (duringTools, duringExecutor) = fixture.Tools(Guid.NewGuid(), value => { during.Cancel(); return value; });
+        var interrupted = await Invoke(duringTools, new("interrupted", "read_file", "{\"path\":\"changed.cs\"}"), during.Token);
+        Proof.Check(interrupted.Outcome == ToolOutcome.Cancelled && interrupted.InvocationStarted &&
+            duringExecutor.Invocations == 1 && duringTools.CurrentObservations.Length == 0);
         Proof.Reject(() => new SolusReviewCandidateHost(Guid.NewGuid(), tools));
         _ = new SolusReviewCandidateHost(tools.ExecutionId, tools);
         Proof.Reject(() => new SolusReviewCandidateHost(tools.ExecutionId, tools));
@@ -216,6 +224,44 @@ internal static class ToolTests
         Proof.Reject(() => new ToolArgumentCorrectionBinding("over", allowed.Append("extra").ToArray(), (_, _) => ToolArgumentDisposition.Allow()));
         var binding = new ToolArgumentCorrectionBinding("wrong_selector", ["arguments_invalid"], (_, _) => ToolArgumentDisposition.Correct("uninstalled"));
         Proof.Check(binding.Classify(new("x", "read_file", "{}"), new FakeCapability("fake")).Kind == ToolArgumentDispositionKind.Fatal);
+    }
+
+    private static void Construction(SnapshotFixture fixture)
+    {
+        Proof.Stage = "correction-construction-profile";
+        var (tools, executor) = fixture.Tools(Guid.NewGuid());
+        var flagOnly = new FlagOnlyProvider();
+        Proof.Reject(() => Proof.Agent(Proof.Configuration(tools, flagOnly)));
+        var absentFlag = new AbsentFlagProvider();
+        Proof.Reject(() => Proof.Agent(Proof.Configuration(tools, absentFlag)));
+        var provider = new Provider((r, _) => Proof.Response(r, []));
+        var configuration = Proof.Configuration(tools, provider);
+        Proof.Check(configuration.RequiredGuarantees == (RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds | RuntimeGuarantee.ToolArgumentCorrection));
+        Proof.Reject(() => SolusRuntimeConstruction.Create(configuration, "cr1-solus-internal1-dev"));
+        foreach (var options in new[] { new RuntimeOptions(maximumAttempts: 63, requireContinuation: true),
+            new RuntimeOptions(maximumRecords: 63, requireContinuation: true),
+            new RuntimeOptions(maximumRetainedBytes: 196607, requireContinuation: true),
+            new RuntimeOptions(requireContinuation: false), new RuntimeOptions(settlementGrace: TimeSpan.FromSeconds(2), requireContinuation: true) })
+            Proof.Reject(() => SolusRuntimeConstruction.Create(configuration, Cr1DevelopmentProfile.Id, options: options));
+        Proof.Check(flagOnly.Calls == 0 && absentFlag.Calls == 0 && provider.Calls == 0 && executor.Invocations == 0);
+    }
+
+    private sealed class FlagOnlyProvider : IModelProvider
+    {
+        internal int Calls;
+        public ProviderScope Scope { get; } = new("flag-only", "synthetic");
+        public ProviderCapabilities Capabilities => ProviderCapabilities.ToolCalls | ProviderCapabilities.Continuation |
+            ProviderCapabilities.UsageReporting | ProviderCapabilities.ToolArgumentCorrection;
+        public ValueTask<ProviderExchangeResult> ExchangeAsync(ProviderRequest request, CancellationToken token = default)
+        { Calls++; throw new InvalidOperationException(); }
+    }
+
+    private sealed class AbsentFlagProvider() : ModelProvider(new("absent-flag", "synthetic"),
+        ProviderCapabilities.ToolCalls | ProviderCapabilities.Continuation | ProviderCapabilities.UsageReporting)
+    {
+        internal int Calls;
+        protected override ValueTask<ProviderResponse> ExchangeCoreAsync(ProviderRequest request, ProviderObservation observation, CancellationToken token)
+        { Calls++; throw new InvalidOperationException(); }
     }
 
     private sealed class FakeCapability(string id) : IToolCapability { public string CapabilityId => id; }
