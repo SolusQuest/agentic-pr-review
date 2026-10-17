@@ -4,7 +4,21 @@ import type { Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { TextDecoder } from 'node:util';
 
-import { H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES } from './contracts.js';
+import {
+  H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES,
+  H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES,
+} from './contracts.js';
+import {
+  admitManagedRuntime,
+  validateManagedLoadingConfiguration,
+  ManagedRuntimePrerequisiteError,
+  type AdmittedManagedRuntime,
+} from './managed-runtime.js';
+import {
+  acquireVerifiedManagedTreeLease,
+  type VerifiedManagedTree,
+  type VerifiedManagedTreeLease,
+} from './payload-staging.js';
 import {
   trustedProofHostReceiptProfile,
   type TrustedProofRequestBudgetProfile,
@@ -20,7 +34,7 @@ const CONTROL_REQUEST_BUDGET_PREFIX = 'APR_R4_E2P_CONTROL_REQUEST_BUDGET ';
 export const STATE_RECONCILIATION_DIAGNOSTIC_PREFIX = 'APR_R4_E2P_STATE_RECONCILIATION ';
 
 export class HostProcessTerminationUnconfirmedError extends Error {
-  constructor() {
+  constructor(readonly terminationConfirmed?: Promise<void>) {
     super('wrapper_host_termination_unconfirmed');
     this.name = 'HostProcessTerminationUnconfirmedError';
   }
@@ -49,6 +63,150 @@ export interface HostProcessRequest {
 export type HostProcessRunner = (request: HostProcessRequest) => Promise<HostProcessResult>;
 
 export async function runHostProcess(request: HostProcessRequest): Promise<HostProcessResult> {
+  return runProcess(request, {});
+}
+
+export interface ManagedHostProcessRequest extends Omit<HostProcessRequest, 'executableHandle'> {
+  readonly tree: VerifiedManagedTree;
+  /** Trusted runner/setup input, never supplied by the reviewed workspace or ambient PATH. */
+  readonly trustedRuntimeRoot: string;
+  readonly workspace: string;
+}
+
+export class ManagedHostProcessTerminationUnconfirmedError extends HostProcessTerminationUnconfirmedError {
+  constructor(
+    terminationConfirmed: Promise<void>,
+    readonly resourcesReleased: Promise<void>,
+  ) {
+    super(terminationConfirmed);
+    this.name = 'ManagedHostProcessTerminationUnconfirmedError';
+    // Observability is retained for callers without creating an unhandled late cleanup rejection.
+    void resourcesReleased.catch(() => {});
+  }
+}
+
+export async function runManagedHostProcess(
+  request: ManagedHostProcessRequest,
+): Promise<HostProcessResult> {
+  if (
+    !(request.launchBytes instanceof Uint8Array) ||
+    request.launchBytes.byteLength < 1 ||
+    request.launchBytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES
+  )
+    fail('wrapper_launch_invalid');
+  const captured = { ...request, launchBytes: Buffer.from(request.launchBytes) };
+  if (captured.signal.aborted) fail('wrapper_cancelled_before_spawn');
+  if (
+    captured.requestBudgetProfile !== undefined &&
+    trustedProofHostReceiptProfile(captured.requestBudgetProfile) === undefined
+  )
+    fail('wrapper_host_process_failed');
+  duration(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
+  duration(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
+  let runtime: AdmittedManagedRuntime | undefined;
+  let lease: VerifiedManagedTreeLease | undefined;
+  let probing = true;
+  const release = async (): Promise<void> => {
+    lease?.release();
+    lease = undefined;
+    await runtime?.release();
+  };
+  let result: HostProcessResult;
+  try {
+    runtime = await admitManagedRuntime(captured);
+    const probeCancellation = new AbortController();
+    const timeout = setTimeout(() => probeCancellation.abort(), 10_000);
+    try {
+      const probe = await runProcess(
+        {
+          executableHandle: runtime.executableHandle,
+          launchBytes: Buffer.alloc(0),
+          tempRoot: runtime.tempRoot,
+          signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
+          cancellationKillGraceMs: 100,
+          postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS,
+        },
+        {
+          args: ['--list-runtimes'],
+          argv0: runtime.executablePath,
+          environment: managedChildEnvironment(runtime.tempRoot),
+          probe: true,
+        },
+      );
+      if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
+        throw new ManagedRuntimePrerequisiteError();
+      runtime.validateProbe(probe.completionBytes);
+    } finally {
+      clearTimeout(timeout);
+    }
+    probing = false;
+    lease = await acquireVerifiedManagedTreeLease(captured.tree, captured.signal);
+    await validateManagedLoadingConfiguration(lease);
+    await runtime.validate();
+    const stem = '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime';
+    result = await runProcess(
+      { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
+      {
+        args: [
+          'exec',
+          '--runtimeconfig',
+          stem + '.runtimeconfig.json',
+          '--depsfile',
+          stem + '.deps.json',
+          '--fx-version',
+          runtime.frameworkVersion,
+          '--roll-forward',
+          'Disable',
+          stem + '.dll',
+        ],
+        argv0: runtime.executablePath,
+        environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
+        directoryFd: lease.directoryFd,
+      },
+    );
+  } catch (caught) {
+    if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
+      const settlement = caught.terminationConfirmed.then(release);
+      throw new ManagedHostProcessTerminationUnconfirmedError(
+        caught.terminationConfirmed,
+        settlement,
+      );
+    }
+    const error =
+      probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError)
+        ? new ManagedRuntimePrerequisiteError()
+        : caught;
+    try {
+      await release();
+    } catch (cleanupError) {
+      if (error instanceof Error)
+        Object.defineProperty(error, 'cleanupError', { value: cleanupError });
+    }
+    throw error;
+  }
+  await release();
+  return result;
+}
+
+export function managedChildEnvironment(
+  tempRoot: string,
+  profile?: TrustedProofRequestBudgetProfile,
+): NodeJS.ProcessEnv {
+  return { ...closedChildEnvironment(tempRoot, profile), DOTNET_EnableDiagnostics: '0' };
+}
+
+interface ProcessLaunch {
+  readonly args?: readonly string[];
+  readonly argv0?: string;
+  readonly environment?: NodeJS.ProcessEnv;
+  readonly directoryFd?: number;
+  readonly probe?: boolean;
+}
+
+async function runProcess(
+  request: HostProcessRequest,
+  launch: ProcessLaunch,
+): Promise<HostProcessResult> {
   if (request.signal.aborted) fail('wrapper_cancelled_before_spawn');
   const cancellationKillGraceMs = duration(
     request.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS,
@@ -58,12 +216,21 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   );
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [], {
+    child = spawn(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [...(launch.args ?? [])], {
+      ...(launch.argv0 === undefined ? {} : { argv0: launch.argv0 }),
       cwd: request.tempRoot,
-      env: closedChildEnvironment(request.tempRoot, request.requestBudgetProfile),
+      env:
+        launch.environment ??
+        closedChildEnvironment(request.tempRoot, request.requestBudgetProfile),
       shell: false,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe', request.executableHandle.fd],
+      stdio: [
+        'pipe',
+        'pipe',
+        'pipe',
+        request.executableHandle.fd,
+        ...(launch.directoryFd === undefined ? [] : [launch.directoryFd]),
+      ],
     });
   } catch {
     return fail('wrapper_host_process_failed');
@@ -101,7 +268,8 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   const armCloseDeadline = (): void => {
     if (closeDeadline || closeObserved) return;
     closeDeadline = setTimeout(
-      () => rejectUnconfirmed(new HostProcessTerminationUnconfirmedError()),
+      () =>
+        rejectUnconfirmed(new HostProcessTerminationUnconfirmedError(closePromise.then(() => {}))),
       postKillCloseGraceMs,
     );
   };
@@ -128,10 +296,12 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   };
   request.signal.addEventListener('abort', forwardCancellation, { once: true });
   if (request.signal.aborted) forwardCancellation();
-  const outputPromise = readSingleFrame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
+  const outputPromise = launch.probe
+    ? readProbeOutput(child.stdout!)
+    : readSingleFrame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
   const stderrPromise = readTrustedProofStderr(child.stderr!, request.requestBudgetProfile);
   try {
-    child.stdin!.end(encodeFrame(request.launchBytes));
+    child.stdin!.end(launch.probe ? undefined : encodeFrame(request.launchBytes));
     const [, completionBytes, admittedStderr, closed] = await Promise.race([
       Promise.all([finished(child.stdin!), outputPromise, stderrPromise, closePromise]),
       processErrorPromise,
@@ -564,15 +734,28 @@ export function encodeFrame(document: Uint8Array): Buffer {
 export async function readSingleFrame(stream: Readable, maximumBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
+  const header = Buffer.alloc(4);
+  let headerBytes = 0;
+  let declared: number | undefined;
   for await (const value of stream) {
     const chunk = Buffer.from(value as Uint8Array);
     total += chunk.byteLength;
     if (total > maximumBytes + 4) fail('wrapper_frame_invalid');
+    if (headerBytes < 4) {
+      const take = Math.min(4 - headerBytes, chunk.length);
+      chunk.copy(header, headerBytes, 0, take);
+      headerBytes += take;
+      if (headerBytes === 4) {
+        declared = header.readUInt32BE(0);
+        if (declared < 1 || declared > maximumBytes) fail('wrapper_frame_invalid');
+      }
+    }
+    if (declared !== undefined && total > declared + 4) fail('wrapper_frame_invalid');
     chunks.push(chunk);
   }
   const frame = Buffer.concat(chunks, total);
   if (frame.byteLength < 4) fail('wrapper_frame_invalid');
-  const declared = frame.readUInt32BE(0);
+  declared = frame.readUInt32BE(0);
   if (declared < 1 || declared > maximumBytes || frame.byteLength !== declared + 4) {
     fail('wrapper_frame_invalid');
   }
@@ -597,4 +780,15 @@ export function closedChildEnvironment(
 function duration(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) fail('wrapper_host_process_failed');
   return value;
+}
+
+async function readProbeOutput(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const value of stream) {
+    const chunk = Buffer.from(value as Uint8Array);
+    if ((total += chunk.length) > 64 * 1024) throw new ManagedRuntimePrerequisiteError();
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, total);
 }
