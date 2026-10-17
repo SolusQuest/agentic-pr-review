@@ -26,12 +26,14 @@ internal sealed record ArtifactStateRestoreRequest(
     TimeProvider? TimeProvider = null,
     IStateReconciliationDiagnosticSink?
         StateReconciliationDiagnosticSink = null,
-    long? LatestAcceptanceUnixSeconds = null);
+    long? LatestAcceptanceUnixSeconds = null,
+    SolusSourceSelectionRequest? SolusSourceSelection = null);
 
 internal sealed record AuthorizedAcceptedStateRestoreResult(
     string Code,
     bool IsBootstrap,
-    AuthorizedAcceptedStateRestoreContext? Context)
+    AuthorizedAcceptedStateRestoreContext? Context,
+    SolusContextSource? SolusSource = null)
 {
     internal bool Succeeded =>
         Context is not null &&
@@ -318,6 +320,12 @@ internal sealed class AuthorizedAcceptedStateComposer
                 AcceptedStateCodes.AccessDenied);
         }
 
+        if (request.SolusSourceSelection is { } sourceRequest &&
+            (request.Launch.Inputs.StateMode != ActionHostStateMode.Auto ||
+                !sourceRequest.Targets.Matches(request) ||
+                !SolusRestrictedStateAdmission.IsSupported(sourceRequest.Compatibility)))
+            return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
+
         var launch = request.Launch;
         var invocation = request.Invocation;
         var policy = request.TrustedPolicy;
@@ -449,6 +457,16 @@ internal sealed class AuthorizedAcceptedStateComposer
                 store,
                 timeProvider,
                 request.StateReconciliationDiagnosticSink);
+            if (request.SolusSourceSelection is not null)
+            {
+                var source = await SelectSolusSourceAsync(request, store, keys, locator,
+                    lineageRequest, publicationBinding, dependencies, timeProvider, cancellationToken)
+                    .ConfigureAwait(false);
+                if (source is null)
+                    return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
+                ownershipTransferred = true;
+                return new(AcceptedStateCodes.Ready, false, null, source);
+            }
             LineageInterruptedTransitionRecoveryResult? recoveredTransition =
                 null;
             SelectedLineageSnapshot? expectedRecoveredHead = null;
@@ -858,6 +876,49 @@ internal sealed class AuthorizedAcceptedStateComposer
                 access.Dispose();
             }
         }
+    }
+
+    private async Task<SolusContextSource?> SelectSolusSourceAsync(
+        ArtifactStateRestoreRequest request, IRestrictedStateStore store,
+        LocatorStateKeyRing keys, LocatorContext locator, LineageResolveRequest lineageRequest,
+        AcceptedStatePublicationBinding publicationBinding,
+        IAcceptedStateProductionDependencies dependencies, TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
+        var sourceRequest = request.SolusSourceSelection;
+        if (sourceRequest is null || !sourceRequest.Targets.Matches(request)) return null;
+        var observed = await new LineageService(store, timeProvider, request.StateReconciliationDiagnosticSink)
+            .ObserveReadOnlyAsync(locator, lineageRequest, cancellationToken).ConfigureAwait(false);
+        using var observation = observed.Context;
+        if (!observed.Succeeded || observation is null) return null;
+        var selected = new AcceptedStateSelector(timeProvider).Select(observation, lineageRequest);
+        if (!selected.Succeeded || selected.Selection is not { } selection) return null;
+        var policy = request.TrustedPolicy;
+        var policyBinding = new AcceptedStatePolicyBinding(policy.PolicySha256, policy.ConfigSha256,
+            policy.InstructionsSha256, policy.PayloadSha256, policy.PayloadContinuityMode,
+            policy.BuildDiscriminator);
+        if (!AcceptedStateRestoreService.MatchesPublication(selection.Current, policyBinding, publicationBinding) ||
+            selection.ImmediatePredecessor is { } predecessor &&
+                !AcceptedStateRestoreService.MatchesPublication(predecessor, policyBinding, publicationBinding))
+            return null;
+        var generation = selection.Current.Generation;
+        using var ancestryTransport = dependencies.CreateAncestryTransport(request.Launch.Inputs.GitHubToken!);
+        var transition = await new TrustedHeadAncestryClassifier(ancestryTransport, timeProvider)
+            .ClassifyAsync(request.Launch.RepositoryName, generation.ProducerBaseSha, generation.ProducerHeadSha,
+                request.Invocation.PullRequest.BaseSha, request.Invocation.PullRequest.HeadSha, cancellationToken)
+            .ConfigureAwait(false);
+        if (transition is not (AgentSessionHeadTransition.SameHead or AgentSessionHeadTransition.VerifiedAhead) ||
+            !sourceRequest.Targets.Matches(request) ||
+            timeProvider.GetUtcNow().ToUnixTimeSeconds() >= generation.PreparedExpiresAtUnixSeconds)
+            return null;
+        var scope = new RestrictedStateScope(request.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            lineageRequest.BaseScope.TrustedWorkflowIdentity, request.Invocation.PullRequest.Number,
+            selection.LineageHead.Header.SessionId, policy.ProviderId, policy.ModelId, policy.AdapterId,
+            policy.InstructionsSha256, policy.LimitsSha256, policy.ToolsetSha256, policy.BuildDiscriminator);
+        var authorized = AuthorizedStateAccess.Authorize(new(scope, scope, true, true, false), out var access);
+        if (authorized.Code != RestrictedStateCodes.Authorized || access is null) return null;
+        return new SolusContextSource(issuer, keys, locator, store, lineageRequest, selection,
+            sourceRequest, access, timeProvider, request.StateReconciliationDiagnosticSink);
     }
 
     internal static string TrustedWorkflowIdentity(

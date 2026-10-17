@@ -755,6 +755,30 @@ describe('CR1 authorized actual APR private package proof route', () => {
         w.jobs['install-proof'].steps.push({ run: 'echo extra' });
       },
     ],
+    [
+      'S2 proof removed',
+      (w: any) => {
+        w.jobs['install-proof'].steps = w.jobs['install-proof'].steps.filter(
+          (step: any) => step.name !== 'CR1-S2 durable Solus context authority proof',
+        );
+      },
+    ],
+    [
+      'S2 credential injection',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-S2 durable Solus context authority proof',
+        ).env.GH_TOKEN = '${{ github.token }}';
+      },
+    ],
+    [
+      'S2 substitute command',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-S2 durable Solus context authority proof',
+        ).run = 'echo passed';
+      },
+    ],
   ])('rejects %s without weakening historical secret routes', (_label, mutate) => {
     const workflowsRoot = copiedWorkflowsRoot();
     const candidate = path.join(workflowsRoot, 'solus-agent-package-proof.yml');

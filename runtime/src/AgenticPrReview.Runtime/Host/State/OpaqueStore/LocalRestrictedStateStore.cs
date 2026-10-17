@@ -15,7 +15,8 @@ internal sealed class LocalRestrictedStateStore
     private static readonly ConcurrentDictionary<string, SemaphoreSlim>
         NameGates = new(StringComparer.Ordinal);
     private readonly string configuredRoot;
-    private readonly string producingRunIdentity = Guid.NewGuid().ToString("N");
+    private readonly OpaqueStoreProducingRun producingRun;
+    private readonly Func<OpaqueStoreObjectId>? objectIdFactory;
     private readonly TimeProvider timeProvider;
     private readonly Action? beforeWriteTestHook;
     private readonly Action? afterTemporaryFlushTestHook;
@@ -30,7 +31,9 @@ internal sealed class LocalRestrictedStateStore
         Func<string, bool>? deleteTemporaryTestHook = null,
         Func<string, bool>? syncDirectoryTestHook = null,
         Action? afterFinalRootProofTestHook = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        OpaqueStoreProducingRun? producingRun = null,
+        Func<OpaqueStoreObjectId>? objectIdFactory = null)
     {
         if (string.IsNullOrWhiteSpace(explicitTestOwnedRoot))
         {
@@ -40,6 +43,11 @@ internal sealed class LocalRestrictedStateStore
         }
 
         configuredRoot = explicitTestOwnedRoot;
+        if (producingRun is not null && !OpaqueStoreValidation.IsValid(producingRun))
+            throw new ArgumentException("Invalid producing invocation.", nameof(producingRun));
+        // Correlation only; the caller still needs independent root/claim authority.
+        this.producingRun = producingRun ?? new(Guid.NewGuid().ToString("N"), 1);
+        this.objectIdFactory = objectIdFactory;
         this.beforeWriteTestHook = beforeWriteTestHook;
         this.afterTemporaryFlushTestHook = afterTemporaryFlushTestHook;
         this.afterFinalRootProofTestHook = afterFinalRootProofTestHook;
@@ -224,6 +232,19 @@ internal sealed class LocalRestrictedStateStore
             return OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Invalid);
         }
 
+        OpaqueStoreObjectId objectId;
+        try
+        {
+            objectId = objectIdFactory is null
+                ? new(Guid.NewGuid().ToString("N")) : objectIdFactory();
+            if (!OpaqueStoreValidation.IsValid(objectId))
+                return OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Invalid);
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException))
+        {
+            return OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Invalid);
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         if (!TryPrepareOperation(
                 request.Name,
@@ -248,8 +269,6 @@ internal sealed class LocalRestrictedStateStore
                         OpaqueStoreFailure.Invalid);
                 }
 
-                var objectId = new OpaqueStoreObjectId(
-                    Guid.NewGuid().ToString("N"));
                 var reference = new OpaqueStoreObjectReference(
                     request.Name,
                     objectId);
@@ -261,9 +280,7 @@ internal sealed class LocalRestrictedStateStore
                     request.EncryptedBytes.Span);
                 var metadata = new OpaqueStoreObjectMetadata(
                     reference,
-                    new OpaqueStoreProducingRun(
-                        producingRunIdentity,
-                        Attempt: 1),
+                    producingRun,
                     new OpaqueStoreArchiveDigest(digest),
                     request.EncryptedObjectDigest,
                     actualExpiry,

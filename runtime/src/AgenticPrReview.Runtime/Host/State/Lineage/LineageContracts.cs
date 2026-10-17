@@ -30,7 +30,9 @@ internal static class LineageFormat
     internal const int MaximumReaderPayloadBytes = OpaqueStoreCapacity.AnchorBytes;
     internal const int MaximumEnvelopeBytes = OpaqueStoreCapacity.MaximumObjectBytes;
     internal const int MaximumPhysicalPerClass = 8;
-    internal const int MaximumScopedObjects = 9 * MaximumPhysicalPerClass;
+    // Context claims share the existing aggregate budget; adding a family does
+    // not silently increase transport or transition evidence capacity.
+    internal const int MaximumScopedObjects = 72;
     internal const int MaximumTextBytes = 512;
     internal const int MaximumRunIdentityBytes = 256;
     internal const int MaximumEvidenceObjects = MaximumScopedObjects;
@@ -44,6 +46,7 @@ internal static class LineageFormat
             StateObjectClass.Acceptance => 64 * 1024,
             StateObjectClass.PublicationIntent => OpaqueStoreCapacity.RecoveryRecordBytes,
             StateObjectClass.Cleanup => OpaqueStoreCapacity.AnchorBytes,
+            StateObjectClass.ContextClaim => SolusContextClaimRecordCodec.MaximumBytes,
             _ => MaximumPayloadBytes,
         };
 
@@ -100,6 +103,7 @@ internal enum StateObjectClass
     Reset,
     ExpiryTransition,
     Cleanup,
+    ContextClaim,
 }
 
 internal static class StateObjectClasses
@@ -116,6 +120,7 @@ internal static class StateObjectClasses
         StateObjectClass.Reset,
         StateObjectClass.ExpiryTransition,
         StateObjectClass.Cleanup,
+        StateObjectClass.ContextClaim,
     ];
 
     internal static ImmutableArray<StateObjectClass> Scoped { get; } =
@@ -135,6 +140,7 @@ internal static class StateObjectClasses
             StateObjectClass.Reset => "reset",
             StateObjectClass.ExpiryTransition => "expiry_transition",
             StateObjectClass.Cleanup => "cleanup",
+            StateObjectClass.ContextClaim => "context_claim",
             _ => throw new ArgumentOutOfRangeException(nameof(value)),
         };
 

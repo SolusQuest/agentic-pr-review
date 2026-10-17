@@ -75,11 +75,12 @@ public sealed class LineageContractAndCodecTests
             "reset",
             "expiry_transition",
             "cleanup",
+            "context_claim",
         ],
             StateObjectClasses.All
                 .Select(StateObjectClasses.ToWireName)
                 .ToArray());
-        Assert.Equal(9, StateObjectClasses.Scoped.Length);
+        Assert.Equal(10, StateObjectClasses.Scoped.Length);
         Assert.DoesNotContain(
             StateObjectClass.LocatorRoot,
             StateObjectClasses.Scoped);

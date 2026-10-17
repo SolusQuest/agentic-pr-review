@@ -864,6 +864,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             },
             run: 'node runtime/tests/SolusStateEnvelopeFixture/verify.mjs',
           },
+          {
+            name: 'CR1-S2 durable Solus context authority proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'node runtime/tests/SolusContextAuthorityFixture/verify.mjs',
+          },
         ],
       },
     },
