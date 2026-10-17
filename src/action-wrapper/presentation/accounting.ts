@@ -36,6 +36,7 @@ export const TERMINATION_REASONS = [
   'request_limit',
   'response_limit',
   'context_limit',
+  'resource_limit',
   'invalid_result',
   'host_failure',
 ] as const;
