@@ -34,12 +34,14 @@ function check(value) {
   if (!value) throw new Error('APR_SOLUS_FRESH_HOST_VERIFY_FAILED');
 }
 
+let stage = 'environment';
 try {
   check(process.platform === 'linux' && process.arch === 'x64');
   const os = readFileSync('/etc/os-release', 'utf8');
   check(/^ID=ubuntu$/m.test(os) && /^VERSION_ID="24\.04"$/m.test(os));
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   check(/^[a-f0-9]{40}$/.test(head));
+  stage = 'workspace';
   const root = resolve(process.env.RUNNER_TEMP, 'apr-solus-r5');
   mkdirSync(root, { mode: 0o700 });
   for (const directory of ['home', 'tmp']) mkdirSync(join(root, directory), { mode: 0o700 });
@@ -100,6 +102,7 @@ try {
     check(result.status === 0);
     return result.stdout;
   };
+  stage = 'restore';
   run([
     'restore',
     fixture,
@@ -110,6 +113,7 @@ try {
     ...properties,
   ]);
   const output = join(root, 'proof');
+  stage = 'build';
   run([
     'build',
     fixture,
@@ -123,6 +127,7 @@ try {
     output,
     ...properties,
   ]);
+  stage = 'assembly_identity';
   for (const name of [
     'SolusAgent.Api',
     'SolusAgent.Tools.Api',
@@ -140,18 +145,22 @@ try {
       original.status === 0 && original.stdout.equals(readFileSync(join(output, name + '.dll'))),
     );
   }
+  stage = 'execution';
   const proof = run([
     join(output, 'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll'),
     'runtime/tests/fixtures/agent/r5/quality/bundle',
   ]);
+  stage = 'output_lines';
   const lines = proof.trim().split(/\r?\n/);
   check(lines.length === cases.length + 1);
   const summary = lines.pop();
+  stage = 'summary_shape';
   check(
     /^APR_SOLUS_FRESH_HOST_PROOF cases=13 checks=\d+ controlled_sends=\d+ live_calls=0 effects=0 durable_acceptance=false credential_free=true$/.test(
       summary,
     ),
   );
+  stage = 'summary_counts';
   const counts = summary.match(/checks=(\d+) controlled_sends=(\d+)/);
   check(counts && Number(counts[1]) >= 500 && Number(counts[2]) >= 90);
   const fields = [
@@ -185,8 +194,10 @@ try {
     'output_reservation',
   ].sort();
   const rows = lines.map((line, index) => {
+    stage = `row_${index}_fields`;
     const row = JSON.parse(line);
     check(JSON.stringify(Object.keys(row).sort()) === JSON.stringify(fields));
+    stage = `row_${index}_identity`;
     check(
       row.case_id === cases[index] &&
         row.evaluation === evaluations[index] &&
@@ -198,10 +209,17 @@ try {
         row.durable_accepted === false &&
         typeof row.terminal_accepted === 'boolean',
     );
+    stage = `row_${index}_admission`;
     check(['Fresh', 'NotAttempted'].includes(row.admission));
-    check(['Completed', 'Failed', 'Cancelled', 'ResourceLimit'].includes(row.runtime));
+    stage = `row_${index}_runtime`;
+    check(['Completed', 'Partial', 'Failed', 'Cancelled', 'ResourceLimit'].includes(row.runtime));
+    if (row.runtime === 'Partial')
+      check(row.evaluation === 'ExecutionFailed' && row.terminal_accepted === false && row.head === null);
+    stage = `row_${index}_capture`;
     check(['NotRequested', 'Unavailable', 'Delivered', 'Failed'].includes(row.capture));
+    stage = `row_${index}_head`;
     check(row.head === null || row.head === 'Exact');
+    stage = `row_${index}_numbers`;
     for (const key of fields.filter(
       (key) =>
         key.endsWith('_bytes') ||
@@ -228,6 +246,6 @@ try {
   for (const row of rows) console.log(JSON.stringify(row));
   console.log(summary);
 } catch {
-  console.error('APR_SOLUS_FRESH_HOST_VERIFY_FAILED');
+  console.error('APR_SOLUS_FRESH_HOST_VERIFY_FAILED ' + stage);
   process.exitCode = 1;
 }
