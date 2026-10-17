@@ -106,16 +106,15 @@ async function collect(output, verify) {
     const expectedFeed = ids.includes(lower) ? privateFeed : publicFeed;
     requireThat(metadata.source?.replace(/\/$/, '') === expectedFeed, 'APR_SOLUS_SOURCE');
     const bytes = await readFile(join(root, `${lower}.${resolvedVersion}.nupkg`));
-    const hashes = packageHashes(
-      bytes,
-      metadata.contentHash,
-      library.sha512,
-      (await readFile(join(root, `${lower}.${resolvedVersion}.nupkg.sha512`), 'utf8')).trim(),
-    );
+    const archiveSha512 = (
+      await readFile(join(root, `${lower}.${resolvedVersion}.nupkg.sha512`), 'utf8')
+    ).trim();
+    const hashes = packageHashes(bytes, metadata.contentHash, library.sha512, archiveSha512);
     packages.push({
       id: lower,
       version: resolvedVersion,
       ...hashes,
+      archiveSha512,
       role: 'managed',
       source: expectedFeed,
     });
@@ -127,6 +126,7 @@ async function collect(output, verify) {
   requireThat(packages.length <= 16, 'APR_SOLUS_INVENTORY');
   packages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   let constructed = false;
+  const packageRepositories = [];
   if (verify) {
     const policy = managedDependencyPolicy(
       JSON.parse(await readFile('scripts/release/build-payload.inputs.json', 'utf8')),
@@ -236,6 +236,29 @@ async function collect(output, verify) {
         original.equals(await readFile(join(startup, name + '.dll'))),
         'APR_SOLUS_ASSEMBLY_BYTES',
       );
+      // Signed archive identity is checked above. Bind emitted repository commit
+      // metadata as well; when absent, keep publisher/tag provenance explicit.
+      const nuspec = execFileSync('/usr/bin/unzip', ['-p', archive, '*.nuspec'], {
+        env,
+        encoding: 'utf8',
+        maxBuffer: 256 * 1024,
+      });
+      const repositories = [...nuspec.matchAll(/<repository\b[^>]*\/?\s*>/g)];
+      requireThat(repositories.length === 1, 'APR_SOLUS_RELEASE_SOURCE');
+      const declaration = repositories[0][0];
+      const url = /\burl=["']([^"']+)["']/.exec(declaration)?.[1];
+      const commit = /\bcommit=["']([^"']+)["']/.exec(declaration)?.[1];
+      requireThat(
+        url === 'https://github.com/SolusQuest/solus-agent' &&
+          (commit === undefined || commit === SOLUS_RELEASE_SOURCE),
+        'APR_SOLUS_RELEASE_SOURCE',
+      );
+      packageRepositories.push({
+        id: name.toLowerCase(),
+        repository: url,
+        commit: commit ?? null,
+        provenance: commit ? 'nuspec-commit' : 'publisher-tag',
+      });
     }
     const native = JSON.parse(
       cleanRun(
@@ -294,6 +317,7 @@ async function collect(output, verify) {
     constructed,
     producerProof: false,
     packages,
+    packageRepositories,
     actualAprLock: JSON.parse(await readFile(lock, 'utf8')),
   };
   await writeFile(join(output, 'metadata.json'), JSON.stringify(facts, null, 2) + '\n', {

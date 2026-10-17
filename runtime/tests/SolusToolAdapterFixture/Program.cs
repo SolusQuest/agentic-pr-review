@@ -12,7 +12,9 @@ try
     await ToolTests.Run();
     await RuntimeTests.Run();
     await TransportTests.Run();
-    Console.WriteLine($"APR_SOLUS_TOOLS_PROOF tools=5 terminal=true correction_variants=21 checks={Proof.Checks} credential_free=true outbound_http=0");
+    Proof.Check(Proof.MaxRequest <= 65536 && Proof.MaxContext <= 196608 && Proof.MaxWireRequest <= 1048576 &&
+        Proof.MaxResult == 4096 && Proof.MaxSchema <= 8192 && Proof.MaxProspectiveRequest > 0);
+    Console.WriteLine($"APR_SOLUS_TOOLS_PROOF tools=5 terminal=true correction_variants=21 checks={Proof.Checks} credential_free=true outbound_http=0 max_request={Proof.MaxRequest} max_prospective_request={Proof.MaxProspectiveRequest} max_wire_request={Proof.MaxWireRequest} max_context={Proof.MaxContext} max_result={Proof.MaxResult} max_schema={Proof.MaxSchema}");
     return 0;
 }
 catch

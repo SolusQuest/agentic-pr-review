@@ -21,6 +21,7 @@ internal static class Proof
 {
     internal static string Stage = "startup";
     internal static int Checks;
+    internal static int MaxRequest, MaxProspectiveRequest, MaxWireRequest, MaxContext, MaxResult, MaxSchema;
     internal const string RejectedCanary = "REJECTED_ARGUMENT_CANARY_399";
     internal const string InstructionCanary = "UNTRUSTED_REPO_INSTRUCTION_399";
     internal const string EmptyFinal = "{\"summary\":\"No supported findings.\",\"findings\":[]}";
@@ -31,6 +32,12 @@ internal static class Proof
         throw new InvalidOperationException();
     }
     internal static string Json(string text) => JsonSerializer.Serialize(text);
+    internal static void ObserveRequest(ProviderRequest request)
+    {
+        MaxRequest = Math.Max(MaxRequest, request.PayloadByteCount);
+        if (request.Inputs.Any(i => i.Kind == ProviderInputKind.ToolCorrectionFeedbackData))
+            MaxProspectiveRequest = Math.Max(MaxProspectiveRequest, request.PayloadByteCount);
+    }
     internal static string Grounded(string id, string path = "changed.cs", int first = 1, int last = 1) =>
         "{\"summary\":\"A supported defect.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Missing guard\",\"message\":\"Validate before use.\",\"evidence\":[{\"observation_id\":" +
         Json(id) + ",\"path\":" + Json(path) + ",\"start_line\":" + first + ",\"end_line\":" + last + "}]}]}";
@@ -113,7 +120,7 @@ internal sealed class Provider(Func<ProviderRequest, int, ProviderResponse> repl
     internal bool RefuseCorrection;
     internal readonly List<ProviderRequest> Requests = [];
     protected override ProviderError ValidateRequestCore(ProviderRequest request)
-    { Validations++; return RefuseCorrection && request.Inputs.Any(x => x.Kind == ProviderInputKind.ToolCorrectionFeedbackData) ? ProviderError.LimitExceeded : ProviderError.None; }
+    { Validations++; Proof.ObserveRequest(request); return RefuseCorrection && request.Inputs.Any(x => x.Kind == ProviderInputKind.ToolCorrectionFeedbackData) ? ProviderError.LimitExceeded : ProviderError.None; }
     protected override ValueTask<ProviderResponse> ExchangeCoreAsync(ProviderRequest request, ProviderObservation observation, CancellationToken token)
     { token.ThrowIfCancellationRequested(); Requests.Add(request); observation.ObserveDispatch(DispatchExposure.Dispatched); return ValueTask.FromResult(reply(request, ++Calls)); }
     public ProviderSavedState? ExportContext(ProviderContextBinding binding) => new(binding.Scope, binding.Origin, 1, [1, 9, 3]);
@@ -124,7 +131,8 @@ internal sealed class Provider(Func<ProviderRequest, int, ProviderResponse> repl
 internal sealed class Sink : IRestrictedContextSink
 {
     internal AgentContextEnvelope? Context;
-    public void Capture(AgentContextEnvelope context) { Proof.Check(Context is null); Context = context; }
+    public void Capture(AgentContextEnvelope context)
+    { Proof.Check(Context is null); Context = context; Proof.MaxContext = Math.Max(Proof.MaxContext, context.PayloadByteCount); }
 }
 
 // Synthetic exact source/target authority only, not the product S2 claim service.

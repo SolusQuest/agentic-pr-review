@@ -73,6 +73,21 @@ internal static class TransportTests
                 !captured.Contains(Credential, StringComparison.Ordinal));
         }
 
+        Proof.Stage = "installed-deepseek-prospective-wire-refusal";
+        var refusalExecution = Guid.NewGuid(); var (refusalTools, refusalExecutor) = fixture.Tools(refusalExecution);
+        var refusalHandler = new Handler((_, _) => Wire("tool_calls", null,
+            [new("wire_bad", "read_file", bad), new("wire_sibling", "list_files", "{}")]));
+        using (var provider = new DeepSeekProvider(new(Credential, 1024,
+            maximumRequestBodyBytes: Encoding.UTF8.GetByteCount(handler.Bodies[0]),
+            maximumResponseBodyBytes: 524288, timeout: TimeSpan.FromSeconds(30)), refusalHandler))
+        {
+            var host = new SolusReviewCandidateHost(refusalExecution, refusalTools);
+            var result = await Proof.Agent(Proof.Configuration(refusalTools, provider)).ExecuteCandidatesWithContextAsync(
+                new(Proof.Request(refusalExecution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), host);
+            Proof.Check(!host.TryComplete(result, out _) && refusalHandler.Sends == 1 && refusalExecutor.Invocations == 0 &&
+                refusalTools.CurrentObservations.Length == 0 && result.Context.Outcome!.Usage!.Attempts.Count == 1);
+        }
+
         Proof.Stage = "installed-deepseek-invalid-terminal-carriers";
         foreach (var mode in new[] { "stop_with_calls", "terminal_function_first", "terminal_function_last", "bad_nested_final" })
         {
@@ -107,12 +122,15 @@ internal static class TransportTests
     private sealed class Handler(Func<string, int, string> reply) : HttpMessageHandler
     {
         internal int Sends;
+        internal readonly List<string> Bodies = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             Proof.Check(request.RequestUri!.OriginalString == DeepSeekOptions.OfficialEndpoint &&
                 request.Headers.Authorization?.Parameter == Credential);
             var body = await request.Content!.ReadAsStringAsync(token);
+            Bodies.Add(body);
+            Proof.MaxWireRequest = Math.Max(Proof.MaxWireRequest, Encoding.UTF8.GetByteCount(body));
             Proof.Check(!body.Contains(Credential, StringComparison.Ordinal));
             return new(HttpStatusCode.OK) { Content = new StringContent(reply(body, ++Sends), Encoding.UTF8, "application/json") };
         }

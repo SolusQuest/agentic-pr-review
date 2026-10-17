@@ -34,6 +34,8 @@ internal static class ToolTests
             Proof.Check(result.Outcome == ToolOutcome.Succeeded && result.Call.Matches(call));
             Proof.Check(registration.Descriptor.InputSchema.Profile == "bounded_closed_object" &&
                 registration.Descriptor.ResultSchema.Profile == "bounded_closed_object");
+            Proof.MaxSchema = Math.Max(Proof.MaxSchema, Math.Max(Encoding.UTF8.GetByteCount(registration.Descriptor.InputSchema.NormalizedJson),
+                Encoding.UTF8.GetByteCount(registration.Descriptor.ResultSchema.NormalizedJson)));
             var historical = ToolResult.RestoreHistorical(registration.Descriptor, call, result.Call,
                 result.Outcome, result.Error, result.InvocationStarted, result.Json);
             Proof.Check(historical.IsHistorical && executor.Invocations == tools.CurrentObservations.Length);
@@ -71,7 +73,9 @@ internal static class ToolTests
         var r = tools.Registrations.Single(r => r.Descriptor.Name == call.ToolName);
         var preparation = r.Tool.Prepare(call);
         Proof.Check(preparation.Accepted);
-        return await r.Tool.InvokeAsync(preparation.Prepared!, call, r.Capability, token);
+        var result = await r.Tool.InvokeAsync(preparation.Prepared!, call, r.Capability, token);
+        if (result.Json is not null) Proof.MaxResult = Math.Max(Proof.MaxResult, Encoding.UTF8.GetByteCount(result.Json));
+        return result;
     }
 
     private static async Task Guards(SnapshotFixture fixture)

@@ -92,6 +92,24 @@ internal static class RuntimeTests
         Proof.Check(result.Context.Outcome!.Usage!.Attempts.Count == 3 && result.Context.Outcome.Usage.ToolCallAdmissions!.Admitted == 3);
         Proof.Check(result.Context.Outcome.Usage.ToolInvocations!.Invoked == 1);
         Proof.Check(sink.Context is not null && !Encoding.UTF8.GetString(sink.Context.CopyRestrictedPayload()).Contains(Proof.RejectedCanary, StringComparison.Ordinal));
+        var restoredExecution = Guid.NewGuid(); var (restoredTools, restoredExecutor) = fixture.Tools(restoredExecution);
+        var grant = new ContextRoundGrant(Guid.NewGuid(), result.Context.Checkpoint!, restoredExecution, Guid.NewGuid());
+        var authority = new Authority(sink.Context!, grant);
+        var restoredProvider = new Provider((request, _) =>
+        {
+            CheckNoRejected(request);
+            var correction = request.Inputs.Single(i => i.Model?.Finish == ProviderFinish.ToolCorrection).Model!;
+            Proof.Check(correction.Correction!.Members.Single(m => m.Rejected).Call.ArgumentsJson == AgentRecoveryFeedback.RejectedArguments);
+            Proof.Check(request.Inputs.Where(i => i.ToolResult is not null).All(i => i.ToolResult!.IsHistorical));
+            Proof.Check(restoredTools.CurrentObservations.Length == 0 && restoredExecutor.Invocations == 0);
+            return Proof.Response(request, []);
+        });
+        var restoredHost = new SolusReviewCandidateHost(restoredExecution, restoredTools);
+        var restored = await Proof.Agent(Proof.Configuration(restoredTools, restoredProvider, authority)).ExecuteCandidatesWithContextAsync(
+            new(Proof.Request(restoredExecution), ContextExecutionIntent.NewRunFromContext, sink.Context, grant),
+            SolusReviewCandidateHost.Bounds(), restoredHost);
+        Proof.Check(restored.Context.Admission == ContextAdmission.Supplied && authority.Claims == 1 && restoredProvider.Imports == 1);
+        Proof.Check(restoredHost.TryComplete(restored, out _) && restoredProvider.Calls == 1 && restoredExecutor.Invocations == 0);
     }
 
     private static void CheckNoRejected(ProviderRequest request)
@@ -194,6 +212,28 @@ internal static class RuntimeTests
             var result = await Proof.Agent(Proof.Configuration(tools, provider)).ExecuteCandidatesWithContextAsync(
                 new(Proof.Request(execution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), host, capture);
             Proof.Check(!host.TryComplete(result, out _) && !capture.TryComplete(result, out _) && provider.Calls == 1 && executor.Invocations == 0);
+            Proof.Check(result.Candidates!.Receipts.Count == 1 && !result.Candidates.Receipts[0].IsAccepted && result.Candidates.RepairsAdmitted == 0);
+        }
+        foreach (var mode in new[] { "duplicate_evidence", "duplicate_finding", "unreturned_line", "nested_unknown", "wrong_severity" })
+        {
+            var execution = Guid.NewGuid(); var (tools, executor) = fixture.Tools(execution);
+            var provider = new Provider((request, n) =>
+            {
+                if (n == 1) return Proof.Response(request, [new("read_for_final", "read_file", "{\"path\":\"changed.cs\",\"line_count\":1}")]);
+                var value = System.Text.Json.Nodes.JsonNode.Parse(Proof.Grounded(tools.CurrentObservations.Single().ObservationId))!;
+                var findings = value["findings"]!.AsArray(); var evidence = findings[0]!["evidence"]!.AsArray();
+                if (mode == "duplicate_evidence") evidence.Add(evidence[0]!.DeepClone());
+                if (mode == "duplicate_finding") findings.Add(findings[0]!.DeepClone());
+                if (mode == "unreturned_line") evidence[0]!["end_line"] = 2;
+                if (mode == "nested_unknown") evidence[0]!["unknown"] = true;
+                if (mode == "wrong_severity") findings[0]!["severity"] = "unsupported";
+                return Proof.Response(request, [], value.ToJsonString());
+            });
+            var host = new SolusReviewCandidateHost(execution, tools);
+            using var capture = new SolusRestrictedStateCapture(execution, Compatibility());
+            var result = await Proof.Agent(Proof.Configuration(tools, provider)).ExecuteCandidatesWithContextAsync(
+                new(Proof.Request(execution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), host, capture);
+            Proof.Check(!host.TryComplete(result, out _) && !capture.TryComplete(result, out _) && provider.Calls == 2 && executor.Invocations == 1);
             Proof.Check(result.Candidates!.Receipts.Count == 1 && !result.Candidates.Receipts[0].IsAccepted && result.Candidates.RepairsAdmitted == 0);
         }
     }

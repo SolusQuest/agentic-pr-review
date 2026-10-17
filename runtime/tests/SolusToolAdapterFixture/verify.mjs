@@ -85,7 +85,7 @@ try {
   ]);
   const proof = run([join(output, 'AgenticPrReview.Runtime.SolusToolAdapterFixture.dll')]);
   check(
-    /^APR_SOLUS_TOOLS_PROOF tools=5 terminal=true correction_variants=21 checks=\d+ credential_free=true outbound_http=0\s*$/.test(
+    /^APR_SOLUS_TOOLS_PROOF tools=5 terminal=true correction_variants=21 checks=\d+ credential_free=true outbound_http=0 max_request=\d+ max_prospective_request=\d+ max_wire_request=\d+ max_context=\d+ max_result=4096 max_schema=\d+\s*$/.test(
       proof,
     ),
   );
