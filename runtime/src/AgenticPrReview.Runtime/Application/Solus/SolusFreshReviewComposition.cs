@@ -105,10 +105,10 @@ internal sealed class SolusFreshReviewComposition
         SolusContextReviewOutcome? observedRun = null;
         AgentTerminalReview? validatedReview = null;
         var domainAccepted = false;
-        ImmutableArray<AgentObservation> observedTools = [];
+        SolusSnapshotTools? tools = null;
         try
         {
-            var tools = new SolusSnapshotTools(executionId, prepared.FreshContext.Snapshot,
+            tools = new SolusSnapshotTools(executionId, prepared.FreshContext.Snapshot,
                 trustedFileAccess?.Invoke(prepared.FreshContext.Snapshot) ?? new VerifiedReviewedFileAccess());
             var domain = new SolusReviewCandidateHost(executionId, tools);
             using var bridge = new SolusReviewBridge(executionId,
@@ -118,7 +118,6 @@ internal sealed class SolusFreshReviewComposition
                 sink, prepared.TimeBudget.RemainingReviewTime,
                 prepared.Journal.ProviderCancellationToken, trustedProviderDecorator).ConfigureAwait(false);
             observedRun = run;
-            observedTools = tools.CurrentObservations;
             admittedOperation.Resolve(ActionHostOperationResolution.ResolvedNoCommit);
             var actual = run.Execution;
             AgentTerminalReview? review = null;
@@ -141,13 +140,13 @@ internal sealed class SolusFreshReviewComposition
         {
             return new(executionId, SolusFreshReviewFailure.Cancelled, observedRun?.Work,
                 observedRun?.Execution?.Context, validatedReview, domainAccepted,
-                new(ActionHostFreshPublicationStatus.Cancelled), observedTools);
+                new(ActionHostFreshPublicationStatus.Cancelled), tools?.CurrentObservations ?? []);
         }
         catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException))
         {
             return new(executionId, SolusFreshReviewFailure.HostFailure, observedRun?.Work,
                 observedRun?.Execution?.Context, validatedReview, domainAccepted,
-                new(ActionHostFreshPublicationStatus.NotEvaluated), observedTools);
+                new(ActionHostFreshPublicationStatus.NotEvaluated), tools?.CurrentObservations ?? []);
         }
     }
 
