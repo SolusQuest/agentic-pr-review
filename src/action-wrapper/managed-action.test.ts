@@ -292,6 +292,48 @@ describe('managed Action owned launch and fatal barriers', () => {
     expect(f.outputs.status).toBe('failed');
   });
 
+  it.each([
+    ['direct', false],
+    ['direct', true],
+    ['attached', false],
+    ['attached', true],
+  ])(
+    'retries a confirmed Host %s guard failure once and retains resources when retry fails=%s',
+    async (kind, retryFails) => {
+      const f = await fixture();
+      const retry = vi.fn(async () => {
+        f.events.push('guard-retry');
+        if (retryFails) throw new Error('PRIVATE_GUARD_FAILURE');
+      });
+      const guardError = new ManagedRuntimeCleanupError(retry);
+      const error = kind === 'direct' ? guardError : new Error('PRIVATE_HOST_FAILED');
+      if (kind === 'attached') Object.defineProperty(error, 'cleanupError', { value: guardError });
+      expect(
+        await runManagedActionWrapperWithSeams({
+          ...f.seams,
+          hostProcessRunner: async () => {
+            throw error;
+          },
+        }),
+      ).toBe(1);
+      expect(retry).toHaveBeenCalledOnce();
+      expect(f.bridge.stopAndDrain).toHaveBeenCalledOnce();
+      expect(f.bridge.cleanup).toHaveBeenCalledOnce();
+      expect(f.seams.fatalExit).not.toHaveBeenCalled();
+      if (retryFails) {
+        expect(f.payload.dispose).not.toHaveBeenCalled();
+        expect((await stat(f.treeRoot)).isDirectory()).toBe(true);
+        expect((await stat(f.runtimeRoot)).isDirectory()).toBe(true);
+      } else {
+        expect(f.payload.dispose).toHaveBeenCalledOnce();
+        expect(f.events.indexOf('guard-retry')).toBeLessThan(f.events.indexOf('dispose'));
+      }
+      expect(Object.keys(f.outputs)).toHaveLength(4);
+      expect(f.outputs.status).toBe('failed');
+      expect(JSON.stringify([f.outputs, f.summaries, f.annotations])).not.toContain('PRIVATE');
+    },
+  );
+
   it('seals immediately and waits for actual close even if resource settlement is observed first', async () => {
     const f = await fixture();
     const closed = deferred(),

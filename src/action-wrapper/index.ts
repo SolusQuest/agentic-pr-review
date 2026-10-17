@@ -331,6 +331,7 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
   let prerequisiteTerminationUnconfirmed:
     | RuntimePrerequisiteTerminationUnconfirmedError
     | undefined;
+  let managedResourcesRetained = false;
   let prepared: OwnedActionPayload | undefined;
   let unboundMap = false;
   const inputs = (() => {
@@ -431,6 +432,26 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       }
     } else {
       failed = true;
+      if (prepared?.kind === 'managed') {
+        const cleanupError =
+          error instanceof ManagedRuntimeCleanupError
+            ? error
+            : error instanceof Error && 'cleanupError' in error
+              ? error.cleanupError
+              : undefined;
+        if (cleanupError !== undefined) {
+          // Actual Host close is not evidence that its runtime guards released.
+          managedResourcesRetained = true;
+          if (cleanupError instanceof ManagedRuntimeCleanupError) {
+            try {
+              await cleanupError.retryCleanup();
+              managedResourcesRetained = false;
+            } catch {
+              /* Retain storage whose guard release still failed. */
+            }
+          }
+        }
+      }
       unboundMap =
         error instanceof ActionWrapperContractError && error.code === 'wrapper_payload_map_unbound';
     }
@@ -518,13 +539,14 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       }
     }
     if (!quiet) {
-      if (prepared?.kind === 'managed') await prepared.dispose().catch(() => {});
+      if (prepared?.kind === 'managed' && !managedResourcesRetained)
+        await prepared.dispose().catch(() => {});
       seams.fatalExit(1);
       return 1;
     }
   }
 
-  if (prepared?.kind === 'managed') {
+  if (prepared?.kind === 'managed' && !managedResourcesRetained) {
     try {
       await prepared.dispose();
     } catch {

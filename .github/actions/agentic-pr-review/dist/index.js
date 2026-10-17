@@ -104574,6 +104574,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
   let hostTerminationUnconfirmed = false;
   let managedTerminationUnconfirmed;
   let prerequisiteTerminationUnconfirmed;
+  let managedResourcesRetained = false;
   let prepared;
   let unboundMap = false;
   const inputs = (() => {
@@ -104665,6 +104666,19 @@ async function runOwnedActionWrapperWithSeams(seams) {
       }
     } else {
       failed = true;
+      if (prepared?.kind === "managed") {
+        const cleanupError = error3 instanceof ManagedRuntimeCleanupError ? error3 : error3 instanceof Error && "cleanupError" in error3 ? error3.cleanupError : void 0;
+        if (cleanupError !== void 0) {
+          managedResourcesRetained = true;
+          if (cleanupError instanceof ManagedRuntimeCleanupError) {
+            try {
+              await cleanupError.retryCleanup();
+              managedResourcesRetained = false;
+            } catch {
+            }
+          }
+        }
+      }
       unboundMap = error3 instanceof ActionWrapperContractError && error3.code === "wrapper_payload_map_unbound";
     }
   } finally {
@@ -104746,13 +104760,14 @@ async function runOwnedActionWrapperWithSeams(seams) {
       }
     }
     if (!quiet) {
-      if (prepared?.kind === "managed") await prepared.dispose().catch(() => {
-      });
+      if (prepared?.kind === "managed" && !managedResourcesRetained)
+        await prepared.dispose().catch(() => {
+        });
       seams.fatalExit(1);
       return 1;
     }
   }
-  if (prepared?.kind === "managed") {
+  if (prepared?.kind === "managed" && !managedResourcesRetained) {
     try {
       await prepared.dispose();
     } catch {
@@ -104907,4 +104922,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 833da74b44469d9726424877a1937661f43d2d9085c27b0adb35428d14566729
+// Action source inventory sha256: 3c9db23521c56375b01c6ad27c465a7d4030c93767aaf5bc75acf9c3d112ceb7
