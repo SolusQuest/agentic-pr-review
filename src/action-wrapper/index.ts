@@ -582,6 +582,7 @@ async function retainManagedResources(
   fatalExit: (code: 1) => void,
 ): Promise<void> {
   if (!error.terminationConfirmed) return await new Promise<void>(() => {});
+  let officialQuiescenceFailed = false;
   const bridgeSettlement = error.terminationConfirmed.then(async () => {
     let quiet = false;
     try {
@@ -591,7 +592,7 @@ async function retainManagedResources(
       /* Unsettled official work never authorizes normal presentation. */
     }
     if (!quiet) {
-      fatalExit(1);
+      officialQuiescenceFailed = true;
       throw new Error('wrapper_official_quiescence_failed');
     }
     await bridge.cleanup();
@@ -609,6 +610,9 @@ async function retainManagedResources(
         })
       : new Promise<void>(() => {});
   const results = await Promise.allSettled([bridgeSettlement, payloadSettlement]);
+  // A bridge failure cannot bypass the independent guard release/retry or owner disposal.
+  // Rejected owner settlement retains its storage; it does not authorize presentation.
+  if (officialQuiescenceFailed) fatalExit(1);
   if (results.some((result) => result.status === 'rejected'))
     throw new AggregateError(
       results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),

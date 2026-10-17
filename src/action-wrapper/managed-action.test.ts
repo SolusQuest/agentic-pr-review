@@ -429,6 +429,96 @@ describe('managed Action owned launch and fatal barriers', () => {
     },
   );
 
+  it.each(
+    ['quiescence-false', 'quiescence-reject', 'drain-reject'].flatMap((bridgeFailure) =>
+      ['released', 'retry', 'failed-retry', 'unknown-release'].map((release) => ({
+        bridgeFailure,
+        release,
+      })),
+    ),
+  )(
+    'defers late $bridgeFailure fatal until independent $release settlement',
+    async ({ bridgeFailure, release }) => {
+      const f = await fixture();
+      const closed = deferred(),
+        released = deferred(),
+        retryFinished = deferred();
+      const dispose = f.payload.dispose;
+      f.payload.dispose = vi.fn(async () => {
+        await dispose();
+        f.events.push('owner-disposed');
+      });
+      vi.mocked(f.seams.fatalExit).mockImplementation(() => {
+        f.events.push('fatal');
+        noPresentation(f);
+      });
+      const retry = vi.fn(async () => {
+        await retryFinished.promise;
+      });
+      vi.mocked(f.bridge.stopAndDrain).mockImplementation(async () => {
+        f.events.push('drain');
+        if (bridgeFailure === 'drain-reject') throw new Error('PRIVATE_DRAIN');
+      });
+      await runManagedActionWrapperWithSeams({
+        ...f.seams,
+        bridgeRuntime: async (input) => {
+          await input.executorFactory(f.bridge.stagingRoot);
+          return f.bridge;
+        },
+        createArtifactExecutor: async (_context, tracker) => {
+          vi.spyOn(tracker, 'awaitQuiescence').mockImplementation(async () => {
+            if (bridgeFailure === 'quiescence-reject') throw new Error('PRIVATE_QUIESCENCE');
+            return false;
+          });
+          return {
+            execute: async () => {
+              throw new Error('unused');
+            },
+          };
+        },
+        hostProcessRunner: async () => {
+          throw new ManagedHostProcessTerminationUnconfirmedError(closed.promise, released.promise);
+        },
+      });
+      const retained = expect(f.retention()).rejects.toThrow(
+        'wrapper_retained_resource_cleanup_failed',
+      );
+      closed.resolve();
+      // Flush both branches after actual Host close while resource release stays pending.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.bridge.stopAndDrain).toHaveBeenCalledOnce();
+      expect(f.seams.fatalExit).not.toHaveBeenCalled();
+      expect(f.payload.dispose).not.toHaveBeenCalled();
+      expect((await stat(f.runtimeRoot)).isDirectory()).toBe(true);
+      noPresentation(f);
+      if (release === 'released') released.resolve();
+      else if (release === 'unknown-release') released.reject(new Error('PRIVATE_RELEASE'));
+      else {
+        released.reject(new ManagedRuntimeCleanupError(retry));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(retry).toHaveBeenCalledOnce();
+        expect(f.seams.fatalExit).not.toHaveBeenCalled();
+        expect(f.payload.dispose).not.toHaveBeenCalled();
+        noPresentation(f);
+        if (release === 'retry') retryFinished.resolve();
+        else retryFinished.reject(new Error('PRIVATE_RETRY'));
+      }
+      await retained;
+      expect(f.seams.fatalExit).toHaveBeenCalledExactlyOnceWith(1);
+      expect(f.bridge.cleanup).not.toHaveBeenCalled();
+      if (release === 'released' || release === 'retry') {
+        expect(f.payload.dispose).toHaveBeenCalledOnce();
+        expect(f.events.indexOf('owner-disposed')).toBeLessThan(f.events.indexOf('fatal'));
+        await expect(stat(f.runtimeRoot)).rejects.toThrow();
+      } else {
+        expect(f.payload.dispose).not.toHaveBeenCalled();
+        expect((await stat(f.treeRoot)).isDirectory()).toBe(true);
+        expect((await stat(f.runtimeRoot)).isDirectory()).toBe(true);
+      }
+      noPresentation(f);
+    },
+  );
+
   it('observes late owner cleanup failure without unhandled rejection or later presentation', async () => {
     const f = await fixture();
     const closed = deferred(),

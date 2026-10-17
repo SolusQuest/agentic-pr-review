@@ -104794,6 +104794,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
 async function retainManagedResources(error3, payload, bridge, tracker, quiescenceMs, fatalExit) {
   if (!error3.terminationConfirmed) return await new Promise(() => {
   });
+  let officialQuiescenceFailed = false;
   const bridgeSettlement = error3.terminationConfirmed.then(async () => {
     let quiet = false;
     try {
@@ -104802,7 +104803,7 @@ async function retainManagedResources(error3, payload, bridge, tracker, quiescen
     } catch {
     }
     if (!quiet) {
-      fatalExit(1);
+      officialQuiescenceFailed = true;
       throw new Error("wrapper_official_quiescence_failed");
     }
     await bridge.cleanup();
@@ -104818,6 +104819,7 @@ async function retainManagedResources(error3, payload, bridge, tracker, quiescen
   }) : new Promise(() => {
   });
   const results = await Promise.allSettled([bridgeSettlement, payloadSettlement]);
+  if (officialQuiescenceFailed) fatalExit(1);
   if (results.some((result) => result.status === "rejected"))
     throw new AggregateError(
       results.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
@@ -104922,4 +104924,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 3c9db23521c56375b01c6ad27c465a7d4030c93767aaf5bc75acf9c3d112ceb7
+// Action source inventory sha256: 2a3faf3fc4b71ec95b1744a0cf6f9d94354ed7916fc7014bb6677949cd96c225
