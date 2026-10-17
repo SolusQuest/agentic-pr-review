@@ -258,8 +258,8 @@ internal enum Cr1DevelopmentRefusal
 
 internal static class Cr1DevelopmentProfile
 {
-    internal const string Id = "cr1-solus-internal1-dev";
-    internal const string PackageVersion = "0.1.0-internal.1";
+    internal const string Id = "cr1-solus-internal4-dev";
+    internal const string PackageVersion = "0.1.0-internal.4";
     internal const int RetainedAttempts = 64;
     internal const int RetainedRecords = 64;
     internal const int RetainedBytes = 196_608;

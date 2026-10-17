@@ -18,6 +18,7 @@ using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Host.State.Transactions;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
@@ -81,6 +82,107 @@ public sealed partial class ActionHostCompositionTests
         Assert.Empty(publisher.Transport.Bodies);
         Assert.Equal(0, stagingCalls);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ContextExclusionCancellationAndAcquisitionFailureStayDistinct(bool cancelWhileWaiting)
+    {
+        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
+        var original = FullLaunch(scenario.Launch);
+        var runId = RandomNumberGenerator.GetInt32(1_000_000, int.MaxValue);
+        scenario.Transport.CurrentRun = scenario.Transport.CurrentRun with { Id = runId };
+        Assert.True(ActionHostLaunchContract.TryCreate(original.Inputs, original.EventJsonPath,
+            original.EventJsonSha256, original.RepositoryName, original.RepositoryId, runId, original.RunAttempt,
+            original.WorkflowPath, original.WorkflowRef, original.WorkflowSha, original.ActionSourceSha,
+            original.PayloadSha256, original.BuildDiscriminator, original.Cancellation,
+            original.ArtifactBridgeEndpoint, out var launch));
+        var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(launch!, default);
+        var invocation = Assert.IsType<ActionHostAuthorizer.AuthorizedInvocation>(authorization.Invocation);
+        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(launch!, invocation, out var policyRequest, out _));
+        using var transport = github.CreateExactObjectTransport(launch!.Inputs.GitHubToken!);
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(policyRequest!, transport, default);
+        Assert.NotNull(materialized.Policy);
+        var store = FullPathStore(launch);
+        var state = new FullPathStateDependencies(store, github);
+        var clock = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var request = new ArtifactStateRestoreRequest(launch, invocation, materialized.Policy!,
+            new("user", [new ProjectTextContent("authorized exclusion test")]),
+            DeepSeekReasoningContinuationCodec.Instance, state, clock);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var owner = await SolusContextExclusion.AcquireInvocationAsync(request, deadline.Token);
+        Assert.NotNull(owner);
+        // Locate this unique invocation's real directory, then observe the
+        // competing open descriptor. Cancellation is phase-bound, not a delay.
+        var writer = new LineageBinaryWriter(4096);
+        writer.WriteString("apr.solus-invocation-exclusion.v1");
+        writer.WriteInt64(launch.RepositoryId);
+        writer.WriteInt64(invocation.PullRequest.Number);
+        writer.WriteString(invocation.WorkflowPath);
+        writer.WriteInt64(launch.RunId);
+        writer.WriteInt64(launch.RunAttempt);
+        var scope = Convert.ToHexStringLower(SHA256.HashData(writer.ToArray()));
+        var directory = Assert.Single(Directory.EnumerateDirectories("/tmp", "apr-context-*")
+            .Select(parent => Path.Join(parent, scope)), Directory.Exists);
+        Assert.Equal(1, OpenExclusionDescriptors(directory));
+        var provider = new FullPathProviderFactory();
+        var publisher = EmptyPublisher();
+        var staging = StagingPath();
+        using var cancellation = new CancellationTokenSource();
+        Task<ActionHostCompletion>? running = null;
+        try
+        {
+            if (!cancelWhileWaiting)
+            {
+                owner!.Dispose();
+                File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                    UnixFileMode.UserExecute | UnixFileMode.GroupRead);
+            }
+            running = new ActionHostComposition(new ActionHostCompositionDependencies(
+                scenario.EventReader, scenario.Factory, github, github, state, publisher, provider, clock,
+                () => staging)).RunAsync(launch, cancellation.Token);
+            if (cancelWhileWaiting)
+            {
+                while (OpenExclusionDescriptors(directory) < 2)
+                {
+                    Assert.False(running.IsCompleted, "Host must reach the contended exclusion before cancellation.");
+                    await Task.Delay(1, deadline.Token);
+                }
+                cancellation.Cancel();
+            }
+            var completion = await running.WaitAsync(deadline.Token);
+            Assert.Empty(store.Objects);
+            Assert.Equal(0, store.ListCalls);
+            Assert.Equal(0, store.UploadCalls);
+            Assert.Equal(0, provider.Creates);
+            Assert.Equal(0, provider.Runs);
+            Assert.Empty(publisher.Transport.Bodies);
+            Assert.Equal(ActionHostStateDisposition.NotCommitted, completion.Summary.StateDisposition);
+            Assert.True(completion.Accounting.IsCompleteZero);
+            Assert.False(Directory.Exists(staging));
+            Assert.Equal(cancelWhileWaiting ? 1 : 0, OpenExclusionDescriptors(directory));
+            Assert.Equal(cancelWhileWaiting ? ActionHostStatus.Cancelled : ActionHostStatus.InternalFailure,
+                completion.Status);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (running is not null) await running.WaitAsync(TimeSpan.FromSeconds(10));
+            owner!.Dispose();
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        using var reacquired = await SolusContextExclusion.AcquireInvocationAsync(request, deadline.Token);
+        Assert.NotNull(reacquired);
+    }
+
+    private static int OpenExclusionDescriptors(string directory) =>
+        Directory.EnumerateFileSystemEntries("/proc/self/fd").Count(path =>
+        {
+            try { return new FileInfo(path).LinkTarget == directory; }
+            catch (IOException) { return false; } // unrelated transient descriptor
+        });
 
     [Fact]
     public async Task ReconciledStateSetupCancellationClosesProviderAdmission()

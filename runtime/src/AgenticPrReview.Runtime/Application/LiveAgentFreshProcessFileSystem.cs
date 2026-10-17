@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using Microsoft.Win32.SafeHandles;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.Transactions;
 
 namespace AgenticPrReview.Runtime;
 
@@ -55,6 +56,7 @@ internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
 {
     private readonly object owner;
     private IDisposable? guard;
+    private SolusContextExclusion? contextExclusion;
 
     private LiveAgentFreshProcessAuthorizedRoot(
         object owner,
@@ -92,7 +94,16 @@ internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
 
     internal object? Guard => guard;
 
-    public void Dispose() => Interlocked.Exchange(ref guard, null)?.Dispose();
+    internal SolusContextExclusion? ContextExclusion => Volatile.Read(ref contextExclusion);
+
+    internal bool TryAttachExclusion(SolusContextExclusion exclusion) =>
+        Interlocked.CompareExchange(ref contextExclusion, exclusion, null) is null;
+
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref contextExclusion, null)?.Dispose();
+        Interlocked.Exchange(ref guard, null)?.Dispose();
+    }
 
     internal static LiveAgentFreshProcessAuthorizedRoot Create(
         object owner,
@@ -414,6 +425,18 @@ internal sealed class LiveAgentFreshProcessFileSystem :
                 TryDelete(temporary);
             }
         }
+    }
+
+    internal async Task<bool> AcquireContextExclusionAsync(
+        LiveAgentFreshProcessAuthorizedRoot capability, CancellationToken cancellationToken)
+    {
+        if (!IsAuthorized(capability) || capability.ContextExclusion is not null) return false;
+        var exclusion = await SolusContextExclusion.AcquireAuthorizedDirectoryAsync(
+            capability.RootPath, () => IsAuthorized(capability), cancellationToken).ConfigureAwait(false);
+        if (exclusion is null) return false;
+        if (capability.TryAttachExclusion(exclusion)) return true;
+        exclusion.Dispose();
+        return false;
     }
 
     private bool IsAuthorized(LiveAgentFreshProcessAuthorizedRoot capability) =>

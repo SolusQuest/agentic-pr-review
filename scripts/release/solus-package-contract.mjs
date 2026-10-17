@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 
-export const SOLUS_VERSION = '0.1.0-internal.1';
+export const SOLUS_VERSION = '0.1.0-internal.4';
+// Publisher/tag provenance anchor; archive hashes are measured independently.
+export const SOLUS_RELEASE_SOURCE = 'cb5f5ef8fc39a24f888065052078d40722e7680b';
 export const SOLUS_FEED = 'https://nuget.pkg.github.com/SolusQuest/index.json';
 export const PUBLIC_FEED = 'https://api.nuget.org/v3/index.json';
 export const SOLUS_IDS = Object.freeze([

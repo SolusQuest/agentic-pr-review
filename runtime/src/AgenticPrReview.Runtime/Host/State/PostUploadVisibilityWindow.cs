@@ -15,6 +15,7 @@ internal enum StateReconciliationOwner
     Reset,
     ExpiryTransition,
     Cleanup,
+    ContextClaim,
 }
 
 internal enum StateReconciliationOutcome
@@ -113,6 +114,7 @@ internal static class StateReconciliationDiagnosticFormatter
         StateReconciliationOwner.Reset => "reset",
         StateReconciliationOwner.ExpiryTransition => "expiry_transition",
         StateReconciliationOwner.Cleanup => "cleanup",
+        StateReconciliationOwner.ContextClaim => "context_claim",
         _ => throw new ArgumentOutOfRangeException(nameof(value)),
     };
 

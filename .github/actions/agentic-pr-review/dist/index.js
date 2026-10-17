@@ -97548,7 +97548,7 @@ import { fileURLToPath } from "node:url";
 import { createHash as createHash3 } from "node:crypto";
 
 // scripts/release/solus-package-contract.mjs
-var SOLUS_VERSION = "0.1.0-internal.1";
+var SOLUS_VERSION = "0.1.0-internal.4";
 var SOLUS_IDS = Object.freeze([
   "solusagent.api",
   "solusagent.providers.deepseek",
@@ -104049,6 +104049,7 @@ var TERMINATION_REASONS = [
   "request_limit",
   "response_limit",
   "context_limit",
+  "resource_limit",
   "invalid_result",
   "host_failure"
 ];
@@ -104906,4 +104907,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 4b83b6b8b6e656c2c52fb4f998bad0540c6a161ea4f8c957ef1ec9b89e2b1b94
+// Action source inventory sha256: 833da74b44469d9726424877a1937661f43d2d9085c27b0adb35428d14566729

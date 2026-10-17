@@ -400,16 +400,16 @@ internal static class SolusRestrictedStateFormat
 {
     internal const string Magic = "APRSOL01";
     internal const ushort Version = 1;
-    internal const string PackageVersion = "0.1.0-internal.1";
-    internal const string Profile = "cr1-solus-internal1-dev";
+    internal const string PackageVersion = "0.1.0-internal.4";
+    internal const string Profile = "cr1-solus-internal4-dev";
     internal const string PackageClosureSha256 =
-        "954b5183b4160f833827c410114e1031a5194dfeea31e21b2a05e7266e2098ee";
+        "ade505cdff69a526ae95109b6258004304e7b504b2eb3b7c9b1fec3964d74949";
     internal const string RecordDomain = "apr.solus-state.cr1";
     internal const int MaximumPayloadBytes = 196_608;
     internal const byte CompletedCandidateMode = 1;
     internal static readonly Guid Implementation =
         new("3f520f02-3b59-431e-8acf-a62544f28760");
-    internal const int ContextFormat = 1;
+    internal const int ContextFormat = 2;
     internal const int ContextCompatibility = 1;
 }
 

@@ -3,6 +3,8 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.Tests")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusStartupFixture")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusStateEnvelopeFixture")]
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusToolAdapterFixture")]
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusProviderAccountingFixture")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ReviewEvaluationFixture")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.AgentLoopAotFixture")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.LiveAgentVerifierFixture")]
@@ -10,3 +12,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostTrustedProofPayload")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle")]
+
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusContextAuthorityFixture")]

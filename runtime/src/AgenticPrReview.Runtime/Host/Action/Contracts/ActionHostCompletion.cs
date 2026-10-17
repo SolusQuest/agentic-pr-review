@@ -311,6 +311,7 @@ internal enum ActionHostTerminationReason
 {
     ReviewCompleted = 1, NotStarted, ProviderFailure, Cancelled, DeadlineExceeded,
     ModelLimit, ToolLimit, TokenLimit, RequestLimit, ResponseLimit, ContextLimit, InvalidResult, HostFailure,
+    ResourceLimit,
 }
 
 internal sealed class ActionHostCompletion
