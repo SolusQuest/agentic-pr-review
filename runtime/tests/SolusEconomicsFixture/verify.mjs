@@ -356,6 +356,7 @@ try {
     stage = mode;
     await scenario(mode, async ({ host, readback, work }) => {
       const seed = await host('seed');
+      assert.equal((await compare(seed.file, seed.file)).prefix_stable, true);
       await readback(seed);
       const sticky = digest(await readFile(join(work, 'sticky.txt')));
       const current = await host(mode, seed.report);
