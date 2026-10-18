@@ -939,6 +939,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             run: 'bash runtime/scripts/verify-r5-evaluation.sh managed',
           },
           {
+            name: 'CR1-V2 actual Solus economics and prefix evidence proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'sudo apt-get update\nsudo apt-get install -y strace\nbash runtime/scripts/verify-r6-economics.sh managed\n',
+          },
+          {
             name: 'CR1-V3 actual managed review capacity proof',
             if: "inputs.mode == 'verify'",
             env: {

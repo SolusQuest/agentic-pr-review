@@ -1,4 +1,4 @@
-"""Private, bounded execution supervisor for the same-source R6 oracle."""
+"""Bounded current Solus gate and explicit historical framework/AOT R6 oracle."""
 
 import json
 import os
@@ -32,6 +32,10 @@ MUTATIONS = (
     "host-preserved-epoch host-preserved-session host-restore-epoch host-restore-session host-code host-disposition"
 ).split()
 NETWORK = re.compile(rb"\b(?:socket|connect|sendto|sendmsg|sendmmsg)\(.*\bAF_INET6?\b")
+MANAGED_STAGES = set(("environment offline_restore managed_build installed_bytes audit_positive_control "
+                      "required_self_tests prework_denial hostile_reports source_and_cleanup known zero "
+                      "total-only hit-only miss-only missing-usage invalid-final invalid-usage capture-failure "
+                      "transport-failure reject-import stale-publication cancel-after-usage").split())
 
 
 def require(condition):
@@ -64,6 +68,33 @@ def bounded(path, maximum=MAX_CAPTURE):
         result = stream.read(maximum + 1)
     require(len(result) <= maximum)
     return result
+
+
+def managed_diagnostics(path):
+    """Project only closed failure codes and public source locations, never logs."""
+    for raw in bounded(path).splitlines():
+        if len(raw) > 2048:
+            continue
+        line = raw.decode("utf-8", errors="replace")
+        if re.fullmatch(r"APR_SOLUS_ECONOMICS_VERIFY_FAILED stage=[a-z0-9_-]+", line):
+            if line.split("=", 1)[1] in MANAGED_STAGES:
+                print(line, file=sys.stderr)
+        elif re.fullmatch(r"APR_SOLUS_ECONOMICS_ORACLE location=runtime/tests/SolusEconomicsFixture/(oracle|verify)\.mjs:\d+:\d+", line):
+            print(line, file=sys.stderr)
+        else:
+            try:
+                value = json.loads(line)
+                if not isinstance(value, dict) or value.get("stage") not in MANAGED_STAGES:
+                    continue
+                if set(value) == {"stage", "codes"} and isinstance(value["codes"], list) and len(value["codes"]) <= 20 and all(
+                        isinstance(code, str) and re.fullmatch(r"(?:CS|MSB|NU|NETSDK)\d{4}", code) for code in value["codes"]):
+                    print(json.dumps(value), file=sys.stderr)
+                elif set(value) == {"stage", "status", "failures"} and value["status"] in (None, -9, -15, 1, 2, 127) and isinstance(value["failures"], list) and len(value["failures"]) <= 2 and all(
+                        isinstance(code, str) and re.fullmatch(r"APR_SOLUS_ECONOMICS_FAILED [a-z0-9_]{1,128}", code) for code in value["failures"]):
+                    print(json.dumps(value), file=sys.stderr)
+            except (ValueError, TypeError):
+                # Unrecognized private output must not cross the diagnostic allowlist.
+                pass
 
 
 class Gate:
@@ -131,10 +162,28 @@ class Gate:
                 try:
                     os.killpg(child.pid, signal.SIGKILL)
                 except ProcessLookupError:
+                    # The owned process exited before the kill; there is nothing left to signal.
                     pass
                 child.wait(timeout=10)
                 raise
-        require(not owned_processes(private, child.pid))
+        remaining = owned_processes(private, child.pid)
+        if remaining:
+            # An exited supervisor does not prove its descendants exited. Kill
+            # only the already identified launched group, retaining failure data.
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                # The owned process group already exited; continue checking descendants.
+                pass
+            for pid in remaining:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    # The owned process exited before the kill; there is nothing left to signal.
+                    pass
+            require(False)
+        if child.returncode != code and self.stage == "managed-installed-execution":
+            managed_diagnostics(error)
         require(child.returncode == code)
         bounded(output)
         bounded(error)
@@ -216,6 +265,8 @@ class Gate:
 
     def execute(self, selected_mode):
         require(platform.system() == "Linux" and platform.machine() == "x86_64")
+        if selected_mode == "managed":
+            return self.managed()
         require(selected_mode in ("framework", "aot", "all"))
         commit, tree = self.git("rev-parse", "HEAD"), self.git("rev-parse", "HEAD^{tree}")
         require(not self.git("status", "--porcelain", "--untracked-files=normal"))
@@ -234,12 +285,38 @@ class Gate:
         print("r6_economics_gate result=verified mode=" + selected_mode + " source_commit=" + commit +
               " source_tree=" + tree + " private_state=absent", flush=True)
 
+    def managed(self):
+        self.mark("managed-environment")
+        # Strip tokens, Node preloads, proxies, SDK overrides and user config
+        # before even starting the Node supervisor or loading project helpers.
+        self.env = {key: self.env[key] for key in ("PATH", "DOTNET_ROOT", "NUGET_PACKAGES") if key in self.env}
+        cache = self.env.get("NUGET_PACKAGES")
+        require(shutil.which("node") and cache and Path(cache).is_absolute() and Path(cache).is_dir())
+        self.env["RUNNER_TEMP"] = str(self.root)
+        commit, tree = self.git("rev-parse", "HEAD"), self.git("rev-parse", "HEAD^{tree}")
+        require(not self.git("status", "--porcelain", "--untracked-files=normal"))
+        self.mark("managed-installed-execution")
+        output, error = self.run(["node", REPO / "runtime/tests/SolusEconomicsFixture/verify.mjs"],
+                                 audit=False, seconds=1800)
+        require(bounded(error) == b"")
+        expected = (b"APR_SOLUS_ECONOMICS_PROOF scenarios=14 hosts=30 readbacks=18 adversarial=39 "
+                    b"host_http_entries=92 live_calls=0 installed_bytes=true private_state=absent\n")
+        require(bounded(output) == expected)
+        require(self.git("rev-parse", "HEAD") == commit and self.git("rev-parse", "HEAD^{tree}") == tree and
+                not self.git("status", "--porcelain", "--untracked-files=normal") and not owned_processes(self.root))
+        self.mark("managed-cleanup")
+        shutil.rmtree(self.root)
+        require(not self.root.exists())
+        print("r6_economics_gate result=verified mode=managed scenarios=14 adversarial=39 "
+              "source_commit=" + commit + " source_tree=" + tree + " private_state=absent", flush=True)
+
 
 if __name__ == "__main__":
     gate = None
     try:
         gate = Gate()
-        gate.execute(sys.argv[1] if len(sys.argv) == 2 else "all")
+        require(len(sys.argv) in (1, 2))
+        gate.execute(sys.argv[1] if len(sys.argv) == 2 else "managed")
     except BaseException:
         # No candidate text, exception message, private path or captured log is
         # printed/uploaded. Failed owned evidence is retained, never erased to
