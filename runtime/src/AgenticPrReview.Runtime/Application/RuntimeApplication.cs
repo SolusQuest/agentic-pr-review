@@ -34,7 +34,7 @@ public sealed class RuntimeApplication
     }
 
     // The production entrypoint cannot choose the linked-test runner. It always
-    // constructs the existing production composition after launch admission.
+    // constructs the compiled production composition after launch admission.
     internal static async Task<int> RunActionHostAsync(
         Stream input, Stream output, TextWriter stderr, CancellationToken cancellationToken,
         Func<ActionHostLaunchContract, CancellationToken, Task<ActionHostCompletion>>? linkedRunner = null)
@@ -63,9 +63,19 @@ public sealed class RuntimeApplication
 
             // Composition retains the original Host-entry deadline, state
             // horizon and transaction-aware cancellation/reconciliation owner.
-            var completion = linkedRunner is null
-                ? await new ActionHostComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false)
-                : await linkedRunner(launch, cancellationToken).ConfigureAwait(false);
+            ActionHostCompletion completion;
+            if (linkedRunner is not null)
+            {
+                completion = await linkedRunner(launch, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+#if APR_SOLUS_MANAGED
+                completion = await new SolusManagedActionComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false);
+#else
+                completion = await new ActionHostComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false);
+#endif
+            }
             if (completion is null ||
                 !StringComparer.Ordinal.Equals(completion.BuildDiscriminator, ActionHostBuildDiscriminator) ||
                 !ActionHostJsonCodec.TryWriteCompletion(completion, out var document))

@@ -765,11 +765,12 @@ function validateSolusAgentInstallWorkflow(workflow) {
             type: 'string',
           },
           mode: {
-            description: 'Verify is mandatory for acceptance; collect only prepares metadata',
+            description:
+              'Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic only',
             required: true,
             default: 'verify',
             type: 'choice',
-            options: ['collect', 'verify'],
+            options: ['collect', 'verify', 'network-prerequisite'],
           },
         },
       },
@@ -819,7 +820,18 @@ function validateSolusAgentInstallWorkflow(workflow) {
             run: 'npm ci',
           },
           {
+            name: 'CR1-D5 target network and TLS prerequisite (no archive qualification)',
+            if: "inputs.mode == 'verify' || inputs.mode == 'network-prerequisite'",
+            run: 'sudo apt-get update\nsudo apt-get install -y iproute2 openssl\nnode runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs\n',
+          },
+          {
+            name: 'CR1-D5 package-independent transaction selection prerequisite',
+            if: "inputs.mode == 'verify' || inputs.mode == 'network-prerequisite'",
+            run: 'dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj --nologo --filter FullyQualifiedName~ManagedSelection --maxcpucount:1 -p:PublishAot=false -p:SelfContained=false -p:RestoreSources=https://api.nuget.org/v3/index.json',
+          },
+          {
             name: 'Cold-cache actual APR managed construction and pin proof',
+            if: "inputs.mode != 'network-prerequisite'",
             env: {
               EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
               GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
@@ -866,6 +878,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'Retain only sanitized identity and lock metadata',
+            if: "inputs.mode != 'network-prerequisite'",
             uses: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
             with: {
               name: 'solus-package-metadata',
