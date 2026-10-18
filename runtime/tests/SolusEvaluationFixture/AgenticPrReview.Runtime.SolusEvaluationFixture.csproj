@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <SelfContained>false</SelfContained>
+    <PublishAot>false</PublishAot>
+    <!-- Reuse the existing trusted test friend; this grants no public route. -->
+    <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofVerifier</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj" />
+    <Compile Include="../ReviewEvaluationFixture/Evaluation/*.cs" Exclude="../ReviewEvaluationFixture/Evaluation/EvaluationSelfTest.cs" Link="Evaluation/%(Filename)%(Extension)" />
+    <Compile Include="../SharedHostPorts/ActionHostAuthorizationTestData.cs" Link="Ports/Authorization.cs" />
+    <Compile Include="../SolusFreshStateCommitFixture/Proof.cs" Link="Ports/Proof.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/CorpusGitHub.cs" Link="Ports/CorpusGitHub.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/StickyPort.cs" Link="Ports/StickyPort.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/SyntheticBuildIdentity.cs" Link="Ports/SyntheticBuildIdentity.cs" />
+    <Compile Include="../ActionHostTrustedProofPayload/TrustedProofV2WorkflowAdmission.cs" Link="Ports/TrustedWorkflow.cs" />
+    <EmbeddedResource Include="../fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template"
+                      LogicalName="AgenticPrReview.Runtime.ActionHostTrustedProofPayload.TrustedProofWorkflowTemplateV2" />
+  </ItemGroup>
+  <Target Name="RequireManagedEvaluation" BeforeTargets="_GenerateRestoreGraphProjectEntry;PrepareForBuild">
+    <Error Condition="'$(APRManagedPackage)' != 'true'" Text="APR_SOLUS_EVALUATION_REQUIRES_MANAGED" />
+  </Target>
+  <Target Name="RecordEvaluationSource" BeforeTargets="CoreCompile">
+    <Exec Command="git rev-parse HEAD" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="EvaluationSourceCommit" />
+    </Exec>
+    <Exec Command="git rev-parse &quot;HEAD^{tree}&quot;" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="EvaluationSourceTree" />
+    </Exec>
+    <Exec Command="git status --porcelain --untracked-files=normal" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" ItemName="EvaluationSourceChanges" />
+    </Exec>
+    <PropertyGroup>
+      <EvaluationSourceClean Condition="'@(EvaluationSourceChanges->Count())' == '0'">true</EvaluationSourceClean>
+      <EvaluationSourceClean Condition="'@(EvaluationSourceChanges->Count())' != '0'">false</EvaluationSourceClean>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)EvaluationSource.g.cs" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation%3B internal static class EvaluationSource { internal const string Commit = &quot;$(EvaluationSourceCommit)&quot;%3B internal const string Tree = &quot;$(EvaluationSourceTree)&quot;%3B internal const bool Clean = $(EvaluationSourceClean)%3B }" />
+    <ItemGroup><Compile Include="$(IntermediateOutputPath)EvaluationSource.g.cs" /></ItemGroup>
+  </Target>
+</Project>
