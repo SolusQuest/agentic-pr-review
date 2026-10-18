@@ -12,6 +12,61 @@ for (const role of ['first', 'independent-second']) {
     prefix: 'APR_D5_MANAGED_ARCHIVE ',
     maximumSeconds: 1200,
     prepare: async (root, { source, tree, builderEnv }) => {
+      // A pure API-construction diagnostic with the archive application's JSON
+      // switch. Its receipt is separate and never counts as archive evidence.
+      const probeProject = join(
+        repo,
+        'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/PreparationProbe/PreparationProbe.csproj',
+      );
+      for (const reflection of ['false', 'true']) {
+        const probe = spawnSync(
+          'dotnet',
+          [
+            'publish',
+            probeProject,
+            '-c',
+            'Release',
+            '-o',
+            join(root, 'preparation-' + reflection),
+            '-p:APRManagedPackage=true',
+            '-p:APRReleaseVersion=v0.0.0-internal.1',
+            '-p:APRBuildId=' + '0'.repeat(64),
+            '-p:JsonSerializerIsReflectionEnabledByDefault=' + reflection,
+            '-p:UseSharedCompilation=false',
+            '-p:RestoreIgnoreFailedSources=true',
+          ],
+          {
+            cwd: repo,
+            env: { ...builderEnv, NUGET_PACKAGES: process.env.NUGET_PACKAGES },
+            encoding: 'utf8',
+            timeout: 180_000,
+            maxBuffer: 1024 * 1024,
+          },
+        );
+        assert.equal(probe.error, undefined);
+        assert.equal(probe.status, 0, 'd5_preparation_probe_build_failed');
+        const executed = spawnSync(
+          'dotnet',
+          [
+            join(
+              root,
+              'preparation-' + reflection,
+              'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll',
+            ),
+          ],
+          { cwd: root, env: builderEnv, encoding: 'utf8', timeout: 30_000, maxBuffer: 8192 },
+        );
+        assert.equal(executed.status, 0);
+        const diagnostic = executed.stdout
+          .split('\n')
+          .filter((line) =>
+            /^APR_D5_PREPARATION_PROBE descriptors=[0-5] reflection=(enabled|disabled) failure=(none|invalid-operation|not-supported|type-initialization|argument|other) archive_qualified=false$/u.test(
+              line,
+            ),
+          );
+        assert.equal(diagnostic.length, 1);
+        process.stderr.write(diagnostic[0] + '\n');
+      }
       const output = join(root, 'package');
       const result = spawnSync(
         process.execPath,

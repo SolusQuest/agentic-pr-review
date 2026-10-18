@@ -39,3 +39,11 @@ Ambient CLR loading variables must not reach the actual child. Per-invocation
 owner cleanup precedes every presentation. Only bounded counts, closed outcomes,
 source and archive identities leave the temporary consumer. A failure is a failed
 qualification; fixture unit tests alone do not establish this proof.
+
+The preparation probe is a separate supporting diagnostic. It compares pure
+schema construction with JSON reflection disabled/enabled and, only after a
+failed fresh archive case, repeats read-only Host preparation. It cannot run
+Agent, state or publication work. Every probe line says `archive_qualified=false`;
+it never substitutes its assembly, launch command or settings into the generated
+Action. The actual archive retains the production build settings and must still
+pass independently.

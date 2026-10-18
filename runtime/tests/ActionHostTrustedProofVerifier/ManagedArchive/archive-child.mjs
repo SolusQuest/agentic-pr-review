@@ -362,6 +362,15 @@ try {
     }
     const completion = close?.completion?.payload ?? close?.completion;
     const outputText = await readFile(output, 'utf8');
+    const reported = {};
+    const outputLines = outputText.trimEnd().split('\n');
+    assert.equal(outputLines.length % 3, 0);
+    for (let index = 0; index < outputLines.length; index += 3) {
+      const [key, delimiter] = outputLines[index].split('<<');
+      assert.equal(outputLines[index + 2], delimiter);
+      assert.equal(Object.hasOwn(reported, key), false);
+      reported[key] = outputLines[index + 1];
+    }
     const statusMatch = /^status<<[^\n]+\n([^\n]+)\n/mu.exec(outputText);
     assert.ok(statusMatch);
     const status = statusMatch[1];
@@ -373,10 +382,74 @@ try {
       actual_host: !!launch,
       completion_status: completion?.status ?? null,
     });
-    return { status, completion, records, exit, prefix: provider.previousContext };
+    return { status, completion, records, exit, reported, prefix: provider.previousContext };
+  }
+  function assertAccounting(result, sends) {
+    assert.equal(result.reported['model-calls'], String(sends));
+    assert.equal(result.reported['provider-attempts'], String(sends));
+    assert.equal(result.reported['provider-retries'], '0');
+    assert.equal(result.reported['provider-failed-attempts'], '0');
+    assert.equal(result.reported['input-tokens'], String(sends * 10));
+    assert.equal(result.reported['input-cache-hit-tokens'], String(sends * 4));
+    assert.equal(result.reported['input-cache-miss-tokens'], String(sends * 6));
+    assert.equal(result.reported['output-tokens'], String(sends * 5));
+  }
+  async function diagnosePreparation(records) {
+    const launch = records.find((x) => x.kind === 'launch')?.document;
+    if (!launch) return;
+    const file = join(root, 'diagnostic-launch.json');
+    await writeFile(file, JSON.stringify(launch), { mode: 0o600, flag: 'wx' });
+    const temp = join(root, 'diagnostic-tmp');
+    await mkdir(temp, { mode: 0o700 });
+    for (const reflection of ['false', 'true']) {
+      const child = spawn(
+        join(root, 'runtime/dotnet'),
+        [
+          'exec',
+          '--fx-version',
+          '10.0.13',
+          '--roll-forward',
+          'Disable',
+          join(
+            root,
+            'preparation-' + reflection,
+            'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll',
+          ),
+          file,
+        ],
+        {
+          env: {
+            TMPDIR: temp,
+            DOTNET_EnableDiagnostics: '0',
+            DOTNET_NOLOGO: '1',
+            DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      const chunks = [];
+      let size = 0;
+      for (const stream of [child.stdout, child.stderr])
+        stream.on('data', (bytes) => {
+          size += bytes.length;
+          if (size > 8192) child.kill('SIGKILL');
+          else chunks.push(bytes);
+        });
+      const timeout = setTimeout(() => child.kill('SIGKILL'), 45_000);
+      await new Promise((done, reject) => {
+        child.once('error', reject);
+        child.once('close', done);
+      }).finally(() => clearTimeout(timeout));
+      for (const line of Buffer.concat(chunks).toString().split('\n')) {
+        if (/^APR_D5_PREPARATION_(PROBE|HOST) [a-zA-Z0-9=_ -]{1,512}$/u.test(line))
+          process.stderr.write(line + '\n');
+      }
+    }
   }
   const fresh = await run('fresh', 0);
+  if (fresh.status !== 'reviewed') await diagnosePreparation(fresh.records);
   assert.equal(fresh.status, 'reviewed');
+  assertAccounting(fresh, 2);
   assert.equal(provider.count, 2);
   assert.equal(github.writes, 1);
   assert.ok(official.size > 0);
@@ -385,15 +458,17 @@ try {
     prefix = fresh.prefix;
   const repeated = await run('same-head-recovery', 0, { noProvider: true });
   assert.equal(repeated.status, 'reviewed');
+  assertAccounting(repeated, 0);
   assert.equal(provider.count, 0);
   assert.equal(github.writes, 1);
   const second = await run('restored-second-head', 1, { prefix });
   assert.equal(second.status, 'reviewed');
+  assertAccounting(second, 2);
   assert.equal(provider.count, 2);
   assert.equal(github.writes, 2);
-  await run('restored-third-head', 2, { prefix: second.prefix }).then((x) =>
-    assert.equal(x.status, 'reviewed'),
-  );
+  const third = await run('restored-third-head', 2, { prefix: second.prefix });
+  assert.equal(third.status, 'reviewed');
+  assertAccounting(third, 2);
   assert.equal(provider.count, 2);
   assert.equal(github.writes, 3);
   for (const mode of ['provider-failure', 'stale', 'cancel']) {
@@ -413,6 +488,7 @@ try {
   assert.equal(github.writes, beforeKnown + 1);
   const recovered = await run('known-commit-recovery', 1, { noProvider: true });
   assert.equal(recovered.status, 'reviewed');
+  assertAccounting(recovered, 0);
   assert.equal(provider.count, 0);
   assert.equal(github.writes, beforeKnown + 1);
   const corrupted = accepted.map(([id, item]) => [

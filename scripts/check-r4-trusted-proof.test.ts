@@ -725,6 +725,22 @@ describe('CR1 authorized actual APR private package proof route', () => {
         else step.if = 'false';
       },
     ]),
+    ...(['credential', 'unverified cache', 'bypassed', 'bootstrap substitute'] as const).map(
+      (mutation) => [
+        'D5 actual archive qualification ' + mutation,
+        (w: any) => {
+          const step = w.jobs['install-proof'].steps.find(
+            (item: any) =>
+              item.name === 'CR1-D5 actual original archive and generated Action qualification',
+          );
+          if (mutation === 'credential') step.env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+          else if (mutation === 'unverified cache') step.env.NUGET_PACKAGES = '/tmp/unverified';
+          else if (mutation === 'bootstrap substitute')
+            step.run = 'node tests/distribution/verify-managed-action.mjs';
+          else step.if = 'false';
+        },
+      ],
+    ),
     [
       'producer bypassed',
       (w: any) => {

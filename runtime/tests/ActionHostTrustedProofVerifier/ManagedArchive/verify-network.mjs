@@ -65,6 +65,10 @@ export async function runIsolatedFixture({
           .split('\n')
           .find((line) => line.startsWith('APR_D5_ARCHIVE_DIAGNOSTIC '));
         if (detail && detail.length <= 1024) process.stderr.write(detail + '\n');
+        for (const line of result.stderr.split('\n')) {
+          if (/^APR_D5_PREPARATION_(PROBE|HOST) [a-zA-Z0-9=_ -]{1,512}$/u.test(line))
+            process.stderr.write(line + '\n');
+        }
       }
       assert.equal(result.status, 0);
       return result.stdout;

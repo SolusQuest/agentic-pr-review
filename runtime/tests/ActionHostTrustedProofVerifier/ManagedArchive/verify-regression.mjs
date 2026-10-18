@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
-const role = process.env.APR_D5_REGRESSION_ROLE;
+const role = process.env.APR_D5_REGRESSION_ROLE ?? 'first';
 assert.ok(['first', 'second'].includes(role));
 for (const name of [
   'GITHUB_TOKEN',
@@ -27,7 +27,7 @@ const result = spawnSync('/bin/bash', ['runtime/scripts/verify-action-host.sh', 
   cwd: repo,
   env: process.env,
   encoding: 'utf8',
-  timeout: 600_000,
+  timeout: 1_800_000,
   maxBuffer: 4 * 1024 * 1024,
 });
 assert.equal(result.error, undefined);
