@@ -922,6 +922,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             },
             run: 'node runtime/tests/SolusFreshStateCommitFixture/verify.mjs',
           },
+          {
+            name: 'CR1-S4 actual restored Solus Host review and successor proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'node runtime/tests/ActionHostFixture/verify-solus-restored.mjs',
+          },
         ],
       },
     },

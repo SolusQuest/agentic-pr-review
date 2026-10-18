@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { createArtifactBridgeServer } from './bridge-server.js';
 import {
+  safePositiveDecimal,
   type ArtifactBridgeCommand,
   type ArtifactBridgeResult,
   type ArtifactMetadataWire,
@@ -89,12 +90,16 @@ class SyntheticArtifactExecutor implements ArtifactBridgeExecutor {
             mutation_state: 'not_committed',
           });
         }
+        const producer = await this.producingRun();
+        if (!producer) {
+          return failure(command, 'invalid', { mutation_state: 'not_committed' });
+        }
         const objectId = String(this.nextId++);
         const metadata: ArtifactMetadataWire = {
           name: command.name,
           object_id: objectId,
-          producing_run_id: '7001',
-          producing_run_attempt: '2',
+          producing_run_id: producer.id,
+          producing_run_attempt: producer.attempt,
           archive_digest: digestBytes(Buffer.concat([Buffer.from('synthetic-archive\0'), bytes])),
           encrypted_object_digest: command.encrypted_object_digest,
           expires_at_unix_seconds: String(Number(command.minimum_expires_at_unix_seconds) + 600),
@@ -148,6 +153,31 @@ class SyntheticArtifactExecutor implements ArtifactBridgeExecutor {
         };
       }
     }
+  }
+
+  private async producingRun(): Promise<
+    { readonly id: string; readonly attempt: string } | undefined
+  > {
+    let text: string;
+    try {
+      text = await readFile(path.join(this.controlRoot, 'producing-run.json'), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { id: '7001', attempt: '2' };
+      throw error;
+    }
+    if (Buffer.byteLength(text, 'utf8') > 1024) return undefined;
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    if (Object.keys(record).length !== 2) return undefined;
+    const id = safePositiveDecimal(record.id);
+    const attempt = safePositiveDecimal(record.attempt);
+    return id && attempt ? { id, attempt } : undefined;
   }
 
   private async consume(name: string): Promise<boolean> {

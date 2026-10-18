@@ -729,13 +729,13 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
         RetainedStateAuthorityLease lease,
         StateGenerationRecordV1 generation,
         out RetainedStateCurrentReviewProjection? currentReview,
-        out string code)
+        out string code, ScopedStateInventorySnapshot? inventory = null)
     {
         currentReview = null;
         code = RetainedStateTransactionCodes.Invalid;
         if (solusTransaction is not null)
         {
-            if (!Allows(lease) || !TryValidateSolusGeneration(generation, acceptedGeneration: false) ||
+            if (!Allows(lease) || !TryValidateSolusGeneration(generation, acceptedGeneration: false, inventory) ||
                 !TryRecoverSolusProjection(generation, out currentReview)) return false;
             code = RetainedStateTransactionCodes.Ready;
             return true;

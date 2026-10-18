@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <SelfContained>false</SelfContained>
+    <PublishAot>false</PublishAot>
+    <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofVerifier</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj" />
+    <Compile Include="../../SharedHostPorts/ActionHostAuthorizationTestData.cs" Link="Ports/Authorization.cs" />
+    <Compile Include="../../SolusFreshStateCommitFixture/Proof.cs" Link="Ports/Proof.cs" />
+    <Compile Include="../../ActionHostTrustedProofPayload/TrustedProofV2WorkflowAdmission.cs" Link="Ports/TrustedWorkflow.cs" />
+    <EmbeddedResource Include="../../fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template"
+                      LogicalName="AgenticPrReview.Runtime.ActionHostTrustedProofPayload.TrustedProofWorkflowTemplateV2" />
+  </ItemGroup>
+  <Target Name="RequireManagedRestoredProof" BeforeTargets="_GenerateRestoreGraphProjectEntry;PrepareForBuild">
+    <Error Condition="'$(APRManagedPackage)' != 'true'" Text="APR_SOLUS_RESTORED_PROOF_REQUIRES_MANAGED" />
+  </Target>
+</Project>

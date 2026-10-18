@@ -95,6 +95,9 @@ internal sealed class RestrictedStateService
     internal static bool CanPrepareFreshSolus(AuthorizedAcceptedStateRestoreContext context) =>
         context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority?.CanPrepareFreshSolus == true;
 
+    internal static bool CanPrepareRestoredSolus(AuthorizedAcceptedStateRestoreContext context) =>
+        context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority?.CanPrepareRestoredSolus == true;
+
     internal static bool TryReadAcceptedSolusRecord(AuthorizedAcceptedStateRestoreContext context,
         out SolusRestrictedStateRecord? record)
     {
@@ -108,6 +111,13 @@ internal sealed class RestrictedStateService
         R4ValidatedPublicationReview review, CancellationToken cancellationToken) =>
         context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority is not null
             ? new RetainedStateTransactionService(RetainedStateIssuer).PrepareSolusAsync(authority, record, review, cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<RetainedStatePreparedCandidate>> PrepareRetainedRestoredSolusCandidateAsync(
+        AuthorizedAcceptedStateRestoreContext context, SolusConsumedContext consumed,
+        SolusRestrictedStateRecord record, R4ValidatedPublicationReview review, CancellationToken cancellationToken) =>
+        context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority is not null && consumed is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer).PrepareSolusAsync(authority, record, review, cancellationToken, consumed)
             : Task.FromResult(RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
