@@ -193,6 +193,18 @@ internal sealed class SolusReviewBridge : IDisposable
     internal static ProviderExchangeBounds Bounds() => new(Cr1DevelopmentProfile.ProviderInputs,
         Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
         Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes, Cr1DevelopmentProfile.ContinuationBytes);
+    // Existing R5 provider-wrapper validation consumes the omitted default.
+    // Retain that seam without restoring silent reduction of explicit values.
+    internal static ReviewTokenBudget BoundBudget(ReviewTokenBudget? configured)
+    {
+        configured ??= new(Cr1DevelopmentProfile.InputTokenAllowance,
+            Cr1DevelopmentProfile.InputTokenAllowance, Cr1DevelopmentProfile.OutputTokenAllowance);
+        if (!configured.IsValid || configured.UncachedInputTokens > Cr1DevelopmentProfile.InputTokenAllowance ||
+            configured.CachedInputTokens > Cr1DevelopmentProfile.InputTokenAllowance ||
+            configured.OutputTokens > Cr1DevelopmentProfile.OutputTokenAllowance)
+            throw new ArgumentException("APR_SOLUS_REVIEW_POLICY", nameof(configured));
+        return configured;
+    }
     internal static void ValidateText(string instructions, IReadOnlyList<AgentInput> data)
     {
         var utf8 = new UTF8Encoding(false, true);

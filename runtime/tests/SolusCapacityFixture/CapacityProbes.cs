@@ -22,6 +22,16 @@ internal static class CapacityProbes
     internal static readonly List<object> Results = [];
     internal static async Task Run()
     {
+        var omitted = SolusReviewBridge.BoundBudget(null);
+        Proof.Require(omitted == new ReviewTokenBudget(65536, 65536, 8192), "retained_default_budget_seam");
+        var explicitBudget = new ReviewTokenBudget(4096, 4096, 1024);
+        Proof.Require(ReferenceEquals(explicitBudget, SolusReviewBridge.BoundBudget(explicitBudget)), "budget_seam_keeps_explicit_selection");
+        try
+        {
+            SolusReviewBridge.BoundBudget(new(65537, 65536, 8192));
+            throw new ProofFailure("budget_seam_must_not_clamp");
+        }
+        catch (ArgumentException) { Proof.Require(true, "budget_seam_rejects_unsupported_selection"); }
         Proof.Stage = "portable_selected_request";
         foreach (var json in new[] { "{}", "{\"review\":{\"maxModelCalls\":2,\"timeoutSeconds\":3," +
             "\"maxUncachedInputTokens\":4096,\"maxCachedInputTokens\":4096,\"maxOutputTokens\":1024}}",
