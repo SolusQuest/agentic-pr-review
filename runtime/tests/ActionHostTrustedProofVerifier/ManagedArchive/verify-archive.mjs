@@ -26,6 +26,8 @@ for (const role of ['first', 'independent-second']) {
             probeProject,
             '-c',
             'Release',
+            '-r',
+            'linux-x64',
             '-o',
             join(root, 'preparation-' + reflection),
             '-p:APRManagedPackage=true',
@@ -43,6 +45,14 @@ for (const role of ['first', 'independent-second']) {
             maxBuffer: 1024 * 1024,
           },
         );
+        if (probe.error || probe.status !== 0) {
+          const output = (probe.stdout ?? '') + (probe.stderr ?? '');
+          const codes =
+            [...new Set(output.match(/\b(?:CS|MSB|NU|NETSDK)[0-9]{4}\b/gu) ?? [])]
+              .slice(0, 8)
+              .join(',') || 'none';
+          process.stderr.write('APR_D5_PREPARATION_BUILD failure=compiler codes=' + codes + '\n');
+        }
         assert.equal(probe.error, undefined);
         assert.equal(probe.status, 0, 'd5_preparation_probe_build_failed');
         const executed = spawnSync(
@@ -56,6 +66,8 @@ for (const role of ['first', 'independent-second']) {
           ],
           { cwd: root, env: builderEnv, encoding: 'utf8', timeout: 30_000, maxBuffer: 8192 },
         );
+        if (executed.status !== 0)
+          process.stderr.write('APR_D5_PREPARATION_BUILD failure=execution codes=none\n');
         assert.equal(executed.status, 0);
         const diagnostic = executed.stdout
           .split('\n')
