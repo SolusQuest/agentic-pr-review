@@ -188,6 +188,12 @@ internal sealed class ActionHostAccountingCapture
         };
     }
 
+    internal void Complete(ProviderAccounting? currentAccounting, ActionHostTerminationReason termination)
+    {
+        accounting = ActionHostAccounting.FromProvider(currentAccounting);
+        reason = termination;
+    }
+
     internal ActionHostCompletion Apply(ActionHostCompletion completion) => completion.WithAccounting(accounting, reason);
 }
 
@@ -203,6 +209,12 @@ internal interface IActionHostPostAcceptanceInlineHook
         ActionHostCoordinator.PostAcceptanceInlineRequest request,
         CancellationToken cancellationToken);
 }
+
+internal sealed record ActionHostCandidatePreparation(ActionHostStatus? Failure,
+    RetainedStateTransactionResult<RetainedStatePreparedCandidate>? Result = null);
+
+internal delegate Task<ActionHostCandidatePreparation> ActionHostCandidatePreparer(
+    AuthorizedAcceptedStateRestoreContext state, R4PublicationScopeV1 scope, ActionHostAccountingCapture accounting);
 
 internal sealed class ActionHostCoordinator
 {
@@ -286,11 +298,12 @@ internal sealed class ActionHostCoordinator
         AuthorizedAcceptedStateRestoreContext state,
         R4PublicationScopeV1 scope,
         CancellationToken cancellationToken,
-        ActionHostAccountingCapture? accountingCapture = null)
+        ActionHostAccountingCapture? accountingCapture = null,
+        ActionHostCandidatePreparer? candidatePreparer = null)
     {
         var capture = accountingCapture ?? new ActionHostAccountingCapture();
         return capture.Apply(await RunCoreAsync(launch, invocation, policy, snapshot, state, scope,
-            cancellationToken, capture).ConfigureAwait(false));
+            cancellationToken, capture, candidatePreparer).ConfigureAwait(false));
     }
 
     private async Task<ActionHostCompletion> RunCoreAsync(
@@ -301,7 +314,7 @@ internal sealed class ActionHostCoordinator
         AuthorizedAcceptedStateRestoreContext state,
         R4PublicationScopeV1 scope,
         CancellationToken cancellationToken,
-        ActionHostAccountingCapture capture)
+        ActionHostAccountingCapture capture, ActionHostCandidatePreparer? candidatePreparer)
     {
         ArgumentNullException.ThrowIfNull(launch);
         ArgumentNullException.ThrowIfNull(invocation);
@@ -365,6 +378,16 @@ internal sealed class ActionHostCoordinator
                         return Failure(launch, journal.CancellationStatus);
                     }
 
+                    RetainedStateTransactionResult<RetainedStatePreparedCandidate> preparedResult;
+                    if (candidatePreparer is not null)
+                    {
+                        var result = await candidatePreparer(state, scope, capture).ConfigureAwait(false);
+                        if (result.Failure is { } failure) return Failure(launch, failure);
+                        preparedResult = result.Result ?? RetainedStateTransactionResult<RetainedStatePreparedCandidate>
+                            .Fail(RetainedStateTransactionCodes.Invalid);
+                    }
+                    else
+                    {
                     if (launch.Inputs.ProviderApiKey is null)
                     {
                         return Failure(
@@ -476,8 +499,6 @@ internal sealed class ActionHostCoordinator
                         return Failure(launch, journal.CancellationStatus);
                     }
 
-                    RetainedStateTransactionResult<RetainedStatePreparedCandidate>
-                        preparedResult;
                     using (candidatePreparationOperation!)
                     {
                         preparedResult = await RestrictedStateService
@@ -489,6 +510,7 @@ internal sealed class ActionHostCoordinator
                             .ConfigureAwait(false);
                         candidatePreparationOperation!.Resolve(
                             StateOwnerResolution(preparedResult.Code));
+                    }
                     }
                     using var prepared = preparedResult.Value;
                     if (!preparedResult.Succeeded || prepared is null)
@@ -1932,7 +1954,7 @@ internal sealed class ActionHostCoordinator
                 ? ActionHostStatus.ReviewedWithInlineWarnings
                 : ActionHostStatus.Reviewed,
             receipt,
-            projection.OrderedFindings.Length);
+            projection.FindingCount);
     }
 
     private static bool TryBuildInlineMap(
@@ -1947,7 +1969,7 @@ internal sealed class ActionHostCoordinator
             return true;
         }
 
-        if (projection.ReviewedIdentity != snapshot.Snapshot.Identity ||
+        if (!projection.HasCompleteFindings || projection.ReviewedIdentity != snapshot.Snapshot.Identity ||
             !InlineDiffCoordinates.TryCreate(
                 snapshot.Snapshot,
                 snapshot.Identities,
@@ -1981,8 +2003,11 @@ internal sealed class ActionHostCoordinator
             revalidationFactory,
             cancellationToken);
 
-    private ActionHostStatus RevalidationStatus(
-        ExactHeadRevalidationStatus status) => status switch
+    private ActionHostStatus RevalidationStatus(ExactHeadRevalidationStatus status) =>
+        RevalidationStatus(status, journal.CancellationStatus);
+
+    internal static ActionHostStatus RevalidationStatus(
+        ExactHeadRevalidationStatus status, ActionHostStatus cancellationStatus) => status switch
         {
             ExactHeadRevalidationStatus.Exact =>
                 ActionHostStatus.InternalFailure,
@@ -2000,7 +2025,7 @@ internal sealed class ActionHostCoordinator
             ExactHeadRevalidationStatus.DeadlineExceeded =>
                 ActionHostStatus.SnapshotIncomplete,
             ExactHeadRevalidationStatus.Cancelled =>
-                journal.CancellationStatus,
+                cancellationStatus,
             _ => ActionHostStatus.InternalFailure,
         };
 

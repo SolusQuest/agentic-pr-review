@@ -27,7 +27,8 @@ internal sealed record ArtifactStateRestoreRequest(
     IStateReconciliationDiagnosticSink?
         StateReconciliationDiagnosticSink = null,
     long? LatestAcceptanceUnixSeconds = null,
-    SolusSourceSelectionRequest? SolusSourceSelection = null);
+    SolusSourceSelectionRequest? SolusSourceSelection = null,
+    SolusTransactionSelectionRequest? SolusTransaction = null);
 
 internal sealed record AuthorizedAcceptedStateRestoreResult(
     string Code,
@@ -324,6 +325,11 @@ internal sealed class AuthorizedAcceptedStateComposer
             (request.Launch.Inputs.StateMode != ActionHostStateMode.Auto ||
                 !sourceRequest.Targets.Matches(request) ||
                 !SolusRestrictedStateAdmission.IsSupported(sourceRequest.Compatibility)))
+            return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
+
+        if (request.SolusTransaction is { } transaction &&
+            (request.SolusSourceSelection is not null || request.Launch.Inputs.StateMode != ActionHostStateMode.Auto ||
+                !transaction.Targets.Matches(request) || transaction.ExecutionId == Guid.Empty || !SolusRestrictedStateAdmission.IsSupported(transaction.Compatibility)))
             return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
 
         var launch = request.Launch;
@@ -703,6 +709,19 @@ internal sealed class AuthorizedAcceptedStateComposer
             {
                 return AuthorizedAcceptedStateRestoreResult.Fail(
                     AcceptedStateCodes.AccessDenied);
+            }
+
+            if (request.SolusTransaction is not null)
+            {
+                // S3 authenticates an accepted Solus record for transaction recovery,
+                // without constructing SESSION or issuing a source-consumption claim.
+                if (selectorResult.Expiry is not null || !TryTransfer(authorization, request, store, timeProvider,
+                        access, keys, locator, selectedLineage, baseScope, reviewed, publicationBinding,
+                        runIdentity, accepted: null, selectorResult.Selection, observation.InventoryDigest,
+                        out var solusContext) || solusContext is null)
+                    return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
+                ownershipTransferred = true;
+                return AuthorizedAcceptedStateRestoreResult.Ready(solusContext);
             }
 
             var trustedPolicyBytes = policy.InstructionBytes.ToArray();
@@ -1211,7 +1230,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                     accepted,
                     acceptedSelection,
                     initialInventoryDigest,
-                    out var transaction) ||
+                    out var transaction, request.SolusTransaction) ||
                 transaction is null)
             {
                 return false;

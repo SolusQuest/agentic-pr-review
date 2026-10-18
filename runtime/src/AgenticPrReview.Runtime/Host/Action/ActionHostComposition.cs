@@ -965,8 +965,19 @@ internal sealed class ActionHostComposition
         }
     }
 
+    // Uses the same admitted state setup and coordinator under the caller's live
+    // prepared leases. Only compiled composition can supply a fresh preparer.
+    internal async Task<ActionHostCompletion> RunStateCommitPreparedAsync(
+        ActionHostPreparedReview prepared, ActionHostCandidatePreparer candidatePreparer)
+    {
+        ArgumentNullException.ThrowIfNull(candidatePreparer);
+        var capture = new ActionHostAccountingCapture();
+        return capture.Apply(await RunNativePreparedAsync(prepared, capture, candidatePreparer).ConfigureAwait(false));
+    }
+
     private async Task<ActionHostCompletion> RunNativePreparedAsync(
-        ActionHostPreparedReview prepared, ActionHostAccountingCapture capture)
+        ActionHostPreparedReview prepared, ActionHostAccountingCapture capture,
+        ActionHostCandidatePreparer? candidatePreparer = null)
     {
         var launch = prepared.Launch;
         var invocation = prepared.Invocation;
@@ -1034,7 +1045,8 @@ internal sealed class ActionHostComposition
                 state,
                 publicationScope,
                 cancellationToken,
-                capture)
+                capture,
+                candidatePreparer)
             .ConfigureAwait(false);
         return timeBudget.ReconciliationToken.IsCancellationRequested &&
             completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted

@@ -78,13 +78,14 @@ internal sealed class CorpusGitHub : IActionHostGitObjectTransportFactory, IActi
     internal int CurrentCalls, BlobReads, ArchiveReads;
 
     internal CorpusGitHub(Corpus corpus, ActionHostGitHubPullRequestFact pullRequest,
-        string workflowSha, byte[]? instructionOverride = null, string? reviewJson = null)
+        string workflowSha, byte[]? instructionOverride = null, string? reviewJson = null, bool inline = false)
     {
         PullRequest = pullRequest; this.workflowSha = workflowSha;
         files = corpus.Files.ToDictionary(p => p.Key, p => p.Value.ToArray(), StringComparer.Ordinal);
         foreach (var bytes in files.Values) AddBlob(bytes);
         var config = Encoding.UTF8.GetBytes("{\"schema\":\"agentic-pr-review.config.v1\",\"instructionsPath\":" +
-            "\".github/agentic-pr-review/instructions.md\",\"publication\":{\"mode\":\"sticky\"}" +
+            "\".github/agentic-pr-review/instructions.md\",\"publication\":{\"mode\":\"" +
+            (inline ? "sticky_and_inline" : "sticky") + "\"}" +
             (reviewJson is null ? "" : ",\"review\":" + reviewJson) + "}");
         var policy = new Dictionary<string, byte[]> {
             [".github/agentic-pr-review.json"] = config,

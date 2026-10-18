@@ -13,7 +13,7 @@ using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.State.Transactions;
 
-internal sealed class RetainedStateTransactionService
+internal sealed partial class RetainedStateTransactionService
 {
     private readonly object issuer;
 
@@ -92,10 +92,7 @@ internal sealed class RetainedStateTransactionService
 
         byte[] stateEnvelope = [];
         byte[] publicationBytes = [];
-        byte[] generationBytes = [];
-        byte[] outerEnvelope = [];
         var encryptionCode = RetainedStateTransactionCodes.Invalid;
-        var envelopeCode = RetainedStateTransactionCodes.Invalid;
         try
         {
             if (!authority.TryCreateCurrentReviewProjection(
@@ -125,97 +122,10 @@ internal sealed class RetainedStateTransactionService
                             : encryptionCode);
             }
 
-            var generation = new StateGenerationRecordV1(
-                ImmutableArray.CreateRange(stateEnvelope),
-                RestrictedStateEnvelope.EnvelopeSha256(stateEnvelope),
-                artifact.SessionSha256,
-                artifact.Document.ProducerBaseSha,
-                artifact.Document.ProducerHeadSha,
-                artifact.Document.Generation,
-                artifact.Document.PredecessorStateSha256,
-                binding.CurrentLogicalGenerationIdentity,
-                preparedAt,
-                logicalExpiry,
-                ImmutableArray.CreateRange(publicationBytes),
-                AcceptedStateRecordValidation.Sha256(publicationBytes),
-                binding.Policy.PolicyIdentitySha256,
-                binding.Policy.ConfigSha256,
-                binding.Policy.InstructionsSha256,
-                binding.Policy.PayloadSha256,
-                binding.Policy.BuildDiscriminator);
-            if (!AcceptedStateGenerationRecordCodec.TryEncode(
-                    generation,
-                    out generationBytes) ||
-                !AcceptedStateIdentity.TryComputeLogicalGeneration(
-                    generationBytes,
-                    binding.SelectedLineage.BaseScopeDigest,
-                    binding.SelectedLineage.Epoch,
-                    binding.SelectedLineage.SessionId,
-                    binding.CurrentAcceptanceReceiptIdentity,
-                    out var logicalIdentity) ||
-                !authority.TryGetPersistenceContext(
-                    lease,
-                    out var locator,
-                    out var locatorAccess,
-                    out var baseScope) ||
-                locator is null ||
-                locatorAccess is null ||
-                baseScope is null ||
-                !RetainedStatePersistence.TryPrepareEnvelope(
-                    locator,
-                    locatorAccess,
-                    baseScope,
-                    binding.SelectedLineage,
-                    StateObjectClass.Candidate,
-                    binding.CurrentAcceptanceReceiptIdentity,
-                    successorIdentity: null,
-                    binding.ProducingRunIdentity,
-                    binding.ProducingRunAttempt,
-                    preparedAt,
-                    logicalExpiry,
-                    requiredPlatformExpiry,
-                    generationBytes,
-                    out var name,
-                    out outerEnvelope,
-                    out var header,
-                    out envelopeCode) ||
-                name is null ||
-                header is null)
-            {
-                return RetainedStateTransactionResult<
-                    RetainedStatePreparedCandidate>.Fail(
-                        outerEnvelope.Length == 0
-                            ? RetainedStateTransactionCodes.RetentionFailed
-                            : envelopeCode);
-            }
-
-            if (!authority.TryBindCurrentReviewProjection(
-                    lease,
-                    logicalIdentity,
-                    currentReview))
-            {
-                return RetainedStateTransactionResult<
-                    RetainedStatePreparedCandidate>.Fail(
-                        RetainedStateTransactionCodes.Invalid);
-            }
-
-            var prepared = RetainedStatePreparedCandidate.Create(
-                issuer,
-                authority,
-                run,
-                generation,
-                validatedPublication,
-                generationBytes,
-                name,
-                outerEnvelope,
-                header,
-                logicalIdentity);
-            generationBytes = [];
-            outerEnvelope = [];
-            return RetainedStateTransactionResult<
-                RetainedStatePreparedCandidate>.Success(
-                    RetainedStateTransactionCodes.Prepared,
-                    prepared);
+            return PrepareGeneration(authority, lease, binding, run, stateEnvelope, artifact.SessionSha256,
+                artifact.Document.ProducerBaseSha, artifact.Document.ProducerHeadSha,
+                artifact.Document.Generation, artifact.Document.PredecessorStateSha256,
+                validatedPublication, publicationBytes, currentReview, preparedAt, logicalExpiry, requiredPlatformExpiry);
         }
         catch (Exception exception) when (
             exception is ArgumentException or
@@ -232,8 +142,6 @@ internal sealed class RetainedStateTransactionService
             CryptographicOperations.ZeroMemory(artifact.Plaintext);
             CryptographicOperations.ZeroMemory(stateEnvelope);
             CryptographicOperations.ZeroMemory(publicationBytes);
-            CryptographicOperations.ZeroMemory(generationBytes);
-            CryptographicOperations.ZeroMemory(outerEnvelope);
         }
     }
 
@@ -3090,6 +2998,7 @@ internal sealed class RetainedStateTransactionService
                 RetainedStatePublicationRecoveryAnchorEvidence>();
             var cleanupRecords = ImmutableArray.CreateBuilder<
                 RetainedStatePublicationRecoveryCleanupEvidence>();
+            var terminalCleanupCount = 0;
             foreach (var item in cleanup)
             {
                 if (RetainedStateCleanupRecordCodec.TryDecode(
@@ -3097,6 +3006,23 @@ internal sealed class RetainedStateTransactionService
                         out var cleanupRecord) &&
                     cleanupRecord is not null)
                 {
+                    // S6 terminal cleanup belongs to the selected durable acceptance,
+                    // including its valid zero-target record. Let PlanCleanup/Cleanup
+                    // resume it after ReturnCommitted; it grants no P5 delete authority.
+                    if (observed.AcceptedState.Selection is { } terminalSelection &&
+                        cleanupRecord.TerminalAcceptanceIdentity ==
+                            terminalSelection.Current.ReceiptPhysical.Header.ObjectIdentity)
+                    {
+                        if (!CleanupRecordMatchesPhysical(cleanupRecord, item) ||
+                            ++terminalCleanupCount > 1 ||
+                            !TryValidateCleanupTargets(snapshot, terminalSelection,
+                                cleanupRecord.Targets.Select(target => new RetainedStateCleanupTarget(target))
+                                    .ToImmutableArray(), out _))
+                            return RetainedStateTransactionResult<RetainedStatePublicationRecoveryInventory>
+                                .Fail(RetainedStateTransactionCodes.Conflict);
+                        continue;
+                    }
+
                     if (!CleanupRecordMatchesPhysical(cleanupRecord, item) ||
                         cleanupRecord.Targets.IsDefaultOrEmpty ||
                         cleanupRecord.Targets.Length > 2)

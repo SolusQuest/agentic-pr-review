@@ -22,6 +22,28 @@ internal static class SolusRuntimeConstruction
         Func<SolusFreshHostContext, SolusRuntimeTargets> construct) =>
         SolusAuthorizedRuntime.Create(context, construct);
 
+    internal static SolusRestrictedStateCompatibility DescribeFreshConfiguration(SolusFreshHostContext context,
+        IReadOnlyList<RuntimeToolRegistration> registrations, IRuntimeExposureHooks hooks)
+    {
+        if (!context.IsLive || registrations.Count is < 1 or > Cr1DevelopmentProfile.NonterminalDefinitions)
+            throw new ArgumentException("APR_SOLUS_TARGET_AUTHORITY");
+        var tools = registrations.ToArray();
+        if (tools.Any(tool => tool is null || tool.Recovery is not null))
+            throw new ArgumentException("APR_SOLUS_TARGET_PROFILE_UNSUPPORTED");
+        var correction = SolusSnapshotTools.ArgumentCorrectionFor(tools, context.Snapshot)
+            ?? throw new ArgumentException("APR_SOLUS_TARGET_PROFILE_UNSUPPORTED");
+        // Exact installed internal.4 DeepSeek contract. Actual construction is
+        // independently compared before exchange; this description grants no claim.
+        const ProviderCapabilities capabilities = ProviderCapabilities.ToolCalls | ProviderCapabilities.Continuation |
+            ProviderCapabilities.UsageReporting | ProviderCapabilities.ToolArgumentCorrection;
+        var bounds = new ProviderExchangeBounds(Cr1DevelopmentProfile.ProviderInputs,
+            Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
+            Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes,
+            Cr1DevelopmentProfile.ContinuationBytes);
+        return SolusAuthorizedRuntime.Compatibility(context, capabilities, tools, hooks, bounds,
+            RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds | RuntimeGuarantee.ToolArgumentCorrection, correction);
+    }
+
     internal static IAgent Create(RuntimeConfiguration configuration, string profileId,
         int logicalCalls = Cr1DevelopmentProfile.LogicalCalls, SolusRuntimeOptions? options = null)
     {
@@ -99,7 +121,7 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
             Cr1DevelopmentProfile.ContinuationBytes);
         // Compute compatibility from current trusted construction. These hashes
         // reject mismatches; the live context and exact references grant authority.
-        var compatibility = Compatibility(context, targets.Provider, tools, targets.Hooks, bounds, guarantees, correction);
+        var compatibility = Compatibility(context, targets.Provider.Capabilities, tools, targets.Hooks, bounds, guarantees, correction);
         RuntimeConfiguration? configuration = null;
         bool CurrentTargets() => context.IsLive && configuration is not null &&
             ReferenceEquals(configuration.Provider, targets.Provider) &&
@@ -145,8 +167,8 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
 
     public void Dispose() => authority.Dispose();
 
-    private static SolusRestrictedStateCompatibility Compatibility(SolusFreshHostContext context,
-        IModelProvider provider, RuntimeToolRegistration[] tools, IRuntimeExposureHooks? hooks,
+    internal static SolusRestrictedStateCompatibility Compatibility(SolusFreshHostContext context,
+        ProviderCapabilities capabilities, RuntimeToolRegistration[] tools, IRuntimeExposureHooks? hooks,
         ProviderExchangeBounds bounds, RuntimeGuarantee guarantees, ToolArgumentCorrectionPolicy? correction)
     {
         var runtime = new LineageBinaryWriter(1024 * 1024);
@@ -161,7 +183,7 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
             Cr1DevelopmentProfile.SettlementGraceSeconds }) runtime.WriteInt64(number);
         runtime.WriteByte(Cr1DevelopmentProfile.RequireContinuation ? (byte)1 : (byte)0);
         runtime.WriteByte(hooks is null ? (byte)0 : (byte)1);
-        runtime.WriteInt64((long)provider.Capabilities);
+        runtime.WriteInt64((long)capabilities);
         runtime.WriteString(context.Policy.ToolsetSha256);
         runtime.WriteInt64(tools.Length);
         foreach (var tool in tools)

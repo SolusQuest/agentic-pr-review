@@ -92,6 +92,24 @@ internal sealed class RestrictedStateService
                 out projection);
     }
 
+    internal static bool CanPrepareFreshSolus(AuthorizedAcceptedStateRestoreContext context) =>
+        context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority?.CanPrepareFreshSolus == true;
+
+    internal static bool TryReadAcceptedSolusRecord(AuthorizedAcceptedStateRestoreContext context,
+        out SolusRestrictedStateRecord? record)
+    {
+        record = null;
+        return context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority is not null &&
+            authority.TryReadAcceptedSolusRecord(out record);
+    }
+
+    internal static Task<RetainedStateTransactionResult<RetainedStatePreparedCandidate>> PrepareRetainedSolusCandidateAsync(
+        AuthorizedAcceptedStateRestoreContext context, SolusRestrictedStateRecord record,
+        R4ValidatedPublicationReview review, CancellationToken cancellationToken) =>
+        context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer).PrepareSolusAsync(authority, record, review, cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied));
+
     internal static Task<RetainedStateTransactionResult<
         RetainedStatePreparedCandidate>> PrepareRetainedCandidateAsync(
         AuthorizedAcceptedStateRestoreContext context,

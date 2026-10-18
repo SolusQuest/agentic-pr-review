@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Host.State;
 using System.Collections.Immutable;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost;
@@ -76,10 +77,24 @@ internal sealed class SolusFreshReviewComposition
             : ExecuteAsync(prepared, contextSink, data), cancellationToken);
     }
 
-    private async Task<SolusFreshReviewResult> ExecuteAsync(ActionHostPreparedReview prepared,
-        IRestrictedContextSink? sink, IReadOnlyList<SolusAgent.Api.Execution.AgentInput> reviewData)
+    internal SolusPreparedFreshExecution PrepareStateExecution(ActionHostPreparedReview prepared)
     {
-        var executionId = Guid.NewGuid();
+        if (prepared.FreshContext?.IsLive != true) throw new ArgumentException("APR_SOLUS_TARGET_AUTHORITY");
+        var id = Guid.NewGuid();
+        var tools = new SolusSnapshotTools(id, prepared.FreshContext.Snapshot,
+            trustedFileAccess?.Invoke(prepared.FreshContext.Snapshot) ?? new VerifiedReviewedFileAccess());
+        var hooks = new FreshExposureHooks(prepared);
+        return new(id, tools, hooks, SolusRuntimeConstruction.DescribeFreshConfiguration(
+            prepared.FreshContext, tools.Registrations, hooks));
+    }
+
+    internal async Task<SolusFreshReviewResult> ExecuteAsync(ActionHostPreparedReview prepared,
+        IRestrictedContextSink? sink, IReadOnlyList<SolusAgent.Api.Execution.AgentInput> reviewData,
+        SolusPreparedFreshExecution? execution = null,
+        Func<SolusRestrictedStateCompatibility, IRestrictedContextSink?>? sinkFactory = null,
+        Action<ContextCandidateExecutionResult?>? completeCapture = null, Action? providerStarted = null)
+    {
+        var executionId = execution?.ExecutionId ?? Guid.NewGuid();
         if (prepared.FreshContext?.IsLive != true)
             return new(executionId, SolusFreshReviewFailure.AuthorityUnavailable);
         if (prepared.Journal.ObserveCancellation(prepared.CancellationToken))
@@ -102,22 +117,27 @@ internal sealed class SolusFreshReviewComposition
                 prepared.CancellationToken, out var operation))
             return new(executionId, SolusFreshReviewFailure.Cancelled);
         using var admittedOperation = operation!;
+        providerStarted?.Invoke();
         SolusContextReviewOutcome? observedRun = null;
         AgentTerminalReview? validatedReview = null;
         var domainAccepted = false;
         SolusSnapshotTools? tools = null;
         try
         {
-            tools = new SolusSnapshotTools(executionId, prepared.FreshContext.Snapshot,
+            tools = execution?.Tools ?? new SolusSnapshotTools(executionId, prepared.FreshContext.Snapshot,
                 trustedFileAccess?.Invoke(prepared.FreshContext.Snapshot) ?? new VerifiedReviewedFileAccess());
             var domain = new SolusReviewCandidateHost(executionId, tools);
             using var bridge = new SolusReviewBridge(executionId,
                 DeepSeekCredential.Create(prepared.Launch.Inputs.ProviderApiKey.ExportForPrivateLaunch()),
-                new FreshExposureHooks(prepared), budget, controlledTransport?.Invoke(), prepared.TimeBudget);
+                execution?.Hooks ?? new FreshExposureHooks(prepared), budget, controlledTransport?.Invoke(), prepared.TimeBudget);
             var run = await bridge.RunAuthorizedAsync(prepared.FreshContext, instructions, data, tools, domain,
                 sink, prepared.TimeBudget.RemainingReviewTime,
-                prepared.Journal.ProviderCancellationToken, trustedProviderDecorator).ConfigureAwait(false);
+                prepared.Journal.ProviderCancellationToken, trustedProviderDecorator, sinkFactory,
+                execution?.Compatibility).ConfigureAwait(false);
             observedRun = run;
+            // A failing transfer cannot turn completed work into provider failure.
+            try { completeCapture?.Invoke(run.Execution); }
+            catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException)) { }
             admittedOperation.Resolve(ActionHostOperationResolution.ResolvedNoCommit);
             var actual = run.Execution;
             AgentTerminalReview? review = null;
@@ -169,4 +189,10 @@ internal sealed class SolusFreshReviewComposition
                     prepared.Journal.ObserveCancellation(prepared.CancellationToken)
                     ? RuntimeContinuation.Stop : RuntimeContinuation.Continue, settlement.Accounting));
     }
+}
+
+internal sealed record SolusPreparedFreshExecution(Guid ExecutionId, SolusSnapshotTools Tools,
+    IRuntimeExposureHooks Hooks, SolusRestrictedStateCompatibility Compatibility)
+{
+    public override string ToString() => nameof(SolusPreparedFreshExecution);
 }
