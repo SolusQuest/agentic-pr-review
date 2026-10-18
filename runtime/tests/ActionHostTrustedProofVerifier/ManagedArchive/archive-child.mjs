@@ -497,8 +497,12 @@ try {
         result.records.some((record) => record.kind === 'forwarded' && record.signal === 'SIGTERM'),
       );
     for (const key of ['model-calls', 'provider-attempts']) {
-      if (provider.count > 0 && Object.hasOwn(result.reported, key))
+      if (provider.count > 0 && Object.hasOwn(result.reported, key)) {
+        diagnostic.accounting_key = key;
+        const value = result.reported[key];
+        diagnostic.accounting_count = /^(0|[1-9][0-9]{0,18})$/u.test(value) ? value : 'unavailable';
         assert.ok(Number(result.reported[key]) > 0, 'd5_no_false_zero_after_dispatch');
+      }
     }
   }
   official.restore(accepted);
