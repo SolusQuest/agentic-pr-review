@@ -143,6 +143,10 @@ export function createGitHubFixture(workflow) {
         'export function authenticate(accessToken: string) { console.error(accessToken); }\n',
     },
   ];
+  // Keep trusted policy files in the PR tree; only the authored review corpus
+  // differs from the immutable base. Ordinary V1 also reads GitHub's PR-files
+  // view, whose metadata must agree with these exact Git blobs.
+  for (const headFiles of files) Object.assign(headFiles, trusted);
   let parent = workflowSha;
   const heads = files.map((items, index) => {
     const root = tree(items),
@@ -309,6 +313,30 @@ export function createGitHubFixture(workflow) {
           .end();
         return;
       }
+      if (suffix === '/pulls/147/files' && request.method === 'GET') {
+        assert.equal(url.searchParams.get('per_page'), '100');
+        assert.equal(url.searchParams.get('page'), '1');
+        return json(
+          response,
+          Object.entries(files[ordinal])
+            .filter(([path]) => !Object.hasOwn(trusted, path))
+            .map(([filename, text]) => {
+              const lines = text.trimEnd().split('\n');
+              return {
+                sha: objectHash('blob', Buffer.from(text)),
+                filename,
+                previous_filename: null,
+                status: 'added',
+                additions: lines.length,
+                deletions: 0,
+                changes: lines.length,
+                patch:
+                  `@@ -0,0 +1,${lines.length} @@\n` + lines.map((line) => '+' + line).join('\n'),
+              };
+            }),
+        );
+      }
+      if (suffix === '/pulls/147/comments' && request.method === 'GET') return json(response, []);
       if (suffix === '/issues/147/comments' && request.method === 'GET')
         return json(response, comment ? [comment] : []);
       if (

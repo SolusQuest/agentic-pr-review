@@ -43,12 +43,31 @@ describe('D5 bounded external source and provider services', () => {
   test('serves distinct linked source heads and original tar bytes matching Git blob identities', async () => {
     const github = createGitHubFixture('workflow');
     let previous = workflowSha;
-    for (const head of github.heads) {
+    for (const [ordinal, head] of github.heads.entries()) {
+      github.configure(ordinal, 1101 + ordinal);
       const commit = exchange('api.github.com', `/repos/${repository}/git/commits/${head}`);
       await github.handle(commit.incoming, commit.response);
       const document = JSON.parse(commit.response.bytes.toString());
       expect(document.parents).toEqual([{ sha: previous }]);
       previous = head;
+      const changed = exchange(
+        'api.github.com',
+        `/repos/${repository}/pulls/147/files?per_page=100&page=1`,
+      );
+      await github.handle(changed.incoming, changed.response);
+      const changes = JSON.parse(changed.response.bytes.toString());
+      expect(changes).toHaveLength(ordinal === 2 ? 4 : 3);
+      for (const change of changes) {
+        expect(change.status).toBe('added');
+        expect(change.filename).not.toContain('.github/');
+        const original = exchange('api.github.com', `/repos/${repository}/git/blobs/${change.sha}`);
+        await github.handle(original.incoming, original.response);
+        const source = Buffer.from(
+          JSON.parse(original.response.bytes.toString()).content,
+          'base64',
+        ).toString();
+        expect(change.patch).toContain('+' + source.trimEnd());
+      }
       const archive = exchange('codeload.github.com', `/${repository}/legacy.tar.gz/${head}`);
       delete archive.incoming.headers.authorization;
       await github.handle(archive.incoming, archive.response);

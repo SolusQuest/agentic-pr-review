@@ -118,6 +118,9 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-043      | R6 evaluator and control tests                  | Narrow conformance for retained structural signals and bounded semantic precedence    |
 | RR-044      | R6 prospective quality observation              | Current public-safe reports and decision records retain the structural scoring field  |
 | RR-045      | R6 v2 independent review boundary               | Names the retained structural override reason without restoring a retired route       |
+| RR-046      | CR1-D5 codeload service and source fixtures     | Exact GitHub archive endpoint conformance inside the isolated actual-archive proof    |
+| RR-047      | CR1-D5 synthetic provider receipt               | Closed zero-live-request field backed by namespace and route isolation                |
+| RR-048      | CR1-D5 verification and CR1-D6 retirement       | Explicit historical native alias, removed with its implementation by D6               |
 
 Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
 
