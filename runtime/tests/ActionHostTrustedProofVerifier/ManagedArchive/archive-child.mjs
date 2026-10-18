@@ -501,7 +501,17 @@ try {
         diagnostic.accounting_key = key;
         const value = result.reported[key];
         diagnostic.accounting_count = /^(0|[1-9][0-9]{0,18})$/u.test(value) ? value : 'unavailable';
-        assert.ok(Number(result.reported[key]) > 0, 'd5_no_false_zero_after_dispatch');
+        const completeness = result.reported['attempt-accounting-completeness'];
+        diagnostic.accounting_completeness = ['complete', 'partial', 'unavailable'].includes(
+          completeness,
+        )
+          ? completeness
+          : 'invalid';
+        // Cancellation can leave dispatch exposure unknown. The existing H2
+        // contract then reports attempts as a lower bound (including zero).
+        // Logical calls, and complete attempt counts, must still reflect work.
+        if (key === 'model-calls' || completeness === 'complete')
+          assert.ok(Number(value) > 0, 'd5_no_false_zero_after_dispatch');
       }
     }
   }
