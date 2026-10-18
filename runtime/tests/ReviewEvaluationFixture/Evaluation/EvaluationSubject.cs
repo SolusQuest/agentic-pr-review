@@ -63,7 +63,7 @@ internal sealed class EvaluationFailure
 }
 
 // Safe planned-attempt identity exists before completion, without admitting any result.
-internal sealed class EvaluationAttempt
+internal sealed partial class EvaluationAttempt
 {
     private EvaluationAttempt(EvaluationRunInput run, string configuration)
     {
@@ -125,7 +125,7 @@ internal sealed record EvaluationObservation(string Tool, AgentObservation Obser
     }
 }
 
-internal sealed class EvaluationSubject
+internal sealed partial class EvaluationSubject
 {
     private EvaluationSubject(EvaluationAttempt attempt, R3QualitySubject admitted, string execution)
     {

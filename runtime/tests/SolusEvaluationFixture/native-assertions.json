@@ -1,0 +1,918 @@
+{
+  "source_commit": "64084d97f6d4c65cfe41719fe74d72f5f9524f7e",
+  "deletion_authorized": false,
+  "assertions": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ExecutableSelfTestChecksEveryNamedPositiveAndNegative",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ProseAloneNeverEstablishesSemanticTruthOrReusesOldAnnotation",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "AnnotationIsBoundToEveryIdentityAndCannotOverrideFailedEvidence",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "OneFindingCannotCreditTwoDefectsAndTwoFindingsCannotCreditOneDefectTwice",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "MaximumMatchingReassignsAmbiguousFirstFindingAndIsPermutationInvariant",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ExecutionBindingChangesWithRunSourceModeConfigurationAndStablePolicy",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "CandidateAdmissionRejectsDetachedReviewChangedObservationAndWrongRun",
+      "disposition": "replacement",
+      "replacement": "managed-admission"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "CompletedAssertionFailuresRetainExecutionStatusAndCannotBeRescued",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ConfigurationCohortIgnoresCaseHistoryAndSourceButBindsActualSettings",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "KnownFailuresKeepAttemptConfigurationSourceAndModeBeforeCompletion",
+      "disposition": "replacement",
+      "replacement": "managed-admission"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "InvalidSidecarsPreserveEveryEstablishedStructuralFailureAndDiscardPartialCredit",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "OutcomeReaderRejectsMalformedIncompleteAndContradictoryReports",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses",
+      "disposition": "replacement",
+      "replacement": "managed-admission"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ClosedJsonRejectsUnknownDuplicateMissingNullMalformedAndOversizedInput",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ContractBoundsAndContentIdentitiesAreEnforced",
+      "disposition": "replacement",
+      "replacement": "shared-scorer"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ReportsContainOnlyBoundedProjectionAndNoPrivateCandidateOrToolBytes",
+      "disposition": "replacement",
+      "replacement": "managed-admission"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CompleteCheckedCorpusExecutesEveryCategoryAndActualToolFamily",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "RemovingRequiredOperationCannotBorrowPassingAuditObservations",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "ReplacingRequiredFamilyWithAnotherReadDoesNotMeetCoverage",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "InitialContextOrTrustedPolicyLeakFailsIndependentlyOfScriptedAnswer",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "ChangedDecisiveSourceWithValidHashesFailsTheIndependentOracle",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CorpusInventoryCannotBeSilentlyReducedOrRelabeled",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "UnconsumedOrInvalidScriptsNeverCountAsExpectedSuccess",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "ChangingExpectedResultOrObservationCannotBlessFaultyExecution",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "IrrelevantOrOmittedReadCannotUsePreflightAsAgentEvidence",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CommandPreservesEvaluateAndEmitsOnlyBoundedDeterministicResults",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CommandOutputFailuresReturnOnlySafeInfrastructureDiagnostic",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "MalformedTerminalMustFollowTheRequiredActualObservations",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "AdmissionFailureCategoryIsPreserved",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CancelledRealAdmissionIsNotMalformedCorpus",
+      "disposition": "replacement",
+      "replacement": "managed-quality"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "BootstrapPreparesRealStateWithoutAcceptingIt",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ThreeFreshPhasesAcceptAndRestoreCompletedHistory",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "TwoFreshSupervisorExecutablesProduceEqualNormalizedEvidence",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "FailedPhaseNeverAdvancesAcceptedPredecessor",
+      "disposition": "replacement",
+      "replacement": "authenticated-replay"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "RehashedScriptAndHistoricalInputMutationsCannotBlessReplay",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "LiteralAnswerCannotReplaceHistoryDerivationWithValidPredecessor",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "RecoveryWithoutReplacementEvidenceRetainsFailedReplayAndPredecessor",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "RestoredExplicitNullToolArgumentRejectsEntireBatchAndPreservesPredecessor",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials",
+      "disposition": "replacement",
+      "replacement": "authenticated-replay"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "IndependentConcurrentInvocationsHaveDisjointPrivateState",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CleanupFailureIsExplicitAndCannotReturnSuccess",
+      "disposition": "replacement",
+      "replacement": "authenticated-replay"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CancelledSupervisorAndInvalidBundleCleanPrivateArtifacts",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ChildProtocolRejectsMalformedOrIncompleteDocuments",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "PrivateProtocolBoundsUtf8AndStreams",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "AdmittedRevisionObservationsMatchIndependentCurrentTools",
+      "disposition": "replacement",
+      "replacement": "authenticated-replay"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "IdenticalBodyOnAnotherCommentCannotAuthorizeTheNewHostTransaction",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "SameHeadRecoveryRequiresOneSuccessfulFreshDiscovery",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "CompletedIncrementalReviewCannotPublishOrAcceptAfterHeadAdvances",
+      "disposition": "replacement",
+      "replacement": "authenticated-replay"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "InvalidCurrentFindingsFailBeyondAdmissionAndPreservePredecessor",
+      "disposition": "replacement",
+      "replacement": "authenticated-replay"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "SkippedOrChangedContinuationCannotPassPlausibleCurrentFindings",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "RenamedBundleKeepsScenarioAndCoordinatedExpectedMutationCannotWeakenIt",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "UnknownOrMixedCaseIdentitiesDoNotSelectAnotherOracle",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "CurrentReferenceCannotResolveHistoricalOrAmbiguousToolMessages",
+      "disposition": "replacement",
+      "replacement": "authenticated-replay"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "GrowthReportNamesToolResultsAsObservations",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "PrivateReplyPreservesAbsenceOfSessionBytes",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "UnknownProfilesAndUnboundedSchedulesRejectBeforeExecution",
+      "disposition": "replacement",
+      "replacement": "bounded-growth"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "FailureControlsPreserveTheAcceptedPredecessor",
+      "disposition": "replacement",
+      "replacement": "bounded-growth"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "FiniteExhaustionAndReportMutationsDoNotInventCapacityEvidence",
+      "disposition": "replacement",
+      "replacement": "bounded-growth"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "RehashedAlteredPriorContentCannotReplaceThePreparedState",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "DiagnosticForgeryAndCleanupFailureStayFailures",
+      "disposition": "replacement",
+      "replacement": "bounded-growth"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "CurrentMatrixMeasuresTwoAcceptedArtifactsWithoutClaimingCapacity",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "AmbientCanaryDoesNotEnterTheChildOrPublicReport",
+      "disposition": "replacement",
+      "replacement": "bounded-growth"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "PostReplyFailureRetainsTheAttemptAndConfirmedPrefix",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "ZeroCallCancellationRetainsActualAgentDiagnostic",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "RehashedFailureCannotKeepCompletedQ1Outcome",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "UnreapedDispositionRetainsPrefixWithoutReadbackOrCleanup",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "ThrowingCleanupCannotClaimArtifactsWereRemoved",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "RejectedRepliesCannotContributeQ1Quality",
+      "disposition": "replacement",
+      "replacement": "bounded-growth"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "TypedAdmissionResultsRetainOperationalAttribution",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "FormerRecordBoundaryRemainsAdmitted",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthRootCountBoundaryIsNotAcceptedHistory",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthPlaintextAndRecordWriterBoundaries",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthDecodedContinuationBoundaries",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthReconstructedRequestByteAndMessageBoundaries",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CurrentSyntheticExecutionHasNewIdentityAndPreservesHistoricalBytes",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "SyntheticDerivationRequiresTheExactFormerDefaultTuple",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "ExperimentalAdaptersRequireAClosedEvaluatorPlanInsteadOfGenericReplayAdmission",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CompleteSeedProducesOwnedInputsForActualToolsAndPolicy",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "AssertionsAreNotContextPolicyOrToolContentAndAdmittedBytesOutliveBundle",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "DirectoryAndContentFaultsNeverReturnPartialFixture",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "UntrustedMemberPathsReject",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "ClosedReferencesRolesAndIdentityReject",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "EveryObjectHasClosedRequiredFields",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CountByteAndDepthBoundsAreEnforcedAtActualBoundaries",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "SnapshotAndExpectationSemanticsRejectAfterValidFileHashes",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "BomCrLfPreserveRawBytesAndIntentionallyBadScriptsRemainInputs",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CancellationAndUnsupportedRootsAreSafeFailures",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "NestedDuplicatesNullsAndWrongTypesReject",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "RunOrderBoundsAndExplicitTransitionsAreBoundToOneTarget",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "PortableNestedPathsAcceptAtLimitsAndRejectAliases",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "EveryAdmittedLifecycleUsesRuntimeValidationAndHeadContent",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "HardLinkedMembersRejectOnBothPlatforms",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "LinuxLinksAndSpecialFilesRejectWithoutBlocking",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "PinnedDirectoryRejectsReplacementOrKeepsTheOriginalAnchor",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "WindowsDirectoryReparsePointsReject",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "LogicalRepositoryRejectsFileDirectoryAndDirectorySpellingCollisions",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "LogicalRepositoryAllowsSharedDirectoriesAndSimilarFilePrefixes",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "EarlierLiveSummaryOmissionRemainsAdmittedButForgedV5StatusIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanReaderAdmitsOnlyCanonicalPathDetailPairs",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithDeclaredCasesIsVerified",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportMissingCaseIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithZeroCasesIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithDuplicateCaseIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithUnverifiedRowIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityCaseMissingActualCodeMemberIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeDivergingFromSummaryCodeIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeWithWrongExpectedCodeIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeWithDivergentConfigurationIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeWithForeignSourceIdentityIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReportContainingForbiddenCanaryIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReportWhoseCorpusDoesNotMatchDeclaredCorpusIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "MalformedReportIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReportWithMissingRequiredMemberIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportIsVerifiedAndMismatchIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportWithStaleNormalizedDigestIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportWithForeignSourceIdentityIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "IncrementalReportIsVerified",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportWithFailedCleanupIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportIsVerifiedAgainstTerminalOracle",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CurrentGrowthGateRequiresEveryBoundedProfileAndCannotSubstituteForHistoricalCapacity",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithReorderedProfilesIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithMutatedTerminalClassificationIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithForeignSourceIdentityIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithRejectedNonTerminalRowIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithFailedCleanupIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ResetOwnerReportIsVerifiedAndShrunkReportRejected",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ResetOwnerReportWithWrongTopologyOrSourceIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LiveSelfTestReportIsVerified",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryIsVerified",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "Output65536LiveScenarioUsesTheStrictPlanVerifier",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "Output8192LiveScenarioAcceptsItsSelectedPlan",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ExperimentalLiveScenarioRejectsRelabeledCurrentPlan",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanDiagnosticsMustCoverEveryFailedAttemptExactlyOnce",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanDiagnosticAttributionIsAdmittedOnlyFromClosedDomains",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanUnknownFailureStillRequiresAnExplicitDiagnostic",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LiveCoverageGateExecutesItsDeclaredFiveCasesAndRejectsMissingRowsAndDiagnostics",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryWithProviderCallsOrIncompleteScheduleIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryMissingActualProviderCallsIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanOutcomeWithWrongExpectedCodeIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanBareSummaryIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryWithBrokenAccountingIsRejected",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ParityVerificationAcceptsIdenticalReceiptsAndRejectsDivergence",
+      "disposition": "retained-historical",
+      "replacement": "historical-only"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "TrxAdmissionRequiresEveryDeclaredClassNonZeroAndAllPassed",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CleanupHelperDeletesOnlyMarkedPrivateRoots",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CleanupHelperRejectsSymlinkedAncestor",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CleanupHelperFailsClosedWhenRootCannotBeRemoved",
+      "disposition": "retained-historical",
+      "replacement": "managed-report-verifier"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GeneratedLivePlanAdmitsAndBindsDeclaredInventory",
+      "disposition": "retained-historical",
+      "replacement": "cross-owner-live"
+    }
+  ]
+}

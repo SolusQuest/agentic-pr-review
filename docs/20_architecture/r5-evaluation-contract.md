@@ -1,5 +1,21 @@
 # R5 evaluation subject and scorer
 
+## Managed Solus evaluation
+
+CR1-V1 [#416](https://github.com/SolusQuest/agentic-pr-review/issues/416) adds [SolusEvaluationFixture](../../runtime/tests/SolusEvaluationFixture/README.md), the managed consumer of the existing R5 case, outcome and scoring contracts. It executes the actual APR fresh/state-commit/restored compositions with synthetic authorization, repository and encrypted artifact transports, and the installed Solus provider/runtime. The [validation gate](../10_workflow/r5-evaluation-validation.md#managed-qualification) owns source, package and runner qualification.
+
+The fixture source-links the existing contracts, JSON codec, outcome reader and `EvaluationScorer`. Only partial declarations are added to the old attempt/subject classes. Its new completed-subject factory consumes a correlated returned `SolusFreshReviewResult` and invocation-owned witnesses. It checks current execution/context/outcome identity, completed work and complete usage, validated APR terminal acceptance, and actual provider Final bytes against the returned canonical review. A parsed report, a script, an authenticated saved context or a separately executed oracle cannot create a completed subject.
+
+The trusted provider decorator associates current accepted model attempts with their typed tool calls and results. Historical results and correction feedback supply no current evidence. Repeated projections are deduplicated by call identity; separate identical reads may retain the same observation hash. Every successful current result is re-admitted with `AgentToolResultAdmission` against the actual APR observation, snapshot and returned-line set. Named tool, coverage, complete-diff, must-find/must-not-find, one-to-one matching and sidecar predicates then use the shared scorer. A completed review with missing required evidence remains completed with failed evidence and no model credit; incomplete work never becomes a passing empty review.
+
+Configuration identity binds the current trusted policy/settings and actual provider instructions, tool definitions, bounds and correction semantics. It excludes current input, restored history, source revision and attempt/round IDs. Package/context provenance is recorded separately. Attempt identity binds the complete scheduled run descriptor; execution identity additionally binds the actual execution, current checkpoint, historical-round identities, current canonical terminal/observations and actual wire-request digests. Private wire and context bytes do not enter ordinary output.
+
+Work completion, candidate eligibility, capture success, durable Host acceptance and recovery without work remain separate observations. A failed capture or stale publication target cannot imply durable success, even if the completed work can still be structurally scored. Negative controls retain typed stop/admission observations and honest unknown failure attribution. The fixed synthetic cases establish engineering behavior; findings remain unadjudicated unless the existing exact-bound annotation contract is explicitly exercised. The managed proof records `model_quality: not_evaluated` and performs zero live provider calls.
+
+## Retained native subject contract
+
+The following foundation describes the native-loop subject/CLI and the shared scorer. Native producer, SESSION and AOT observations apply to that retained route. They do not qualify managed Solus execution.
+
 Issue [#241](https://github.com/SolusQuest/agentic-pr-review/issues/241) introduces the test-only `runtime/tests/ReviewEvaluationFixture` executable. It references the existing Runtime through friend access; it does not add a production CLI, provider, Action input, persistent SESSION format or public compatibility promise.
 
 Run the independently usable scorer vectors with:
