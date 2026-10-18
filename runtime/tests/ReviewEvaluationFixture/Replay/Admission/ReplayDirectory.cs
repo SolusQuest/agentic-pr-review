@@ -22,7 +22,9 @@ internal sealed class ReplayDirectoryGuard : IDisposable
     internal string Path { get; }
     internal SafeFileHandle Handle { get; }
     internal ReviewedStagedFileIdentity Identity { get; }
-    internal string AnchoredPath => NativeRestrictedStateFiles.AnchoredRoot(Path, Handle);
+    // Darwin traversal/read/enumeration use Handle; this path is display/proof only.
+    internal string AnchoredPath => OperatingSystem.IsMacOS() ? Path
+        : NativeRestrictedStateFiles.AnchoredRoot(Path, Handle);
 
     internal RestrictedStateOpenResult OpenFile(string name, out SafeFileHandle? handle)
     {

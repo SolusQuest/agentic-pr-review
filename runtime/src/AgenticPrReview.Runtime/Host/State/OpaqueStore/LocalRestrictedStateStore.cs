@@ -808,9 +808,10 @@ internal sealed class LocalRestrictedStateStore
             return false;
         }
 
-        var operationRoot = NativeRestrictedStateFiles.AnchoredRoot(
-            root,
-            guard);
+        // On Darwin this is only a display/test-hook path. Every child read,
+        // mutation and rollback below uses the retained RootGuard descriptor.
+        var operationRoot = OperatingSystem.IsMacOS() ? root
+            : NativeRestrictedStateFiles.AnchoredRoot(root, guard);
         if (!RootGuardMatchesProof(guard, proof) ||
             !TryResolveFilePrefix(name, operationRoot, out var prefix))
         {

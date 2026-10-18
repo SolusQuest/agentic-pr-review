@@ -37,12 +37,30 @@ const runtimeFilter = [
   'ReviewedRootMaterializerTests',
   'Tests.Host.State',
   'R5ReplayAdmissionTests',
+  'R5CompletedReplayTests.ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials',
+  'R6EconomicsRunnerTests.EnvironmentAndPrivateStateCanariesNeverReachPublicOutputOrChildEnvironment',
   'TrustedProofEvidenceBoundaryTests',
   'SyntheticPrimaryBucket',
   'NativeFileOperationsTests',
+  'DarwinDirectoryAuthorityIsRejectedBeforeCapabilityIssuance',
 ]
   .map((name) => `FullyQualifiedName~${name}`)
   .join('|');
+// Physical bridge operations still require anchored directory paths. Keep all
+// four portable bridge contract/codec controls; runtime-all retains every
+// transport/staging diagnostic, including unsupported-platform failures.
+const portableBridgeTests = [
+  'FreezesExactPrivateBounds',
+  'UsesStrictSourceGeneratedPrivateSerialization',
+  'H1CodecRejectsUnknownDuplicateAndBuildMismatch',
+  'GitHubArtifactAdapterTypesStayInternalAndCapabilityNarrow',
+]
+  .map((name) => `FullyQualifiedName~ArtifactBridgeContractTests.${name}`)
+  .join('|');
+const focusedRuntimeFilter =
+  process.platform === 'darwin'
+    ? `(${runtimeFilter})&(FullyQualifiedName!~Tests.Host.State.GitHubArtifacts|${portableBridgeTests})`
+    : runtimeFilter;
 
 function run(command, commandArgs) {
   const result = spawnSync(command, commandArgs, { cwd: root, env, stdio: 'inherit' });
@@ -69,7 +87,7 @@ function runtimeTests(unfiltered) {
   const selected =
     unfiltered || args.some((arg) => arg === '--filter' || arg.startsWith('--filter='))
       ? []
-      : ['--filter', runtimeFilter];
+      : ['--filter', focusedRuntimeFilter];
   console.log(`Native .NET ${unfiltered ? 'diagnostic' : 'selection'}; physical temp: ${temp}`);
   const status = run('dotnet', [
     'test',

@@ -8,6 +8,7 @@ using AgenticPrReview.Runtime.ActionHost.Snapshot.Materialization;
 using AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts;
 using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 using AgenticPrReview.Runtime.Tests.Host.Action.Snapshot;
 
@@ -120,6 +121,17 @@ public sealed class NativeFileOperationsTests
             Assert.Equal(new byte[] { 2 }, await File.ReadAllBytesAsync(other.FinalPath));
         }
         Assert.Equal(new byte[] { 1 }, await File.ReadAllBytesAsync(original.FinalPath));
+    }
+
+    [DarwinFact]
+    public void DarwinCannotRepresentRetainedDirectoryAuthorityAsAPath()
+    {
+        using var root = new Root();
+        Assert.True(ReviewedStagedFileAccess.TryOpenDirectory(root.Path, out var held, out _));
+        using (held)
+            Assert.Throws<PlatformNotSupportedException>(() => NativeRestrictedStateFiles.AnchoredRoot(root.Path, held!));
+        Assert.Throws<PlatformNotSupportedException>(() => new ArtifactBridgeStaging(root.Path));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(root.Path));
     }
 
     [DarwinFact]

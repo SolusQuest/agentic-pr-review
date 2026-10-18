@@ -786,6 +786,8 @@ internal static partial class NativeRestrictedStateFiles
         SafeFileHandle rootGuard) =>
         OperatingSystem.IsLinux()
             ? $"/proc/self/fd/{checked((int)rootGuard.DangerousGetHandle())}"
+            : OperatingSystem.IsMacOS()
+            ? throw new PlatformNotSupportedException("Darwin directory authority requires descriptor-relative operations.")
             : configuredRoot;
 
     internal static bool TryGetIdentity(

@@ -21,6 +21,10 @@ internal sealed class ArtifactBridgeStaging
 
     internal ArtifactBridgeStaging(string explicitBridgeOwnedRoot)
     {
+        // This consumer still performs mutations through an anchored pathname.
+        // Native identity support alone does not make that authority portable.
+        if (OperatingSystem.IsMacOS())
+            throw new PlatformNotSupportedException("Artifact bridge staging requires anchored directory paths.");
         if (string.IsNullOrWhiteSpace(explicitBridgeOwnedRoot))
         {
             throw new ArgumentException(

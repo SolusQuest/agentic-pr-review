@@ -1306,6 +1306,20 @@ public sealed class LiveAgentFreshProcessTests
         }
     }
 
+    [AgenticPrReview.Runtime.Tests.Storage.DarwinFact]
+    public void DarwinDirectoryAuthorityIsRejectedBeforeCapabilityIssuance()
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity("owner/repository", 109, new string('a', 40), new string('b', 40));
+        fixture.WritePhase(identity, "Review the immutable snapshot.", "prior\n", "unsupported_darwin_authority",
+            "absent", "automatic", "same_head", expectedLineageSha256: null, fromHeadSha: identity.HeadSha);
+        Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(fixture.Root, out var files));
+        var authorization = Assert.IsType<LiveAgentFreshProcessAuthorizationRead>(files!.ReadAuthorization());
+        Assert.False(files.TryAuthorizeLayout(authorization, AuthorizedAccess(), lineageExpected: false, out var capability));
+        Assert.Null(capability);
+        Assert.False(File.Exists(Path.Join(fixture.Root, "output", "result.json")));
+    }
+
     [Theory]
     [InlineData("host")]
     [InlineData("output")]

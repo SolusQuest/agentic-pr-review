@@ -10,7 +10,7 @@ npm run test:native:node
 npm run test:native:runtime
 ```
 
-`node` selects `src/` and `tests/`. `runtime` selects output/trace application, reviewed snapshot/tools/materialization, restricted state, replay admission, evidence and synthetic rate-bucket tests. Both retain the underlying runners' failures. Select an individual file or .NET filter when working on a narrower change:
+`node` selects `src/` and `tests/`. `runtime` selects output/trace application, reviewed snapshot/tools/materialization, restricted state, replay admission and child-environment controls, evidence and synthetic rate-bucket tests. On Darwin it retains the four portable GitHub artifact codec/contract controls while excluding physical bridge staging/transport, which still requires directory path anchoring. Explicit Darwin controls verify that unsupported directory authority is rejected before a capability or staging tree is created. Both entrypoints retain the underlying runners' failures. Select an individual file or .NET filter when working on a narrower change:
 
 ```bash
 npm run test:native -- node src/action-wrapper/artifact-bridge/staging.test.ts
@@ -57,5 +57,7 @@ npm run test:native -- runtime-all
 | Managed archive execution, loader authority and installed-package proofs | Complete hosted Ubuntu x64 CI remains required.                                                                                                                                                                                                                                       |
 | Sanitized apphost launch fixtures                                        | A framework-dependent apphost needs a registered/default .NET installation after its child environment is cleared. A custom SDK visible only through the parent environment can produce exit 131 before fixture assertions; focused filesystem tests do not qualify that launch path. |
 | Filesystem behavior                                                      | Darwin atomic no-replace and hostile controls were exercised on APFS. Unsupported exclusive rename fails closed; there is no copy/delete or check-then-move fallback. Other volumes and Intel execution need their own evidence.                                                      |
+
+Direct fresh-process directory capabilities and physical GitHub artifact staging/transport require retained directory authority. Linux uses `/proc/self/fd` paths and Windows holds guarded directory handles. Darwin has no equivalent pathname anchor: these consumers fail closed until their mutations are ported to descriptor-relative operations. The unfiltered suite retains their assertions; the focused profile keeps portable bridge contracts and actual Darwin rejection controls. Local state and replay use their retained handles directly.
 
 Do not replace [`npm run check`, `npm run dist:check` or runtime qualification](validation.md) with the focused commands. Full `npm run check` on Darwin still encounters the enrollment endpoint boundary above; record that failure and use the required successful hosted Linux checks. Keep all retained CI aggregates and security negatives. Local success grants no macOS distribution, release, live-provider or deployment authority.
