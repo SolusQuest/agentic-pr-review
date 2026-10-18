@@ -83,9 +83,9 @@ internal static class CapacityHostRun
                 trustedCaptureDecorator: scenario == "cancel-capture" ? sink => new CancelCapture(sink, fixture.Fault.Cancellation) : null,
                 trustedCapturedRecord: Capture).RunAsync(fixture.Launch, fixture.Fault.Cancellation.Token, data);
             work = result.Value?.Work; completion = result.Value?.Completion ?? result.Failure;
-            captured = result.Value?.CurrentCaptureValid; accepted = result.Value?.DurableStateAccepted == true;
+            captured = result.Value?.CurrentCaptureValid; accepted = result.Value is { DurableStateAccepted: true };
             preparationFailure = result.Value?.PreparationFailure ?? SolusFreshReviewFailure.None;
-            recovered = result.Value?.RecoveredWithoutWork == true;
+            recovered = result.Value is { RecoveredWithoutWork: true };
         }
         else
         {
@@ -95,9 +95,9 @@ internal static class CapacityHostRun
                 trustedCaptureDecorator: scenario == "cancel-capture" ? sink => new CancelCapture(sink, fixture.Fault.Cancellation) : null,
                 trustedCapturedRecord: Capture).RunAsync(fixture.Launch, fixture.Fault.Cancellation.Token, data);
             work = result.Value?.Work; completion = result.Value?.Completion ?? result.Failure;
-            captured = result.Value?.CurrentCaptureValid; accepted = result.Value?.DurableStateAccepted == true;
+            captured = result.Value?.CurrentCaptureValid; accepted = result.Value is { DurableStateAccepted: true };
             preparationFailure = result.Value?.PreparationFailure ?? SolusFreshReviewFailure.None;
-            recovered = result.Value?.RecoveredWithoutWork == true;
+            recovered = result.Value is { RecoveredWithoutWork: true };
         }
         if (work?.ProductReviewAccepted == true && scenario is "useful" or "six-tools" or "escaped")
         {

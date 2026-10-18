@@ -10,7 +10,7 @@ internal sealed class ScriptedHandler : HttpMessageHandler
 {
     private readonly JsonDocument script;
     internal int Round;
-    internal long InputTokens = 8192, OutputTokens = 512;
+    internal readonly long InputTokens = 8192, OutputTokens = 512;
     internal int DelayMilliseconds;
     internal readonly List<Dictionary<string, object?>> Wire = [];
     internal int Sends;

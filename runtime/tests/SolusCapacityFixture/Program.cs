@@ -26,6 +26,7 @@ internal static class Program
             }
             return 0;
         }
+        // The proof executable reports only fixed codes; raw exceptions can contain private Host inputs.
         catch (Exception error)
         {
             Console.Error.WriteLine("APR_SOLUS_CAPACITY_FAILED " + Proof.Stage + "_" +

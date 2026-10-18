@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Managed mode qualifies installed Solus review capacity. Explicit framework/aot/all
-# retain the credential-free legacy evaluation proof until its owning retirement.
+# retain the credential-free APR evaluation proof until its owning retirement.
 set -euo pipefail
 umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
