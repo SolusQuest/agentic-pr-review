@@ -268,23 +268,36 @@ export async function runIsolatedFixture({
       packages,
     ]);
     assert.ok(output.startsWith(prefix) && output.indexOf('\n') === output.length - 1);
+    assert.ok(Buffer.byteLength(output, 'utf8') <= 32768);
     const facts = JSON.parse(output.slice(prefix.length));
     assert.equal(digest(await readFile('/etc/hosts')), original.hosts);
     assert.equal(digest(await readFile('/etc/ssl/certs/ca-certificates.crt')), original.trust);
     for (const kind of ['net', 'mnt'])
       assert.equal(await readlink('/proc/self/ns/' + kind), original.namespaces[kind]);
-    process.stdout.write(
+    const workflow = {};
+    if (childName === 'archive-child.mjs') {
+      for (const [field, variable] of [
+        ['workflow_run_id', 'GITHUB_RUN_ID'],
+        ['workflow_run_attempt', 'GITHUB_RUN_ATTEMPT'],
+      ]) {
+        assert.match(process.env[variable] ?? '', /^[1-9][0-9]{0,18}$/u);
+        workflow[field] = process.env[variable];
+      }
+    }
+    const receipt =
       prefix +
-        JSON.stringify({
-          ...facts,
-          source_commit: source,
-          source_tree: tree,
-          probe_sha256: digest(await readFile(join(root, 'probe/NetworkProbe.dll'))),
-          runtime_archive_sha512: runtimeSha512,
-          outside_mounts_unchanged: true,
-        }) +
-        '\n',
-    );
+      JSON.stringify({
+        ...facts,
+        ...workflow,
+        source_commit: source,
+        source_tree: tree,
+        probe_sha256: digest(await readFile(join(root, 'probe/NetworkProbe.dll'))),
+        runtime_archive_sha512: runtimeSha512,
+        outside_mounts_unchanged: true,
+      }) +
+      '\n';
+    assert.ok(Buffer.byteLength(receipt, 'utf8') <= 32768);
+    process.stdout.write(receipt);
   } catch {
     process.stderr.write('APR_D5_NETWORK_FAILURE stage=' + stage + '\n');
     process.exitCode = 1;

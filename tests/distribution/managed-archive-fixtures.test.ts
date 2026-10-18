@@ -111,6 +111,78 @@ describe('D5 bounded external source and provider services', () => {
     await expect(github.handle(request.incoming, request.response)).rejects.toThrow();
   });
 
+  test('holds known-commit readback only after the current invocation writes', async () => {
+    const github = createGitHubFixture('workflow');
+    const route = `/repos/${repository}/issues/comments/701`;
+    const seed = exchange('api.github.com', `/repos/${repository}/issues/147/comments`, 'POST', {
+      body: 'previous accepted comment',
+    });
+    await github.handle(seed.incoming, seed.response);
+    github.holdReadback(true);
+    const before = exchange('api.github.com', route);
+    await github.handle(before.incoming, before.response);
+    expect(before.response.status).toBe(200);
+    expect(github.knownCommitBarrier).toBe(false);
+    const write = exchange('api.github.com', route, 'PATCH', { body: 'current committed comment' });
+    await github.handle(write.incoming, write.response);
+    expect(write.response.status).toBe(200);
+    const after = exchange('api.github.com', route);
+    await github.handle(after.incoming, after.response);
+    expect(after.response.status).toBe(0);
+    expect(github.knownCommitBarrier).toBe(true);
+    expect(github.writes).toBe(2);
+    github.holdReadback(false);
+    const recovery = exchange('api.github.com', route);
+    await github.handle(recovery.incoming, recovery.response);
+    expect(JSON.parse(recovery.response.bytes.toString()).body).toBe('current committed comment');
+    expect(github.writes).toBe(2);
+  });
+
+  test.each(['missing-usage', 'incomplete-tools', 'malformed-final'])(
+    'applies the intended %s fault to actual provider response bytes',
+    async (mode) => {
+      const provider = createProviderFixture(createGitHubFixture('workflow'));
+      provider.configure(mode, null);
+      const body = {
+        model: 'deepseek-flash',
+        max_tokens: 1024,
+        stream: false,
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'high',
+        tools: ['list_changed_files', 'list_files', 'read_diff', 'read_file', 'search_text'].map(
+          (name) => ({ type: 'function', function: { name } }),
+        ),
+        messages: [{ role: 'user', content: 'review' }],
+      };
+      const first = exchange('api.deepseek.com', '/chat/completions', 'POST', body);
+      await provider.handle(first.incoming, first.response);
+      const response = JSON.parse(first.response.bytes.toString());
+      expect(first.response.status).toBe(200);
+      expect(response.choices[0].message.tool_calls).toHaveLength(3);
+      if (mode === 'missing-usage') expect(response).not.toHaveProperty('usage');
+      else expect(response.usage.total_tokens).toBe(15);
+      if (mode === 'incomplete-tools') expect(response.choices[0].finish_reason).toBe('length');
+      if (mode === 'malformed-final') {
+        body.messages.push(response.choices[0].message);
+        for (let index = 0; index < 3; index++)
+          body.messages.push({
+            role: 'tool',
+            content: JSON.stringify({
+              observation_id: 'unit-observation',
+              path: 'Caller.cs',
+              content: 'Lookup.Find(key).Trim()',
+            }),
+          });
+        const final = exchange('api.deepseek.com', '/chat/completions', 'POST', body);
+        await provider.handle(final.incoming, final.response);
+        expect(JSON.parse(final.response.bytes.toString()).choices[0].message.content).toBe('{');
+        expect(provider.receipts.filter((receipt) => receipt.kind === 'completed-round')).toEqual(
+          [],
+        );
+      }
+    },
+  );
+
   test('rejects a missing restored prefix before issuing a provider response', async () => {
     const github = createGitHubFixture('workflow'),
       provider = createProviderFixture(github);

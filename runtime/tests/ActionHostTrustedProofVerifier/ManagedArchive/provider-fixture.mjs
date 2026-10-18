@@ -136,27 +136,38 @@ export function createProviderFixture(github) {
         };
         message = {
           role: 'assistant',
-          content: JSON.stringify(terminal),
+          content: mode === 'malformed-final' ? '{' : JSON.stringify(terminal),
           reasoning_content: reasoningCanary + ordinal + '-final',
         };
-        context = [...body.messages, message];
-        previousContext = structuredClone(context);
-        receipts.push({
-          kind: 'completed-round',
-          ordinal,
-          sends: 2,
-          tools: 3,
-          messages: context.length,
-          sha256: hash(context),
-        });
+        if (mode !== 'malformed-final') {
+          context = [...body.messages, message];
+          previousContext = structuredClone(context);
+          receipts.push({
+            kind: 'completed-round',
+            ordinal,
+            sends: 2,
+            tools: 3,
+            messages: context.length,
+            sha256: hash(context),
+          });
+        }
         if (mode === 'stale') github.setStale();
       }
-      json(response, {
+      const result = {
         id: 'd5-synthetic',
         object: 'chat.completion',
         model: 'deepseek-flash',
         choices: [
-          { index: 0, finish_reason: requests.length === 1 ? 'tool_calls' : 'stop', message },
+          {
+            index: 0,
+            finish_reason:
+              mode === 'incomplete-tools'
+                ? 'length'
+                : requests.length === 1
+                  ? 'tool_calls'
+                  : 'stop',
+            message,
+          },
         ],
         usage: {
           prompt_tokens: 10,
@@ -165,7 +176,9 @@ export function createProviderFixture(github) {
           prompt_cache_hit_tokens: 4,
           prompt_cache_miss_tokens: 6,
         },
-      });
+      };
+      if (mode === 'missing-usage') delete result.usage;
+      json(response, result);
     },
   };
 }

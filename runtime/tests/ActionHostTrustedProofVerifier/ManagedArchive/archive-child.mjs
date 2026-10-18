@@ -37,7 +37,7 @@ try {
   assert.equal(sdkProbe.stdout, '');
   const settings = JSON.parse(await readFile(join(root, 'archive-settings.json'), 'utf8'));
   const repo = settings.repo;
-  const { inspectManagedPackage } = await import(
+  const { inspectManagedPackage, canonicalJson, sha256 } = await import(
     join(repo, 'scripts/release/build-payload.format.mjs')
   );
   const { readGeneratedActionAudit: audit } = await import(
@@ -483,7 +483,14 @@ try {
   assertAccounting(third, 2);
   assert.equal(provider.count, 2);
   assert.equal(github.writes, 3);
-  for (const mode of ['provider-failure', 'stale', 'cancel']) {
+  for (const mode of [
+    'provider-failure',
+    'missing-usage',
+    'malformed-final',
+    'incomplete-tools',
+    'stale',
+    'cancel',
+  ]) {
     official.restore(accepted);
     github.restore(acceptedComment);
     const before = github.writes;
@@ -491,6 +498,7 @@ try {
     assert.notEqual(result.status, 'reviewed');
     assert.equal(github.writes, before);
     assert.deepEqual(github.snapshot(), acceptedComment);
+    assert.equal(provider.count, mode === 'malformed-final' || mode === 'stale' ? 2 : 1);
     if (mode === 'stale') assertAccounting(result, 2);
     if (mode === 'cancel')
       assert.ok(
@@ -598,7 +606,19 @@ try {
         source_tree: settings.tree,
         compiled_identity: settings.compiled.compiledIdentity,
         archive_sha256: receipt.archiveSha256,
+        archive_size: receipt.archiveSize,
         archive_inventory: receipt.members.length,
+        archive_inventory_sha256: sha256(Buffer.from(canonicalJson(receipt.members))),
+        entry_dll_sha256: receipt.members.find(
+          (member) => member.path === 'agentic-pr-review/AgenticPrReview.Runtime.dll',
+        ).sha256,
+        deps_sha256: receipt.members.find(
+          (member) => member.path === 'agentic-pr-review/AgenticPrReview.Runtime.deps.json',
+        ).sha256,
+        runtimeconfig_sha256: receipt.members.find(
+          (member) =>
+            member.path === 'agentic-pr-review/AgenticPrReview.Runtime.runtimeconfig.json',
+        ).sha256,
         build_id: receipt.identity.buildId,
         builder: closure.toolchain,
         dependency_closure: closure.dependencies,

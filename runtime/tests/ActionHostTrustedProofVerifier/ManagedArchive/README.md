@@ -35,10 +35,19 @@ source through the authenticated API redirect to anonymous codeload. Three
 successive source heads exercise fresh and restored work with grounded findings;
 same-head recovery must avoid provider work. Failure, cancellation, stale-head,
 wrong-key, reset refusal and hostile loading cases require no sticky writes.
+Missing usage, malformed final JSON and truncated tool-call responses execute
+through the same original archive and must refuse acceptance. The known-commit
+crash barrier holds readback only after the current invocation has written;
+recovery must perform no provider work or duplicate sticky write.
 Ambient CLR loading variables must not reach the actual child. Per-invocation
 owner cleanup precedes every presentation. Only bounded counts, closed outcomes,
 source and archive identities leave the temporary consumer. A failure is a failed
 qualification; fixture unit tests alone do not establish this proof.
+
+Each bounded receipt binds its workflow run/attempt, original archive size/hash,
+inventory digest, entry/deps/runtimeconfig hashes, dependency closure, source,
+Action bundle and runner. The source and Action projection identities remain
+distinct; no receipt relabels a supporting diagnostic as qualification.
 
 The preparation probe is a separate supporting diagnostic. It compares pure
 schema construction with JSON reflection disabled/enabled and, only after a
