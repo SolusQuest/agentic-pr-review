@@ -458,3 +458,37 @@ export function verifyCleanup(value) {
   assert.equal(value, 'removed');
   return true;
 }
+
+export function verifyRecovery(before, after, recovered) {
+  assert.equal(recovered.recovered_without_work, true);
+  assert.equal(recovered.sends, 0);
+  assert.equal(recovered.outcome, null);
+  assert.equal(recovered.current_attempts, null);
+  assert.equal(recovered.current_tools, null);
+  assert.deepEqual(after.slice(0, before.length), before);
+  const delta = after.slice(before.length);
+  const kinds = new Set([
+    'locator_root',
+    'lineage_head',
+    'candidate',
+    'publication_intent',
+    'acceptance',
+    'publication_failure',
+    'abandonment',
+    'reset',
+    'expiry_transition',
+    'cleanup',
+    'context_claim',
+  ]);
+  const uploads = {};
+  for (const operation of delta) {
+    // Known accepted-state reconciliation may retain a physical predecessor
+    // or repair storage. It cannot become another review, claim or publication.
+    assert.equal(operation.operation, 'upload');
+    assert.ok(kinds.has(operation.kind));
+    assert.notEqual(operation.kind, 'context_claim');
+    assert.equal(operation.from_current_capture, false);
+    uploads[operation.kind] = (uploads[operation.kind] ?? 0) + 1;
+  }
+  return uploads;
+}

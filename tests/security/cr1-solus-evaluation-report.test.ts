@@ -9,6 +9,7 @@ import {
   verifySuccessor,
   verifyGrowth,
   verifyCleanup,
+  verifyRecovery,
 } from '../../runtime/tests/SolusEvaluationFixture/report.mjs';
 
 // Authored report DATA tests only. These rows cannot create an EvaluationSubject
@@ -252,5 +253,41 @@ describe('managed Solus independent report admission', () => {
   test('requires actual cleanup acknowledgement', () => {
     expect(verifyCleanup('removed')).toBe(true);
     expect(() => verifyCleanup('retained')).toThrow();
+  });
+});
+
+// Recovery preserves logical work/effects while allowing existing R4 physical
+// predecessor retention. Whole-storage equality would reject valid recovery.
+describe('recovery effect attribution', () => {
+  const before = [{ operation: 'sticky', written: true }];
+  const recovered = {
+    recovered_without_work: true,
+    sends: 0,
+    outcome: null,
+    current_attempts: null,
+    current_tools: null,
+  };
+  const retained = { operation: 'upload', kind: 'candidate', from_current_capture: false };
+  test('allows physical predecessor retention without inventing a new review', () => {
+    expect(verifyRecovery(before, [...before, retained], recovered)).toEqual({ candidate: 1 });
+  });
+  test.each([
+    'sticky',
+    'inline',
+    'claim',
+    'current-capture',
+    'provider',
+    'tool',
+    'rewritten-prefix',
+  ])('rejects %s replay', (kind) => {
+    const state = { ...recovered };
+    const after = [...before, { ...retained }];
+    if (kind === 'sticky' || kind === 'inline') after[1].operation = kind;
+    if (kind === 'claim') after[1].kind = 'context_claim';
+    if (kind === 'current-capture') after[1].from_current_capture = true;
+    if (kind === 'provider') state.sends = 1;
+    if (kind === 'tool') state.current_tools = 1;
+    if (kind === 'rewritten-prefix') after[0] = { operation: 'sticky', written: false };
+    expect(() => verifyRecovery(before, after, state)).toThrow();
   });
 });

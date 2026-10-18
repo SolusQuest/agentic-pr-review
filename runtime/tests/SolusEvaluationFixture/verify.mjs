@@ -19,6 +19,7 @@ import {
   verifySuccessor,
   verifyGrowth,
   verifyCleanup,
+  verifyRecovery,
   classifyRefusal,
 } from './report.mjs';
 
@@ -281,6 +282,7 @@ try {
   verifyQuality(quality, source);
   stage = 'same_head';
   let same;
+  let recoveryUploads;
   await world(async (run, operations) => {
     const seed = run('seed').row;
     assert.equal(seed.durable_accepted, true);
@@ -296,7 +298,7 @@ try {
     assert.equal(recovered.recovered_without_work, true);
     assert.equal(recovered.outcome, null);
     assert.equal(recovered.sends, 0);
-    assert.deepEqual(await operations(), after);
+    recoveryUploads = verifyRecovery(after, await operations(), recovered);
     assert.equal(run('readback').row.readback_verified, true);
   });
   stage = 'verified_ahead';
@@ -453,6 +455,7 @@ try {
     quality_cases: quality.length,
     quality: quality.map((row) => row.outcome),
     same_head: same,
+    recovery_reconciliation_uploads: recoveryUploads,
     ahead,
     negative_results: negatives.map((row) => ({
       mode: row.mode,
