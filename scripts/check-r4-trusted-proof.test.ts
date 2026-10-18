@@ -893,6 +893,38 @@ describe('CR1 authorized actual APR private package proof route', () => {
         ).if;
       },
     ],
+    [
+      'V3 proof removed',
+      (w: any) => {
+        w.jobs['install-proof'].steps = w.jobs['install-proof'].steps.filter(
+          (step: any) => step.name !== 'CR1-V3 actual managed review capacity proof',
+        );
+      },
+    ],
+    [
+      'V3 credential injection',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-V3 actual managed review capacity proof',
+        ).env.GH_TOKEN = '${{ github.token }}';
+      },
+    ],
+    [
+      'V3 substitute command',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-V3 actual managed review capacity proof',
+        ).run = 'echo passed';
+      },
+    ],
+    [
+      'V3 collect mode bypass',
+      (w: any) => {
+        delete w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-V3 actual managed review capacity proof',
+        ).if;
+      },
+    ],
   ])('rejects %s without weakening historical secret routes', (_label, mutate) => {
     const workflowsRoot = copiedWorkflowsRoot();
     const candidate = path.join(workflowsRoot, 'solus-agent-package-proof.yml');

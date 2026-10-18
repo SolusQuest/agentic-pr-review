@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 
 namespace AgenticPrReview.Runtime.Agent;
 
@@ -231,6 +232,55 @@ internal sealed record ReviewTokenBudget(long UncachedInputTokens, long CachedIn
     internal bool IsValid => UncachedInputTokens is > 0 and <= AgentLimits.InputTokens &&
         CachedInputTokens is > 0 and <= AgentLimits.CachedInputTokens &&
         OutputTokens is > 0 and <= AgentLimits.OutputTokens;
+}
+
+// The managed review has its own admitted defaults. Read omission from the
+// authenticated policy bytes; a native Current default is not a selected Solus
+// value. Explicit values either survive exactly or reject before a state claim.
+internal sealed record SolusReviewCapacity(int ModelCalls, int TimeoutSeconds, ReviewTokenBudget Tokens)
+{
+    internal long InputAllowance => Math.Min(Cr1DevelopmentProfile.InputTokenAllowance,
+        Tokens.UncachedInputTokens + Tokens.CachedInputTokens);
+
+    internal static bool TrySelect(ReadOnlySpan<byte> authenticatedConfig, out SolusReviewCapacity? capacity)
+    {
+        capacity = null;
+        try
+        {
+            using var document = JsonDocument.Parse(authenticatedConfig.ToArray(), new() { MaxDepth = 16 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
+            var calls = (long)Cr1DevelopmentProfile.LogicalCalls;
+            var seconds = (long)Cr1DevelopmentProfile.DurationSeconds;
+            var uncached = (long)Cr1DevelopmentProfile.InputTokenAllowance;
+            var cached = (long)Cr1DevelopmentProfile.InputTokenAllowance;
+            var output = (long)Cr1DevelopmentProfile.OutputTokenAllowance;
+            if (document.RootElement.TryGetProperty("review", out var review))
+            {
+                if (review.ValueKind != JsonValueKind.Object) return false;
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var field in review.EnumerateObject())
+                {
+                    if (!seen.Add(field.Name) || field.Value.ValueKind != JsonValueKind.Number ||
+                        !field.Value.TryGetInt64(out var value) || value <= 0) return false;
+                    switch (field.Name)
+                    {
+                        case "maxModelCalls": calls = value; break;
+                        case "timeoutSeconds": seconds = value; break;
+                        case "maxUncachedInputTokens": uncached = value; break;
+                        case "maxCachedInputTokens": cached = value; break;
+                        case "maxOutputTokens": output = value; break;
+                        default: return false;
+                    }
+                }
+            }
+            if (calls > Cr1DevelopmentProfile.LogicalCalls || seconds > Cr1DevelopmentProfile.DurationSeconds ||
+                uncached > Cr1DevelopmentProfile.InputTokenAllowance || cached > Cr1DevelopmentProfile.InputTokenAllowance ||
+                output > Cr1DevelopmentProfile.OutputTokenAllowance) return false;
+            capacity = new((int)calls, (int)seconds, new(uncached, cached, output));
+            return true;
+        }
+        catch (JsonException) { return false; }
+    }
 }
 
 // CR1's isolated .1 numeric contract; not a selectable AgentLimitProfile or

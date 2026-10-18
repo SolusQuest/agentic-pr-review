@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Credential-free, bounded R7 capacity proof. Each mode compiles its own exact-source
-# evaluation fixture once and executes the same authored inventory in fresh children.
+# Managed mode qualifies installed Solus review capacity. Explicit framework/aot/all
+# retain the credential-free APR evaluation proof until its owning retirement.
 set -euo pipefail
 umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,10 +10,13 @@ TEST_PROJECT="${REPO_ROOT}/runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPr
 CORPUS="${REPO_ROOT}/runtime/tests/fixtures/agent/r7/capacity/cases.json"
 ASSEMBLY="AgenticPrReview.Runtime.ReviewEvaluationFixture"
 DOTNET_CMD="${DOTNET_CMD:-dotnet}"
-MODE="${1:-all}"
-case "${MODE}" in framework|aot|all) ;; *) printf 'APR_R7_CAPACITY_ARGUMENTS\n' >&2; exit 2 ;; esac
+MODE="${1:-managed}"
+case "${MODE}" in managed|framework|aot|all) ;; *) printf 'APR_R7_CAPACITY_ARGUMENTS\n' >&2; exit 2 ;; esac
 [[ $# -le 1 ]] || { printf 'APR_R7_CAPACITY_ARGUMENTS\n' >&2; exit 2; }
 cd "${REPO_ROOT}"
+if [[ "${MODE}" == managed ]]; then
+  exec node runtime/tests/SolusCapacityFixture/verify.mjs
+fi
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || { printf 'APR_R7_CAPACITY_SOURCE_DIRTY\n' >&2; exit 1; }
 SOURCE_SHA="$(git rev-parse HEAD)"
 SOURCE_TREE="$(git rev-parse 'HEAD^{tree}')"

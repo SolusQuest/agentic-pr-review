@@ -946,6 +946,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             },
             run: 'sudo apt-get update\nsudo apt-get install -y strace\nbash runtime/scripts/verify-r6-economics.sh managed\n',
           },
+          {
+            name: 'CR1-V3 actual managed review capacity proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'bash runtime/scripts/verify-r7-capacity.sh managed',
+          },
         ],
       },
     },

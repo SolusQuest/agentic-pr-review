@@ -106,7 +106,9 @@ internal sealed class SolusFreshReviewComposition
         var inputFailure = ValidateInput(prepared, reviewData, out var instructions, out var data);
         if (inputFailure != SolusFreshReviewFailure.None) return new(executionId, inputFailure);
 
-        var budget = SolusReviewBridge.BoundBudget(prepared.Policy.LimitAuthority.TokenBudget);
+        if (!SolusReviewCapacity.TrySelect(prepared.Policy.ConfigBytes.AsSpan(), out var capacity))
+            return new(executionId, SolusFreshReviewFailure.InputProfileRejected);
+        var budget = capacity!.Tokens;
         if (!prepared.Journal.TryBeginBusinessOperation(ActionHostOperationKind.Provider,
                 prepared.CancellationToken, out var operation))
             return new(executionId, SolusFreshReviewFailure.Cancelled);
@@ -173,6 +175,8 @@ internal sealed class SolusFreshReviewComposition
     {
         instructions = Control + Encoding.UTF8.GetString(prepared.Policy.InstructionBytes.AsSpan());
         data = [];
+        if (!SolusReviewCapacity.TrySelect(prepared.Policy.ConfigBytes.AsSpan(), out _))
+            return SolusFreshReviewFailure.InputProfileRejected;
         var contents = prepared.RestoreRequest.CurrentReviewContext.Contents;
         if (contents.Length != 1 || contents[0] is not ProjectTextContent context)
             return SolusFreshReviewFailure.HostFailure;
