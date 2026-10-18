@@ -6,7 +6,7 @@
 #   framework   Framework-dependent bootstrap and actual ActionHost entrypoint smoke.
 #   aot         Native AOT bootstrap smoke: publish linux-x64, execute published binary,
 #               cmp goldens.
-#   all         test -> framework -> aot.
+#   all         test -> framework -> managed.
 #
 # Comparison is strictly byte-level via cmp. No JSON parsing, sorting, field removal, or
 # rewriting is permitted before cmp.
@@ -175,26 +175,31 @@ run_aot() {
   node "${REPO_ROOT}/tests/distribution/verify-package.mjs" "${REPO_ROOT}"
 }
 
+run_managed() {
+  node "${REPO_ROOT}/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+}
+
 run_all() {
   run_test
   run_framework
-  run_aot
+  run_managed
 }
 
 subcommand="${1:-all}"
 case "${subcommand}" in
   test)      run_test ;;
   framework) run_framework ;;
+  managed) run_managed ;;
   aot)       run_aot ;;
   all)       run_all ;;
   -h|--help|help)
     cat <<'USAGE'
-Usage: verify-runtime.sh [test|framework|aot|all]
+Usage: verify-runtime.sh [test|framework|managed|aot|all]
 
   test        Run the runtime test project.
   framework   Bootstrap and actual ActionHost entrypoint smoke.
   aot         Native AOT bootstrap and actual ActionHost smoke (linux-x64).
-  all         Run test, then framework, then aot (default).
+  all         Run test, then framework, then actual managed archive (default).
 USAGE
     ;;
   *)

@@ -51,4 +51,5 @@ for (const role of ['first', 'independent-second']) {
       );
     },
   });
+  if (process.exitCode) break;
 }

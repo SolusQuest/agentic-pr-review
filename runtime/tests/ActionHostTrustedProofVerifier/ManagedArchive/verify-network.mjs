@@ -61,6 +61,10 @@ export async function runIsolatedFixture({
             /^APR_D5_ARCHIVE_FAILURE stage=[a-z0-9-]+ code=(assertion|harness)$/u.test(line),
           );
         if (failure) process.stderr.write(failure + '\n');
+        const detail = result.stderr
+          .split('\n')
+          .find((line) => line.startsWith('APR_D5_ARCHIVE_DIAGNOSTIC '));
+        if (detail && detail.length <= 1024) process.stderr.write(detail + '\n');
       }
       assert.equal(result.status, 0);
       return result.stdout;

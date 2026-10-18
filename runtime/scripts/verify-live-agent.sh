@@ -6,6 +6,10 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == managed && "$#" -eq 1 ]]; then
+  exec node "$(dirname "${BASH_SOURCE[0]}")/../tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+fi
+
 # The secret-bearing workflow invokes this exact branch. Bash performs only
 # parameter expansion before replacing itself with the already prepared and
 # admitted C# supervisor; no helper process inherits the provider credential.
@@ -924,7 +928,7 @@ case "${subcommand}" in
     esac
     ;;
   -h|--help|help)
-    printf '%s\n' 'Usage: verify-live-agent.sh [deterministic|aot|live [--prepare|--verify-prepared|--dry-run]]'
+    printf '%s\n' 'Usage: verify-live-agent.sh [deterministic|managed|aot|live [--prepare|--verify-prepared|--dry-run]]'
     ;;
   *)
     printf 'APR_R3_LIVE_COMMAND_INVALID %s\n' "${subcommand:-missing}" >&2

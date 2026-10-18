@@ -2,8 +2,11 @@
 set -euo pipefail
 
 mode="${1:-}"
+if [[ "$mode" == managed && "$#" -eq 1 ]]; then
+  exec node "$(dirname "${BASH_SOURCE[0]}")/../tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+fi
 if [[ "$#" -ne 1 || ( "$mode" != framework && "$mode" != aot ) ]]; then
-  echo "usage: runtime/scripts/verify-action-host.sh <framework|aot>" >&2
+  echo "usage: runtime/scripts/verify-action-host.sh <framework|managed|aot>" >&2
   exit 2
 fi
 if [[ "$(uname -s)" != Linux ]]; then

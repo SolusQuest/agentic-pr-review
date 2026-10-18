@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Current qualification uses the actual managed archive. Ordinary PR/fork CI
+# retains the full public FDD Host invariant corpus without private feed access.
+case "${1:-framework}" in
+  framework)
+    [[ "$#" -le 1 ]] || exit 2
+    exec node "$(dirname "${BASH_SOURCE[0]}")/../tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-regression.mjs"
+    ;;
+  managed)
+    [[ "$#" -eq 1 ]] || exit 2
+    exec node "$(dirname "${BASH_SOURCE[0]}")/../tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+    ;;
+  legacy-aot) shift ;;
+  *) exit 2 ;;
+esac
+
+# Historical native implementation remains explicit until D6 retires it.
+
 if [[ "$#" -ne 0 ]]; then
   printf 'APR_R4_E2P_V2_FAILURE stage=proof case=clean-source code=usage status=failed\n' >&2
   exit 2

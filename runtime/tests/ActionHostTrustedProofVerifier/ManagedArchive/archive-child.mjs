@@ -25,6 +25,7 @@ import {
 import { createProviderFixture, reasoningCanary } from './provider-fixture.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
+let diagnostic = {};
 const servers = [],
   errors = [];
 try {
@@ -45,7 +46,12 @@ try {
   );
   const receipt = JSON.parse(await readFile(join(root, 'package/receipt.json'), 'utf8'));
   const archive = await readFile(join(root, 'package', receipt.archiveName));
-  inspectManagedPackage(archive, receipt);
+  const inspected = inspectManagedPackage(archive, receipt);
+  const closure = inspected.manifest.buildInputs;
+  const solus = closure.dependencies.filter((x) => x.id.startsWith('solusagent.'));
+  assert.equal(solus.length, 5);
+  assert.ok(solus.every((x) => x.version === '0.1.0-internal.4'));
+  assert.equal(settings.compiled.compiledIdentity, receipt.identity.informationalVersion);
   const runtime = await readFile(join(root, 'runtime.tar.gz'));
   const bundle = await readFile(join(repo, '.github/actions/agentic-pr-review/dist/index.js'));
   const workflow = (
@@ -142,7 +148,7 @@ try {
   }
   const results = [];
   async function run(name, ordinal, options = {}) {
-    stage = name;
+    stage = name.toLowerCase();
     const invocation = join(root, 'case-' + results.length),
       action = join(invocation, 'action'),
       runner = join(invocation, 'runner'),
@@ -172,6 +178,7 @@ try {
       config = join(invocation, 'config.json');
     const runId = 1101 + results.length;
     github.configure(ordinal, runId);
+    github.holdReadback(!!options.knownCommit);
     const runtimeToken = official.configure(runId);
     provider.configure(options.mode, options.prefix ?? null);
     for (const file of [output, summary, auditPath]) await writeFile(file, '', { mode: 0o600 });
@@ -259,6 +266,18 @@ try {
             }
           }, 20)
         : null;
+    const killKnown = options.knownCommit
+      ? setInterval(() => {
+          if (!github.knownCommitBarrier) return;
+          void audit(auditPath).then((records) => {
+            const owned = records.find((x) => x.kind === 'spawn');
+            if (owned?.pid) {
+              clearInterval(killKnown);
+              process.kill(owned.pid, 'SIGKILL');
+            }
+          });
+        }, 20)
+      : null;
     let exit;
     try {
       exit = await new Promise((done, reject) => {
@@ -268,18 +287,50 @@ try {
     } finally {
       clearTimeout(watchdog);
       if (cancel) clearInterval(cancel);
+      if (killKnown) clearInterval(killKnown);
     }
+    diagnostic = {
+      external_errors: errors.length,
+      sends: provider.count,
+      github_requests: github.calls.length,
+      official_requests: official.calls.length,
+    };
+    if (errors[0])
+      diagnostic.service_site =
+        /(?:github-fixture|provider-fixture|official-platform|archive-child)\.mjs:[0-9]+/u.exec(
+          errors[0].stack,
+        )?.[0] ?? 'unknown';
     assert.equal(errors.length, 0, 'd5_external_service_refused');
     const records = await audit(auditPath, { settled: true }),
       launch = records.find((x) => x.kind === 'spawn'),
       close = records.find((x) => x.kind === 'managed-close');
+    diagnostic.host_started = !!launch;
+    diagnostic.host_exit = close?.code ?? -1;
+    diagnostic.status =
+      close?.completion?.payload?.status ?? close?.completion?.status ?? 'unavailable';
     const presentation = records.filter((x) => x.kind === 'presentation');
     assert.ok(presentation.length);
     for (const fact of presentation)
       for (const [key, value] of Object.entries(fact))
         if (key !== 'kind') assert.equal(value, true, 'd5_cleanup_' + key);
+    const observedStdout = Buffer.concat(chunks).toString();
+    const maskValues = new Set([
+      githubKey,
+      providerKey,
+      stateKey,
+      env['INPUT_STATE-KEY'],
+      runtimeToken,
+    ]);
+    const visibleStdout = observedStdout
+      .split('\n')
+      .filter((line) => {
+        if (!line.startsWith('::add-mask::')) return true;
+        assert.ok(maskValues.has(line.slice('::add-mask::'.length)), 'd5_expected_mask_control');
+        return false;
+      })
+      .join('\n');
     const text =
-      Buffer.concat(chunks).toString() +
+      visibleStdout +
       (await readFile(summary, 'utf8')) +
       (await readFile(output, 'utf8')) +
       (github.comment?.body ?? '');
@@ -353,6 +404,28 @@ try {
     assert.equal(github.writes, before);
     assert.deepEqual(github.snapshot(), acceptedComment);
   }
+  official.restore(accepted);
+  github.restore(acceptedComment);
+  const beforeKnown = github.writes;
+  const crashed = await run('known-commit-crash', 1, { prefix, knownCommit: true });
+  assert.notEqual(crashed.status, 'reviewed');
+  assert.equal(github.writes, beforeKnown + 1);
+  const recovered = await run('known-commit-recovery', 1, { noProvider: true });
+  assert.equal(recovered.status, 'reviewed');
+  assert.equal(provider.count, 0);
+  assert.equal(github.writes, beforeKnown + 1);
+  const corrupted = accepted.map(([id, item]) => [
+    id,
+    { metadata: structuredClone(item.metadata), bytes: Buffer.from(item.bytes) },
+  ]);
+  for (const [, item] of corrupted) item.bytes[item.bytes.length - 1] ^= 1;
+  official.restore(corrupted);
+  github.restore(acceptedComment);
+  const beforeCorrupt = github.writes;
+  const refusedCorrupt = await run('corrupt-context-artifact', 1, { prefix });
+  assert.notEqual(refusedCorrupt.status, 'reviewed');
+  assert.equal(provider.count, 0);
+  assert.equal(github.writes, beforeCorrupt);
   for (const options of [
     { wrongKey: true },
     { reset: true },
@@ -380,7 +453,13 @@ try {
         source_tree: settings.tree,
         compiled_identity: settings.compiled.compiledIdentity,
         archive_sha256: receipt.archiveSha256,
-        archive_inventory: receipt.files?.length ?? receipt.inventory?.length,
+        archive_inventory: receipt.members.length,
+        build_id: receipt.identity.buildId,
+        builder: closure.toolchain,
+        dependency_closure: closure.dependencies,
+        lock_sha256: closure.lockSha256,
+        assets_sha256: closure.assetsSha256,
+        producer_source_tree: receipt.identity.sourceTree,
         action_bundle_sha256: (await import('node:crypto'))
           .createHash('sha256')
           .update(bundle)
@@ -403,6 +482,11 @@ try {
       '\n',
   );
 } catch (error) {
+  diagnostic.assertion_site =
+    /(?:github-fixture|provider-fixture|official-platform|archive-child)\.mjs:[0-9]+/u.exec(
+      error.stack,
+    )?.[0] ?? 'unknown';
+  process.stderr.write('APR_D5_ARCHIVE_DIAGNOSTIC ' + JSON.stringify(diagnostic) + '\n');
   // No request/response/body/path/credential bytes are published on a failed proof.
   process.stderr.write(
     'APR_D5_ARCHIVE_FAILURE stage=' +

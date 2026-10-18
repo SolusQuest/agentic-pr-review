@@ -145,6 +145,8 @@ export function createGitHubFixture(workflow) {
     comment = null,
     writes = 0;
   const calls = [];
+  let holdReadback = false,
+    knownCommitBarrier = false;
   const pull = () => ({
     id: 1000,
     number: 147,
@@ -163,6 +165,13 @@ export function createGitHubFixture(workflow) {
   return {
     heads,
     calls,
+    get knownCommitBarrier() {
+      return knownCommitBarrier;
+    },
+    holdReadback(value) {
+      holdReadback = value;
+      knownCommitBarrier = false;
+    },
     get ordinal() {
       return ordinal;
     },
@@ -282,6 +291,11 @@ export function createGitHubFixture(workflow) {
         comment = issueComment(JSON.parse(await readBody(request)).body);
         writes++;
         return json(response, comment, request.method === 'POST' ? 201 : 200);
+      }
+      if (suffix === '/issues/comments/701' && request.method === 'GET' && holdReadback) {
+        assert.ok(comment);
+        knownCommitBarrier = true;
+        return;
       }
       if (suffix === '/issues/comments/701' && request.method === 'GET')
         return json(response, comment ?? {}, comment ? 200 : 404);

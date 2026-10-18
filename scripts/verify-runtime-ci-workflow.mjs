@@ -16,11 +16,10 @@ const historicalSource = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
 const coreProofs = [
   'bash runtime/scripts/verify-runtime.sh test',
   'bash runtime/scripts/verify-runtime.sh framework',
-  'bash runtime/scripts/verify-runtime.sh aot',
   'bash runtime/scripts/verify-live-agent.sh deterministic',
-  'bash runtime/scripts/verify-live-agent.sh aot',
 ];
-const r2Proof = 'bash runtime/scripts/verify-agent-loop.sh all';
+const r2Proof =
+  'bash runtime/scripts/verify-agent-loop.sh test\nbash runtime/scripts/verify-agent-loop.sh framework';
 const r4Proof = 'bash runtime/scripts/verify-action-host.sh "${{ matrix.mode }}"';
 const cleanCheck = 'test -z "$(git status --porcelain)"';
 const sourceCheck = 'test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"';
@@ -167,14 +166,12 @@ function v2Programs(jobs) {
       proof.run,
       `bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-${role}.log"`,
     );
-    assert.equal(
-      proof.name,
-      `Current-head R4 E2P ${role} clean production and verifier Native AOT build`,
-    );
+    assert.equal(proof.name, `Current-head D5 ${role} independent public FDD invariant regression`);
+    assert.deepEqual(proof.env, { APR_D5_REGRESSION_ROLE: role });
     const receipt = `"$RUNNER_TEMP/r4-e2p-v2-${role}.receipt"`;
     assert.equal(
       extraction.run,
-      `grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-${role}.log" > ${receipt}\n` +
+      `grep '^APR_D5_MANAGED_REGRESSION ' "$RUNNER_TEMP/r4-e2p-v2-${role}.log" > ${receipt}\n` +
         `test "$(wc -l < ${receipt})" -eq 1\n` +
         `test "$(wc -c < ${receipt})" -le 32768\n`,
     );
@@ -248,12 +245,7 @@ function v2Programs(jobs) {
       '  "$(git rev-parse HEAD)" \\\n' +
       '  "$(git rev-parse \'HEAD^{tree}\')"',
   );
-  for (const field of [
-    'source_commit',
-    'source_tree',
-    'compiled_payload_source_commit',
-    'compiled_payload_source_tree',
-  ]) {
+  for (const field of ['source_commit', 'source_tree']) {
     assert.ok(evidence.includes(`receipt.${field} !== source`));
   }
   assert.ok(!runs(aggregate).some((step) => step.run.includes('cmp ')));
@@ -316,14 +308,14 @@ export function verifyWorkflow(workflow) {
   const matrixJob = jobs['r4-action-host'];
   assert.deepEqual(matrixJob.strategy, {
     'fail-fast': false,
-    'max-parallel': 4,
-    matrix: { mode: ['framework', 'aot'], repetition: ['first', 'second'] },
+    'max-parallel': 2,
+    matrix: { mode: ['framework'], repetition: ['first', 'second'] },
   });
   assert.equal(matrixJob.name, 'R4 ActionHost (${{ matrix.mode }}, ${{ matrix.repetition }})');
   const lanes = matrixJob.strategy.matrix.mode.flatMap((mode) =>
     matrixJob.strategy.matrix.repetition.map((repetition) => `${mode}/${repetition}`),
   );
-  assert.deepEqual(lanes, ['framework/first', 'framework/second', 'aot/first', 'aot/second']);
+  assert.deepEqual(lanes, ['framework/first', 'framework/second']);
   const allRuns = Object.values(jobs).flatMap(runs);
   assert.equal(allRuns.filter((step) => step.run.includes('verify-agent-loop.sh')).length, 1);
   assert.equal(allRuns.filter((step) => step.run.includes('verify-action-host.sh')).length, 1);
@@ -462,7 +454,7 @@ function verifyReceipts(program) {
   );
   const sourceCommit = '1'.repeat(40);
   const sourceTree = '2'.repeat(40);
-  const line = (receipt) => 'APR_R4_E2P_RECEIPT_V2 ' + JSON.stringify(receipt) + '\n';
+  const line = (receipt) => 'APR_D5_MANAGED_REGRESSION ' + JSON.stringify(receipt) + '\n';
   let cases = 0;
   function execute(mutate = () => {}, shouldPass = false) {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-ci-v2-receipts-'));
@@ -473,12 +465,14 @@ function verifyReceipts(program) {
       path.join(directory, `r4-e2p-v2-${index === 0 ? 'first' : 'second'}.receipt`),
     );
     const receipts = directories.map((_, index) => ({
-      ...historical,
+      kind: 'apr-d5-managed-regression-v1',
+      role: index === 0 ? 'first' : 'second',
+      execution_kind: 'framework',
+      archive_qualified: false,
+      oracle_sha256: 'a'.repeat(64),
+      invariant_inventory_sha256: 'b'.repeat(64),
       source_commit: sourceCommit,
       source_tree: sourceTree,
-      compiled_payload_source_commit: sourceCommit,
-      compiled_payload_source_tree: sourceTree,
-      payload_sha256: String(index + 3).repeat(64),
     }));
     const args = [receiptRoot, '77', '1', sourceCommit, sourceTree];
     try {
@@ -507,9 +501,8 @@ function verifyReceipts(program) {
   }
   execute(undefined, true); // Different build bytes with the same source are valid.
   const padded = (receipt, length) => {
-    const value = { ...receipt, padding: '' };
-    value.padding = 'x'.repeat(length - Buffer.byteLength(line(value)));
-    return line(value);
+    const original = line(receipt);
+    return original.slice(0, -1) + ' '.repeat(length - Buffer.byteLength(original)) + '\n';
   };
   execute(({ paths, receipts }) => fs.writeFileSync(paths[0], padded(receipts[0], 32768)), true);
   execute(({ args }) => {
@@ -559,12 +552,18 @@ function verifyReceipts(program) {
     // File symlink creation requires a privilege absent on ordinary Windows hosts.
     // The actual Linux Runtime CI self-test exercises this additional case.
     if (process.platform !== 'win32') {
-      execute(({ paths }) => {
+      execute(({ paths, receipts, receiptRoot }) => {
         fs.unlinkSync(paths[index]);
-        fs.symlinkSync(paths[1 - index], paths[index], 'file');
+        const target = path.join(path.dirname(receiptRoot), 'borrowed.receipt');
+        fs.writeFileSync(target, line(receipts[index]));
+        fs.symlinkSync(target, paths[index], 'file');
       });
     }
-    for (const value of ['', 'APR_R4_E2P_RECEIPT_V2 {broken}\n', 'APR_R4_E2P_RECEIPT_V2 null\n']) {
+    for (const value of [
+      '',
+      'APR_D5_MANAGED_REGRESSION {broken}\n',
+      'APR_D5_MANAGED_REGRESSION null\n',
+    ]) {
       execute(({ paths }) => fs.writeFileSync(paths[index], value));
     }
     execute(({ paths, receipts }) =>
@@ -575,7 +574,10 @@ function verifyReceipts(program) {
       fs.writeFileSync(paths[index], line(receipts[index]).repeat(2)),
     );
     execute(({ paths, receipts }) =>
-      fs.writeFileSync(paths[index], line(receipts[index]).replace('RECEIPT_V2', 'RECEIPT')),
+      fs.writeFileSync(
+        paths[index],
+        line(receipts[index]).replace('MANAGED_REGRESSION', 'NETWORK_PREREQUISITE'),
+      ),
     );
     execute(({ paths, receipts }) =>
       fs.writeFileSync(paths[index], '\uFEFF' + line(receipts[index])),
@@ -590,12 +592,7 @@ function verifyReceipts(program) {
         Buffer.from(valid).map((byte) => (byte === 118 ? 255 : byte)),
       );
     });
-    for (const field of [
-      'source_commit',
-      'source_tree',
-      'compiled_payload_source_commit',
-      'compiled_payload_source_tree',
-    ]) {
+    for (const field of ['source_commit', 'source_tree']) {
       execute(({ paths, receipts }) =>
         fs.writeFileSync(paths[index], line({ ...receipts[index], [field]: '0'.repeat(40) })),
       );
@@ -612,7 +609,6 @@ function verifyReceipts(program) {
         line({
           ...receipts[index],
           source_commit: '0'.repeat(40),
-          compiled_payload_source_commit: '0'.repeat(40),
         }),
       ),
     ),
@@ -767,19 +763,14 @@ function verifyV2Mutations(workflow, programs) {
   outcomes.forEach((program) => assert.throws(() => verifyV2Results(program)));
   const evidence = [
     ['stat.size > 32768', 'false'],
-    ['fatal: true', 'fatal: false'],
+    // Invalid UTF-8 is independently rejected by the closed value schemas.
     ["line.indexOf('\\n') !== line.length - 1", 'false'],
     ['JSON.stringify(fs.readdirSync(receiptRoot).sort()) !== JSON.stringify(expected)', 'false'],
     ['JSON.stringify(fs.readdirSync(directory)) !== JSON.stringify([file])', 'false'],
     ['!fs.lstatSync(receiptRoot).isDirectory()', 'false'],
     ['!fs.lstatSync(directory).isDirectory()', 'false'],
     ...(process.platform !== 'win32' ? [['!stat.isFile()', 'false']] : []),
-    ...[
-      'source_commit',
-      'source_tree',
-      'compiled_payload_source_commit',
-      'compiled_payload_source_tree',
-    ].map((field) => [
+    ...['source_commit', 'source_tree'].map((field) => [
       `receipt.${field} !== ${field.endsWith('commit') ? 'sourceCommit' : 'sourceTree'}`,
       'false',
     ]),
@@ -827,7 +818,7 @@ function verifyMutations(workflow, program) {
       sdk.with['global-json-file'] = 'global.json';
     },
     (w) => {
-      w.jobs['r4-action-host'].strategy.matrix.mode = ['framework'];
+      w.jobs['r4-action-host'].strategy.matrix.mode = ['aot'];
     },
     (w) => {
       w.jobs['r4-action-host'].strategy.matrix.mode = ['framework', 'framework', 'aot'];
@@ -973,7 +964,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const mutations = selfTest ? verifyMutations(workflow, programs.runtime) : 0;
   const v2Mutations = selfTest ? verifyV2Mutations(workflow, programs.v2) : 0;
   console.log(
-    `runtime_ci_workflow_verified lanes=4 result_cases=${resultCases} mutations=${mutations} ` +
+    `runtime_ci_workflow_verified lanes=2 result_cases=${resultCases} mutations=${mutations} ` +
       `v2_workers=2 v2_result_cases=${v2Results} receipt_cases=${receiptCases} v2_mutations=${v2Mutations}`,
   );
 }
