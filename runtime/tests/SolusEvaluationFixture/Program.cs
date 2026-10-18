@@ -116,6 +116,9 @@ internal static class Program
             EvaluationOutcome? outcome = recovered ? null : subject is null
                 ? EvaluationScorer.Failure(testCase, EvaluationFailure.Unknown, attempt)
                 : EvaluationScorer.Evaluate(testCase, subject);
+            if (mode is "initial-leak" or "policy-leak")
+                Proof.Require(handler.FailureCode == "first_request_withholds_answers" && handler.HttpSends > 0 &&
+                    handler.Sends == 0 && subject is null, "decoded_first_request_leak_rejected");
             var guards = subject is null ? 0 : AdmissionGuards(testCase, work!, identity, run!, witness!, fixture.PolicyFingerprint, handler.RequestDigests, subject);
             if (outcome is not null) Proof.Require(EvaluationJson.ReadOutcome(EvaluationJson.Write(outcome)) is not null,
                 "closed_outcome_admission");

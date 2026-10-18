@@ -91,9 +91,15 @@ internal sealed class ScriptedHandler : HttpMessageHandler
                     FirstInstructions.Count == 1 && FirstInstructions.All(i => !i.Contains(PriorOnly, StringComparison.Ordinal) &&
                         !i.Contains(CurrentOnly, StringComparison.Ordinal)), "history_and_current_data_remain_classified");
             }
-            else foreach (var fact in Proof.DecisiveFacts)
-                Proof.Require(!body.Contains(fact, StringComparison.Ordinal) &&
-                    FirstInstructions.All(i => !i.Contains(fact, StringComparison.Ordinal)), "first_request_withholds_answers");
+            else
+            {
+                // Inspect semantic strings: the official JSON writer escapes
+                // characters such as '>' inside otherwise identical answers.
+                var texts = WireStrings(value).ToArray();
+                foreach (var fact in Proof.DecisiveFacts)
+                    Proof.Require(texts.All(text => !text.Contains(fact, StringComparison.Ordinal)),
+                        "first_request_withholds_answers");
+            }
         }
         Proof.Require(Sends < Turns, "no_unexpected_script_send");
         var turn = script.RootElement.GetProperty("turns")[Sends++]; Proof.Sends++;
@@ -136,6 +142,17 @@ internal sealed class ScriptedHandler : HttpMessageHandler
         });
         return Response(json);
     }
+    private static IEnumerable<string> WireStrings(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.String) yield return value.GetString()!;
+        else if (value.ValueKind == JsonValueKind.Array)
+            foreach (var item in value.EnumerateArray())
+                foreach (var text in WireStrings(item)) yield return text;
+        else if (value.ValueKind == JsonValueKind.Object)
+            foreach (var property in value.EnumerateObject())
+                foreach (var text in WireStrings(property.Value)) yield return text;
+    }
+
     private HttpResponseMessage Response(string json)
     {
         ResponseBytes += Encoding.UTF8.GetByteCount(json);
