@@ -6,7 +6,6 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer as httpServer } from 'node:http';
 import { createServer as httpsServer } from 'node:https';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { assertIsolatedBoundary } from './isolated-boundary.mjs';
 import {
   createOfficialPlatform,

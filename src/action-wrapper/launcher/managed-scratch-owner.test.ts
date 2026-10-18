@@ -5,9 +5,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createManagedScratch } from './managed-scratch-owner.js';
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, lstat: vi.fn(actual.lstat) };
+});
+
 const roots: string[] = [];
 afterEach(async () => {
-  vi.restoreAllMocks();
+  vi.mocked(fs.lstat).mockReset();
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
@@ -62,12 +67,12 @@ describe.runIf(process.platform === 'linux')('managed bridge scratch ownership',
     await fs.writeFile(child, 'retained');
     const foreign = await fs.lstat(child, { bigint: true });
     foreign.uid += 1n;
-    const lstat = vi.spyOn(fs, 'lstat');
+    const lstat = vi.mocked(fs.lstat);
     lstat.mockResolvedValueOnce(await fs.stat(parent, { bigint: true }));
     lstat.mockResolvedValueOnce(await fs.stat(owner.tempRoot, { bigint: true }));
     lstat.mockResolvedValueOnce(foreign);
     await expect(owner.cleanup()).rejects.toThrow('wrapper_managed_scratch_cleanup_failed');
-    vi.restoreAllMocks();
+    lstat.mockReset();
     expect(await fs.readFile(child, 'utf8')).toBe('retained');
     // A rejected cleanup stays rejected after the injected metadata condition disappears.
     await expect(owner.cleanup()).rejects.toThrow('wrapper_managed_scratch_cleanup_failed');
