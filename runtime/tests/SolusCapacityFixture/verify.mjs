@@ -19,6 +19,7 @@ const assembly = 'AgenticPrReview.Runtime.SolusCapacityFixture';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 let root;
 let stage = 'environment';
+let check = 'none';
 const receipts = [];
 // Only this newly allocated private proof tree is made removable. Never follow
 // snapshot symlinks or loosen permissions on another task's directories.
@@ -316,33 +317,51 @@ try {
     }
   }
   function prefix(before, after) {
+    check = 'history_records';
     assert.deepEqual(after.Records.slice(1, before.Records.length), before.Records.slice(1));
-    for (const key of ['Rounds', 'Members'])
+    for (const key of ['Rounds', 'Members']) {
+      check = 'history_' + key;
       assert.deepEqual(after[key].slice(0, before[key].length), before[key]);
-    for (const key of ['Episodes', 'Submissions'])
+    }
+    for (const key of ['Episodes', 'Submissions']) {
+      check = 'history_' + key;
       assert.deepEqual(
         after.Candidates[key].slice(0, before.Candidates[key].length),
         before.Candidates[key],
       );
+    }
+    check = 'history_instruction_classification';
     assert.equal(after.Records[0].Kind, before.Records[0].Kind);
+    check = 'history_new_checkpoint';
     assert.notDeepEqual(after.Info, before.Info);
+    check = 'none';
   }
   stage = 'useful_fresh_and_restored';
   for (const id of ['cs-defect', 'cs-safe', 'ts-defect', 'ts-safe', 'repository-rule'])
     await scenario(id, async ({ run, captured }) => {
       const first = run(0);
+      check = 'fresh_completion';
       completed(first);
       const second = run(1);
+      check = 'restored_completion';
       completed(second);
+      check = 'historical_usage';
       assert.equal(second.admission, 'Supplied');
       assert.equal(second.historical_attempts, first.current_attempts);
       assert.equal(second.historical_input_tokens, first.current_input_tokens);
       assert.equal(second.historical_output_tokens, first.current_output_tokens);
       assert.equal(second.retained.attempts, first.current_attempts + second.current_attempts);
+      check = 'wire_growth';
       assert.ok(second.wire_request_bytes > first.wire_request_bytes);
+      check = 'encoded_growth';
       assert.ok(second.retained.encoded_bytes > first.retained.encoded_bytes);
+      check = 'historical_tool_results';
       assert.ok(second.exchanges[0].historical_tool_results > 0);
-      prefix(await captured(0), await captured(1));
+      check = 'read_fresh_capture';
+      const before = await captured(0);
+      check = 'read_restored_capture';
+      const after = await captured(1);
+      prefix(before, after);
     });
   stage = 'consecutive_useful_growth';
   await scenario('repository-rule', async ({ run, operations, captured }) => {
@@ -592,8 +611,11 @@ try {
   await removeRoot(root);
   root = undefined;
   console.log('APR_R7_CAPACITY_MANAGED_PASSED installed=true live_calls=0 cleanup=verified');
-} catch {
-  console.error(JSON.stringify({ stage, last_receipt: receipts.at(-1) }));
+} catch (error) {
+  const io = ['ENOENT', 'EACCES'].includes(error.code) ? error.code : null;
+  // Receipts contain only the same bounded numeric/enum/hash fields exported
+  // on success. Never emit AssertionError diffs or raw captured history.
+  console.error(JSON.stringify({ stage, check, io, receipts }));
   console.error('APR_SOLUS_CAPACITY_GATE_FAILED stage=' + stage);
   process.exitCode = 1;
 } finally {
