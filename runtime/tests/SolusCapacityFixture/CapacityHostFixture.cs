@@ -36,6 +36,7 @@ internal sealed class HostFixture : IDisposable
     internal readonly StickyPort Sticky;
     private readonly DeniedProvider native = new();
     internal int NativeCreates => native.Creates;
+    internal bool NamesBound { get; private set; }
     internal readonly TimeProvider Clock;
 
     private readonly bool continuation;
@@ -103,6 +104,12 @@ internal sealed class HostFixture : IDisposable
             out var policyRequest, out _), "fault_locator_authorization");
         using var transport = GitHub.CreateExactObjectTransport(Launch.Inputs.GitHubToken!);
         var policy = await ActionHostTrustedPolicy.MaterializeAsync(policyRequest!, transport, default);
+        if (!policy.Succeeded)
+        {
+            Proof.Require(policy.Policy is null && policy.Failure != ActionHostTrustedPolicyFailure.None,
+                "invalid_policy_has_no_fault_scope");
+            return;
+        }
         var request = new ArtifactStateRestoreRequest(Launch, invocation!, policy.Policy!,
             new("user", [new ProjectTextContent("synthetic locator classification")]), DeepSeekReasoningContinuationCodec.Instance);
         Proof.Require(AcceptedStateProductionAuthorization.TryAuthorize(request, out var production), "fault_scope_authority");
@@ -114,6 +121,7 @@ internal sealed class HostFixture : IDisposable
             foreach (var objectClass in StateObjectClasses.All)
                 Fault.Names[LocatorCryptography.OpaqueName(root, StateObjectClasses.ToWireName(objectClass), scope)] =
                     StateObjectClasses.ToWireName(objectClass);
+            NamesBound = true;
         }
         finally { CryptographicOperations.ZeroMemory(key); CryptographicOperations.ZeroMemory(root); CryptographicOperations.ZeroMemory(scope); }
     }

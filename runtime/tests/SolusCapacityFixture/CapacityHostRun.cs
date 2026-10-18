@@ -109,12 +109,13 @@ internal static class CapacityHostRun
         var report = JsonSerializer.Serialize(new { mode, scenario, case_id = id, round, accepted, recovered_without_work = recovered,
             clean_review = work?.ProductReviewAccepted == true, captured, retained,
             sends = handler.Sends, native_creates = fixture.NativeCreates, imports = meter?.Imports ?? 0,
+            state_names_bound = fixture.NamesBound,
             status = completion?.Status.ToString(), input_failure = work?.Failure.ToString(),
             preparation_failure = preparationFailure.ToString(),
             accounting_zero = completion?.Accounting.IsCompleteZero,
             admission = work?.Context?.Admission.ToString(), rejection = work?.Context?.RejectionCode.ToString(),
             termination = work?.Work?.Termination.ToString(), capture_status = work?.Context?.CaptureStatus.ToString(),
-            findings = work?.Review?.Findings.Length, current_observations = work?.Observations.Length,
+            findings = work?.Review?.Findings.Length, current_observations = ObservationCount(work),
             current_attempts = usage?.Attempts.Count, historical_attempts = work?.Context?.History.Sum(r => r.Usage.Attempts.Count),
             current_logical_calls = usage?.Attempts.Select(a => a.LogicalCallId).Distinct().Count(),
             current_model_work_units = work?.Context?.Outcome?.CompletedWorkUnits,
@@ -136,6 +137,9 @@ internal static class CapacityHostRun
             Proof.Require(!report.Contains(secret, StringComparison.Ordinal), "sanitized_capacity_report");
         Console.WriteLine(report);
     }
+
+    internal static int? ObservationCount(SolusFreshReviewResult? work) =>
+        work is { Observations.IsDefault: false } ? work.Observations.Length : null;
 
     private static long? SumKnown(IEnumerable<long?> values)
     {

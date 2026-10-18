@@ -1,5 +1,6 @@
 using System.Text;
 using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Application.Solus;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Execution.Solus;
 using AgenticPrReview.Runtime.Solus;
@@ -22,6 +23,11 @@ internal static class CapacityProbes
     internal static readonly List<object> Results = [];
     internal static async Task Run()
     {
+        var rejected = new SolusFreshReviewResult(Guid.NewGuid(), SolusFreshReviewFailure.InputProfileRejected);
+        Proof.Require(CapacityHostRun.ObservationCount(rejected) is null &&
+            CapacityHostRun.ObservationCount(null) is null, "unavailable_observation_inventory");
+        Proof.Require(CapacityHostRun.ObservationCount(rejected with { Observations = [] }) == 0,
+            "known_empty_observation_inventory");
         var omitted = SolusReviewBridge.BoundBudget(null);
         Proof.Require(omitted == new ReviewTokenBudget(65536, 65536, 8192), "retained_default_budget_seam");
         var explicitBudget = new ReviewTokenBudget(4096, 4096, 1024);

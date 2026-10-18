@@ -573,6 +573,12 @@ try {
           } else assert.equal(receipt.input_failure, 'InputProfileRejected');
         }
         const added = (await operations()).slice(before.length);
+        assert.equal(receipt.state_names_bound, bad.indexOf(config) < 6);
+        if (!receipt.state_names_bound)
+          assert.equal(
+            added.filter((row) => row.operation === 'upload' && row.committed).length,
+            0,
+          );
         assert.equal(
           added.filter(
             (row) =>
