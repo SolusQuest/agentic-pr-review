@@ -500,6 +500,10 @@ try {
       assert.equal(receipt.sends, expectedSends);
       assert.equal(receipt.accepted, false);
       assert.equal(receipt.clean_review, false);
+      assert.equal(
+        receipt.termination,
+        config.includes('maxModelCalls') ? 'ResourceLimit' : 'TokenLimit',
+      );
       if (config.includes('1024')) assert.equal(receipt.output_allowance, 1024);
       if (config.includes('4096')) assert.equal(receipt.input_allowance, 8192);
     });

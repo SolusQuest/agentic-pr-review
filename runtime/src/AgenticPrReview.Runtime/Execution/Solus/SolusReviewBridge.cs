@@ -145,6 +145,7 @@ internal sealed class SolusReviewBridge : IDisposable
             : Facts.HostStopped ? ActionHostTerminationReason.HostFailure
             : Facts.Overrun || Facts.Refused || Facts.BudgetStopped ? ActionHostTerminationReason.TokenLimit
             : Facts.MissingCore || accounting is null ? ActionHostTerminationReason.ProviderFailure
+            : TokenReservationExhausted(result) ? ActionHostTerminationReason.TokenLimit
             : result.StopReason == CandidateStopReason.RuntimeLimit || result.Outcome.Reason == AgentTerminationReason.ResourceLimit ? ActionHostTerminationReason.ResourceLimit
             : result.Outcome.Reason == AgentTerminationReason.Cancelled ? ActionHostTerminationReason.Cancelled
             : result.Outcome.Reason == AgentTerminationReason.Completed && result.Receipts.Count == 1 &&
@@ -156,6 +157,17 @@ internal sealed class SolusReviewBridge : IDisposable
             : result.Outcome.Reason == AgentTerminationReason.Failed ? ActionHostTerminationReason.ProviderFailure
             : ActionHostTerminationReason.InvalidResult;
         return new(result.Outcome.Reason, accounting, reason, reason == ActionHostTerminationReason.ReviewCompleted, result.Outcome.Usage);
+    }
+
+    private static bool TokenReservationExhausted(CandidateExecutionResult result)
+    {
+        // Runtime preflight can refuse before provider hooks observe an attempt.
+        // Use its current accounting balance, never historical usage or an
+        // inference from the coarse ResourceLimit reason alone.
+        if (result.Outcome.Reason != AgentTerminationReason.ResourceLimit ||
+            result.Outcome.Usage.Accounting is not { } accounting) return false;
+        return accounting.Input.RemainingAllowance is { } input && input < accounting.Policy.Reservation.InputTokens ||
+            accounting.Output.RemainingAllowance is { } output && output < accounting.Policy.Reservation.OutputTokens;
     }
 
     // The unauthenticated R4 control seam retains its original probe policy.
