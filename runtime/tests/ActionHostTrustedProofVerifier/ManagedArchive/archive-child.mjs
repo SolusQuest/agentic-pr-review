@@ -48,6 +48,17 @@ try {
   const archive = await readFile(join(root, 'package', receipt.archiveName));
   const inspected = inspectManagedPackage(archive, receipt);
   const closure = inspected.manifest.buildInputs;
+  const runtimeConfig = JSON.parse(
+    inspected.files.find(
+      (file) => file.path === 'agentic-pr-review/AgenticPrReview.Runtime.runtimeconfig.json',
+    ).bytes,
+  );
+  assert.equal(
+    runtimeConfig.runtimeOptions.configProperties[
+      'System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault'
+    ],
+    true,
+  );
   const solus = closure.dependencies.filter((x) => x.id.startsWith('solusagent.'));
   assert.equal(solus.length, 5);
   assert.ok(solus.every((x) => x.version === '0.1.0-internal.4'));

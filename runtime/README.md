@@ -25,9 +25,13 @@ The replacement proof is `runtime/tests/AgentLoopAotFixture` plus `runtime/scrip
 
 ## Local validation
 
-The framework-dependent and Native AOT bootstrap paths are exercised by a single Bash script
-that CI also calls. It targets Linux (WSL and Linux containers are acceptable); native Windows
-and macOS are not promised at M2.
+The public framework bootstrap and invariant regressions use the scripts below.
+The full `all` route also requires actual managed archive qualification on the
+selected Ubuntu 24.04 x64 runner with an already verified Solus package cache.
+Ordinary PR/push CI calls explicit credential-free routes. The trusted exact-head
+`solus-agent-package-proof.yml` workflow performs the private build and original
+archive/Action qualification. See [validation](../docs/10_workflow/validation.md)
+and [the qualification harness](tests/ActionHostTrustedProofVerifier/ManagedArchive/README.md).
 
 ```bash
 # runtime tests only
@@ -39,16 +43,17 @@ bash runtime/scripts/verify-runtime.sh framework
 # Native AOT bootstrap smoke only (requires clang and zlib1g-dev)
 bash runtime/scripts/verify-runtime.sh aot
 
-# all three, in order
+# tests, framework bootstrap, then actual managed archive qualification
 bash runtime/scripts/verify-runtime.sh all
 # equivalently, from the repo root:
 npm run runtime:verify
 
-# complete R2 Agent proof: focused tests, framework, Native AOT, and retired-surface guard
+# complete R2 proof: tests, full FDD corpus, actual managed archive, and inventory guard
 bash runtime/scripts/verify-agent-loop.sh all
 
 # individual R2 Agent proof modes
 bash runtime/scripts/verify-agent-loop.sh framework
+bash runtime/scripts/verify-agent-loop.sh managed
 bash runtime/scripts/verify-agent-loop.sh aot
 
 # R3 live-Agent replacement proof modes
@@ -71,4 +76,17 @@ stale output from participating in comparisons.
 
 ## Continuous integration
 
-The direct runtime framework and `linux-x64` Native AOT paths, the real R2 Agent product proof, both R3 live-Agent replacement modes, and the secret-free trusted-live dry-run run on every `pull_request` and on `push` to `main` via `.github/workflows/runtime-ci.yml`. The workflow installs the SDK from `global.json` and calls the same scripts used locally, so CI and contributor validation cannot drift. Actual provider traffic exists only in the separately protected `R3 Trusted Live Proof` workflow after merge and maintainer authorization.
+Ordinary `pull_request` and `push` checks run the public FDD bootstrap, complete
+R2/R3/Host invariant corpora, managed format/loader checks and trusted-live policy
+dry-run through `.github/workflows/runtime-ci.yml`. The two current-source receipt
+workers perform independent full FDD builds and mark their receipts
+`archive_qualified: false`. Retained historical, R5 and R6 native gates keep their
+existing ownership. Stable aggregates reject failed, skipped, cancelled and
+missing workers.
+
+Actual Solus archive qualification is mandatory in the separate reviewed-source
+trusted workflow and cannot be inferred from a public regression result. It
+builds two independent original archives and runs the literal generated Action
+with isolated synthetic GitHub/provider services, no consumer SDK or feed
+credentials, and bounded source/archive receipts. Actual provider traffic remains
+limited to the separately protected trusted-live workflow after authorization.

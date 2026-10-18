@@ -16,6 +16,7 @@
   <!-- CR1-D1 producer-only profile; native defaults remain until CR1-D6 cutover. -->
   <PropertyGroup Condition="'$(APRManagedPackage)' == 'true'">
     <DefineConstants>$(DefineConstants);APR_SOLUS_MANAGED</DefineConstants>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
     <SolusAgentVersion>0.1.0-internal.4</SolusAgentVersion>
     <UseAppHost>false</UseAppHost>
     <PublishAot>false</PublishAot>
