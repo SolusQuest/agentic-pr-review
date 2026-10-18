@@ -5,28 +5,73 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Host.State.Lineage;
 
 namespace AgenticPrReview.Runtime.Host.State.Transactions;
 
+internal enum SolusTransactionMode { Fresh, CompletedContextReview }
+
 // Selected only by compiled Host composition, separate from S2 consumption.
 internal sealed record SolusTransactionSelectionRequest(
-    SolusFreshHostContext Targets, SolusRestrictedStateCompatibility Compatibility, Guid ExecutionId);
+    SolusFreshHostContext Targets, SolusRestrictedStateCompatibility Compatibility, Guid ExecutionId,
+    SolusTransactionMode Mode = SolusTransactionMode.Fresh);
 
 internal sealed record SolusRetainedStateMaterial(byte[] Envelope, string RecordSha256,
     ValidatedPublicationPayloadV1 Publication, RetainedStateCurrentReviewProjection Projection,
-    long PreparedAt, long LogicalExpiry, long RequiredPlatformExpiry);
+    long PreparedAt, long LogicalExpiry, long RequiredPlatformExpiry,
+    long Generation = 0, string? PredecessorEnvelopeSha256 = null);
 
 internal sealed partial class RetainedStateTransactionAuthority
 {
-    internal bool CanPrepareFreshSolus => IsLive && solusTransaction is not null &&
+    internal bool CanPrepareFreshSolus => IsLive && solusTransaction?.Mode == SolusTransactionMode.Fresh &&
         acceptedSelection is null && !HasTerminalAcceptance;
+
+    internal bool CanPrepareRestoredSolus => IsLive &&
+        solusTransaction?.Mode == SolusTransactionMode.CompletedContextReview &&
+        acceptedSelection is not null && !HasTerminalAcceptance;
 
     internal bool TryBuildSolusSuccessor(RetainedStateAuthorityLease lease,
         SolusRestrictedStateRecord record, R4ValidatedPublicationReview review,
         out SolusRetainedStateMaterial? material)
     {
         material = null;
-        if (!Allows(lease) || !CanPrepareFreshSolus || record is null || review is null ||
+        return Allows(lease) && CanPrepareFreshSolus &&
+            TryBuildSolusMaterial(lease, record, review, 0, null, out material);
+    }
+
+    internal bool TryBuildRestoredSolusSuccessor(RetainedStateAuthorityLease lease,
+        SolusConsumedContext consumed, SolusRestrictedStateRecord record,
+        R4ValidatedPublicationReview review, RetainedStateObservation observation,
+        out SolusRetainedStateMaterial? material)
+    {
+        material = null;
+        var selected = acceptedSelection;
+        var observed = observation.AcceptedState.Selection;
+        if (!Allows(lease) || !CanPrepareRestoredSolus || selected is null || observed is null ||
+            observation.Snapshot is not { } inventory || !consumed.WasClaimed ||
+            !ReferenceEquals(consumed.Targets, solusTransaction!.Targets) ||
+            consumed.Compatibility != solusTransaction.Compatibility ||
+            observed.LineageHead.Header.ObjectIdentity != selected.LineageHead.Header.ObjectIdentity ||
+            observed.Current.ReceiptPhysical.Header.ObjectIdentity != selected.Current.ReceiptPhysical.Header.ObjectIdentity ||
+            observed.Current.LogicalGenerationIdentity != selected.Current.LogicalGenerationIdentity ||
+            !TryReadTrustedTime(lease, out var now) ||
+            !RetainedStateTransactionService.HasNoPendingPublicationWork(inventory, observed, now) ||
+            !MatchesSolusSourceClaim(consumed.Claim, selected) ||
+            !HasExactSolusClaim(inventory, consumed.Claim) ||
+            !MatchesSolusSuccessorCheckpoint(record, consumed.Claim) ||
+            now >= consumed.Claim.SourceExpiresAtUnixSeconds ||
+            selected.Current.Generation.Generation == long.MaxValue) return false;
+        return TryBuildSolusMaterial(lease, record, review,
+            selected.Current.Generation.Generation + 1,
+            selected.Current.Generation.StateEnvelopeSha256, out material);
+    }
+
+    private bool TryBuildSolusMaterial(RetainedStateAuthorityLease lease,
+        SolusRestrictedStateRecord record, R4ValidatedPublicationReview review,
+        long generation, string? predecessorEnvelope, out SolusRetainedStateMaterial? material)
+    {
+        material = null;
+        if (!Allows(lease) || solusTransaction is null || record is null || review is null ||
             record.Compatibility != solusTransaction!.Compatibility ||
             record.Checkpoint.ExecutionId != solusTransaction.ExecutionId ||
             !SameIdentity(review.ReviewedIdentity, currentReviewedIdentity) || review.Scope != publication.Scope ||
@@ -44,11 +89,12 @@ internal sealed partial class RetainedStateTransactionAuthority
                 payload.ReviewedHeadSha != currentReviewedIdentity.HeadSha ||
                 locatorAccess is null || locator is null ||
                 !SolusRestrictedStateSnapshotCodec.TrySeal(stateAccess,
-                    new(stateAccess.Scope, reviewed.BaseSha, reviewed.HeadSha, 0, null, now, logicalExpiry),
+                    new(stateAccess.Scope, reviewed.BaseSha, reviewed.HeadSha, generation, predecessorEnvelope, now, logicalExpiry),
                     record, new TransactionRestrictedStateKeyResolver(stateAccess, locatorAccess, locator),
                     out envelope, out var digest, out _) || envelope is null || digest is null) return false;
             material = new(envelope, digest, payload,
-                new(currentReviewedIdentity, rendered.OrderedFindings), now, logicalExpiry, platformExpiry);
+                new(currentReviewedIdentity, rendered.OrderedFindings), now, logicalExpiry, platformExpiry,
+                generation, predecessorEnvelope);
             envelope = null;
             return true;
         }
@@ -67,17 +113,30 @@ internal sealed partial class RetainedStateTransactionAuthority
             TryValidateSolusGeneration(selection.Current.Generation, acceptedGeneration: true);
     }
 
-    private bool TryValidateSolusGeneration(StateGenerationRecordV1 generation, bool acceptedGeneration)
+    private bool TryValidateSolusGeneration(StateGenerationRecordV1 generation, bool acceptedGeneration,
+        ScopedStateInventorySnapshot? inventory = null)
     {
         if (!IsLive || solusTransaction is null || generation is null || locatorAccess is null || locator is null ||
-            generation.Generation != 0 || generation.PredecessorEnvelopeSha256 is not null ||
-            generation.PreviousLogicalGenerationIdentity is not null ||
-            generation.ProducerBaseSha != reviewed.BaseSha || generation.ProducerHeadSha != reviewed.HeadSha ||
             generation.PolicyIdentitySha256 != policy.PolicyIdentitySha256 || generation.ConfigSha256 != policy.ConfigSha256 ||
             generation.InstructionsSha256 != policy.InstructionsSha256 || generation.PayloadSha256 != policy.PayloadSha256 ||
             generation.BuildDiscriminator != policy.BuildDiscriminator ||
             !AcceptedStateRecordValidation.FixedDigest(generation.StateEnvelopeSha256,
                 RestrictedStateEnvelope.EnvelopeSha256(generation.EncryptedStateEnvelope.AsSpan()))) return false;
+        if (solusTransaction.Mode == SolusTransactionMode.Fresh)
+        {
+            if (generation.Generation != 0 || generation.PredecessorEnvelopeSha256 is not null ||
+                generation.PreviousLogicalGenerationIdentity is not null ||
+                generation.ProducerBaseSha != reviewed.BaseSha || generation.ProducerHeadSha != reviewed.HeadSha)
+                return false;
+        }
+        else if (solusTransaction.Mode != SolusTransactionMode.CompletedContextReview ||
+            acceptedSelection is null || !acceptedGeneration &&
+            (generation.ProducerBaseSha != reviewed.BaseSha || generation.ProducerHeadSha != reviewed.HeadSha ||
+                acceptedSelection.Current.Generation.Generation == long.MaxValue ||
+                generation.Generation != acceptedSelection.Current.Generation.Generation + 1 ||
+                generation.PredecessorEnvelopeSha256 != acceptedSelection.Current.Generation.StateEnvelopeSha256 ||
+                generation.PreviousLogicalGenerationIdentity != acceptedSelection.Current.LogicalGenerationIdentity))
+            return false;
         var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
         if (now < generation.PreparedAtUnixSeconds || now >= generation.PreparedExpiresAtUnixSeconds) return false;
         var binding = new RestrictedStateBinding(stateAccess.Scope, generation.ProducerBaseSha,
@@ -91,13 +150,56 @@ internal sealed partial class RetainedStateTransactionAuthority
         {
             // Pending candidates have no accepted-lineage capability. Authenticate
             // against the independently selected current transaction instead.
-            return acceptedSelection is null && RestrictedStateEnvelope.TryDecrypt(stateAccess, binding,
-                generation.EncryptedStateEnvelope.AsSpan(), resolver, out plaintext, out _) && plaintext is not null &&
-                AcceptedStateRecordValidation.FixedDigest(SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext),
-                    generation.SessionSha256) &&
-                SolusRestrictedStateSnapshotCodec.TryRead(plaintext, solusTransaction.Compatibility, out _, out _);
+            if (!(acceptedSelection is null || solusTransaction.Mode == SolusTransactionMode.CompletedContextReview) ||
+                !RestrictedStateEnvelope.TryDecrypt(stateAccess, binding,
+                    generation.EncryptedStateEnvelope.AsSpan(), resolver, out plaintext, out _) || plaintext is null)
+                return false;
+            if (!AcceptedStateRecordValidation.FixedDigest(SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext),
+                    generation.SessionSha256) ||
+                !SolusRestrictedStateSnapshotCodec.TryRead(plaintext, solusTransaction.Compatibility, out var record, out _) ||
+                record is null) return false;
+            if (solusTransaction.Mode == SolusTransactionMode.Fresh) return true;
+            if (inventory is null || acceptedSelection is null) return false;
+            var claims = inventory.Authenticated.Where(item => item.Header.ObjectClass == StateObjectClass.ContextClaim)
+                .Select(item => SolusContextClaimRecordCodec.TryDecode(item.Payload, out var claim) ? claim : null)
+                .Where(claim => claim is not null && MatchesSolusSourceClaim(claim, acceptedSelection) &&
+                    MatchesSolusSuccessorCheckpoint(record, claim)).ToArray();
+            return claims.Length == 1 && HasExactSolusClaim(inventory, claims[0]!);
         }
         finally { if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext); }
+    }
+
+    private bool MatchesSolusSourceClaim(SolusContextClaimRecord claim, AcceptedStateSelection selected)
+    {
+        var head = selected.LineageHead.Header;
+        var current = selected.Current;
+        return claim.BaseScopeDigest == head.BaseScopeDigest && claim.Epoch == head.Epoch &&
+            claim.SessionId == head.SessionId && claim.SelectedHeadIdentity == head.ObjectIdentity &&
+            claim.AcceptanceIdentity == current.ReceiptPhysical.Header.ObjectIdentity &&
+            claim.LogicalGenerationIdentity == current.LogicalGenerationIdentity &&
+            claim.EnvelopeSha256 == current.Generation.StateEnvelopeSha256 &&
+            claim.RecordSha256 == current.Generation.SessionSha256 &&
+            claim.SourceExpiresAtUnixSeconds == current.Generation.PreparedExpiresAtUnixSeconds &&
+            TryReadAcceptedSolusRecord(out var source) && source?.Checkpoint == claim.Source;
+    }
+
+    private static bool MatchesSolusSuccessorCheckpoint(SolusRestrictedStateRecord record, SolusContextClaimRecord claim) =>
+        record.Checkpoint.ExecutionId == claim.ExecutionId && record.Checkpoint.RoundId == claim.RoundId &&
+        record.Checkpoint.LogicalWorkId != claim.Source.LogicalWorkId &&
+        record.Checkpoint.CheckpointId != claim.Source.CheckpointId;
+
+    private static bool HasExactSolusClaim(ScopedStateInventorySnapshot inventory, SolusContextClaimRecord expected)
+    {
+        if (!inventory.Unknown.IsEmpty || inventory.UnderRetained.Any(item => item.Header.ObjectClass == StateObjectClass.ContextClaim))
+            return false;
+        var matching = 0;
+        foreach (var item in inventory.Authenticated.Where(item => item.Header.ObjectClass == StateObjectClass.ContextClaim))
+        {
+            if (!SolusContextClaimRecordCodec.TryDecode(item.Payload, out var claim) || claim is null) return false;
+            if (claim == expected) matching++;
+            else if (claim.ConflictsWith(expected)) return false;
+        }
+        return matching == 1;
     }
 
     internal bool TryReadAcceptedSolusRecord(out SolusRestrictedStateRecord? record)
@@ -126,12 +228,19 @@ internal sealed partial class RetainedStateTransactionAuthority
         byte[] canonical = [];
         try
         {
+            var previousAcceptance = generation.PreviousLogicalGenerationIdentity is null ? null :
+                acceptedSelection?.Current.LogicalGenerationIdentity == generation.PreviousLogicalGenerationIdentity
+                    ? acceptedSelection.Current.ReceiptPhysical.Header.ObjectIdentity
+                    : acceptedSelection?.ImmediatePredecessor?.LogicalGenerationIdentity == generation.PreviousLogicalGenerationIdentity
+                        ? acceptedSelection.ImmediatePredecessor.ReceiptPhysical.Header.ObjectIdentity : null;
             // The same call retains its exact full validated projection. Only a
             // new process needs the deliberately incomplete public count view.
             if (TryGetLineageSnapshot(out var selected) && selected is not null &&
                 AcceptedStateGenerationRecordCodec.TryEncode(generation, out canonical) &&
                 AcceptedStateIdentity.TryComputeLogicalGeneration(canonical, selected.BaseScopeDigest,
-                    selected.Epoch, selected.SessionId, previousAcceptanceReceiptIdentity: null, out var identity) &&
+                    selected.Epoch, selected.SessionId,
+                    previousAcceptanceReceiptIdentity: previousAcceptance,
+                    out var identity) &&
                 TryGetBoundCurrentReview(identity, out projection)) return true;
         }
         finally { CryptographicOperations.ZeroMemory(canonical); }

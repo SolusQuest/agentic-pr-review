@@ -817,6 +817,42 @@ describe('CR1 authorized actual APR private package proof route', () => {
         ).run = 'echo passed';
       },
     ],
+    [
+      'S4 proof removed',
+      (w: any) => {
+        w.jobs['install-proof'].steps = w.jobs['install-proof'].steps.filter(
+          (step: any) =>
+            step.name !== 'CR1-S4 actual restored Solus Host review and successor proof',
+        );
+      },
+    ],
+    [
+      'S4 credential injection',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) =>
+            step.name === 'CR1-S4 actual restored Solus Host review and successor proof',
+        ).env.GH_TOKEN = '${{ github.token }}';
+      },
+    ],
+    [
+      'S4 substitute command',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) =>
+            step.name === 'CR1-S4 actual restored Solus Host review and successor proof',
+        ).run = 'echo passed';
+      },
+    ],
+    [
+      'S4 collect mode bypass',
+      (w: any) => {
+        delete w.jobs['install-proof'].steps.find(
+          (step: any) =>
+            step.name === 'CR1-S4 actual restored Solus Host review and successor proof',
+        ).if;
+      },
+    ],
   ])('rejects %s without weakening historical secret routes', (_label, mutate) => {
     const workflowsRoot = copiedWorkflowsRoot();
     const candidate = path.join(workflowsRoot, 'solus-agent-package-proof.yml');

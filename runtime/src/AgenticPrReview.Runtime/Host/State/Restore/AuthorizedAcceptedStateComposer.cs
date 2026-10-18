@@ -329,7 +329,8 @@ internal sealed class AuthorizedAcceptedStateComposer
 
         if (request.SolusTransaction is { } transaction &&
             (request.SolusSourceSelection is not null || request.Launch.Inputs.StateMode != ActionHostStateMode.Auto ||
-                !transaction.Targets.Matches(request) || transaction.ExecutionId == Guid.Empty || !SolusRestrictedStateAdmission.IsSupported(transaction.Compatibility)))
+                !transaction.Targets.Matches(request) || transaction.ExecutionId == Guid.Empty ||
+                !Enum.IsDefined(transaction.Mode) || !SolusRestrictedStateAdmission.IsSupported(transaction.Compatibility)))
             return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
 
         var launch = request.Launch;
@@ -713,6 +714,17 @@ internal sealed class AuthorizedAcceptedStateComposer
 
             if (request.SolusTransaction is not null)
             {
+                if (request.SolusTransaction.Mode == SolusTransactionMode.CompletedContextReview)
+                {
+                    var producer = selectorResult.Selection.Current.Generation;
+                    using var ancestryTransport = dependencies.CreateAncestryTransport(launch.Inputs.GitHubToken!);
+                    var transition = await new TrustedHeadAncestryClassifier(ancestryTransport, timeProvider)
+                        .ClassifyAsync(launch.RepositoryName, producer.ProducerBaseSha, producer.ProducerHeadSha,
+                            invocation.PullRequest.BaseSha, invocation.PullRequest.HeadSha, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (transition is not (AgentSessionHeadTransition.SameHead or AgentSessionHeadTransition.VerifiedAhead))
+                        return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
+                }
                 // S3 authenticates an accepted Solus record for transaction recovery,
                 // without constructing SESSION or issuing a source-consumption claim.
                 if (selectorResult.Expiry is not null || !TryTransfer(authorization, request, store, timeProvider,

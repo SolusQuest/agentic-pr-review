@@ -2433,7 +2433,7 @@ internal sealed partial class RetainedStateTransactionService
                 lease,
                 generation,
                 out var currentReview,
-                out _) ||
+                out _, snapshot) ||
             currentReview is null ||
             !AcceptedStateIdentity.TryComputeLogicalGeneration(
                 pending[0].Payload,

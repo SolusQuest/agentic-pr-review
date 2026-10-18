@@ -79,7 +79,8 @@ internal sealed class SolusReviewBridge : IDisposable
         TimeSpan hostRemaining, CancellationToken cancellationToken,
         Func<IModelProvider, IModelProvider>? trustedProviderDecorator = null,
         Func<SolusRestrictedStateCompatibility, IRestrictedContextSink?>? sinkFactory = null,
-        SolusRestrictedStateCompatibility? expectedCompatibility = null)
+        SolusRestrictedStateCompatibility? expectedCompatibility = null,
+        SolusConsumedContext? consumed = null, Action? providerStarted = null)
     {
         if (Interlocked.Exchange(ref used, 1) != 0) throw new InvalidOperationException("APR_SOLUS_REVIEW_ALREADY_USED");
         var limits = context.Policy.LimitAuthority;
@@ -93,6 +94,7 @@ internal sealed class SolusReviewBridge : IDisposable
         if (hostRemaining < duration) duration = hostRemaining;
         if (duration <= TimeSpan.Zero)
         {
+            if (consumed is not null) return new(null, null);
             var empty = new AgentRunUsage(Facts.ExecutionId, UsageInventoryCoverage.Complete, []);
             return new(new(AgentTerminationReason.ResourceLimit, Facts.Freeze(empty),
                 ActionHostTerminationReason.DeadlineExceeded, false, empty), null);
@@ -102,19 +104,27 @@ internal sealed class SolusReviewBridge : IDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         // A compiled fixture can fault only capture/export after real provider
         // work; no repository, environment or model field selects this delegate.
-        var currentProvider = trustedProviderDecorator?.Invoke(provider) ?? provider;
+        IModelProvider observedProvider = providerStarted is null ? provider : new ExchangeObserver(provider, providerStarted);
+        var currentProvider = trustedProviderDecorator?.Invoke(observedProvider) ?? observedProvider;
         using var runtime = SolusRuntimeConstruction.CreateForAuthorizedReview(context,
             _ => new(currentProvider, tools.Registrations, hooks));
         if (expectedCompatibility is not null && runtime.SourceSelection.Compatibility != expectedCompatibility)
             throw new ArgumentException("APR_SOLUS_CONFIGURATION_MISMATCH");
+        AgentContextEnvelope? envelope = null;
+        ContextRoundGrant? grant = null;
+        if (consumed is not null && !runtime.TryArm(consumed, out envelope, out grant))
+            throw new ArgumentException("APR_SOLUS_CONTEXT_AUTHORITY");
         var currentSink = sinkFactory is null ? sink : sinkFactory(runtime.SourceSelection.Compatibility);
         var request = Request(instructions, data, duration,
             Math.Min(Cr1DevelopmentProfile.LogicalCalls, limits.ModelCalls), admitToolCalls: true);
         var terminal = new SolusTerminalAccountingGate(Facts, domain);
         var result = await ((IContextCandidateAgent)runtime.Agent).ExecuteCandidatesWithContextAsync(
-            new(request, ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), terminal, currentSink,
+            new(request, consumed is null ? ContextExecutionIntent.Fresh : ContextExecutionIntent.NewRunFromContext,
+                envelope, grant), SolusReviewCandidateHost.Bounds(), terminal, currentSink,
             cancellationToken: linked.Token).ConfigureAwait(false);
-        var candidates = result.Candidates ?? throw new InvalidOperationException("APR_SOLUS_FRESH_OUTCOME");
+        // Supplied admission/import rejection has no current work outcome.
+        // It is neither a fresh fallback nor an invented provider failure.
+        if (result.Candidates is not { } candidates) return new(null, result);
         // Capture happens after work. Its latency/failure cannot rewrite an
         // actually completed work outcome; Host eligibility separately observes
         // the caller/deadline before any prospective effect.
@@ -185,9 +195,27 @@ internal sealed class SolusReviewBridge : IDisposable
     }
     public void Dispose() => provider.Dispose();
     public override string ToString() => nameof(SolusReviewBridge);
+
+    // Import and request admission do not start a provider exchange. Keep Host
+    // accounting untouched until the actual current provider operation begins.
+    private sealed class ExchangeObserver(IModelProvider inner, Action started)
+        : IModelProvider, IProviderContextPersistence, IProviderRequestValidation
+    {
+        private int observed;
+        public ProviderScope Scope => inner.Scope;
+        public ProviderCapabilities Capabilities => inner.Capabilities;
+        public ValueTask<ProviderExchangeResult> ExchangeAsync(ProviderRequest request, CancellationToken token = default)
+        {
+            if (Interlocked.Exchange(ref observed, 1) == 0) started();
+            return inner.ExchangeAsync(request, token);
+        }
+        public ProviderError ValidateRequest(ProviderRequest request) => ((IProviderRequestValidation)inner).ValidateRequest(request);
+        public ProviderSavedState? ExportContext(ProviderContextBinding binding) => ((IProviderContextPersistence)inner).ExportContext(binding);
+        public bool AdmitContext(ProviderContextBinding binding, ProviderSavedState state) => ((IProviderContextPersistence)inner).AdmitContext(binding, state);
+    }
 }
 
-internal sealed record SolusContextReviewOutcome(SolusReviewOutcome Work, ContextCandidateExecutionResult? Execution)
+internal sealed record SolusContextReviewOutcome(SolusReviewOutcome? Work, ContextCandidateExecutionResult? Execution)
 {
     public override string ToString() => nameof(SolusContextReviewOutcome);
 }

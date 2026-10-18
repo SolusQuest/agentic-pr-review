@@ -11,13 +11,32 @@ internal sealed partial class RetainedStateTransactionService
 {
     internal async Task<RetainedStateTransactionResult<RetainedStatePreparedCandidate>> PrepareSolusAsync(
         RetainedStateTransactionAuthority authority, SolusRestrictedStateRecord record,
-        R4ValidatedPublicationReview review, CancellationToken cancellationToken)
+        R4ValidatedPublicationReview review, CancellationToken cancellationToken, SolusConsumedContext? consumed = null)
     {
         if (cancellationToken.IsCancellationRequested)
             return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.Cancelled);
         using var lease = await authority.EnterAsync(cancellationToken).ConfigureAwait(false);
-        if (lease is null || !authority.TryGetBinding(lease, out var binding) || binding is null ||
-            !authority.TryBuildSolusSuccessor(lease, record, review, out var material) || material is null)
+        if (lease is null || !authority.TryGetBinding(lease, out var binding) || binding is null)
+            return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(
+                cancellationToken.IsCancellationRequested ? RetainedStateTransactionCodes.Cancelled : RetainedStateTransactionCodes.Invalid);
+        RetainedStateObservation? observation = null;
+        if (consumed is not null)
+        {
+            if (!authority.TryReadTrustedTime(lease, out var now) ||
+                !RetainedStateRetention.TryCandidate(now, out var expiry, out _))
+                return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.Invalid);
+            var observed = await authority.ObserveAsync(lease, expiry, now, cancellationToken).ConfigureAwait(false);
+            if (!observed.Succeeded || observed.Value is null)
+                return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(observed.Code);
+            observation = observed.Value;
+        }
+        using var admittedObservation = observation;
+        SolusRetainedStateMaterial? material = null;
+        var built = consumed is null
+            ? authority.TryBuildSolusSuccessor(lease, record, review, out material)
+            : observation is not null && authority.TryBuildRestoredSolusSuccessor(lease, consumed, record,
+                review, observation, out material);
+        if (!built || material is null)
             return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(
                 cancellationToken.IsCancellationRequested ? RetainedStateTransactionCodes.Cancelled : RetainedStateTransactionCodes.Invalid);
         byte[] publicationBytes = [];
@@ -26,7 +45,8 @@ internal sealed partial class RetainedStateTransactionService
             if (!AcceptedStatePublicationPayloadCodec.TryEncode(material.Publication, out publicationBytes))
                 return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.Invalid);
             return PrepareGeneration(authority, lease, binding, null, material.Envelope, material.RecordSha256,
-                binding.Reviewed.BaseSha, binding.Reviewed.HeadSha, 0, null, material.Publication,
+                binding.Reviewed.BaseSha, binding.Reviewed.HeadSha, material.Generation,
+                material.PredecessorEnvelopeSha256, material.Publication,
                 publicationBytes, material.Projection, material.PreparedAt, material.LogicalExpiry, material.RequiredPlatformExpiry);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or

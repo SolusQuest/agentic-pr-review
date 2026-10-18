@@ -11,6 +11,7 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Execution.Solus;
 using AgenticPrReview.Runtime.Solus;
 using SolusAgent.Api.Context;
+using AgenticPrReview.Runtime.Host.State.Restore;
 using SolusAgent.Runtime.Api.Exposure;
 using SolusAgent.Runtime.Api.Providers;
 
@@ -92,7 +93,8 @@ internal sealed class SolusFreshReviewComposition
         IRestrictedContextSink? sink, IReadOnlyList<SolusAgent.Api.Execution.AgentInput> reviewData,
         SolusPreparedFreshExecution? execution = null,
         Func<SolusRestrictedStateCompatibility, IRestrictedContextSink?>? sinkFactory = null,
-        Action<ContextCandidateExecutionResult?>? completeCapture = null, Action? providerStarted = null)
+        Action<ContextCandidateExecutionResult?>? completeCapture = null, Action? providerStarted = null,
+        SolusConsumedContext? consumed = null)
     {
         var executionId = execution?.ExecutionId ?? Guid.NewGuid();
         if (prepared.FreshContext?.IsLive != true)
@@ -101,23 +103,14 @@ internal sealed class SolusFreshReviewComposition
             return new(executionId, SolusFreshReviewFailure.Cancelled);
         if (prepared.Launch.Inputs.ProviderApiKey is null)
             return new(executionId, SolusFreshReviewFailure.CredentialsMissing);
-        var instructions = Control + Encoding.UTF8.GetString(prepared.Policy.InstructionBytes.AsSpan());
-        var contents = prepared.RestoreRequest.CurrentReviewContext.Contents;
-        if (contents.Length != 1 || contents[0] is not ProjectTextContent context)
-            return new(executionId, SolusFreshReviewFailure.HostFailure);
-        if (reviewData.Any(d => d is null || d.Source != SolusAgent.Api.Execution.AgentInputSource.Repository))
-            return new(executionId, SolusFreshReviewFailure.InputProfileRejected);
-        var data = new[] { new SolusAgent.Api.Execution.AgentInput(
-            SolusAgent.Api.Execution.AgentInputSource.Repository, context.Text) }.Concat(reviewData).ToArray();
-        try { SolusReviewBridge.ValidateText(instructions, data); }
-        catch (ArgumentException) { return new(executionId, SolusFreshReviewFailure.InputProfileRejected); }
+        var inputFailure = ValidateInput(prepared, reviewData, out var instructions, out var data);
+        if (inputFailure != SolusFreshReviewFailure.None) return new(executionId, inputFailure);
 
         var budget = SolusReviewBridge.BoundBudget(prepared.Policy.LimitAuthority.TokenBudget);
         if (!prepared.Journal.TryBeginBusinessOperation(ActionHostOperationKind.Provider,
                 prepared.CancellationToken, out var operation))
             return new(executionId, SolusFreshReviewFailure.Cancelled);
         using var admittedOperation = operation!;
-        providerStarted?.Invoke();
         SolusContextReviewOutcome? observedRun = null;
         AgentTerminalReview? validatedReview = null;
         var domainAccepted = false;
@@ -133,7 +126,7 @@ internal sealed class SolusFreshReviewComposition
             var run = await bridge.RunAuthorizedAsync(prepared.FreshContext, instructions, data, tools, domain,
                 sink, prepared.TimeBudget.RemainingReviewTime,
                 prepared.Journal.ProviderCancellationToken, trustedProviderDecorator, sinkFactory,
-                execution?.Compatibility).ConfigureAwait(false);
+                execution?.Compatibility, consumed, providerStarted).ConfigureAwait(false);
             observedRun = run;
             // A failing transfer cannot turn completed work into provider failure.
             try { completeCapture?.Invoke(run.Execution); }
@@ -142,13 +135,15 @@ internal sealed class SolusFreshReviewComposition
             var actual = run.Execution;
             AgentTerminalReview? review = null;
             var correlated = actual is not null && actual.Context.ExecutionId == executionId &&
-                actual.Context.Intent == ContextExecutionIntent.Fresh && actual.Context.Admission == ContextAdmission.Fresh &&
-                actual.Context.History.Count == 0 && actual.Candidates?.HistoricalReceipts.Count == 0 &&
+                (consumed is null
+                    ? actual.Context.Intent == ContextExecutionIntent.Fresh && actual.Context.Admission == ContextAdmission.Fresh &&
+                        actual.Context.History.Count == 0 && actual.Candidates?.HistoricalReceipts.Count == 0
+                    : CorrelatesSupplied(actual, consumed)) &&
                 (actual.Context.CaptureStatus != ContextCaptureStatus.Delivered ||
                     actual.Context.Checkpoint?.ExecutionId == executionId);
             var accepted = correlated && domain.TryComplete(actual!, out review);
             domainAccepted = accepted;
-            var productAccepted = accepted && run.Work.EligibleForProductValidation;
+            var productAccepted = accepted && run.Work?.EligibleForProductValidation == true;
             validatedReview = productAccepted ? review : null;
             var publication = productAccepted
                 ? await ActionHostCoordinator.ValidateFreshPublicationAsync(prepared, review!).ConfigureAwait(false)
@@ -168,6 +163,45 @@ internal sealed class SolusFreshReviewComposition
                 observedRun?.Execution?.Context, validatedReview, domainAccepted,
                 new(ActionHostFreshPublicationStatus.NotEvaluated), tools?.CurrentObservations ?? []);
         }
+    }
+
+    // Pure current-input admission, also used before S2's durable claim. Neither
+    // historical data nor a model field can become trusted Host instructions.
+    internal static SolusFreshReviewFailure ValidateInput(ActionHostPreparedReview prepared,
+        IReadOnlyList<SolusAgent.Api.Execution.AgentInput> reviewData, out string instructions,
+        out SolusAgent.Api.Execution.AgentInput[] data)
+    {
+        instructions = Control + Encoding.UTF8.GetString(prepared.Policy.InstructionBytes.AsSpan());
+        data = [];
+        var contents = prepared.RestoreRequest.CurrentReviewContext.Contents;
+        if (contents.Length != 1 || contents[0] is not ProjectTextContent context)
+            return SolusFreshReviewFailure.HostFailure;
+        if (reviewData.Count >= Cr1DevelopmentProfile.ProviderInputs - 1 ||
+            reviewData.Any(d => d is null || d.Source != SolusAgent.Api.Execution.AgentInputSource.Repository))
+            return SolusFreshReviewFailure.InputProfileRejected;
+        data = new[] { new SolusAgent.Api.Execution.AgentInput(
+            SolusAgent.Api.Execution.AgentInputSource.Repository, context.Text) }.Concat(reviewData).ToArray();
+        try { SolusReviewBridge.ValidateText(instructions, data); }
+        catch (ArgumentException) { return SolusFreshReviewFailure.InputProfileRejected; }
+        return SolusFreshReviewFailure.None;
+    }
+
+    private static bool CorrelatesSupplied(ContextCandidateExecutionResult actual, SolusConsumedContext consumed)
+    {
+        var claim = consumed.Claim;
+        var context = actual.Context;
+        if (!consumed.WasClaimed || context.Intent != ContextExecutionIntent.NewRunFromContext ||
+            context.Admission != ContextAdmission.Supplied || context.ExecutionId != claim.ExecutionId ||
+            context.History.Count == 0 || actual.Candidates?.HistoricalReceipts.Count is not > 0) return false;
+        var source = context.History[^1];
+        var receipt = actual.Candidates.HistoricalReceipts[^1];
+        return source.LogicalWorkId == claim.Source.LogicalWorkId && source.RoundId == claim.Source.RoundId &&
+            source.Usage.ExecutionId == claim.Source.ExecutionId &&
+            source.Reason == SolusAgent.Api.Execution.AgentTerminationReason.Completed &&
+            receipt.ExecutionId == claim.Source.ExecutionId && receipt.IsAccepted &&
+            receipt.Continuation == SolusAgent.Api.Candidates.CandidateContinuation.End &&
+            (context.Checkpoint is null || context.Checkpoint.RoundId == claim.RoundId &&
+                context.Checkpoint.LogicalWorkId != claim.Source.LogicalWorkId);
     }
 
     private sealed class FreshExposureHooks(ActionHostPreparedReview prepared) : IRuntimeExposureHooks
