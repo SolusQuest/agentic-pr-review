@@ -119,11 +119,11 @@ function measure(run, pages, main = false) {
     const frameworkNames = ['first', 'second']
       .map((role) => `R4 ActionHost (framework, ${role})`)
       .sort();
-    const legacyNames = [
+    const historicalNames = [
       ...frameworkNames,
       ...['first', 'second'].map((role) => `R4 ActionHost (aot, ${role})`),
     ].sort();
-    const expectedR4 = r4Names.length === 2 ? frameworkNames : legacyNames;
+    const expectedR4 = r4Names.length === 2 ? frameworkNames : historicalNames;
     assert.deepEqual(
       r4Names,
       expectedR4,
