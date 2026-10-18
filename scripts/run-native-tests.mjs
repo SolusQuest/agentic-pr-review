@@ -37,30 +37,16 @@ const runtimeFilter = [
   'ReviewedRootMaterializerTests',
   'Tests.Host.State',
   'R5ReplayAdmissionTests',
+  'LiveAgentFreshProcessTests',
+  'TrustedLiveAgentTests',
   'R5CompletedReplayTests.ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials',
   'R6EconomicsRunnerTests.EnvironmentAndPrivateStateCanariesNeverReachPublicOutputOrChildEnvironment',
   'TrustedProofEvidenceBoundaryTests',
   'SyntheticPrimaryBucket',
   'NativeFileOperationsTests',
-  'DarwinDirectoryAuthorityIsRejectedBeforeCapabilityIssuance',
 ]
   .map((name) => `FullyQualifiedName~${name}`)
   .join('|');
-// Physical bridge operations still require anchored directory paths. Keep all
-// four portable bridge contract/codec controls; runtime-all retains every
-// transport/staging diagnostic, including unsupported-platform failures.
-const portableBridgeTests = [
-  'FreezesExactPrivateBounds',
-  'UsesStrictSourceGeneratedPrivateSerialization',
-  'H1CodecRejectsUnknownDuplicateAndBuildMismatch',
-  'GitHubArtifactAdapterTypesStayInternalAndCapabilityNarrow',
-]
-  .map((name) => `FullyQualifiedName~ArtifactBridgeContractTests.${name}`)
-  .join('|');
-const focusedRuntimeFilter =
-  process.platform === 'darwin'
-    ? `(${runtimeFilter})&(FullyQualifiedName!~Tests.Host.State.GitHubArtifacts|${portableBridgeTests})`
-    : runtimeFilter;
 
 function run(command, commandArgs) {
   const result = spawnSync(command, commandArgs, { cwd: root, env, stdio: 'inherit' });
@@ -71,6 +57,13 @@ function run(command, commandArgs) {
 function nodeTests(unfiltered) {
   const selection = args.length > 0 ? args : unfiltered ? [] : ['src', 'tests'];
   console.log(`Native Node ${unfiltered ? 'diagnostic' : 'selection'}; physical temp: ${temp}`);
+  console.log(
+    args.length > 0
+      ? 'Coverage: explicit Vitest arguments replace the default src/ + tests/ path arguments.'
+      : unfiltered
+        ? 'Coverage: unfiltered Node diagnostic, including platform-specific script tests.'
+        : 'Coverage: src/ + tests/; script tests require an explicit selection or node-all.',
+  );
   return run(process.execPath, [
     path.join(root, 'node_modules/vitest/vitest.mjs'),
     'run',
@@ -84,11 +77,19 @@ function runtimeTests(unfiltered) {
   const directory = path.join(root, '.local/native-tests');
   mkdirSync(directory, { recursive: true });
   const results = mkdtempSync(path.join(directory, 'runtime-'));
-  const selected =
-    unfiltered || args.some((arg) => arg === '--filter' || arg.startsWith('--filter='))
-      ? []
-      : ['--filter', focusedRuntimeFilter];
+  const explicitFilter = args.some((arg) => arg === '--filter' || arg.startsWith('--filter='));
+  const selected = unfiltered || explicitFilter ? [] : ['--filter', runtimeFilter];
   console.log(`Native .NET ${unfiltered ? 'diagnostic' : 'selection'}; physical temp: ${temp}`);
+  console.log(
+    unfiltered
+      ? 'Coverage: unfiltered runtime diagnostic; unsupported production mechanisms remain real failures.'
+      : explicitFilter
+        ? 'Coverage: explicit dotnet filter; the focused default is replaced.'
+        : 'Coverage: output/snapshot/tools/state/replay, real local bridge and directory authority, evidence, launcher and bucket fixtures.',
+  );
+  console.log(
+    'Not established by this run: complete Linux namespace/strace/descriptor-launch, Native AOT and managed archive qualification. Existing early-return passes are not native execution proof.',
+  );
   const status = run('dotnet', [
     'test',
     path.join(root, 'runtime/tests/AgenticPrReview.Runtime.Tests'),

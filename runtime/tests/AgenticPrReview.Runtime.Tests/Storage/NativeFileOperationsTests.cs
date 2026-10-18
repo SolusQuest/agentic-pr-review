@@ -31,7 +31,7 @@ public sealed class NativeFileOperationsTests
             .Select(method => method.GetCustomAttribute<LibraryImportAttribute>())
             .OfType<LibraryImportAttribute>().ToArray();
         Assert.All(imports, import => Assert.Equal("libc", import.LibraryName));
-        Assert.Equal(new[] { "__openat", "__openat", "closedir", "fdopendir", "fdopendir$INODE64", "fstat64", "readdir", "readdir$INODE64", "renameatx_np", "unlinkat" },
+        Assert.Equal(new[] { "__openat", "__openat", "closedir", "fchmod", "fdopendir", "fdopendir$INODE64", "fstat64", "mkdirat", "readdir", "readdir$INODE64", "renameatx_np", "unlinkat" },
             imports.Select(import => import.EntryPoint).Order(StringComparer.Ordinal).ToArray());
     }
 
@@ -130,7 +130,6 @@ public sealed class NativeFileOperationsTests
         Assert.True(ReviewedStagedFileAccess.TryOpenDirectory(root.Path, out var held, out _));
         using (held)
             Assert.Throws<PlatformNotSupportedException>(() => NativeRestrictedStateFiles.AnchoredRoot(root.Path, held!));
-        Assert.Throws<PlatformNotSupportedException>(() => new ArtifactBridgeStaging(root.Path));
         Assert.Empty(Directory.EnumerateFileSystemEntries(root.Path));
     }
 
@@ -150,6 +149,81 @@ public sealed class NativeFileOperationsTests
             Assert.Equal(new byte[] { 3 }, await File.ReadAllBytesAsync(staged.TempPath));
             if (exists) Assert.Equal("target", await File.ReadAllTextAsync(target));
             else Assert.False(File.Exists(target));
+        }
+    }
+
+    [DarwinFact]
+    [SupportedOSPlatform("macos")]
+    public async Task BridgeSealingUsesRetainedEntriesAfterAnOperationPathReplacement()
+    {
+        using var root = new Root();
+        File.SetUnixFileMode(root.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var outside = Path.Join(root.Path, "outside");
+        Directory.CreateDirectory(outside, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var outsideObject = Path.Join(outside, "object.bin");
+        var outsideEnvelope = Path.Join(outside, "artifact-envelope.json");
+        File.WriteAllText(outsideObject, "outside-object");
+        File.WriteAllText(outsideEnvelope, "outside-envelope");
+        File.SetUnixFileMode(outsideObject, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var staging = new ArtifactBridgeStaging(root.Path);
+        var scope = await staging.StageUploadAsync(new byte[] { 1, 2 }, CancellationToken.None);
+        var operation = Path.GetDirectoryName(scope.FullPath)!;
+        var displaced = Path.Join(root.Path, "held-operation");
+        File.SetUnixFileMode(operation, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Directory.Move(operation, displaced);
+        try
+        {
+            Directory.CreateSymbolicLink(operation, outside);
+            scope.Seal();
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(outside));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(outsideObject));
+            Assert.Equal("outside-object", File.ReadAllText(outsideObject));
+            Assert.Equal("outside-envelope", File.ReadAllText(outsideEnvelope));
+        }
+        finally
+        {
+            Directory.Delete(operation);
+            File.SetUnixFileMode(displaced, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.Move(displaced, operation);
+            await scope.DisposeAsync();
+        }
+        Assert.True(scope.CleanupSucceeded);
+    }
+
+    [DarwinFact]
+    [SupportedOSPlatform("macos")]
+    public async Task BridgeCleanupRejectsAReparentedOperationUnderAReplacementOwner()
+    {
+        using var root = new Root();
+        File.SetUnixFileMode(root.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var staging = new ArtifactBridgeStaging(root.Path);
+        var scope = staging.PrepareDownload();
+        await scope.ObjectStream.WriteAsync(new byte[] { 3, 4 });
+        await scope.ObjectStream.FlushAsync();
+        var owner = Path.GetDirectoryName(Path.GetDirectoryName(scope.FullPath)!)!;
+        var operationName = Path.GetFileName(Path.GetDirectoryName(scope.FullPath)!);
+        File.SetUnixFileMode(Path.GetDirectoryName(scope.FullPath)!, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var displaced = Path.Join(root.Path, "held-owner");
+        Directory.Move(owner, displaced);
+        Directory.CreateDirectory(owner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var replacementOperation = Path.Join(owner, operationName);
+        Directory.Move(Path.Join(displaced, operationName), replacementOperation);
+        var marker = Path.Join(owner, "outside");
+        File.WriteAllText(marker, "replacement-owner");
+        try
+        {
+            Assert.False(scope.ValidatePhysicalIdentity());
+            await Assert.ThrowsAsync<IOException>(() => staging.ReadDownloadAsync(scope, 2, CancellationToken.None));
+            await scope.DisposeAsync();
+            Assert.False(scope.CleanupSucceeded);
+            Assert.Equal("replacement-owner", File.ReadAllText(marker));
+            Assert.Equal(new byte[] { 3, 4 }, File.ReadAllBytes(Path.Join(replacementOperation, "object.bin")));
+            Assert.Empty(Directory.GetFileSystemEntries(displaced));
+        }
+        finally
+        {
+            await scope.DisposeAsync();
+            File.SetUnixFileMode(replacementOperation, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
     }
 

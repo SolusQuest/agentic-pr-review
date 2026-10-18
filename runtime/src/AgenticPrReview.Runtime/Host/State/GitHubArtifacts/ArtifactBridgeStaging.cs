@@ -21,10 +21,6 @@ internal sealed class ArtifactBridgeStaging
 
     internal ArtifactBridgeStaging(string explicitBridgeOwnedRoot)
     {
-        // This consumer still performs mutations through an anchored pathname.
-        // Native identity support alone does not make that authority portable.
-        if (OperatingSystem.IsMacOS())
-            throw new PlatformNotSupportedException("Artifact bridge staging requires anchored directory paths.");
         if (string.IsNullOrWhiteSpace(explicitBridgeOwnedRoot))
         {
             throw new ArgumentException(
@@ -38,33 +34,25 @@ internal sealed class ArtifactBridgeStaging
         }
         rootGuard = OpenDirectoryGuard(root);
         rootIdentity = RequireIdentity(rootGuard, expectDirectory: true);
-        var anchoredRoot = NativeRestrictedStateFiles.AnchoredRoot(
-            root,
-            rootGuard);
+        var anchoredRoot = OperatingSystem.IsMacOS() ? root
+            : NativeRestrictedStateFiles.AnchoredRoot(root, rootGuard);
         csharpRoot = Path.Join(root, "csharp");
         var anchoredCsharpPath = Path.Join(anchoredRoot, "csharp");
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsMacOS())
         {
-            Directory.CreateDirectory(anchoredCsharpPath);
+            csharpRootGuard = DarwinFiles.CreateChildDirectory(rootGuard, "csharp");
+            csharpRootIdentity = RequireIdentity(csharpRootGuard, expectDirectory: true);
+            DarwinFiles.SetMode(csharpRootGuard, 0x1c0);
+            anchoredCsharpRoot = csharpRoot; // display/proof only; mutations use csharpRootGuard
         }
         else
         {
-            Directory.CreateDirectory(
-                anchoredCsharpPath,
-                PrivateDirectoryMode);
-        }
-        csharpRootGuard = OpenDirectoryGuard(anchoredCsharpPath);
-        csharpRootIdentity = RequireIdentity(
-            csharpRootGuard,
-            expectDirectory: true);
-        anchoredCsharpRoot = NativeRestrictedStateFiles.AnchoredRoot(
-            csharpRoot,
-            csharpRootGuard);
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                anchoredCsharpRoot,
-                PrivateDirectoryMode);
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(anchoredCsharpPath);
+            else Directory.CreateDirectory(anchoredCsharpPath, PrivateDirectoryMode);
+            csharpRootGuard = OpenDirectoryGuard(anchoredCsharpPath);
+            csharpRootIdentity = RequireIdentity(csharpRootGuard, expectDirectory: true);
+            anchoredCsharpRoot = NativeRestrictedStateFiles.AnchoredRoot(csharpRoot, csharpRootGuard);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(anchoredCsharpRoot, PrivateDirectoryMode);
         }
         if (!IsSafeDirectory(root) ||
             !PathMatchesIdentity(root, rootIdentity, expectDirectory: true) ||
@@ -206,15 +194,10 @@ internal sealed class ArtifactBridgeStaging
         var anchoredDirectory = Path.Join(
             anchoredCsharpRoot,
             operationName);
-        if (OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsMacOS())
         {
-            Directory.CreateDirectory(anchoredDirectory);
-        }
-        else
-        {
-            Directory.CreateDirectory(
-                anchoredDirectory,
-                PrivateDirectoryMode);
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(anchoredDirectory);
+            else Directory.CreateDirectory(anchoredDirectory, PrivateDirectoryMode);
         }
         SafeFileHandle? operationGuard = null;
         FileStream? objectStream = null;
@@ -224,15 +207,16 @@ internal sealed class ArtifactBridgeStaging
         RestrictedStateFileIdentity? envelopeIdentity = null;
         try
         {
-            operationGuard = OpenDirectoryGuard(anchoredDirectory);
+            operationGuard = OperatingSystem.IsMacOS()
+                ? DarwinFiles.CreateChildDirectory(csharpRootGuard, operationName, exclusive: true)
+                : OpenDirectoryGuard(anchoredDirectory);
             operationIdentity = RequireIdentity(
                 operationGuard,
                 expectDirectory: true);
-            var anchoredOperation =
-                NativeRestrictedStateFiles.AnchoredRoot(
-                    directory,
-                    operationGuard);
-            if (!OperatingSystem.IsWindows())
+            var anchoredOperation = OperatingSystem.IsMacOS() ? directory
+                : NativeRestrictedStateFiles.AnchoredRoot(directory, operationGuard);
+            if (OperatingSystem.IsMacOS()) DarwinFiles.SetMode(operationGuard, 0x1c0);
+            else if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(
                     anchoredOperation,
@@ -242,7 +226,9 @@ internal sealed class ArtifactBridgeStaging
             var anchoredFullPath = Path.Join(
                 anchoredOperation,
                 "object.bin");
-            objectStream = new FileStream(
+            objectStream = OperatingSystem.IsMacOS()
+                ? new FileStream(DarwinFiles.OpenChild(operationGuard, "object.bin", create: true), FileAccess.ReadWrite, 64 * 1024, isAsync: false)
+                : new FileStream(
                 anchoredFullPath,
                 FileMode.CreateNew,
                 FileAccess.ReadWrite,
@@ -257,7 +243,9 @@ internal sealed class ArtifactBridgeStaging
                 "artifact-envelope.json");
             if (upload)
             {
-                envelopeStream = new FileStream(
+                envelopeStream = OperatingSystem.IsMacOS()
+                    ? new FileStream(DarwinFiles.OpenChild(operationGuard, "artifact-envelope.json", create: true), FileAccess.ReadWrite, 64 * 1024, isAsync: false)
+                    : new FileStream(
                     Path.Join(
                         anchoredOperation,
                         "artifact-envelope.json"),
@@ -292,20 +280,82 @@ internal sealed class ArtifactBridgeStaging
                 envelopePath,
                 envelopeStream,
                 envelopeIdentity,
-                relative);
+                relative,
+                OperatingSystem.IsMacOS() ? csharpRootGuard : null,
+                OperatingSystem.IsMacOS() ? csharpRootIdentity : null);
         }
         catch
         {
             envelopeStream?.Dispose();
             objectStream?.Dispose();
-            operationGuard?.Dispose();
-            DeleteFailedScope(
+            if (OperatingSystem.IsMacOS())
+            {
+                if (operationGuard is not null && operationIdentity is { } heldIdentity)
+                    DeleteDarwinScope(csharpRootGuard, operationName, operationGuard, heldIdentity, objectIdentity, envelopeIdentity);
+                operationGuard?.Dispose();
+            }
+            else
+            {
+                operationGuard?.Dispose();
+                DeleteFailedScope(
                 anchoredDirectory,
                 operationIdentity,
                 objectIdentity,
-                envelopeIdentity);
+                    envelopeIdentity);
+            }
             throw;
         }
+    }
+
+    internal static bool RelativeFileMatches(SafeFileHandle directory, string name, RestrictedStateFileIdentity expected)
+    {
+        try
+        {
+            using var file = DarwinFiles.OpenChild(directory, name);
+            return RequireIdentity(file, expectDirectory: false) == expected;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        { return false; }
+    }
+
+    private static void DeleteExactDarwinFile(SafeFileHandle directory, string name, RestrictedStateFileIdentity expected)
+    {
+        if (!RelativeFileMatches(directory, name, expected))
+            throw new IOException("artifact_bridge_cleanup_identity_changed");
+        DarwinFiles.DeleteChild(directory, name);
+    }
+
+    internal static bool DeleteDarwinScope(SafeFileHandle owner, string operationName, SafeFileHandle operation,
+        RestrictedStateFileIdentity expectedDirectory, RestrictedStateFileIdentity? expectedObject,
+        RestrictedStateFileIdentity? expectedEnvelope)
+    {
+        try
+        {
+            if (RequireIdentity(operation, true) != expectedDirectory) return false;
+            using var namedOperation = DarwinFiles.OpenChild(owner, operationName, isDirectory: true);
+            if (RequireIdentity(namedOperation, true) != expectedDirectory) return false;
+            var tombstoneName = $"cleanup-{Guid.NewGuid():N}";
+            DarwinFiles.MoveChild(owner, operationName, tombstoneName);
+            using var isolated = DarwinFiles.OpenChild(owner, tombstoneName, isDirectory: true);
+            if (RequireIdentity(isolated, true) != expectedDirectory) return false;
+            var expectedNames = new HashSet<string>(StringComparer.Ordinal);
+            if (expectedObject is not null) expectedNames.Add("object.bin");
+            if (expectedEnvelope is not null) expectedNames.Add("artifact-envelope.json");
+            var maximum = expectedNames.Count + 1;
+            foreach (var name in DarwinFiles.EnumerateNames(isolated).Take(maximum))
+                if (!expectedNames.Remove(name)) return false;
+            if (expectedNames.Count != 0) return false;
+            DarwinFiles.SetMode(isolated, 0x1c0);
+            if (expectedObject is { } objectIdentity) DeleteExactDarwinFile(isolated, "object.bin", objectIdentity);
+            if (expectedEnvelope is { } envelopeIdentity) DeleteExactDarwinFile(isolated, "artifact-envelope.json", envelopeIdentity);
+            using var current = DarwinFiles.OpenChild(owner, tombstoneName, isDirectory: true);
+            if (RequireIdentity(current, true) != expectedDirectory || DarwinFiles.EnumerateNames(isolated).Any()) return false;
+            DarwinFiles.DeleteChild(owner, tombstoneName, isDirectory: true);
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or
+            ObjectDisposedException or NotSupportedException)
+        { return false; }
     }
 
     private static void DeleteFailedScope(
@@ -484,7 +534,9 @@ internal sealed class ArtifactBridgeStagingScope(
     string envelopePath,
     FileStream? envelopeStream,
     RestrictedStateFileIdentity? envelopeIdentity,
-    string relativePath) : IAsyncDisposable
+    string relativePath,
+    SafeFileHandle? darwinOwnerGuard,
+    RestrictedStateFileIdentity? darwinOwnerIdentity) : IAsyncDisposable
 {
     private bool disposed;
 
@@ -512,6 +564,15 @@ internal sealed class ArtifactBridgeStagingScope(
         {
             return;
         }
+        if (OperatingSystem.IsMacOS())
+        {
+            if (darwinOwnerGuard is null || ArtifactBridgeStaging.RequireIdentity(operationGuard, true) != operationIdentity)
+                throw new IOException("artifact_bridge_staging_invalid");
+            DarwinFiles.SetMode(ObjectStream.SafeFileHandle, envelopeStream is null ? 0x180u : 0x100u);
+            if (envelopeStream is not null) DarwinFiles.SetMode(envelopeStream.SafeFileHandle, 0x180);
+            DarwinFiles.SetMode(operationGuard, 0x140);
+            return;
+        }
         File.SetUnixFileMode(
             FullPath,
             envelopeStream is null
@@ -535,6 +596,12 @@ internal sealed class ArtifactBridgeStagingScope(
             return !disposed &&
                 IsOwnedBy(ownerRoot) &&
                 ArtifactBridgeStaging.IsSafeDirectory(ownerRoot) &&
+                (darwinOwnerGuard is null ? !OperatingSystem.IsMacOS() : darwinOwnerIdentity is { } ownerIdentity &&
+                    ArtifactBridgeStaging.RequireIdentity(darwinOwnerGuard, true) == ownerIdentity &&
+                    ArtifactBridgeStaging.PathMatchesIdentity(ownerRoot, ownerIdentity, true) &&
+                    ArtifactBridgeStaging.RequireIdentity(operationGuard, true) == operationIdentity &&
+                    ArtifactBridgeStaging.RelativeFileMatches(operationGuard, "object.bin", objectIdentity) &&
+                    (envelopeIdentity is null || ArtifactBridgeStaging.RelativeFileMatches(operationGuard, "artifact-envelope.json", envelopeIdentity.Value))) &&
                 ArtifactBridgeStaging.IsSafeDirectory(operationDirectory) &&
                 ArtifactBridgeStaging.PathMatchesIdentity(
                     operationDirectory,
@@ -575,12 +642,23 @@ internal sealed class ArtifactBridgeStagingScope(
         var physicalIdentityValid = ValidateBeforeDisposal();
         envelopeStream?.Dispose();
         ObjectStream.Dispose();
-        operationGuard.Dispose();
         if (!physicalIdentityValid)
         {
+            operationGuard.Dispose();
             CleanupSucceeded = false;
             return ValueTask.CompletedTask;
         }
+        if (darwinOwnerGuard is not null)
+        {
+            try
+            {
+                CleanupSucceeded = ArtifactBridgeStaging.DeleteDarwinScope(darwinOwnerGuard, operationName,
+                    operationGuard, operationIdentity, objectIdentity, envelopeIdentity);
+            }
+            finally { operationGuard.Dispose(); }
+            return ValueTask.CompletedTask;
+        }
+        operationGuard.Dispose();
         try
         {
             var tombstoneName = $"cleanup-{Guid.NewGuid():N}";

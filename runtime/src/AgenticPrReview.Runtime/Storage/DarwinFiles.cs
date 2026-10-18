@@ -62,21 +62,21 @@ internal static partial class DarwinFiles
     [LibraryImport("libc", EntryPoint = "renameatx_np", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int RenameAt(SafeFileHandle sourceDirectory, string source, SafeFileHandle destinationDirectory, string destination, uint flags);
 
-    internal static void MoveChild(SafeFileHandle directory, string source, string destination)
+    internal static void MoveChild(SafeFileHandle directory, string source, string destination, bool overwrite = false)
     {
         RequireName(source);
         RequireName(destination);
-        if (RenameAt(directory, source, directory, destination, RenameExclusive) != 0)
+        if (RenameAt(directory, source, directory, destination, overwrite ? 0 : RenameExclusive) != 0)
             throw new IOException("The Darwin child could not be committed without replacement.");
     }
 
     [LibraryImport("libc", EntryPoint = "unlinkat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int UnlinkAt(SafeFileHandle directory, string name, int flags);
 
-    internal static void DeleteChild(SafeFileHandle directory, string name)
+    internal static void DeleteChild(SafeFileHandle directory, string name, bool isDirectory = false)
     {
         RequireName(name);
-        if (UnlinkAt(directory, name, 0) != 0 && Marshal.GetLastPInvokeError() != 2)
+        if (UnlinkAt(directory, name, isDirectory ? RemoveDirectory : 0) != 0 && Marshal.GetLastPInvokeError() != 2)
             throw new IOException("The Darwin child could not be deleted.");
     }
 
@@ -145,4 +145,25 @@ internal static partial class DarwinFiles
     private static partial nint ReadDirectoryX64(nint stream);
     [LibraryImport("libc", EntryPoint = "closedir", SetLastError = true)]
     private static partial int CloseDirectoryStream(nint stream);
+
+    internal static SafeFileHandle CreateChildDirectory(SafeFileHandle directory, string name, bool exclusive = false)
+    {
+        RequireName(name);
+        if (MakeDirectoryAt(directory, name, 0x1c0) != 0 &&
+            (exclusive || Marshal.GetLastPInvokeError() != 17))
+            throw new IOException("The Darwin child directory could not be created.");
+        return OpenChild(directory, name, isDirectory: true);
+    }
+
+    internal static void SetMode(SafeFileHandle handle, uint mode)
+    {
+        if (ChangeMode(handle, mode) != 0)
+            throw new IOException("The Darwin retained entry mode could not be set.");
+    }
+
+    [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MakeDirectoryAt(SafeFileHandle directory, string name, uint mode);
+
+    [LibraryImport("libc", EntryPoint = "fchmod", SetLastError = true)]
+    private static partial int ChangeMode(SafeFileHandle handle, uint mode);
 }

@@ -800,6 +800,8 @@ internal static class TrustedLiveProcessLauncher
         start.Environment["LANG"] = "C.UTF-8";
         start.Environment["LC_ALL"] = "C.UTF-8";
         start.Environment["TZ"] = "UTC";
+        // Darwin normalizes this at startup; never inherit the caller's value.
+        if (OperatingSystem.IsMacOS()) start.Environment["__CF_USER_TEXT_ENCODING"] = "0:0:0";
         if (OperatingSystem.IsWindows())
         {
             AddPublicRuntimeVariable(start, "SystemRoot");

@@ -24,6 +24,8 @@ internal sealed class LocalRestrictedStateStore
     private readonly Action? afterFinalRootProofTestHook;
     private readonly Func<string, bool>? deleteTemporaryTestHook;
     private readonly Func<string, bool>? syncDirectoryTestHook;
+    private readonly RestrictedStateFileIdentity? expectedRootIdentity;
+    private readonly Func<bool>? rootAuthorityIsCurrent;
 
     internal LocalRestrictedStateStore(
         string explicitTestOwnedRoot,
@@ -34,7 +36,9 @@ internal sealed class LocalRestrictedStateStore
         Action? afterFinalRootProofTestHook = null,
         TimeProvider? timeProvider = null,
         OpaqueStoreProducingRun? producingRun = null,
-        Func<OpaqueStoreObjectId>? objectIdFactory = null)
+        Func<OpaqueStoreObjectId>? objectIdFactory = null,
+        RestrictedStateFileIdentity? expectedRootIdentity = null,
+        Func<bool>? rootAuthorityIsCurrent = null)
     {
         if (string.IsNullOrWhiteSpace(explicitTestOwnedRoot))
         {
@@ -55,6 +59,8 @@ internal sealed class LocalRestrictedStateStore
         this.deleteTemporaryTestHook = deleteTemporaryTestHook;
         this.syncDirectoryTestHook = syncDirectoryTestHook;
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.expectedRootIdentity = expectedRootIdentity;
+        this.rootAuthorityIsCurrent = rootAuthorityIsCurrent;
     }
 
     public async Task<OpaqueStoreListResult> ListExactAsync(
@@ -674,7 +680,7 @@ internal sealed class LocalRestrictedStateStore
         }
     }
 
-    private static async Task<LocalOpaqueStoreRead> ReadRecordAsync(
+    private async Task<LocalOpaqueStoreRead> ReadRecordAsync(
         LocalOpaqueStoreOperation operation,
         string path,
         CancellationToken cancellationToken,
@@ -791,7 +797,8 @@ internal sealed class LocalRestrictedStateStore
     {
         operation = null!;
         failure = OpaqueStoreFailure.Invalid;
-        if (!TryResolveRoot(out var root) ||
+        if (rootAuthorityIsCurrent?.Invoke() == false ||
+            !TryResolveRoot(out var root) ||
             !TryCaptureRootProof(root, out var proof, out failure))
         {
             return false;
@@ -805,6 +812,14 @@ internal sealed class LocalRestrictedStateStore
             failure = open == RestrictedStateOpenResult.Unsafe
                 ? OpaqueStoreFailure.Invalid
                 : OpaqueStoreFailure.Io;
+            return false;
+        }
+
+        if (expectedRootIdentity is { } expected &&
+            (!NativeRestrictedStateFiles.TryGetIdentity(guard, true, out var actual) || actual != expected))
+        {
+            guard.Dispose();
+            failure = OpaqueStoreFailure.Invalid;
             return false;
         }
 
@@ -882,8 +897,9 @@ internal sealed class LocalRestrictedStateStore
             ".aprobject");
     }
 
-    private static bool OperationIsCurrent(
+    private bool OperationIsCurrent(
         LocalOpaqueStoreOperation operation) =>
+        rootAuthorityIsCurrent?.Invoke() != false &&
         RootGuardMatchesProof(operation.RootGuard, operation.RootProof) &&
         RootProofIsCurrent(operation.Root, operation.RootProof);
 

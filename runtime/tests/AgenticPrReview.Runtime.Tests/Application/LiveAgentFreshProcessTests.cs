@@ -9,6 +9,7 @@ using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
 namespace AgenticPrReview.Runtime.Tests.Application;
 
@@ -1307,7 +1308,7 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [AgenticPrReview.Runtime.Tests.Storage.DarwinFact]
-    public void DarwinDirectoryAuthorityIsRejectedBeforeCapabilityIssuance()
+    public void DarwinDirectoryAuthorityKeepsPublicationWithinTheRetainedChild()
     {
         using var fixture = new FreshProcessFixture();
         var identity = new ReviewedIdentity("owner/repository", 109, new string('a', 40), new string('b', 40));
@@ -1315,9 +1316,72 @@ public sealed class LiveAgentFreshProcessTests
             "absent", "automatic", "same_head", expectedLineageSha256: null, fromHeadSha: identity.HeadSha);
         Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(fixture.Root, out var files));
         var authorization = Assert.IsType<LiveAgentFreshProcessAuthorizationRead>(files!.ReadAuthorization());
-        Assert.False(files.TryAuthorizeLayout(authorization, AuthorizedAccess(), lineageExpected: false, out var capability));
-        Assert.Null(capability);
-        Assert.False(File.Exists(Path.Join(fixture.Root, "output", "result.json")));
+        Assert.True(files.TryAuthorizeLayout(authorization, AuthorizedAccess(), lineageExpected: false, out var capability));
+        using var lease = capability!;
+        var output = Path.Join(fixture.Root, "output");
+        var displaced = fixture.Root + "-held-output";
+        Directory.Move(output, displaced);
+        try
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllText(Path.Join(output, "result.json"), "replacement");
+            var receipt = files.PublishResult(lease, [1]);
+            Assert.NotNull(receipt);
+            Assert.True(receipt.Durable);
+            Assert.Equal(new byte[] { 1 }, File.ReadAllBytes(Path.Join(displaced, "result.json")));
+            Assert.Equal("replacement", File.ReadAllText(Path.Join(output, "result.json")));
+        }
+        finally
+        {
+            Directory.Delete(output, recursive: true);
+            Directory.Move(displaced, output);
+        }
+    }
+
+    [AgenticPrReview.Runtime.Tests.Storage.DarwinFact]
+    public async Task DarwinStateStoreRemainsPinnedToTheAuthorizedDirectoryAndLifetime()
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity("owner/repository", 109, new string('a', 40), new string('b', 40));
+        fixture.WritePhase(identity, "Review the immutable snapshot.", "prior\n", "darwin_state_authority",
+            "absent", "automatic", "same_head", expectedLineageSha256: null, fromHeadSha: identity.HeadSha);
+        Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(fixture.Root, out var files));
+        var authorization = Assert.IsType<LiveAgentFreshProcessAuthorizationRead>(files!.ReadAuthorization());
+        Assert.True(files.TryAuthorizeLayout(authorization, AuthorizedAccess(), false, out var capability));
+        using var lease = capability!;
+        var store = files.CreateStateStore(lease, lease.StateRootPath);
+        var bytes = new byte[] { 7 };
+        var request = new OpaqueStoreUploadRequest(new("pinned-state"), new(Guid.NewGuid().ToString("N")), bytes,
+            new(OpaqueStoreHash.Sha256(bytes)), DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 600);
+        var state = Path.Join(fixture.Root, "state");
+        var displaced = fixture.Root + "-held-state";
+        Directory.Move(state, displaced);
+        try
+        {
+            Directory.CreateDirectory(state);
+            var marker = Path.Join(state, "outside");
+            await File.WriteAllTextAsync(marker, "replacement");
+            var rejected = await store.UploadImmutableAsync(request, CancellationToken.None);
+            Assert.False(rejected.Succeeded);
+            Assert.Equal(OpaqueStoreFailure.Invalid, rejected.Failure);
+            Assert.Equal(new[] { marker }, Directory.GetFileSystemEntries(state));
+            Assert.Equal("replacement", await File.ReadAllTextAsync(marker));
+            Assert.Empty(Directory.GetFileSystemEntries(displaced));
+        }
+        finally
+        {
+            Directory.Delete(state, recursive: true);
+            Directory.Move(displaced, state);
+        }
+        var admitted = await store.UploadImmutableAsync(request, CancellationToken.None);
+        Assert.True(admitted.Succeeded, $"{admitted.Failure}/{admitted.MutationState}");
+        var beforeRevocation = Directory.GetFileSystemEntries(state).Order(StringComparer.Ordinal).ToArray();
+        Assert.NotEmpty(beforeRevocation);
+        lease.Dispose();
+        var revoked = await store.UploadImmutableAsync(request, CancellationToken.None);
+        Assert.False(revoked.Succeeded);
+        Assert.Equal(OpaqueStoreFailure.Invalid, revoked.Failure);
+        Assert.Equal(beforeRevocation, Directory.GetFileSystemEntries(state).Order(StringComparer.Ordinal).ToArray());
     }
 
     [Theory]

@@ -144,6 +144,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
             expected.Add("SystemRoot");
             expected.Add("WINDIR");
         }
+        if (OperatingSystem.IsMacOS()) expected.Add("__CF_USER_TEXT_ENCODING");
         Assert.True(
             expected.SetEquals(names),
             string.Join(",", names.Order(StringComparer.OrdinalIgnoreCase)));
