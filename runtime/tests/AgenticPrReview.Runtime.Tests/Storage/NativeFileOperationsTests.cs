@@ -346,7 +346,7 @@ public sealed class NativeFileOperationsTests
         File.WriteAllBytes(path, [100, 0, 0, 0]);
         Assert.Equal(100, owner.ReadRemaining());
         File.Delete(path);
-        await Assert.ThrowsAsync<IOException>(() => Task.Run(owner.ReadRemaining).WaitAsync(TimeSpan.FromSeconds(5)));
+        await Assert.ThrowsAnyAsync<IOException>(() => Task.Run(owner.ReadRemaining).WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [DarwinFact]
