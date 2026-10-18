@@ -1,5 +1,28 @@
 # R5 deterministic evaluation gate
 
+## Managed qualification
+
+CR1-V1 makes the default and explicit `managed` command execute actual installed Solus quality, authenticated replay and bounded growth:
+
+```bash
+bash runtime/scripts/verify-r5-evaluation.sh
+bash runtime/scripts/verify-r5-evaluation.sh managed
+```
+
+Run on GitHub-hosted Ubuntu 24.04 x64 with .NET SDK 10.0.109, Node 24, `RUNNER_TEMP` and the verified `NUGET_PACKAGES` cache from the existing trusted package-proof workflow. The driver requires a clean exact HEAD/tree, builds the independent managed fixture without package feeds or credentials, and hash-compares all five loaded Solus DLLs with the installed exact pin. Source-reference compilation and source/pin metadata alone cannot pass this gate.
+
+The existing trusted workflow adds the mandatory `CR1-V1 actual managed Solus evaluation and replay proof` step. Its strict checker requires the exact command, verify condition, selected runner and sole verified-cache environment while retaining earlier accepted proof steps. Only the existing cold-cache restore step receives its authorized package credential. Tests, bridge and loader children receive an explicit credential-free environment; runtime children do not need the package cache.
+
+The parent declares the exact thirteen quality IDs/codes outside the producer, verifies ordered complete results and their independent execution/evidence/scenario dimensions, and checks same-head and verified-ahead useful second reviews. It rejects missing/duplicate/reordered/forged results, foreign source/pin, stale annotations/evidence, incomplete work, leaked private canaries, broken predecessor association and failed cleanup. Negative oracle cases are successful rejection tests, not successful model-quality observations. Recovery-only and readback processes do not count as new reviews.
+
+The public-safe `apr-solus-evaluation-proof-v1` receipt includes the exact source/tree, loaded package hashes, per-case Q1 outcomes, actual successor observations, separate current/history and growth measurements, refusal classification, private-receipt digest and cleanup verdict. It contains no source/tool/policy/terminal text, reasoning, credential or raw context. Synthetic publication transports may receive the deliberately validated authored finding; credentials, reasoning and prior/current classified-input canaries remain forbidden there. All private build/state/report files are removed only after child exit, and retained files fail qualification.
+
+Native macOS format/types, pure scorer tests, report mutation tests and source-reference compilation are useful local evidence. Darwin snapshot/bridge capability limits and sandbox loopback/trace failures are recorded separately; they do not qualify selected-runner execution. The exact pushed head must pass the hosted installed-package gate and normal repository CI before Ready. No live sampling is needed for these deterministic engineering claims. A later live-quality request requires a separate finite content/calls/time/cost proposal and explicit authorization; existing credentials or R5/R6 observations supply no authorization or new quality result.
+
+## Retained native framework/AOT gate
+
+Explicit `framework`, `aot` and `all` modes retain the prior native R5 gate used by existing secret-free runtime CI. They preserve historical regression coverage until the owning cutover; none is managed Solus qualification. The following sections describe that retained topology.
+
 [Issue #250](https://github.com/SolusQuest/agentic-pr-review/issues/250) adds a
 provider-secret-free CI gate that executes the complete named R5 deterministic
 corpus — quality, incremental, completed replay, growth, reset and the V2

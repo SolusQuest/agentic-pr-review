@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Deterministic R5 evaluation gate for framework-dependent .NET and linux-x64
-# Native AOT. Executes the named R5 deterministic corpus in both modes against
+# Managed Solus evaluation is the default. The explicit framework/aot/all
+# modes retain the historical APR-loop gate for current native CI until cutover.
+# That historical gate executes the named R5 deterministic corpus against
 # an outside-in declared coverage inventory, proves framework/AOT semantic
 # parity, and fails closed on coverage, leakage or cleanup violations.
 #
 # Subcommands:
+#   managed     Actual installed Solus quality/replay/growth (default), on the
+#               selected Ubuntu 24.04 x64 runner with the verified package cache.
 #   framework   Framework-dependent mode: build once, run all scenarios + the
 #               focused Host/session test set (TRX-verified).
 #   aot         Native AOT mode: publish linux-x64 once, run all scenarios.
@@ -21,6 +24,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ "${1:-managed}" == managed ]]; then
+  [[ $# -le 1 ]] || { printf 'APR_SOLUS_EVALUATION_ARGUMENTS\n' >&2; exit 2; }
+  exec node "${REPO_ROOT}/runtime/tests/SolusEvaluationFixture/verify.mjs"
+fi
 PROJECT="${REPO_ROOT}/runtime/tests/ReviewEvaluationFixture/AgenticPrReview.Runtime.ReviewEvaluationFixture.csproj"
 TEST_PROJECT="${REPO_ROOT}/runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj"
 FIXTURES="${REPO_ROOT}/runtime/tests/fixtures/agent/r5"
@@ -288,11 +295,12 @@ case "${subcommand}" in
     ;;
   -h|--help|help)
     cat <<'USAGE'
-Usage: verify-r5-evaluation.sh [framework|aot|all]
+Usage: verify-r5-evaluation.sh [managed|framework|aot|all]
 
+  managed     Actual installed managed Solus quality/replay/growth (default).
   framework   Build once; run all R5 scenarios + focused Host/session tests.
   aot         Publish linux-x64 Native AOT once; run all R5 scenarios.
-  all         framework -> aot -> cross-mode parity -> cleanup (default).
+  all         Historical framework -> aot -> cross-mode parity -> cleanup.
 USAGE
     ;;
   *)
