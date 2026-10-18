@@ -21,6 +21,8 @@ let root;
 let stage = 'environment';
 let check = 'none';
 const receipts = [];
+const failures = [];
+const bridgeRuns = [];
 // Only this newly allocated private proof tree is made removable. Never follow
 // snapshot symlinks or loosen permissions on another task's directories.
 async function removeRoot(path) {
@@ -174,10 +176,27 @@ try {
   assert.equal(byteProbe.refused_capacity, byteProbe.required_capacity - 1);
   assert.ok(byteProbe.required_capacity > byteProbe.actual_encoded_bytes);
   assert.equal(byteProbe.response_bound, 16384);
+  stage = 'shared_helper_identity';
+  const helperSource = 'e08f596b4d195b360312e466d808d1d91ccb4595';
+  const helperIdentities = [];
+  for (const [path, digest] of [
+    [
+      'src/action-wrapper/artifact-bridge/synthetic-fixture-server.ts',
+      'c3559fbe081cb0b7df6dcaa7f97f43f6de878dece29990ae5b7212fa99fa19cc',
+    ],
+    [
+      'src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.ts',
+      '5eaa89931542b5ae7eb2939f27d4bc8843a2ed7f048e2c00939ff1f5fec90c72',
+    ],
+  ]) {
+    const actual = sha(await readFile(path));
+    assert.equal(actual, digest);
+    helperIdentities.push({ path, sha256: actual });
+  }
   stage = 'bridge';
   const bridgeBundle = join(root, 'bridge.mjs');
   await build({
-    entryPoints: ['src/action-wrapper/artifact-bridge/synthetic-fixture-server.ts'],
+    entryPoints: ['runtime/tests/SolusCapacityFixture/CapacityArtifactServer.mjs'],
     outfile: bridgeBundle,
     bundle: true,
     platform: 'node',
@@ -190,6 +209,7 @@ try {
   let scenarios = 0;
   const scenario = async (id, execute) => {
     const work = join(root, 'case' + scenarios++);
+    check = 'none';
     for (const part of ['', 'bridge-staging', 'control'])
       await mkdir(join(work, part), { mode: 0o700 });
     const now = Math.floor(Date.now() / 1000);
@@ -203,19 +223,49 @@ try {
         join(work, 'bridge-staging'),
         join(work, 'control'),
       ],
-      { env, stdio: ['ignore', 'pipe', 'pipe'] },
+      { env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
     );
     const lines = createInterface({ input: bridge.stdout });
     try {
       assert.equal(
         await Promise.race([
           once(lines, 'line').then(([line]) => line),
+          once(bridge, 'exit').then(() => {
+            throw new Error('bridge_start_failed');
+          }),
           new Promise((_, reject) =>
             setTimeout(() => reject(new Error('bridge_timeout')), 20000).unref(),
           ),
         ]),
         'READY',
       );
+      let request = 0;
+      const control = (operation) =>
+        new Promise((resolve, reject) => {
+          const id = ++request;
+          const finish = (error, value) => {
+            clearTimeout(timer);
+            bridge.off('message', onMessage);
+            bridge.off('exit', onExit);
+            bridge.off('error', onError);
+            if (error) reject(error);
+            else resolve(value);
+          };
+          const onMessage = (message) => {
+            if (message?.request !== id || message?.ok !== true)
+              finish(new Error('bridge_control_failed'));
+            else finish(null, message);
+          };
+          const onExit = () => finish(new Error('bridge_control_exit'));
+          const onError = () => finish(new Error('bridge_control_error'));
+          const timer = setTimeout(() => finish(new Error('bridge_control_timeout')), 20000);
+          bridge.on('message', onMessage);
+          bridge.once('exit', onExit);
+          bridge.once('error', onError);
+          bridge.send({ request: id, operation }, (error) => {
+            if (error) finish(new Error('bridge_control_send'));
+          });
+        });
       const operations = async () => {
         try {
           return (await readFile(join(work, 'operations.jsonl'), 'utf8'))
@@ -228,7 +278,7 @@ try {
           throw error;
         }
       };
-      const run = (
+      const run = async (
         round,
         mode = round === 0 ? 'seed' : 'review',
         config = 'omitted',
@@ -238,11 +288,36 @@ try {
           join(work, 'control', 'producing-run.json'),
           JSON.stringify({ id: String(7001 + round), attempt: '2' }),
         );
-        const child = spawnSync(
-          'dotnet',
-          [dll, work, mode, id, String(now), corpus, String(round), config, variant],
-          { env, encoding: 'utf8', timeout: 180000, maxBuffer: 1024 * 1024 },
-        );
+        const before = await control('start');
+        assert.equal(before.active, 0);
+        assert.equal(before.terminal, 0);
+        assert.equal(before.terminal_limit, 4096);
+        let child;
+        let after;
+        try {
+          child = spawnSync(
+            'dotnet',
+            [dll, work, mode, id, String(now), corpus, String(round), config, variant],
+            { env, encoding: 'utf8', timeout: 180000, maxBuffer: 1024 * 1024 },
+          );
+        } finally {
+          after = await control('close');
+        }
+        assert.equal(after.active, 0);
+        assert.equal(after.epoch, before.epoch);
+        assert.equal(after.terminal_limit, 4096);
+        assert.ok(after.terminal <= after.terminal_limit);
+        const registry = {
+          scenario_index: scenarios - 1,
+          round,
+          epoch: before.epoch,
+          active_before: before.active,
+          terminal_before: before.terminal,
+          active_after: after.active,
+          terminal_after: after.terminal,
+          terminal_limit: after.terminal_limit,
+        };
+        bridgeRuns.push(registry);
         if (child.status !== 0)
           console.error(
             JSON.stringify({
@@ -263,12 +338,21 @@ try {
         assert.equal(receipt.round, round);
         receipt.group = stage;
         receipt.scenario_index = scenarios - 1;
+        receipt.bridge_registry = registry;
         receipts.push(receipt);
         return receipt;
       };
       const captured = async (round) =>
         JSON.parse(await readFile(join(work, `capture-r${round}.json`), 'utf8'));
       await execute({ run, operations, captured });
+    } catch (error) {
+      failures.push({
+        group: stage,
+        check,
+        io: ['ENOENT', 'EACCES'].includes(error.code) ? error.code : null,
+        case_id: id,
+        scenario_index: scenarios - 1,
+      });
     } finally {
       lines.close();
       const priorCheck = check;
@@ -342,10 +426,10 @@ try {
   stage = 'useful_fresh_and_restored';
   for (const id of ['cs-defect', 'cs-safe', 'ts-defect', 'ts-safe', 'repository-rule'])
     await scenario(id, async ({ run, captured }) => {
-      const first = run(0);
+      const first = await run(0);
       check = 'fresh_completion';
       completed(first);
-      const second = run(1);
+      const second = await run(1);
       check = 'restored_completion';
       completed(second);
       check = 'historical_usage';
@@ -373,7 +457,7 @@ try {
     let refusal;
     for (let round = 0; round < 4; round++) {
       const before = await operations();
-      const receipt = run(round);
+      const receipt = await run(round);
       if (!receipt.accepted) {
         assert.equal(receipt.clean_review, false);
         assert.ok(
@@ -415,7 +499,7 @@ try {
     'correction',
   ])
     await scenario('cs-defect', async ({ run, captured }) => {
-      const receipt = run(0, 'seed', 'omitted', variant);
+      const receipt = await run(0, 'seed', 'omitted', variant);
       if (variant === 'six-tools' || variant === 'escaped') {
         completed(receipt);
         assert.equal(receipt.sends, 6);
@@ -472,9 +556,9 @@ try {
   for (const mode of ['ordinary', 'seed', 'review'])
     for (const config of bad)
       await scenario('cs-defect', async ({ run, operations }) => {
-        if (mode === 'review') completed(run(0));
+        if (mode === 'review') completed(await run(0));
         const before = await operations();
-        const receipt = run(mode === 'review' ? 1 : 0, mode, config);
+        const receipt = await run(mode === 'review' ? 1 : 0, mode, config);
         assert.equal(receipt.accepted, false);
         assert.equal(receipt.clean_review, false);
         assert.equal(receipt.sends, 0);
@@ -498,14 +582,14 @@ try {
           ).length,
           0,
         );
-        if (mode === 'review') completed(run(1));
+        if (mode === 'review') completed(await run(1));
       });
   stage = 'explicit_exact_profile';
   await scenario('cs-defect', async ({ run, captured }) => {
     const config =
       '{"maxModelCalls":6,"timeoutSeconds":120,"maxUncachedInputTokens":65536,"maxCachedInputTokens":65536,"maxOutputTokens":8192}';
-    completed(run(0, 'seed', config));
-    completed(run(1, 'review', config));
+    completed(await run(0, 'seed', config));
+    completed(await run(1, 'review', config));
     prefix(await captured(0), await captured(1));
   });
   stage = 'lower_exact_and_exhaustion';
@@ -518,7 +602,7 @@ try {
     ['{"maxUncachedInputTokens":1}', 1],
   ])
     await scenario('cs-defect', async ({ run }) => {
-      const receipt = run(0, 'seed', config);
+      const receipt = await run(0, 'seed', config);
       assert.equal(receipt.sends, expectedSends);
       assert.equal(receipt.accepted, false);
       assert.equal(receipt.clean_review, false);
@@ -542,9 +626,9 @@ try {
     for (const restored of [false, true])
       await scenario('cs-defect', async ({ run, operations }) => {
         const config = variant === 'deadline' ? '{"timeoutSeconds":1}' : 'omitted';
-        if (restored) completed(run(0, 'seed', config));
+        if (restored) completed(await run(0, 'seed', config));
         const before = await operations();
-        const receipt = run(restored ? 1 : 0, restored ? 'review' : 'seed', config, variant);
+        const receipt = await run(restored ? 1 : 0, restored ? 'review' : 'seed', config, variant);
         assert.equal(receipt.accepted, false);
         if (variant !== 'cancel-capture') assert.equal(receipt.clean_review, false);
         if (['cancel-before', 'data-over', 'input-count-over'].includes(variant))
@@ -559,15 +643,15 @@ try {
         );
       });
   await scenario('cs-defect', async ({ run }) =>
-    completed(run(0, 'seed', 'omitted', 'data-exact')),
+    completed(await run(0, 'seed', 'omitted', 'data-exact')),
   );
   stage = 'existing_commit_recovery_priority';
   for (const pendingCleanup of [false, true])
     await scenario('cs-defect', async ({ run, operations }) => {
-      completed(run(0));
-      completed(run(1, pendingCleanup ? 'fail-cleanup' : 'review'));
+      completed(await run(0));
+      completed(await run(1, pendingCleanup ? 'fail-cleanup' : 'review'));
       const before = await operations();
-      const recovered = run(1, 'recover', 'omitted', 'recovery-input-over');
+      const recovered = await run(1, 'recover', 'omitted', 'recovery-input-over');
       assert.equal(recovered.accepted, true);
       assert.equal(recovered.recovered_without_work, true);
       assert.equal(recovered.sends, 0);
@@ -585,7 +669,9 @@ try {
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), head);
   assert.equal(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }), '');
   assert.equal(scenarios, 68, 'complete authored scenario inventory');
+  assert.equal(failures.length, 0, 'every authored scenario must pass');
   assert.ok(receipts.length >= 107 && receipts.length <= 108);
+  assert.equal(bridgeRuns.length, receipts.length);
   const report = {
     proof: 'APR_SOLUS_V3_CAPACITY',
     source_commit: head,
@@ -597,8 +683,10 @@ try {
     lock_sha256: sha(lockBytes),
     corpus_sha256: corpusHash,
     packages: identities,
+    test_helpers: { source_commit: helperSource, files: helperIdentities },
     portable,
     scenarios,
+    bridge_runs: bridgeRuns,
     receipts,
   };
   const serialized = JSON.stringify(report);
@@ -618,7 +706,7 @@ try {
   const io = ['ENOENT', 'EACCES'].includes(error.code) ? error.code : null;
   // Receipts contain only the same bounded numeric/enum/hash fields exported
   // on success. Never emit AssertionError diffs or raw captured history.
-  console.error(JSON.stringify({ stage, check, io, receipts }));
+  console.error(JSON.stringify({ stage, check, io, failures, bridge_runs: bridgeRuns, receipts }));
   console.error('APR_SOLUS_CAPACITY_GATE_FAILED stage=' + stage);
   process.exitCode = 1;
 } finally {

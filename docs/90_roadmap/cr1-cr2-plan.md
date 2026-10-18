@@ -54,6 +54,8 @@ V3's independent installed-package gate uses exact `0.1.0-internal.4`, published
 
 `verify-r7-capacity.sh` defaults to the managed route while explicit `all` preserves the old framework/AOT CI consumer. D5 consumes only the final exact-head Ubuntu 24.04 x64 installed-package receipt and its measured practical envelope, limitations and gap dispositions. Portable source-based support is not qualification, and this contract does not activate the ordinary Action route, publish packages or promise indefinite successor capacity.
 
+The gate uses one official bridge registry per independent Host while retaining the same encrypted store between reviews, and records idle/start/end counters without changing the 4,096 transport limit. Its shared test executor is consumed at an explicit source/hash; no evaluator or scorer implementation is required. Transport-fixture refusals cannot stand in for runtime capacity, and all authored scenarios must pass.
+
 ### Context And Cutover
 
 APR chooses and authenticates saved state, binds it to the reviewed scope and lineage, and controls acceptance/reset. Solus owns its runtime context representation. Reinject current providers, tools, credentials and authority; serialized bytes are not authority. Context admission, work outcome, context capture and durable product-state acceptance are distinct checks.
