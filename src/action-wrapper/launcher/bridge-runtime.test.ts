@@ -278,6 +278,46 @@ describe.runIf(process.platform === 'linux')('W1 S2 bridge composition', () => {
     expect((await stat(runtime.endpoint)).mode & 0o777).toBe(0o600);
   });
 
+  it('removes managed sealed scratch after disposal failure and keeps concurrent cleanup rejected', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'apr-bridge-storage-'));
+    roots.push(root);
+    const runnerTemp = path.join(root, 'runner');
+    const workspace = path.join(root, 'workspace');
+    await mkdir(runnerTemp, { mode: 0o700 });
+    await mkdir(workspace, { mode: 0o700 });
+    runtime = await startArtifactBridgeRuntime({
+      buildDiscriminator: 'r4-h1',
+      runnerStorage: { runnerTemp, workspace },
+      executorFactory: async () => ({
+        execute: async (command) => ({
+          operation: 'list_exact',
+          correlation_id: command.correlation_id,
+          failure: 'none',
+          complete: true,
+          objects: [],
+        }),
+        dispose: () => {
+          throw new Error('dispose-failure');
+        },
+      }),
+    });
+    await executeListExact(runtime);
+    const sealed = path.join(runtime.tempRoot, 'sealed');
+    await mkdir(sealed, { mode: 0o500 });
+    await runtime.stopAndDrain();
+    const results = await Promise.allSettled([runtime.cleanup(), runtime.cleanup()]);
+    for (const result of results) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') {
+        expect(result.reason).toBeInstanceOf(AggregateError);
+        expect(result.reason.errors[0].message).toBe('dispose-failure');
+      }
+    }
+    await expect(stat(runtime.tempRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(runtime.cleanup()).rejects.toThrow('wrapper_managed_bridge_cleanup_failed');
+    runtime = undefined;
+  });
+
   it('rejects reviewed-workspace and shared-writable runner storage before bridge creation', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'apr-bridge-storage-'));
     roots.push(root);

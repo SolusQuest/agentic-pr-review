@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import {
   chmod,
+  lstat,
+  readdir,
   mkdir,
   mkdtemp,
   readFile,
@@ -23,6 +25,24 @@ const runtimeSize = 36_648_012;
 const runtimeSha512 =
   '9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// Teardown runs only after the isolated PID namespace has terminated. A failed
+// product cleanup remains a failed proof; this only removes the fixture's own
+// private root without following a symlink or leaking its paths in a stack.
+async function removeFixtureRoot(root) {
+  assert.equal(await realpath(root), root);
+  assert.ok(root.startsWith('/tmp/apr-d5-'));
+  let entries = 0;
+  async function reopen(path, depth) {
+    assert.ok(depth <= 128 && ++entries <= 262144);
+    const stat = await lstat(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+    assert.equal(stat.uid, process.getuid());
+    await chmod(path, 0o700);
+    for (const child of await readdir(path)) await reopen(join(path, child), depth + 1);
+  }
+  await reopen(root, 0);
+  await rm(root, { recursive: true, force: true });
+}
 export async function runIsolatedFixture({
   prepare,
   childName = 'network-child.mjs',
@@ -269,7 +289,14 @@ export async function runIsolatedFixture({
     process.stderr.write('APR_D5_NETWORK_FAILURE stage=' + stage + '\n');
     process.exitCode = 1;
   } finally {
-    if (root) await rm(root, { recursive: true, force: true });
+    if (root) {
+      try {
+        await removeFixtureRoot(root);
+      } catch {
+        process.stderr.write('APR_D5_FIXTURE_CLEANUP_FAILURE\n');
+        process.exitCode = 1;
+      }
+    }
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)

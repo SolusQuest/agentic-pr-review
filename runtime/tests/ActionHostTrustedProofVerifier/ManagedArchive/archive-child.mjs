@@ -321,6 +321,8 @@ try {
     diagnostic.status =
       close?.completion?.payload?.status ?? close?.completion?.status ?? 'unavailable';
     const presentation = records.filter((x) => x.kind === 'presentation');
+    diagnostic.cleanup = presentation.at(-1);
+    diagnostic.host_signal = close?.signal ?? 'none';
     assert.ok(presentation.length);
     for (const fact of presentation)
       for (const [key, value] of Object.entries(fact))
@@ -490,12 +492,25 @@ try {
     assert.notEqual(result.status, 'reviewed');
     assert.equal(github.writes, before);
     assert.deepEqual(github.snapshot(), acceptedComment);
+    if (mode === 'stale') assertAccounting(result, 2);
+    if (mode === 'cancel')
+      assert.ok(
+        result.records.some((record) => record.kind === 'forwarded' && record.signal === 'SIGTERM'),
+      );
+    for (const key of ['model-calls', 'provider-attempts']) {
+      if (provider.count > 0 && Object.hasOwn(result.reported, key))
+        assert.ok(Number(result.reported[key]) > 0, 'd5_no_false_zero_after_dispatch');
+    }
   }
   official.restore(accepted);
   github.restore(acceptedComment);
   const beforeKnown = github.writes;
   const crashed = await run('known-commit-crash', 1, { prefix, knownCommit: true });
   assert.notEqual(crashed.status, 'reviewed');
+  assert.equal(
+    crashed.records.find((record) => record.kind === 'managed-close')?.signal,
+    'SIGKILL',
+  );
   assert.equal(github.writes, beforeKnown + 1);
   const recovered = await run('known-commit-recovery', 1, { noProvider: true });
   assert.equal(recovered.status, 'reviewed');
@@ -518,7 +533,14 @@ try {
     official.restore(accepted);
     github.restore(acceptedComment);
     const before = github.writes;
+    const anonymousBefore = github.calls.filter(
+      (call) => call.host === 'codeload.github.com',
+    ).length;
     const result = await run(archiveMode, 1, { prefix, archiveMode });
+    assert.equal(
+      github.calls.filter((call) => call.host === 'codeload.github.com').length - anonymousBefore,
+      archiveMode === 'bad-redirect' ? 0 : 1,
+    );
     assert.equal(result.status, 'snapshot_incomplete');
     assert.equal(provider.count, 0);
     assert.equal(github.writes, before);
@@ -537,6 +559,19 @@ try {
     assert.notEqual(result.status, 'reviewed');
     assert.equal(provider.count, 0);
     assert.equal(github.writes, before);
+    if (options.substitution || options.unsupportedRuntime) {
+      const target = options.substitution ? 'verified-nonentry' : 'runtime-prerequisite';
+      assert.equal(
+        result.records.find(
+          (record) => record.kind === 'resource-fault' && record.target === target,
+        )?.applied,
+        true,
+      );
+      assert.equal(
+        result.records.some((record) => record.kind === 'spawn'),
+        false,
+      );
+    }
   }
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
