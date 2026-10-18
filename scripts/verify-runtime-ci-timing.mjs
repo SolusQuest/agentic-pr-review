@@ -35,7 +35,7 @@ function isProofStep(name) {
       'Require all former Runtime lanes to succeed',
       'Require both complete current-head V2 proofs to succeed',
     ].includes(name) ||
-    /^(R4 E2P (first|second) |Current-head R4 E2P (first|second) |R5 deterministic evaluation gate|R6 offline economics gate)/.test(
+    /^(R4 E2P (first|second) |Current-head R4 E2P (first|second) |Current-head D5 (first|second) independent managed V2 production\/verifier proof$|R5 deterministic evaluation gate|R6 offline economics gate)/.test(
       name,
     )
   );
@@ -112,12 +112,32 @@ function measure(run, pages, main = false) {
   );
   if (parallel) {
     assert.ok(aggregate, 'Parallel timing must include the terminal runtime aggregate');
-    assert.equal(splitLeaves.length, 6, 'Parallel timing must retain core, R2 and four R4 workers');
-    assert.equal(rows.filter(isR4).length, 4, 'All four R4 workers must remain present');
+    const r4Names = rows
+      .filter(isR4)
+      .map((row) => row.name)
+      .sort();
+    const frameworkNames = ['first', 'second']
+      .map((role) => `R4 ActionHost (framework, ${role})`)
+      .sort();
+    const legacyNames = [
+      ...frameworkNames,
+      ...['first', 'second'].map((role) => `R4 ActionHost (aot, ${role})`),
+    ].sort();
+    const expectedR4 = r4Names.length === 2 ? frameworkNames : legacyNames;
+    assert.deepEqual(
+      r4Names,
+      expectedR4,
+      'R4 evidence requires exactly both framework roles or the complete historical matrix',
+    );
+    assert.equal(
+      splitLeaves.length,
+      expectedR4.length + 2,
+      'Parallel timing must retain core, R2 and every selected R4 worker',
+    );
     assert.ok(rows.some((row) => row.name === 'r2-agent-loop'));
     assert.equal(
       new Set(rows.filter(isR4).map((row) => row.runnerId)).size,
-      4,
+      expectedR4.length,
       'R4 workers must use distinct runners',
     );
   }
@@ -140,9 +160,15 @@ function measure(run, pages, main = false) {
       2,
       'V2 workers must use distinct runners',
     );
+    const managed = v2Workers.some((row) =>
+      row.proofs.some((proof) => proof.name.startsWith('Current-head D5 ')),
+    );
     const proofs = v2Ids.map((id, index) => {
       const row = v2Workers.find((worker) => worker.name === id);
-      const name = `Current-head R4 E2P ${index === 0 ? 'first' : 'second'} clean production and verifier Native AOT build`;
+      const role = index === 0 ? 'first' : 'second';
+      const name = managed
+        ? `Current-head D5 ${role} independent managed V2 production/verifier proof`
+        : `Current-head R4 E2P ${role} clean production and verifier Native AOT build`;
       assert.equal(row.proofs.length, 1, 'Each V2 worker must execute exactly its one whole proof');
       assert.equal(row.proofs[0].name, name);
       assert.ok(row.proofs[0].activeMinutes > 0);
@@ -332,6 +358,30 @@ function selfTest() {
       .activeMinutes,
     4,
   );
+  const managedJobs = structuredClone(v2Jobs).filter(
+    (job) => !/^R4 ActionHost \(aot, /.test(job.name),
+  );
+  for (const role of ['first', 'second']) {
+    managedJobs.find((job) => job.name === `trusted-proof-payload-v2-${role}`).steps[0].name =
+      `Current-head D5 ${role} independent managed V2 production/verifier proof`;
+  }
+  const managedTiming = measure(run, { jobs: managedJobs });
+  assert.equal(managedTiming.observedR4Concurrency, 2);
+  assert.equal(managedTiming.v2.proofOverlapSeconds, 200);
+  assert.equal(managedTiming.v2.observedWorkerConcurrency, 2);
+  const mixed = structuredClone(managedJobs);
+  mixed.find((job) => job.name === 'trusted-proof-payload-v2-first').steps[0].name =
+    'Current-head R4 E2P first clean production and verifier Native AOT build';
+  assert.throws(() => measure(run, { jobs: mixed }));
+  const generic = structuredClone(managedJobs);
+  generic.find((job) => job.name === 'trusted-proof-payload-v2-first').steps[0].name =
+    'Current-head D5 first independent public FDD invariant regression';
+  assert.throws(() => measure(run, { jobs: generic }));
+  const missingR4 = managedJobs.filter((job) => job.name !== 'R4 ActionHost (framework, second)');
+  assert.throws(() => measure(run, { jobs: missingR4 }));
+  const reusedR4 = structuredClone(managedJobs);
+  reusedR4.find((job) => job.name === 'R4 ActionHost (framework, second)').runner_id = 3;
+  assert.throws(() => measure(run, { jobs: reusedR4 }));
   const main = { ...run, event: 'push', head_branch: 'main' };
   assert.equal(measure(main, { jobs: v2Jobs }, true).event, 'push');
   assert.equal(measure(main, { jobs }, true).v2.topology, 'serial');
@@ -376,7 +426,7 @@ function selfTest() {
     assert.throws(() => measure(run, { jobs: changed }));
   }
   console.log(
-    'runtime_ci_timing_verified serial=passed parallel=passed v2_parallel=passed main_push=passed refusals=passed',
+    'runtime_ci_timing_verified serial=passed parallel=passed v2_parallel=passed managed_parallel=passed main_push=passed refusals=passed',
   );
 }
 

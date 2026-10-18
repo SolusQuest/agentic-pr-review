@@ -141,7 +141,7 @@ async function main() {
   } else if (mode === 'verify') {
     const bytes = fs.readFileSync(input);
     assert.ok(bytes.length > 0 && bytes.length <= 32768);
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     const receipt = JSON.parse(text);
     assert.equal(text, JSON.stringify(receipt) + '\n');
     validateManagedV2Receipt(receipt);
