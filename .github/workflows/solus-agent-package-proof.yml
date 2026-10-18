@@ -123,6 +123,11 @@ jobs:
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/ActionHostFixture/verify-solus-restored.mjs
+      - name: CR1-V1 actual managed Solus evaluation and replay proof
+        if: inputs.mode == 'verify'
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
+        run: bash runtime/scripts/verify-r5-evaluation.sh managed
       - name: CR1-V3 actual managed review capacity proof
         if: inputs.mode == 'verify'
         env:
