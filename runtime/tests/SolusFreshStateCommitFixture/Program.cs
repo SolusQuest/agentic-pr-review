@@ -50,17 +50,17 @@ internal static class Program
                 [new(SolusAgent.Api.Execution.AgentInputSource.Repository, handler.Focus)]);
             var result = prepared.Value;
             Proof.Require(fixture.NativeCreates == 0, "zero_native_provider_construction");
-            var accepted = result?.DurableStateAccepted == true;
-            if (mode.StartsWith("success", StringComparison.Ordinal)) Proof.Require(result?.Work?.ProductReviewAccepted == true &&
-                result.CurrentCaptureValid == true && accepted, "fresh_complete_acceptance");
+            var accepted = result?.DurableStateAccepted is true;
+            if (mode.StartsWith("success", StringComparison.Ordinal)) Proof.Require(result?.Work?.ProductReviewAccepted is true &&
+                result.CurrentCaptureValid is true && accepted, "fresh_complete_acceptance");
             if (mode == "recover-unknown") Proof.Require(result?.Completion?.Status == ActionHostStatus.OutcomeAmbiguous &&
                 !accepted && result.Work is null && handler.Sends == 0, "uncertain_intent_not_replayed");
-            if (mode is "recover" or "recover-inline") Proof.Require(result?.RecoveredWithoutWork == true &&
+            if (mode is "recover" or "recover-inline") Proof.Require(result?.RecoveredWithoutWork is true &&
                 result.Work is null && result.CurrentCaptureValid is null && handler.Sends == 0,
                     ("recovered_without_provider_key_" + (result?.Completion ?? prepared.Failure)?.Status +
                         "_preparation_" + result?.PreparationFailure).ToLowerInvariant());
             if (mode.StartsWith("capture-", StringComparison.Ordinal)) Proof.Require(
-                result?.Work?.ProductReviewAccepted == true && result.CurrentCaptureValid != true && !accepted,
+                result?.Work?.ProductReviewAccepted is true && result.CurrentCaptureValid != true && !accepted,
                 "capture_failure_preserves_work_no_state");
             if (mode is "stale-head" or "malformed" or "compat-mismatch" or "fail-candidate" or "fail-acceptance" or
                 "unknown-unreadable-candidate" or "unknown-unwritten-sticky" or "fail-cleanup-upload" or "cancel-provider" or "cancel-before" or
@@ -73,8 +73,8 @@ internal static class Program
                 (mode == "recover-inline" ? ActionHostStatus.ReviewedWithInlineWarnings : ActionHostStatus.Reviewed),
                 "inline_projection_availability_truth");
             if (mode == "compat-mismatch") Proof.Require(handler.Sends == 0, "mismatch_before_exchange");
-            if (mode == "stale-head") Proof.Require(result?.Work?.ProductReviewAccepted == true, "stale_preserves_work");
-            var summary = new { mode, accepted, recovered = result?.RecoveredWithoutWork == true,
+            if (mode == "stale-head") Proof.Require(result?.Work?.ProductReviewAccepted is true, "stale_preserves_work");
+            var summary = new { mode, accepted, recovered = result?.RecoveredWithoutWork is true,
                 work = result?.Work?.ProductReviewAccepted, capture = result?.CurrentCaptureValid,
                 capture_status = result?.Work?.Context?.CaptureStatus.ToString(), status =
                     (result?.Completion ?? prepared.Failure)?.Status.ToString(),
@@ -132,9 +132,9 @@ internal static class Program
                 return new ReadbackResult(true);
             }
             Proof.Require(restored.Succeeded && state is not null, "fresh_process_selected_acceptance");
-            Proof.Require(RestrictedStateService.TryReadAcceptedSolusRecord(state!, out var record) && record is not null,
-                "fresh_process_authenticated_record");
-            Proof.Require(record!.PayloadByteCount == expected.RootElement.GetProperty("count").GetInt32() &&
+            if (!RestrictedStateService.TryReadAcceptedSolusRecord(state!, out var record) || record is null)
+                throw new ProofFailure("fresh_process_authenticated_record");
+            Proof.Require(record.PayloadByteCount == expected.RootElement.GetProperty("count").GetInt32() &&
                 Convert.ToHexStringLower(SHA256.HashData(record.RestrictedPayload)) == expected.RootElement.GetProperty("payload").GetString(),
                 "exact_payload_after_process_restart");
             Proof.Require(SolusRestrictedStateSnapshotCodec.TryWrite(record, out var bytes), "readback_record_encoding");
@@ -145,7 +145,7 @@ internal static class Program
                 "exact_checkpoint_after_process_restart");
             return new ReadbackResult(true);
         }, default);
-        Proof.Require(observed.Value?.Verified == true && fixture.NativeCreates == 0, "readback_no_execution_or_claim");
+        Proof.Require(observed.Value?.Verified is true && fixture.NativeCreates == 0, "readback_no_execution_or_claim");
         Console.WriteLine(JsonSerializer.Serialize(new { mode, readback = true, sends = 0, native_creates = fixture.NativeCreates }));
     }
     private sealed record ReadbackResult(bool Verified);

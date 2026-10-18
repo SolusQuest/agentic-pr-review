@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
@@ -12,6 +12,21 @@ import { SOLUS_VERSION } from '../../../scripts/release/solus-package-contract.m
 
 let stage = 'environment';
 let root;
+let proofSummary;
+// Crashed Hosts deliberately cannot dispose sealed snapshots. After every child
+// has exited, reopen only this driver's private directories for teardown. Never
+// follow a symlink into a location outside the newly created proof root.
+const removeProofRoot = async (directory) => {
+  const info = await lstat(directory);
+  if (info.isDirectory() && !info.isSymbolicLink()) {
+    await chmod(directory, 0o700);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && !entry.isSymbolicLink())
+        await removeProofRoot(join(directory, entry.name));
+    }
+  }
+  await rm(directory, { recursive: true, force: true });
+};
 try {
   assert.equal(process.platform, 'linux');
   assert.equal(process.arch, 'x64');
@@ -305,19 +320,17 @@ try {
     stage = 'reconcile_' + mode;
     await scenario('cs-defect', async ({ run }) => assert.equal(run(mode).accepted, true));
   }
-  console.log(
-    JSON.stringify({
-      proof: 'APR_SOLUS_FRESH_STATE_COMMIT',
-      source: head,
-      package: SOLUS_VERSION,
-      scenarios,
-      hosts,
-      live_calls: 0,
-      credential_free: true,
-      process_restart: true,
-      official_bridge: true,
-    }),
-  );
+  proofSummary = {
+    proof: 'APR_SOLUS_FRESH_STATE_COMMIT',
+    source: head,
+    package: SOLUS_VERSION,
+    scenarios,
+    hosts,
+    live_calls: 0,
+    credential_free: true,
+    process_restart: true,
+    official_bridge: true,
+  };
 } catch (error) {
   console.error(
     JSON.stringify({
@@ -329,5 +342,20 @@ try {
   );
   process.exitCode = 1;
 } finally {
-  if (root) await rm(root, { recursive: true, force: true });
+  if (root) {
+    try {
+      await removeProofRoot(root);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          proof: 'APR_SOLUS_FRESH_STATE_COMMIT',
+          stage: 'cleanup',
+          failed: true,
+          code: error?.code || 'cleanup_failed',
+        }),
+      );
+      process.exitCode = 1;
+    }
+  }
 }
+if (proofSummary && !process.exitCode) console.log(JSON.stringify(proofSummary));

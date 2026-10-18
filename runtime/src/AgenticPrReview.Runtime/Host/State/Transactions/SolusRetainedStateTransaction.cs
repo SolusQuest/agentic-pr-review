@@ -154,9 +154,9 @@ internal static class SolusRecoveredPublicationCount
         var comment = Encoding.UTF8.GetString(publication.FinalizedCommentUtf8.AsSpan());
         var inspected = R4StickyMarker.Inspect(comment);
         if (inspected.Kind != R4StickyInspectionKind.ValidR4 || inspected.Body is not { } body ||
-            inspected.Identity?.ScopeSha256 != publication.ScopeSha256 ||
-            inspected.Identity.BodySha256 != publication.BodySha256 ||
-            inspected.Identity.HeadSha != publication.ReviewedHeadSha) return false;
+            inspected.Identity is not { } identity || identity.ScopeSha256 != publication.ScopeSha256 ||
+            identity.BodySha256 != publication.BodySha256 ||
+            identity.HeadSha != publication.ReviewedHeadSha) return false;
         var prefix = "## Agentic PR Review\n\nReviewed head: `" + publication.ReviewedHeadSha + "`\n\n### Summary\n\n";
         if (!body.StartsWith(prefix, StringComparison.Ordinal)) return false;
         const string boundary = "\n\n### Findings";
