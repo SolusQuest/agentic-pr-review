@@ -28,8 +28,10 @@ For affected direct-runtime integration, run `npm run runtime:integration`. The 
 
 The current `all` route runs test, framework and actual managed archive
 qualification. `managed` aliases in the owning Agent, ActionHost, live-agent
-verification and trusted-proof-v2 commands invoke the same complete archive
-qualification. They require the reviewed-source Ubuntu 24.04 x64 builder and an
+verification commands invoke the same complete archive qualification. The
+trusted-proof-v2 `managed` route first executes the actual V2 FDD
+production/verifier and two-root preparation proof, then qualifies the archive.
+Its default `framework` route runs that complete credential-free V2 proof. They require the reviewed-source Ubuntu 24.04 x64 builder and an
 already verified package cache. No command automatically obtains credentials.
 Ordinary PR/push CI calls explicit credential-free test/framework and
 `deterministic` routes; the complete trusted `verify` workflow qualifies the

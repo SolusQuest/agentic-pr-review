@@ -11,18 +11,39 @@
 | `r5-evaluation-gate`                                                | Additive deterministic quality, replay, growth, reset and dry-run coverage with actual framework/AOT semantic parity.                                                                            |
 | `r6-economics-gate`                                                 | Additive offline economics/accounting/lifecycle/failure coverage with actual framework/AOT execution and syscall audit.                                                                          |
 | `trusted-proof-payload`                                             | Historical source `5b5769753653bb3fd3e68cf8b7bb88a1bd350613`, two clean production/verifier builds and equal supplemental receipts.                                                              |
-| `trusted-proof-payload-v2-first`, `trusted-proof-payload-v2-second` | Two independent current-source public FDD invariant regressions, each with its own full Host build, process tree and clean-source guard.                                                         |
-| `trusted-proof-payload-v2`                                          | Stable aggregate requiring both successful workers and exactly their bounded first/second receipts, with independently verified current-source identities and closed regression receipt schemas. |
+| `trusted-proof-payload-v2-first`, `trusted-proof-payload-v2-second` | Two independent current-source managed V2 production/verifier builds, full V2 scenarios and two-root preparation, each with its own process tree and clean-source guard.                         |
+| `trusted-proof-payload-v2`                                          | Stable aggregate requiring both successful workers and exactly their bounded first/second receipts, with independently verified current-source identities and closed managed V2 receipt schemas. |
 | `integration`                                                       | Trusted-live policy dry-run and host/runtime integration matrix on the selected source.                                                                                                          |
 
 R5, R6, integration and both retained proof checks remain independent and required before PR readiness. They are outside the stable `runtime` aggregate's original responsibility. Older phase names do not establish that a gate is obsolete. Debug and Release coverage and historical versus current-source proof authority remain distinct. R5/R6 native implementations and the immutable historical job retain their existing ownership until retirement.
 
-The two current-source workers emit `APR_D5_MANAGED_REGRESSION`, with
-`execution_kind: framework` and `archive_qualified: false`. They preserve the
-complete generic Host invariant corpus, including its canary, recovery, stale,
-cancellation, negative and replacement-inventory checks. They have no private
-feed token and do not establish Solus archive execution. The original native V2
-script remains available only through explicit `legacy-aot` until D6 retirement.
+The two current-source workers emit `APR_D5_V2_MANAGED_PROOF` with
+`execution_kind: framework-single-file` and `archive_qualified: false`. Each
+publishes the actual V2 production and independent verifier projects as
+framework-dependent .NET 10 single-file programs. This test-only format keeps
+the existing single-executable protected staging protocol; it does not replace
+the multi-file production Solus archive proof. Production CIL must equal the
+verifier's referenced payload CIL, and both must share identical runtime CIL.
+The architecture checker retains the separation between production composition
+and controlled outer ports. Explicit compiled source identities and actual
+verifier evidence bind exact-source workflow admission and continuation across
+workflow runs.
+
+Each worker executes six production framing/credential smoke cases with zero
+network syscalls, then V2 bootstrap, continuation, stale-head, visibility and
+unauthorized-follow-on cases. CLR diagnostics are disabled only during the
+syscall smoke so diagnostic IPC cannot be confused with product networking.
+Independent source/control roots exercise traversal, prefix escape, symlink
+parent, dirty source, replaced local checker and stale receipt rejection before
+a successful deterministic FDD rebuild. Rejections preserve the output sentinel;
+no prepared output survives a rejected preparation. The trusted control-root
+checker binds the rebuilt executable, actual private Action bundle and proof
+recipe. Only the completed sequence emits a receipt, including both executable
+hashes, CIL/architecture/evidence hashes, exact case inventories and recipe hash.
+The original native preparer, receipt contract and historical source pin remain
+unchanged; `legacy-aot` explicitly selects that historical format and warning
+policy. Managed compilation retains the same exact two IL3058 reference-compatibility warnings per project; those static checks do not establish native execution. Current managed receipts cannot claim native execution or archive
+qualification. Neither public worker obtains private feed credentials.
 
 Actual D5 qualification runs in `solus-agent-package-proof.yml`'s reviewed-source
 `verify` mode, immediately after the cold-cache build. Two independent original
@@ -39,7 +60,7 @@ Run `node scripts/verify-runtime-ci-workflow.mjs --self-test` after `npm ci`. Ru
 
 The checker executes the actual inline aggregate programs extracted from the workflow. All-success input passes; failure, cancelled, skipped, missing, malformed, empty and unknown results reject for each of the original three dependencies, including the R4 matrix result, and for each V2 worker independently. `fail-fast:false` allows unaffected R4 matrix siblings to finish; no job or proof step can swallow failures through `continue-on-error`. The original `runtime` aggregate checks out no repository code and still has exactly core/R2/R4 scope. Both aggregates use job-level `always()`. A whole-workflow cancellation or hard platform kill can prevent a pending aggregate from starting; an absent/cancelled check supplies no success evidence. Ordinary successful remote CI is still required to prove actual Linux builds and the GitHub scheduler, rather than treating local semantic tests as Linux proof.
 
-Each V2 worker uploads only its single receipt line, bounded by the existing 32,768-byte limit. Immutable artifact names identify first/second and the workflow run ID/attempt. The V2 aggregate first requires both exact successful dependency results, then independently checks out the event-selected commit, derives its tree, and downloads all artifacts in that attempt's receipt namespace into separate directories. It rejects missing/duplicate/extra artifact directories, unexpected files, nonregular files or links, invalid UTF-8, invalid prefix/single-terminal-newline framing, invalid JSON and source/tree substitutions or an attempt to present a regression receipt as archive qualification. The actual inline filesystem program is exercised with distinct valid build receipts and concrete negative evidence. Linux CI additionally executes file-symlink negatives; ordinary Windows hosts can create directory junctions but require additional privilege for file symlinks.
+Each V2 worker uploads only its single receipt line, bounded by the existing 32,768-byte limit. Immutable artifact names identify first/second and the workflow run ID/attempt. The V2 aggregate first requires both exact successful dependency results, then independently checks out the event-selected commit, derives its tree, and downloads all artifacts in that attempt's receipt namespace into separate directories. It rejects missing/duplicate/extra artifact directories, unexpected files, nonregular files or links, invalid UTF-8, invalid prefix/single-terminal-newline framing, invalid JSON and source/tree substitutions or omitted/reordered V2 or preparation cases, generic Host substitutions, unequal shared CIL, changed proof recipes and attempts to claim native execution or archive qualification. The actual inline filesystem program is exercised with distinct valid build receipts and concrete negative evidence. Linux CI additionally executes file-symlink negatives; ordinary Windows hosts can create directory junctions but require additional privilege for file symlinks.
 
 Artifact actions are admitted only for this receipt boundary: upload in the two V2 workers and download in their aggregate, with exact paths and current-run inputs. The existing prohibition on compiled payload/verifier output reuse remains active in every gate. The selected [official upload action](https://github.com/actions/upload-artifact/blob/v7/action.yml) archives the one file without overwrite, and the [official download action](https://github.com/actions/download-artifact/blob/v8/action.yml) preserves separate artifact directories and rejects digest mismatches. No additional GitHub permission, cross-run token, compiled cache, proof-log transfer or production receipt protocol is introduced. A partial rerun lacking the successful sibling's current-attempt receipt fails closed; a complete new attempt supplies both receipts.
 

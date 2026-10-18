@@ -86,7 +86,7 @@ public sealed class TrustedProofArchitectureTests
     }
 
     [Fact]
-    public void RetainedV2PayloadHasCompiledIdentityAndCurrentCiUsesManagedRegression()
+    public void RetainedV2PayloadHasCompiledIdentityAndCurrentCiUsesManagedV2Proof()
     {
         var root = FindRepositoryRoot();
         var payloadRoot = Path.Join(
@@ -185,14 +185,13 @@ public sealed class TrustedProofArchitectureTests
             "ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613",
             workflow,
             StringComparison.Ordinal);
-        // D5's current public CI retains the complete FDD invariant corpus.
-        // The exact YAML, two independent workers, source-bound receipts and
-        // failure/missing/cancelled aggregation are executed by the owning
-        // verify-runtime-ci-workflow self-test. The retained native V2 source
-        // below still has its own compiled identity and admission contract.
-        Assert.Contains("APR_D5_MANAGED_REGRESSION", workflow,
+        // Each public worker executes the real V2 production/verifier pair,
+        // including exact-source continuation and independent two-root preparation.
+        // The owning CI self-test executes the actual aggregate and rejects
+        // generic Host substitutions, omitted cases and unbound identities.
+        Assert.Contains("APR_D5_V2_MANAGED_PROOF", workflow,
             StringComparison.Ordinal);
-        Assert.DoesNotContain("compiled_payload_source_commit", workflow,
+        Assert.Contains("validateManagedV2Receipt", workflow,
             StringComparison.Ordinal);
 
         using var preflightV2 = JsonDocument.Parse(File.ReadAllBytes(Path.Join(

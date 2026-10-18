@@ -5,6 +5,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import {
+  identityFields,
+  v2Cases,
+  preparationCases,
+  recipeDigest,
+  buildPair,
+} from './check-r4-e2p-managed-receipt-v2.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const selectedSource =
@@ -166,12 +173,15 @@ function v2Programs(jobs) {
       proof.run,
       `bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-${role}.log"`,
     );
-    assert.equal(proof.name, `Current-head D5 ${role} independent public FDD invariant regression`);
+    assert.equal(
+      proof.name,
+      `Current-head D5 ${role} independent managed V2 production/verifier proof`,
+    );
     assert.deepEqual(proof.env, { APR_D5_REGRESSION_ROLE: role });
     const receipt = `"$RUNNER_TEMP/r4-e2p-v2-${role}.receipt"`;
     assert.equal(
       extraction.run,
-      `grep '^APR_D5_MANAGED_REGRESSION ' "$RUNNER_TEMP/r4-e2p-v2-${role}.log" > ${receipt}\n` +
+      `grep '^APR_D5_V2_MANAGED_PROOF ' "$RUNNER_TEMP/r4-e2p-v2-${role}.log" > ${receipt}\n` +
         `test "$(wc -l < ${receipt})" -eq 1\n` +
         `test "$(wc -c < ${receipt})" -le 32768\n`,
     );
@@ -454,7 +464,7 @@ function verifyReceipts(program) {
   );
   const sourceCommit = '1'.repeat(40);
   const sourceTree = '2'.repeat(40);
-  const line = (receipt) => 'APR_D5_MANAGED_REGRESSION ' + JSON.stringify(receipt) + '\n';
+  const line = (receipt) => 'APR_D5_V2_MANAGED_PROOF ' + JSON.stringify(receipt) + '\n';
   let cases = 0;
   function execute(mutate = () => {}, shouldPass = false) {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-ci-v2-receipts-'));
@@ -464,16 +474,33 @@ function verifyReceipts(program) {
     const paths = directories.map((directory, index) =>
       path.join(directory, `r4-e2p-v2-${index === 0 ? 'first' : 'second'}.receipt`),
     );
-    const receipts = directories.map((_, index) => ({
-      kind: 'apr-d5-managed-regression-v1',
-      role: index === 0 ? 'first' : 'second',
-      execution_kind: 'framework',
-      archive_qualified: false,
-      oracle_sha256: 'a'.repeat(64),
-      invariant_inventory_sha256: 'b'.repeat(64),
-      source_commit: sourceCommit,
-      source_tree: sourceTree,
-    }));
+    const receipts = directories.map((_, index) => {
+      const value = {
+        kind: 'apr-d5-v2-managed-proof-v1',
+        role: index === 0 ? 'first' : 'second',
+        execution_kind: 'framework-single-file',
+        production_payload_smoke: 'passed-six-zero-network-cases',
+        synthetic_managed_v2_route: 'passed',
+        two_root_preparation: 'passed',
+        native_aot_disposition: 'historical-only',
+        action_source_sha: historicalSource,
+        payload_build_discriminator: 'r4-w2',
+        archive_qualified: false,
+        source_commit: sourceCommit,
+        source_tree: sourceTree,
+        compiled_payload_source_commit: sourceCommit,
+        compiled_payload_source_tree: sourceTree,
+        compiled_payload_proof_kind: 'apr-r4-e2p-trusted-proof-payload-v2',
+        wrapper_bundle_sha256: 'c'.repeat(64),
+        proof_recipe_sha256: recipeDigest(root),
+        v2_cases: [...v2Cases],
+        preparation_cases: [...preparationCases],
+      };
+      for (const field of identityFields.filter((key) => key.endsWith('_sha256')))
+        value[field] = (index ? 'b' : 'a').repeat(64);
+      value.build_pair_sha256 = buildPair(value);
+      return value;
+    });
     const args = [receiptRoot, '77', '1', sourceCommit, sourceTree];
     try {
       directories.forEach((directory) => fs.mkdirSync(directory, { recursive: true }));
@@ -561,8 +588,8 @@ function verifyReceipts(program) {
     }
     for (const value of [
       '',
-      'APR_D5_MANAGED_REGRESSION {broken}\n',
-      'APR_D5_MANAGED_REGRESSION null\n',
+      'APR_D5_V2_MANAGED_PROOF {broken}\n',
+      'APR_D5_V2_MANAGED_PROOF null\n',
     ]) {
       execute(({ paths }) => fs.writeFileSync(paths[index], value));
     }
@@ -576,7 +603,7 @@ function verifyReceipts(program) {
     execute(({ paths, receipts }) =>
       fs.writeFileSync(
         paths[index],
-        line(receipts[index]).replace('MANAGED_REGRESSION', 'NETWORK_PREREQUISITE'),
+        line(receipts[index]).replace('V2_MANAGED_PROOF', 'NETWORK_PREREQUISITE'),
       ),
     );
     execute(({ paths, receipts }) =>
@@ -592,6 +619,80 @@ function verifyReceipts(program) {
         Buffer.from(valid).map((byte) => (byte === 118 ? 255 : byte)),
       );
     });
+    for (const field of [
+      'kind',
+      'execution_kind',
+      'production_payload_smoke',
+      'synthetic_managed_v2_route',
+      'two_root_preparation',
+      'native_aot_disposition',
+      'action_source_sha',
+      'payload_build_discriminator',
+      'compiled_payload_source_commit',
+      'compiled_payload_source_tree',
+      'compiled_payload_proof_kind',
+      ...identityFields.filter((key) => key.endsWith('_sha256')),
+      'wrapper_bundle_sha256',
+      'proof_recipe_sha256',
+    ]) {
+      execute(({ paths, receipts }) =>
+        fs.writeFileSync(paths[index], line({ ...receipts[index], [field]: 'invalid' })),
+      );
+      execute(({ paths, receipts }) => {
+        delete receipts[index][field];
+        fs.writeFileSync(paths[index], line(receipts[index]));
+      });
+    }
+    execute(({ paths, receipts }) => {
+      receipts[index].verifier_payload_managed_intermediate_sha256 = 'd'.repeat(64);
+      receipts[index].build_pair_sha256 = buildPair(receipts[index]);
+      fs.writeFileSync(paths[index], line(receipts[index]));
+    });
+    execute(({ paths, receipts }) => {
+      receipts[index].build_pair_sha256 = 'e'.repeat(64);
+      fs.writeFileSync(paths[index], line(receipts[index]));
+    });
+    execute(({ paths, receipts }) => {
+      receipts[index].proof_recipe_sha256 = 'f'.repeat(64);
+      fs.writeFileSync(paths[index], line(receipts[index]));
+    });
+    execute(({ paths }) =>
+      fs.writeFileSync(
+        paths[index],
+        line({
+          kind: 'apr-d5-managed-regression-v1',
+          role: index ? 'second' : 'first',
+          source_commit: sourceCommit,
+          source_tree: sourceTree,
+          execution_kind: 'framework',
+          archive_qualified: false,
+          oracle_sha256: 'a'.repeat(64),
+          invariant_inventory_sha256: 'b'.repeat(64),
+        }),
+      ),
+    );
+    for (const field of ['v2_cases', 'preparation_cases']) {
+      for (const mutation of ['missing', 'reordered', 'duplicate', 'generic-substitution']) {
+        execute(({ paths, receipts }) => {
+          const values = receipts[index][field];
+          if (mutation === 'missing') values.pop();
+          if (mutation === 'reordered') values.reverse();
+          if (mutation === 'duplicate') values.push(values[0]);
+          if (mutation === 'generic-substitution')
+            receipts[index][field] = ['generic-r4-framework'];
+          fs.writeFileSync(paths[index], line(receipts[index]));
+        });
+      }
+    }
+    execute(({ paths, receipts }) =>
+      fs.writeFileSync(paths[index], line({ ...receipts[index], archive_qualified: true })),
+    );
+    execute(({ paths, receipts }) =>
+      fs.writeFileSync(
+        paths[index],
+        line({ ...receipts[index], role: index ? 'first' : 'second' }),
+      ),
+    );
     for (const field of ['source_commit', 'source_tree']) {
       execute(({ paths, receipts }) =>
         fs.writeFileSync(paths[index], line({ ...receipts[index], [field]: '0'.repeat(40) })),

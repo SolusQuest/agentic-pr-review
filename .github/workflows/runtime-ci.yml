@@ -335,14 +335,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
           test -z "$(git status --porcelain)"
 
-      - name: Current-head D5 first independent public FDD invariant regression
+      - name: Current-head D5 first independent managed V2 production/verifier proof
         env:
           APR_D5_REGRESSION_ROLE: first
         run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
 
       - name: Extract bounded first receipt
         run: |
-          grep '^APR_D5_MANAGED_REGRESSION ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
+          grep '^APR_D5_V2_MANAGED_PROOF ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
           test "$(wc -c < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -le 32768
 
@@ -399,14 +399,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
           test -z "$(git status --porcelain)"
 
-      - name: Current-head D5 second independent public FDD invariant regression
+      - name: Current-head D5 second independent managed V2 production/verifier proof
         env:
           APR_D5_REGRESSION_ROLE: second
         run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
 
       - name: Extract bounded second receipt
         run: |
-          grep '^APR_D5_MANAGED_REGRESSION ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
+          grep '^APR_D5_V2_MANAGED_PROOF ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
           test "$(wc -c < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -le 32768
 
@@ -485,6 +485,7 @@ jobs:
             "$(git rev-parse 'HEAD^{tree}')" <<'NODE'
           import fs from 'node:fs';
           import path from 'node:path';
+          import { validateManagedV2Receipt, recipeDigest } from './scripts/check-r4-e2p-managed-receipt-v2.mjs';
           const [receiptRoot, runId, runAttempt, sourceCommit, sourceTree] =
             process.argv.slice(2);
           if (process.argv.length !== 7 || !/^[1-9][0-9]*$/.test(runId) ||
@@ -498,7 +499,7 @@ jobs:
               JSON.stringify(fs.readdirSync(receiptRoot).sort()) !== JSON.stringify(expected)) {
             throw new Error('Exactly first and second receipt artifacts are required.');
           }
-          const prefix = 'APR_D5_MANAGED_REGRESSION ';
+          const prefix = 'APR_D5_V2_MANAGED_PROOF ';
           for (const [index, role] of roles.entries()) {
             const directory = path.join(receiptRoot, expected[index]);
             const file = `r4-e2p-v2-${role}.receipt`;
@@ -517,14 +518,9 @@ jobs:
               throw new Error('The current-head receipt framing is invalid.');
             }
             const receipt = JSON.parse(line.slice(prefix.length));
-            const expectedKeys = ['kind', 'role', 'source_commit', 'source_tree', 'execution_kind', 'oracle_sha256', 'invariant_inventory_sha256', 'archive_qualified'].sort();
-            if (receipt === null || typeof receipt !== 'object' || Array.isArray(receipt) ||
-                JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(expectedKeys) ||
-                receipt.kind !== 'apr-d5-managed-regression-v1' || receipt.role !== role ||
-                receipt.execution_kind !== 'framework' || receipt.archive_qualified !== false ||
-                !/^[a-f0-9]{64}$/.test(receipt.oracle_sha256) ||
-                !/^[a-f0-9]{64}$/.test(receipt.invariant_inventory_sha256)) {
-              throw new Error('The public FDD regression receipt contract is invalid.');
+            validateManagedV2Receipt(receipt);
+            if (receipt.role !== role || receipt.proof_recipe_sha256 !== recipeDigest(process.cwd())) {
+              throw new Error('The managed V2 proof role or current recipe is invalid.');
             }
             if (receipt.source_commit !== sourceCommit ||
                 receipt.source_tree !== sourceTree) {
