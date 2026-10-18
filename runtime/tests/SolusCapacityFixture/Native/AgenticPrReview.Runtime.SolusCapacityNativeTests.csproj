@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Uses V3's own friend, in an independent native-test output directory. -->
+    <AssemblyName>AgenticPrReview.Runtime.SolusCapacityFixture</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
+    <ProjectReference Include="../../../src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj" />
+    <Compile Include="../../AgenticPrReview.Runtime.Tests/Agent/SolusReviewCapacityTests.cs" Link="CapacityTests.cs" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

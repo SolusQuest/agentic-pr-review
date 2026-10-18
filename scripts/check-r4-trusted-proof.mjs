@@ -930,6 +930,14 @@ function validateSolusAgentInstallWorkflow(workflow) {
             },
             run: 'node runtime/tests/ActionHostFixture/verify-solus-restored.mjs',
           },
+          {
+            name: 'CR1-V3 actual managed review capacity proof',
+            if: "inputs.mode == 'verify'",
+            env: {
+              NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+            },
+            run: 'bash runtime/scripts/verify-r7-capacity.sh managed',
+          },
         ],
       },
     },

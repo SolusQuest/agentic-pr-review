@@ -85,12 +85,13 @@ internal sealed class SolusReviewBridge : IDisposable
         if (Interlocked.Exchange(ref used, 1) != 0) throw new InvalidOperationException("APR_SOLUS_REVIEW_ALREADY_USED");
         var limits = context.Policy.LimitAuthority;
         if (acknowledgement != ExposureStrength.Volatile || !context.IsLive || tools.ExecutionId != Facts.ExecutionId ||
-            selectedBudget != BoundBudget(limits.TokenBudget) ||
+            !SolusReviewCapacity.TrySelect(context.Policy.ConfigBytes.AsSpan(), out var capacity) ||
+            selectedBudget != capacity!.Tokens ||
             SolusSnapshotTools.ArgumentCorrectionFor(tools.Registrations, context.Snapshot) is null ||
             !AgentLimitAuthority.TryResolve(context.Policy.AdapterId, limits, out var profile) ||
             profile != AgentLimitProfile.Current)
             throw new ArgumentException("APR_SOLUS_REVIEW_AUTHORITY");
-        var duration = TimeSpan.FromSeconds(Math.Min(Cr1DevelopmentProfile.DurationSeconds, limits.TimeoutSeconds));
+        var duration = TimeSpan.FromSeconds(capacity.TimeoutSeconds);
         if (hostRemaining < duration) duration = hostRemaining;
         if (duration <= TimeSpan.Zero)
         {
@@ -116,7 +117,7 @@ internal sealed class SolusReviewBridge : IDisposable
             throw new ArgumentException("APR_SOLUS_CONTEXT_AUTHORITY");
         var currentSink = sinkFactory is null ? sink : sinkFactory(runtime.SourceSelection.Compatibility);
         var request = Request(instructions, data, duration,
-            Math.Min(Cr1DevelopmentProfile.LogicalCalls, limits.ModelCalls), admitToolCalls: true);
+            capacity.ModelCalls, admitToolCalls: true, admittedCapacity: capacity);
         var terminal = new SolusTerminalAccountingGate(Facts, domain);
         var result = await ((IContextCandidateAgent)runtime.Agent).ExecuteCandidatesWithContextAsync(
             new(request, consumed is null ? ContextExecutionIntent.Fresh : ContextExecutionIntent.NewRunFromContext,
@@ -157,31 +158,29 @@ internal sealed class SolusReviewBridge : IDisposable
         return new(result.Outcome.Reason, accounting, reason, reason == ActionHostTerminationReason.ReviewCompleted, result.Outcome.Usage);
     }
 
+    // The unauthenticated R4 control seam retains its original probe policy.
+    // Every Host review supplies the admitted capacity here.
     internal AgentRequest Request(string instructions, IReadOnlyList<AgentInput> data, TimeSpan duration,
-        int maximumCalls = Cr1DevelopmentProfile.LogicalCalls, bool admitToolCalls = false) => new(
-        Facts.ExecutionId, instructions, data, new(Cr1DevelopmentProfile.WorkUnits, duration),
+        int maximumCalls = Cr1DevelopmentProfile.LogicalCalls, bool admitToolCalls = false,
+        SolusReviewCapacity? admittedCapacity = null) => new(
+        Facts.ExecutionId, instructions, data, new(maximumCalls, duration),
         AgentCapability.WorkUnitLimit | AgentCapability.DurationLimit | AgentCapability.Cancellation |
         AgentCapability.UsageReporting | AgentCapability.DispatchLimits | AgentCapability.UsageThresholds |
         AgentCapability.ToolInvocationLimit | AgentCapability.UsageAccounting |
         (admitToolCalls ? AgentCapability.ToolCallAdmissionLimit : AgentCapability.None),
         new(maximumLogicalCalls: maximumCalls, maximumPhysicalDispatches: maximumCalls,
-            inputTokenThreshold: Cr1DevelopmentProfile.InputTokenThreshold, outputTokenThreshold: Cr1DevelopmentProfile.OutputTokenThreshold,
+            inputTokenThreshold: admittedCapacity?.InputAllowance ?? Cr1DevelopmentProfile.InputTokenThreshold,
+            outputTokenThreshold: admittedCapacity?.Tokens.OutputTokens ?? Cr1DevelopmentProfile.OutputTokenThreshold,
             maximumToolInvocations: Cr1DevelopmentProfile.ToolInvocations,
             maximumToolCallAdmissions: admitToolCalls ? Cr1DevelopmentProfile.ToolInvocations : null,
             accountingPolicy: new(new(Cr1DevelopmentProfile.InputTokenReservation, Cr1DevelopmentProfile.OutputTokenReservation),
-                Cr1DevelopmentProfile.InputTokenAllowance, Cr1DevelopmentProfile.OutputTokenAllowance, UnknownUsagePolicy.Stop),
+                admittedCapacity?.InputAllowance ?? Cr1DevelopmentProfile.InputTokenAllowance,
+                admittedCapacity?.Tokens.OutputTokens ?? Cr1DevelopmentProfile.OutputTokenAllowance, UnknownUsagePolicy.Stop),
             retryPolicy: new(Cr1DevelopmentProfile.AttemptsPerLogicalCall)));
 
     internal static ProviderExchangeBounds Bounds() => new(Cr1DevelopmentProfile.ProviderInputs,
         Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
         Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes, Cr1DevelopmentProfile.ContinuationBytes);
-    internal static ReviewTokenBudget BoundBudget(ReviewTokenBudget? configured)
-    {
-        configured ??= ReviewTokenBudget.Default;
-        return new(Math.Min(configured.UncachedInputTokens, Cr1DevelopmentProfile.InputTokenAllowance),
-            Math.Min(configured.CachedInputTokens, Cr1DevelopmentProfile.InputTokenAllowance),
-            Math.Min(configured.OutputTokens, Cr1DevelopmentProfile.OutputTokenAllowance));
-    }
     internal static void ValidateText(string instructions, IReadOnlyList<AgentInput> data)
     {
         var utf8 = new UTF8Encoding(false, true);
