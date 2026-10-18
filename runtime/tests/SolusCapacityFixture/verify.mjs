@@ -271,11 +271,14 @@ try {
       await execute({ run, operations, captured });
     } finally {
       lines.close();
-      if (bridge.exitCode === null) {
+      const priorCheck = check;
+      check = 'bridge_shutdown';
+      if (bridge.exitCode === null && bridge.signalCode === null) {
         bridge.kill('SIGTERM');
         await once(bridge, 'exit');
-      }
-      assert.equal(bridge.exitCode, 0);
+        assert.equal(bridge.signalCode, 'SIGTERM');
+      } else assert.equal(bridge.exitCode, 0);
+      check = priorCheck;
     }
   };
   function completed(receipt, correction = false) {
