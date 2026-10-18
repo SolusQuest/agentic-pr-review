@@ -43,12 +43,25 @@ internal static class Program
                     : Comparison.Create(left, right);
                 Console.WriteLine(JsonSerializer.Serialize(result, EconomicsJson.Default.ComparisonFact)); return 0;
             }
-            if (args is ["network-probe"])
+            if (args is ["network-probe"] or ["network-probe-datagram"])
             {
-                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-                try { await socket.ConnectAsync("127.0.0.1", 9, deadline.Token); } catch (SocketException) { } catch (OperationCanceledException) { }
+                using var socket = new Socket(AddressFamily.InterNetwork,
+                    args[0] == "network-probe" ? SocketType.Stream : SocketType.Dgram, ProtocolType.Unspecified);
+                if (args[0] == "network-probe")
+                {
+                    using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+                    try { await socket.ConnectAsync("127.0.0.1", 9, deadline.Token); }
+                    catch (SocketException) { /* A refused loopback attempt is still decisive audit evidence. */ }
+                    catch (OperationCanceledException) { /* The bounded probe need not establish a connection. */ }
+                }
                 Console.WriteLine("APR_SOLUS_ECONOMICS_NETWORK_PROBE"); return 0;
+            }
+            if (args is ["unix-probe"])
+            {
+                using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                try { socket.Connect(new UnixDomainSocketEndPoint(Path.Join(Path.GetTempPath(), "v2-probe-" + Guid.NewGuid().ToString("N")))); }
+                catch (SocketException) { /* The missing Unix endpoint still exercises the runtime capability checks. */ }
+                Console.WriteLine("APR_SOLUS_ECONOMICS_UNIX_PROBE"); return 0;
             }
             if (args is ["readback", var readbackRoot, var readbackTime, var readbackCorpus, var expectedReport])
             {
@@ -132,6 +145,7 @@ internal static class Program
         }
         catch (Exception error)
         {
+            // This executable boundary must emit only closed codes, including unexpected failures.
             Console.Error.WriteLine("APR_SOLUS_ECONOMICS_FAILED " + (error is ProofFailure failure ? failure.Code : "unexpected"));
             return 1;
         }
@@ -190,7 +204,7 @@ internal static class Privacy
             }
             Strings(document.RootElement);
         }
-        catch (JsonException) { }
+        catch (JsonException) { /* Non-JSON publication text still receives the literal/encoded canary scan below. */ }
         var canaries = new[] { HostFixture.ProviderKey, HostFixture.GitHubKey, HostFixture.StateKey,
             ControlledProvider.CurrentOnly, ControlledProvider.Reasoning, ControlledProvider.ProviderRequestId,
             "V2_PRIVATE_CAPTURE_CANARY", "V2_PRIVATE_EXCEPTION_CANARY", "APR242_POLICY_CANARY", HistoryOracle.Fact };

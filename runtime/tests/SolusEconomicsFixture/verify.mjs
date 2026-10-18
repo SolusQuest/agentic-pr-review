@@ -16,7 +16,6 @@ let stage = 'environment',
   controlled = 0,
   adversarial = 0;
 const maximum = 2 * 1024 * 1024;
-const network = /\b(?:socket|connect|sendto|sendmsg|sendmmsg)\(.*\bAF_INET6?\b/u;
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const removeRoot = async (directory) => {
   const info = await lstat(directory);
@@ -65,6 +64,7 @@ try {
   const { build, stop } = await import('esbuild');
   const { SOLUS_VERSION } = await import('../../../scripts/release/solus-package-contract.mjs');
   const { cases, verifyReport } = await import('./oracle.mjs');
+  const { auditNetwork } = await import('./network-audit.mjs');
   const git = (...args) =>
     execFileSync('git', args, { env, encoding: 'utf8', timeout: 30_000 }).trim();
   const head = git('rev-parse', 'HEAD'),
@@ -184,7 +184,7 @@ try {
         '-s',
         '256',
         '-e',
-        'trace=network,process',
+        'trace=network,process,close',
         '-o',
         trace,
         'dotnet',
@@ -212,16 +212,13 @@ try {
       name.startsWith('t' + id + '.'),
     );
     assert.ok(files.length > 0 && files.length <= 512);
-    let internet = false;
+    const traces = [];
     for (const name of files) {
       const bytes = await readFile(join(root, 'traces', name));
       assert.ok(bytes.length <= 8 * 1024 * 1024);
-      internet ||= bytes
-        .toString('utf8')
-        .split('\n')
-        .some((line) => network.test(line));
+      traces.push(bytes.toString('utf8'));
     }
-    assert.equal(internet, expectedNetwork);
+    assert.equal(auditNetwork(traces).activity, expectedNetwork);
     return { text: result.stdout || '', trace, files };
   };
   stage = 'audit_positive_control';
@@ -229,6 +226,11 @@ try {
     (await run(['network-probe'], 0, true)).text.trim(),
     'APR_SOLUS_ECONOMICS_NETWORK_PROBE',
   );
+  assert.equal(
+    (await run(['network-probe-datagram'], 0, true)).text.trim(),
+    'APR_SOLUS_ECONOMICS_NETWORK_PROBE',
+  );
+  assert.equal((await run(['unix-probe'])).text.trim(), 'APR_SOLUS_ECONOMICS_UNIX_PROBE');
   stage = 'required_self_tests';
   const self = (await run(['self-test'])).text.trim();
   assert.match(
