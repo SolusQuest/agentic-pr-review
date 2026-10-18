@@ -704,12 +704,12 @@ internal static partial class ReviewedStagedFileAccess
 {
     private const int OpenReadOnly = 0;
     private const int OpenReadWrite = 2;
-    private const int OpenCreate = 0x40;
-    private const int OpenExclusive = 0x80;
-    private const int OpenDirectory = 0x10000;
-    private const int OpenNoFollow = 0x20000;
-    private const int OpenCloseOnExec = 0x80000;
-    private const int UnlinkRemoveDirectory = 0x200;
+    private static readonly int OpenCreate = OperatingSystem.IsMacOS() ? DarwinFiles.Create : 0x40;
+    private static readonly int OpenExclusive = OperatingSystem.IsMacOS() ? DarwinFiles.Exclusive : 0x80;
+    private static readonly int OpenDirectory = OperatingSystem.IsMacOS() ? DarwinFiles.Directory : 0x10000;
+    private static readonly int OpenNoFollow = OperatingSystem.IsMacOS() ? DarwinFiles.NoFollowAny : 0x20000;
+    private static readonly int OpenCloseOnExec = OperatingSystem.IsMacOS() ? DarwinFiles.CloseOnExec : 0x80000;
+    private static readonly int UnlinkRemoveDirectory = OperatingSystem.IsMacOS() ? DarwinFiles.RemoveDirectory : 0x200;
     private const uint FileTypeMask = 0xf000;
     private const uint RegularFile = 0x8000;
     private const uint DirectoryFile = 0x4000;
@@ -750,7 +750,7 @@ internal static partial class ReviewedStagedFileAccess
             return false;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             var descriptor = Open(
                 path,
@@ -787,11 +787,11 @@ internal static partial class ReviewedStagedFileAccess
         stream = null;
         try
         {
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 var parentDescriptor = checked(
                     (int)parent.DangerousGetHandle());
-                var descriptor = OpenAt(
+                var descriptor = OpenRelative(
                     parentDescriptor,
                     fileName,
                     OpenReadWrite |
@@ -871,12 +871,12 @@ internal static partial class ReviewedStagedFileAccess
         childPath = Path.Join(parentPath, name);
         try
         {
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 var parentDescriptor = checked(
                     (int)parent.DangerousGetHandle());
                 _ = MakeDirectoryAt(parentDescriptor, name, 0x1c0);
-                var descriptor = OpenAt(
+                var descriptor = OpenRelative(
                     parentDescriptor,
                     name,
                     OpenReadOnly |
@@ -945,7 +945,7 @@ internal static partial class ReviewedStagedFileAccess
         childPath = Path.Join(parentPath, name);
         try
         {
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 var parentDescriptor = checked(
                     (int)parent.DangerousGetHandle());
@@ -954,7 +954,7 @@ internal static partial class ReviewedStagedFileAccess
                     return false;
                 }
 
-                var descriptor = OpenAt(
+                var descriptor = OpenRelative(
                     parentDescriptor,
                     name,
                     OpenReadOnly |
@@ -1027,9 +1027,9 @@ internal static partial class ReviewedStagedFileAccess
     {
         handle = null;
         identity = default;
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
-            var descriptor = OpenAt(
+            var descriptor = OpenRelative(
                 checked((int)parent.DangerousGetHandle()),
                 name,
                 OpenReadOnly |
@@ -1066,7 +1066,7 @@ internal static partial class ReviewedStagedFileAccess
         string name,
         bool directory)
     {
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             return UnlinkAt(
                 checked((int)parent.DangerousGetHandle()),
@@ -1102,11 +1102,11 @@ internal static partial class ReviewedStagedFileAccess
         stream = null;
         try
         {
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 var parentDescriptor = checked(
                     (int)parent.DangerousGetHandle());
-                var descriptor = OpenAt(
+                var descriptor = OpenRelative(
                     parentDescriptor,
                     name,
                     OpenReadWrite |
@@ -1178,13 +1178,13 @@ internal static partial class ReviewedStagedFileAccess
     }
 
     internal static bool TryMakeReadOnly(SafeFileHandle handle) =>
-        !OperatingSystem.IsLinux() ||
+        !(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) ||
         FChmod(checked((int)handle.DangerousGetHandle()), 0x100) == 0;
 
     internal static bool TrySetDirectoryWritable(
         SafeFileHandle handle,
         bool writable) =>
-        !OperatingSystem.IsLinux() ||
+        !(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) ||
         FChmod(
             checked((int)handle.DangerousGetHandle()),
             writable ? 0x1c0u : 0x140u) == 0;
@@ -1210,10 +1210,10 @@ internal static partial class ReviewedStagedFileAccess
             return true;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             var descriptor = checked((int)handle.DangerousGetHandle());
-            if (FStat(descriptor, out var info) != 0 ||
+            if (ReadInformation(descriptor, out var info) != 0 ||
                 (info.Mode & FileTypeMask) != DirectoryFile)
             {
                 return false;
@@ -1250,10 +1250,10 @@ internal static partial class ReviewedStagedFileAccess
                 info.VolumeSerialNumber,
                 ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow);
         }
-        else if (OperatingSystem.IsLinux())
+        else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             var descriptor = checked((int)handle.DangerousGetHandle());
-            if (FStat(descriptor, out var info) != 0 ||
+            if (ReadInformation(descriptor, out var info) != 0 ||
                 (info.Mode & FileTypeMask) != RegularFile)
             {
                 return false;
@@ -1305,6 +1305,18 @@ internal static partial class ReviewedStagedFileAccess
         SafeFileHandle handle,
         out ByHandleFileInformation information);
 
+    private static int ReadInformation(int descriptor, out LinuxFileInformation information)
+    {
+        if (!OperatingSystem.IsMacOS()) return FStat(descriptor, out information);
+        var result = DarwinFiles.Stat(descriptor, out var native);
+        information = new LinuxFileInformation
+        {
+            Device = native.Device, Inode = native.Inode, Mode = native.Mode,
+            HardLinkCount = native.Links, UserId = native.UserId, Size = native.Size,
+        };
+        return result;
+    }
+
     [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static partial int FStat(
         int fileDescriptor,
@@ -1327,6 +1339,11 @@ internal static partial class ReviewedStagedFileAccess
         string path,
         int flags,
         uint mode);
+
+    private static int OpenRelative(int directory, string path, int flags, uint mode) =>
+        OperatingSystem.IsMacOS()
+            ? DarwinFiles.OpenAtFixed(directory, path, flags, mode)
+            : OpenAt(directory, path, flags, mode);
 
     [LibraryImport(
         "libc",

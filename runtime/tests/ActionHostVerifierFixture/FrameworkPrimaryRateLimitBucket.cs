@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
@@ -70,6 +72,15 @@ internal sealed class FrameworkPrimaryRateLimitBucket : IDisposable
             CancellationToken.None)
         .AsTask().GetAwaiter().GetResult();
 
+    internal static async Task<int> RunProbeAsync(string[] args)
+    {
+        if (args.Length != 2 || !int.TryParse(args[1], out var count) || count is < 1 or > 512) return 2;
+        using var bucket = OpenForScenario(args[0]);
+        for (var index = 0; index < count; index++)
+            await bucket.ObserveAsync(charged: true, CancellationToken.None).ConfigureAwait(false);
+        return 0;
+    }
+
     internal void RestartIndependentWindow(int initialRemaining)
     {
         if (!deleteOnDispose || initialRemaining < 1)
@@ -92,27 +103,33 @@ internal sealed class FrameworkPrimaryRateLimitBucket : IDisposable
         bool charged,
         CancellationToken cancellationToken)
     {
-        if (OperatingSystem.IsMacOS())
-        {
-            throw new PlatformNotSupportedException(
-                "The trusted-proof synthetic primary bucket requires file locks.");
-        }
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var stream = new FileStream(path, FileMode.Open,
-                FileAccess.ReadWrite, FileShare.ReadWrite);
-            try
+            // FileStream's Unix share lock must not compete with our Darwin
+            // whole-file flock. Open that descriptor without a second lock.
+            using var stream = OperatingSystem.IsMacOS() ? OpenDarwinStream(path)
+                : new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+            if (OperatingSystem.IsMacOS())
             {
-                stream.Lock(0, StateBytes);
+                if (Flock(stream.SafeFileHandle, 2 | 4) != 0)
+                {
+                    if (Marshal.GetLastPInvokeError() != 35)
+                        throw new IOException("synthetic_primary_bucket_lock_failed");
+                    await Task.Delay(1, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
             }
-            catch (IOException)
+            else
             {
-                await Task.Delay(1, cancellationToken).ConfigureAwait(false);
-                continue;
+                try { stream.Lock(0, StateBytes); }
+                catch (IOException)
+                {
+                    await Task.Delay(1, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
             }
-
             try
             {
                 var state = new byte[StateBytes];
@@ -141,10 +158,34 @@ internal sealed class FrameworkPrimaryRateLimitBucket : IDisposable
             }
             finally
             {
-                stream.Unlock(0, StateBytes);
+                if (OperatingSystem.IsMacOS())
+                {
+                    if (Flock(stream.SafeFileHandle, 8) != 0)
+                        throw new IOException("synthetic_primary_bucket_unlock_failed");
+                }
+                else stream.Unlock(0, StateBytes);
             }
         }
     }
+
+    private static FileStream OpenDarwinStream(string path)
+    {
+        var descriptor = Open(path, 2 | 4 | 0x20000000 | 0x1000000);
+        if (descriptor < 0) throw new IOException("synthetic_primary_bucket_open_failed");
+        var handle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        if (DarwinFiles.Stat(descriptor, out var info) != 0 || (info.Mode & 0xf000) != 0x8000 || info.Links != 1)
+        {
+            handle.Dispose();
+            throw new IOException("synthetic_primary_bucket_open_invalid");
+        }
+        return new FileStream(handle, FileAccess.ReadWrite);
+    }
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [DllImport("libc", EntryPoint = "flock", SetLastError = true)]
+    private static extern int Flock(SafeFileHandle handle, int operation);
 
     public void Dispose()
     {

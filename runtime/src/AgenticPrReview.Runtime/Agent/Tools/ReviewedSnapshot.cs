@@ -610,7 +610,7 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
         out SafeFileHandle? handle)
     {
         handle = null;
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             return NativeReviewedFileIdentity.TryOpenNonBlockingNoFollow(
                 fullPath,
@@ -751,9 +751,9 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
 internal static partial class NativeReviewedFileIdentity
 {
     private const int OpenReadOnly = 0;
-    private const int OpenNonBlocking = 0x800;
-    private const int OpenNoFollow = 0x20000;
-    private const int OpenCloseOnExec = 0x80000;
+    private static readonly int OpenNonBlocking = OperatingSystem.IsMacOS() ? DarwinFiles.NonBlocking : 0x800;
+    private static readonly int OpenNoFollow = OperatingSystem.IsMacOS() ? DarwinFiles.NoFollowAny : 0x20000;
+    private static readonly int OpenCloseOnExec = OperatingSystem.IsMacOS() ? DarwinFiles.CloseOnExec : 0x80000;
 
     internal static bool TryOpenNonBlockingNoFollow(
         string path,
@@ -790,10 +790,10 @@ internal static partial class NativeReviewedFileIdentity
             return true;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             var descriptor = checked((int)handle.DangerousGetHandle());
-            if (FStat(descriptor, out var info) != 0 ||
+            if (ReadInformation(descriptor, out var info) != 0 ||
                 (info.Mode & FileTypeMask) != RegularFile)
             {
                 identity = default;
@@ -819,6 +819,18 @@ internal static partial class NativeReviewedFileIdentity
     private static partial bool GetFileInformationByHandle(
         SafeFileHandle handle,
         out ByHandleFileInformation information);
+
+    private static int ReadInformation(int descriptor, out LinuxFileInformation information)
+    {
+        if (!OperatingSystem.IsMacOS()) return FStat(descriptor, out information);
+        var result = DarwinFiles.Stat(descriptor, out var native);
+        information = new LinuxFileInformation
+        {
+            Device = native.Device, Inode = native.Inode, Mode = native.Mode,
+            HardLinkCount = native.Links, UserId = native.UserId, Size = native.Size,
+        };
+        return result;
+    }
 
     [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static partial int FStat(

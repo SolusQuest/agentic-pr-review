@@ -24,6 +24,8 @@ The [CR1/CR2 direction](../90_roadmap/cr1-cr2-plan.md) changes future qualificat
 
 ## Runtime And Workflow Changes
 
+For macOS local development, use [native focused development tests](native-development-tests.md) for repeatable Node/.NET selections, temporary-path handling, runner counts and explicit Linux-only boundaries. These commands add local feedback; complete hosted Linux qualification remains required.
+
 For affected direct-runtime integration, run `npm run runtime:integration`. The complete runtime command is `bash runtime/scripts/verify-runtime.sh all`. Follow [local runtime validation](local-runtime-validation.md) and [parallel runtime CI](runtime-ci-parallel-validation.md) for the actual platform and qualification requirements. A source or documentation check does not establish those runtime proofs.
 
 Follow [APR repository policy](repository-policy.md) for CI, synthetic fixtures, live-provider authorization, and event security restrictions. The shared validation standard owns document-consumer checks and evidence reporting.

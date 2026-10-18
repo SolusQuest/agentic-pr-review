@@ -416,6 +416,7 @@ internal static class ReviewedRootMaterializer
         {
             [string.Empty] = new(root, rootHandle, rootIdentity),
         };
+        var physicalDirectories = new HashSet<ReviewedStagedFileIdentity> { rootIdentity };
         try
         {
             foreach (var record in regular)
@@ -451,6 +452,14 @@ internal static class ReviewedRootMaterializer
                                 out var childIdentity,
                                 out var childPath))
                     {
+                        return ReviewedRootFailure.UnsafeRoot;
+                    }
+
+                    // Distinct logical directories must stay distinct on the
+                    // actual volume, including case/normalization-insensitive APFS.
+                    if (!physicalDirectories.Add(childIdentity))
+                    {
+                        childHandle!.Dispose();
                         return ReviewedRootFailure.UnsafeRoot;
                     }
 
@@ -508,7 +517,7 @@ internal static class ReviewedRootMaterializer
                 return ReviewedRootFailure.UnsupportedSize;
             }
 
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 foreach (var directory in directories.Values.OrderByDescending(
                              static value => value.Path.Length))
@@ -551,7 +560,7 @@ internal static class ReviewedRootMaterializer
         string path,
         FileStream stream)
     {
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             return ReviewedStagedFileAccess.TryMakeReadOnly(
                 stream.SafeFileHandle);
@@ -568,7 +577,7 @@ internal static class ReviewedRootMaterializer
 
     private static bool TryMakeDirectoriesReadOnly(string root)
     {
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             foreach (var directory in Directory
                          .EnumerateDirectories(root, "*", SearchOption.AllDirectories)
@@ -720,7 +729,7 @@ internal static class ReviewedRootCleanup
                 return false;
             }
 
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 if (!ReviewedStagedFileAccess.TryOpenChildDirectory(
                         parentHandle,
@@ -798,14 +807,11 @@ internal static class ReviewedRootCleanup
         ReviewedRootMaterializationHooks? hooks)
     {
         var descriptor = checked((int)directoryHandle.DangerousGetHandle());
-        var enumerationPath = "/proc/self/fd/" + descriptor;
-        var names = Directory.EnumerateFileSystemEntries(
-                enumerationPath,
-                "*",
-                SearchOption.TopDirectoryOnly)
-            .Select(Path.GetFileName)
-            .Where(static name => !string.IsNullOrEmpty(name))
-            .ToArray();
+        var enumerationPath = OperatingSystem.IsMacOS() ? displayPath : "/proc/self/fd/" + descriptor;
+        var names = OperatingSystem.IsMacOS()
+            ? DarwinFiles.EnumerateNames(directoryHandle).ToArray()
+            : Directory.EnumerateFileSystemEntries(enumerationPath, "*", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName).Where(static name => !string.IsNullOrEmpty(name)).ToArray();
         foreach (var name in names)
         {
             var childName = name!;
@@ -959,7 +965,7 @@ internal static class ReviewedRootCleanup
 
     private static void MakeWritable(string path)
     {
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             var attributes = File.GetAttributes(path);
             File.SetUnixFileMode(
