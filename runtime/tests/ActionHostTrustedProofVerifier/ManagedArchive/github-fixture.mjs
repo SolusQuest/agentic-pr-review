@@ -32,19 +32,34 @@ export async function readBody(request) {
 }
 function tar(files) {
   const blocks = [];
-  for (const [path, text] of Object.entries(files)) {
-    const bytes = Buffer.from(text),
-      header = Buffer.alloc(512);
-    const name = 'apr-d5-fixture/' + path;
+  const directories = new Set(['apr-d5-fixture/']);
+  for (const path of Object.keys(files)) {
+    const parts = path.split('/');
+    for (let index = 1; index < parts.length; index++)
+      directories.add('apr-d5-fixture/' + parts.slice(0, index).join('/') + '/');
+  }
+  const entries = [
+    ...[...directories]
+      .sort()
+      .map((name) => ({ name, bytes: Buffer.alloc(0), type: '5', mode: '0000775\0' })),
+    ...Object.entries(files).map(([path, text]) => ({
+      name: 'apr-d5-fixture/' + path,
+      bytes: Buffer.from(text),
+      type: '0',
+      mode: '0000664\0',
+    })),
+  ];
+  for (const { name, bytes, type, mode } of entries) {
+    const header = Buffer.alloc(512);
     assert.ok(Buffer.byteLength(name) < 100);
     header.write(name);
-    header.write('0000644\0', 100);
+    header.write(mode, 100);
     header.write('0000000\0', 108);
     header.write('0000000\0', 116);
     header.write(bytes.length.toString(8).padStart(11, '0') + '\0', 124);
     header.write('00000000000\0', 136);
     header.fill(32, 148, 156);
-    header.write('0', 156);
+    header.write(type, 156);
     header.write('ustar\0', 257);
     header.write('00', 263);
     const sum = header.reduce((a, b) => a + b, 0);
@@ -145,6 +160,7 @@ export function createGitHubFixture(workflow) {
     comment = null,
     writes = 0;
   const calls = [];
+  let archiveMode = 'success';
   let holdReadback = false,
     knownCommitBarrier = false;
   const pull = () => ({
@@ -167,6 +183,10 @@ export function createGitHubFixture(workflow) {
     calls,
     get knownCommitBarrier() {
       return knownCommitBarrier;
+    },
+    archiveMode(value) {
+      assert.ok(['success', 'bad-redirect', 'wrong-archive'].includes(value));
+      archiveMode = value;
     },
     holdReadback(value) {
       holdReadback = value;
@@ -205,7 +225,11 @@ export function createGitHubFixture(workflow) {
         assert.equal(request.method, 'GET');
         const index = heads.indexOf(path.slice(`/${repository}/legacy.tar.gz/`.length));
         assert.ok(index >= 0);
-        const bytes = tar(files[index]);
+        const bytes = tar(
+          archiveMode === 'wrong-archive'
+            ? { ...files[index], 'Caller.cs': 'synthetic wrong source bytes\n' }
+            : files[index],
+        );
         response
           .writeHead(200, { 'Content-Type': 'application/x-gzip', 'Content-Length': bytes.length })
           .end(bytes);
@@ -277,7 +301,10 @@ export function createGitHubFixture(workflow) {
         assert.ok(heads.includes(sha));
         response
           .writeHead(302, {
-            location: `https://codeload.github.com/${repository}/legacy.tar.gz/${sha}`,
+            location:
+              archiveMode === 'bad-redirect'
+                ? 'https://example.invalid/refused'
+                : `https://codeload.github.com/${repository}/legacy.tar.gz/${sha}`,
           })
           .end();
         return;

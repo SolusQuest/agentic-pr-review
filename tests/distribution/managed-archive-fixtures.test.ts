@@ -58,6 +58,16 @@ describe('D5 bounded external source and provider services', () => {
       while (bytes[offset]) {
         const header = bytes.subarray(offset, offset + 512);
         const size = Number.parseInt(header.subarray(124, 136).toString().replaceAll('\0', ''), 8);
+        const type = header.subarray(156, 157).toString();
+        const mode = Number.parseInt(header.subarray(100, 108).toString().replaceAll('\0', ''), 8);
+        if (type === '5') {
+          expect(mode).toBe(0o775);
+          expect(size).toBe(0);
+          offset += 512;
+          continue;
+        }
+        expect(type).toBe('0');
+        expect(mode).toBe(0o664);
         const body = bytes.subarray(offset + 512, offset + 512 + size);
         const sha = objectHash('blob', body);
         const blob = exchange('api.github.com', `/repos/${repository}/git/blobs/${sha}`);

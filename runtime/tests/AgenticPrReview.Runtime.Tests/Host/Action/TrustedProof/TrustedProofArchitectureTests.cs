@@ -452,7 +452,13 @@ public sealed class TrustedProofArchitectureTests
             "scripts",
             "verify-r4-trusted-proof-payload.sh"));
 
-        Assert.Contains("<PublishAot>true</PublishAot>", project,
+        Assert.Contains("<PublishAot>false</PublishAot>", project,
+            StringComparison.Ordinal);
+        Assert.Contains("<SelfContained>false</SelfContained>", project,
+            StringComparison.Ordinal);
+        // Retained native qualification opts in explicitly; ordinary tests
+        // can reference this executable project as an FDD assembly.
+        Assert.Contains("-p:PublishAot=true", verification,
             StringComparison.Ordinal);
         Assert.Contains("ActionHostTrustedProofPayload.csproj", project,
             StringComparison.Ordinal);

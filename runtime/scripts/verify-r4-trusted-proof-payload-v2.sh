@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Inspect both builder tools before any dispatcher can execute them.
+source "$(dirname "${BASH_SOURCE[0]}")/require-linux-toolchain.sh"
+if ! apr_require_linux_toolchain dotnet node; then
+  printf 'APR_D5_VERIFICATION_FAILURE code=native-linux-required\n' >&2
+  exit 2
+fi
+
 # Current qualification uses the actual managed archive. Ordinary PR/fork CI
 # retains the full public FDD Host invariant corpus without private feed access.
 case "${1:-framework}" in

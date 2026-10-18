@@ -6,10 +6,6 @@
 
 set -euo pipefail
 
-if [[ "${1:-}" == managed && "$#" -eq 1 ]]; then
-  exec node "$(dirname "${BASH_SOURCE[0]}")/../tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
-fi
-
 # The secret-bearing workflow invokes this exact branch. Bash performs only
 # parameter expansion before replacing itself with the already prepared and
 # admitted C# supervisor; no helper process inherits the provider credential.
@@ -35,6 +31,11 @@ if [[ "${1:-}" == live && "$#" -eq 1 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${1:-}" == managed && "$#" -eq 1 ]]; then
+  exec node "$(dirname "${BASH_SOURCE[0]}")/../tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+fi
+
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNTIME_TESTS="${REPO_ROOT}/runtime/tests"
 PROJECT="${RUNTIME_TESTS}/LiveAgentVerifierFixture/AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj"

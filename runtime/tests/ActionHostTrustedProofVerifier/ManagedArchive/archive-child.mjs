@@ -179,6 +179,7 @@ try {
     const runId = 1101 + results.length;
     github.configure(ordinal, runId);
     github.holdReadback(!!options.knownCommit);
+    github.archiveMode(options.archiveMode ?? 'success');
     const runtimeToken = official.configure(runId);
     provider.configure(options.mode, options.prefix ?? null);
     for (const file of [output, summary, auditPath]) await writeFile(file, '', { mode: 0o600 });
@@ -426,6 +427,15 @@ try {
   assert.notEqual(refusedCorrupt.status, 'reviewed');
   assert.equal(provider.count, 0);
   assert.equal(github.writes, beforeCorrupt);
+  for (const archiveMode of ['bad-redirect', 'wrong-archive']) {
+    official.restore(accepted);
+    github.restore(acceptedComment);
+    const before = github.writes;
+    const result = await run(archiveMode, 1, { prefix, archiveMode });
+    assert.equal(result.status, 'snapshot_incomplete');
+    assert.equal(provider.count, 0);
+    assert.equal(github.writes, before);
+  }
   for (const options of [
     { wrongKey: true },
     { reset: true },
