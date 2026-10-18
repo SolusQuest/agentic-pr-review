@@ -841,6 +841,12 @@ function validateSolusAgentInstallWorkflow(workflow) {
             run: 'node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"',
           },
           {
+            name: 'CR1-D5 actual original archive and generated Action qualification',
+            if: "inputs.mode == 'verify'",
+            env: { NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages' },
+            run: 'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs',
+          },
+          {
             name: 'Actual managed publish archive inventory and roundtrip',
             if: "inputs.mode == 'verify'",
             env: {

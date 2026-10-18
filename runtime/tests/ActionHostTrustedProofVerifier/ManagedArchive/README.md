@@ -22,3 +22,20 @@ identity, generated Action execution, useful fresh/restored work, failure and
 loading scenarios, or the independently built archive receipts. The transaction
 selection tests use synthetic records; installed-package execution and capture
 require their separate actual-archive evidence.
+
+`verify-archive.mjs` constructs two independent original D1 archives from the
+selected source and verified build cache. For each role it runs the literal
+checked Action bundle, adjacent synthetic release map, unchanged D4 observer,
+ordinary managed acquisition and framework-dependent launcher in the isolated
+consumer. Neither the entry assembly nor launch frame is substituted. Official
+SDK uploads retain their original ZIP bytes and producing run identities.
+
+The external GitHub service serves actual blob/tree hashes and nonempty gzip/tar
+source through the authenticated API redirect to anonymous codeload. Three
+successive source heads exercise fresh and restored work with grounded findings;
+same-head recovery must avoid provider work. Failure, cancellation, stale-head,
+wrong-key, reset refusal and hostile loading cases require no sticky writes.
+Ambient CLR loading variables must not reach the actual child. Per-invocation
+owner cleanup precedes every presentation. Only bounded counts, closed outcomes,
+source and archive identities leave the temporary consumer. A failure is a failed
+qualification; fixture unit tests alone do not establish this proof.
