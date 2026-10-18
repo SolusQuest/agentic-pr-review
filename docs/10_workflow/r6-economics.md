@@ -1,5 +1,29 @@
 # R6 usage observations and reconciliation
 
+## Current Solus consumer
+
+CR1-V2 [#417](https://github.com/SolusQuest/agentic-pr-review/issues/417) supplies deterministic managed reporting for actual fresh and restored Solus Host reviews. `runtime/tests/SolusEconomicsFixture` owns the transient strict report, transparent provider observer, independent verifier and controlled cases. It does not adapt Solus facts into an invented legacy Agent outcome or SESSION. The existing journal, pricing/comparison commands and authorized live-local runner below retain their historical implementations and evidence; this task does not rerun a live economics campaign.
+
+Current `AgentRunUsage` and `Context.History` are distinct populations. Reports preserve actual execution/logical/physical IDs, 1-based attempt ordinals, typed dispatch exposure and independently nullable measurements. A historical attempt is neither a current send nor a current token debit. Complete empty/no-dispatch inventory proves no consumption while preserving missing individual measurement fields; dispatched measured zero remains an explicit numeric measurement. Unknown dispatch, partial/unavailable inventory, missing required counters and aggregate overflow cannot become complete zero. Nonempty continued-call lineage is outside this completed-context/new-round report and is refused.
+
+`history_reported` distinguishes an admitted fresh empty history from recovery or pre-work refusal that returned no context history. An empty array with that flag false is unavailable history, not measured historical zero. Recovery's proven zero applies to current Host work only.
+
+Optional counters retain their kinds and declared relationships. Missing uncached input is never inferred by subtracting cache reads from core input, and overlapping detail counters do not add to core totals. APR may conservatively debit total observed input against an uncached budget when a peer is absent; that safety debit is not a measured miss count. Actual provider normalization tests retain known core usage through malformed response rejection. Host terminal rejection, cancellation, capture failure or stale publication also cannot erase already admitted current measurements or imply durable acceptance. The observer seals snapshots so late completions cannot backfill an emitted report.
+
+The selected production profile permits one attempt per logical call. An explicitly supplemental selected-provider test makes two physical exchanges under one logical ID, retaining both measured attempts and their original ordinals; it neither enables nor qualifies production retries.
+
+### Declared synthetic reference and comparison
+
+The new fixture explicitly reuses the R6 synthetic USD 1/4/5-per-million hit/miss/output reference, with six decimal places and component aggregation before half-even rounding. This is an authored arithmetic fixture, not a fetched tariff, current price, invoice or execution-time applicability claim. Current input/output prices have independent known subtotals and completeness; an incomplete required priced component leaves the complete total null. A measured zero can be zero; missing usage cannot. The separate same-token all-miss view is labeled a counterfactual and establishes no disabled-cache control or causal saving.
+
+The authored seed returns 10 input/5 output/4 hit/6 miss per exchange: five exchanges yield a synthetic 0.000265 USD seed amount. The current round returns 11/7/3/8: two exchanges yield 0.000140 USD. The subsequent report retains the seed inventory only under history and prices current consumption alone. Missing hit or miss retains the measured peer and output component, with no complete observed-reference total.
+
+Prefix comparison requires equal source/tree/clean/build/corpus, installed package/profile/configuration domain and complete historical boundary with actual per-attempt wire association. Source/pin/profile/generation changes make unsupported prefix comparisons ineligible rather than manufacturing stability. Economic comparison additionally requires complete current populations and priced components under the same explicit reference. Missing knowledge yields fixed eligibility reasons and null results. Current usage/price, prefix stability, product acceptance, durable acceptance and historical observations are separate facts. Billing remains unknown, cache savings not evidenced and quality inconclusive. The legacy declared source-build comparison axis is not silently generalized to this new prefix domain.
+
+See [validation and retained/replaced invariants](r6-economics-validation.md) and the [Solus prefix contract](../20_architecture/r6-prefix-evidence.md). No public Action contract, durable state reader, migration promise, limit/pin change or release decision is introduced.
+
+## Historical R6-T1 legacy observations
+
 R6-T1 preserves the existing DeepSeek parser's validated cache-read and uncached-input partition through the backend and project chat usage into the existing live-local summary. Required input and output totals, thinking controls, continuation bytes, SESSION admission rules and reservation accounting retain their meanings. Current model, adapter and continuation discriminator identities follow the [Flash identity transition](../20_architecture/deepseek-flash-identity.md); historical evidence retains its original bytes and identities. The parser still rejects missing, malformed, negative, overflowing or inconsistent required counters. Optional cached-token detail and reasoning subcounts are not added to totals.
 
 The optional project-owned provider observation is independent of required total usage. Synthetic backends can continue returning only input and output totals. Missing or invalid optional cache observations do not introduce an Agent failure rule and do not increment `usage_unknown_calls` when total usage is known.
