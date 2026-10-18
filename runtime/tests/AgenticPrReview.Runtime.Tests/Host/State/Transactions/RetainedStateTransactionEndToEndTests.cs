@@ -1980,6 +1980,38 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
+    public async Task InterruptedEmptyTerminalCleanupDoesNotBecomeP5Conflict()
+    {
+        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var first = await AcceptGenerationAsync(fixture, commentId: 1809);
+        var plan = await RestrictedStateService.PlanRetainedStateCleanupAsync(
+            fixture.Context, first.Acceptance, CancellationToken.None);
+        using var authorization = Assert.IsType<RetainedStateCleanupAuthorization>(plan.Value);
+        Assert.Empty(authorization.Targets);
+        fixture.Store.DeleteFailuresRemaining = 1;
+        fixture.Store.NextDeleteFailure = OpaqueStoreFailure.Io;
+        fixture.Store.NextDeleteMutationState = OpaqueStoreMutationState.NotCommitted;
+        var interrupted = await RestrictedStateService.CleanupRetainedStateAsync(fixture.Context,
+            new RetainedStateCleanupRequest(first.Acceptance, authorization,
+                fixture.Time.UnixSeconds + StateRetentionRequirements.ScopedPlatformRequestSeconds),
+            CancellationToken.None);
+        Assert.False(interrupted.Completed);
+        fixture.Context.Dispose();
+
+        var restored = await RestoreFixtureAsync(fixture);
+        using var restoredContext = restored.Context;
+        var inventoryResult = await RestrictedStateService.ObserveRetainedPublicationRecoveryInventoryAsync(
+            restoredContext, CancellationToken.None);
+        using var inventory = Assert.IsType<RetainedStatePublicationRecoveryInventory>(inventoryResult.Value);
+        Assert.Empty(inventory.CleanupRecords); // No new P5 deletion permission.
+        Assert.Equal(first.Acceptance.AcceptanceReceiptIdentity, inventory.CurrentAcceptance!.AcceptanceReceiptIdentity);
+        var acceptedResult = await RestrictedStateService.RecoverVerifiedRetainedStateAcceptanceAsync(
+            restoredContext, CancellationToken.None);
+        var accepted = Assert.IsType<VerifiedRetainedStateAcceptance>(acceptedResult.Value);
+        await ExecuteCleanupAsync(restored, accepted);
+    }
+
+    [Fact]
     public async Task SuccessfulTwoRunCleanupProtectsSelectedPredecessor()
     {
         var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);

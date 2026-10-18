@@ -113,3 +113,8 @@ jobs:
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/ActionHostFixture/verify-solus-fresh.mjs
+      - name: CR1-S3 actual fresh Solus state commit and restart proof
+        if: inputs.mode == 'verify'
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
+        run: node runtime/tests/SolusFreshStateCommitFixture/verify.mjs

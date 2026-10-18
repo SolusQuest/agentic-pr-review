@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Host.State;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent;
@@ -76,7 +77,9 @@ internal sealed class SolusReviewBridge : IDisposable
         string instructions, IReadOnlyList<AgentInput> data, SolusSnapshotTools tools,
         SolusReviewCandidateHost domain, IRestrictedContextSink? sink,
         TimeSpan hostRemaining, CancellationToken cancellationToken,
-        Func<IModelProvider, IModelProvider>? trustedProviderDecorator = null)
+        Func<IModelProvider, IModelProvider>? trustedProviderDecorator = null,
+        Func<SolusRestrictedStateCompatibility, IRestrictedContextSink?>? sinkFactory = null,
+        SolusRestrictedStateCompatibility? expectedCompatibility = null)
     {
         if (Interlocked.Exchange(ref used, 1) != 0) throw new InvalidOperationException("APR_SOLUS_REVIEW_ALREADY_USED");
         var limits = context.Policy.LimitAuthority;
@@ -102,11 +105,14 @@ internal sealed class SolusReviewBridge : IDisposable
         var currentProvider = trustedProviderDecorator?.Invoke(provider) ?? provider;
         using var runtime = SolusRuntimeConstruction.CreateForAuthorizedReview(context,
             _ => new(currentProvider, tools.Registrations, hooks));
+        if (expectedCompatibility is not null && runtime.SourceSelection.Compatibility != expectedCompatibility)
+            throw new ArgumentException("APR_SOLUS_CONFIGURATION_MISMATCH");
+        var currentSink = sinkFactory is null ? sink : sinkFactory(runtime.SourceSelection.Compatibility);
         var request = Request(instructions, data, duration,
             Math.Min(Cr1DevelopmentProfile.LogicalCalls, limits.ModelCalls), admitToolCalls: true);
         var terminal = new SolusTerminalAccountingGate(Facts, domain);
         var result = await ((IContextCandidateAgent)runtime.Agent).ExecuteCandidatesWithContextAsync(
-            new(request, ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), terminal, sink,
+            new(request, ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), terminal, currentSink,
             cancellationToken: linked.Token).ConfigureAwait(false);
         var candidates = result.Candidates ?? throw new InvalidOperationException("APR_SOLUS_FRESH_OUTCOME");
         // Capture happens after work. Its latency/failure cannot rewrite an

@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent;
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -207,7 +208,15 @@ internal sealed record RetainedStateTransactionBinding(
 
 internal sealed record RetainedStateCurrentReviewProjection(
     ReviewedIdentity ReviewedIdentity,
-    ImmutableArray<R4FindingIdentityV1> OrderedFindings);
+    ImmutableArray<R4FindingIdentityV1> OrderedFindings,
+    int? RecoveredFindingCount = null)
+{
+    internal bool HasCompleteFindings => RecoveredFindingCount is null;
+    internal int FindingCount => RecoveredFindingCount ?? OrderedFindings.Length;
+    internal bool IsValid => ReviewedIdentity is not null && ReviewedIdentity.IsValid() &&
+        (HasCompleteFindings ? !OrderedFindings.IsDefault && OrderedFindings.Length <= AgentLimits.Findings :
+            OrderedFindings.IsDefault && RecoveredFindingCount is >= 0 and <= AgentLimits.Findings);
+}
 
 internal sealed class RetainedStatePreparedCandidate : IDisposable
 {
@@ -225,8 +234,9 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
         OpaqueStoreName name,
         byte[] outerEnvelope,
         StateControlHeaderV1 header,
-        string logicalGenerationIdentity)
+        string logicalGenerationIdentity, bool recovered = false)
     {
+        IsRecovered = recovered;
         this.authority = authority;
         Run = run;
         Generation = generation;
@@ -240,7 +250,7 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
 
     private readonly RetainedStateTransactionAuthority authority;
     internal AgentRunRequest? Run { get; }
-    internal bool IsRecovered => Run is null;
+    internal bool IsRecovered { get; }
     internal StateGenerationRecordV1 Generation { get; }
     internal ValidatedPublicationPayloadV1 Publication { get; }
     internal OpaqueStoreName Name { get; }
@@ -295,7 +305,7 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
     internal static RetainedStatePreparedCandidate Create(
         object issuer,
         RetainedStateTransactionAuthority authority,
-        AgentRunRequest run,
+        AgentRunRequest? run,
         StateGenerationRecordV1 generation,
         ValidatedPublicationPayloadV1 publication,
         byte[] canonicalGeneration,
@@ -337,7 +347,7 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
             name,
             outerEnvelope: [],
             header,
-            logicalGenerationIdentity);
+            logicalGenerationIdentity, recovered: true);
     }
 
     public void Dispose()

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <SelfContained>false</SelfContained>
+    <PublishAot>false</PublishAot>
+    <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofVerifier</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj" />
+    <Compile Include="../SharedHostPorts/ActionHostAuthorizationTestData.cs" Link="Ports/Authorization.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusFresh/CorpusGitHub.cs" Link="Ports/CorpusGitHub.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusFresh/ScriptedHandler.cs" Link="Ports/ScriptedHandler.cs" />
+  </ItemGroup>
+  <Target Name="RequireManagedStateCommitProof" BeforeTargets="_GenerateRestoreGraphProjectEntry;PrepareForBuild">
+    <Error Condition="'$(APRManagedPackage)' != 'true'" Text="APR_SOLUS_STATE_COMMIT_PROOF_REQUIRES_MANAGED" />
+  </Target>
+</Project>

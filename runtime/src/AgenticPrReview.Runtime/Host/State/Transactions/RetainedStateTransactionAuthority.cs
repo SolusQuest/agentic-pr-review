@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
@@ -14,10 +15,11 @@ using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.State.Transactions;
 
-internal sealed class RetainedStateTransactionAuthority : IDisposable
+internal sealed partial class RetainedStateTransactionAuthority : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly object issuer;
+    private readonly SolusTransactionSelectionRequest? solusTransaction;
     private readonly AcceptedStateProductionAuthorization production;
     private readonly IRestrictedStateStore store;
     private readonly TimeProvider timeProvider;
@@ -70,8 +72,10 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         IAgentContinuationCodec continuationCodec,
         AcceptedStateContext? accepted,
         AcceptedStateSelection? acceptedSelection,
-        string initialInventoryDigest)
+        string initialInventoryDigest,
+        SolusTransactionSelectionRequest? solusTransaction = null)
     {
+        this.solusTransaction = solusTransaction;
         this.issuer = issuer;
         this.production = production;
         this.locatorAccess = locatorAccess;
@@ -102,7 +106,8 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         Volatile.Read(ref locatorAccess) is not null &&
         Volatile.Read(ref keys) is not null &&
         Volatile.Read(ref locator) is not null &&
-        Volatile.Read(ref lineage) is not null;
+        Volatile.Read(ref lineage) is not null &&
+        (solusTransaction is null || solusTransaction.Targets.IsLive);
 
     internal bool HasTerminalAcceptance =>
         Volatile.Read(ref terminalAcceptance) is not null;
@@ -150,7 +155,8 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         AcceptedStateContext? accepted,
         AcceptedStateSelection? acceptedSelection,
         string initialInventoryDigest,
-        out RetainedStateTransactionAuthority? authority)
+        out RetainedStateTransactionAuthority? authority,
+        SolusTransactionSelectionRequest? solusTransaction = null)
     {
         authority = null;
         if (!RestrictedStateService.IsRetainedStateIssuer(issuer) ||
@@ -183,7 +189,12 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 selected.BaseScopeDigest,
                 Digest(baseScope)) ||
             !MatchesStateScope(stateAccess.Scope, baseScope, selected) ||
-            (accepted is null) != (acceptedSelection is null) ||
+            (solusTransaction is null
+                ? (accepted is null) != (acceptedSelection is null)
+                : accepted is not null || !SolusRestrictedStateAdmission.IsSupported(solusTransaction.Compatibility) ||
+                    !solusTransaction.Targets.IsLive ||
+                    !ReferenceEquals(solusTransaction.Targets.Policy, production.Policy) ||
+                    acceptedSelection is not null && acceptedSelection.LineageHead.Header.ObjectIdentity != selected.LineageHeadIdentity) ||
             (accepted is not null &&
                 (!StringComparer.Ordinal.Equals(
                     accepted.LogicalGenerationIdentity,
@@ -225,8 +236,14 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 continuationCodec,
                 accepted,
                 CloneSelection(acceptedSelection),
-                initialInventoryDigest);
+                initialInventoryDigest, solusTransaction);
             trustedPolicy = [];
+            if (solusTransaction is not null && !authority.TryValidateSelectedSolusAcceptance())
+            {
+                authority.Dispose();
+                authority = null;
+                return false;
+            }
             return true;
         }
         finally
@@ -285,7 +302,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
     internal bool TryGetCanonicalRunRequest(out AgentRunRequest? run)
     {
         run = null;
-        if (!IsLive)
+        if (!IsLive || solusTransaction is not null)
         {
             return false;
         }
@@ -397,7 +414,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
             !SameIdentity(
                 projection.ReviewedIdentity,
                 currentReviewedIdentity) ||
-            projection.OrderedFindings.IsDefault)
+            !projection.IsValid)
         {
             return false;
         }
@@ -416,9 +433,10 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 return SameIdentity(
                         existing.ReviewedIdentity,
                         projection.ReviewedIdentity) &&
-                    SameFindingIdentities(
+                    existing.RecoveredFindingCount == projection.RecoveredFindingCount &&
+                    (!existing.HasCompleteFindings || SameFindingIdentities(
                         existing.OrderedFindings,
-                        projection.OrderedFindings);
+                        projection.OrderedFindings));
             }
 
             currentReviews.Add(logicalGenerationIdentity, projection);
@@ -449,6 +467,9 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         }
 
         var selection = Volatile.Read(ref acceptedSelection)?.Current;
+        if (solusTransaction is not null)
+            return selection is not null && selection.LogicalGenerationIdentity == acceptanceCapability.LogicalGenerationIdentity &&
+                TryRecoverSolusProjection(selection.Generation, out projection);
         if (selection is null ||
             !StringComparer.Ordinal.Equals(
                 selection.LogicalGenerationIdentity,
@@ -479,7 +500,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 SameIdentity(
                     projection.ReviewedIdentity,
                     currentReviewedIdentity) &&
-                !projection.OrderedFindings.IsDefault;
+                projection.IsValid;
         }
     }
 
@@ -538,6 +559,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         validatedPublication = null;
         code = RetainedStateTransactionCodes.Invalid;
         if (!Allows(lease) ||
+            solusTransaction is not null ||
             HasTerminalAcceptance ||
             run is null ||
             preparedPublication is null ||
@@ -711,6 +733,13 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
     {
         currentReview = null;
         code = RetainedStateTransactionCodes.Invalid;
+        if (solusTransaction is not null)
+        {
+            if (!Allows(lease) || !TryValidateSolusGeneration(generation, acceptedGeneration: false) ||
+                !TryRecoverSolusProjection(generation, out currentReview)) return false;
+            code = RetainedStateTransactionCodes.Ready;
+            return true;
+        }
         if (!Allows(lease) ||
             generation is null ||
             !AcceptedStateRecordValidation.FixedDigest(
