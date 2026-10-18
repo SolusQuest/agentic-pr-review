@@ -72,6 +72,7 @@ public sealed partial class ActionHostCompositionTests
         var seeded = await SeedManagedSelection(seedHost, firstLaunch, compatibility,
             SolusTransactionMode.FreshOrCompletedContextReview);
         Assert.Equal(ActionHostStateDisposition.Accepted, seeded.Summary.StateDisposition);
+        var sourceRecords = ReadAcceptedStateRecords(store, firstLaunch, time);
 
         var next = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
         next.Transport.PullRequest = next.Transport.PullRequest with { HeadSha = new string('f', 40) };
@@ -102,9 +103,17 @@ public sealed partial class ActionHostCompositionTests
                     return Task.FromResult(new ActionHostCandidatePreparation(ActionHostStatus.StateConflict));
                 }), default);
         Assert.Null(result.Failure);
-        Assert.Equal(ActionHostStatus.StateConflict, result.Value!.Status);
+        Assert.Equal(condition == "ahead" ? ActionHostStatus.StateConflict : ActionHostStatus.AuthorizationFailed,
+            result.Value!.Status);
         Assert.Equal(condition == "ahead" ? 1 : 0, calls);
-        Assert.Equal(uploadsBefore, store.UploadCalls);
+        // Verified ahead may reconcile historical R4 cleanup before calling
+        // the preparer. Rejected source admission never reaches that owner.
+        if (condition != "ahead") Assert.Equal(uploadsBefore, store.UploadCalls);
+        var retained = ReadAcceptedStateRecords(store, firstLaunch, time);
+        Assert.Equal(sourceRecords.Acceptances.Select(item => item.Receipt.LogicalGenerationIdentity),
+            retained.Acceptances.Select(item => item.Receipt.LogicalGenerationIdentity));
+        Assert.Equal(sourceRecords.Generations.Select(item => item.Generation.StateEnvelopeSha256),
+            retained.Generations.Select(item => item.Generation.StateEnvelopeSha256));
         Assert.Single(publisher.Transport.Bodies);
         Assert.Equal(0, native.Creates);
     }
