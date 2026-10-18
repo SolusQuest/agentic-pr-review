@@ -299,7 +299,7 @@ class Gate:
         output, error = self.run(["node", REPO / "runtime/tests/SolusEconomicsFixture/verify.mjs"],
                                  audit=False, seconds=1800)
         require(bounded(error) == b"")
-        expected = (b"APR_SOLUS_ECONOMICS_PROOF scenarios=14 hosts=30 readbacks=18 adversarial=30 "
+        expected = (b"APR_SOLUS_ECONOMICS_PROOF scenarios=14 hosts=30 readbacks=18 adversarial=39 "
                     b"host_http_entries=92 live_calls=0 installed_bytes=true private_state=absent\n")
         require(bounded(output) == expected)
         require(self.git("rev-parse", "HEAD") == commit and self.git("rev-parse", "HEAD^{tree}") == tree and
@@ -307,7 +307,7 @@ class Gate:
         self.mark("managed-cleanup")
         shutil.rmtree(self.root)
         require(not self.root.exists())
-        print("r6_economics_gate result=verified mode=managed scenarios=14 adversarial=30 "
+        print("r6_economics_gate result=verified mode=managed scenarios=14 adversarial=39 "
               "source_commit=" + commit + " source_tree=" + tree + " private_state=absent", flush=True)
 
 

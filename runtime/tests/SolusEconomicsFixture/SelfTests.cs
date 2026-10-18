@@ -44,6 +44,26 @@ internal static class SelfTests
             new(Evidence.Hash("content", "unit-final"), Evidence.Hash("reasoning", "unit-reasoning"), 0),
             true, true, false, false, 0, 0, SyntheticPrice.Create(run), ""));
     }
+    private static EconomicsDocument RestoredDocument()
+    {
+        var report = Document(); var prior = Usage(10, 5, 4, 6);
+        prior = RunFact.From(new(prior.ExecutionId, UsageInventoryCoverage.Complete,
+            Enumerable.Range(0, 5).Select(_ => (prior.Attempts[0] with {
+                LogicalCallId = Guid.NewGuid(), PhysicalAttemptId = Guid.NewGuid() }).ToObservation()).ToArray()));
+        var messages = report.Wire[0].Messages.ToList();
+        MessageFact Assistant(int index) => new("assistant", new(Evidence.Hash("unit", "assistant-" + index), 8),
+            Evidence.Hash("content", "assistant-" + index), Evidence.Hash("reasoning", "assistant-" + index), null);
+        for (var index = 0; index < 4; index++)
+        {
+            messages.Add(Assistant(index));
+            messages.Add(new("tool", new(Evidence.Hash("unit", "tool-" + index), 8),
+                Evidence.Hash("content", "tool-" + index), null, Evidence.Hash("tool", "tool-" + index)));
+        }
+        messages.Add(Assistant(4)); messages.Add(report.Wire[0].Messages[1]); messages.Add(report.Wire[0].Messages[2]);
+        return Evidence.Seal(report with { Admission = ContextAdmission.Supplied,
+            History = [new(Guid.NewGuid(), Guid.NewGuid(), prior)],
+            Wire = [report.Wire[0] with { Messages = messages.ToArray() }] });
+    }
     private static void Contracts()
     {
         var report = Document(); var bytes = Evidence.Write(report);
@@ -67,6 +87,35 @@ internal static class SelfTests
                 Convert.ToBase64String(Encoding.UTF8.GetBytes(canary)) })
                 Throws(() => Privacy.Protect(Encoding.UTF8.GetBytes(encoding)), "v2_unit_private_encodings");
         Privacy.Protect(bytes);
+        FailureAndAdmissionContracts();
+    }
+    private static void FailureAndAdmissionContracts()
+    {
+        var restored = RestoredDocument();
+        bool Admitted(EconomicsDocument value) => Evidence.Read(Evidence.Write(Evidence.Seal(value))) is not null;
+        var invalidPair = restored with { ProductAccepted = false, DurableAccepted = false,
+            Exchanges = [restored.Exchanges[0] with { Outcome = ProviderOutcome.Failed, Error = ProviderError.InvalidResponse }] };
+        var missing = restored with { Admission = null, HistoryReported = false, History = [] };
+        var relabeled = restored with { Admission = ContextAdmission.Fresh, History = [] };
+        Proof.Require(Admitted(restored), "v2_unit_restored_context_original");
+        Proof.Require(!Admitted(invalidPair), "v2_unit_invalid_provider_failure_pair");
+        Proof.Require(!Admitted(missing), "v2_unit_success_requires_context_admission");
+        Proof.Require(!Admitted(relabeled), "v2_unit_restored_not_fresh");
+        Proof.Require(!Admitted(restored with { Wire = [restored.Wire[0] with { Messages = restored.Wire[0].Messages[..3] }] }),
+            "v2_unit_supplied_requires_historical_wire");
+        var failure = restored with { ProductAccepted = false, DurableAccepted = false };
+        foreach (var outcome in Enum.GetValues<ProviderOutcome>())
+        {
+            var permitted = outcome switch {
+                ProviderOutcome.Succeeded => new[] { ProviderError.None },
+                ProviderOutcome.Failed => [ProviderError.ProviderFailed],
+                ProviderOutcome.Cancelled => [ProviderError.Cancelled],
+                _ => Enum.GetValues<ProviderError>().Where(error => error != ProviderError.None).ToArray(),
+            };
+            foreach (var error in Enum.GetValues<ProviderError>())
+                Proof.Require(Admitted(failure with { Exchanges = [failure.Exchanges[0] with { Outcome = outcome, Error = error }] }) ==
+                    permitted.Contains(error), "v2_unit_provider_result_contract_matrix");
+        }
     }
     private static void NullableUsage()
     {

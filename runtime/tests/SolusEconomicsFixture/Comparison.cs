@@ -15,8 +15,8 @@ internal static class Comparison
         if (left.Domain is null) return Refuse("domain_unavailable");
         if (left.Scenario != right.Scenario || left.Admission != right.Admission || !Boundary(left, right)) return Refuse("boundary_mismatch");
         if (left.Wire.Length == 0 || right.Wire.Length == 0) return Refuse("wire_unavailable");
-        var count = PrefixCount(left);
-        if (count is null || count != PrefixCount(right)) return Refuse("boundary_unverified");
+        var count = Evidence.PrefixCount(left);
+        if (count is null || count != Evidence.PrefixCount(right)) return Refuse("boundary_unverified");
         var all = left.Wire.Concat(right.Wire).ToArray(); var first = all[0];
         var stable = all.All(w => w.Messages.Length >= count && w.Settings == first.Settings &&
             w.Messages.Take(count.Value).SequenceEqual(first.Messages.Take(count.Value)));
@@ -26,16 +26,6 @@ internal static class Comparison
         return new("comparable", stable, complete ? "comparable" : "incomplete_usage", complete
             ? right.Price.Observed.Total - left.Price.Observed.Total : null, "unknown", "not_evidenced", "inconclusive");
     }
-    // This count belongs only to the authored two-input, five-exchange seed
-    // corpus. Transition verification also checks every source token and the
-    // final response; no caller may choose a shorter accepted boundary.
-    internal static int? PrefixCount(EconomicsDocument value) => value.Admission switch
-    {
-        ContextAdmission.Fresh when value.History.Length == 0 && value.Wire[0].Messages.Length == 3 => 1,
-        ContextAdmission.Supplied when value.History.Length == 1 && value.History[0].Usage.Attempts.Length == 5 &&
-            value.Wire[0].Messages.Length == 14 => 12,
-        _ => null,
-    };
     private static bool Complete(RunFact? value) => value is { Coverage: UsageInventoryCoverage.Complete, ContinuedCalls: 0 } &&
         value.Input.Coverage == TokenObservationCoverage.Complete && value.Output.Coverage == TokenObservationCoverage.Complete &&
         value.Attempts.All(a => a.Exposure != DispatchExposure.Unknown);

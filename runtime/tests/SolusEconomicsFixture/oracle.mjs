@@ -141,6 +141,15 @@ export function verifyReport(report, selection, mode, seed = null) {
     assert.equal(detail(attempt, 'CacheRead'), hit);
     assert.equal(detail(attempt, 'UncachedInput'), miss);
     assert.deepEqual(report.exchanges[i].observation, attempt);
+    // Provider acceptance is separate from later usage/product/capture failure.
+    const result =
+      mode === 'invalid-usage'
+        ? ['Rejected', 'InvalidResponse']
+        : mode === 'transport-failure'
+          ? ['Failed', 'ProviderFailed']
+          : ['Succeeded', 'None'];
+    assert.equal(report.exchanges[i].outcome, result[0]);
+    assert.equal(report.exchanges[i].error, result[1]);
     assert.equal(wire.execution_id, attempt.execution_id);
     assert.equal(wire.logical_call_id, attempt.logical_call_id);
     assert.equal(wire.physical_attempt_id, attempt.physical_attempt_id);

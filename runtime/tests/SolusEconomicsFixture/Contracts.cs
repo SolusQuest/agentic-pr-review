@@ -146,7 +146,8 @@ internal static class Evidence
         if (value.RecoveredWithoutWork && (!value.DurableAccepted || !value.HostAccountingZero || value.Current is not null)) return false;
         if (value.DurableAccepted && !value.RecoveredWithoutWork && (!value.ProductAccepted || value.Domain is null ||
             value.Capture != ContextCaptureStatus.Delivered || value.LogicalWorkId is null || value.RoundId is null)) return false;
-        if (value.ProductAccepted && (value.Current is not { Coverage: UsageInventoryCoverage.Complete } accepted ||
+        if (value.ProductAccepted && (value.Admission is not (ContextAdmission.Fresh or ContextAdmission.Supplied) || value.Wire.Length == 0 ||
+            value.Current is not { Coverage: UsageInventoryCoverage.Complete } accepted ||
             accepted.ContinuedCalls != 0 || accepted.Input.Coverage != TokenObservationCoverage.Complete ||
             accepted.Output.Coverage != TokenObservationCoverage.Complete || accepted.Attempts.Length == 0)) return false;
         if (!Associations(value) || value.Price != SyntheticPrice.Create(value.Current, value.HostAccountingZero) ||
@@ -169,7 +170,9 @@ internal static class Evidence
         {
             if (exchange is null || exchange.Observation is not { } fact || !exchangeIds.Add(fact.PhysicalAttemptId) ||
                 !Enum.IsDefined(exchange.Outcome) || !Enum.IsDefined(exchange.Error) ||
-                (exchange.Outcome == ProviderOutcome.Succeeded) != (exchange.Error == ProviderError.None)) return false;
+                (exchange.Outcome == ProviderOutcome.Succeeded) != (exchange.Error == ProviderError.None) ||
+                exchange.Outcome == ProviderOutcome.Failed && exchange.Error != ProviderError.ProviderFailed ||
+                exchange.Outcome == ProviderOutcome.Cancelled && exchange.Error != ProviderError.Cancelled) return false;
             var current = value.Current?.Attempts.SingleOrDefault(a => a.PhysicalAttemptId == fact.PhysicalAttemptId);
             if (current is null || !Same(current, fact)) return false;
         }
@@ -192,6 +195,7 @@ internal static class Evidence
                     message.Role == "tool" && message.ToolAssociationSha256 is null ||
                     message.Role is "system" or "user" && message.ToolAssociationSha256 is not null) return false;
         }
+        if (value.Wire.Length > 0 && PrefixCount(value) is null) return false;
         if (value.ProductAccepted && (value.Current!.Attempts.Length != exchangeIds.Count ||
             value.Exchanges.Any(e => e.Outcome != ProviderOutcome.Succeeded))) return false;
         if (value.Current?.Coverage == UsageInventoryCoverage.Complete &&
@@ -199,6 +203,16 @@ internal static class Evidence
         return value.FinalResponse is null || Digest(value.FinalResponse.ContentSha256) &&
             Digest(value.FinalResponse.ReasoningSha256) && value.FinalResponse.Calls == 0;
     }
+    // This boundary belongs only to the authored two-input, five-exchange seed.
+    // A report's context classification and its observed wire must agree before
+    // comparison can assign continuity credit. Unsupported histories fail closed.
+    internal static int? PrefixCount(EconomicsDocument value) => value.Wire.Length == 0 ? null : value.Admission switch
+    {
+        ContextAdmission.Fresh when value.History.Length == 0 && value.Wire[0].Messages.Length == 3 => 1,
+        ContextAdmission.Supplied when value.History.Length == 1 && value.History[0].Usage.Attempts.Length == 5 &&
+            value.Wire[0].Messages.Length == 14 => 12,
+        _ => null,
+    };
     internal static bool Same(AttemptFact left, AttemptFact right) => left.ExecutionId == right.ExecutionId &&
         left.LogicalCallId == right.LogicalCallId && left.PhysicalAttemptId == right.PhysicalAttemptId &&
         left.AttemptNumber == right.AttemptNumber && left.Exposure == right.Exposure &&

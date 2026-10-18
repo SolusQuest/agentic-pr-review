@@ -354,6 +354,7 @@ try {
     }
   };
   let known, knownSeed;
+  const scenarioReports = new Map();
   for (const mode of cases) {
     stage = mode;
     await scenario(mode, async ({ host, readback, work }) => {
@@ -362,6 +363,7 @@ try {
       await readback(seed);
       const sticky = digest(await readFile(join(work, 'sticky.txt')));
       const current = await host(mode, seed.report);
+      scenarioReports.set(mode, { current, seed });
       if (current.report.durable_accepted) await readback(current);
       else assert.equal(digest(await readFile(join(work, 'sticky.txt'))), sticky);
       const comparison = await compare(current.file, current.file);
@@ -392,6 +394,15 @@ try {
   });
   stage = 'hostile_reports';
   const mutations = [
+    (r) => {
+      r.admission = null;
+      r.history_reported = false;
+      r.history = [];
+    },
+    (r) => {
+      r.admission = 'Fresh';
+      r.history = [];
+    },
     (r) => {
       r.execution_kind = 'live';
     },
@@ -535,6 +546,31 @@ try {
   await admit(rebound.file);
   assert.throws(() => verifyReport(rebound.value, selection, 'known', knownSeed.report));
   adversarial++;
+  for (const outcome of ['Failed', 'Cancelled']) {
+    const invalid = structuredClone(scenarioReports.get('invalid-usage').current.report);
+    invalid.exchanges[0].outcome = outcome;
+    invalid.exchanges[0].error = 'InvalidResponse';
+    const changed = await rebind('invalid-result-' + adversarial, invalid);
+    await admit(changed.file, false);
+    adversarial++;
+  }
+  for (const [mode, outcome, error] of [
+    ['invalid-usage', 'Succeeded', 'None'],
+    ['invalid-final', 'Rejected', 'InvalidResponse'],
+    ['transport-failure', 'Rejected', 'InvalidResponse'],
+    ['missing-usage', 'Rejected', 'InvalidResponse'],
+    ['cancel-after-usage', 'Cancelled', 'Cancelled'],
+  ]) {
+    const { current, seed } = scenarioReports.get(mode);
+    const invalid = structuredClone(current.report);
+    const exchange = invalid.exchanges.at(-1);
+    exchange.outcome = outcome;
+    exchange.error = error;
+    const changed = await rebind('wrong-scenario-result-' + adversarial, invalid);
+    await admit(changed.file);
+    assert.throws(() => verifyReport(changed.value, selection, mode, seed.report));
+    adversarial++;
+  }
   stage = 'source_and_cleanup';
   assert.equal(git('rev-parse', 'HEAD'), head);
   assert.equal(git('rev-parse', 'HEAD^{tree}'), tree);
@@ -544,7 +580,7 @@ try {
   let traceBytes = 0;
   for (const name of allTraces) traceBytes += (await lstat(join(root, 'traces', name))).size;
   assert.ok(traceBytes <= 128 * 1024 * 1024);
-  assert.equal(adversarial, 30);
+  assert.equal(adversarial, 39);
   assert.equal(hostCount, 30);
   assert.equal(readbacks, 18);
   assert.equal(controlled, 92);

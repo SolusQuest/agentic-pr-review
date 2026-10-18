@@ -74,7 +74,8 @@ internal static class ProviderTests
             using var selected = new DeepSeekProvider(new(Key, 1024), child);
             var actual = await selected.ExchangeAsync(Request());
             var fact = RunFact.From(new(actual.Observation.ExecutionId, UsageInventoryCoverage.Complete, [actual.Observation]));
-            Proof.Require(Evidence.Run(fact) && child.Sends == 1 && fact.Attempts[0].Exposure == DispatchExposure.Dispatched &&
+            Proof.Require(actual.Outcome == ProviderOutcome.Succeeded && actual.Error == ProviderError.None &&
+                Evidence.Run(fact) && child.Sends == 1 && fact.Attempts[0].Exposure == DispatchExposure.Dispatched &&
                 fact.Attempts[0].InputTokens == value.Input && fact.Attempts[0].OutputTokens == value.Output &&
                 SyntheticPrice.Detail(fact.Attempts[0], ProviderTokenCounterKind.CacheRead) == value.Hit &&
                 SyntheticPrice.Detail(fact.Attempts[0], ProviderTokenCounterKind.UncachedInput) == value.Miss,
@@ -84,18 +85,33 @@ internal static class ProviderTests
         using var failedHandler = new Handler((_, _) => Task.FromResult(Response(Usage(), invalid: true)));
         using var failed = new DeepSeekProvider(new(Key, 1024), failedHandler);
         var rejected = await failed.ExchangeAsync(Request());
-        Proof.Require(rejected.Outcome != ProviderOutcome.Succeeded && rejected.Observation.Usage.InputTokens == 11 &&
+        Proof.Require(rejected.Outcome == ProviderOutcome.Rejected && rejected.Error == ProviderError.InvalidResponse &&
+            rejected.Observation.Usage.InputTokens == 11 &&
             rejected.Observation.Usage.OutputTokens == 7, "v2_unit_usage_before_invalid_response");
+        using var invalidUsageHandler = new Handler((_, _) => Task.FromResult(Response(Usage(11, 7, 12, 8))));
+        using var invalidUsage = new DeepSeekProvider(new(Key, 1024), invalidUsageHandler);
+        var invalid = await invalidUsage.ExchangeAsync(Request());
+        Proof.Require(invalid.Outcome == ProviderOutcome.Rejected && invalid.Error == ProviderError.InvalidResponse &&
+            invalid.Observation.Usage.InputTokens == 11 && invalid.Observation.Usage.OutputTokens == 7 &&
+            SyntheticPrice.Detail(AttemptFact.From(invalid.Observation), ProviderTokenCounterKind.CacheRead) is null,
+            "v2_unit_invalid_counter_retains_core_usage");
         using var ambiguousHandler = new Handler((_, _) => throw new HttpRequestException(HttpRequestError.ConnectionError, "V2_PRIVATE_EXCEPTION_CANARY"));
         using var ambiguous = new DeepSeekProvider(new(Key, 1024), ambiguousHandler);
         var unknown = await ambiguous.ExchangeAsync(Request());
-        Proof.Require(unknown.Observation.Exposure == DispatchExposure.Unknown && unknown.Observation.Usage.InputTokens is null,
+        Proof.Require(unknown.Outcome == ProviderOutcome.Failed && unknown.Error == ProviderError.ProviderFailed &&
+            unknown.Observation.Exposure == DispatchExposure.Unknown && unknown.Observation.Usage.InputTokens is null,
             "v2_unit_unknown_dispatch");
         using var noSendHandler = new Handler((_, _) => throw new ProofFailure("v2_no_send_expected"));
         using var noSend = new DeepSeekProvider(new(Key, 1024), noSendHandler);
         var local = await noSend.ExchangeAsync(Request(scope: new("different-provider", "different-model")));
-        Proof.Require(local.Observation.Exposure == DispatchExposure.NotDispatched && noSendHandler.Sends == 0 &&
+        Proof.Require(local.Outcome == ProviderOutcome.Rejected && local.Error == ProviderError.InvalidAssociation &&
+            local.Observation.Exposure == DispatchExposure.NotDispatched && noSendHandler.Sends == 0 &&
             local.Observation.Usage.InputTokens is null, "v2_unit_local_refusal_no_measurement");
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        var stopped = await noSend.ExchangeAsync(Request(), cancelled.Token);
+        Proof.Require(stopped.Outcome == ProviderOutcome.Cancelled && stopped.Error == ProviderError.Cancelled &&
+            stopped.Observation.Exposure == DispatchExposure.NotDispatched && noSendHandler.Sends == 0,
+            "v2_unit_provider_cancelled_before_acceptance");
     }
     internal static async Task Freeze()
     {
