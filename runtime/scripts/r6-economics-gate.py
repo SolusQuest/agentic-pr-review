@@ -93,6 +93,7 @@ def managed_diagnostics(path):
                         isinstance(code, str) and re.fullmatch(r"APR_SOLUS_ECONOMICS_FAILED [a-z0-9_]{1,128}", code) for code in value["failures"]):
                     print(json.dumps(value), file=sys.stderr)
             except (ValueError, TypeError):
+                # Unrecognized private output must not cross the diagnostic allowlist.
                 pass
 
 
@@ -161,6 +162,7 @@ class Gate:
                 try:
                     os.killpg(child.pid, signal.SIGKILL)
                 except ProcessLookupError:
+                    # The owned process exited before the kill; there is nothing left to signal.
                     pass
                 child.wait(timeout=10)
                 raise
@@ -171,11 +173,13 @@ class Gate:
             try:
                 os.killpg(child.pid, signal.SIGKILL)
             except ProcessLookupError:
+                # The owned process group already exited; continue checking descendants.
                 pass
             for pid in remaining:
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError:
+                    # The owned process exited before the kill; there is nothing left to signal.
                     pass
             require(False)
         if child.returncode != code and self.stage == "managed-installed-execution":
