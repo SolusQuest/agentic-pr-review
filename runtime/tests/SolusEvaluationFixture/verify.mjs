@@ -30,6 +30,7 @@ let root;
 let summary;
 let runSequence = 10000;
 let hosts = 0;
+let bridgeInvocations = 0;
 const started = Date.now();
 const elapsedLimit = 20 * 60 * 1000;
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -167,7 +168,7 @@ try {
   }
   const bridgeBundle = join(root, 'bridge.mjs');
   await build({
-    entryPoints: ['src/action-wrapper/artifact-bridge/synthetic-fixture-server.ts'],
+    entryPoints: ['runtime/tests/SolusEvaluationFixture/bridge.mjs'],
     outfile: bridgeBundle,
     bundle: true,
     platform: 'node',
@@ -193,7 +194,7 @@ try {
         join(work, 'bridge-staging'),
         join(work, 'control'),
       ],
-      { env: runtimeEnv, stdio: ['ignore', 'pipe', 'pipe'] },
+      { env: runtimeEnv, stdio: ['pipe', 'pipe', 'pipe'] },
     );
     bridge.stderr.resume();
     const lines = createInterface({ input: bridge.stdout });
@@ -205,13 +206,35 @@ try {
         ),
       ]);
       assert.equal(ready, 'READY');
-      const run = (mode, id = 'cs-defect', reuseRun) => {
+      let invocation = 0;
+      const run = async (mode, id = 'cs-defect', reuseRun) => {
         assert.ok(Date.now() - started < elapsedLimit);
         const runId = reuseRun ?? ++runSequence;
         writeFileSync(
           join(work, 'control', 'producing-run.json'),
           JSON.stringify({ id: String(runId), attempt: '2' }),
         );
+        // A fresh Action invocation owns a fresh official bridge registry.
+        // The controller retains the same encrypted store, never a new state.
+        const response = once(lines, 'line');
+        const next = ++invocation;
+        bridge.stdin.write('NEXT ' + next + '\n');
+        let timer;
+        try {
+          const [ready] = await Promise.race([
+            response,
+            new Promise((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error('bridge_invocation_timeout')),
+                20000,
+              ).unref();
+            }),
+          ]);
+          assert.equal(ready, 'INVOCATION_READY ' + next);
+          bridgeInvocations++;
+        } finally {
+          clearTimeout(timer);
+        }
         const result = spawnSync(
           'dotnet',
           [dll, work, mode, id, String(now), String(runId), corpus],
@@ -278,36 +301,37 @@ try {
   };
   stage = 'quality';
   const quality = [];
-  for (const [id] of QUALITY) await world(async (run) => quality.push(run('fresh', id).row));
+  for (const [id] of QUALITY)
+    await world(async (run) => quality.push((await run('fresh', id)).row));
   verifyQuality(quality, source);
   stage = 'same_head';
   let same;
   let recoveryUploads;
   await world(async (run, operations) => {
-    const seed = run('seed').row;
+    const seed = (await run('seed')).row;
     assert.equal(seed.durable_accepted, true);
     assert.equal(seed.outcome.code, 'Scored');
     const initial = await operations();
-    const review = run('review');
+    const review = await run('review');
     same = review.row;
     verifySuccessor(seed, same, source);
     const after = await operations();
     assert.equal(initial.filter((o) => o.operation === 'sticky').length, 1);
     assert.equal(after.filter((o) => o.operation === 'sticky').length, 2);
-    const recovered = run('recover', 'cs-defect', review.runId).row;
+    const recovered = (await run('recover', 'cs-defect', review.runId)).row;
     assert.equal(recovered.recovered_without_work, true);
     assert.equal(recovered.outcome, null);
     assert.equal(recovered.sends, 0);
     recoveryUploads = verifyRecovery(after, await operations(), recovered);
-    assert.equal(run('readback').row.readback_verified, true);
+    assert.equal((await run('readback')).row.readback_verified, true);
   });
   stage = 'verified_ahead';
   let ahead;
   await world(async (run) => {
-    const seed = run('seed').row;
-    ahead = run('ahead', 'ts-defect').row;
+    const seed = (await run('seed')).row;
+    ahead = (await run('ahead', 'ts-defect')).row;
     verifySuccessor(seed, ahead, source, { ahead: true });
-    assert.equal(run('readback').row.readback_verified, true);
+    assert.equal((await run('readback-ahead', 'ts-defect')).row.readback_verified, true);
   });
   stage = 'refusal_matrix';
   const negatives = [];
@@ -326,11 +350,13 @@ try {
     'stale-head',
   ]) {
     await world(async (run, operations) => {
-      const seed = run('seed').row;
+      const seed = (await run('seed')).row;
       const before = await operations();
-      const row = run(
-        mode,
-        ['stale-evidence', 'unverified-ahead'].includes(mode) ? 'ts-defect' : 'cs-defect',
+      const row = (
+        await run(
+          mode,
+          ['stale-evidence', 'unverified-ahead'].includes(mode) ? 'ts-defect' : 'cs-defect',
+        )
       ).row;
       negatives.push(row);
       assert.equal(row.durable_accepted, false);
@@ -361,7 +387,7 @@ try {
         before.filter((o) => o.operation === 'sticky').length,
       );
       {
-        const readback = run('readback').row;
+        const readback = (await run('readback')).row;
         assert.equal(readback.readback_verified, true);
         assert.deepEqual(readback.predecessor, seed.capture);
       }
@@ -370,14 +396,14 @@ try {
   stage = 'oracle_mutations';
   for (const mode of ['source-mutation', 'initial-leak', 'policy-leak'])
     await world(async (run) => {
-      const row = run(mode).row;
+      const row = (await run(mode)).row;
       assert.equal(row.durable_accepted, false);
       assert.notEqual(row.outcome.execution_status, 'Completed');
       assert.equal(row.outcome.model_status, 'NotEvaluated');
     });
   stage = 'repeated_read';
   await world(async (run) => {
-    const row = run('repeated-read', 'cs-safe').row;
+    const row = (await run('repeated-read', 'cs-safe')).row;
     assert.equal(row.outcome.code, 'Scored');
     assert.equal(row.current_tools, 3);
     assert.equal(row.sends, 4);
@@ -385,11 +411,11 @@ try {
   stage = 'growth';
   let growth;
   await world(async (run, operations) => {
-    const rows = [run('seed').row];
+    const rows = [(await run('seed')).row];
     let refusal;
     let injected = false;
     for (let index = 1; index < 16; index++) {
-      const row = run('review').row;
+      const row = (await run('review')).row;
       if (!row.durable_accepted) {
         refusal = row;
         break;
@@ -399,10 +425,10 @@ try {
     }
     if (!refusal) {
       injected = true;
-      refusal = run('input-over').row;
+      refusal = (await run('input-over')).row;
     }
     verifyGrowth(rows, refusal, source, injected);
-    assert.equal(run('readback').row.readback_verified, true);
+    assert.equal((await run('readback')).row.readback_verified, true);
     const effects = await operations();
     assert.equal(effects.filter((o) => o.operation === 'sticky').length, rows.length);
     growth = {
@@ -442,6 +468,7 @@ try {
   assert.equal(git(['rev-parse', 'HEAD']), source.commit);
   assert.equal(git(['rev-parse', 'HEAD^{tree}']), source.tree);
   assert.equal(git(['status', '--porcelain', '--untracked-files=normal']), '');
+  assert.equal(bridgeInvocations, hosts);
   summary = {
     schema: 'apr-solus-evaluation-proof-v1',
     native_assertion_methods: nativeAssertions,
@@ -472,6 +499,7 @@ try {
     refusal_cases: negatives.length,
     growth,
     hosts,
+    bridge_invocations: bridgeInvocations,
     live_calls: 0,
     model_quality: 'not_evaluated',
     receipts_sha256: digest(JSON.stringify(receipts)),

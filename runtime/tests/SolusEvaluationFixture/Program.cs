@@ -21,7 +21,7 @@ internal static class Program
 {
     private static readonly string[] Modes = ["fresh", "seed", "review", "ahead", "stale-evidence", "malformed-response",
         "missing-usage", "cancel-provider", "cancel-before", "policy-mismatch", "tamper-source", "unverified-ahead",
-        "capture-throw", "reject-import", "input-over", "readback", "recover", "stale-head", "source-mutation", "initial-leak", "policy-leak", "repeated-read"];
+        "capture-throw", "reject-import", "input-over", "readback", "readback-ahead", "recover", "stale-head", "source-mutation", "initial-leak", "policy-leak", "repeated-read"];
     private static async Task<int> Main(string[] args)
     {
         try
@@ -38,17 +38,18 @@ internal static class Program
             var runId = long.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture);
             using var corpus = new Corpus(args[5]);
             var seed = mode == "seed";
-            var ahead = mode is "ahead" or "stale-evidence" or "unverified-ahead";
+            var readback = mode is "readback" or "readback-ahead";
+            var ahead = mode is "ahead" or "stale-evidence" or "unverified-ahead" or "readback-ahead";
             Captured? predecessor = File.Exists(Path.Join(root, "accepted-capture.json"))
                 ? JsonSerializer.Deserialize<Captured>(File.ReadAllBytes(Path.Join(root, "accepted-capture.json"))) : null;
             if (mode == "source-mutation") corpus.Files["src/Caller.cs"] = Encoding.UTF8.GetBytes(
                 Encoding.UTF8.GetString(corpus.Files["src/Caller.cs"]).Replace("Lookup.Find(key).Trim()", "Lookup.Find(key)?.Trim() ?? string.Empty", StringComparison.Ordinal));
-            using var fixture = new HostFixture(corpus, root, mode, mode is not ("readback" or "recover"), now,
+            using var fixture = new HostFixture(corpus, root, mode, !readback && mode != "recover", now,
                 reviewJson: mode == "policy-mismatch" ? "{\"maxModelCalls\":1}" : null,
                 ahead: ahead, verifiedAhead: mode != "unverified-ahead", authorizedRunId: runId,
                 instructionOverride: mode == "policy-leak" ? Encoding.UTF8.GetBytes(Proof.DecisiveFacts[0]) : null);
             await fixture.BindNamesAsync();
-            if (mode == "readback")
+            if (readback)
             {
                 Proof.Require(predecessor is not null, "readback_predecessor_present");
                 await Readback(fixture, predecessor!);
@@ -218,18 +219,30 @@ internal static class Program
 
     private static async Task Readback(HostFixture fixture, Captured expected)
     {
+        var phase = "not_entered";
         var result = await fixture.Host.RunPreparedFreshAsync(fixture.Launch, async prepared =>
         {
+            phase = "target_preparation";
             var execution = new SolusFreshReviewComposition(fixture.Host).PrepareStateExecution(prepared);
+            phase = "state_restore";
             var restored = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(prepared.RestoreRequest with {
                 SolusTransaction = new(prepared.FreshContext!, execution.Compatibility, execution.ExecutionId,
                     SolusTransactionMode.CompletedContextReview) }, default);
             using var state = restored.Context;
-            Proof.Require(restored.Succeeded && state is not null && RestrictedStateService.TryReadAcceptedSolusRecord(state, out var record) &&
-                record is not null && Captured.From(record) == expected, "authenticated_predecessor_readback");
+            phase = restored.Succeeded ? "restore_context" : "restore_" + restored.Code;
+            Proof.Require(restored.Succeeded && state is not null, "authenticated_predecessor_restore");
+            phase = "record_accessor";
+            Proof.Require(RestrictedStateService.TryReadAcceptedSolusRecord(state!, out var record) && record is not null,
+                "authenticated_predecessor_record");
+            phase = "record_projection";
+            var actual = Captured.From(record!);
+            phase = "record_comparison";
+            Proof.Require(actual == expected, "authenticated_predecessor_readback");
+            phase = "verified";
             return new ReadbackResult(true);
         }, default);
-        Proof.Require(result.Value?.Verified == true && fixture.NativeCreates == 0, "readback_without_work");
+        Proof.Require(result.Value?.Verified == true && fixture.NativeCreates == 0,
+            ("readback_without_work_" + phase + "_" + result.Failure?.Status).ToLowerInvariant());
     }
     private sealed record ReadbackResult(bool Verified);
 
