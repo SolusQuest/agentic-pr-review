@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <SelfContained>false</SelfContained>
+    <PublishAot>false</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj" />
+    <!-- Reuse only synthetic Host ports; V2 owns every provider/report oracle. -->
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/HostFixture.cs" Link="Ports/HostFixture.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/CorpusGitHub.cs" Link="Ports/CorpusGitHub.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/StickyPort.cs" Link="Ports/StickyPort.cs" />
+    <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/SyntheticBuildIdentity.cs" Link="Ports/BuildIdentity.cs" />
+    <Compile Include="../SharedHostPorts/ActionHostAuthorizationTestData.cs" Link="Ports/Authorization.cs" />
+    <Compile Include="../SolusFreshStateCommitFixture/Proof.cs" Link="Ports/Proof.cs" />
+    <Compile Include="../ActionHostTrustedProofPayload/TrustedProofV2WorkflowAdmission.cs" Link="Ports/Workflow.cs" />
+    <EmbeddedResource Include="../fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template"
+      LogicalName="AgenticPrReview.Runtime.ActionHostTrustedProofPayload.TrustedProofWorkflowTemplateV2" />
+  </ItemGroup>
+  <Target Name="RequireManagedEconomicsProof" BeforeTargets="_GenerateRestoreGraphProjectEntry;PrepareForBuild">
+    <Error Condition="'$(APRManagedPackage)' != 'true'" Text="APR_SOLUS_ECONOMICS_REQUIRES_MANAGED" />
+  </Target>
+  <Target Name="RecordEconomicsSource" BeforeTargets="CoreCompile">
+    <Exec Command="git rev-parse HEAD" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="EconomicsSourceCommit" />
+    </Exec>
+    <Exec Command="git rev-parse &quot;HEAD^{tree}&quot;" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="EconomicsSourceTree" />
+    </Exec>
+    <Exec Command="git status --porcelain --untracked-files=normal" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" ItemName="EconomicsSourceChanges" />
+    </Exec>
+    <PropertyGroup>
+      <EconomicsSourceClean Condition="'@(EconomicsSourceChanges->Count())' == '0'">true</EconomicsSourceClean>
+      <EconomicsSourceClean Condition="'@(EconomicsSourceChanges->Count())' != '0'">false</EconomicsSourceClean>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)EconomicsSource.g.cs" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="namespace AgenticPrReview.Runtime.SolusEconomicsFixture%3B internal static class FixtureSource { internal const string Commit = &quot;$(EconomicsSourceCommit)&quot;%3B internal const string Tree = &quot;$(EconomicsSourceTree)&quot;%3B internal const bool Clean = $(EconomicsSourceClean)%3B }" />
+    <ItemGroup><Compile Include="$(IntermediateOutputPath)EconomicsSource.g.cs" /></ItemGroup>
+  </Target>
+</Project>

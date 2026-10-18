@@ -853,6 +853,46 @@ describe('CR1 authorized actual APR private package proof route', () => {
         ).if;
       },
     ],
+    [
+      'V2 proof removed',
+      (w: any) => {
+        w.jobs['install-proof'].steps = w.jobs['install-proof'].steps.filter(
+          (step: any) => step.name !== 'CR1-V2 actual Solus economics and prefix evidence proof',
+        );
+      },
+    ],
+    [
+      'V2 credential injection',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-V2 actual Solus economics and prefix evidence proof',
+        ).env.GH_TOKEN = '${{ github.token }}';
+      },
+    ],
+    [
+      'V2 substitute framework/AOT command',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-V2 actual Solus economics and prefix evidence proof',
+        ).run = 'bash runtime/scripts/verify-r6-economics.sh all';
+      },
+    ],
+    [
+      'V2 audit dependency removed',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-V2 actual Solus economics and prefix evidence proof',
+        ).run = 'bash runtime/scripts/verify-r6-economics.sh managed';
+      },
+    ],
+    [
+      'V2 collect mode bypass',
+      (w: any) => {
+        delete w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1-V2 actual Solus economics and prefix evidence proof',
+        ).if;
+      },
+    ],
   ])('rejects %s without weakening historical secret routes', (_label, mutate) => {
     const workflowsRoot = copiedWorkflowsRoot();
     const candidate = path.join(workflowsRoot, 'solus-agent-package-proof.yml');

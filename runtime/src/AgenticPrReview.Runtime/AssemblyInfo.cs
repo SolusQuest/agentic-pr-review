@@ -14,3 +14,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle")]
 
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusContextAuthorityFixture")]
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusEconomicsFixture")]

@@ -128,3 +128,11 @@ jobs:
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: bash runtime/scripts/verify-r5-evaluation.sh managed
+      - name: CR1-V2 actual Solus economics and prefix evidence proof
+        if: inputs.mode == 'verify'
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace
+          bash runtime/scripts/verify-r6-economics.sh managed
