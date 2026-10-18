@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Current managed Solus gate; explicit all/framework/aot retain legacy R6 proof.
+# Current managed Solus gate; explicit all/framework/aot retain historical R6 proof.
 set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

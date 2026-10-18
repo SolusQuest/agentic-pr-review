@@ -870,7 +870,7 @@ describe('CR1 authorized actual APR private package proof route', () => {
       },
     ],
     [
-      'V2 substitute legacy command',
+      'V2 substitute framework/AOT command',
       (w: any) => {
         w.jobs['install-proof'].steps.find(
           (step: any) => step.name === 'CR1-V2 actual Solus economics and prefix evidence proof',

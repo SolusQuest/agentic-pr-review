@@ -24,24 +24,24 @@ Every original report passes the strict C# reader and an independent Node oracle
 
 The Python supervisor bounds time/output and owns process groups; the Node layer audits every runtime/reader process with strace. A loopback socket probe must be detected; ordinary scenarios reject every AF_INET/AF_INET6 attempt, while the real local artifact bridge uses AF_UNIX. This observes syscalls rather than preventing them. Child environments are explicit allowlists; project helpers receive no inherited token, provider credential, preload or proxy. Reports/publication checks cover literal, JSON-escaped and encoded synthetic canaries. Failure output contains only closed codes and public source locations. Failed private captures are retained without upload; successful runs reap children and remove their entire private state.
 
-Exact-head acceptance also requires `npm run check`, `npm run dist:check`, Runtime tests and the retained legacy gate. Hosted Linux proof and the actual installed package path are mandatory; local macOS portable checks or unsupported native tooling cannot substitute. The existing package-proof workflow owns branch dispatch and read-only package authority, as described in [package consumption](solus-package-consumption.md). Production Action activation, live campaigns, capacity/profile changes, upstream writes and public private-binary redistribution are outside V2.
+Exact-head acceptance also requires `npm run check`, `npm run dist:check`, Runtime tests and the retained historical gate. Hosted Linux proof and the actual installed package path are mandatory; local macOS portable checks or unsupported native tooling cannot substitute. The existing package-proof workflow owns branch dispatch and read-only package authority, as described in [package consumption](solus-package-consumption.md). Production Action activation, live campaigns, capacity/profile changes, upstream writes and public private-binary redistribution are outside V2.
 
 ### Acceptance mapping
 
 | R6 family | Retained historical regression                                    | Current managed replacement                                                                                                                          |
 | --------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1        | Legacy DeepSeek/parser/cache summary                              | Actual selected Solus normalization, nullable core/detail relationships, known zero and independent peer cases.                                      |
-| T2        | Legacy schedule/refusal/finalization journal                      | Real execution/logical/physical attempt joins, exposure and current/history separation; no fake legacy outcome.                                      |
+| T1        | Historical DeepSeek/parser/cache summary                          | Actual selected Solus normalization, nullable core/detail relationships, known zero and independent peer cases.                                      |
+| T2        | Historical schedule/refusal/finalization journal                  | Real execution/logical/physical attempt joins, exposure and current/history separation; no fabricated Agent outcome.                                 |
 | T3        | Full declared-tariff, rounding/overflow arithmetic                | Narrow explicit synthetic reference over actual Solus measurements, incomplete totals and separate counterfactual.                                   |
-| P1        | Legacy Agent/DeepSeek serialization                               | Original Solus wire tokens/settings, complete accepted boundary, per-attempt association and final-response semantic check.                          |
+| P1        | Historical Agent/DeepSeek serialization                           | Original Solus wire tokens/settings, complete accepted boundary, per-attempt association and final-response semantic check.                          |
 | P2        | SESSION replay/growth/reset and ahead-snapshot evidence           | Actual encrypted fresh/second-process restored Host path, historical tool fact and current-evidence validation within supported same-head authority. |
-| C1        | Legacy population/quality/source-axis comparisons                 | Conservative Solus domain/boundary/current-population/reference eligibility, with billing/cache/quality limits explicit.                             |
+| C1        | Historical population/quality/source-axis comparisons             | Conservative Solus domain/boundary/current-population/reference eligibility, with billing/cache/quality limits explicit.                             |
 | C2        | Historical offline and separately authorized live-local campaigns | Focused deterministic managed success/failure/report cases; no live campaign replay.                                                                 |
 | V1 gate   | Current 84-case framework/AOT inventory plus hostile producers    | Independent required managed result; no cross-runtime parity claim.                                                                                  |
 
 Historical [R6 results](../90_roadmap/r6-economics-results.md), including their earlier 82-case receipt and live conclusions, retain their original source/build/profile/eligibility limits. They are not rewritten into a new managed receipt.
 
-## Retained legacy framework/AOT regression
+## Retained historical framework/AOT regression
 
 Run `bash runtime/scripts/verify-r6-economics.sh all` from a clean committed checkout on Linux x64 with the pinned .NET SDK, Python 3, Node 24, installed npm dependencies, clang, zlib development headers and strace. `framework` and `aot` select one actual execution mode; only `all` also proves cross-mode semantic parity. The dedicated `r6-economics-gate` Runtime CI job checks out the exact event-selected commit with read-only permissions and disabled checkout credentials. Existing Runtime and R2–R5 gates remain required.
 

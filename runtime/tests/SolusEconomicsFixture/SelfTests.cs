@@ -95,7 +95,7 @@ internal static class SelfTests
     private static void Pricing()
     {
         Proof.Require(SyntheticPrice.Create(Usage()).Observed.Total == .000070m, "v2_unit_reference_actual_values");
-        Proof.Require(SyntheticPrice.Create(Usage(10, 5, 4, 6)).Observed.Total == .000053m, "v2_unit_legacy_reference_values");
+        Proof.Require(SyntheticPrice.Create(Usage(10, 5, 4, 6)).Observed.Total == .000053m, "v2_unit_seed_reference_values");
         Proof.Require(SyntheticPrice.Create(Usage(0, 0, 0, 0)).Observed.Total == 0m, "v2_unit_measured_zero_price");
         foreach (var value in new[] { Usage(hit: null), Usage(miss: null), Usage(hit: null, miss: null) })
         {
