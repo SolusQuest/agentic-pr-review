@@ -122,6 +122,9 @@ internal static class ResetInventoryProof
 
     private static bool Matches(Decoded[] before, Decoded[] after)
     {
+        if (before.Select(item => item.Entry.Id).Distinct(StringComparer.Ordinal).Count() != before.Length ||
+            after.Select(item => item.Entry.Id).Distinct(StringComparer.Ordinal).Count() != after.Length)
+            return Mismatch("reset_oracle_duplicate_id");
         var priorRoots = before.Where(item => item.Sentinel is not null).ToArray();
         var nextRoots = after.Where(item => item.Sentinel is not null).ToArray();
         if (priorRoots.Length != 1 || nextRoots.Length != 1 || !RootMatches(priorRoots[0], nextRoots[0])) return Mismatch("reset_oracle_root_delta");
