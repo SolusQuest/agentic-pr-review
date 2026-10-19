@@ -140,6 +140,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/materialize-r4-enrollment-observation.test.ts',
       'scripts/probe-r4-e2p-unauthorized-no-launch.mjs',
       'scripts/probe-r4-e2p-unauthorized-no-launch.test.ts',
+      'scripts/project-r3-test-failures.test.ts',
       'scripts/project-r4-e2p-diagnostics.mjs',
       'scripts/project-r4-e2p-diagnostics.test.ts',
       'scripts/project-r4-trusted-proof-evidence.mjs',

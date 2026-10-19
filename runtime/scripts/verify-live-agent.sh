@@ -792,10 +792,75 @@ run_live_dry_run() {
   node "${REPO_ROOT}/scripts/check-r3-live-proof.mjs" ||
     _fail APR_R3_TRUSTED_LIVE_POLICY_FAILED
   test_project="${TEST_PROJECT}"
-  "${DOTNET_CMD}" test "${test_project}" --configuration Release --nologo \
+  if ! "${DOTNET_CMD}" test "${test_project}" --configuration Release --nologo \
     --filter 'FullyQualifiedName~TrustedLive' \
-    >"${dry_runner_temp}/trusted-live-tests.log" 2>&1 ||
+    >"${dry_runner_temp}/trusted-live-tests.log" 2>&1; then
+    node --input-type=module - "${dry_runner_temp}/trusted-live-tests.log" 2>/dev/null <<'APR_R3_TEST_DIAGNOSTIC' ||
+      printf '%s\n' APR_R3_TRUSTED_LIVE_TEST_FAILURES_UNKNOWN
+import { readFileSync, lstatSync } from 'node:fs';
+// BEGIN APR_R3_TRUSTED_LIVE_TEST_PROJECTION
+const trustedLiveDeclaredMethods = new Set([
+  "AdmittedSessionFailuresRetainTheirExactClassification",
+  "CanaryCompletionClearsAllPhaseDerivedEvidence",
+  "CanaryFailureSuppressesAllReceiptFields",
+  "CanonicalProductResultBytesRemainDiagnosticFree",
+  "CleanupAndContinuationFailuresRemainClassifiedThroughAdmission",
+  "CompletionRecordIsBoundedAndDoesNotContainSecrets",
+  "EveryChildStageProducesOnlyClosedPrivateFailureEvidence",
+  "ExceptionsMapDirectlyToClosedPrivateCategories",
+  "FailedPhaseIsSeparatedFromPassingPhaseEvidence",
+  "FailedReceiptNeverPromotesACompletedQualityOutcome",
+  "FailureClassificationIsExhaustiveAndStable",
+  "FileLeakFromAFailedChildDominatesTheProviderFailure",
+  "LauncherCancellationTerminatesTheProcessTree",
+  "LauncherRejectsEmbeddedArgumentAndOversizedOutputLeaks",
+  "LauncherSerializesFreshProcessesAndTimesOut",
+  "LauncherTimeoutTerminatesTheProcessTree",
+  "LauncherUsesPublicArgumentsAndAnExactChildEnvironment",
+  "MaterializerUsesCaseSpecificEvidenceAndContinuationPolicies",
+  "MissingOrCanaryReceiptFailsClosed",
+  "PostCommitQualityFailureSurvivesTransportProofWrapper",
+  "PrivateFailureCodecRejectsUnknownDuplicateAndRawValues",
+  "PrivateFailureMarkerUsesCreateNewSemantics",
+  "ProductCodeInventoryExactlyCoversCurrentSourceFamilies",
+  "ReceiptRejectsOverlongAndInconsistentCombinations",
+  "ReceiptRejectsUnownedOrSensitiveLookingDiagnostics",
+  "RejectedPassingReceiptBecomesNonReflectiveInvalidEvidence",
+  "SupervisorConsumesOnlyTheAdmittedSeedReceiptBeforeRestore",
+  "SupervisorEmitsOneSanitizedFailureRecord",
+  "SupervisorSigtermTerminatesChildAndCleansSensitiveRoot",
+  "TransportProofWrapperAdmitsMappedQualityFailure",
+  "TrustedChildWritesAClosedMarkerForMaterializationFailure",
+  "UnknownSessionCodeBecomesNonReflectiveInvalidReceiptEvidence",
+  "VerifierOwnsExactlyTheDeterministicAndTrustedProfiles"
+]);
+function projectTrustedLiveTestFailures(bytes) {
+  const unknown = ['APR_R3_TRUSTED_LIVE_TEST_FAILURES_UNKNOWN'];
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > 1048576) return unknown;
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { return unknown; }
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return unknown;
+  const failed = new Set();
+  for (const line of text.split(/\r?\n/u)) {
+    if (line.length > 8192) return unknown;
+    if (!line.includes('[FAIL]')) continue;
+    const match = /^\[xUnit\.net [0-9:.]+\]\s+AgenticPrReview\.Runtime\.Tests\.Agent\.Core\.TrustedLiveAgentTests\.([A-Za-z][A-Za-z0-9_]{0,100})(?:\([^\r\n]*\))?\s+\[FAIL\]$/u.exec(line);
+    if (!match || !trustedLiveDeclaredMethods.has(match[1])) return unknown;
+    failed.add(match[1]);
+  }
+  if (failed.size === 0 || failed.size > 32) return unknown;
+  return [...failed].sort().map(name => 'APR_R3_TRUSTED_LIVE_CASE_FAILED ' + name);
+}
+// END APR_R3_TRUSTED_LIVE_TEST_PROJECTION
+try {
+  const info = lstatSync(process.argv[2]);
+  if (!info.isFile() || info.size > 1048576) throw new Error();
+  for (const line of projectTrustedLiveTestFailures(readFileSync(process.argv[2]))) console.log(line);
+} catch { console.log('APR_R3_TRUSTED_LIVE_TEST_FAILURES_UNKNOWN'); }
+APR_R3_TEST_DIAGNOSTIC
     _fail APR_R3_TRUSTED_LIVE_TESTS_FAILED
+  fi
   _cleanup || _fail APR_R3_TRUSTED_LIVE_CLEANUP_FAILED
   printf '%s\n' APR_R3_TRUSTED_LIVE_DRY_RUN_OK
 }

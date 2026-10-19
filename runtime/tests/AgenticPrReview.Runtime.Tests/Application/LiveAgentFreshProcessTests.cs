@@ -483,6 +483,50 @@ public sealed class LiveAgentFreshProcessTests
         Assert.Equal(0, profile.ActivationCount);
     }
 
+    [Fact]
+    public async Task CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout()
+    {
+        var trusted = Trusted();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
+        var scope = Scope(trusted, stable!, "session-109");
+        var valid = Authorization(trusted, scope, "session-109", "scope_fields", "absent", "automatic",
+            "same_head", new string('b', 40), new string('a', 40), new string('b', 40), null);
+        Assert.True(LiveAgentFreshProcessCommand.TryAdmitAuthorization(valid, out _, out var admitted, out var access));
+        Assert.Equal(StateAction.Authorized, admitted!.Action);
+        Assert.NotNull(access);
+        var hash = new string('e', 64);
+        var denied = new[]
+        {
+            scope with { RepositoryId = "other/repository" },
+            scope with { WorkflowIdentity = "other-workflow" },
+            scope with { ReviewTarget = 108 },
+            scope with { SessionId = "other-session" },
+            scope with { ProviderId = "other-provider" },
+            scope with { ModelId = "other-model" },
+            scope with { AdapterId = "other-adapter" },
+            scope with { PolicySha256 = hash },
+            scope with { LimitsSha256 = hash },
+            scope with { ToolsetSha256 = hash },
+            scope with { BuildId = "other-build" },
+        }.Select(changed => valid with { AuthorizedScope = LiveAgentFreshProcessDomain.ScopeDocument(changed) })
+        .Concat([valid with { IsTrustedWorkflow = false }, valid with { IsSameRepository = false },
+            valid with { IsForkOrigin = true }]).ToArray();
+        Assert.Equal(14, denied.Length);
+        foreach (var document in denied)
+        {
+            var files = new DenialProbeFileSystem(LiveAgentFreshProcessCodec.Write(document));
+            var result = await LiveAgentFreshProcessCommand.RunAsync("bootstrap", files, CancellationToken.None);
+            Assert.Equal(13, result.ExitCode);
+            Assert.Equal(RestrictedStateCodes.AccessDenied, result.DiagnosticCode);
+            Assert.Equal(1, files.AuthorizationReads);
+            Assert.Equal(0, files.AuthorizedLayoutCalls);
+            Assert.Equal(0, files.ProtectedBoundaryCalls);
+        }
+        // Secret/transport construction has no injected observer here. The
+        // shared frontgate returns before authorizing the required root; zero
+        // counts above describe only the actual filesystem boundaries observed.
+    }
+
     [Theory]
     [InlineData("provider")]
     [InlineData("model")]
@@ -1994,6 +2038,8 @@ public sealed class LiveAgentFreshProcessTests
 
         internal int AuthorizedLayoutCalls { get; private set; }
 
+        internal int ProtectedBoundaryCalls { get; private set; }
+
         public LiveAgentFreshProcessAuthorizationRead? ReadAuthorization()
         {
             AuthorizationReads++;
@@ -2039,9 +2085,11 @@ public sealed class LiveAgentFreshProcessTests
             LiveAgentFreshProcessAuthorizedRoot root,
             byte[] bytes) => throw Unreachable();
 
-        private static Exception Unreachable() =>
-            new InvalidOperationException(
-                "Authorization denial reached a protected capability.");
+        private Exception Unreachable()
+        {
+            ProtectedBoundaryCalls++;
+            return new InvalidOperationException("Authorization denial reached a protected capability.");
+        }
     }
 
     private sealed class ActivationProbeProfile : ILiveAgentFreshProcessProfile

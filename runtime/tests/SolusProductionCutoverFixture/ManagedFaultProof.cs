@@ -33,6 +33,7 @@ internal static class ManagedFaultProof
                 Check(!revoked.Authorization.IsLive && SolusFreshHostContext.TryCreateDirect(revoked.Authorization) is null,
                     "changed_authorization_revokes");
             }
+            await InvalidSecrets(root);
             foreach (var mode in new[] { "missing", "duplicate", "wrong-format", "throw", "cancel" })
             {
                 var path = Path.Join(root, mode);
@@ -108,6 +109,72 @@ internal static class ManagedFaultProof
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable, null);
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable, null);
         }
+    }
+
+    private static async Task InvalidSecrets(string root)
+    {
+        // A genuine current successful run establishes the same fixture's
+        // authority, manifest, runtime construction and provider prerequisites.
+        var positivePath = Path.Join(root, "secret-positive");
+        var positive = new Program.DirectRoot(positivePath);
+        positive.Write(Head, Head, "secret_control", Fact + "\n");
+        using (var authority = await Authority.Open(positivePath))
+        {
+            SetSecrets();
+            var completed = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
+                null, 0, null, authority.Sink, CancellationToken.None);
+            Check(completed.Execution.Result is { Code: R3LiveAgentCodes.Completed, ModelCalls: 2,
+                ToolCalls: 1, AcceptedGeneration: 0, HandoffReady: true } &&
+                File.Exists(positive.LineagePath), "secret_positive_control");
+        }
+        (string? Provider, string? Key)[] invalid = [
+            (null, Program.Key), ("", Program.Key), ("synthetic-header-only", null),
+            ("synthetic-header-only", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="),
+            ("synthetic-header-only", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")];
+        for (var index = 0; index < invalid.Length; index++)
+        {
+            var path = Path.Join(root, "secret-negative-" + index);
+            var input = new Program.DirectRoot(path);
+            input.Write(Head, Head, "secret_negative", Fact + "\n");
+            using var authority = await Authority.Open(path);
+            Check(authority.Authorization.IsLive, "secret_live_authority");
+            Check(await authority.EmptyAccepted(), "secret_initial_absent");
+            var before = StateSnapshot(authority.Root.StateRootPath);
+            Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable, invalid[index].Provider);
+            Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable, invalid[index].Key);
+            var rejected = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
+                null, 0, null, authority.Sink, CancellationToken.None);
+            Check(rejected.Execution.Result is { Code: R3LiveAgentCodes.SecretInvalid, ModelCalls: 0,
+                ToolCalls: 0, AcceptedGeneration: null, AcceptedSessionSha256: null,
+                AcceptedEnvelopeSha256: null, HandoffReady: false }, "secret_no_work");
+            Check(Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable) is null &&
+                Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable) is null,
+                "secret_environment_cleared");
+            Check(!File.Exists(input.LineagePath) && await authority.EmptyAccepted(), "secret_no_acceptance");
+            Check(before.SequenceEqual(StateSnapshot(authority.Root.StateRootPath)), "secret_state_unchanged");
+        }
+    }
+
+    private static string[] StateSnapshot(string root)
+    {
+        var entries = new List<string>();
+        foreach (var path in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories).Prepend(root)
+            .Order(StringComparer.Ordinal))
+        {
+            var info = new FileInfo(path);
+            var directory = (info.Attributes & FileAttributes.Directory) != 0;
+            var mode = OperatingSystem.IsWindows() ? 0 : (int)File.GetUnixFileMode(path);
+            var identity = Path.GetRelativePath(root, path) + ":" + (int)info.Attributes + ":" + mode + ":" +
+                info.CreationTimeUtc.Ticks + ":" + info.LastWriteTimeUtc.Ticks;
+            if (!directory)
+            {
+                var bytes = File.ReadAllBytes(path);
+                try { identity += ":" + bytes.Length + ":" + Convert.ToHexStringLower(SHA256.HashData(bytes)); }
+                finally { CryptographicOperations.ZeroMemory(bytes); }
+            }
+            entries.Add(identity);
+        }
+        return entries.ToArray();
     }
 
     private static void Check(bool valid, string code)
