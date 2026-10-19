@@ -21,6 +21,44 @@ function project(contents: string) {
 }
 
 describe('R4 E2P public diagnostic projection', () => {
+  it('reports only the last fixed execution stage alongside the original failure', () => {
+    const failure =
+      'APR_R4_E2P_FAILURE stage=proof case=clean-source code=child-failed status=failed';
+    const result = project(
+      'APR_R4_E2P_V2_DIAGNOSTIC stage=bundle\n' +
+        'private output\n' +
+        'APR_R4_E2P_V2_DIAGNOSTIC stage=architecture\n',
+    );
+    expect(result.stdout).toBe(`${failure}\nAPR_R4_E2P_V2_DIAGNOSTIC stage=architecture\n`);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
+  it.each([
+    'stage=unknown',
+    'stage=architecture secret=private-canary',
+    'stage=private-canary',
+    'stage=architecture/private-canary',
+    'stage=architecture\u0000private-canary',
+    `stage=${'a'.repeat(16_384)}`,
+    'stage=architecture status=failed',
+  ])('rejects forged stage fields without reflecting their contents: %s', (fields) => {
+    const result = project(`APR_R4_E2P_V2_DIAGNOSTIC ${fields}\n`);
+    expect(result.stdout).toBe(
+      'APR_R4_E2P_FAILURE stage=proof case=clean-source code=child-failed status=failed\n',
+    );
+    expect(result.stderr).toBe('');
+  });
+
+  it('does not admit even fixed stages from an oversized log', () => {
+    const result = project(
+      `${'x'.repeat(8 * 1024 * 1024)}\nAPR_R4_E2P_V2_DIAGNOSTIC stage=architecture\n`,
+    );
+    expect(result.stdout).toBe(
+      'APR_R4_E2P_FAILURE stage=proof case=clean-source code=child-failed status=failed\n',
+    );
+  });
+
   it('drops paths, bodies, canaries, multiline stderr, and unapproved tokens', () => {
     const child = spawnSync(
       process.execPath,

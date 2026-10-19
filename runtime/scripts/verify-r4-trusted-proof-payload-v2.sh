@@ -366,6 +366,7 @@ NODE
 
 execute_proof() {
   cd "$repo_root"
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=bundle'
   proof_bundle="$temporary_root/proof-action.js"
   node --input-type=module - "$repo_root" "$proof_bundle" <<'NODE'
 import path from 'node:path';
@@ -374,6 +375,7 @@ const [root, output] = process.argv.slice(2);
 const { writeTrustedProofActionBundle } = await import(pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href);
 await writeTrustedProofActionBundle(output, root);
 NODE
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=host-unit-oracles'
   dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj \
     --configuration Release --nologo \
     --filter 'FullyQualifiedName~TrustedProof|FullyQualifiedName~CurrentHostScriptedChatClientTests|FullyQualifiedName~CurrentHostTraceOracleTests' -m:1 \
@@ -387,6 +389,7 @@ import { parseS5UnitOracleResults } from './scripts/check-r4-e2p-managed-receipt
 const actual = parseS5UnitOracleResults(fs.readFileSync(process.argv[2]));
 process.stdout.write('APR_S5_CURRENT_HOST_UNIT_ORACLES ' + JSON.stringify(actual) + '\n');
 NODE
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=publish-payload'
   if ! dotnet publish "$project" --configuration Release --runtime linux-x64 \
     --self-contained "$self_contained" --output "$publish_root" --artifacts-path "$artifacts_root" \
     --nologo "-p:PublishAot=$publish_aot" "-p:IsAotCompatible=$publish_aot" \
@@ -406,10 +409,12 @@ NODE
   }
   [[ -x "$payload" && ! -e "$payload.dll" && ! -e "$payload.deps.json" ]] ||
     return 1
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=smoke'
   run_production_smoke || {
     echo 'APR_R4_E2P_V2_FAILURE stage=production-smoke case=aggregate code=smoke-failed status=failed' >&2
     return 1
   }
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=payload-intermediates'
   proof_build_output="$artifacts_root/bin/AgenticPrReview.Runtime.ActionHostTrustedProofPayload/release_linux-x64"
   proof_intermediate="$intermediate_root/AgenticPrReview.Runtime.ActionHostTrustedProofPayload.dll"
   runtime_intermediate="$intermediate_root/AgenticPrReview.Runtime.dll"
@@ -421,6 +426,7 @@ NODE
   cp "$proof_build_output/AgenticPrReview.Runtime.dll" "$runtime_intermediate"
   [[ "$(find "$intermediate_root" -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 2 ]] ||
     return 1
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=publish-verifier'
   if ! dotnet publish "$verifier_project" --configuration Release \
     --runtime linux-x64 --self-contained "$self_contained" --output "$verifier_publish_root" \
     --artifacts-path "$artifacts_root" --nologo \
@@ -442,6 +448,7 @@ NODE
   }
   [[ -x "$verifier" && ! -e "$verifier.dll" &&
       ! -e "$verifier.deps.json" ]] || return 1
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=verifier-intermediates'
   verifier_build_output="$artifacts_root/bin/AgenticPrReview.Runtime.ActionHostTrustedProofVerifier/release_linux-x64"
   verifier_intermediate="$verifier_intermediate_root/AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll"
   verifier_proof_intermediate="$verifier_intermediate_root/AgenticPrReview.Runtime.ActionHostTrustedProofPayload.dll"
@@ -457,6 +464,7 @@ NODE
   cp "$verifier_build_output/AgenticPrReview.Runtime.dll" \
     "$verifier_runtime_intermediate"
   [[ "$(find "$verifier_intermediate_root" -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 3 ]] || return 1
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=architecture'
   node scripts/check-r4-e2p-managed-architecture.mjs \
     --proof "$proof_intermediate" --runtime "$runtime_intermediate" \
     --verifier "$verifier_intermediate" \
@@ -464,17 +472,20 @@ NODE
     --verifier-runtime "$verifier_runtime_intermediate" \
     --proof-output "$architecture" \
     --verifier-output "$verifier_architecture"
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=malformed-frame'
   if printf '\000\000\000\001x' |
       env AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap \
         "$payload" >/dev/null 2>&1; then
     echo APR_R4_E2P_AOT_MALFORMED_FRAME_ACCEPTED >&2
     return 1
   fi
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=build-supervisor'
   dotnet build "$supervisor_project" --configuration Release --nologo \
     -p:PublishAot=false
   mkdir -p "$proof_evidence"
   verifier_sha="$(sha256sum "$verifier" | cut -d ' ' -f 1)"
   set +e
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=supervisor'
   dotnet "$supervisor" supervise \
     --root "$proof_evidence" --repo "$repo_root" --payload "$verifier" \
     --bundle "$proof_bundle" \
@@ -495,6 +506,7 @@ NODE
     return "$supervisor_status"
   fi
   [[ -f "$proof_evidence/trusted-proof-payload-evidence.json" ]] || return 1
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=normalize-evidence'
   normalized_evidence="$temporary_root/trusted-proof-payload-evidence.normalized.json"
   node --input-type=module - \
     "$proof_evidence/trusted-proof-payload-evidence.json" \
@@ -586,6 +598,7 @@ fs.writeFileSync(outputPath, JSON.stringify({
   cases,
 }) + '\n');
 NODE
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=receipt'
   payload_sha="$(sha256sum "$payload" | cut -d ' ' -f 1)"
   proof_sha="$(sha256sum "$proof_intermediate" | cut -d ' ' -f 1)"
   runtime_sha="$(sha256sum "$runtime_intermediate" | cut -d ' ' -f 1)"
@@ -665,7 +678,9 @@ NODE
       "$identity" "$repo_root" "$proof_bundle" > "$receipt_line"
   fi
   sed "s/^$receipt_prefix //" "$receipt_line" > "$receipt_json"
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=two-root-preparation'
   verify_two_root_preparation
+  echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=complete'
   cat "$receipt_line"
 }
 

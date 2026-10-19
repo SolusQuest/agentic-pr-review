@@ -152,7 +152,8 @@ internal sealed class FaultControl(string root, string mode)
     private int lastDownloadAt;
     private long lastDownloadSize;
     private int lastDownloadMaximum;
-    internal string StorageObservationCode => $"list_{observations[0]}_listfailed_{observations[1]}_metadata_{observations[2]}_metadatafailed_{observations[3]}_download_{observations[4]}_downloadfailed_{observations[5]}_readback_{observations[6]}_readbackfailed_{observations[7]}_delete_{observations[8]}_deletefailed_{observations[9]}_maxlist_{maximumListObjects}_lastdownload_{lastDownloadFailure}_kind_{lastDownloadKind}_at_{lastDownloadAt}_size_{lastDownloadSize}_cap_{lastDownloadMaximum}";
+    internal bool LastDownloadStagingException;
+    internal string StorageObservationCode => $"list_{observations[0]}_listfailed_{observations[1]}_metadata_{observations[2]}_metadatafailed_{observations[3]}_download_{observations[4]}_downloadfailed_{observations[5]}_readback_{observations[6]}_readbackfailed_{observations[7]}_delete_{observations[8]}_deletefailed_{observations[9]}_maxlist_{maximumListObjects}_lastdownload_{lastDownloadFailure}_kind_{lastDownloadKind}_at_{lastDownloadAt}_size_{lastDownloadSize}_cap_{lastDownloadMaximum}_stagingexception_{LastDownloadStagingException}";
     internal int ObserveStorage(int operation, OpaqueStoreFailure failure, int listed = 0)
     {
         var ordinal = Interlocked.Increment(ref observations[operation * 2]);
@@ -230,7 +231,20 @@ internal sealed class FaultStore(IRestrictedStateStore inner, FaultControl fault
     public async Task<OpaqueStoreDownloadResult> DownloadAsync(OpaqueStoreDownloadRequest request, CancellationToken token)
     {
         if (fault.DenyReads) return OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Io);
-        var result = await inner.DownloadAsync(request, token);
+        // Observe only a closed staging failure code while the real download
+        // executes. Do not record exception text, paths, stack traces or bytes,
+        // and do not intercept or change the production failure result.
+        var stagingException = false;
+        void ObserveException(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs observation)
+        {
+            if (observation.Exception is IOException { Message: "artifact_bridge_staging_invalid" })
+                stagingException = true;
+        }
+        OpaqueStoreDownloadResult result;
+        AppDomain.CurrentDomain.FirstChanceException += ObserveException;
+        try { result = await inner.DownloadAsync(request, token); }
+        finally { AppDomain.CurrentDomain.FirstChanceException -= ObserveException; }
+        if (!result.Succeeded) fault.LastDownloadStagingException = stagingException;
         var ordinal = fault.ObserveStorage(2, result.Failure);
         fault.ObserveDownloadFailure(request, result.Failure, ordinal);
         if (result.Succeeded) Scan(result.EncryptedBytes.Span);

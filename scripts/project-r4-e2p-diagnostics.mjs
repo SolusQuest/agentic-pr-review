@@ -1,6 +1,23 @@
 import fs from 'node:fs';
 
 const fallback = 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=child-failed status=failed';
+const executionStages = new Set([
+  'bundle',
+  'host-unit-oracles',
+  'publish-payload',
+  'smoke',
+  'payload-intermediates',
+  'publish-verifier',
+  'verifier-intermediates',
+  'architecture',
+  'malformed-frame',
+  'build-supervisor',
+  'supervisor',
+  'normalize-evidence',
+  'receipt',
+  'two-root-preparation',
+  'complete',
+]);
 const allowed = {
   stage: new Set(['production-smoke', 'synthetic-route', 'proof']),
   case: new Set([
@@ -39,7 +56,10 @@ function project(path) {
   const pattern =
     /^APR_R4_E2P(?:_V2)?_FAILURE stage=([a-z-]+) case=([a-z-]+) code=([a-z-]+) status=([a-z_]+)$/u;
   const projected = [];
+  let lastStage;
   for (const line of fs.readFileSync(path, 'utf8').split(/\r?\n/u)) {
+    const stage = /^APR_R4_E2P_V2_DIAGNOSTIC stage=([a-z-]+)$/u.exec(line);
+    if (stage && executionStages.has(stage[1])) lastStage = stage[1];
     const match = pattern.exec(line);
     if (
       match &&
@@ -47,11 +67,15 @@ function project(path) {
       allowed.case.has(match[2]) &&
       allowed.code.has(match[3]) &&
       allowed.status.has(match[4]) &&
-      !projected.includes(line)
+      !projected.includes(line) &&
+      projected.length < 3
     ) {
       projected.push(line);
-      if (projected.length === 3) break;
     }
+  }
+  if (lastStage) {
+    if (projected.length === 0) projected.push(fallback);
+    projected.push(`APR_R4_E2P_V2_DIAGNOSTIC stage=${lastStage}`);
   }
   return projected;
 }
