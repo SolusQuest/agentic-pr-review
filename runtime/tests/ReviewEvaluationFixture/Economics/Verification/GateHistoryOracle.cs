@@ -49,9 +49,9 @@ internal static class GateHistoryOracle
             var failed = report.Rows[1];
             Require(report.Code == code && failed.Code == code && !failed.Accepted && failed.SessionSha256 is null && failed.Generation is null);
             if (code == "state_failed") Require(failed.Capture.Code == (item.Id == "p2-current-toolset" ? "observed" : "unavailable") &&
-                failed.Capture.Calls.IsEmpty && !failed.WireMatch);
+                failed.Capture.Calls.IsEmpty && !failed.LogicalRequestMatch);
             if (item.Id == "p2-missing-history") Require(failed.Capture.Code == "unmeasurable");
-            if (item.Id == "p2-changed-continuation") Require(failed.RestoredMatch && failed.Comparison == new PrefixComparison("compared", false, false));
+            if (item.Id == "p2-changed-continuation") Require(failed.RestoredMatch && failed.Comparison == new PrefixComparison("compared", false));
         }
         var accepted = report.Rows.Where(row => row.Accepted).ToArray();
         Require(accepted.Select(row => row.SessionSha256).Distinct().Count() == accepted.Length &&
@@ -82,8 +82,7 @@ internal static class GateHistoryOracle
         }
         if (!continuation) return;
         // Only logical continuation metadata carries the random SessionId.
-        // Counts/bytes, provider segments, control/history, and every other
-        // stable segment remain exact, including provider whole-request hashes.
+        // Counts/bytes, control/history, and every other stable segment remain exact.
         node["logical"]![phase > 0 ? "settings" : "dynamic"]!["sha256"] = "contains-selected-session";
         node["logical"]!["whole"]!["sha256"] = "contains-selected-session";
     }

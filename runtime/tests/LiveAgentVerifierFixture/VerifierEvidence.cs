@@ -28,15 +28,15 @@ internal sealed record VerifierAggregateEvidence(
 internal static class VerifierEvidence
 {
     private const string PhaseKind =
-        "apr-r3-live-agent-phase-receipt-v1";
+        "apr-r3-historical-typed-phase-receipt-v1";
     private const string NegativeKind =
-        "apr-r3-live-agent-negative-receipt-v1";
+        "apr-r3-historical-typed-negative-receipt-v1";
     private const string ArchitectureKind =
-        "apr-r3-live-agent-architecture-receipt-v1";
+        "apr-r3-historical-typed-architecture-receipt-v1";
 
     private static readonly VerifierManifestRow[] ExpectedCanaries =
     [
-        new("provider", "authorization_header_only", null, null),
+        new("provider", "absent_from_typed_input", null, null),
         new("state", "host_crypto_only", null, null),
         new("repository", "untrusted_reviewed_content", null, null),
         new("path", "tracked_path_and_tool_evidence", null, null),
@@ -262,7 +262,7 @@ internal static class VerifierEvidence
                 : "evidence_continuation_invalid";
             return valid;
         }
-        catch (Exception exception) when (exception is IOException or
+        catch (Exception exception) when (exception is InvalidDataException or IOException or
             UnauthorizedAccessException or
             JsonException or
             InvalidOperationException or
@@ -377,11 +377,11 @@ internal static class VerifierEvidence
         VerifierPhaseReceipt canary)
     {
         var values = new[] { mustFind, mustNot, seed, restore, canary };
-        if (values.Any(receipt => receipt.Kind != PhaseKind ||
+        if (values.Any(receipt => receipt.Kind != PhaseKind || receipt.ObservationDomain != "apr-historical-authored-typed-chat-v1" ||
                 receipt.Status != "passed" ||
                 receipt.ProductCode != R3LiveAgentCodes.Completed ||
-                !receipt.WireValid ||
-                receipt.WireFailureCode is not null ||
+                !receipt.TypedCallsValid || !TypedObservationsValid(receipt.TypedObservations, receipt.SyntheticCalls, receipt.FirstTypedRequestSha256, success: true) ||
+                receipt.TypedFailureCode is not null ||
                 !receipt.CommitDelegatedOnce ||
                 !receipt.HandoffReady ||
                 !receipt.AcceptedTupleValidated ||
@@ -441,7 +441,7 @@ internal static class VerifierEvidence
             !restore.ExactReplayValidated ||
             !restore.ReplayMutationMatrixValidated ||
             !LiveAgentFreshProcessDomain.IsSha256(
-                restore.FirstRequestSha256))
+                restore.FirstTypedRequestSha256))
         {
             return "evidence_restore_invalid";
         }
@@ -470,7 +470,7 @@ internal static class VerifierEvidence
         receipt.Generation == generation &&
         receipt.Transition == transition &&
         receipt.ModelCalls == providerRequests &&
-        receipt.ProviderRequests == providerRequests &&
+        receipt.SyntheticCalls == providerRequests &&
         receipt.ToolCalls == toolCalls;
 
     private static bool QualityShape(
@@ -494,7 +494,8 @@ internal static class VerifierEvidence
         VerifierManifestRow row,
         VerifierNegativeReceipt receipt)
     {
-        if (receipt.Kind != NegativeKind ||
+        if (receipt.Kind != NegativeKind || receipt.ObservationDomain != "apr-historical-authored-typed-chat-v1" ||
+            !TypedObservationsValid(receipt.TypedObservations, receipt.SyntheticCalls) ||
             receipt.Case != row.Id ||
             receipt.Phase != row.PhaseOrRoute ||
             receipt.StateExpectation != row.StateExpectation ||
@@ -521,7 +522,7 @@ internal static class VerifierEvidence
                 receipt.AcceptedGeneration == 1 &&
                 AcceptedIdentityMatches(receipt) &&
                 receipt.ActivationCount == 1 &&
-                receipt.ProviderRequests == 1 &&
+                receipt.SyntheticCalls == 1 &&
                 receipt.CommitDelegationCount == 1 &&
                 receipt.StateBeforeSha256 != receipt.StateAfterSha256 &&
                 LiveAgentFreshProcessDomain.IsSha256(
@@ -577,7 +578,7 @@ internal static class VerifierEvidence
         };
         return stateValid &&
             receipt.ActivationCount == expectedActivation &&
-            receipt.ProviderRequests == expectedRequests &&
+            receipt.SyntheticCalls == expectedRequests &&
             receipt.ResultBeforeSha256 is null &&
             receipt.ResultAfterSha256 is null &&
             receipt.ResultPublicationAttempts == 0;
@@ -630,8 +631,8 @@ internal static class VerifierEvidence
         LiveAgentFreshProcessDomain.IsSha256(receipt.AssemblySha256) &&
         receipt.AssemblySha256 == buildPair.ArchitectureAssemblySha256 &&
         receipt.ForbiddenReferencesAbsent &&
-        receipt.RealTransportCreationCalls == 2 &&
-        receipt.TransportFactoryTypes == 1 &&
+        receipt.TypedFactoryCreationCalls == 1 &&
+        receipt.TypedChatFactoryTypes == 1 &&
         receipt.ProfileTypes == 2 &&
         receipt.Passed;
 
@@ -698,16 +699,56 @@ internal static class VerifierEvidence
         VerifierBuildPair expected,
         VerifierNegativeReceipt receipt) => BuildPairValid(expected, receipt);
 
+    internal static bool ControlledPhaseValidForTesting(string path)
+    {
+        try { return ReadPhase(path) is { Kind: PhaseKind, ObservationDomain: "apr-historical-authored-typed-chat-v1" }; }
+        catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException) { return false; }
+    }
+
+    private static bool ControlledObservationMatches(string path, string scenario, string process, string buildPair,
+        IReadOnlyList<VerifierTypedObservation>? expected)
+    {
+        using var document = JsonDocument.Parse(VerifierTypedObservationFiles.Read(path), new JsonDocumentOptions { MaxDepth = 8 });
+        var root = document.RootElement;
+        return root.ValueKind == JsonValueKind.Object && ExactProperties(root,
+            ["kind", "observation_domain", "scenario", "process_instance_sha256", "build_pair_sha256", "typed_observations"]) &&
+            RequiredString(root, "kind") == "apr-r3-controlled-typed-observations-v1" &&
+            RequiredString(root, "observation_domain") == "apr-historical-authored-typed-chat-v1" &&
+            RequiredString(root, "scenario") == scenario && RequiredString(root, "process_instance_sha256") == process &&
+            RequiredString(root, "build_pair_sha256") == buildPair && expected is not null &&
+            ReadTypedObservations(root).SequenceEqual(expected);
+    }
+
+    private static IReadOnlyList<VerifierTypedObservation> ReadTypedObservations(JsonElement root)
+    {
+        var value = root.GetProperty("typed_observations");
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > 4) throw new InvalidDataException("typed_observation_shape");
+        var observations = new List<VerifierTypedObservation>();
+        foreach (var item in value.EnumerateArray())
+        {
+            if (!ExactProperties(item, ["ordinal", "request_sha256", "outcome"])) throw new InvalidDataException("typed_observation_shape");
+            observations.Add(new(item.GetProperty("ordinal").GetInt32(), RequiredString(item, "request_sha256"), RequiredString(item, "outcome")));
+        }
+        return observations;
+    }
+
+    private static bool TypedObservationsValid(IReadOnlyList<VerifierTypedObservation>? observations, int calls,
+        string? firstDigest = null, bool success = false) => observations is not null && calls is >= 0 and <= 4 &&
+        observations.Count == calls && observations.Select((value, index) => value.Ordinal == index + 1 &&
+            LiveAgentFreshProcessDomain.IsSha256(value.RequestSha256) && value.Outcome is "succeeded" or "failed" or "cancelled" &&
+            (!success || value.Outcome == "succeeded")).All(valid => valid) &&
+        (firstDigest is null || calls > 0 && observations[0].RequestSha256 == firstDigest);
+
     private static VerifierPhaseReceipt? ReadPhase(string path)
     {
         using var document = OpenExact(path,
         [
-            "kind", "execution_kind", "execution_artifact_sha256",
+            "kind", "observation_domain", "typed_observations", "execution_kind", "execution_artifact_sha256",
             "architecture_assembly_sha256", "build_pair_sha256",
             "scenario", "status", "product_code", "generation",
-            "transition", "model_calls", "tool_calls", "provider_requests",
-            "wire_valid", "wire_failure_code", "commit_delegated_once",
-            "handoff_ready", "first_request_sha256", "terminal_sha256",
+            "transition", "model_calls", "tool_calls", "synthetic_calls",
+            "typed_calls_valid", "typed_failure_code", "commit_delegated_once",
+            "handoff_ready", "first_typed_request_sha256", "terminal_sha256",
             "prior_fact_sha256", "invocation_identity_sha256",
             "seed_identity_sha256", "lineage_sha256",
             "accepted_session_sha256", "accepted_envelope_sha256",
@@ -757,7 +798,7 @@ internal static class VerifierEvidence
             return null;
         }
 
-        return new VerifierPhaseReceipt(
+        var receipt = new VerifierPhaseReceipt(
             RequiredString(root, "scenario"),
             RequiredString(root, "status"),
             RequiredString(root, "product_code"),
@@ -765,12 +806,12 @@ internal static class VerifierEvidence
             RequiredString(root, "transition"),
             root.GetProperty("model_calls").GetInt32(),
             root.GetProperty("tool_calls").GetInt32(),
-            root.GetProperty("provider_requests").GetInt32(),
-            root.GetProperty("wire_valid").GetBoolean(),
-            NullableString(root, "wire_failure_code"),
+            root.GetProperty("synthetic_calls").GetInt32(),
+            root.GetProperty("typed_calls_valid").GetBoolean(),
+            NullableString(root, "typed_failure_code"),
             root.GetProperty("commit_delegated_once").GetBoolean(),
             root.GetProperty("handoff_ready").GetBoolean(),
-            NullableString(root, "first_request_sha256"),
+            NullableString(root, "first_typed_request_sha256"),
             NullableString(root, "terminal_sha256"),
             NullableString(root, "prior_fact_sha256"),
             RequiredString(root, "invocation_identity_sha256"),
@@ -790,7 +831,9 @@ internal static class VerifierEvidence
             RequiredString(root, "execution_kind"),
             RequiredString(root, "execution_artifact_sha256"),
             RequiredString(root, "architecture_assembly_sha256"),
-            RequiredString(root, "build_pair_sha256"));
+            RequiredString(root, "build_pair_sha256"), RequiredString(root, "observation_domain"), ReadTypedObservations(root));
+        return TypedObservationsValid(receipt.TypedObservations, receipt.SyntheticCalls, receipt.FirstTypedRequestSha256, success: true) &&
+            ControlledObservationMatches(path, receipt.Scenario, receipt.ProcessInstanceSha256, receipt.BuildPairSha256, receipt.TypedObservations) ? receipt : null;
     }
 
     private static VerifierQualityProjection? ReadQuality(JsonElement value)
@@ -827,7 +870,7 @@ internal static class VerifierEvidence
     {
         using var document = OpenExact(path,
         [
-            "kind", "execution_kind", "execution_artifact_sha256",
+            "kind", "observation_domain", "typed_observations", "execution_kind", "execution_artifact_sha256",
             "architecture_assembly_sha256", "build_pair_sha256",
             "case", "phase", "state_expectation", "expected_code",
             "actual_code", "state_before_sha256", "state_after_sha256",
@@ -837,7 +880,7 @@ internal static class VerifierEvidence
             "canonical_lineage_generation",
             "canonical_lineage_session_sha256",
             "canonical_lineage_envelope_sha256",
-            "canonical_lineage_sha256", "activation_count", "provider_requests",
+            "canonical_lineage_sha256", "activation_count", "synthetic_calls",
             "commit_delegation_count", "handoff_ready",
             "accepted_truth_preserved", "passed", "process_instance_sha256",
             "result_before_sha256", "result_after_sha256",
@@ -849,7 +892,7 @@ internal static class VerifierEvidence
         }
 
         var root = document.RootElement;
-        return new VerifierNegativeReceipt(
+        var receipt = new VerifierNegativeReceipt(
             RequiredString(root, "kind"),
             RequiredString(root, "case"),
             RequiredString(root, "phase"),
@@ -869,7 +912,7 @@ internal static class VerifierEvidence
             NullableString(root, "canonical_lineage_envelope_sha256"),
             NullableString(root, "canonical_lineage_sha256"),
             root.GetProperty("activation_count").GetInt32(),
-            root.GetProperty("provider_requests").GetInt32(),
+            root.GetProperty("synthetic_calls").GetInt32(),
             root.GetProperty("commit_delegation_count").GetInt32(),
             root.GetProperty("handoff_ready").GetBoolean(),
             root.GetProperty("accepted_truth_preserved").GetBoolean(),
@@ -881,7 +924,9 @@ internal static class VerifierEvidence
             RequiredString(root, "execution_kind"),
             RequiredString(root, "execution_artifact_sha256"),
             RequiredString(root, "architecture_assembly_sha256"),
-            RequiredString(root, "build_pair_sha256"));
+            RequiredString(root, "build_pair_sha256"), RequiredString(root, "observation_domain"), ReadTypedObservations(root));
+        return TypedObservationsValid(receipt.TypedObservations, receipt.SyntheticCalls) &&
+            ControlledObservationMatches(path, receipt.Case, receipt.ProcessInstanceSha256, receipt.BuildPairSha256, receipt.TypedObservations) ? receipt : null;
     }
 
     private static VerifierArchitectureReceipt? ReadArchitecture(string path)
@@ -891,8 +936,8 @@ internal static class VerifierEvidence
             "kind", "execution_kind", "execution_artifact_sha256",
             "architecture_assembly_sha256", "build_pair_sha256",
             "status", "assembly_sha256",
-            "forbidden_references_absent", "real_transport_creation_calls",
-            "transport_factory_types", "profile_types", "passed",
+            "forbidden_references_absent", "typed_factory_creation_calls",
+            "typed_chat_factory_types", "profile_types", "passed",
             "process_instance_sha256",
         ]);
         if (document is null)
@@ -910,8 +955,8 @@ internal static class VerifierEvidence
             RequiredString(root, "status"),
             RequiredString(root, "assembly_sha256"),
             root.GetProperty("forbidden_references_absent").GetBoolean(),
-            root.GetProperty("real_transport_creation_calls").GetInt32(),
-            root.GetProperty("transport_factory_types").GetInt32(),
+            root.GetProperty("typed_factory_creation_calls").GetInt32(),
+            root.GetProperty("typed_chat_factory_types").GetInt32(),
             root.GetProperty("profile_types").GetInt32(),
             root.GetProperty("passed").GetBoolean(),
             RequiredString(root, "process_instance_sha256"));

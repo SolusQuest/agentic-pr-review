@@ -25,6 +25,9 @@ internal sealed class CapacityMeasurement
     private readonly long start = Stopwatch.GetTimestamp();
     private readonly long allocated = GC.GetTotalAllocatedBytes(precise: true);
     internal int ProjectBytes { get; private set; }
+    internal int InitialUserContentBytes { get; private set; }
+    internal void ObserveInput(AgentRunRequest run)
+    { InitialUserContentBytes = Encoding.UTF8.GetByteCount(((ProjectTextContent)run.InitialMessages[^1].Contents.Single()).Text); }
     internal int Messages { get; private set; }
     internal int Parts { get; private set; }
     internal void Observe(ProjectChatRequest request)
@@ -38,7 +41,8 @@ internal sealed class CapacityMeasurement
         using var process = Process.GetCurrentProcess();
         return new((long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
             GC.GetTotalAllocatedBytes(precise: true) - allocated, process.WorkingSet64, process.PeakWorkingSet64,
-            transport?.MaximumRequestBytes ?? 0, transport?.MaximumResponseBytes ?? 0, ProjectBytes,
+            transport?.MaximumRequestBytes ?? 0, null, transport?.GenericResponseAdmissionBytes ?? 0,
+            transport?.ReasoningContentBytes ?? 0, InitialUserContentBytes, ProjectBytes,
             Messages, Parts, records, sessionBytes, envelopeBytes, storedBytes, snapshotBytes);
     }
 }
@@ -75,7 +79,7 @@ internal sealed record CapacitySnapshot(ReviewedSnapshot Snapshot, IReviewedFile
 internal sealed record CapacityCall(string Id, string Name, string Arguments);
 
 // Independent positive transcript inventory. Expectations come from authored run metadata
-// (local) or each previously accepted pre-projection Host context, never restored wire users.
+// (local) or each previously accepted Host context, never restored logical users.
 internal static class CapacityUserOracle
 {
     internal static string LocalText(string runId, bool fresh) =>
@@ -85,7 +89,7 @@ internal static class CapacityUserOracle
         int sentTurns, bool fresh, string[]? hostUsers = null, string[]? forbiddenUsers = null)
     {
         var users = hostUsers ?? history.Select(run => LocalText(run.Id, fresh)).Append(LocalText(selected.Id, fresh)).ToArray();
-        CapacitySpec.Require(users.Length == history.Length + 1 && users.All(text => !string.IsNullOrEmpty(text)), "wire_user_inventory");
+        CapacitySpec.Require(users.Length == history.Length + 1 && users.All(text => !string.IsNullOrEmpty(text)), "logical_user_inventory");
         var expected = new List<(string Role, string? User)>();
         for (var index = 0; index < history.Length; index++)
         {
@@ -95,32 +99,34 @@ internal static class CapacityUserOracle
         expected.Add(("user", users[^1]));
         AddTurns(selected.Calls, selected.ToolsPerTurn, sentTurns);
         var controlCount = messages.Length - expected.Count;
-        CapacitySpec.Require(controlCount >= 1, "wire_user_message_count");
+        CapacitySpec.Require(controlCount >= 1, "logical_user_message_count");
         foreach (var control in messages.Take(controlCount))
-            CapacitySpec.Require(control.GetProperty("role").GetString() is "system" or "developer", "wire_user_control_prefix");
+            CapacitySpec.Require(control.GetProperty("role").GetString() is "system" or "developer", "logical_user_control_prefix");
         // An intact user suffix does not prove that its untrusted contents were not also
         // copied into control/assistant/tool messages. Decode every string, including nested
         // values, so escaped newlines or a wrapping field cannot hide that promotion.
         var forbidden = (forbiddenUsers ?? []).Concat(fresh ? [CapacitySpec.OldUser] : []).ToArray();
-        CapacitySpec.Require(forbidden.All(text => !string.IsNullOrEmpty(text)), "wire_user_forbidden_inventory");
+        CapacitySpec.Require(forbidden.All(text => !string.IsNullOrEmpty(text)), "logical_user_forbidden_inventory");
         var forbiddenTokens = forbidden.SelectMany(Tokens).Distinct(StringComparer.Ordinal).ToArray();
         var userTokens = users.SelectMany(Tokens).Distinct(StringComparer.Ordinal).ToArray();
         foreach (var message in messages)
         {
-            CapacitySpec.Require(!forbiddenTokens.Any(text => Contains(message, text)), "wire_user_forbidden");
+            CapacitySpec.Require(!forbiddenTokens.Any(text => Contains(message, text)), "logical_user_forbidden");
             if (message.GetProperty("role").GetString() != "user")
-                CapacitySpec.Require(!userTokens.Any(text => Contains(message, text)), "wire_user_promotion");
+                CapacitySpec.Require(!userTokens.Any(text => Contains(message, text)), "logical_user_promotion");
         }
         for (var index = 0; index < expected.Count; index++)
         {
             var actual = messages[controlCount + index]; var wanted = expected[index];
-            CapacitySpec.Require(actual.GetProperty("role").GetString() == wanted.Role, "wire_user_placement");
+            CapacitySpec.Require(actual.GetProperty("role").GetString() == wanted.Role, "logical_user_placement");
             if (wanted.User is not null)
-                CapacitySpec.Require(actual.GetProperty("content").GetString() == wanted.User, "wire_user_content");
+                CapacitySpec.Require(actual.GetProperty("contents").GetArrayLength() == 1 &&
+                    actual.GetProperty("contents")[0].GetProperty("kind").GetString() == "text" &&
+                    actual.GetProperty("contents")[0].GetProperty("text").GetString() == wanted.User, "logical_user_content");
         }
         void AddTurns(int total, int tools, int completed)
         {
-            CapacitySpec.Require(completed >= 0 && completed <= total, "wire_user_turns");
+            CapacitySpec.Require(completed >= 0 && completed <= total, "logical_user_turns");
             for (var turn = 0; turn < completed; turn++)
             {
                 expected.Add(("assistant", null));
@@ -148,15 +154,16 @@ internal static class CapacityUserOracle
     };
 }
 
-// Unlike R5 replay, this transport never retains the complete repeated request transcript.
-// The independently authored history oracle is evaluated on the actual provider wire on every send.
+// The fixed typed script never retains the complete repeated logical transcript.
+// Independent history oracles read actual typed callback input on every invocation.
 internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[] history, CapacityClock clock,
-    bool fresh, bool host = false, ReviewedIdentity? expectedIdentity = null, string[]? expectedUsers = null,
-    string[]? forbiddenUsers = null) : IAccountedDeepSeekTransport
+    bool fresh, DeepSeekAdapterContext context, bool host = false, ReviewedIdentity? expectedIdentity = null, string[]? expectedUsers = null,
+    string[]? forbiddenUsers = null) : IProjectChatClient, IDisposable
 {
     internal int Sends { get; private set; }
     internal int MaximumRequestBytes { get; private set; }
-    internal int MaximumResponseBytes { get; private set; }
+    internal int GenericResponseAdmissionBytes { get; private set; }
+    internal int ReasoningContentBytes { get; private set; }
     internal int VerifiedAssistants { get; private set; }
     internal int VerifiedToolResults { get; private set; }
     internal int ListedFiles { get; private set; }
@@ -182,56 +189,43 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
         }).ToArray();
     }
 
-    public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> body, CancellationToken token) =>
-        SendAsync(body, token, null);
-    public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> body, CancellationToken token, ProviderAttemptCapture? accounting)
+    public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
+        var body = AgentRequestWriter.Write(request);
         try
         {
-            CapacitySpec.Require(accounting is null || accounting.TryBeginDispatch(), "dispatch");
+            CapacitySpec.Require(request.Accounting is null || request.Accounting.TryBeginDispatch(), "dispatch");
             MaximumRequestBytes = Math.Max(MaximumRequestBytes, body.Length);
-            VerifyWire(body);
+            VerifyLogicalInput(body);
         }
         catch (InvalidOperationException failure) { OracleFailure = failure.Message; throw; }
         var turn = Sends++;
         if (selected.Mode == "deadline") clock.Seconds = AgentLimits.DeadlineSeconds;
         if (selected.Mode == "response")
         {
-            var oversizedBody = new byte[AgentLimits.ResponseBytes + 1];
-            MaximumResponseBytes = oversizedBody.Length;
-            CapacitySpec.Require(oversizedBody.Length > AgentLimits.ResponseBytes, "response_body_boundary");
-            return Task.FromResult(DeepSeekTransportResult.ResponseTooLarge());
+            // An authored typed admission sentinel exercises the generic response bound;
+            // it is not a serialized provider-body size or HTTP qualification.
+            GenericResponseAdmissionBytes = AgentLimits.ResponseBytes + 1;
+            return Task.FromResult(new ProjectChatResponse(new("assistant", []),
+                CapturedResponseBodyBytes: GenericResponseAdmissionBytes));
         }
         var reasoning = selected.Mode == "capacity" ? new string('r', AgentLimits.ContentBytes + 1) : Reasoning(selected.Id, turn);
+        ReasoningContentBytes = Math.Max(ReasoningContentBytes, Encoding.UTF8.GetByteCount(reasoning));
         var calls = Calls(selected.Id, Math.Max(1, selected.Calls), selected.ToolsPerTurn, turn, host);
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject(); writer.WriteString("model", DeepSeekAdapterContext.Model);
-            writer.WritePropertyName("choices"); writer.WriteStartArray(); writer.WriteStartObject(); writer.WriteNumber("index", 0);
-            writer.WriteString("finish_reason", "tool_calls"); writer.WritePropertyName("message"); writer.WriteStartObject();
-            writer.WriteString("role", "assistant"); writer.WriteString("content", ""); writer.WriteString("reasoning_content", reasoning);
-            writer.WritePropertyName("tool_calls"); writer.WriteStartArray();
-            foreach (var call in calls)
-            {
-                writer.WriteStartObject(); writer.WriteString("id", call.Id); writer.WriteString("type", "function");
-                writer.WritePropertyName("function"); writer.WriteStartObject(); writer.WriteString("name", call.Name);
-                writer.WriteString("arguments", call.Arguments); writer.WriteEndObject(); writer.WriteEndObject();
-            }
-            writer.WriteEndArray(); writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray();
-            var output = selected.Mode == "output" ? AgentLimits.OutputTokens + 1 : 2;
-            writer.WritePropertyName("usage"); writer.WriteStartObject(); writer.WriteNumber("prompt_tokens", 3);
-            writer.WriteNumber("completion_tokens", output); writer.WriteNumber("total_tokens", 3 + output);
-            writer.WriteNumber("prompt_cache_hit_tokens", 0); writer.WriteNumber("prompt_cache_miss_tokens", 3);
-            writer.WriteEndObject(); writer.WriteEndObject();
-        }
-        var response = stream.ToArray();
-        MaximumResponseBytes = Math.Max(MaximumResponseBytes, response.Length);
-        return Task.FromResult(DeepSeekTransportResult.Success(response));
+        var output = selected.Mode == "output" ? AgentLimits.OutputTokens + 1 : 2;
+        request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, output, 0, 3, 3 + output));
+        var position = request.Messages.Length;
+        ProjectChatContent[] contents = [new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+            .. calls.Select(call => new ProjectToolCallContent(call.Id, call.Name, call.Arguments))];
+        // Typed fixture: no serialized provider response body; zero is not a wire measurement.
+        return Task.FromResult(new ProjectChatResponse(new("assistant", contents),
+            new(3, output, new(context.ProviderId, context.ModelId, context.ModelId, 0, 3)),
+            CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
+                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
     }
 
-    private void VerifyWire(ReadOnlyMemory<byte> body)
+    private void VerifyLogicalInput(ReadOnlyMemory<byte> body)
     {
         using var document = JsonDocument.Parse(body);
         var messages = document.RootElement.GetProperty("messages").EnumerateArray().ToArray();
@@ -241,38 +235,47 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
             .Concat(Enumerable.Range(0, Sends).Select(turn => (selected.Id, selected.Calls, selected.ToolsPerTurn, Turn: turn,
                 Identity: expectedIdentity ?? CapacityState.Identity))).ToArray();
         var assistants = messages.Where(message => message.GetProperty("role").GetString() == "assistant").ToArray();
-        CapacitySpec.Require(assistants.Length == expected.Length, "wire_history_count");
+        CapacitySpec.Require(assistants.Length == expected.Length, "logical_history_count");
         var expectedTools = new Dictionary<string, (CapacityCall Call, ReviewedIdentity Identity)>(StringComparer.Ordinal);
         for (var index = 0; index < expected.Length; index++)
         {
             var item = expected[index];
             var message = assistants[index];
-            CapacitySpec.Require(message.GetProperty("reasoning_content").GetString() == Reasoning(item.Id, item.Turn), "wire_reasoning_association");
+            var position = Array.FindIndex(messages, candidate => candidate.GetRawText() == message.GetRawText());
+            var carriers = document.RootElement.GetProperty("continuation").GetProperty("items").EnumerateArray()
+                .Where(carrier => carrier.GetProperty("message_position").GetInt32() == position).ToArray();
+            CapacitySpec.Require(carriers.Length == 1 && carriers[0].GetProperty("content_position").GetInt32() == 0 &&
+                carriers[0].GetProperty("readable").GetString() == Reasoning(item.Id, item.Turn) &&
+                carriers[0].GetProperty("opaque").GetString() == "" &&
+                carriers[0].GetProperty("framing").GetString() == DeepSeekReasoningContinuationCodec.FramingName &&
+                carriers[0].GetProperty("associated_call_id").ValueKind == JsonValueKind.Null, "logical_reasoning_association");
             var calls = Calls(item.Id, item.Calls, item.ToolsPerTurn, item.Turn, host);
-            var actual = message.GetProperty("tool_calls");
-            CapacitySpec.Require(actual.GetArrayLength() == calls.Length, "wire_call_count");
+            var actual = message.GetProperty("contents").EnumerateArray().Where(c => c.GetProperty("kind").GetString() == "tool_call").ToArray();
+            CapacitySpec.Require(actual.Length == calls.Length, "logical_call_count");
             for (var slot = 0; slot < calls.Length; slot++)
             {
                 var call = calls[slot]; var value = actual[slot];
-                // Production projection omits SESSION's canonical null option again on provider wire.
-                using var wanted = JsonDocument.Parse(call.Arguments);
-                using var received = JsonDocument.Parse(value.GetProperty("function").GetProperty("arguments").GetString()!);
-                CapacitySpec.Require(value.GetProperty("id").GetString() == call.Id, "wire_call_id");
-                CapacitySpec.Require(value.GetProperty("function").GetProperty("name").GetString() == call.Name, "wire_call_name");
-                CapacitySpec.Require(JsonElement.DeepEquals(wanted.RootElement, received.RootElement), "wire_call_arguments_" + call.Name);
-                CapacitySpec.Require(expectedTools.TryAdd(call.Id, (call, item.Identity)), "wire_duplicate_call");
+                // Compare actual logical canonical arguments against the fixed authored tool contract.
+                using var wanted = JsonDocument.Parse(CanonicalArguments(call));
+                using var received = JsonDocument.Parse(value.GetProperty("arguments_json").GetString()!);
+                CapacitySpec.Require(value.GetProperty("call_id").GetString() == call.Id, "logical_call_id");
+                CapacitySpec.Require(value.GetProperty("name").GetString() == call.Name, "logical_call_name");
+                CapacitySpec.Require(JsonElement.DeepEquals(wanted.RootElement, received.RootElement), "logical_call_arguments_" + call.Name);
+                CapacitySpec.Require(expectedTools.TryAdd(call.Id, (call, item.Identity)), "logical_duplicate_call");
             }
         }
         var toolMessages = messages.Where(message => message.GetProperty("role").GetString() == "tool").ToArray();
-        CapacitySpec.Require(toolMessages.Length == expectedTools.Count, "wire_tool_count");
+        CapacitySpec.Require(toolMessages.Length == expectedTools.Count, "logical_tool_count");
         var listed = new HashSet<string>(StringComparer.Ordinal); var diffReads = 0;
         foreach (var message in toolMessages)
         {
-            var id = message.GetProperty("tool_call_id").GetString()!;
-            CapacitySpec.Require(expectedTools.Remove(id, out var association), "wire_tool_association");
+            var resultContent = message.GetProperty("contents");
+            CapacitySpec.Require(resultContent.GetArrayLength() == 1 && resultContent[0].GetProperty("kind").GetString() == "tool_result", "logical_result_shape");
+            var id = resultContent[0].GetProperty("call_id").GetString()!;
+            CapacitySpec.Require(expectedTools.Remove(id, out var association), "logical_tool_association");
             var call = association.Call;
-            var content = message.GetProperty("content").GetString()!;
-            if (call!.Name == "finish_review") CapacitySpec.Require(content == "{}", "wire_terminal_result");
+            var content = resultContent[0].GetProperty("result").GetString()!;
+            if (call!.Name == "finish_review") CapacitySpec.Require(content == "{}", "logical_terminal_result");
             else
             {
                 using var result = JsonDocument.Parse(content);
@@ -282,38 +285,38 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
                     identity.GetProperty("repository_id").GetString() == wantedIdentity.RepositoryId &&
                     identity.GetProperty("review_target").GetInt64() == wantedIdentity.ReviewTarget &&
                     identity.GetProperty("base_sha").GetString() == wantedIdentity.BaseSha &&
-                    identity.GetProperty("head_sha").GetString() == wantedIdentity.HeadSha, "wire_tool_identity");
+                    identity.GetProperty("head_sha").GetString() == wantedIdentity.HeadSha, "logical_tool_identity");
                 using var arguments = JsonDocument.Parse(call.Arguments);
                 if (call.Name is "read_file" or "read_diff")
                     CapacitySpec.Require(result.RootElement.GetProperty("path").GetString() ==
-                        arguments.RootElement.GetProperty("path").GetString(), "wire_tool_path");
+                        arguments.RootElement.GetProperty("path").GetString(), "logical_tool_path");
                 if (call.Name == "read_file")
                     CapacitySpec.Require(result.RootElement.GetProperty("lines")[0].GetProperty("text").GetString() ==
-                        (fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool), "wire_tool_data");
+                        (fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool), "logical_tool_data");
                 if (call.Name == "list_changed_files")
                 {
                     var start = call.Arguments == "{}" ? 0 : int.Parse(arguments.RootElement.GetProperty("after").GetString()!.AsSpan(5, 4),
                         System.Globalization.CultureInfo.InvariantCulture) + 1;
                     var changes = result.RootElement.GetProperty("changes");
-                    CapacitySpec.Require(changes.GetArrayLength() == Math.Min(100, 320 - start), "wire_list_count");
+                    CapacitySpec.Require(changes.GetArrayLength() == Math.Min(100, 320 - start), "logical_list_count");
                     var offset = 0;
                     foreach (var change in result.RootElement.GetProperty("changes").EnumerateArray())
                     {
                         var path = change.GetProperty("path").GetString()!;
-                        CapacitySpec.Require(path == $"file-{start + offset++:D4}.txt" && listed.Add(path), "wire_list_membership");
+                        CapacitySpec.Require(path == $"file-{start + offset++:D4}.txt" && listed.Add(path), "logical_list_membership");
                     }
                 }
                 if (call.Name == "read_diff")
-                { CapacitySpec.Require(content.Contains(fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool, StringComparison.Ordinal), "wire_diff_data"); diffReads++; }
+                { CapacitySpec.Require(content.Contains(fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool, StringComparison.Ordinal), "logical_diff_data"); diffReads++; }
             }
         }
-        CapacitySpec.Require(expectedTools.Count == 0, "wire_missing_result");
+        CapacitySpec.Require(expectedTools.Count == 0, "logical_missing_result");
         foreach (var message in messages)
         {
             var role = message.GetProperty("role").GetString();
             var raw = message.GetRawText();
-            CapacitySpec.Require(!raw.Contains(fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool, StringComparison.Ordinal) || role == "tool", "wire_tool_role");
-            CapacitySpec.Require(!raw.Contains(fresh ? CapacitySpec.FreshUser : CapacitySpec.OldUser, StringComparison.Ordinal) || role == "user", "wire_user_role");
+            CapacitySpec.Require(!raw.Contains(fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool, StringComparison.Ordinal) || role == "tool", "logical_tool_role");
+            CapacitySpec.Require(!raw.Contains(fresh ? CapacitySpec.FreshUser : CapacitySpec.OldUser, StringComparison.Ordinal) || role == "user", "logical_user_role");
         }
         if (fresh)
         {
@@ -326,6 +329,14 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
         VerifiedAssistants = Math.Max(VerifiedAssistants, assistants.Length);
         VerifiedToolResults = Math.Max(VerifiedToolResults, toolMessages.Length);
         ListedFiles = Math.Max(ListedFiles, listed.Count); DiffReads = Math.Max(DiffReads, diffReads);
+    }
+    private static byte[] CanonicalArguments(CapacityCall call)
+    {
+        if (call.Name == "list_changed_files" && AgentToolArguments.TryListChangedFilesProvider(call.Arguments, out var listed)) return listed!.CanonicalBytes;
+        if (call.Name == "read_file" && AgentToolArguments.TryReadFileProvider(call.Arguments, out var read)) return read!.CanonicalBytes;
+        if (call.Name == "read_diff" && AgentToolArguments.TryReadDiffProvider(call.Arguments, out var diff)) return diff!.CanonicalBytes;
+        if (call.Name == "finish_review" && AgentToolArguments.TryFinishReviewProvider(call.Arguments, out var finish)) return finish!.CanonicalBytes;
+        throw new InvalidOperationException("r7_capacity_authored_arguments");
     }
     public void Dispose() { }
 }

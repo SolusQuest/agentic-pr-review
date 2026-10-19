@@ -90,7 +90,7 @@ internal static class GateComparisonCases
         {
             var scope = collector.BeginAttempt(i); scope.AgentStarted();
             var call = scope.BeginCall()!; Require(call.Dispatch());
-            call.TransportFinished(DeepSeekTransportResult.Success([])); call.Returned(GateTokenCases.Measured(10, output, 6));
+            call.ScriptFinished("success"); call.Returned(GateTokenCases.Measured(10, output, 6));
             var run = new EvaluationRunInput(expected.AttemptId(i), "deterministic", plan.Source.Commit, plan.Source.Tree, plan.Source.Clean,
                 plan.Provider.ConfigurationSha256);
             var attemptHash = EvaluationAttempt.Hash("attempt", Hash('e'), AgentCanonical.HashRaw(EvaluationJson.Write(run)));
@@ -122,9 +122,9 @@ internal static class GateComparisonCases
         var segment = new PrefixSegment(Hash('a'), 1, 1);
         var projection = new PrefixProjection(segment, segment, segment, segment, segment);
         var baseline = new PrefixObservation(new(selection.SourceCommit, selection.SourceTree, selection.SourceClean,
-            Hash('f'), Hash(session), -1, null), 1, 0, projection, projection);
+            Hash('f'), Hash(session), -1, null), 1, 0, projection, PrefixObservation.LogicalDomain);
         var changed = projection with { Dynamic = new(Hash('c'), 2, 1), Whole = new(Hash('d'), 4, 1), History = new(Hash('e'), 1, 1) };
-        var call = baseline with { Logical = changed, Provider = changed };
+        var call = baseline with { Logical = changed };
         var row = new HistoryRow(0, 123, "session_failed", false, null, null, null, true, true, true,
             baseline.Compare(call), new("observed", baseline, [call]));
         var report = new HistoryReport("deterministic", "replay", "session_failed", "cleaned", selection.SourceCommit,

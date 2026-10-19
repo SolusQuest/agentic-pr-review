@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text;
@@ -250,8 +251,8 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
         {
             var historical = new string('a', 64);
             var current = new string('b', 64);
-            var tool = (string id) => new { role = "tool", tool_call_id = "read", content = "{\"observation_id\":\"" + id + "\"}" };
-            var context = new { role = "user", content = "Current context" };
+            var tool = (string id) => new { role = "tool", contents = new[] { new { kind = "tool_result", call_id = "read", result = "{\"observation_id\":\"" + id + "\"}" } } };
+            var context = new { role = "user", contents = new[] { new { kind = "text", text = "Current context" } } };
             var arguments = "{\"summary\":\"s\",\"findings\":[{\"evidence\":[{\"observation_id\":\"$current:read\"}]}]}";
             using var prior = JsonDocument.Parse(JsonSerializer.Serialize(new { messages = new object[] { tool(historical), context } }));
             Assert.Throws<InvalidOperationException>(() => IncrementalArguments.Expand(arguments, prior.RootElement));
@@ -449,18 +450,17 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                     {
                         owner.Request = request;
                         Assert.Equal(owner.input.Input.ReviewedIdentity.Runtime, snapshot.Identity);
-                        using var transport = new ReplayTransport(owner.input.Script, ReplayFault.None);
-                        var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-                            DeepSeekAdapterContext.Adapter, request.SessionId), transport);
+                        using var transport = new ReplayScriptClient(owner.input.Script, ReplayFault.None, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, request.SessionId));
+                        IProjectChatClient client = transport;
                         var outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), timeProvider).RunAsync(request, token);
                         owner.Outcome = outcome;
                         Assert.Equal(2, transport.Consumed);
                         Assert.False(transport.Failed);
                         using var initial = JsonDocument.Parse(transport.Requests[0]);
-                        var assistant = initial.RootElement.GetProperty("messages").EnumerateArray()
-                            .Where(message => message.GetProperty("role").GetString() == "assistant");
-                        Assert.Equal(Enumerable.Range(0, owner.index).SelectMany(index => new[] { IncrementalCoverage.Reasoning(index, false), IncrementalCoverage.Reasoning(index, true) }),
-                            assistant.Select(message => message.GetProperty("reasoning_content").GetString()));
+                        var continuation = initial.RootElement.GetProperty("continuation");
+                        var reasoning = continuation.ValueKind == JsonValueKind.Null ? [] : continuation.GetProperty("items").EnumerateArray()
+                            .Select(item => item.GetProperty("readable").GetString()).ToArray();
+                        Assert.Equal(Enumerable.Range(0, owner.index).SelectMany(index => new[] { IncrementalCoverage.Reasoning(index, false), IncrementalCoverage.Reasoning(index, true) }), reasoning);
                         owner.onCompleted();
                         return outcome;
                         }

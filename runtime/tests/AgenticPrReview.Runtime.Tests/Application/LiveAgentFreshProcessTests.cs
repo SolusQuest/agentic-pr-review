@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
@@ -97,7 +98,9 @@ public sealed class LiveAgentFreshProcessTests
         Assert.Equal(1, secondResult.Generation);
         Assert.Equal("verified_ahead", secondResult.TransitionClass);
         Assert.True(secondResult.HandoffReady);
-        Assert.NotNull(secondResult.SecondRequestSha256);
+        // The historical typed script does not observe a serialized provider request.
+        // Current Solus direct transport keeps its separate actual wire digest proof.
+        Assert.Null(secondResult.SecondRequestSha256);
         Assert.NotEqual(
             firstResult.InvocationIdentitySha256,
             secondResult.InvocationIdentitySha256);
@@ -1609,11 +1612,10 @@ public sealed class LiveAgentFreshProcessTests
     {
         var fact = "APR_PRIOR_ONLY_" + new string('a', 64);
         var messages = RestoredMessages(fact);
-        using var document = JsonDocument.Parse(messages.ToJsonString());
 
-        var accepted = LiveAgentFreshProcessDeterministicTransport
+        var accepted = LiveAgentFreshProcessDeterministicChat
             .TryValidateRestoredMessages(
-                document.RootElement,
+                messages,
                 [Encoding.UTF8.GetBytes("fresh public input")],
                 out var restored);
 
@@ -1644,51 +1646,25 @@ public sealed class LiveAgentFreshProcessTests
         };
         switch (mutation)
         {
-            case "first_reasoning":
-                Message(messages, 2)["reasoning_content"] = "changed";
-                break;
-            case "first_call_id":
-                ToolCall(Message(messages, 2))["id"] = "changed";
-                break;
-            case "first_arguments":
-                ToolFunction(Message(messages, 2))["arguments"] =
-                    "{\"path\":\"fact.txt\"}";
-                break;
-            case "first_result_id":
-                Message(messages, 3)["tool_call_id"] = "changed";
-                break;
-            case "finish_reasoning":
-                Message(messages, 4)["reasoning_content"] = "changed";
-                break;
-            case "finish_call_id":
-                ToolCall(Message(messages, 4))["id"] = "changed";
-                break;
-            case "finish_arguments":
-                ToolFunction(Message(messages, 4))["arguments"] = "{}";
-                break;
-            case "finish_result_id":
-                Message(messages, 5)["tool_call_id"] = "changed";
-                break;
-            case "historical_user_fact":
-                Message(messages, 1)["content"] = fact;
-                break;
-            case "fresh_user_fact":
-                Message(messages, 6)["content"] = fact;
-                break;
-            case "fresh_public_fact":
-                currentInputs.Add(Encoding.UTF8.GetBytes(fact));
-                break;
+            case "first_reasoning": SetReasoning(messages, 2, "changed"); break;
+            case "first_call_id": SetCall(messages, 2, Call(messages, 2) with { CallId = "changed" }); break;
+            case "first_arguments": SetCall(messages, 2, Call(messages, 2) with { ArgumentsJson = "{\"path\":\"fact.txt\"}" }); break;
+            case "first_result_id": SetResult(messages, 3, Result(messages, 3) with { CallId = "changed" }); break;
+            case "finish_reasoning": SetReasoning(messages, 4, "changed"); break;
+            case "finish_call_id": SetCall(messages, 4, Call(messages, 4) with { CallId = "changed" }); break;
+            case "finish_arguments": SetCall(messages, 4, Call(messages, 4) with { ArgumentsJson = "{}" }); break;
+            case "finish_result_id": SetResult(messages, 5, Result(messages, 5) with { CallId = "changed" }); break;
+            case "historical_user_fact": messages[1] = new("user", [new ProjectTextContent(fact)]); break;
+            case "fresh_user_fact": messages[6] = new("user", [new ProjectTextContent(fact)]); break;
+            case "fresh_public_fact": currentInputs.Add(Encoding.UTF8.GetBytes(fact)); break;
             case "unapproved_reasoning":
-                Message(messages, 3)["reasoning_content"] = "hidden";
-                break;
-            default:
-                throw new InvalidOperationException("Unknown mutation.");
+                messages[3] = messages[3] with { Contents = [Result(messages, 3), Reasoning("hidden", 3)] }; break;
+            default: throw new InvalidOperationException("Unknown mutation.");
         }
 
-        using var document = JsonDocument.Parse(messages.ToJsonString());
-        Assert.False(LiveAgentFreshProcessDeterministicTransport
+        Assert.False(LiveAgentFreshProcessDeterministicChat
             .TryValidateRestoredMessages(
-                document.RootElement,
+                messages,
                 currentInputs,
                 out _));
     }
@@ -1710,86 +1686,38 @@ public sealed class LiveAgentFreshProcessTests
             .IsSatisfiedBy(expected));
     }
 
-    private static JsonArray RestoredMessages(string fact)
+    private static ProjectChatMessage[] RestoredMessages(string fact)
     {
         var observation = new string('e', 64);
         return
         [
-            new JsonObject
-            {
-                ["role"] = "system",
-                ["content"] = "stable control",
-            },
-            new JsonObject
-            {
-                ["role"] = "user",
-                ["content"] = "historical review context",
-            },
-            AssistantMessage(
-                "Inspect the manifest-backed reviewed file.",
-                "bootstrap_read",
-                AgentToolRegistry.ReadFileName,
-                "{\"path\":\"fact.txt\",\"start_line\":1," +
-                    "\"line_count\":800}"),
-            new JsonObject
-            {
-                ["role"] = "tool",
-                ["tool_call_id"] = "bootstrap_read",
-                ["content"] = "{\"observation_id\":\"" + observation +
-                    "\",\"content\":\"" + fact + "\"}",
-            },
-            AssistantMessage(
-                "Remember " + fact,
-                "bootstrap_finish",
-                AgentToolRegistry.FinishReviewName,
-                RestoredFinishArguments(fact, observation)),
-            new JsonObject
-            {
-                ["role"] = "tool",
-                ["tool_call_id"] = "bootstrap_finish",
-                ["content"] = "{}",
-            },
-            new JsonObject
-            {
-                ["role"] = "user",
-                ["content"] = "fresh review context",
-            },
+            new("system", [new ProjectTextContent("stable control")]),
+            new("user", [new ProjectTextContent("historical review context")]),
+            new("assistant", [Reasoning("Inspect the manifest-backed reviewed file.", 2),
+                new ProjectToolCallContent("bootstrap_read", AgentToolRegistry.ReadFileName,
+                    "{\"path\":\"fact.txt\",\"start_line\":1,\"line_count\":800}")]),
+            new("tool", [new ProjectToolResultContent("bootstrap_read",
+                "{\"observation_id\":\"" + observation + "\",\"content\":\"" + fact + "\"}")]),
+            new("assistant", [Reasoning("Remember " + fact, 4),
+                new ProjectToolCallContent("bootstrap_finish", AgentToolRegistry.FinishReviewName,
+                    RestoredFinishArguments(fact, observation))]),
+            new("tool", [new ProjectToolResultContent("bootstrap_finish", "{}")]),
+            new("user", [new ProjectTextContent("fresh review context")]),
         ];
     }
 
-    private static JsonObject AssistantMessage(
-        string reasoning,
-        string callId,
-        string name,
-        string arguments) => new()
-        {
-            ["role"] = "assistant",
-            ["content"] = string.Empty,
-            ["reasoning_content"] = reasoning,
-            ["tool_calls"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["id"] = callId,
-                    ["type"] = "function",
-                    ["function"] = new JsonObject
-                    {
-                        ["name"] = name,
-                        ["arguments"] = arguments,
-                    },
-                },
-            },
-        };
-
-    private static JsonObject Message(JsonArray messages, int index) =>
-        Assert.IsType<JsonObject>(messages[index]);
-
-    private static JsonObject ToolCall(JsonObject message) =>
-        Assert.IsType<JsonObject>(
-            Assert.IsType<JsonArray>(message["tool_calls"])[0]);
-
-    private static JsonObject ToolFunction(JsonObject message) =>
-        Assert.IsType<JsonObject>(ToolCall(message)["function"]);
+    private static ProjectReasoningContent Reasoning(string text, int position) =>
+        new(text, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0);
+    private static ProjectToolCallContent Call(ProjectChatMessage[] messages, int index) =>
+        Assert.IsType<ProjectToolCallContent>(messages[index].Contents[1]);
+    private static ProjectToolResultContent Result(ProjectChatMessage[] messages, int index) =>
+        Assert.IsType<ProjectToolResultContent>(messages[index].Contents[0]);
+    private static void SetCall(ProjectChatMessage[] messages, int index, ProjectToolCallContent call) =>
+        messages[index] = messages[index] with { Contents = [messages[index].Contents[0], call] };
+    private static void SetResult(ProjectChatMessage[] messages, int index, ProjectToolResultContent result) =>
+        messages[index] = messages[index] with { Contents = [result] };
+    private static void SetReasoning(ProjectChatMessage[] messages, int index, string text) =>
+        messages[index] = messages[index] with { Contents = [Reasoning(text, index), Call(messages, index)] };
 
     private static string RestoredFinishArguments(
         string fact,

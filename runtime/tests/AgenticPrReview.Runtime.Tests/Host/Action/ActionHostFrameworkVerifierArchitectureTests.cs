@@ -87,7 +87,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     [Fact]
     public void ProofFactoriesAreNarrowInternalConstructorSeams()
     {
-        var provider = typeof(ActionHostDeepSeekProviderRunnerFactory)
+        var provider = typeof(ActionHostHistoricalChatRunnerFactory)
             .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic);
         var github = typeof(ActionHostGitHubAuthorizationTransportFactory)
             .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic);
@@ -146,7 +146,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Contains("APR_ACTION_HOST_FRAMEWORK_GLOBAL_DIAGNOSTIC", verifier,
             StringComparison.Ordinal);
         var goldenAssignment =
-            "golden=\"$repo_root/runtime/tests/fixtures/action-host/r7-action-outputs/expected-evidence.json.golden\"";
+            "golden=\"$repo_root/runtime/tests/fixtures/action-host/cr1-r8-typed/expected-evidence.json.golden\"";
         Assert.Contains(goldenAssignment, verifier, StringComparison.Ordinal);
         Assert.True(verifier.IndexOf(goldenAssignment, StringComparison.Ordinal) <
             verifier.IndexOf("trap cleanup EXIT", StringComparison.Ordinal));
@@ -403,10 +403,107 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
 
         Assert.True((bool)validator.Invoke(null,
         [
+            Path.Join(fixture, "..", "cr1-r8-typed", "replacement-record.json"),
+            root,
+            Path.Join(fixture, "e1-base-inventory.json"),
+        ])!);
+        Assert.False((bool)validator.Invoke(null,
+        [
             Path.Join(fixture, "replacement-record.json"),
             root,
             Path.Join(fixture, "e1-base-inventory.json"),
         ])!);
+        var currentV2 = File.ReadAllText(Path.Join(root, "runtime", "scripts", "verify-r4-trusted-proof-payload-v2.sh"));
+        Assert.Contains("--record \"$repo_root/runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json\"", currentV2, StringComparison.Ordinal);
+        Assert.DoesNotContain("--record \"$framework_fixture_root/replacement-record.json\"", currentV2, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TypedSuccessorRetainsOtherEntriesAndRejectsProviderOwnershipSubstitution()
+    {
+        var root = FindRepositoryRoot();
+        var fixture = Path.Join(root, "runtime", "tests", "fixtures", "action-host");
+        var old = JsonNode.Parse(File.ReadAllBytes(Path.Join(fixture, "framework", "replacement-record.json")))!;
+        var current = JsonNode.Parse(File.ReadAllBytes(Path.Join(fixture, "cr1-r8-typed", "replacement-record.json")))!;
+        var priorEntries = old["entries"]!.AsArray();
+        var currentEntries = current["entries"]!.AsArray();
+        Assert.Equal(priorEntries.Count, currentEntries.Count);
+        for (var index = 0; index < priorEntries.Count; index++)
+            if (priorEntries[index]!["leaf_id"]!.GetValue<string>() is not ("W4" or "W12"))
+                Assert.True(JsonNode.DeepEquals(priorEntries[index], currentEntries[index]));
+        var validator = typeof(FrameworkSupervisor).GetMethod("ValidateReplacementRecord", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var temporary = Path.Join(Path.GetTempPath(), "apr-r8-map-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            foreach (var mutation in new[] { "missing", "duplicate", "retired", "owner", "qualification", "contract" })
+            {
+                var changed = current.DeepClone();
+                var entry = changed["entries"]!.AsArray().Single(value => value!["leaf_id"]!.GetValue<string>() == "W4")!;
+                var rows = entry["provider_retirement_evidence_map"]!.AsArray();
+                switch (mutation)
+                {
+                    case "missing": rows.RemoveAt(0); break;
+                    case "duplicate": rows[1] = rows[0]!.DeepClone(); break;
+                    case "retired": rows[0]!["retired_test"] = "unlisted.cs"; break;
+                    case "owner": rows[0]!["installed_fixture_paths"]![0] = "docs/20_architecture/deepseek-flash-identity.md"; break;
+                    case "qualification": rows[0]!["qualification"] = "passed because source exists"; break;
+                    case "contract": rows[0]!["contract"] = "wire claims delegated to typed script"; break;
+                }
+                File.WriteAllText(temporary, changed.ToJsonString());
+                Assert.False((bool)validator.Invoke(null, [temporary, root, Path.Join(fixture, "framework", "e1-base-inventory.json")])!, mutation);
+            }
+        }
+        finally { File.Delete(temporary); }
+    }
+
+    [Fact]
+    public void TypedSuccessorMetadataClassificationRequiresExactHistoricalDerivation()
+    {
+        var source = FindRepositoryRoot();
+        var root = Path.Join(Path.GetTempPath(), "apr-r8-derived-record-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        const string relative = "runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json";
+        const string historical = "runtime/tests/fixtures/action-host/framework/replacement-record.json";
+        var helper = typeof(FrameworkSupervisor).GetMethod("IsVerifiedTypedSuccessorRecord", BindingFlags.Static | BindingFlags.NonPublic)!;
+        try
+        {
+            var command = new ProcessStartInfo("git") { WorkingDirectory = source, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            command.ArgumentList.Add("ls-files"); command.ArgumentList.Add("-z");
+            using var process = Process.Start(command)!;
+            var paths = process.StandardOutput.ReadToEnd().Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            process.WaitForExit(); Assert.Equal(0, process.ExitCode);
+            foreach (var path in paths)
+            {
+                var original = Path.Join(source, path);
+                if (Directory.Exists(original)) continue;
+                var target = Path.Join(root, path); Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(original, target);
+            }
+            var currentPath = Path.Join(root, relative);
+            var originalBytes = File.ReadAllBytes(currentPath);
+            Assert.True((bool)helper.Invoke(null, [root])!);
+            foreach (var mutation in new[] { "root", "entry", "extra-entry", "extra-owner-field", "owner", "current-production-path", "null-root" })
+            {
+                var value = JsonNode.Parse(originalBytes)!;
+                var entries = value["entries"]!.AsArray();
+                var provider = entries.Single(entry => entry!["leaf_id"]!.GetValue<string>() == "W4")!;
+                switch (mutation)
+                {
+                    case "root": value["extra"] = true; break;
+                    case "entry": entries.Single(entry => entry!["leaf_id"]!.GetValue<string>() == "W5")!["classification"] = "forged"; break;
+                    case "extra-entry": entries.Add(entries[0]!.DeepClone()); break;
+                    case "extra-owner-field": provider["unlisted_provider_route"] = "enabled"; break;
+                    case "owner": provider["csharp_owners"]![0] = "UnlistedOwner"; break;
+                    case "current-production-path": provider["retained_evidence_paths"]![0] = "runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/DeepSeekCredential.cs"; break;
+                }
+                File.WriteAllText(currentPath, mutation == "null-root" ? "null" : value.ToJsonString());
+                Assert.False((bool)helper.Invoke(null, [root])!, mutation);
+            }
+            File.WriteAllBytes(currentPath, originalBytes);
+            var priorPath = Path.Join(root, historical);
+            File.AppendAllText(priorPath, "\n");
+            Assert.False((bool)helper.Invoke(null, [root])!); // Original digest must match, even with equivalent JSON.
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     [Fact]
@@ -416,7 +513,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         var fixture = Path.Join(root, "runtime", "tests", "fixtures",
             "action-host", "framework");
         using var replacement = JsonDocument.Parse(File.ReadAllBytes(
-            Path.Join(fixture, "replacement-record.json")));
+            Path.Join(fixture, "..", "cr1-r8-typed", "replacement-record.json")));
         using var inventory = JsonDocument.Parse(File.ReadAllBytes(
             Path.Join(fixture, "e1-base-inventory.json")));
 
@@ -1021,7 +1118,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.False(Directory.Exists(Path.Join(root, "protocol", "fixtures",
             "provider-run-metadata")));
         Assert.Contains(
-            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
             w12.GetProperty("retained_evidence_paths").EnumerateArray()
                 .Select(value => value.GetString()));
         Assert.Contains(

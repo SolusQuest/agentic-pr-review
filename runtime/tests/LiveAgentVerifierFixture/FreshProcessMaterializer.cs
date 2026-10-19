@@ -80,7 +80,9 @@ internal static class FreshProcessMaterializer
         Directory.CreateDirectory(Path.Join(root, "input"));
         Directory.CreateDirectory(Path.Join(root, "host"));
         Directory.CreateDirectory(Path.Join(root, "state"));
-        Directory.CreateDirectory(Path.Join(root, "private"));
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(Path.Join(root, "private"));
+        else Directory.CreateDirectory(Path.Join(root, "private"),
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         Directory.CreateDirectory(Path.Join(root, "output"));
 
         var trusted = new AgentSessionTrustedRequest(

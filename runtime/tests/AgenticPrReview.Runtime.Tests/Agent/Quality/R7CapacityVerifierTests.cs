@@ -49,6 +49,42 @@ public sealed class R7CapacityVerifierTests
         }
     }
 
+    [Theory]
+    [InlineData("domain")]
+    [InlineData("receipt-domain")]
+    [InlineData("wire-bytes")]
+    [InlineData("context-count")]
+    [InlineData("context-stimulus")]
+    [InlineData("response-sentinel")]
+    [InlineData("reasoning-stimulus")]
+    public void TypedDomainAndActualStimulusBindingsCannotBeForged(string mutation)
+    {
+        var report = Report();
+        var cases = report.Cases.ToArray();
+        switch (mutation)
+        {
+            case "domain": report = report with { ObservationDomain = "provider-wire" }; break;
+            case "receipt-domain": cases[0] = cases[0] with { ObservationDomain = "provider-wire" }; break;
+            case "wire-bytes": cases[0] = cases[0] with { Metrics = cases[0].Metrics with { ProviderResponseBytes = 0 } }; break;
+            case "context-count": cases[3] = cases[3] with { Calls = 1 }; break;
+            case "context-stimulus": cases[3] = cases[3] with { Metrics = cases[3].Metrics with { InitialUserContentBytes = 1048576 } }; break;
+            case "response-sentinel": cases[5] = cases[5] with { Metrics = cases[5].Metrics with { GenericResponseAdmissionBytes = 2097152 } }; break;
+            case "reasoning-stimulus": cases[2] = cases[2] with { Metrics = cases[2].Metrics with { ReasoningContentBytes = 1048576 } }; break;
+        }
+        Assert.NotNull(CapacityVerifier.Verify(report with { Cases = cases }, Corpus));
+    }
+
+    [Fact]
+    public void MissingDomainAndOldWireSchemaCannotBeReadAsTypedEvidence()
+    {
+        var value = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.SerializeToUtf8Bytes(Report(), CapacityJson.Default.CapacityReport))!;
+        value.AsObject().Remove("observationDomain");
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(value.ToJsonString(), CapacityJson.Default.CapacityReport));
+        value["observationDomain"] = "apr-historical-typed-logical-capacity-v1";
+        value["cases"]![0]!["metrics"]!["providerRequestBytes"] = 10000;
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(value.ToJsonString(), CapacityJson.Default.CapacityReport));
+    }
+
     [Fact]
     public void IncompleteHostCannotMasqueradeAsNoFindingsOrPreservedState()
     {
@@ -85,27 +121,28 @@ public sealed class R7CapacityVerifierTests
 
     private static CapacityReport Report()
     {
-        var codes = new[] { "completed", "completed", "agent_response_invalid", "agent_context_limit", "agent_token_limit",
+        var codes = new[] { "completed", "completed", "agent_response_invalid", "agent_response_invalid", "agent_token_limit",
             "agent_response_too_large", "agent_deadline_exceeded", "admission_rejected", "admission_rejected", "admission_rejected",
             "admission_rejected", "completed", "completed", "completed", "completed" };
         var tools = new[] { 442, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 382, 1 };
-        var receipts = Cases.Select((item, index) => new CapacityReceipt(item.Id, codes[index], index == 3 ? 1 : item.Calls, tools[index], item.Calls,
+        var receipts = Cases.Select((item, index) => new CapacityReceipt(item.Id, codes[index], item.Calls, tools[index], item.Calls,
             index == 0 ? 63 : index == 1 ? 64 : index == 13 ? 127 : index == 14 ? 128 : 0,
             index == 0 ? 441 : index == 1 ? 442 : index == 13 ? 381 : index == 14 ? 382 : 0,
             index is 0 or 13 ? 320 : 0, index is 0 or 13 ? 1 : 0, index is not (0 or 13), true,
             index is >= 2 and <= 10, index is >= 2 and <= 6, index is >= 2 and <= 6,
             index == 11, index is 11 or 12, true, 1000 + index, index.ToString("x32"), new('a', 40), new('b', 40), true,
-            new(1, 1, 1000, 1000, index == 3 ? 0 : 10000, index == 2 ? 1049000 : index == 5 ? 2097153 : 10000,
-                1100000, 600, 800, 900, 500000, 550000, 600000, 11_000_000))).ToArray();
+            new(1, 1, 1000, 1000, index == 3 ? 0 : 10000, null, index == 5 ? 2097153 : 0,
+                index == 2 ? 1048577 : 256, index == 3 ? 1048577 : 100, index == 3 ? 0 : 1100000,
+                600, 800, 900, 500000, 550000, 600000, 11_000_000), "apr-historical-typed-logical-capacity-v1")).ToArray();
         var modes = new[] { "seed", "capacity", "context", "output", "response", "deadline", "reset", "reset_restore" };
-        var hostCodes = new[] { "completed", "agent_response_invalid", "agent_context_limit", "agent_token_limit",
+        var hostCodes = new[] { "completed", "agent_response_invalid", "agent_response_invalid", "agent_token_limit",
             "agent_response_too_large", "agent_deadline_exceeded", "completed", "completed" };
         var host = modes.Select((mode, index) => new CapacityHostReceipt("host_" + mode, hostCodes[index],
             index is 0 or 6 or 7 ? "Reviewed" : index == 5 ? "ProviderFailed" : "AgentResultInvalid", index is 0 or 6 or 7 ? 0 : 1,
-            index is 0 or 6 or 7 ? "Accepted" : "NotCommitted", index == 0 ? 64 : index == 6 ? 2 : 1,
+            index is 0 or 6 or 7 ? "Accepted" : "NotCommitted", index == 0 ? 64 : index == 6 ? 2 : index == 2 ? 0 : 1,
             index == 0 ? 64 : index == 6 ? 2 : index == 2 ? 0 : 1, index is not (0 or 6), index is >= 1 and <= 5,
             index is >= 1 and <= 5, index is >= 1 and <= 5, index is >= 1 and <= 5, index >= 6)).ToArray();
-        return new("r7-capacity-v1", "r7_capacity_passed", Convert.ToHexStringLower(SHA256.HashData(Corpus)),
-            new('a', 40), new('b', 40), true, receipts, host, true);
+        return new("r7-historical-typed-logical-capacity-v1", "r7_capacity_passed", Convert.ToHexStringLower(SHA256.HashData(Corpus)),
+            new('a', 40), new('b', 40), true, receipts, host, true, "apr-historical-typed-logical-capacity-v1");
     }
 }

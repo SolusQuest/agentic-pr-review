@@ -4,6 +4,7 @@ namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 
 internal sealed class DeepSeekCredential
 {
+    private const int CredentialMaxBytes = 256;
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -28,7 +29,7 @@ internal sealed class DeepSeekCredential
         try
         {
             var byteCount = StrictUtf8.GetByteCount(value);
-            if (byteCount is < 1 or > DeepSeekTransportPolicy.CredentialMaxBytes)
+            if (byteCount is < 1 or > CredentialMaxBytes)
             {
                 throw InvalidCredential();
             }

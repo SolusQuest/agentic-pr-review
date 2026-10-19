@@ -9,7 +9,7 @@ public sealed class R7CapacityUserOracleTests
 {
     private static readonly CapacityHistory[] History = [new("older", 1, 0), new("recent", 1, 0)];
     private static readonly CapacityCase Current = new("current", "success", 2, 1, 64);
-    // Authored wire, independent of the oracle's transcript construction. All user contexts
+    // Authored logical message data, independent of the oracle's transcript construction. All user contexts
     // share the old marker but have distinct run identity, including the current context.
     private static JsonArray Wire() => JsonNode.Parse("""
         [
@@ -26,7 +26,17 @@ public sealed class R7CapacityUserOracleTests
 
     private static JsonElement[] Messages(JsonArray wire)
     {
-        using var document = JsonDocument.Parse(wire.ToJsonString());
+        // Fixed authored test messages are projected to the actual logical shape.
+        // This is test data construction, never a compatibility reader for provider input.
+        var logical = wire.DeepClone().AsArray();
+        foreach (var node in logical)
+        {
+            var message = node!.AsObject();
+            var text = message["content"]!.DeepClone();
+            message.Remove("content");
+            message["contents"] = new JsonArray(new JsonObject { ["kind"] = "text", ["text"] = text });
+        }
+        using var document = JsonDocument.Parse(logical.ToJsonString());
         return document.RootElement.EnumerateArray().Select(item => item.Clone()).ToArray();
     }
     private static void Verify(JsonArray wire, int turns = 0) =>
@@ -96,7 +106,7 @@ public sealed class R7CapacityUserOracleTests
     }
 
     [Fact]
-    public void HostHistoryUsesPreviouslyAcceptedContextsRatherThanReturnedWireUsers()
+    public void HostHistoryUsesPreviouslyAcceptedContextsRatherThanReturnedLogicalUsers()
     {
         var expected = new[] { "authored head-sha=100", "authored head-sha=101", "authored head-sha=102" };
         var wire = Wire();
@@ -126,7 +136,7 @@ public sealed class R7CapacityUserOracleTests
                 var changed = Wire();
                 changed[0]!["role"] = role;
                 changed[0]!["content"] = "wrapped " + changed[index]!["content"]!.GetValue<string>() + " suffix";
-                Assert.Equal("r7_capacity_wire_user_promotion", Assert.Throws<InvalidOperationException>(() => Verify(changed)).Message);
+                Assert.Equal("r7_capacity_logical_user_promotion", Assert.Throws<InvalidOperationException>(() => Verify(changed)).Message);
             }
         var fresh = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = "trusted control" },
             new JsonObject { ["role"] = "user", ["content"] = "APR_R7_PRIVATE_FRESH_USER_54ea7_reset Review this synthetic snapshot." });
@@ -169,19 +179,19 @@ public sealed class R7CapacityUserOracleTests
                         changed.Insert(1, new JsonObject { ["role"] = role, ["content"] = nested
                             ? new JsonArray(new JsonObject { ["text"] = "wrapped " + context + " suffix" })
                             : JsonValue.Create(context) });
-                        Assert.Equal("r7_capacity_wire_user_forbidden", Assert.Throws<InvalidOperationException>(() => Check(changed)).Message);
+                        Assert.Equal("r7_capacity_logical_user_forbidden", Assert.Throws<InvalidOperationException>(() => Check(changed)).Message);
                     }
             var currentPromotion = wire.DeepClone().AsArray();
             currentPromotion[0]!["diagnostic"] = continuation ? restored : reset;
-            Assert.Equal("r7_capacity_wire_user_promotion", Assert.Throws<InvalidOperationException>(() => Check(currentPromotion)).Message);
+            Assert.Equal("r7_capacity_logical_user_promotion", Assert.Throws<InvalidOperationException>(() => Check(currentPromotion)).Message);
             var encodedOld = wire.DeepClone().AsArray(); encodedOld[0]!["content"] = JsonSerializer.Serialize(old[0]);
-            Assert.Equal("r7_capacity_wire_user_forbidden", Assert.Throws<InvalidOperationException>(() => Check(encodedOld)).Message);
+            Assert.Equal("r7_capacity_logical_user_forbidden", Assert.Throws<InvalidOperationException>(() => Check(encodedOld)).Message);
             var encodedCurrent = wire.DeepClone().AsArray(); encodedCurrent[0]!["content"] = JsonSerializer.Serialize(continuation ? restored : reset);
-            Assert.Equal("r7_capacity_wire_user_promotion", Assert.Throws<InvalidOperationException>(() => Check(encodedCurrent)).Message);
+            Assert.Equal("r7_capacity_logical_user_promotion", Assert.Throws<InvalidOperationException>(() => Check(encodedCurrent)).Message);
             foreach (var index in Enumerable.Range(1, wire.Count - 1))
             {
                 var changed = wire.DeepClone().AsArray(); changed[index]!["diagnostic"] = old[0];
-                Assert.Equal("r7_capacity_wire_user_forbidden", Assert.Throws<InvalidOperationException>(() => Check(changed)).Message);
+                Assert.Equal("r7_capacity_logical_user_forbidden", Assert.Throws<InvalidOperationException>(() => Check(changed)).Message);
             }
         }
     }

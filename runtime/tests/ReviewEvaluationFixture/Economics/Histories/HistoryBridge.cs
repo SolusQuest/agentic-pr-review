@@ -12,7 +12,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 
 internal sealed record HistoryStaged(int Phase, int ProcessId, string Startup, bool Admitted,
-    bool RestoredMatch, bool WireMatch, PrefixComparison Comparison, HistoryCapture Capture);
+    bool RestoredMatch, bool LogicalRequestMatch, PrefixComparison Comparison, HistoryCapture Capture);
 
 internal static class HistoryBridge
 {
@@ -51,19 +51,19 @@ internal static class HistoryBridge
     {
         var admitted = ReplayRunner.AdmitReply(input, run, reply, out _);
         var capture = admitted ? reply.PrefixHistory! : HistoryCapture.Unavailable;
-        var compared = capture.Calls.FirstOrDefault() is { } first ? expected.Compare(first) : new PrefixComparison("unavailable", null, null);
-        var wire = admitted && reply.Requests.Length > 0 && reply.Requests.Length <= capture.Calls.Length &&
-            reply.Requests.Select((bytes, index) => capture.Calls[index]?.Provider.Whole == WireSegment(bytes)).All(x => x);
+        var compared = capture.Calls.FirstOrDefault() is { } first ? expected.Compare(first) : new PrefixComparison("unavailable", null);
+        var logical = admitted && reply.Requests.Length > 0 && reply.Requests.Length <= capture.Calls.Length &&
+            reply.Requests.Select((bytes, index) => capture.Calls[index]?.Logical.Whole == LogicalSegment(bytes)).All(x => x);
         return new(input.Phase, reply.ProcessId, reply.Startup, admitted, capture.Baseline == expected,
-            wire, compared, capture);
+            logical, compared, capture);
     }
 
-    // Independent byte oracle for P1's single, length-framed whole-body diagnostic segment.
-    // Continuity still uses Control/History/Settings; this only binds observations to actual transport.
-    private static PrefixSegment WireSegment(byte[] body)
+    // Independent length-framed byte oracle binds observations to actual typed callback input.
+    // Continuity uses Control/History/Settings; these bytes make no HTTP claim.
+    private static PrefixSegment LogicalSegment(byte[] body)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        hash.AppendData(Encoding.UTF8.GetBytes("apr.r6.prefix.provider.whole\0"));
+        hash.AppendData(Encoding.UTF8.GetBytes("apr.r6.prefix.logical.whole\0"));
         Span<byte> size = stackalloc byte[4];
         BinaryPrimitives.WriteInt32BigEndian(size, body.Length);
         hash.AppendData(size); hash.AppendData(body);

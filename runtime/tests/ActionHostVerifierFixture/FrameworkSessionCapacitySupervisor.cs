@@ -50,13 +50,13 @@ internal static partial class FrameworkSupervisor
         var failed = await RunCaseAsync(new(failureName, failureName, "agent_result_invalid", ExpectedProviderRequests: 0, ExpectedStickyMutations: 0),
             root, repository, payload, bundle, node, platform);
         if (!failed.Passed || !pids.Add(failed.HostPid) ||
-            File.ReadAllText(Path.Join(root, failureName, "r7-agent-code")) != "agent_context_limit") return false;
+            File.ReadAllText(Path.Join(root, failureName, "r7-agent-code")) != "agent_response_invalid") return false;
         var after = ReadR7State(platform, Path.Join(root, failureName), FrameworkSessionCapacity.Generations);
         if (after.Generation != last.Generation || after.SessionSha256 != last.SessionSha256) return false;
-        var receipt = FrameworkJson.Object(("schema", "r7-artifact-session-capacity-v1"),
+        var receipt = FrameworkJson.Object(("schema", "r7-historical-typed-session-input-capacity-v1"),
             ("accepted_generations", FrameworkSessionCapacity.Generations), ("fresh_host_processes", pids.Count),
             ("messages", messages), ("combined_records", last.CombinedRecords), ("plaintext_bytes", last.PlaintextBytes),
-            ("physical_copy_observations", copies), ("maximum_store_operations", maximumOperations), ("refused_physical_sends", failed.ProviderRequests),
+            ("physical_copy_observations", copies), ("maximum_store_operations", maximumOperations), ("refused_script_calls", failed.ProviderRequests),
             ("predecessor_preserved", true), ("session_sha256", last.SessionSha256));
         await File.WriteAllTextAsync(Path.Join(root, "capacity-receipt.json"), FrameworkJson.Serialize(receipt) + "\n");
         Console.WriteLine("APR_R7_ARTIFACT_SESSION_CAPACITY_OK");

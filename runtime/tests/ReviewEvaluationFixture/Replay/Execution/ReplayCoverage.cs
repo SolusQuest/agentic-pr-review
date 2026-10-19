@@ -79,7 +79,10 @@ internal static class ReplayCoverage
         var messages = first.RootElement.GetProperty("messages").EnumerateArray().ToArray();
         var expectedReasoning = Reasoning.Take(phase * 2).ToArray();
         var assistant = messages.Where(message => message.GetProperty("role").GetString() == "assistant").ToArray();
-        if (!assistant.Select(message => message.GetProperty("reasoning_content").GetString()).SequenceEqual(expectedReasoning)) return false;
-        return phase == 0 ? assistant.Length == 0 : ReplayTransport.HistoricalLine(first.RootElement, "seed_read", 1) == Fact;
+        var continuations = first.RootElement.GetProperty("continuation");
+        var observedReasoning = continuations.ValueKind == JsonValueKind.Null ? [] :
+            continuations.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("readable").GetString()).ToArray();
+        if (!observedReasoning.SequenceEqual(expectedReasoning)) return false;
+        return phase == 0 ? assistant.Length == 0 : ReplayScriptClient.HistoricalLine(first.RootElement, "seed_read", 1) == Fact;
     }
 }

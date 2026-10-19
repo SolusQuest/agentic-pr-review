@@ -53,7 +53,7 @@ public sealed partial class ActionHostTrustedPolicyTests
         Assert.Equal(DeepSeekAdapterContext.Adapter, policy.AdapterId);
         Assert.NotEqual(DeepSeekAdapterContext.CandidateAdapter, policy.AdapterId);
         Assert.NotEqual(DeepSeekAdapterContext.Output65536Adapter, policy.AdapterId);
-        Assert.Equal(DeepSeekTransportPolicy.Endpoint, policy.Endpoint);
+        Assert.Equal(DeepSeekAdapterContext.Endpoint, policy.Endpoint);
         Assert.True(policy.ThinkingEnabled);
         Assert.True(policy.PromptCachingEnabled);
         Assert.Equal(AgentCanonical.ToolsetSha256(

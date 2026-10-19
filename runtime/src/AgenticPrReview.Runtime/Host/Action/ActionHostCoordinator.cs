@@ -67,94 +67,44 @@ internal interface IActionHostProviderRunner : IDisposable
         CancellationToken cancellationToken);
 }
 
-internal sealed class ActionHostDeepSeekProviderRunnerFactory :
-    IActionHostProviderRunnerFactory
+// Explicit historical fixture injection. No credential or network transport reaches this callback.
+internal sealed class ActionHostHistoricalChatRunnerFactory : IActionHostProviderRunnerFactory
 {
-    private readonly Func<DeepSeekCredential, DeepSeekTransport>?
-        transportFactory;
+    private readonly Func<DeepSeekAdapterContext, AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient> createClient;
 
-    internal ActionHostDeepSeekProviderRunnerFactory()
+    internal ActionHostHistoricalChatRunnerFactory(
+        Func<DeepSeekAdapterContext, AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient> createClient)
     {
+        this.createClient = createClient ?? throw new ArgumentNullException(nameof(createClient));
     }
 
-    internal ActionHostDeepSeekProviderRunnerFactory(
-        Func<DeepSeekCredential, DeepSeekTransport> transportFactory) =>
-        this.transportFactory = transportFactory ??
-            throw new ArgumentNullException(nameof(transportFactory));
-
-    public IActionHostProviderRunner Create(
-        ActionHostProviderPolicy policy,
-        ActionHostProviderApiKey key,
-        ReviewedSnapshot snapshot,
-        TimeProvider timeProvider)
+    public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
+        ReviewedSnapshot snapshot, TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(timeProvider);
-
-        var credential = DeepSeekCredential.Create(
-            key.ExportForPrivateLaunch());
-        var transport = transportFactory is null
-            ? DeepSeekTransport.Create(credential, timeProvider)
-            : transportFactory(credential);
-        try
-        {
-            return new Runner(policy, snapshot, timeProvider, transport);
-        }
-        catch
-        {
-            transport.Dispose();
-            throw;
-        }
+        return new Runner(policy, snapshot, timeProvider, createClient);
     }
 
-    private sealed class Runner : IActionHostProviderRunner
+    private sealed class Runner(ActionHostProviderPolicy policy, ReviewedSnapshot snapshot, TimeProvider clock,
+        Func<DeepSeekAdapterContext, AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient> createClient)
+        : IActionHostProviderRunner
     {
-        private readonly DeepSeekTransport transport;
-        private readonly ReviewedSnapshot snapshot;
-        private readonly TimeProvider timeProvider;
-        private readonly ActionHostProviderPolicy policy;
-
-        internal Runner(
-            ActionHostProviderPolicy policy,
-            ReviewedSnapshot snapshot,
-            TimeProvider timeProvider,
-            DeepSeekTransport transport)
+        private AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient? client;
+        public Task<AgentRunOutcome> RunAsync(AgentRunRequest run, CancellationToken token)
         {
-            this.policy = policy;
-            this.snapshot = snapshot;
-            this.timeProvider = timeProvider;
-            this.transport = transport;
+            var context = new DeepSeekAdapterContext(policy.ProviderId, policy.ModelId, policy.AdapterId, run.SessionId);
+            if (!context.IsValid)
+                return Task.FromResult(AgentRunOutcome.Failure(AgentFailureCodes.ResponseInvalid, 0, 0, [])
+                    with { Accounting = ProviderAccounting.Aggregate([]) });
+            if (client is not null) throw new InvalidOperationException("Historical chat runner is single-use.");
+            client = createClient(context);
+            return new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), clock,
+                policy.LimitAuthority).RunAsync(run, token);
         }
-
-        public Task<AgentRunOutcome> RunAsync(
-            AgentRunRequest run,
-            CancellationToken cancellationToken)
-        {
-            var adapter = new DeepSeekAdapterContext(
-                policy.ProviderId,
-                policy.ModelId,
-                policy.AdapterId,
-                run.SessionId);
-            if (!adapter.IsValid)
-            {
-                return Task.FromResult(AgentRunOutcome.Failure(
-                    AgentFailureCodes.ResponseInvalid,
-                    0,
-                    0,
-                    []) with { Accounting = ProviderAccounting.Aggregate([]) });
-            }
-
-            var client = DeepSeekChatBackend.CreateClient(adapter, transport);
-            var tools = new SnapshotToolExecutor(
-                snapshot,
-                new VerifiedReviewedFileAccess());
-            return new AgentLoop(client, tools, timeProvider, policy.LimitAuthority)
-                .RunAsync(run, cancellationToken);
-        }
-
-        public void Dispose() => transport.Dispose();
+        public void Dispose() => (client as IDisposable)?.Dispose();
     }
 }
 

@@ -19,22 +19,8 @@ public sealed class R6ResponseAdmissionTests
     public async Task InboundListFilesArgumentsReachAdmissionWithoutPathRewriting()
     {
         const string arguments = "{ \"prefix\" : \"../APR303_PRIVATE_RESPONSE_CANARY\" }";
-        var raw = "{\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\"," +
-            "\"content\":\"\",\"reasoning_content\":\"reasoning\",\"tool_calls\":[{" +
-            "\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_files\"," +
-            "\"arguments\":" + JsonSerializer.Serialize(arguments) +
-            "}}]},\"finish_reason\":\"tool_calls\"}],\"model\":\"deepseek-flash\"," +
-            "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5," +
-            "\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}";
-        var response = DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw));
-        var parsed = DeepSeekResponseParser.Parse(response);
-        Assert.Equal(DeepSeekResponseParseOutcome.Success, parsed.Outcome);
-        Assert.Equal(arguments, Assert.IsType<DeepSeekParsedToolResponse>(parsed.Response)
-            .Calls.Single().Arguments);
-
-        var transport = new FixedTransport(response);
-        var backend = DeepSeekChatBackend.CreateClient(Context(), transport);
-        var capturing = new CapturingClient(backend);
+        var transport = new FixedChat(request => Call(request, arguments));
+        var capturing = new CapturingClient(transport);
         var executor = new UnexpectedExecutor();
         var outcome = await new AgentLoop(capturing, executor).RunAsync(Request(), CancellationToken.None);
         var toolCall = Assert.Single(Assert.IsType<ProjectChatResponse>(capturing.Response)
@@ -46,7 +32,7 @@ public sealed class R6ResponseAdmissionTests
         Assert.Equal(new ListFilesPathRejection(ListFilesPathField.Prefix,
             RepositoryPathFailure.DotSegment), detail);
         Assert.False(outcome.Succeeded);
-        // The fixed transport repeats the same call ID after feedback; the
+        // The fixed typed script repeats the same call ID after feedback; the
         // second response therefore fails ID admission, with no dispatch.
         Assert.Equal(AgentFailureCodes.ResponseInvalid,
             outcome.Diagnostic?.Code);
@@ -60,15 +46,13 @@ public sealed class R6ResponseAdmissionTests
     }
 
     [Fact]
-    public async Task SuccessfulTransportWithInvalidUsageKeepsUnknownAccountingAndSafeReason()
+    public async Task AuthoredTypedUsageFailureKeepsUnknownAccountingAndSafeReason()
     {
-        var raw = "{\"choices\":[{}],\"model\":\"deepseek-flash\"," +
-            "\"usage\":{\"" + Canary + "\":1}}";
-        var transport = new FixedTransport(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw)));
+        var transport = new FixedChat(_ => throw new ProjectChatNormalizationException(AgentFailureCodes.ResponseInvalid,
+            ProjectChatNormalizationReason.ProviderUsage));
         var accounting = Accounting();
-        using var metered = new LiveMeteredTransport(transport, accounting);
-        var backend = DeepSeekChatBackend.CreateClient(Context(), metered);
-        var observed = new LiveChatObserver(backend, accounting);
+        using var metered = new LiveMeteredChat(transport, accounting);
+        var observed = new LiveChatObserver(metered, accounting);
         var executor = new UnexpectedExecutor();
 
         var outcome = await new AgentLoop(observed, executor).RunAsync(Request(), CancellationToken.None);
@@ -100,18 +84,23 @@ public sealed class R6ResponseAdmissionTests
     [InlineData("insufficient_system_resource", LiveNormalizationCategories.ProviderFinishReasonResource)]
     [InlineData("aborted", LiveNormalizationCategories.ProviderFinishReasonAborted)]
     [InlineData(Canary, LiveNormalizationCategories.ProviderFinishReasonOther)]
-    public async Task RejectedFinishReasonCrossesAgentAndReportWithoutProviderText(
+    public async Task AuthoredNormalizationReasonCrossesAgentAndReportWithoutPrivateText(
         string finishReason, string expectedCategory)
     {
-        var raw = "{\"choices\":[{\"index\":0,\"message\":{},\"finish_reason\":\"" +
-            finishReason + "\"}],\"model\":\"deepseek-flash\",\"usage\":" +
-            "{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5," +
-            "\"prompt_cache_hit_tokens\":1,\"prompt_cache_miss_tokens\":2}}";
-        var transport = new FixedTransport(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(raw)));
+        // Explicit fixed typed failures test the retained report mapping only.
+        // Actual provider finish-reason parsing belongs to the installed Solus proof.
+        var reason = finishReason switch
+        {
+            "length" => ProjectChatNormalizationReason.ProviderFinishReasonLength,
+            "content_filter" => ProjectChatNormalizationReason.ProviderFinishReasonContentFilter,
+            "insufficient_system_resource" => ProjectChatNormalizationReason.ProviderFinishReasonResource,
+            "aborted" => ProjectChatNormalizationReason.ProviderFinishReasonAborted,
+            _ => ProjectChatNormalizationReason.ProviderFinishReasonOther,
+        };
+        var transport = new FixedChat(_ => throw new ProjectChatNormalizationException(AgentFailureCodes.ResponseInvalid, reason));
         var accounting = Accounting();
-        using var metered = new LiveMeteredTransport(transport, accounting);
-        var backend = DeepSeekChatBackend.CreateClient(Context(), metered);
-        var observed = new LiveChatObserver(backend, accounting);
+        using var metered = new LiveMeteredChat(transport, accounting);
+        var observed = new LiveChatObserver(metered, accounting);
 
         var outcome = await new AgentLoop(observed, new UnexpectedExecutor())
             .RunAsync(Request(), CancellationToken.None);
@@ -178,14 +167,25 @@ public sealed class R6ResponseAdmissionTests
     private static LiveAccounting Accounting() => new(
         new(4, 8, 262144, 32768, 294912, 120, 100000, new(65536, 4096, 1000)));
 
-    private sealed class FixedTransport(DeepSeekTransportResult result) : IDeepSeekTransport
+    private static ProjectChatResponse Call(ProjectChatRequest request, string arguments)
+    {
+        var context = Context(); var position = request.Messages.Length;
+        return new(new("assistant", [new ProjectReasoningContent("reasoning", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+            new ProjectToolCallContent("call_1", AgentToolRegistry.ListFilesName, arguments)]),
+            new(3, 2, new(context.ProviderId, context.ModelId, context.ModelId, 1, 2)), CapturedResponseBodyBytes: 0,
+            Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
+                [new("reasoning", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+    }
+    private sealed class FixedChat(Func<ProjectChatRequest, ProjectChatResponse> respond) : IProjectChatClient, IDisposable
     {
         internal int Sends { get; private set; }
-        public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody,
-            CancellationToken cancellationToken)
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
-            Sends++;
-            return Task.FromResult(result);
+            token.ThrowIfCancellationRequested(); Sends++;
+            if (request.Accounting is { } capture && !capture.TryBeginDispatch()) throw new IOException();
+            var response = respond(request);
+            request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, 2, 1, 2, 5));
+            return Task.FromResult(response);
         }
         public void Dispose() { }
     }

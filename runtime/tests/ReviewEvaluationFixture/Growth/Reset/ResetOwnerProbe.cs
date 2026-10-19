@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
@@ -191,9 +192,9 @@ internal sealed class ResetProbeProvider(int phase, bool fail, ReplayScript? sel
             if (fail) return owner.Outcome = AgentRunOutcome.Failure(AgentFailureCodes.ChatFailed, 0, 0, []);
             var terminal = Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview($"Synthetic reset review {phase}.", []));
             var script = selectedScript ?? new ReplayScript([new([new("reset-finish-" + phase, "finish_review", terminal)], "synthetic reset continuation")]);
-            using var transport = new ReplayTransport(script, ReplayFault.None);
-            var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-                DeepSeekAdapterContext.Adapter, request.SessionId), transport);
+            using var transport = new ReplayScriptClient(script, ReplayFault.None,
+                new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, request.SessionId));
+            IProjectChatClient client = transport;
             var outcome = await new AgentLoop(client, selectedScript is null ? new NoTools() :
                 new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), time).RunAsync(request, token);
             owner.Outcome = outcome;

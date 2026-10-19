@@ -31,7 +31,7 @@ internal static class GateVerifier
         foreach (var item in report.Cases)
         {
             var semantic = item.Id.StartsWith('t') ? GateTokenOracle.Verify(item, expected) :
-                item.Id.StartsWith("p1-", StringComparison.Ordinal) ? GatePrefixOracle.Verify(item, expected) :
+                item.Id.StartsWith("l1-", StringComparison.Ordinal) ? GatePrefixOracle.Verify(item, expected) :
                 item.Id.StartsWith("p2-", StringComparison.Ordinal) ? GateHistoryOracle.Verify(item, expected) :
                 item.Id.StartsWith("c1-", StringComparison.Ordinal) ? GateComparisonOracle.Verify(item, expected, found) :
                 GateEconomicsOracle.Verify(item, expected);

@@ -11,7 +11,7 @@ internal static class CapacityVerifier
     internal static string? Verify(CapacityReport? report, byte[] corpus, bool requireClean = true)
     {
         try { CapacitySpec.Admit(corpus); } catch { return "r7_capacity_corpus_invalid"; }
-        if (report is null || report.Schema != CapacitySpec.Schema || report.Code != "r7_capacity_passed" ||
+        if (report is null || report.Schema != CapacitySpec.ReportSchema || report.ObservationDomain != CapacitySpec.ObservationDomain || report.Code != "r7_capacity_passed" ||
             !report.Cleanup || requireClean && !report.SourceClean || !Hex(report.SourceCommit, 40) || !Hex(report.SourceTree, 40) ||
             report.CorpusSha256 != Convert.ToHexStringLower(SHA256.HashData(corpus))) return "r7_capacity_report_identity";
         if (report.Cases is null || report.Cases.Length != CapacitySpec.Cases.Length || report.Cases.Any(item => item is null) ||
@@ -24,8 +24,8 @@ internal static class CapacityVerifier
             var success = expected.Mode is "success" or "reset";
             var negative = expected.Mode is "role" or "association" or "policy" or "scope";
             var tools = success ? (expected.Calls - 1) * expected.ToolsPerTurn + 1 : 0;
-            if (actual.Code != CapacitySpec.ExpectedCode(expected.Mode) || actual.Calls != (expected.Mode == "context" ? 1 : expected.Calls) || actual.Tools != tools ||
-                actual.Sends != expected.Calls || actual.SourceCommit != report.SourceCommit || actual.SourceTree != report.SourceTree ||
+            if (actual.Code != CapacitySpec.ExpectedCode(expected.Mode) || actual.Calls != expected.Calls || actual.Tools != tools ||
+                actual.Sends != expected.Calls || actual.ObservationDomain != CapacitySpec.ObservationDomain || actual.SourceCommit != report.SourceCommit || actual.SourceTree != report.SourceTree ||
                 actual.SourceClean != report.SourceClean || !actual.RolesAndAssociations || !actual.CiphertextPrivate ||
                 actual.ProcessId <= 0 || !Hex(actual.StartupId, 32) || actual.Metrics is null)
                 return "r7_capacity_case_semantics";
@@ -36,8 +36,12 @@ internal static class CapacityVerifier
             if (negative) continue;
             var metrics = actual.Metrics;
             if (metrics.ElapsedMilliseconds < 0 || metrics.AllocatedBytes < 0 || metrics.WorkingSetBytes <= 0 || metrics.PeakWorkingSetBytes <= 0 ||
-                metrics.ProjectRequestBytes <= 0 || metrics.ProjectRequestBytes > AgentLimits.RequestBytes ||
-                metrics.ProviderRequestBytes > AgentLimits.RequestBytes || metrics.ProviderResponseBytes > AgentLimits.ResponseBytes + 1 ||
+                metrics.ProjectRequestBytes < 0 || (expected.Mode == "context" ? metrics.ProjectRequestBytes != 0 : metrics.ProjectRequestBytes == 0) ||
+                metrics.ProjectRequestBytes > AgentLimits.RequestBytes || metrics.LogicalInputBytes < 0 ||
+                metrics.LogicalInputBytes > AgentLimits.RequestBytes || metrics.ProviderResponseBytes is not null ||
+                metrics.GenericResponseAdmissionBytes < 0 || metrics.GenericResponseAdmissionBytes > AgentLimits.ResponseBytes + 1 ||
+                metrics.ReasoningContentBytes < 0 || metrics.ReasoningContentBytes > AgentLimits.ContentBytes + 1 ||
+                metrics.InitialUserContentBytes < 1 || metrics.InitialUserContentBytes > AgentLimits.ContentBytes + 1 ||
                 metrics.Messages > AgentLimits.Messages || metrics.Parts > AgentLimits.PartsTotal ||
                 metrics.SessionRecords > AgentLimits.SessionRecords || metrics.SessionBytes <= 0 || metrics.SessionBytes > AgentLimits.SessionPlaintextBytes ||
                 metrics.EnvelopeBytes <= 0 || metrics.EnvelopeBytes > AgentLimits.StateEnvelopeBytes ||
@@ -53,9 +57,13 @@ internal static class CapacityVerifier
             if (expected.Id == "default_restore" && (actual.VerifiedAssistants != 64 || actual.VerifiedToolResults != 442) ||
                 expected.Id == "configured_restore" && (actual.VerifiedAssistants != 128 || actual.VerifiedToolResults != 382))
                 return "r7_capacity_fresh_restore_missing";
-            if (expected.Mode == "context" && metrics.ProviderRequestBytes != 0 ||
-                expected.Mode == "capacity" && metrics.ProviderResponseBytes <= AgentLimits.ContentBytes ||
-                expected.Mode == "response" && metrics.ProviderResponseBytes != AgentLimits.ResponseBytes + 1)
+            if (expected.Mode == "context" && (metrics.LogicalInputBytes != 0 || actual.Sends != 0 || actual.Calls != 0 ||
+                    metrics.InitialUserContentBytes != AgentLimits.ContentBytes + 1) ||
+                expected.Mode != "context" && metrics.InitialUserContentBytes > AgentLimits.ContentBytes ||
+                expected.Mode == "capacity" && metrics.ReasoningContentBytes != AgentLimits.ContentBytes + 1 ||
+                expected.Mode != "capacity" && metrics.ReasoningContentBytes > AgentLimits.ContentBytes ||
+                expected.Mode == "response" && metrics.GenericResponseAdmissionBytes != AgentLimits.ResponseBytes + 1 ||
+                expected.Mode != "response" && metrics.GenericResponseAdmissionBytes != 0)
                 return "r7_capacity_failure_stimulus";
         }
         if (report.HostCases is null || report.HostCases.Length != 8 || report.HostCases.Any(item => item is null) ||
@@ -66,7 +74,7 @@ internal static class CapacityVerifier
             var mode = item.Id.StartsWith("host_reset", StringComparison.Ordinal) || item.Id == "host_seed" ? "success" : item.Id[5..];
             var success = mode == "success";
             var calls = item.Id == "host_seed" ? 64 : item.Id == "host_reset" ? 2 : mode == "context" ? 0 : 1;
-            if (item.AgentCode != CapacitySpec.ExpectedCode(mode) || item.Calls != (mode == "context" ? 1 : calls) || item.Sends != calls ||
+            if (item.AgentCode != CapacitySpec.ExpectedCode(mode) || item.Calls != (mode == "context" ? 0 : calls) || item.Sends != calls ||
                 item.Continuation != (item.Id is not ("host_seed" or "host_reset")) ||
                 item.FreshSession != item.Id.StartsWith("host_reset", StringComparison.Ordinal) ||
                 (success ? item.Status != "Reviewed" || item.ExitCode != 0 || item.StateDisposition != "Accepted" || item.NoPublicationMutation :

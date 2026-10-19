@@ -134,7 +134,7 @@ internal sealed partial class ActionHostTrustedPolicy
                 DeepSeekAdapterContext.Provider,
                 DeepSeekAdapterContext.Model,
                 DeepSeekAdapterContext.Adapter,
-                DeepSeekTransportPolicy.Endpoint,
+                DeepSeekAdapterContext.Endpoint,
                 Thinking,
                 PromptCaching,
                 toolsetSha,
@@ -291,7 +291,7 @@ internal sealed partial class ActionHostTrustedPolicy
         Write(ref writer, "config_blob_sha", config.BlobSha);
         Write(ref writer, "config_path", request.ConfigPath.Value);
         Write(ref writer, "config_sha256", configSha);
-        Write(ref writer, "endpoint", DeepSeekTransportPolicy.Endpoint);
+        Write(ref writer, "endpoint", DeepSeekAdapterContext.Endpoint);
         Write(ref writer, "inline_min_severity", SeverityName(inlineMinSeverity));
         Write(ref writer, "instructions_blob_sha", instructions.BlobSha);
         Write(ref writer, "instructions_path", instructionsPath.Value);

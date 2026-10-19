@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -26,7 +27,7 @@ public sealed partial class ActionHostCompositionTests
     [InlineData(65, true)]
     [InlineData(128, true)]
     [InlineData(128, false)]
-    public async Task TrustedConfiguredCallsReachRealProviderAndBothSessionConsumers(int calls, bool finish)
+    public async Task TrustedConfiguredCallsReachAuthoredTypedScriptAndBothSessionConsumers(int calls, bool finish)
     {
         var result = await RunBudgetHost("{\"maxModelCalls\":" + calls + ",\"maxOutputTokens\":1024,\"timeoutSeconds\":60}",
             (ordinal, _) => Task.FromResult(BudgetResponse(ordinal, finish && ordinal == calls)));
@@ -40,8 +41,8 @@ public sealed partial class ActionHostCompositionTests
         for (var i = 0; i < calls; i++)
         {
             using var json = JsonDocument.Parse(result.Provider.Bodies[i]);
-            Assert.Equal(1024 - i, json.RootElement.GetProperty("max_tokens").GetInt32());
-            Assert.Equal("deepseek-flash", json.RootElement.GetProperty("model").GetString());
+            Assert.Equal(1024 - i, result.Provider.OutputCaps[i]);
+            Assert.Equal("deepseek-flash", result.Provider.Context!.ModelId);
             Assert.DoesNotContain("provider-key", result.Provider.Bodies[i], StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("github-token", result.Provider.Bodies[i], StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("state-key", result.Provider.Bodies[i], StringComparison.OrdinalIgnoreCase);
@@ -64,7 +65,7 @@ public sealed partial class ActionHostCompositionTests
     [InlineData("maxUncachedInputTokens", 2, 0, 0)]
     [InlineData("maxCachedInputTokens", 0, 2, 0)]
     [InlineData("maxOutputTokens", 0, 0, 2)]
-    public async Task TrustedConfiguredPartitionsStopRealProviderAfterObservedUsage(string field, int miss, int hit, int output)
+    public async Task TrustedConfiguredPartitionsStopAuthoredTypedScriptAfterObservedUsage(string field, int miss, int hit, int output)
     {
         var result = await RunBudgetHost("{\"" + field + "\":2}",
             (ordinal, _) => Task.FromResult(BudgetResponse(ordinal, false, miss, hit, output)));
@@ -78,22 +79,17 @@ public sealed partial class ActionHostCompositionTests
     [InlineData(null, 2)]
     [InlineData(0, 2)]
     [InlineData(1, 1)]
-    public async Task TrustedConfiguredOutputPreservesFrozenRetryAndUnknownUsage(int? failedOutput, int expectedSends)
+    public async Task TrustedConfiguredOutputPreservesGenericRetryAndUnknownUsage(int? failedOutput, int expectedSends)
     {
         var result = await RunBudgetHost("{\"maxOutputTokens\":10}", (ordinal, _) => Task.FromResult(ordinal == 1
-            ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
-            {
-                Content = new StringContent(failedOutput.HasValue
-                    ? "{\"usage\":{\"completion_tokens\":" + failedOutput.Value + "}}" : "unknown"),
-            }
+            ? new BudgetScriptResult(false, 0, 0, 0, Failed: true, FailedOutput: failedOutput)
             : BudgetResponse(ordinal, true, 0, 0, 1)));
         Assert.Equal(expectedSends, result.Provider.Bodies.Count);
         Assert.Equal(1, result.Provider.Outcome!.Accounting!.ModelCalls);
         Assert.Equal(expectedSends, result.Provider.Outcome.Accounting.ProviderAttempts);
         Assert.Equal(expectedSends - 1, result.Provider.Outcome.Accounting.ProviderRetries);
         Assert.Equal(1, result.Provider.Outcome.Accounting.UnknownUsageAttempts);
-        using var body = JsonDocument.Parse(result.Provider.Bodies[0]);
-        Assert.Equal(10, body.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.Equal(10, result.Provider.OutputCaps[0]);
         if (expectedSends == 2)
         {
             Assert.Equal(result.Provider.Bodies[0], result.Provider.Bodies[1]);
@@ -108,7 +104,7 @@ public sealed partial class ActionHostCompositionTests
     }
 
     [Fact]
-    public async Task TrustedConfiguredTimeoutCancelsRealPhysicalAttempt()
+    public async Task TrustedConfiguredTimeoutCancelsActualTypedAttempt()
     {
         var clock = new DeadlineTestClock(LocatorTestData.Now);
         var result = await RunBudgetHost("{\"timeoutSeconds\":1}", (ordinal, token) =>
@@ -138,7 +134,7 @@ public sealed partial class ActionHostCompositionTests
     }
 
     private static async Task<BudgetHostResult> RunBudgetHost(string review,
-        Func<int, CancellationToken, Task<HttpResponseMessage>> respond, TimeProvider? clock = null)
+        Func<int, CancellationToken, Task<BudgetScriptResult>> respond, TimeProvider? clock = null)
     {
         var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
         var launch = FullLaunch(scenario.Launch);
@@ -164,32 +160,18 @@ public sealed partial class ActionHostCompositionTests
             store.ListCalls + store.UploadCalls + store.DeleteCalls);
     }
 
-    private static HttpResponseMessage BudgetResponse(int ordinal, bool terminal, int miss = 1, int hit = 0, int output = 1) =>
-        new(HttpStatusCode.OK)
-        {
-            Content = new StringContent(JsonSerializer.Serialize(new
-            {
-                model = "deepseek-flash",
-                choices = new[] { new { index = 0, finish_reason = "tool_calls", message = new
-                {
-                    role = "assistant", content = (string?)null, reasoning_content = "",
-                    tool_calls = new[] { new { id = "budget" + ordinal, type = "function", function = new
-                    {
-                        name = terminal ? "finish_review" : "list_files",
-                        arguments = terminal ? "{\"summary\":\"done\",\"findings\":[]}" : "{}",
-                    } } },
-                } } },
-                usage = new { prompt_tokens = miss + hit, completion_tokens = output, total_tokens = miss + hit + output,
-                    prompt_cache_hit_tokens = hit, prompt_cache_miss_tokens = miss },
-            })),
-        };
+    private sealed record BudgetScriptResult(bool Terminal, int Miss, int Hit, int Output, bool Failed = false, int? FailedOutput = null, bool UnknownUsage = false, bool UnknownPartition = false);
+    private static BudgetScriptResult BudgetResponse(int ordinal, bool terminal, int miss = 1, int hit = 0, int output = 1) =>
+        new(terminal, miss, hit, output);
 
     private sealed record BudgetHostResult(ActionHostCompletion Completion, BudgetRecordingFactory Provider, bool Published, int StateOperations);
 
-    private sealed class BudgetRecordingFactory(Func<int, CancellationToken, Task<HttpResponseMessage>> respond,
+    private sealed class BudgetRecordingFactory(Func<int, CancellationToken, Task<BudgetScriptResult>> respond,
         TimeProvider clock) : IActionHostProviderRunnerFactory
     {
         internal List<string> Bodies { get; } = [];
+        internal List<int?> OutputCaps { get; } = [];
+        internal DeepSeekAdapterContext? Context { get; private set; }
         internal AgentRunRequest? Run { get; private set; }
         internal AgentRunOutcome? Outcome { get; private set; }
         internal ActionHostProviderPolicy? Policy { get; private set; }
@@ -198,13 +180,11 @@ public sealed partial class ActionHostCompositionTests
             ReviewedSnapshot snapshot, TimeProvider timeProvider)
         {
             Policy = policy;
-            var factory = new ActionHostDeepSeekProviderRunnerFactory(credential =>
-                DeepSeekTransport.CreateForTesting(credential, () => new BudgetHandler(async (request, token) =>
-                {
-                    Assert.Equal(DeepSeekTransportPolicy.Endpoint, request.RequestUri!.AbsoluteUri);
-                    Bodies.Add(await request.Content!.ReadAsStringAsync(token));
-                    return await respond(Bodies.Count, token);
-                }), DeepSeekTransportPolicy.ProviderTimeout, clock));
+            var factory = new ActionHostHistoricalChatRunnerFactory(context =>
+            {
+                Context = context;
+                return new BudgetChat(this, context, respond);
+            });
             return new RecordingRunner(this, factory.Create(policy, key, snapshot, timeProvider));
         }
 
@@ -219,9 +199,40 @@ public sealed partial class ActionHostCompositionTests
         }
     }
 
-    private sealed class BudgetHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
+    private sealed class BudgetChat(BudgetRecordingFactory owner, DeepSeekAdapterContext context,
+        Func<int, CancellationToken, Task<BudgetScriptResult>> respond) : IProjectChatClient
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => send(request, token);
+        public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            if (request.Accounting is { } capture && !capture.TryBeginDispatch()) throw new IOException();
+            owner.Bodies.Add(Encoding.UTF8.GetString(AgentRequestWriter.Write(request)));
+            owner.OutputCaps.Add(request.MaxOutputTokens);
+            var ordinal = owner.Bodies.Count;
+            var result = await respond(ordinal, token);
+            if (result.Failed)
+            {
+                // Authored partial usage and generic retry signal; no HTTP response is simulated.
+                request.Accounting?.RecordUsage(ProviderUsageObservation.Create(null, result.FailedOutput));
+                request.Accounting?.MarkFailed();
+                throw new ProjectChatRetryException();
+            }
+            if (!result.UnknownUsage)
+                request.Accounting?.RecordUsage(result.UnknownPartition
+                    ? ProviderUsageObservation.Create(result.Miss + result.Hit, result.Output)
+                    : ProviderUsageObservation.Create(result.Miss + result.Hit, result.Output,
+                        result.Hit, result.Miss, result.Miss + result.Hit + result.Output));
+            // These fixed negative scripts preserve the Host's invalid-result accounting path.
+            if (result.UnknownUsage || result.UnknownPartition) throw new ProjectChatNormalizationException();
+            var position = request.Messages.Length;
+            return new(new("assistant", [new ProjectReasoningContent("", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+                new ProjectToolCallContent("budget" + ordinal, result.Terminal ? "finish_review" : "list_files",
+                    result.Terminal ? "{\"summary\":\"done\",\"findings\":[]}" : "{}")]),
+                result.UnknownUsage ? null : new(result.Miss + result.Hit, result.Output, result.UnknownPartition ? null :
+                    new(context.ProviderId, context.ModelId, context.ModelId, result.Hit, result.Miss)),
+                CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
+                    [new("", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+        }
     }
 
     private sealed class BudgetConfigFactory(IActionHostGitObjectTransportFactory inner, byte[] config) : IActionHostGitObjectTransportFactory

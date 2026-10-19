@@ -33,9 +33,9 @@ internal sealed class LiveOptions
     internal Func<string, CancellationToken, ReplayAdmissionResult> AdmitBundle { get; init; } =
         ReplayAdmission.Load;
     internal ILiveSecretSource SecretSource { get; init; } = new LiveEnvironmentSecretSource();
-    internal ILiveTransportFactory TransportFactory { get; init; } = LiveDeepSeekTransportFactory.Instance;
-    internal Func<AdmittedReplayRun, IDeepSeekTransport> DryRunTransport { get; init; } =
-        run => new ReplayTransport(run.Script, ReplayFault.None);
+    internal ILiveChatFactory ChatFactory { get; init; } = UnavailableLiveChatFactory.Instance;
+    internal Func<AdmittedReplayRun, DeepSeekAdapterContext, IProjectChatClient> DryRunChat { get; init; } =
+        (run, context) => new ReplayScriptClient(run.Script, ReplayFault.None, context);
     internal Action<string>? WriteLine { get; init; }
     internal LiveAdjudicator? Adjudicator { get; init; }
     internal R6ProspectiveAdjudicator? ProspectiveReviewer { get; init; }
@@ -344,13 +344,10 @@ internal static class LiveRunner
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable.StablePlan, runId,
             [.. stable.ControlMessages, new("user", [new ProjectTextContent(run.InitialContext)])]);
         var snapshot = run.CreateSnapshot(Directory.GetCurrentDirectory());
-        var inner = execute
-            ? options.TransportFactory.Create(credential!)
-            : options.DryRunTransport(run);
-        using var metered = new LiveMeteredTransport(inner, accounting, journalAttempt);
         var adapter = new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
             trusted.AdapterId, runId);
-        var client = DeepSeekChatBackend.CreateClient(adapter, metered);
+        var inner = execute ? options.ChatFactory.Create(adapter) : options.DryRunChat(run, adapter);
+        using var client = new LiveMeteredChat(inner, accounting, journalAttempt);
         var executor = new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot));
         var observed = new LiveChatObserver(client, accounting, journalAttempt,
             response => LiveToolRejectionProjector.Project(response, executor));

@@ -34,7 +34,7 @@ public sealed partial class R5LiveHarnessTests
         });
         var activations = 0;
         var error = await Assert.ThrowsAsync<LivePlanRejected>(() => LiveRunner.RunAsync(
-            plan.Path, false, Options(transport: _ =>
+            plan.Path, false, Options(transport: (_, context) =>
             {
                 activations++;
                 throw new InvalidOperationException("A rejected profile must not activate transport.");
@@ -70,25 +70,20 @@ public sealed partial class R5LiveHarnessTests
         using var plan = new PlanFile();
         Assert.Equal(0, R5CaseVerifier.MakeLivePlan(corpus, plan.Path).Item1);
         var lines = new List<string>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (run, context) =>
         {
-            var replay = new ReplayTransport(run.Script, ReplayFault.None);
+            var replay = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             if (run.Input.CaseId != "wrong-evidence") return replay;
             var sends = 0;
-            return new FakeTransport(async (request, token) =>
+            return new FakeChat(async (request, token) =>
             {
-                var original = await replay.SendAsync(request, token);
+                var original = await replay.GetResponseAsync(request, token);
                 if (++sends != 1) return original;
-                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
-                if (responseInvalid)
-                    body["usage"] = new JsonObject { [Canary] = 1 };
-                else
-                {
-                    var function = body["choices"]![0]!["message"]!["tool_calls"]![0]!["function"]!;
-                    function["name"] = AgentToolRegistry.ListFilesName;
-                    function["arguments"] = "{\"prefix\":\"../" + Canary + "\"}";
-                }
-                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+                if (responseInvalid) throw new ProjectChatNormalizationException(AgentFailureCodes.ResponseInvalid,
+                    ProjectChatNormalizationReason.ProviderUsage);
+                return original with { Message = original.Message with { Contents = [
+                    new ProjectToolCallContent("authored-path-rejection", AgentToolRegistry.ListFilesName, "{\"prefix\":\"../" + Canary + "\"}")] } };
+
             });
         }), CancellationToken.None);
 
@@ -176,21 +171,18 @@ public sealed partial class R5LiveHarnessTests
         using var plan = new PlanFile();
         Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus, plan.Path).Item1);
         var lines = new List<string>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (run, context) =>
         {
-            var replay = new ReplayTransport(run.Script, ReplayFault.None);
+            var replay = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             if (run.Input.CaseId != "wrong-evidence") return replay;
             var sends = 0;
-            return new FakeTransport(async (request, token) =>
+            return new FakeChat(async (request, token) =>
             {
-                var original = await replay.SendAsync(request, token);
+                var original = await replay.GetResponseAsync(request, token);
                 if (++sends != 1) return original;
-                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
-                if (malformedChoice)
-                    body["choices"]![0] = JsonValue.Create(Canary);
-                else
-                    body["choices"]![0]!["finish_reason"] = "length";
-                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+                throw new ProjectChatNormalizationException(AgentFailureCodes.ResponseInvalid,
+                    malformedChoice ? ProjectChatNormalizationReason.ProviderChoiceShape : ProjectChatNormalizationReason.ProviderFinishReasonLength);
+
             });
         }), CancellationToken.None);
 
@@ -252,24 +244,22 @@ public sealed partial class R5LiveHarnessTests
             });
         });
         var lines = new List<string>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (run, context) =>
         {
-            var replay = new ReplayTransport(run.Script, ReplayFault.None);
+            var replay = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             var injected = false;
-            return new FakeTransport(async (request, token) =>
+            return new FakeChat(async (request, token) =>
             {
-                var original = await replay.SendAsync(request, token);
-                if (injected || original.Outcome != DeepSeekTransportOutcome.Success)
+                var original = await replay.GetResponseAsync(request, token);
+                if (injected)
                 {
                     return original;
                 }
 
                 injected = true;
-                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
-                var function = body["choices"]![0]!["message"]!["tool_calls"]![0]!["function"]!;
-                function["name"] = toolName;
-                function["arguments"] = arguments;
-                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+                return original with { Message = original.Message with { Contents = original.Message.Contents
+                    .Select(content => content is ProjectToolCallContent call ? call with { Name = toolName, ArgumentsJson = arguments } : content).ToArray() } };
+
             });
         }), CancellationToken.None);
 
@@ -343,28 +333,16 @@ public sealed partial class R5LiveHarnessTests
         using var plan = new PlanFile();
         var lines = new List<string>();
         var count = 0;
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (run, context) =>
         {
-            var replay = new ReplayTransport(run.Script, ReplayFault.None);
-            return new FakeTransport(async (request, token) =>
+            var replay = new ReplayScriptClient(run.Script, ReplayFault.None, context);
+            return new FakeChat(async (request, token) =>
             {
-                using var sent = JsonDocument.Parse(request);
-                Assert.Equal("deepseek-flash", sent.RootElement.GetProperty("model").GetString());
-                var original = await replay.SendAsync(request, token);
-                var body = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
+                var original = await replay.GetResponseAsync(request, token);
                 count++;
-                body["model"] = "deepseek-flash";
-                body["id"] = Canary;
-                body["system_fingerprint"] = Canary;
-                body["usage"] = new JsonObject
-                {
-                    ["prompt_tokens"] = hit + miss, ["completion_tokens"] = output,
-                    ["total_tokens"] = hit + miss + output,
-                    ["prompt_cache_hit_tokens"] = hit, ["prompt_cache_miss_tokens"] = miss,
-                    ["prompt_tokens_details"] = new JsonObject { ["cached_tokens"] = 999 },
-                    ["completion_tokens_details"] = new JsonObject { ["reasoning_tokens"] = 999 },
-                };
-                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body.ToJsonString()));
+                return original with { Usage = new(hit + miss, output,
+                    new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, hit, miss)) };
+
             });
         }), CancellationToken.None);
 
@@ -506,8 +484,8 @@ public sealed partial class R5LiveHarnessTests
             _ => [new("finish", "finish_review", "{\"summary\":\"" + Canary + "\",\"findings\":[{\"severity\":\"high\",\"title\":\"Test\",\"message\":\"" + Canary + "\",\"evidence\":[{\"observation_id\":\"" + new string('a', 64) + "\",\"path\":\"src/Caller.cs\",\"start_line\":3,\"end_line\":3}]}]}")],
         };
         var lines = new List<string>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, _ =>
-            new ReplayTransport(new([new([.. calls], Canary)]), ReplayFault.None)), CancellationToken.None);
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (_, context) =>
+            new ReplayScriptClient(new([new([.. calls], Canary)]), ReplayFault.None, context)), CancellationToken.None);
         Assert.Equal(2, result.Failed);
         Assert.Equal(fault == "arguments" ? 4 : 2,
             result.Summary.SimulatedAdapterCalls);
@@ -729,7 +707,7 @@ public sealed partial class R5LiveHarnessTests
             LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output8192);
         document["bounds"]!["max_output_tokens"] = AgentLimits.Output8192Tokens;
         document["bounds"]!["max_combined_tokens"] = AgentLimits.Combined8192Tokens;
-        document["bounds"]!["per_call"]!["max_output_tokens"] = DeepSeekRequestWriter.CandidateMaxTokens;
+        document["bounds"]!["per_call"]!["max_output_tokens"] = 8192;
     }
 
     private static void Output65536Plan(JsonObject document)
@@ -739,7 +717,7 @@ public sealed partial class R5LiveHarnessTests
             LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536);
         document["bounds"]!["max_output_tokens"] = AgentLimits.Output65536Tokens;
         document["bounds"]!["max_combined_tokens"] = AgentLimits.Combined65536Tokens;
-        document["bounds"]!["per_call"]!["max_output_tokens"] = DeepSeekRequestWriter.Output65536MaxTokens;
+        document["bounds"]!["per_call"]!["max_output_tokens"] = 65536;
     }
 
     private sealed class PlanFile : IDisposable
@@ -760,10 +738,10 @@ public sealed partial class R5LiveHarnessTests
 
     private static LiveOptions Options(
         List<string>? lines = null,
-        Func<AdmittedReplayRun, IDeepSeekTransport>? transport = null) => new()
+        Func<AdmittedReplayRun, DeepSeekAdapterContext, IProjectChatClient>? transport = null) => new()
     {
         WriteLine = lines is null ? _ => { } : lines.Add,
-        DryRunTransport = transport ?? (run => new ReplayTransport(run.Script, ReplayFault.None)),
+        DryRunChat = transport ?? ((run, context) => new ReplayScriptClient(run.Script, ReplayFault.None, context)),
     };
 
     private static LiveAdmissionCode RejectPlan(Action<JsonObject> edit)
@@ -780,13 +758,13 @@ public sealed partial class R5LiveHarnessTests
         }
     }
 
-    private sealed class FakeTransport(
-        Func<ReadOnlyMemory<byte>, CancellationToken, Task<DeepSeekTransportResult>> send)
-        : IDeepSeekTransport
+    private sealed class FakeChat(
+        Func<ProjectChatRequest, CancellationToken, Task<ProjectChatResponse>> send)
+        : IProjectChatClient
     {
         internal int Calls { get; private set; }
-        public Task<DeepSeekTransportResult> SendAsync(
-            ReadOnlyMemory<byte> requestBody, CancellationToken cancellationToken)
+        public Task<ProjectChatResponse> GetResponseAsync(
+            ProjectChatRequest requestBody, CancellationToken cancellationToken)
         {
             Calls++;
             return send(requestBody, cancellationToken);
@@ -800,10 +778,10 @@ public sealed partial class R5LiveHarnessTests
         public string? TakeProviderCredential() { Taken++; return value; }
     }
 
-    private sealed class FakeFactory(Func<DeepSeekCredential, IDeepSeekTransport> create) : ILiveTransportFactory
+    private sealed class FakeFactory(Func<DeepSeekAdapterContext, IProjectChatClient> create) : ILiveChatFactory
     {
         internal int Calls { get; private set; }
-        public IDeepSeekTransport Create(DeepSeekCredential credential) { Calls++; return create(credential); }
+        public IProjectChatClient Create(DeepSeekAdapterContext context) { Calls++; return create(context); }
     }
 
     [Fact]
@@ -969,10 +947,10 @@ public sealed partial class R5LiveHarnessTests
             document["bounds"]!["per_call"]!["max_input_tokens"] = 32768;
         });
         var lines = new List<string>();
-        var transports = new List<ReplayTransport>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        var transports = new List<ReplayScriptClient>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (run, context) =>
         {
-            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            var transport = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             transports.Add(transport);
             return transport;
         }), CancellationToken.None);
@@ -1010,21 +988,15 @@ public sealed partial class R5LiveHarnessTests
     public async Task CandidateDryRunBindsPlanAgentWriterAccountingAndStrictJournal()
     {
         using var plan = new PlanFile(CandidatePlan);
-        var transport = new ReplayTransport(
-            Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs
-                .Single(run => run.Input.CaseId == "cs-safe").Script,
-            ReplayFault.None);
+        ReplayScriptClient transport = null!;
         var result = await LiveRunner.RunAsync(plan.Path, false,
-            Options(transport: _ => transport), CancellationToken.None);
+            Options(transport: (_, context) => { transport = new(
+                Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs.Single(run => run.Input.CaseId == "cs-safe").Script,
+                ReplayFault.None, context); return transport; }), CancellationToken.None);
         Assert.Equal("complete", result.StopReason);
         Assert.Equal(1, result.Attempted);
         Assert.NotEmpty(transport.Requests);
-        foreach (var request in transport.Requests)
-        {
-            using var document = JsonDocument.Parse(request);
-            Assert.Equal(8192, document.RootElement.GetProperty("max_tokens").GetInt32());
-            Assert.False(document.RootElement.TryGetProperty("tool_choice", out _));
-        }
+        Assert.All(transport.OutputCaps, cap => Assert.Equal(8192, cap));
         Assert.Equal((long)transport.Requests.Count * 8192, result.Summary.ReservedOutputTokens);
         Assert.Equal(DeepSeekAdapterContext.CandidateAdapter, result.Journal.Document.Plan.Provider.AdapterId);
         Assert.NotNull(UsageJournalJson.Read(UsageJournalJson.Write(result.Journal)));
@@ -1034,21 +1006,15 @@ public sealed partial class R5LiveHarnessTests
     public async Task Output65536DryRunBindsPlanAgentWriterAccountingAndStrictJournal()
     {
         using var plan = new PlanFile(Output65536Plan);
-        var transport = new ReplayTransport(
-            Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs
-                .Single(run => run.Input.CaseId == "cs-safe").Script,
-            ReplayFault.None);
+        ReplayScriptClient transport = null!;
         var result = await LiveRunner.RunAsync(plan.Path, false,
-            Options(transport: _ => transport), CancellationToken.None);
+            Options(transport: (_, context) => { transport = new(
+                Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture).Runs.Single(run => run.Input.CaseId == "cs-safe").Script,
+                ReplayFault.None, context); return transport; }), CancellationToken.None);
         Assert.Equal("complete", result.StopReason);
         Assert.Equal(1, result.Attempted);
         Assert.NotEmpty(transport.Requests);
-        foreach (var request in transport.Requests)
-        {
-            using var document = JsonDocument.Parse(request);
-            Assert.Equal(65_536, document.RootElement.GetProperty("max_tokens").GetInt32());
-            Assert.False(document.RootElement.TryGetProperty("tool_choice", out _));
-        }
+        Assert.All(transport.OutputCaps, cap => Assert.Equal(65_536, cap));
         Assert.Equal((long)transport.Requests.Count * 65_536, result.Summary.ReservedOutputTokens);
         Assert.Equal(DeepSeekAdapterContext.Output65536Adapter, result.Journal.Document.Plan.Provider.AdapterId);
         Assert.Equal(LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536),
@@ -1082,7 +1048,7 @@ public sealed partial class R5LiveHarnessTests
         var secret = new FakeSecret(Canary);
         var factory = new FakeFactory(_ => throw new InvalidOperationException("must not be constructed"));
         await Assert.ThrowsAsync<LivePlanRejected>(() => LiveRunner.RunAsync(plan.Path, true,
-            new LiveOptions { SecretSource = secret, TransportFactory = factory }, CancellationToken.None));
+            new LiveOptions { SecretSource = secret, ChatFactory = factory }, CancellationToken.None));
         Assert.Equal(0, secret.Taken);
         Assert.Equal(0, factory.Calls);
     }
@@ -1090,21 +1056,19 @@ public sealed partial class R5LiveHarnessTests
     [Theory]
     [InlineData(65_536, false)]
     [InlineData(65_537, true)]
-    public async Task Output65536UsageBoundaryIsAccountedAfterARealAdapterResponse(
+    public async Task Output65536UsageBoundaryIsAccountedAfterAnAuthoredTypedResponse(
         int outputTokens, bool violation)
     {
         using var plan = new PlanFile(Output65536Plan);
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (run, context) =>
         {
-            var inner = new ReplayTransport(run.Script, ReplayFault.None);
-            return new FakeTransport(async (body, token) =>
+            var inner = new ReplayScriptClient(run.Script, ReplayFault.None, context);
+            return new FakeChat(async (body, token) =>
             {
-                var response = await inner.SendAsync(body, token);
-                if (response.Outcome != DeepSeekTransportOutcome.Success) return response;
-                var document = JsonNode.Parse(Encoding.UTF8.GetString(response.Body.AsSpan()))!;
-                document["usage"]!["completion_tokens"] = outputTokens;
-                document["usage"]!["total_tokens"] = 3 + outputTokens;
-                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(document.ToJsonString()));
+                var response = await inner.GetResponseAsync(body, token);
+                return response with { Usage = new(3, outputTokens,
+                    new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, 3)) };
+
             });
         }), CancellationToken.None);
         Assert.Equal(violation, result.Summary.AccountingViolation);
@@ -1151,7 +1115,7 @@ public sealed partial class R5LiveHarnessTests
         var secret = new FakeSecret(Canary);
         var factory = new FakeFactory(_ => throw new InvalidOperationException("must not be constructed"));
         await Assert.ThrowsAsync<LivePlanRejected>(() => LiveRunner.RunAsync(plan.Path, true,
-            new LiveOptions { SecretSource = secret, TransportFactory = factory }, CancellationToken.None));
+            new LiveOptions { SecretSource = secret, ChatFactory = factory }, CancellationToken.None));
         Assert.Equal(0, secret.Taken);
         Assert.Equal(0, factory.Calls);
     }
@@ -1202,10 +1166,10 @@ public sealed partial class R5LiveHarnessTests
             document["bounds"]!["max_combined_tokens"] = 4196;
             document["bounds"]!["per_call"]!["max_input_tokens"] = 60;
         });
-        var transports = new List<ReplayTransport>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        var transports = new List<ReplayScriptClient>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (run, context) =>
         {
-            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            var transport = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             transports.Add(transport);
             return transport;
         }), CancellationToken.None);
@@ -1222,10 +1186,10 @@ public sealed partial class R5LiveHarnessTests
     public async Task ModelCallAndSpendCeilingsStopBeforeSend()
     {
         using var callsPlan = new PlanFile(document => document["bounds"]!["max_model_calls"] = 1);
-        var transports = new List<ReplayTransport>();
-        var callsResult = await LiveRunner.RunAsync(callsPlan.Path, false, Options(null, run =>
+        var transports = new List<ReplayScriptClient>();
+        var callsResult = await LiveRunner.RunAsync(callsPlan.Path, false, Options(null, (run, context) =>
         {
-            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            var transport = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             transports.Add(transport);
             return transport;
         }), CancellationToken.None);
@@ -1235,9 +1199,9 @@ public sealed partial class R5LiveHarnessTests
         using var spendPlan = new PlanFile(document =>
             document["bounds"]!["spend_ceiling_micro_usd"] = 1000);
         transports = [];
-        var spendResult = await LiveRunner.RunAsync(spendPlan.Path, false, Options(null, run =>
+        var spendResult = await LiveRunner.RunAsync(spendPlan.Path, false, Options(null, (run, context) =>
         {
-            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            var transport = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             transports.Add(transport);
             return transport;
         }), CancellationToken.None);
@@ -1261,14 +1225,13 @@ public sealed partial class R5LiveHarnessTests
             document["bounds"]!["per_call"]!["max_input_tokens"] = 32768;
         });
         var sends = 0;
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (run, context) =>
         {
-            var inner = new ReplayTransport(run.Script, ReplayFault.None);
-            return (IDeepSeekTransport)new FakeTransport((body, token) =>
+            var inner = new ReplayScriptClient(run.Script, ReplayFault.None, context);
+            return (IProjectChatClient)new FakeChat((body, token) =>
                 ++sends == 1
-                    ? Task.FromResult(DeepSeekTransportResult.HttpFailure(
-                        DeepSeekHttpStatusClass.TooManyRequests, 0))
-                    : inner.SendAsync(body, token));
+                    ? Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("http429"))
+                    : inner.GetResponseAsync(body, token));
         }), CancellationToken.None);
         Assert.Equal("rate_limited", result.StopReason);
         Assert.Equal(1, sends);
@@ -1288,10 +1251,10 @@ public sealed partial class R5LiveHarnessTests
             document["bounds"]!["per_call"]!["max_input_tokens"] = 2;
             document["bounds"]!["max_combined_tokens"] = 12294;
         });
-        var transports = new List<ReplayTransport>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        var transports = new List<ReplayScriptClient>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (run, context) =>
         {
-            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            var transport = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             transports.Add(transport);
             return transport;
         }), CancellationToken.None);
@@ -1316,10 +1279,10 @@ public sealed partial class R5LiveHarnessTests
             document["bounds"]!["spend_ceiling_micro_usd"] = long.MaxValue;
             document["bounds"]!["per_call"]!["max_charge_micro_usd"] = long.MaxValue;
         });
-        var transports = new List<ReplayTransport>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, run =>
+        var transports = new List<ReplayScriptClient>();
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (run, context) =>
         {
-            var transport = new ReplayTransport(run.Script, ReplayFault.None);
+            var transport = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             transports.Add(transport);
             return transport;
         }), CancellationToken.None);
@@ -1336,21 +1299,18 @@ public sealed partial class R5LiveHarnessTests
     {
         using var plan = new PlanFile();
         var lines = new List<string>();
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, run =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (run, context) =>
         {
-            var inner = new ReplayTransport(run.Script, ReplayFault.None);
+            var inner = new ReplayScriptClient(run.Script, ReplayFault.None, context);
             var calls = 0;
-            return new FakeTransport(async (body, token) =>
+            return new FakeChat(async (body, token) =>
             {
-                if (++calls == oversizedCall) return DeepSeekTransportResult.ResponseTooLarge();
-                var original = await inner.SendAsync(body, token);
-                var response = JsonNode.Parse(original.Body.AsSpan())!.AsObject();
-                response["usage"] = new JsonObject
-                {
-                    ["prompt_tokens"] = 7, ["completion_tokens"] = 3, ["total_tokens"] = 10,
-                    ["prompt_cache_hit_tokens"] = 2, ["prompt_cache_miss_tokens"] = 5,
-                };
-                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(response.ToJsonString()));
+                if (++calls == oversizedCall) return new ProjectChatResponse(new("assistant", []),
+                    CapturedResponseBodyBytes: AgentLimits.ResponseBytes + 1L);
+                var original = await inner.GetResponseAsync(body, token);
+                return original with { Usage = new(7, 3,
+                    new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 2, 5)) };
+
             });
         }), CancellationToken.None);
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.ResponseTooLarge);
@@ -1408,12 +1368,12 @@ public sealed partial class R5LiveHarnessTests
             document["bounds"]!["per_call"]!["max_input_tokens"] = 32768;
         });
         var sends = 0;
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, _ =>
-            (IDeepSeekTransport)new FakeTransport(async (_, token) =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (_, _) =>
+            (IProjectChatClient)new FakeChat(async (_, token) =>
             {
                 sends++;
                 await Task.Delay(Timeout.Infinite, token);
-                return DeepSeekTransportResult.TransportFailure();
+                throw new HistoricalScriptFailure("transport_failure");
             })), CancellationToken.None);
         Assert.Equal("deadline", result.StopReason);
         Assert.Equal(1, sends);
@@ -1439,12 +1399,12 @@ public sealed partial class R5LiveHarnessTests
         });
         using var cancel = new CancellationTokenSource();
         var sends = 0;
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, _ =>
-            (IDeepSeekTransport)new FakeTransport(async (_, token) =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (_, _) =>
+            (IProjectChatClient)new FakeChat(async (_, token) =>
             {
                 if (++sends == 2) cancel.Cancel();
                 await Task.Delay(50, token);
-                return DeepSeekTransportResult.TransportFailure();
+                throw new HistoricalScriptFailure("transport_failure");
             })), cancel.Token);
         Assert.Equal("caller_cancelled", result.StopReason);
         Assert.True(sends <= 2);
@@ -1457,11 +1417,11 @@ public sealed partial class R5LiveHarnessTests
     {
         using var plan = new PlanFile(document => document["schedule"]![0]!["repeats"] = 1);
         var sends = 0;
-        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, _ =>
-            (IDeepSeekTransport)new FakeTransport((_, _) =>
+        var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (_, _) =>
+            (IProjectChatClient)new FakeChat((_, _) =>
             {
                 sends++;
-                return Task.FromResult(DeepSeekTransportResult.TransportFailure());
+                return Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("transport_failure"));
             })), CancellationToken.None);
         Assert.Equal(1, sends);
         Assert.Equal(1, result.Summary.TransportOutcomeCounts.TransportFailure);
@@ -1481,7 +1441,7 @@ public sealed partial class R5LiveHarnessTests
         var factory = new FakeFactory(_ => throw new InvalidOperationException("must not be constructed"));
         var code = await Assert.ThrowsAsync<LivePlanRejected>(() =>
             LiveRunner.RunAsync(plan.Path, true,
-                new LiveOptions { SecretSource = secret, TransportFactory = factory, WriteLine = _ => { } },
+                new LiveOptions { SecretSource = secret, ChatFactory = factory, WriteLine = _ => { } },
                 CancellationToken.None));
         Assert.True(code.Code is LiveAdmissionCode.SecretInvalid or LiveAdmissionCode.InvalidSource);
         Assert.Equal(0, factory.Calls);
@@ -1492,7 +1452,7 @@ public sealed partial class R5LiveHarnessTests
         var malformed = new FakeSecret("line\nbreak");
         code = await Assert.ThrowsAsync<LivePlanRejected>(() =>
             LiveRunner.RunAsync(plan.Path, true,
-                new LiveOptions { SecretSource = malformed, TransportFactory = factory, WriteLine = _ => { } },
+                new LiveOptions { SecretSource = malformed, ChatFactory = factory, WriteLine = _ => { } },
                 CancellationToken.None));
         Assert.True(code.Code is LiveAdmissionCode.SecretInvalid or LiveAdmissionCode.InvalidSource);
         Assert.Equal(0, factory.Calls);
@@ -1536,7 +1496,7 @@ public sealed partial class R5LiveHarnessTests
     private static bool CleanBuild() => EvaluationSource.Clean;
 
     [Fact]
-    public async Task ExecuteWithAuthorizedCredentialPassesItToTransportOnly()
+    public async Task AuthorizedCredentialNeverEntersTheHistoricalTypedFactory()
     {
         if (!CleanBuild()) return; // execute admission requires a clean-built evaluator
         using var plan = new PlanFile();
@@ -1546,18 +1506,18 @@ public sealed partial class R5LiveHarnessTests
         var result = await LiveRunner.RunAsync(plan.Path, true, new LiveOptions
         {
             SecretSource = secret,
-            TransportFactory = new FakeFactory(credential =>
+            ChatFactory = new FakeFactory(context =>
             {
-                received.Add(credential.Value);
-                return new ReplayTransport(
+                received.Add(context.ProviderId);
+                return new ReplayScriptClient(
                     Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture)
                         .Runs.First(run => run.Input.CaseId == "cs-safe").Script,
-                    ReplayFault.None);
+                    ReplayFault.None, context);
             }),
             WriteLine = lines.Add,
         }, CancellationToken.None);
         Assert.Equal(1, secret.Taken);
-        Assert.Equal([Canary], received);
+        Assert.Equal([DeepSeekAdapterContext.Provider], received);
         Assert.All(lines, line => Assert.DoesNotContain(Canary, line));
         Assert.All(result.Outcomes, outcome => Assert.Equal("live", outcome.Mode));
         Assert.True(result.Summary.ActualProviderCalls >= 1);

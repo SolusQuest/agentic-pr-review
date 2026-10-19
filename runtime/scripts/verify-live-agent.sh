@@ -43,9 +43,9 @@ TEST_PROJECT="${RUNTIME_TESTS}/AgenticPrReview.Runtime.Tests/AgenticPrReview.Run
 RUNTIME_PROJECT="${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
 CORPUS="${RUNTIME_TESTS}/fixtures/agent/r3-quality/corpus.json"
 FIXTURES="${RUNTIME_TESTS}/fixtures/agent/r3-live-agent"
-GOLDEN="${FIXTURES}/replacement-record.json.golden"
-NEGATIVE_CASES="${FIXTURES}/negative-cases.tsv"
-CANARY_ROUTES="${FIXTURES}/canary-routes.tsv"
+GOLDEN="${FIXTURES}/cr1-r8-typed/replacement-record.json.golden"
+NEGATIVE_CASES="${FIXTURES}/cr1-r8-typed/negative-cases.tsv"
+CANARY_ROUTES="${FIXTURES}/cr1-r8-typed/canary-routes.tsv"
 ASSEMBLY="AgenticPrReview.Runtime.LiveAgentVerifierFixture"
 DOTNET_CMD="${DOTNET_CMD:-dotnet}"
 PROVIDER_CANARY="APR111_PROVIDER_SECRET_CANARY"
@@ -326,7 +326,8 @@ _run_negative_case() {
   local receipt="${root}/receipts/negative/${case_id}.json"
   local private_receipt="${phase_root}/private/negative-receipt.json"
   local log="${root}/negative-${case_id}.log"
-  mkdir -p -- "${phase_root}" "${root}/receipts/negative"
+  mkdir -p -- "${phase_root}"
+  (umask 077; mkdir -p -- "${root}/receipts/negative")
   local -a extra_arguments=()
   if [[ "${requires_prior}" == yes ]]; then
     local seed_output="${phase_root}/private/seed-receipt.json"
@@ -343,9 +344,12 @@ _run_negative_case() {
       historical_messages_sha256 "${seed_output}")"
     [[ -n "${expected_lineage}" && -n "${expected_history}" ]] ||
       _fail "APR_R3_LIVE_NEGATIVE_SEED_RECEIPT_INVALID ${case_id}"
-    mkdir -p -- "${root}/receipts/negative-seeds"
+    (umask 077; mkdir -p -- "${root}/receipts/negative-seeds")
     mv -- "${seed_output}" \
       "${root}/receipts/negative-seeds/${case_id}.json"
+    [[ ! -e "${root}/receipts/negative-seeds/${case_id}.json.typed-observations.json" && ! -L "${root}/receipts/negative-seeds/${case_id}.json.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
+    mv -n -- "${seed_output}.typed-observations.json" "${root}/receipts/negative-seeds/${case_id}.json.typed-observations.json" || _fail APR_R3_LIVE_TYPED_OBSERVER_MOVE_FAILED
+    [[ ! -e "${seed_output}.typed-observations.json" && ! -L "${seed_output}.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
     extra_arguments=(
       --expected-lineage-sha256 "${expected_lineage}"
       --expected-history-sha256 "${expected_history}"
@@ -366,11 +370,14 @@ _run_negative_case() {
     "${log}" "APR_R3_LIVE_NEGATIVE_OK ${case_id}" ||
     _fail "APR_R3_LIVE_NEGATIVE_MARKER_INVALID ${case_id}"
   mv -- "${private_receipt}" "${receipt}"
+  [[ ! -e "${receipt}.typed-observations.json" && ! -L "${receipt}.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
+  mv -n -- "${private_receipt}.typed-observations.json" "${receipt}.typed-observations.json" || _fail APR_R3_LIVE_TYPED_OBSERVER_MOVE_FAILED
+  [[ ! -e "${private_receipt}.typed-observations.json" && ! -L "${private_receipt}.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
 }
 
 _run_once() {
   local root="$1"
-  mkdir -p -- "${root}/receipts"
+  (umask 077; mkdir -p -- "${root}/receipts")
 
   local verb directory receipt marker phase
   local -a phases=(
@@ -415,6 +422,9 @@ _run_once() {
       grep -Fxq "APR_R3_LIVE_PHASE_OK ${marker}" ||
       _fail "APR_R3_LIVE_PHASE_MARKER_INVALID ${verb}"
     mv -- "${private_output}" "${root}/receipts/${receipt}.json"
+    [[ ! -e "${root}/receipts/${receipt}.json.typed-observations.json" && ! -L "${root}/receipts/${receipt}.json.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
+    mv -n -- "${private_output}.typed-observations.json" "${root}/receipts/${receipt}.json.typed-observations.json" || _fail APR_R3_LIVE_TYPED_OBSERVER_MOVE_FAILED
+    [[ ! -e "${private_output}.typed-observations.json" && ! -L "${private_output}.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
   done
 
   mkdir -p -- "${root}/canary"
@@ -428,6 +438,9 @@ _run_once() {
     "${canary_log}" "APR_R3_LIVE_PHASE_OK CanaryRouting" ||
     _fail APR_R3_LIVE_CANARY_MARKER_INVALID
   mv -- "${canary_output}" "${root}/receipts/canary.json"
+  [[ ! -e "${root}/receipts/canary.json.typed-observations.json" && ! -L "${root}/receipts/canary.json.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
+  mv -n -- "${canary_output}.typed-observations.json" "${root}/receipts/canary.json.typed-observations.json" || _fail APR_R3_LIVE_TYPED_OBSERVER_MOVE_FAILED
+  [[ ! -e "${canary_output}.typed-observations.json" && ! -L "${canary_output}.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
 
   mkdir -p -- "${root}/architecture/private"
   local architecture_output="${root}/architecture/private/receipt.json"
@@ -445,8 +458,8 @@ _run_once() {
   local -a negatives=(
     'outer-authorization-denied|negative-outer-authorization-denied|no|no'
     'inner-authorization-denied|negative-inner-authorization-denied|no|no'
-    'provider-http-failure|negative-provider-http-failure|no|no'
-    'provider-malformed-response|negative-provider-malformed-response|no|no'
+    'script-failure|negative-script-failure|no|no'
+    'script-invalid-response|negative-script-invalid-response|no|no'
     'tool-arguments-invalid|negative-tool-arguments-invalid|no|no'
     'terminal-ungrounded|negative-terminal-ungrounded|no|no'
     'transition-from-head-invalid|negative-transition-from-head-invalid|yes|no'
@@ -485,6 +498,8 @@ _run_once() {
   [[ -n "${replacement_history}" ]] ||
     _fail APR_R3_LIVE_REPLACEMENT_SEED_HISTORY_MISSING
   rm -f -- "${replacement_seed_receipt}"
+  [[ -f "${replacement_seed_receipt}.typed-observations.json" && ! -L "${replacement_seed_receipt}.typed-observations.json" ]] || _fail APR_R3_LIVE_REPLACEMENT_SEED_OBSERVER_INVALID
+  rm -- "${replacement_seed_receipt}.typed-observations.json" || _fail APR_R3_LIVE_REPLACEMENT_SEED_OBSERVER_REMOVE_FAILED
 
   local prior_replacement="${root}/prior-replacement.json"
   local replacement_receipt=
@@ -512,6 +527,9 @@ _run_once() {
     _fail APR_R3_LIVE_REPLACEMENT_PRIOR_CHANGED
   mv -- "${replacement_receipt}" \
     "${root}/receipts/negative/replacement-write-failed.json"
+  [[ ! -e "${root}/receipts/negative/replacement-write-failed.json.typed-observations.json" && ! -L "${root}/receipts/negative/replacement-write-failed.json.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
+  mv -n -- "${replacement_receipt}.typed-observations.json" "${root}/receipts/negative/replacement-write-failed.json.typed-observations.json" || _fail APR_R3_LIVE_TYPED_OBSERVER_MOVE_FAILED
+  [[ ! -e "${replacement_receipt}.typed-observations.json" && ! -L "${replacement_receipt}.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
 
   if ! _run_fixture "${root}" aggregate "${root}" \
       "${root}/replacement.json" "${root}/aggregate.log" \
@@ -624,8 +642,8 @@ _run_repeated_proof() {
   local first_terminal second_terminal
   first_fact="$(_extract_hash prior_fact_sha256 "${first}/receipts/seed.json")"
   second_fact="$(_extract_hash prior_fact_sha256 "${second}/receipts/seed.json")"
-  first_request="$(_extract_hash first_request_sha256 "${first}/receipts/restore.json")"
-  second_request="$(_extract_hash first_request_sha256 "${second}/receipts/restore.json")"
+  first_request="$(_extract_hash first_typed_request_sha256 "${first}/receipts/restore.json")"
+  second_request="$(_extract_hash first_typed_request_sha256 "${second}/receipts/restore.json")"
   first_terminal="$(_extract_hash terminal_sha256 "${first}/receipts/restore.json")"
   second_terminal="$(_extract_hash terminal_sha256 "${second}/receipts/restore.json")"
   [[ -n "${first_fact}" && -n "${second_fact}" &&

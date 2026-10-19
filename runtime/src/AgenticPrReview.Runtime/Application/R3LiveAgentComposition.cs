@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
@@ -104,16 +105,16 @@ internal sealed class R3LiveAgentStateRestorer(
     }
 }
 
-internal interface IR3LiveAgentTransportFactory
+internal interface IR3LiveAgentChatFactory
 {
-    IDeepSeekTransport Create(DeepSeekCredential credential);
+    IProjectChatClient Create(DeepSeekAdapterContext context);
 }
 
-internal sealed class R3LiveAgentTransportFactory
-    : IR3LiveAgentTransportFactory
+internal sealed class R3LiveAgentUnavailableChatFactory
+    : IR3LiveAgentChatFactory
 {
-    public IDeepSeekTransport Create(DeepSeekCredential credential) =>
-        DeepSeekTransport.Create(credential);
+    public IProjectChatClient Create(DeepSeekAdapterContext context) =>
+        throw new InvalidOperationException("Historical provider execution is unavailable.");
 }
 
 internal interface IR3LiveAgentReviewedFileAccessFactory
@@ -229,7 +230,7 @@ internal sealed class R3LiveAgentStateKeyResolver :
 internal sealed class R3LiveAgentDependencies(
     IR3LiveAgentSecretSource secretSource,
     IR3LiveAgentStateRestorer stateRestorer,
-    IR3LiveAgentTransportFactory transportFactory,
+    IR3LiveAgentChatFactory transportFactory,
     IR3LiveAgentReviewedFileAccessFactory reviewedFileAccessFactory,
     ILiveAgentStateCommitCoordinator stateCommitCoordinator,
     TimeProvider timeProvider,
@@ -239,7 +240,7 @@ internal sealed class R3LiveAgentDependencies(
 
     internal IR3LiveAgentStateRestorer StateRestorer { get; } = stateRestorer;
 
-    internal IR3LiveAgentTransportFactory TransportFactory { get; } =
+    internal IR3LiveAgentChatFactory ChatFactory { get; } =
         transportFactory;
 
     internal IR3LiveAgentReviewedFileAccessFactory ReviewedFileAccessFactory {
@@ -262,7 +263,7 @@ internal sealed class R3LiveAgentDependencies(
         return new(
             new R3LiveAgentEnvironmentSecretSource(),
             new R3LiveAgentStateRestorer(),
-            new R3LiveAgentTransportFactory(),
+            new R3LiveAgentUnavailableChatFactory(),
             new R3LiveAgentReviewedFileAccessFactory(),
             new LiveAgentStateCommitCoordinator(
                 new LiveAgentStateTransactionFactory(timeProvider),

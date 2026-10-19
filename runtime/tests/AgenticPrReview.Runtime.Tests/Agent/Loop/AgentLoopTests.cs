@@ -931,7 +931,7 @@ public sealed partial class AgentLoopTests
     }
 
     [Fact]
-    public async Task DeepSeekProjectionPreservesRecoveryReasoningAndCallPair()
+    public async Task TypedContinuationPreservesRecoveryReasoningAndCallPair()
     {
         const string canary = "private-tool-argument-only-canary";
         const string reasoning = "reasoning bytes remain in place";
@@ -961,26 +961,17 @@ public sealed partial class AgentLoopTests
                 Request(), CancellationToken.None);
         Assert.True(outcome.Succeeded);
 
-        var projected = MinimalChatClient.Materialize(chat.Requests[1]);
-        var written = DeepSeekRequestWriter.Write(
-            projected,
-            DeepSeekRequestProfile.Output65536);
-        Assert.Equal(DeepSeekRequestWriteOutcome.Success, written.Outcome);
-        var json = Encoding.UTF8.GetString(written.Body.AsSpan());
+        var logical = AgentRequestWriter.Write(chat.Requests[1]);
+        var json = Encoding.UTF8.GetString(logical);
         Assert.DoesNotContain(canary, json, StringComparison.Ordinal);
-        using var document = JsonDocument.Parse(json);
-        var messages = document.RootElement.GetProperty("messages");
-        var assistant = messages[1];
-        Assert.Equal(reasoning,
-            assistant.GetProperty("reasoning_content").GetString());
-        var call = assistant.GetProperty("tool_calls")[0];
-        Assert.Equal("invalid", call.GetProperty("id").GetString());
-        Assert.Equal(AgentRecoveryFeedback.RejectedArguments,
-            call.GetProperty("function").GetProperty("arguments").GetString());
-        Assert.Equal("invalid",
-            messages[2].GetProperty("tool_call_id").GetString());
-        Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(
-            messages[2].GetProperty("content").GetString()!));
+        var assistant = chat.Requests[1].Messages[1];
+        Assert.Equal(reasoning, Assert.Single(chat.Requests[1].Continuation!.Items).Readable);
+        var call = Assert.IsType<ProjectRecoveryToolCallContent>(Assert.Single(assistant.Contents));
+        Assert.Equal("invalid", call.CallId);
+        Assert.Equal(AgentRecoveryFeedback.RejectedArguments, call.ArgumentsJson);
+        var result = Assert.IsType<ProjectToolErrorContent>(Assert.Single(chat.Requests[1].Messages[2].Contents));
+        Assert.Equal("invalid", result.CallId);
+        Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(result.Result));
     }
 
     [Fact]
@@ -1215,17 +1206,9 @@ public sealed partial class AgentLoopTests
         Assert.Single(
             outcome.Events.OfType<AgentToolResultEvent>(),
             item => item.Name == "list_files");
-        var wire = DeepSeekRequestWriter.Write(
-            MinimalChatClient.Materialize(chat.Requests[1]));
-        Assert.Equal(DeepSeekRequestWriteOutcome.Success, wire.Outcome);
-        using var document = JsonDocument.Parse(wire.Body.ToArray());
-        var historicalCall = document.RootElement.GetProperty("messages")
-            .EnumerateArray()
-            .SelectMany(message => message.TryGetProperty("tool_calls", out var calls)
-                ? calls.EnumerateArray().ToArray()
-                : [])
-            .Single(call => call.GetProperty("function").GetProperty("name").GetString() == "list_files");
-        Assert.Equal("{}", historicalCall.GetProperty("function").GetProperty("arguments").GetString());
+        var historicalCall = chat.Requests[1].Messages.SelectMany(message => message.Contents)
+            .OfType<ProjectToolCallContent>().Single(call => call.Name == "list_files");
+        Assert.Equal("{\"prefix\":null,\"after\":null}", historicalCall.ArgumentsJson);
     }
 
     [Fact]

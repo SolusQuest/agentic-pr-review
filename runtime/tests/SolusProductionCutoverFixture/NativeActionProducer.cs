@@ -1,14 +1,14 @@
-using System.Net;
 using System.Text;
-using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.ActionHost;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.SolusProductionCutoverFixture;
 
-// Explicit supporting historical producer. The ordinary executable never
-// installs this factory; it exists only to make genuine selected-current SESSION.
+// Fixed typed calls produce genuine historical SESSION through the real Host,
+// loop and writer. This is not an HTTP/provider qualification or public route.
 internal static class NativeActionProducer
 {
     internal static Task<int> RunAsync()
@@ -16,8 +16,7 @@ internal static class NativeActionProducer
         var original = ActionHostCompositionDependencies.Production();
         var dependencies = new ActionHostCompositionDependencies(original.EventReader, original.AuthorizationFactory,
             original.GitObjectFactory, original.SnapshotFactory, original.StateDependencies, original.PublisherFactory,
-            new ActionHostDeepSeekProviderRunnerFactory(credential => DeepSeekTransport.CreateForTesting(credential,
-                new Handler(), TimeSpan.FromSeconds(30))), original.TimeProvider,
+            new ActionHostHistoricalChatRunnerFactory(context => new Script(context)), original.TimeProvider,
             original.StagingParentFactory, original.InlineHook, original.WorkflowAdmission,
             original.ReviewedHeadSourceFactory, original.ChangedFileSourceFactory);
         var composition = new ActionHostComposition(dependencies);
@@ -25,31 +24,28 @@ internal static class NativeActionProducer
             Console.Error, CancellationToken.None, composition.RunAsync);
     }
 
-    private sealed class Handler : HttpMessageHandler
+    private sealed class Script(DeepSeekAdapterContext context) : IProjectChatClient
     {
-        private int sends;
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        private int calls;
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            if (++sends > 2) throw new InvalidOperationException("historical_send_bound");
-            var name = sends == 1 ? AgentToolRegistry.ReadFileName : AgentToolRegistry.FinishReviewName;
-            var arguments = sends == 1 ? "{\"path\":\"Caller.cs\"}" :
+            if (++calls > 2 || request.Accounting is { } capture && !capture.TryBeginDispatch())
+                throw new InvalidOperationException("historical_script_bound");
+            request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, 2, 1, 2, 5));
+            var name = calls == 1 ? AgentToolRegistry.ReadFileName : AgentToolRegistry.FinishReviewName;
+            var arguments = calls == 1 ? "{\"path\":\"Caller.cs\"}" :
                 Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview("Historical source review.", []));
-            var message = new JsonObject {
-                ["role"] = "assistant", ["content"] = "", ["reasoning_content"] = "Synthetic historical producer.",
-                ["tool_calls"] = new JsonArray { new JsonObject {
-                    ["id"] = sends == 1 ? "historical_read" : "historical_finish", ["type"] = "function",
-                    ["function"] = new JsonObject { ["name"] = name, ["arguments"] = arguments } } }
-            };
-            var response = new JsonObject {
-                ["model"] = DeepSeekAdapterContext.Model,
-                ["choices"] = new JsonArray { new JsonObject {
-                    ["index"] = 0, ["message"] = message, ["finish_reason"] = "tool_calls" } },
-                ["usage"] = new JsonObject { ["prompt_tokens"] = 3, ["completion_tokens"] = 2,
-                    ["total_tokens"] = 5, ["prompt_cache_hit_tokens"] = 1, ["prompt_cache_miss_tokens"] = 2 }
-            };
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
-                Content = new StringContent(response.ToJsonString(), Encoding.UTF8, "application/json") });
+            var id = calls == 1 ? "historical_read" : "historical_finish";
+            const string reasoning = "Synthetic historical producer.";
+            var position = request.Messages.Length;
+            // Typed fixture: no serialized provider response body; zero is not a wire measurement.
+            return Task.FromResult(new ProjectChatResponse(new("assistant", [
+                new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+                new ProjectToolCallContent(id, name, arguments)]),
+                new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 1, 2)),
+                CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
+                    [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
         }
     }
 }

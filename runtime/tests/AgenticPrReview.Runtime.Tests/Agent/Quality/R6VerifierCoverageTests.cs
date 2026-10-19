@@ -25,8 +25,8 @@ public sealed class R6VerifierCoverageTests
             t2-known-failed t2-unknown t2-local-refusal t2-unattempted-tail t2-terminal-order t2-late-finalization
             t3-usd t3-cny t3-half-even-low t3-half-even-even t3-half-even-high t3-aggregate
             t3-zero-denominator t3-missing-partition t3-unknown-zero-rate t3-overflow
-            p1-bootstrap-restored p1-dynamic-suffix p1-control p1-history p1-settings
-            p1-continuation-position p1-logical-only p1-domain p1-invalid-position
+            l1-bootstrap-restored l1-dynamic-suffix l1-control l1-history l1-settings
+            l1-continuation-position l1-continuation-order l1-domain l1-invalid-position
             p2-replay p2-current-tools p2-current-continuation p2-missing-history p2-reordered-history
             p2-missing-continuation p2-wrong-position p2-changed-continuation p2-wrong-scope
             p2-wrong-head p2-stale-generation p2-policy p2-model p2-adapter p2-current-toolset p2-host-explicit-reset
@@ -201,7 +201,7 @@ public sealed class R6VerifierCoverageTests
             var item = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(evidence, GateJson.Default.GateEconomics));
             Assert.True(GateContracts.Safe(item.Evidence));
             var projection = GateEconomicsOracle.Verify(item, selection);
-            if (id is "c2-replay" or "c2-cancel-after-usage")
+            if (id is "c2-replay" or "c2-cancel-after-usage" or "c2-credential-probe")
             {
                 var repeated = await GateEconomicsCases.RunCase(root, id, plan, Enum.Parse<EconomicsFault>(fault));
                 var repeatedItem = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(repeated, GateJson.Default.GateEconomics));
@@ -209,6 +209,19 @@ public sealed class R6VerifierCoverageTests
                 var forged = evidence with { Report = evidence.Report with { Cleanup = "cleanup_failed" } };
                 var rebound = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(forged, GateJson.Default.GateEconomics));
                 Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(rebound, selection));
+                if (id == "c2-credential-probe")
+                {
+                    foreach (var hash in new[] { "", "not-a-hash" })
+                    {
+                        var missing = evidence with { CredentialProofs = evidence.CredentialProofs.SetItem(1,
+                            evidence.CredentialProofs[1] with { TraceSha256 = hash }) };
+                        var candidate = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(missing, GateJson.Default.GateEconomics));
+                        Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(candidate, selection));
+                    }
+                    var dropped = evidence with { CredentialProofs = evidence.CredentialProofs.RemoveAt(1) };
+                    var droppedItem = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(dropped, GateJson.Default.GateEconomics));
+                    Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(droppedItem, selection));
+                }
             }
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
@@ -297,7 +310,7 @@ public sealed class R6VerifierCoverageTests
                 if (item.Id.StartsWith('t')) GateTokenOracle.Verify(item, selection);
                 else GatePrefixOracle.Verify(item, selection);
             }
-            var dynamic = cases.Single(item => item.Id == "p1-dynamic-suffix");
+            var dynamic = cases.Single(item => item.Id == "l1-dynamic-suffix");
             foreach (var field in new[] { "stable_plan_sha256", "session_sha256", "accepted_session_sha256" })
             {
                 var wrong = Rewrite(dynamic, value =>
@@ -317,6 +330,16 @@ public sealed class R6VerifierCoverageTests
             {
                 foreach (var observation in value["observations"]!.AsArray()) observation!["domain"]!["accepted_session_sha256"] = null;
             }), selection));
+            foreach (var mutation in new[] { "digest", "length", "domain", "old-provider-shape", "missing-domain" })
+                Assert.Throws<InvalidOperationException>(() => GatePrefixOracle.Verify(Rewrite(dynamic, value =>
+                {
+                    var observation = value["observations"]![1]!;
+                    if (mutation == "digest") observation["logical"]!["history"]!["sha256"] = new string('f', 64);
+                    else if (mutation == "length") observation["logical"]!["history"]!["bytes"] = -1;
+                    else if (mutation == "domain") observation["observation_domain"] = "apr-provider-prefix-v1";
+                    else if (mutation == "missing-domain") observation.AsObject().Remove("observation_domain");
+                    else observation["provider"] = observation["logical"]!.DeepClone();
+                }), selection));
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
     }

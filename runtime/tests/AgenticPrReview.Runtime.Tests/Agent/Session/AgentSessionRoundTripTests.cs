@@ -1818,27 +1818,17 @@ public sealed partial class AgentSessionRoundTripTests
             AgentToolRegistry.Definitions.ToArray(),
             restored.RunRequest.Continuation,
             ThinkingRequired: true);
-        var wire = DeepSeekRequestWriter.Write(
-            MinimalChatClient.Materialize(providerRequest));
-        Assert.Equal(DeepSeekRequestWriteOutcome.Success, wire.Outcome);
-        using var document = JsonDocument.Parse(wire.Body.ToArray());
-        var wireCalls = document.RootElement.GetProperty("messages")
-            .EnumerateArray()
-            .SelectMany(message => message.TryGetProperty("tool_calls", out var toolCalls)
-                ? toolCalls.EnumerateArray().ToArray()
-                : [])
-            .Select(call => (
-                Name: call.GetProperty("function").GetProperty("name").GetString(),
-                Arguments: call.GetProperty("function").GetProperty("arguments").GetString()))
+        var logicalCalls = providerRequest.Messages.SelectMany(message => message.Contents)
+            .OfType<ProjectToolCallContent>()
             .Where(call => call.Name != AgentToolRegistry.FinishReviewName)
-            .ToArray();
+            .Select(call => (Name: call.Name, Arguments: call.ArgumentsJson)).ToArray();
         Assert.Equal(
             [
-                (AgentToolRegistry.ListFilesName, "{}"),
-                (AgentToolRegistry.ListChangedFilesName, "{}"),
+                (AgentToolRegistry.ListFilesName, "{\"prefix\":null,\"after\":null}"),
+                (AgentToolRegistry.ListChangedFilesName, "{\"after\":null}"),
                 (AgentToolRegistry.ReadDiffName, "{\"path\":\"src/a.cs\",\"start_hunk\":1,\"hunk_count\":20}"),
             ],
-            wireCalls);
+            logicalCalls);
         var restoredResults = restored.RunRequest.InitialMessages
             .SelectMany(message => message.Contents)
             .OfType<ProjectToolResultContent>()

@@ -47,8 +47,8 @@ const requiredProof = [
   'TrustedProofControlService',
   'TrustedProofStaleSignal',
   'ActionHostCompositionDependencies',
-  'ActionHostDeepSeekProviderRunnerFactory',
-  'DeepSeekTransport',
+  'ActionHostHistoricalChatRunnerFactory',
+  'IProjectChatClient',
   'ActionHostGitHubAuthorizationTransportFactory',
   'AcceptedStateProductionDependencies',
   'BoundedGitHubPublisherTransportFactory',
@@ -94,6 +94,18 @@ const forbiddenVerifier = [
   'System.Reflection.Emit',
   'Assembly.Load',
 ];
+const retiredRuntime = [
+  'DeepSeekChatBackend',
+  'DeepSeekRequestWriter',
+  'DeepSeekResponseParser',
+  'DeepSeekTransport',
+  'IDeepSeekTransport',
+  'IAccountedDeepSeekTransport',
+  'DeepSeekContextAdmission',
+  'DeepSeekUsageReader',
+  'ActionHostDeepSeekProviderRunnerFactory',
+];
+for (const name of retiredRuntime) if (runtimeText.includes(name)) fail(`retired-runtime-${name}`);
 for (const name of requiredProof) if (!proofText.includes(name)) fail(`missing-proof-${name}`);
 for (const name of requiredRuntime)
   if (!runtimeText.includes(name)) fail(`missing-runtime-${name}`);

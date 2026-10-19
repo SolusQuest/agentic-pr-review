@@ -17,14 +17,15 @@ internal static class GateTokenCases
     internal static void Run(List<GateCase> cases, GateSelection selection, string root)
     {
         void JournalCase(string id, string selected, UsageJournal journal) => cases.Add(GateCase.Create(id, selected, UsageJournalJson.Write(journal)));
-        var parsed = Parse(10, 4, 6, 4, DeepSeekAdapterContext.Model);
-        var alias = Parse(10, 4, 6, 4, "deepseek-flash");
+        var parsed = TypedUsage(10, 4, 6, 4, DeepSeekAdapterContext.Model);
+        var alias = TypedUsage(10, 4, 6, 4, "deepseek-flash");
         JournalCase("t1-partition", "10/4/6/4", Journal(selection, [parsed]));
         JournalCase("t1-alias", "documented-alias", Journal(selection, [alias]));
-        JournalCase("t1-zero", "measured-zero", Journal(selection, [Parse(0, 0, 0, 0, DeepSeekAdapterContext.Model)]));
+        JournalCase("t1-zero", "measured-zero", Journal(selection, [TypedUsage(0, 0, 0, 0, DeepSeekAdapterContext.Model)]));
         JournalCase("t1-total-only", "optional-cache-absent", Journal(selection, [new(10, 4)]));
-        Require(Response(10, 4, 6, 5, DeepSeekAdapterContext.Model).Outcome == DeepSeekResponseParseOutcome.Invalid);
-        cases.Add(Scalar("t1-malformed-partition", "partition-mismatch", "parser_invalid", []));
+        var malformed = Journal(selection, [new(10, 4, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 6, 5))]);
+        Require(malformed.Document.Calls.Single().Usage?.Cache is null);
+        cases.Add(Scalar("t1-malformed-partition", "partition-mismatch", "usage_partition_unavailable", []));
 
         JournalCase("t2-known-failed", "known-after-failure", Journal(selection, [Measured(10, 4, 6)]));
         JournalCase("t2-unknown", "unknown-send", Journal(selection, [null]));
@@ -33,7 +34,7 @@ internal static class GateTokenCases
         var attempt = collector.BeginAttempt(0);
         attempt.AgentStarted();
         var first = attempt.BeginCall()!;
-        first.Dispatch(); first.TransportFinished(DeepSeekTransportResult.Success([])); first.Returned(new(0, 0));
+        first.Dispatch(); first.ScriptFinished("success"); first.Returned(new(0, 0));
         var refusal = attempt.BeginCall()!;
         refusal.Refuse("budget_refused"); refusal.Threw(); attempt.AgentFinished(false); attempt.Finish("failed");
         JournalCase("t2-local-refusal", "reservation-refused", collector.Seal("bound_stop", Reservations(expected, 1)));
@@ -44,7 +45,7 @@ internal static class GateTokenCases
         for (var i = 0; i < 2; i++)
         {
             var call = attempt.BeginCall()!;
-            call.Dispatch(); call.TransportFinished(DeepSeekTransportResult.Success([])); call.Returned(new(0, 0));
+            call.Dispatch(); call.ScriptFinished("success"); call.Returned(new(0, 0));
         }
         attempt.AgentFinished(false); attempt.Finish("failed");
         var original = collector.Seal("complete", Reservations(expected, 2)).Document;
@@ -60,7 +61,7 @@ internal static class GateTokenCases
         attempt.Finish("failed", cancelled: true);
         var sealedJournal = collector.Seal("caller_cancelled", Reservations(expected, 1));
         var before = UsageJournalJson.Write(sealedJournal);
-        late.TransportFinished(DeepSeekTransportResult.Success([])); late.Returned(Measured(10, 4, 6));
+        late.ScriptFinished("success"); late.Returned(Measured(10, 4, 6));
         attempt.AdmitEvaluation(Hash('d')); attempt.AgentFinished(true); attempt.Finish("completed");
         Require(before.AsSpan().SequenceEqual(UsageJournalJson.Write(collector.Seal("complete", Reservations(expected, 2)))) && attempt.BeginCall() is null);
         JournalCase("t2-late-finalization", "sealed-call", sealedJournal);
@@ -97,22 +98,8 @@ internal static class GateTokenCases
         Require(markdown.Contains("0.42", StringComparison.Ordinal));
     }
 
-    private static ProjectChatUsage Parse(long input, long output, long hit, long miss, string model)
-    {
-        var result = Response(input, output, hit, miss, model);
-        Require(result.Outcome == DeepSeekResponseParseOutcome.Success);
-        var response = result.Response!;
-        return new(response.Usage.InputTokens, response.Usage.OutputTokens,
-            new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, response.ResponseModel,
-                response.Usage.CacheReadInputTokens, response.Usage.UncachedInputTokens));
-    }
-
-    private static DeepSeekResponseParseResult Response(long input, long output, long hit, long miss, string model)
-    {
-        // Private synthetic response; only the admitted usage projection escapes.
-        var json = $$$"""{"model":"{{{model}}}","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","reasoning_content":"{{{Canary}}}","tool_calls":[{"id":"finish-1","type":"function","function":{"name":"finish","arguments":"{}"}}]}}],"usage":{"prompt_tokens":{{{input}}},"completion_tokens":{{{output}}},"total_tokens":{{{input + output}}},"prompt_cache_hit_tokens":{{{hit}}},"prompt_cache_miss_tokens":{{{miss}}}}}""";
-        return DeepSeekResponseParser.Parse(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(json)));
-    }
+    private static ProjectChatUsage TypedUsage(long input, long output, long hit, long miss, string model) =>
+        new(input, output, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, model, hit, miss));
 
     internal static ProjectChatUsage Measured(long input, long output, long hit) => new(input, output,
         new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, hit, input - hit));
@@ -138,10 +125,10 @@ internal static class GateTokenCases
             var call = attempt.BeginCall()!; call.Dispatch();
             if (sends[i] is { } usage)
             {
-                call.TransportFinished(DeepSeekTransportResult.Success([])); call.Returned(usage);
+                call.ScriptFinished("success"); call.Returned(usage);
                 overBound |= usage.InputTokens > expected.Bounds.PerCall.MaxInputTokens || usage.OutputTokens > expected.Bounds.PerCall.MaxOutputTokens;
             }
-            else { call.TransportFinished(DeepSeekTransportResult.TransportFailure()); call.Threw(); }
+            else { call.ScriptFinished("transport_failure"); call.Threw(); }
             attempt.AgentFinished(false); attempt.Finish("failed");
         }
         return collector.Seal(overBound ? "accounting_violation" : sends.Length < expected.Schedule.Length ? "caller_cancelled" : "complete",

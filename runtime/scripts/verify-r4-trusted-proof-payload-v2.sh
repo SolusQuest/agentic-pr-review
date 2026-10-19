@@ -469,7 +469,7 @@ NODE
   dotnet "$supervisor" supervise \
     --root "$proof_evidence" --repo "$repo_root" --payload "$verifier" \
     --bundle "$proof_bundle" \
-    --record "$framework_fixture_root/replacement-record.json" \
+    --record "$repo_root/runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json" \
     --inventory "$framework_fixture_root/e1-base-inventory.json" \
     --golden "$framework_fixture_root/expected-evidence.json.golden" \
     --canaries "$framework_fixture_root/canary-routes.tsv" \

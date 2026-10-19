@@ -44,18 +44,18 @@ internal static class VerifierScenarioDomain
             false),
         VerifierScenario.InnerAuthorizationDenied => new(
             "inner-authorization-denied",
-            "pre_transport",
+            "pre_script",
             "no_advance",
             RestrictedStateCodes.AccessDenied,
             false),
         VerifierScenario.ProviderHttpFailure => new(
-            "provider-http-failure",
+            "script-failure",
             "pre_commit",
             "no_advance",
             AgentFailureCodes.ChatFailed,
             false),
         VerifierScenario.ProviderMalformedResponse => new(
-            "provider-malformed-response",
+            "script-invalid-response",
             "pre_commit",
             "no_advance",
             AgentFailureCodes.ResponseInvalid,

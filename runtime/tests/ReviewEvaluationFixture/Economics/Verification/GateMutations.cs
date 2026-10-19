@@ -74,13 +74,13 @@ internal static class GateMutations
                 break;
             }
             case "prefix-domain":
-                Edit("p1-dynamic-suffix", value =>
+                Edit("l1-dynamic-suffix", value =>
                 {
                     foreach (var observation in value["observations"]!.AsArray())
                         observation!["domain"]!["stable_plan_sha256"] = "UNLISTED_PRIVATE_PAYLOAD_279";
                 }); break;
             case "prefix-generation":
-                Edit("p1-dynamic-suffix", value =>
+                Edit("l1-dynamic-suffix", value =>
                 {
                     foreach (var observation in value["observations"]!.AsArray()) observation!["domain"]!["generation"] = -1;
                 }); break;

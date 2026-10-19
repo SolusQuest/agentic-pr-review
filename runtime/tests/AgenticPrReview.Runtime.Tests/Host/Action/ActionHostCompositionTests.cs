@@ -1192,7 +1192,7 @@ public sealed partial class ActionHostCompositionTests
             github,
             new AcceptedStateProductionDependencies(),
             new BoundedGitHubPublisherTransportFactory(),
-            new ActionHostDeepSeekProviderRunnerFactory(),
+            new ActionHostHistoricalChatRunnerFactory(_ => throw new InvalidOperationException("historical_provider_unavailable")),
             TimeProvider.System,
             stagingParentFactory);
     }

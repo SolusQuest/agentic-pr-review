@@ -80,9 +80,9 @@ internal static class CapacityCommand
                 {
                     foreach (var root in roots) cleanup &= ReplayProcess.Cleanup(root);
                 }
-                var report = new CapacityReport(CapacitySpec.Schema, "r7_capacity_passed",
+                var report = new CapacityReport(CapacitySpec.ReportSchema, "r7_capacity_passed",
                     Convert.ToHexStringLower(SHA256.HashData(corpusBytes)), EvaluationSource.Commit, EvaluationSource.Tree,
-                    EvaluationSource.Clean, receipts.ToArray(), host, cleanup);
+                    EvaluationSource.Clean, receipts.ToArray(), host, cleanup, CapacitySpec.ObservationDomain);
                 if (CapacityVerifier.Verify(report, corpusBytes, requireClean: false) is { } reportFailure)
                     throw new InvalidOperationException(reportFailure);
                 var reportBytes = JsonSerializer.SerializeToUtf8Bytes(report, CapacityJson.Default.CapacityReport);

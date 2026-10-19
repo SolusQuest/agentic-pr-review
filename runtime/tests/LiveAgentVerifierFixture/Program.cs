@@ -184,11 +184,12 @@ internal static class Program
             "host",
             "accepted-lineage.json");
         var lineageBefore = FileSha256(lineagePath);
+        var observationOwner = new VerifierTypedObservationOwner();
         var profile = new LiveAgentVerifierProfile(
             scenario,
             materialized.TestCase,
             materialized.ReviewedIdentity,
-            command.ExpectedHistorySha256);
+            command.ExpectedHistorySha256, observationOwner);
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             materialized.Phase,
             fileSystem,
@@ -203,7 +204,7 @@ internal static class Program
                 File.ReadAllBytes(resultPath))
             : null;
         var execution = profile.Execution;
-        var wire = execution?.WireProof;
+        var typed = execution?.TypedProof;
         var stateAfter = TreeSha256(Path.Join(command.Root, "state"));
         var lineageAfter = FileSha256(lineagePath);
         var canonicalLineage = ReadAcceptedTuple(lineagePath);
@@ -265,15 +266,15 @@ internal static class Program
             StringComparer.Ordinal.Equals(actualCode, descriptor.StableCode) &&
             invariant &&
             profile.ActivationCount == expectedActivation &&
-            (wire?.RequestCount ?? 0) == expectedRequests &&
+            (typed?.SyntheticCalls ?? 0) == expectedRequests &&
             (scenario != VerifierScenario.ToolArgumentsInvalid ||
-                wire?.FailureCode == "recovery_followup_injected") &&
+                typed?.FailureCode == "recovery_followup_injected") &&
             product?.HandoffReady != true &&
             publicResultSafe &&
             (execution?.PublicResultCanaryInjected ??
                 scenario != VerifierScenario.PublicResultCanary);
         var receipt = new VerifierNegativeReceipt(
-            "apr-r3-live-agent-negative-receipt-v1",
+            "apr-r3-historical-typed-negative-receipt-v1",
             descriptor.Id,
             descriptor.Phase,
             descriptor.StateExpectation,
@@ -292,7 +293,7 @@ internal static class Program
             canonicalLineage?.EnvelopeSha256,
             canonicalLineage?.LineageSha256,
             profile.ActivationCount,
-            wire?.RequestCount ?? 0,
+            typed?.SyntheticCalls ?? 0,
             execution?.Observer.DelegationCount ?? 0,
             product?.HandoffReady == true,
             acceptedTruthPreserved,
@@ -302,7 +303,9 @@ internal static class Program
             ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
             ArchitectureAssemblySha256:
                 buildPair.ArchitectureAssemblySha256,
-            BuildPairSha256: buildPair.BuildPairSha256);
+            BuildPairSha256: buildPair.BuildPairSha256, TypedObservations: typed?.TypedObservations ?? []);
+        VerifierTypedObservationFiles.WriteNew(command.Output, VerifierReceiptCodec.Write(
+            new VerifierTypedObservationSnapshot(descriptor.Id, processInstanceSha256, buildPair.BuildPairSha256, observationOwner.Snapshot)));
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (!passed)
         {
@@ -338,11 +341,12 @@ internal static class Program
             return 3;
         }
 
+        var observationOwner = new VerifierTypedObservationOwner();
         var profile = new LiveAgentVerifierProfile(
             scenario,
             materialized.TestCase,
             materialized.ReviewedIdentity,
-            command.ExpectedHistorySha256);
+            command.ExpectedHistorySha256, observationOwner);
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             materialized.Phase,
             fileSystem,
@@ -379,7 +383,7 @@ internal static class Program
             : VerifierReceiptCodec.Project(
                 materialized.TestCase,
                 execution.Observer.Outcome);
-        var wire = execution.WireProof;
+        var typed = execution.TypedProof;
         var canonicalLineage = ReadAcceptedTuple(Path.Join(
             command.Root,
             "host",
@@ -388,7 +392,7 @@ internal static class Program
             product,
             canonicalLineage);
         var canaryRoutes = scenario == VerifierScenario.CanaryRouting
-            ? CreateCanaryRoutes(command, wire)
+            ? CreateCanaryRoutes(command, typed)
             : null;
         var receipt = new VerifierPhaseReceipt(
             scenario.ToString(),
@@ -398,23 +402,23 @@ internal static class Program
             product.TransitionClass,
             product.ModelCalls,
             product.ToolCalls,
-            wire.RequestCount,
-            wire.Succeeded,
-            wire.FailureCode,
+            typed.SyntheticCalls,
+            typed.Succeeded,
+            typed.FailureCode,
             execution.Observer.DelegationCount == 1,
             product.HandoffReady,
-            wire.FirstRequestSha256,
+            typed.FirstTypedRequestSha256,
             product.TerminalSha256,
-            wire.PriorFactSha256,
+            typed.PriorFactSha256,
             product.InvocationIdentitySha256,
             materialized.SeedIdentitySha256,
             product.LineageSha256,
             product.SessionSha256,
             product.EnvelopeSha256,
             acceptedTupleValidated,
-            wire.HistoricalMessagesSha256,
-            wire.ExactReplayValidated,
-            wire.ReplayMutationMatrixValidated,
+            typed.HistoricalMessagesSha256,
+            typed.ExactReplayValidated,
+            typed.ReplayMutationMatrixValidated,
             quality,
             ProcessInstanceSha256: processInstanceSha256,
             CanaryRoutesValidated:
@@ -426,7 +430,9 @@ internal static class Program
             ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
             ArchitectureAssemblySha256:
                 buildPair.ArchitectureAssemblySha256,
-            BuildPairSha256: buildPair.BuildPairSha256);
+            BuildPairSha256: buildPair.BuildPairSha256, TypedObservations: typed?.TypedObservations ?? []);
+        VerifierTypedObservationFiles.WriteNew(command.Output, VerifierReceiptCodec.Write(
+            new VerifierTypedObservationSnapshot(scenario.ToString(), processInstanceSha256, buildPair.BuildPairSha256, observationOwner.Snapshot)));
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (result.ExitCode != 0 ||
             !receipt.HandoffReady ||
@@ -717,11 +723,13 @@ internal static class Program
         var failingFileSystem = new VerifierFailingResultFileSystem(
             restoreFileSystem,
             target);
+        var processInstanceSha256 = NewProcessInstanceSha256();
+        var observationOwner = new VerifierTypedObservationOwner();
         var restoreProfile = new LiveAgentVerifierProfile(
             VerifierScenario.ContinuationRestore,
             restoreMaterialized.TestCase,
             restoreMaterialized.ReviewedIdentity,
-            command.ExpectedHistorySha256);
+            command.ExpectedHistorySha256, observationOwner);
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             restoreMaterialized.Phase,
             failingFileSystem,
@@ -735,7 +743,7 @@ internal static class Program
             ? LiveAgentFreshProcessCodec.ReadResult(attempted)
             : null;
         var execution = restoreProfile.Execution;
-        var wire = execution?.WireProof;
+        var typed = execution?.TypedProof;
         var observer = execution?.Observer;
         var resultAfter = FileSha256(target);
         var acceptedTruthPreserved = attemptedProduct is
@@ -762,10 +770,10 @@ internal static class Program
             failingFileSystem.PublishResultAttempts == 1 &&
             failingFileSystem.ReplacementConflictObserved &&
             restoreProfile.ActivationCount == 1 &&
-            wire is
+            typed is
             {
                 Succeeded: true,
-                RequestCount: 1,
+                SyntheticCalls: 1,
             } &&
             observer is
             {
@@ -784,7 +792,7 @@ internal static class Program
                 attemptedProduct?.EnvelopeSha256) &&
             acceptedTruthPreserved;
         var receipt = new VerifierNegativeReceipt(
-            "apr-r3-live-agent-negative-receipt-v1",
+            "apr-r3-historical-typed-negative-receipt-v1",
             "replacement-write-failed",
             "post_commit",
             "accepted_preserved",
@@ -803,12 +811,12 @@ internal static class Program
             acceptedAfter?.EnvelopeSha256,
             acceptedAfter?.LineageSha256,
             restoreProfile.ActivationCount,
-            wire?.RequestCount ?? 0,
+            typed?.SyntheticCalls ?? 0,
             observer?.DelegationCount ?? 0,
             HandoffReady: false,
             AcceptedTruthPreserved: acceptedTruthPreserved,
             Passed: passed,
-            ProcessInstanceSha256: NewProcessInstanceSha256(),
+            ProcessInstanceSha256: processInstanceSha256,
             ResultBeforeSha256: resultBefore,
             ResultAfterSha256: resultAfter,
             ResultPublicationAttempts:
@@ -817,7 +825,9 @@ internal static class Program
             ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
             ArchitectureAssemblySha256:
                 buildPair.ArchitectureAssemblySha256,
-            BuildPairSha256: buildPair.BuildPairSha256);
+            BuildPairSha256: buildPair.BuildPairSha256, TypedObservations: typed?.TypedObservations ?? []);
+        VerifierTypedObservationFiles.WriteNew(command.Output, VerifierReceiptCodec.Write(
+            new VerifierTypedObservationSnapshot("replacement-write-failed", processInstanceSha256, buildPair.BuildPairSha256, observationOwner.Snapshot)));
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (!passed)
         {
@@ -827,7 +837,7 @@ internal static class Program
                     ':',
                     "replacement_command_failed",
                     attemptedProduct?.Code ?? "product_missing",
-                    wire?.FailureCode ?? "wire_missing",
+                    typed?.FailureCode ?? "typed_observation_missing",
                     (observer?.DelegationCount ?? 0).ToString(
                         System.Globalization.CultureInfo.InvariantCulture)));
             Console.Error.WriteLine(VerifierCodes.PhaseFailed);
@@ -852,7 +862,7 @@ internal static class Program
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteString("kind", "apr-r3-live-agent-replacement");
+            writer.WriteString("kind", "apr-r3-historical-typed-replacement-v1");
             writer.WriteString("status", "passed");
             writer.WriteStartArray("quality_cases");
             foreach (var quality in qualities.OrderBy(
@@ -990,13 +1000,13 @@ internal static class Program
     private static IReadOnlyList<VerifierCanaryRouteOutcome>?
         CreateCanaryRoutes(
             VerifierCommand command,
-            VerifierWireProof wire)
+            VerifierTypedProof typed)
     {
         if (!VerifierEvidence.TryReadCanaryManifest(
                 command.CanaryManifest,
                 out var rows,
                 out _) ||
-            !wire.CanaryRoutesValidated ||
+            !typed.CanaryRoutesValidated ||
             !CanarySinksValid(command.Root))
         {
             return null;

@@ -331,13 +331,10 @@ internal sealed class R3LiveAgentApplication
 
                 diagnosticCode = R3LiveAgentDiagnosticCodes.TransportFailed;
                 dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
-                using var transport =
-                    dependencies.TransportFactory.Create(credential!);
+                var client = dependencies.ChatFactory.Create(adapter);
+                using var clientLifetime = client as IDisposable;
                 diagnosticCode = R3LiveAgentDiagnosticCodes.AgentRunFailed;
                 dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
-                var client = DeepSeekChatBackend.CreateClient(
-                    adapter,
-                    transport);
                 var tools = new SnapshotToolExecutor(
                     snapshot,
                     dependencies.ReviewedFileAccessFactory.Create());

@@ -39,7 +39,7 @@ public sealed partial class R3LiveAgentApplicationTests
             new UTF8Encoding(false));
         var secrets = new CountingSecretSource(
             new R3LiveAgentSecrets(ProviderSecret, StateSecret));
-        var handler = new GroundedReviewHandler(ProviderSecret);
+        var handler = new GroundedReviewHandler();
         var transportFactory = new TestingTransportFactory(handler);
         var commitCoordinator = new CapturingStateCommitCoordinator();
         var dependencies = new R3LiveAgentDependencies(
@@ -183,7 +183,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 new R3LiveAgentSecrets(ProviderSecret, StateSecret)),
             new R3LiveAgentStateRestorer(),
             new TestingTransportFactory(
-                new GroundedReviewHandler(ProviderSecret)),
+                new GroundedReviewHandler()),
             new CountingFileAccessFactory(),
             observer,
             TimeProvider.System);
@@ -245,7 +245,7 @@ public sealed partial class R3LiveAgentApplicationTests
                     StateSecret)),
                 new R3LiveAgentStateRestorer(),
                 new TestingTransportFactory(
-                    new GroundedReviewHandler(ProviderSecret)),
+                    new GroundedReviewHandler()),
                 new CountingFileAccessFactory(),
                 observer,
                 TimeProvider.System,
@@ -387,7 +387,7 @@ public sealed partial class R3LiveAgentApplicationTests
                     StateSecret)),
                 bootstrap,
                 new TestingTransportFactory(
-                    new GroundedReviewHandler(ProviderSecret)),
+                    new GroundedReviewHandler()),
                 new CountingFileAccessFactory(),
                 new CapturingStateCommitCoordinator(),
                 TimeProvider.System,
@@ -535,7 +535,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 artifact.SessionSha256,
                 envelopeSha),
             admitted));
-        var handler = new GroundedReviewHandler(ProviderSecret);
+        var handler = new GroundedReviewHandler();
         var commitCoordinator = new CapturingStateCommitCoordinator();
         var dependencies = Dependencies(
             restorer,
@@ -647,7 +647,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var stateRoot = Path.Join(snapshot.Path, "state");
         Directory.CreateDirectory(stateRoot);
         var firstRequest = Request(snapshot.Path, stateRoot);
-        var firstHandler = new GroundedReviewHandler(ProviderSecret);
+        var firstHandler = new GroundedReviewHandler();
         var firstCommit = new CapturingStateCommitCoordinator();
         var first = await new R3LiveAgentApplication(
             Dependencies(
@@ -736,9 +736,7 @@ public sealed partial class R3LiveAgentApplicationTests
 
             try
             {
-                var secondHandler = new GroundedReviewHandler(
-                    ProviderSecret,
-                    "-next");
+                var secondHandler = new GroundedReviewHandler("-next");
                 var secondRequest = new R3LiveAgentRequest(
                     firstRequest.AuthorizedScope,
                     isTrustedWorkflow: true,
@@ -838,7 +836,7 @@ public sealed partial class R3LiveAgentApplicationTests
 
     private static R3LiveAgentDependencies Dependencies(
         IR3LiveAgentStateRestorer restorer,
-        HttpMessageHandler handler,
+        TestingChat handler,
         ILiveAgentStateCommitCoordinator? stateCommitCoordinator = null) =>
         new(
             new CountingSecretSource(
@@ -1016,30 +1014,13 @@ public sealed partial class R3LiveAgentApplicationTests
         return new TemporaryDirectory(path);
     }
 
-    private static byte[] Response(
-        string reasoning,
-        string name,
-        string arguments,
-        string callSuffix = "")
-    {
-        var json = string.Concat(
-            "{\"choices\":[{\"index\":0,\"message\":{\"role\":" +
-            "\"assistant\",\"content\":\"\",\"reasoning_content\":",
-            JsonSerializer.Serialize(reasoning),
-            ",\"tool_calls\":[{\"id\":\"call_",
-            name,
-            callSuffix,
-            "\",\"type\":\"function\",\"function\":{\"name\":",
-            JsonSerializer.Serialize(name),
-            ",\"arguments\":",
-            JsonSerializer.Serialize(arguments),
-            "}}]},\"finish_reason\":\"tool_calls\"}]," +
-            "\"model\":\"deepseek-flash\",\"usage\":{" +
-            "\"prompt_tokens\":3,\"completion_tokens\":2," +
-            "\"total_tokens\":5,\"prompt_cache_hit_tokens\":1," +
-            "\"prompt_cache_miss_tokens\":2}}");
-        return Encoding.UTF8.GetBytes(json);
-    }
+    private static ProjectChatResponse Response(string reasoning, string name, string arguments,
+        DeepSeekAdapterContext context, int position, string suffix = "") => new(
+            new("assistant", [new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+                new ProjectToolCallContent("call_" + name + suffix, name, arguments)]),
+            new(3, 2, new(context.ProviderId, context.ModelId, context.ModelId, 1, 2)), CapturedResponseBodyBytes: 0,
+            Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
+                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
 
     private sealed class CountingSecretSource(R3LiveAgentSecrets secrets)
         : IR3LiveAgentSecretSource
@@ -1115,14 +1096,20 @@ public sealed partial class R3LiveAgentApplicationTests
             };
     }
 
-    private sealed class TestingTransportFactory(HttpMessageHandler handler)
-        : IR3LiveAgentTransportFactory
+    private sealed class TestingTransportFactory(TestingChat handler) : IR3LiveAgentChatFactory
     {
-        public IDeepSeekTransport Create(DeepSeekCredential credential) =>
-            DeepSeekTransport.CreateForTesting(
-                credential,
-                handler,
-                TimeSpan.FromSeconds(5));
+        public IProjectChatClient Create(DeepSeekAdapterContext context) { handler.Context = context; return handler; }
+    }
+    private abstract class TestingChat : IProjectChatClient, IDisposable
+    {
+        internal DeepSeekAdapterContext Context { get; set; } = null!;
+        public abstract Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token);
+        public void Dispose() { }
+        protected static void Record(ProjectChatRequest request)
+        {
+            if (request.Accounting is { } capture && !capture.TryBeginDispatch()) throw new IOException();
+            request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, 2, 1, 2, 5));
+        }
     }
 
     private sealed class CountingFileAccessFactory
@@ -1137,123 +1124,44 @@ public sealed partial class R3LiveAgentApplicationTests
         }
     }
 
-    private sealed class GroundedReviewHandler(
-        string expectedCredential,
-        string callSuffix = "")
-        : HttpMessageHandler
+    private sealed class GroundedReviewHandler(string callSuffix = "") : TestingChat
     {
         internal List<string> Requests { get; } = [];
-
         internal Exception? Failure { get; private set; }
-
-        internal IReadOnlyList<string> FirstRequestToolNames { get; private set; }
-            = [];
-
-        protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        internal IReadOnlyList<string> FirstRequestToolNames { get; private set; } = [];
+        public override Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
             try
             {
-                var authorization = request.Headers
-                    .GetValues("Authorization")
-                    .Single();
-                if (!StringComparer.Ordinal.Equals(
-                        authorization,
-                        "Bearer " + expectedCredential))
-                {
-                    throw new InvalidOperationException(
-                        "The fixed authorization header was not applied.");
-                }
-
-                var body = await request.Content!.ReadAsStringAsync(
-                    cancellationToken);
-                Requests.Add(body);
-                byte[] response;
+                token.ThrowIfCancellationRequested(); Record(request);
+                Requests.Add(Encoding.UTF8.GetString(AgentRequestWriter.Write(request)));
                 if (Requests.Count == 1)
                 {
-                    using var document = JsonDocument.Parse(body);
-                    FirstRequestToolNames = document.RootElement
-                        .GetProperty("tools")
-                        .EnumerateArray()
-                        .Select(tool => tool.GetProperty("function")
-                            .GetProperty("name").GetString()!)
-                        .ToArray();
-                    response = Response(
-                        "Inspect the selected file.",
-                        AgentToolRegistry.ReadFileName,
-                        "{\"path\":\"a.txt\"}",
-                        callSuffix);
+                    FirstRequestToolNames = request.Tools.Select(tool => tool.Name).ToArray();
+                    return Task.FromResult(Response("Inspect the selected file.", AgentToolRegistry.ReadFileName,
+                        "{\"path\":\"a.txt\"}", Context, request.Messages.Length, callSuffix));
                 }
-                else
-                {
-                    using var requestDocument = JsonDocument.Parse(body);
-                    var toolMessage = requestDocument.RootElement
-                        .GetProperty("messages")
-                        .EnumerateArray()
-                        .Last(message => StringComparer.Ordinal.Equals(
-                            message.GetProperty("role").GetString(),
-                            "tool"));
-                    using var resultDocument = JsonDocument.Parse(
-                        toolMessage.GetProperty("content").GetString()!);
-                    var observation = resultDocument.RootElement
-                        .GetProperty("observation_id")
-                        .GetString();
-                    if (observation is not { Length: 64 })
-                    {
-                        throw new InvalidOperationException(
-                            "The admitted observation id was missing.");
-                    }
-
-                    var finish = string.Concat(
-                        "{\"summary\":\"grounded\",\"findings\":[{" +
-                        "\"severity\":\"high\",\"title\":\"bug\"," +
-                        "\"message\":\"fix\",\"evidence\":[{" +
-                        "\"observation_id\":\"",
-                        observation,
-                        "\",\"path\":\"a.txt\",\"start_line\":1," +
-                        "\"end_line\":1}]}]}");
-                    response = Response(
-                        "Finish with current evidence.",
-                        AgentToolRegistry.FinishReviewName,
-                        finish,
-                        callSuffix);
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new ByteArrayContent(response),
-                };
+                var tool = request.Messages.Last(message => message.Role == "tool");
+                var result = (ProjectToolResultContent)tool.Contents.Single();
+                using var document = JsonDocument.Parse(result.Result);
+                var observation = document.RootElement.GetProperty("observation_id").GetString();
+                if (observation is not { Length: 64 }) throw new InvalidOperationException("admitted_observation_missing");
+                var finish = "{\"summary\":\"grounded\",\"findings\":[{\"severity\":\"high\",\"title\":\"bug\",\"message\":\"fix\",\"evidence\":[{\"observation_id\":\"" +
+                    observation + "\",\"path\":\"a.txt\",\"start_line\":1,\"end_line\":1}]}]}";
+                return Task.FromResult(Response("Finish with current evidence.", AgentToolRegistry.FinishReviewName,
+                    finish, Context, request.Messages.Length, callSuffix));
             }
-            catch (Exception exception)
-            {
-                Failure = exception;
-                return new HttpResponseMessage(
-                    HttpStatusCode.InternalServerError);
-            }
+            catch (Exception error) { Failure = error; throw; }
         }
     }
-
-    private sealed class UngroundedReviewHandler : HttpMessageHandler
+    private sealed class UngroundedReviewHandler : TestingChat
     {
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        public override Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
-            var finish =
-                "{\"summary\":\"bad\",\"findings\":[{" +
-                "\"severity\":\"high\",\"title\":\"bug\"," +
-                "\"message\":\"fix\",\"evidence\":[{" +
-                "\"observation_id\":\"" + new string('f', 64) +
-                "\",\"path\":\"a.txt\",\"start_line\":1," +
-                "\"end_line\":1}]}]}";
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(Response(
-                    "Invent evidence.",
-                    AgentToolRegistry.FinishReviewName,
-                    finish)),
-            });
+            token.ThrowIfCancellationRequested(); Record(request);
+            var finish = "{\"summary\":\"bad\",\"findings\":[{\"severity\":\"high\",\"title\":\"bug\",\"message\":\"fix\",\"evidence\":[{\"observation_id\":\"" +
+                new string('f', 64) + "\",\"path\":\"a.txt\",\"start_line\":1,\"end_line\":1}]}]}";
+            return Task.FromResult(Response("Invent evidence.", AgentToolRegistry.FinishReviewName, finish, Context, request.Messages.Length));
         }
     }
 
@@ -1293,11 +1201,11 @@ public sealed partial class R3LiveAgentApplicationTests
         }
     }
 
-    private sealed class ThrowingTransportFactory : IR3LiveAgentTransportFactory
+    private sealed class ThrowingTransportFactory : IR3LiveAgentChatFactory
     {
         internal int CallCount { get; private set; }
 
-        public IDeepSeekTransport Create(DeepSeekCredential credential)
+        public IProjectChatClient Create(DeepSeekAdapterContext context)
         {
             CallCount++;
             throw new InvalidOperationException();

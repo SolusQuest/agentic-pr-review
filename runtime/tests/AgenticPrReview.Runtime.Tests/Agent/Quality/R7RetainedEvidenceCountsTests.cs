@@ -101,7 +101,7 @@ public sealed class R7RetainedEvidenceCountsTests
         var segment = new PrefixSegment(new string('a', 64), 1, 1);
         var projection = new PrefixProjection(segment, segment, segment, segment, segment);
         var observation = new PrefixObservation(new(new string('a', 40), new string('b', 40), true,
-            new string('f', 64), new string('1', 64), -1, null), 1, 0, projection, projection);
+            new string('f', 64), new string('1', 64), -1, null), 1, 0, projection, PrefixObservation.LogicalDomain);
         var capture = new HistoryCapture("observed", observation,
             Enumerable.Repeat<PrefixObservation?>(observation, calls).ToImmutableArray());
         // Capacity permits overflow above the selected global message cap by

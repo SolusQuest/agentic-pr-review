@@ -17,7 +17,7 @@ internal static class GateTokenOracle
         {
             var scalar = PricingJson.ReadValue(bytes, GateJson.Default.GateScalar, 4096, 4);
             Require(scalar is not null && scalar.Values.IsEmpty && scalar.Facts.IsEmpty &&
-                scalar.Code == (item.Id == "t3-overflow" ? "arithmetic_overflow" : "parser_invalid"));
+                scalar.Code == (item.Id == "t3-overflow" ? "arithmetic_overflow" : "usage_partition_unavailable"));
             return item.Evidence;
         }
         if (item.Id == "t2-terminal-order")

@@ -77,8 +77,8 @@ internal sealed record EconomicsChildReady(string Operation, string PlanSha256, 
     string SourceCommit, string SourceTree, bool SourceClean, string BuildSha256,
     int ProcessId, string Startup, string Code, bool Restored);
 internal sealed record EconomicsSecretFrame(string Operation, string LeaseId, string? Credential);
-internal sealed record EconomicsCredentialProof(int Requests, bool EnvironmentChecked, bool RestoredSessionChecked,
-    bool CompletedSessionChecked, int StoredObjects);
+internal sealed record EconomicsCredentialProof(string ObservationDomain, int SyntheticCalls, bool EnvironmentChecked, bool RestoredSessionChecked,
+    bool CompletedSessionChecked, int StoredObjects, string TraceSha256);
 internal sealed record EconomicsCall(int Ordinal, bool Dispatched, string TransportOutcome, string ChatOutcome,
     string UsageStatus, UsageJournalUsage? Usage);
 // Public scoped evidence only: no private IPC identities, state keys or candidate locators.

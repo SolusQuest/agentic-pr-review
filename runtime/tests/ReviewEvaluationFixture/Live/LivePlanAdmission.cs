@@ -19,8 +19,9 @@ internal static class LivePlanAdmission
         ? 32_768 : AgentLimits.OutputTokensFor(profile);
     internal static long CombinedTokensFor(AgentLimitProfile profile) => profile == AgentLimitProfile.Current
         ? 294_912 : AgentLimits.CombinedTokensFor(profile);
-    internal static int RequestOutputFor(DeepSeekRequestProfile profile) => profile == DeepSeekRequestProfile.Current
-        ? 4096 : DeepSeekRequestWriter.MaxTokensFor(profile);
+    internal static int RequestOutputFor(DeepSeekRequestProfile profile) => profile switch
+        { DeepSeekRequestProfile.Current => 4096, DeepSeekRequestProfile.Output8192 => 8192,
+            DeepSeekRequestProfile.Output65536 => 65536, _ => throw new ArgumentOutOfRangeException(nameof(profile)) };
 
     internal static string ProviderConfigurationSha256(DeepSeekRequestProfile profile = DeepSeekRequestProfile.Current) =>
         EvaluationAttempt.Hash(ProviderConfigurationDomain,

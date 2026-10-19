@@ -76,6 +76,8 @@ internal sealed record VerifierQualityProjection(
     bool TerminalPresent,
     bool ExpectedCaseBound);
 
+internal sealed record VerifierTypedObservation(int Ordinal, string RequestSha256, string Outcome);
+
 internal sealed record VerifierPhaseReceipt(
     string Scenario,
     string Status,
@@ -84,12 +86,12 @@ internal sealed record VerifierPhaseReceipt(
     string Transition,
     int ModelCalls,
     int ToolCalls,
-    int ProviderRequests,
-    bool WireValid,
-    string? WireFailureCode,
+    int SyntheticCalls,
+    bool TypedCallsValid,
+    string? TypedFailureCode,
     bool CommitDelegatedOnce,
     bool HandoffReady,
-    string? FirstRequestSha256,
+    string? FirstTypedRequestSha256,
     string? TerminalSha256,
     string? PriorFactSha256,
     string InvocationIdentitySha256,
@@ -102,14 +104,16 @@ internal sealed record VerifierPhaseReceipt(
     bool ExactReplayValidated,
     bool ReplayMutationMatrixValidated,
     VerifierQualityProjection? Quality,
-    string Kind = "apr-r3-live-agent-phase-receipt-v1",
+    string Kind = "apr-r3-historical-typed-phase-receipt-v1",
     string ProcessInstanceSha256 = "",
     bool CanaryRoutesValidated = false,
     IReadOnlyList<VerifierCanaryRouteOutcome>? CanaryRoutes = null,
     string ExecutionKind = "",
     string ExecutionArtifactSha256 = "",
     string ArchitectureAssemblySha256 = "",
-    string BuildPairSha256 = "");
+    string BuildPairSha256 = "",
+    string ObservationDomain = "apr-historical-authored-typed-chat-v1",
+    IReadOnlyList<VerifierTypedObservation>? TypedObservations = null);
 
 internal sealed record VerifierNegativeReceipt(
     string Kind,
@@ -131,7 +135,7 @@ internal sealed record VerifierNegativeReceipt(
     string? CanonicalLineageEnvelopeSha256,
     string? CanonicalLineageSha256,
     int ActivationCount,
-    int ProviderRequests,
+    int SyntheticCalls,
     int CommitDelegationCount,
     bool HandoffReady,
     bool AcceptedTruthPreserved,
@@ -143,7 +147,9 @@ internal sealed record VerifierNegativeReceipt(
     string ExecutionKind = "",
     string ExecutionArtifactSha256 = "",
     string ArchitectureAssemblySha256 = "",
-    string BuildPairSha256 = "");
+    string BuildPairSha256 = "",
+    string ObservationDomain = "apr-historical-authored-typed-chat-v1",
+    IReadOnlyList<VerifierTypedObservation>? TypedObservations = null);
 
 internal static class VerifierArguments
 {
@@ -210,9 +216,9 @@ internal static class VerifierArguments
                 VerifierScenario.OuterAuthorizationDenied,
             "negative-inner-authorization-denied" =>
                 VerifierScenario.InnerAuthorizationDenied,
-            "negative-provider-http-failure" =>
+            "negative-script-failure" =>
                 VerifierScenario.ProviderHttpFailure,
-            "negative-provider-malformed-response" =>
+            "negative-script-invalid-response" =>
                 VerifierScenario.ProviderMalformedResponse,
             "negative-tool-arguments-invalid" =>
                 VerifierScenario.ToolArgumentsInvalid,
@@ -492,6 +498,32 @@ internal static class VerifierBuildPairDomain
 
 internal static class VerifierReceiptCodec
 {
+    internal static byte[] Write(VerifierTypedObservationSnapshot snapshot)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject(); writer.WriteString("kind", "apr-r3-controlled-typed-observations-v1");
+            writer.WriteString("observation_domain", "apr-historical-authored-typed-chat-v1");
+            writer.WriteString("scenario", snapshot.Scenario); writer.WriteString("process_instance_sha256", snapshot.ProcessInstanceSha256);
+            writer.WriteString("build_pair_sha256", snapshot.BuildPairSha256); WriteTypedObservations(writer, snapshot.TypedObservations);
+            writer.WriteEndObject();
+        }
+        return stream.ToArray();
+    }
+
+    private static void WriteTypedObservations(Utf8JsonWriter writer, IReadOnlyList<VerifierTypedObservation>? observations)
+    {
+        writer.WriteStartArray("typed_observations");
+        foreach (var observation in observations ?? [])
+        {
+            writer.WriteStartObject(); writer.WriteNumber("ordinal", observation.Ordinal);
+            writer.WriteString("request_sha256", observation.RequestSha256); writer.WriteString("outcome", observation.Outcome);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+    }
+
     internal static byte[] Write(VerifierPhaseReceipt receipt)
     {
         using var stream = new MemoryStream();
@@ -499,6 +531,8 @@ internal static class VerifierReceiptCodec
         {
             writer.WriteStartObject();
             writer.WriteString("kind", receipt.Kind);
+            writer.WriteString("observation_domain", receipt.ObservationDomain);
+            WriteTypedObservations(writer, receipt.TypedObservations);
             WriteBuildPair(writer, receipt);
             writer.WriteString("scenario", receipt.Scenario);
             writer.WriteString("status", receipt.Status);
@@ -514,14 +548,14 @@ internal static class VerifierReceiptCodec
             writer.WriteString("transition", receipt.Transition);
             writer.WriteNumber("model_calls", receipt.ModelCalls);
             writer.WriteNumber("tool_calls", receipt.ToolCalls);
-            writer.WriteNumber("provider_requests", receipt.ProviderRequests);
-            writer.WriteBoolean("wire_valid", receipt.WireValid);
-            WriteNullable(writer, "wire_failure_code", receipt.WireFailureCode);
+            writer.WriteNumber("synthetic_calls", receipt.SyntheticCalls);
+            writer.WriteBoolean("typed_calls_valid", receipt.TypedCallsValid);
+            WriteNullable(writer, "typed_failure_code", receipt.TypedFailureCode);
             writer.WriteBoolean(
                 "commit_delegated_once",
                 receipt.CommitDelegatedOnce);
             writer.WriteBoolean("handoff_ready", receipt.HandoffReady);
-            WriteNullable(writer, "first_request_sha256", receipt.FirstRequestSha256);
+            WriteNullable(writer, "first_typed_request_sha256", receipt.FirstTypedRequestSha256);
             WriteNullable(writer, "terminal_sha256", receipt.TerminalSha256);
             WriteNullable(writer, "prior_fact_sha256", receipt.PriorFactSha256);
             writer.WriteString(
@@ -623,6 +657,8 @@ internal static class VerifierReceiptCodec
         {
             writer.WriteStartObject();
             writer.WriteString("kind", receipt.Kind);
+            writer.WriteString("observation_domain", receipt.ObservationDomain);
+            WriteTypedObservations(writer, receipt.TypedObservations);
             WriteBuildPair(writer, receipt);
             writer.WriteString("case", receipt.Case);
             writer.WriteString("phase", receipt.Phase);
@@ -688,7 +724,7 @@ internal static class VerifierReceiptCodec
                 "canonical_lineage_sha256",
                 receipt.CanonicalLineageSha256);
             writer.WriteNumber("activation_count", receipt.ActivationCount);
-            writer.WriteNumber("provider_requests", receipt.ProviderRequests);
+            writer.WriteNumber("synthetic_calls", receipt.SyntheticCalls);
             writer.WriteNumber(
                 "commit_delegation_count",
                 receipt.CommitDelegationCount);
@@ -738,11 +774,11 @@ internal static class VerifierReceiptCodec
                 "forbidden_references_absent",
                 receipt.ForbiddenReferencesAbsent);
             writer.WriteNumber(
-                "real_transport_creation_calls",
-                receipt.RealTransportCreationCalls);
+                "typed_factory_creation_calls",
+                receipt.TypedFactoryCreationCalls);
             writer.WriteNumber(
-                "transport_factory_types",
-                receipt.TransportFactoryTypes);
+                "typed_chat_factory_types",
+                receipt.TypedChatFactoryTypes);
             writer.WriteNumber("profile_types", receipt.ProfileTypes);
             writer.WriteBoolean("passed", receipt.Passed);
             writer.WriteString(
@@ -794,6 +830,129 @@ internal static class VerifierReceiptCodec
         else
         {
             writer.WriteString(name, value);
+        }
+    }
+}
+
+// Private, bounded observer output for the controlled fixture run. This is an
+// independent input to receipt admission, not cryptographic archive attestation.
+internal sealed record VerifierTypedObservationSnapshot(string Scenario, string ProcessInstanceSha256,
+    string BuildPairSha256, IReadOnlyList<VerifierTypedObservation> TypedObservations);
+
+internal static class VerifierTypedObservationFiles
+{
+    internal const int MaximumBytes = 16 * 1024;
+    internal static string PathFor(string receipt) => receipt + ".typed-observations.json";
+
+    internal static void WriteNew(string receipt, byte[] bytes)
+    {
+        if (bytes.Length is < 1 or > MaximumBytes) throw new InvalidDataException("typed_observation_size");
+        var path = Path.GetFullPath(PathFor(receipt));
+        using var parent = OpenParent(path, create: true);
+        var temporary = ".typed-observations-" + Guid.NewGuid().ToString("N") + ".tmp";
+        var staged = Path.Combine(parent.AnchoredPath, temporary);
+        var target = Path.Combine(parent.AnchoredPath, Path.GetFileName(path));
+        try
+        {
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write,
+                Share = FileShare.None, Options = FileOptions.WriteThrough };
+            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            using (var stream = OperatingSystem.IsMacOS()
+                ? new FileStream(DarwinFiles.OpenChild(parent.Handle, temporary, create: true), FileAccess.Write, 4096, false)
+                : new FileStream(staged, options))
+            { stream.Write(bytes); stream.Flush(flushToDisk: true); }
+            if (OperatingSystem.IsMacOS()) DarwinFiles.MoveChild(parent.Handle, temporary, Path.GetFileName(path));
+            else File.Move(staged, target, overwrite: false);
+        }
+        finally
+        {
+            try
+            {
+                if (OperatingSystem.IsMacOS()) { if (DarwinFiles.ChildExists(parent.Handle, temporary)) DarwinFiles.DeleteChild(parent.Handle, temporary); }
+                else if (File.Exists(staged)) File.Delete(staged);
+            }
+            catch (IOException) { }
+        }
+    }
+
+    internal static byte[] Read(string receipt)
+    {
+        var path = Path.GetFullPath(PathFor(receipt));
+        using var parent = OpenParent(path, create: false);
+        Microsoft.Win32.SafeHandles.SafeFileHandle? handle;
+        if (OperatingSystem.IsMacOS()) handle = DarwinFiles.OpenChild(parent.Handle, Path.GetFileName(path));
+        else if (AgenticPrReview.Runtime.Host.State.NativeRestrictedStateFiles.OpenFileNoFollow(
+            Path.Combine(parent.AnchoredPath, Path.GetFileName(path)), out handle) !=
+            AgenticPrReview.Runtime.Host.State.RestrictedStateOpenResult.Success || handle is null)
+            throw new InvalidDataException("typed_observation_file");
+        using var stream = new FileStream(handle, FileAccess.Read, 4096, false);
+        if (!AgenticPrReview.Runtime.Host.State.NativeRestrictedStateFiles.TryGetIdentity(handle, false, out _) ||
+            (File.GetAttributes(handle) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 ||
+            stream.Length is < 1 or > MaximumBytes) throw new InvalidDataException("typed_observation_size");
+        RequirePrivate(handle);
+        var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1) throw new InvalidDataException("typed_observation_growth");
+        return bytes;
+    }
+
+    private static void RequirePrivate(Microsoft.Win32.SafeHandles.SafeFileHandle handle)
+    {
+        if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(handle) &
+            (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+             UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
+            throw new InvalidDataException("typed_observation_privacy");
+    }
+
+    private sealed class Parent(List<Microsoft.Win32.SafeHandles.SafeFileHandle> guards, string path) : IDisposable
+    {
+        internal Microsoft.Win32.SafeHandles.SafeFileHandle Handle => guards[^1];
+        internal string AnchoredPath => OperatingSystem.IsLinux()
+            ? AgenticPrReview.Runtime.Host.State.NativeRestrictedStateFiles.AnchoredRoot(path, Handle) : path;
+        public void Dispose() { for (var index = guards.Count - 1; index >= 0; index--) guards[index].Dispose(); }
+    }
+
+    // Reuse the runtime's no-follow descriptor and Darwin child primitives. Hold
+    // every parent guard; Linux paths stay anchored and Windows parents deny rename.
+    private static Parent OpenParent(string path, bool create)
+    {
+        var directory = Path.GetDirectoryName(path) ?? throw new InvalidDataException("typed_observation_parent");
+        var volume = Path.GetPathRoot(directory)!;
+        var guards = new List<Microsoft.Win32.SafeHandles.SafeFileHandle>();
+        var current = volume;
+        try
+        {
+            Open(current);
+            var names = directory[volume.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+            if (names.Length > 64) throw new InvalidDataException("typed_observation_parent");
+            foreach (var name in names)
+            {
+                var anchored = OperatingSystem.IsLinux()
+                    ? AgenticPrReview.Runtime.Host.State.NativeRestrictedStateFiles.AnchoredRoot(current, guards[^1]) : current;
+                var child = Path.Combine(anchored, name);
+                if (OperatingSystem.IsMacOS()) guards.Add(create ? DarwinFiles.CreateChildDirectory(guards[^1], name) : DarwinFiles.OpenChild(guards[^1], name, isDirectory: true));
+                else
+                {
+                    if (create)
+                    {
+                        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(child);
+                        else Directory.CreateDirectory(child, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    }
+                    Open(child);
+                }
+                current = Path.Combine(current, name);
+            }
+            RequirePrivate(guards[^1]);
+            return new(guards, directory);
+        }
+        catch { foreach (var guard in guards) guard.Dispose(); throw; }
+        void Open(string candidate)
+        {
+            if (AgenticPrReview.Runtime.Host.State.NativeRestrictedStateFiles.OpenRootGuardNoFollow(candidate, out var handle) !=
+                AgenticPrReview.Runtime.Host.State.RestrictedStateOpenResult.Success || handle is null)
+                throw new InvalidDataException("typed_observation_parent");
+            guards.Add(handle);
+            if ((File.GetAttributes(handle) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != FileAttributes.Directory)
+                throw new InvalidDataException("typed_observation_parent");
         }
     }
 }

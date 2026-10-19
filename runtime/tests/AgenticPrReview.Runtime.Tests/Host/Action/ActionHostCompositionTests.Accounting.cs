@@ -26,7 +26,7 @@ public sealed partial class ActionHostCompositionTests
     [InlineData("model_limit")]
     [InlineData("token_limit")]
     [InlineData("deadline")]
-    public async Task ActualAgentHttpAccountingReachesHostWire(string scenario)
+    public async Task AuthoredTypedAccountingReachesHostWire(string scenario)
     {
         var clock = new DeadlineTestClock(LocatorTestData.Now);
         var result = await RunBudgetHost(scenario == "model_limit" ? "{\"maxModelCalls\":1}" :
@@ -35,16 +35,12 @@ public sealed partial class ActionHostCompositionTests
         {
             if (scenario == "deadline") { clock.Advance(TimeSpan.FromSeconds(1)); token.ThrowIfCancellationRequested(); }
             if (scenario == "failure" || (scenario == "retry" && ordinal == 1))
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
-                    { Content = new StringContent("unknown usage") });
-            var response = BudgetResponse(ordinal, scenario is not ("model_limit" or "token_limit"));
-            if (scenario == "unknown_usage" || scenario == "unknown_partition")
+                return Task.FromResult(new BudgetScriptResult(false, 0, 0, 0, Failed: true));
+            var response = BudgetResponse(ordinal, scenario is not ("model_limit" or "token_limit")) with
             {
-                var body = response.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-                body = scenario == "unknown_usage" ? body[..body.IndexOf(",\"usage\"", StringComparison.Ordinal)] + "}" :
-                    body.Replace(",\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":1", "");
-                response.Content.Dispose(); response.Content = new StringContent(body);
-            }
+                UnknownUsage = scenario == "unknown_usage",
+                UnknownPartition = scenario == "unknown_partition",
+            };
             return Task.FromResult(response);
         }, scenario == "deadline" ? clock : null);
         var expected = result.Provider.Outcome!.Accounting!;
@@ -204,7 +200,7 @@ public sealed partial class ActionHostCompositionTests
     private sealed class InvalidAccountingAdapterFactory : IActionHostProviderRunnerFactory
     {
         public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
-            ReviewedSnapshot snapshot, TimeProvider timeProvider) => new ActionHostDeepSeekProviderRunnerFactory()
+            ReviewedSnapshot snapshot, TimeProvider timeProvider) => new ActionHostHistoricalChatRunnerFactory(_ => throw new InvalidOperationException("historical_invalid_adapter"))
                 .Create(policy with { AdapterId = "" }, key, snapshot, timeProvider);
     }
 

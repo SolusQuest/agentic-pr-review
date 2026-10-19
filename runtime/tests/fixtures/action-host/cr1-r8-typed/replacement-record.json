@@ -1,0 +1,2541 @@
+{
+  "schema": "apr.action-host.replacement-record.v2",
+  "issue_number": 178,
+  "framework_verifier": "runtime/scripts/verify-action-host.sh framework",
+  "entries": [
+    {
+      "leaf_id": "W3",
+      "issue_number": 165,
+      "owned_paths": [
+        "src/runtime-invocation/",
+        "src/live-runtime-invocation/",
+        "protocol/schemas/live-runtime-invocation-context.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
+      ],
+      "retained_paths": ["src/action-wrapper/", "runtime/src/AgenticPrReview.Runtime/Host/Action/"],
+      "classification": "remove_after_framework_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/runtime-invocation/",
+        "src/live-runtime-invocation/",
+        "protocol/schemas/live-runtime-invocation-context.v1.json",
+        "src/runtime-integration/runtime-integration.test.ts",
+        "runtime/tests/IntegrationFixtures/"
+      ],
+      "removed_consumer_paths": [
+        "src/runtime-integration/runtime-integration.test.ts",
+        "runtime/tests/IntegrationFixtures/"
+      ],
+      "retained_carrier_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
+      ],
+      "protective_behaviors": [
+        "command and frame rejection",
+        "bounded child lifecycle and signal escalation",
+        "closed child environment and secret isolation"
+      ],
+      "csharp_owners": ["ActionHostComposition", "ActionHostLaunchContract"],
+      "owned_csharp_members": [
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.LiveContext",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#ReadSchema(assembly, \"AgenticPrReview.Protocol.live-runtime-invocation-context.v1.json\")",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.LiveContext => liveContext",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#EmbeddedResource Include=\"..\\..\\..\\protocol\\schemas\\live-runtime-invocation-context.v1.json\""
+      ],
+      "referenced_tests_and_docs": [
+        ".github/workflows/ci.yml",
+        "src/residual-reference-allowlist.ts",
+        "docs/20_architecture/agent-runtime-rebaseline.md",
+        "docs/20_architecture/r1-legacy-removal-handoff.md",
+        "docs/20_architecture/r3-single-shot-removal-handoff.md",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+        "docs/50_ai/agent-context.md"
+      ],
+      "framework_scenario_ids": [
+        "dispatch-bootstrap",
+        "cancel-before-side-effect",
+        "cancel-escalation"
+      ],
+      "deletion_prerequisites": [
+        "W7 merged",
+        "W2 wrapper route merged",
+        "E1 framework verifier green"
+      ],
+      "deletion_gate": "No launcher import, executable route, live-context resource, or current documentation remains."
+    },
+    {
+      "leaf_id": "W4",
+      "issue_number": 166,
+      "owned_paths": ["src/live-provider/"],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/"],
+      "classification": "remove_after_framework_gate",
+      "disposition": "removed",
+      "removed_paths": ["src/live-provider/"],
+      "retained_evidence_paths": [
+        "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+        "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs",
+        "runtime/tests/SolusProviderAccountingFixture/SupplementalRetryTests.cs",
+        "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/LiveAgentVerifierRetirementArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md"
+      ],
+      "inventory_evidence_paths": ["docs/20_architecture/r4-actionhost-wrapper-plan.md"],
+      "retained_assertion_groups": [
+        "installed Solus .4 request identity wire privacy bounds parsing usage retries and continuation require exact-head executed qualification",
+        "APR legacy credential codec Host loop SESSION and independent authored typed observer regressions"
+      ],
+      "superseded_assertion_groups": [
+        "disabled-thinking no-tool fixed-JSON request shape with temperature and response_format",
+        "M4 request-contract digest and TypeScript cache-envelope identities"
+      ],
+      "later_leaf_assertion_owners": [
+        "W11: src/prefix-contract/",
+        "W12: src/provider-metadata/",
+        "W14: src/canonical-json/"
+      ],
+      "protective_behaviors": [
+        "provider request identity and privacy",
+        "provider failure and cancellation taxonomy",
+        "single authorized provider composition"
+      ],
+      "csharp_owners": [
+        "DeepSeekCredential",
+        "DeepSeekReasoningContinuationCodec",
+        "ActionHostHistoricalChatRunnerFactory",
+        "SolusReviewBridge"
+      ],
+      "framework_scenario_ids": ["dispatch-continuation", "provider-malformed", "public-result"],
+      "deletion_prerequisites": ["W7 merged", "E1 real provider request and parser route green"],
+      "deletion_gate": "No TypeScript live-provider business path, oracle, export, or current documentation remains.",
+      "provider_retirement_evidence_map": [
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekRequestWriterTests.cs",
+          "contract": "request identity and wire bounds",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportTests.cs",
+          "contract": "endpoint bearer-only credential placement cancellation and transport failures",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/SupplementalRetryTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportArchitectureTests.cs",
+          "contract": "actual installed provider transport boundary and APR generic type absence",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserTests.cs",
+          "contract": "parser model usage malformed response and exact continuation persistence",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserArchitectureTests.cs",
+          "contract": "installed parser boundary and generic implementation absence",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+          "contract": "provider accounting continuation and current Host state integration",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        }
+      ]
+    },
+    {
+      "leaf_id": "W5",
+      "issue_number": 167,
+      "owned_paths": [
+        "src/state-v2/",
+        "protocol/schemas/state-manifest.v2.json",
+        "protocol/fixtures/state-manifest-v2/",
+        "protocol/fixtures/state-manifest-v2-compat/",
+        "scripts/regenerate-state-v2-fixtures.mjs",
+        "scripts/regenerate-state-v2-compat-fixtures.mjs"
+      ],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Host/State/"],
+      "classification": "remove_after_state_and_publication_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/state-v2/",
+        "protocol/schemas/state-manifest.v2.json",
+        "protocol/fixtures/state-manifest-v2/",
+        "protocol/fixtures/state-manifest-v2-compat/",
+        "scripts/regenerate-state-v2-fixtures.mjs",
+        "scripts/regenerate-state-v2-compat-fixtures.mjs"
+      ],
+      "protective_behaviors": [
+        "strict state parsing and bounded diagnostics",
+        "ancestry provenance and key mismatch",
+        "stale writer and outcome-unknown recovery",
+        "transaction ordering and current-state crash recovery"
+      ],
+      "csharp_owners": [
+        "AuthorizedAcceptedStateComposer",
+        "AcceptedStateSelector",
+        "AcceptedStateGenerationRecordCodec",
+        "TrustedHeadAncestryClassifier",
+        "RetainedStateTransactionService",
+        "PublicationRecoveryService",
+        "ActionHostCoordinator"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/RestrictedStateService.cs#RestrictedStateService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateRecordCodecs.cs#AcceptedStateGenerationRecordCodec",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/TrustedHeadAncestryClassifier.cs#TrustedHeadAncestryClassifier",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateRecordCodecTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/TrustedHeadAncestryClassifierTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionContractTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+      ],
+      "framework_scenario_ids": [
+        "dispatch-bootstrap",
+        "dispatch-continuation",
+        "dispatch-cross-head-conflict",
+        "stale-head",
+        "artifact-digest-mismatch",
+        "artifact-expired",
+        "artifact-upload-outcome-unknown",
+        "crash-mutation",
+        "crash-recovery",
+        "cancel-outcome-unknown"
+      ],
+      "deletion_prerequisites": [
+        "S5 / #155 merged",
+        "S6 / #156 merged",
+        "P5 / #161 merged",
+        "P6 / #162 merged",
+        "E1 / #178 framework evidence green",
+        "W3 / #165 merged",
+        "W6 / #168 merged",
+        "W7 / #169 merged",
+        "W12 / #174 merged"
+      ],
+      "deletion_gate": "No StateV2 reader, converter, dual format, fixture consumer, or current claim remains.",
+      "legacy_test_groups": [
+        {
+          "id": "aggregation.test.ts::bounded diagnostic aggregation",
+          "source_path": "src/state-v2/aggregation.test.ts",
+          "disposition": "retained",
+          "owner": "S5",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/RestrictedStateService.cs#RestrictedStateService",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "builder-input-domain.test.ts::candidate input rejection",
+          "source_path": "src/state-v2/builder-input-domain.test.ts",
+          "disposition": "retained",
+          "owner": "S6",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionContractTests.cs"
+        },
+        {
+          "id": "builder-string-safety.test.ts::bounded safe strings and paths",
+          "source_path": "src/state-v2/builder-string-safety.test.ts",
+          "disposition": "retained",
+          "owner": "S5",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "classifier-precedence.test.ts::selected-current failure precedence",
+          "source_path": "src/state-v2/classifier-precedence.test.ts",
+          "disposition": "retained",
+          "owner": "S5",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs"
+        },
+        {
+          "id": "classifier-wire-format.test.ts::tampered bundle rejection",
+          "source_path": "src/state-v2/classifier-wire-format.test.ts",
+          "disposition": "retained",
+          "owner": "S5",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateRecordCodecs.cs#AcceptedStateGenerationRecordCodec",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateRecordCodecTests.cs"
+        },
+        {
+          "id": "compat-fixtures.test.ts::compatibility outcome corpus",
+          "source_path": "src/state-v2/compat-fixtures.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The StateV2 compatibility corpus co-composes removed manifest identity and base/cache fields; no current reader evaluates that composite contract. Its independently retained ancestry and state-key protections are recorded by their current S5 owners below."
+        },
+        {
+          "id": "compatibility.test.ts::ancestry and state-key compatibility",
+          "source_path": "src/state-v2/compatibility.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The removed comparator's ordered StateV2 manifest/cache identity is not a current compatibility surface; current ancestry and state-key rejection remain separately tested by S5 rather than recreating the retired composite comparator."
+        },
+        {
+          "id": "constants-mirror.test.ts::StateV2 schema parity",
+          "source_path": "src/state-v2/constants-mirror.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The removed StateV2 schema and constant mirror have no current producer or reader."
+        },
+        {
+          "id": "core.test.ts::StateV2 parser serializer and classifier representation",
+          "source_path": "src/state-v2/core.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The exact three-file M4 representation is removed; C# current-state protections are separately mapped."
+        },
+        {
+          "id": "cross-field.test.ts::provenance generation and transition binding",
+          "source_path": "src/state-v2/cross-field.test.ts",
+          "disposition": "retained",
+          "owner": "S6",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "deep-path-oracle.test.ts::M4 sidecar traversal oracle",
+          "source_path": "src/state-v2/deep-path-oracle.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The M4 bundle-sidecar traversal representation is removed and no current fixture consumer remains."
+        },
+        {
+          "id": "diagnostic-bounds.test.ts::bounded failure diagnostics",
+          "source_path": "src/state-v2/diagnostic-bounds.test.ts",
+          "disposition": "retained",
+          "owner": "S5",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/RestrictedStateService.cs#RestrictedStateService",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "diagnostic-privacy.test.ts::private diagnostic suppression",
+          "source_path": "src/state-v2/diagnostic-privacy.test.ts",
+          "disposition": "retained",
+          "owner": "E1",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+        },
+        {
+          "id": "empty-name-unknown-field.test.ts::closed names and unknown fields",
+          "source_path": "src/state-v2/empty-name-unknown-field.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Closed JSON-property names and Ajv diagnostic precedence belonged only to the removed StateV2 JSON reader; the current binary codec has no property-name parser or equivalent diagnostic surface."
+        },
+        {
+          "id": "fixtures.test.ts::byte-identical StateV2 fixture bundles",
+          "source_path": "src/state-v2/fixtures.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The committed StateV2 golden bundle representation and generator have no current consumer."
+        },
+        {
+          "id": "import-boundary.test.ts::StateV2 dependency and directory contract",
+          "source_path": "src/state-v2/import-boundary.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The removed StateV2 directory has no surviving dependency boundary."
+        },
+        {
+          "id": "import-boundary.test.ts::canonical-json recursive AST filesystem boundary",
+          "source_path": "src/state-v2/import-boundary.test.ts",
+          "disposition": "retired_by_w14",
+          "owner": "W14",
+          "target_path": "src/canonical-json/import-boundary.test.ts",
+          "evidence_path": "runtime/tests/fixtures/action-host/framework/replacement-record.json",
+          "reason": "W14 removed the transferred TypeScript family and records the no-filesystem assertion as reviewed obsolete because no implementation remains behind that boundary."
+        },
+        {
+          "id": "public-surface.test.ts::StateV2 barrel exports",
+          "source_path": "src/state-v2/public-surface.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The StateV2 public barrel was removed with no supported downstream importer."
+        },
+        {
+          "id": "resolver-runtime-consequence.test.ts::M4 resolver runtime consequences",
+          "source_path": "src/state-v2/resolver-runtime-consequence.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The StateV2 resolver route and its fixture-specific consequences are removed."
+        },
+        {
+          "id": "rfc3339.test.ts::accepted-state timestamp grammar",
+          "source_path": "src/state-v2/rfc3339.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "RFC 3339 grammar was parsed only by the removed StateV2 JSON reader; AcceptedStateSelector receives decoded records with bounded integer expiry values and has no timestamp-string parser."
+        },
+        {
+          "id": "schema-conformance.test.ts::closed schema and reference validation",
+          "source_path": "src/state-v2/schema-conformance.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "StateManifestV2 JSON Schema reference resolution, tuple-form items, and additionalItems validation were removed with the JSON schema and reader; the current binary codec does not resolve JSON Schema references."
+        },
+        {
+          "id": "shared-vectors.test.ts::shared M4 vector projection",
+          "source_path": "src/state-v2/shared-vectors.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The StateV2 projection of shared M4 vectors is removed; retained C# contracts own current behavior."
+        },
+        {
+          "id": "shared-vocabulary.test.ts::StateV2 vocabulary parity",
+          "source_path": "src/state-v2/shared-vocabulary.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The removed StateV2 vocabulary no longer owns a current protocol surface."
+        },
+        {
+          "id": "short-circuit-and-exhaustive.test.ts::failure precedence and exhaustive branches",
+          "source_path": "src/state-v2/short-circuit-and-exhaustive.test.ts",
+          "disposition": "retained",
+          "owner": "S5",
+          "owner_member": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs"
+        },
+        {
+          "id": "strict-json.test.ts::strict JSON byte and duplicate-property rejection",
+          "source_path": "src/state-v2/strict-json.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Strict JSON byte and duplicate-property rejection applied only to the removed StateV2 JSON reader; the current closed binary record codec has its own magic, version, tamper, and trailing-byte proof."
+        }
+      ],
+      "fixture_dispositions": [
+        {
+          "id": "positive-bootstrap",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 bootstrap bundle and golden bytes have no current consumer."
+        },
+        {
+          "id": "positive-continuation",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 continuation bundle and golden bytes have no current consumer."
+        },
+        {
+          "id": "positive-recovery-root",
+          "semantic_owner": "S6",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 recovery-root bundle and golden bytes have no current consumer."
+        },
+        {
+          "id": "positive-reset",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 reset bundle and golden bytes have no current consumer."
+        },
+        {
+          "id": "compat-base-change",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/TrustedHeadAncestryClassifierTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        },
+        {
+          "id": "compat-cache-contract-change",
+          "semantic_disposition": "reviewed_obsolete",
+          "semantic_reason": "The StateV2 cache-contract identity has no current reader; P5 publication recovery does not own that retired compatibility contract.",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        },
+        {
+          "id": "compat-continuation",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        },
+        {
+          "id": "compat-contract-version-mismatch",
+          "semantic_disposition": "reviewed_obsolete",
+          "semantic_reason": "The expectedLedgerSchemaVersion versus StateV2 contract-version comparison belonged to the removed ledger/prefix composite compatibility reader; no current record codec or selector evaluates that boundary.",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        },
+        {
+          "id": "compat-nondescendant-head",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/TrustedHeadAncestryClassifierTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        },
+        {
+          "id": "compat-state-key-mismatch",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        },
+        {
+          "id": "compat-unknown-ancestry",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/TrustedHeadAncestryClassifierTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        },
+        {
+          "id": "compat-unsafe-provenance",
+          "semantic_owner": "S5",
+          "semantic_evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+          "representation_disposition": "reviewed_obsolete",
+          "representation_reason": "The StateV2 compatibility JSON representation has no current reader."
+        }
+      ],
+      "mapping_digest": "1c143510afc05a57af6b7bca8ccaa982329bd3409e77e39b7b72be99346a69c2",
+      "updated_reference_paths": [
+        ".prettierignore",
+        ".github/workflows/ci.yml",
+        "src/residual-reference-allowlist.ts",
+        "src/canonical-json/import-boundary.test.ts",
+        "docs/00_project/project-context.md",
+        "docs/20_architecture/agent-runtime-rebaseline.md",
+        "docs/20_architecture/agent-session-format.md",
+        "docs/20_architecture/r1-legacy-removal-handoff.md",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+        "docs/20_architecture/runtime-protocol.md",
+        "docs/20_architecture/security-boundary.md",
+        "docs/20_architecture/session-ledger-and-prefix-contract.md",
+        "docs/20_architecture/state-manifest-v2.md",
+        "docs/90_roadmap/roadmap-seed.md",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerSchemaConformanceTests.cs",
+        "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+      ],
+      "updated_reference_dispositions": [
+        {
+          "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
+          "disposition": "superseded_by_w5_residual_scan",
+          "reason": "The deleted StateManifestV2 no-reference assertion cannot compile after the type removal; W5's tracked-tree residual scan is the exact current no-reader proof."
+        },
+        {
+          "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateArchitectureTests.cs",
+          "disposition": "superseded_by_w5_residual_scan",
+          "reason": "The deleted StateManifestV2 no-reference assertion cannot compile after the type removal; W5's tracked-tree residual scan is the exact current no-reader proof."
+        }
+      ],
+      "w5_residual_scan": {
+        "forbidden_tokens": [
+          "src/state-v2",
+          "state-manifest.v2.json",
+          "state-manifest-v2/",
+          "state-manifest-v2-compat/",
+          "regenerate-state-v2-fixtures.mjs",
+          "regenerate-state-v2-compat-fixtures.mjs",
+          "StateManifestV2",
+          "StateKeyV2",
+          "buildStateBundleV2",
+          "classifyStateBundleV2",
+          "validateStateManifestV2",
+          "serializeStateManifestV2",
+          "checkStateManifestV2Compatibility",
+          "ExpectedStateManifestV2Context",
+          "state_unsupported_legacy_v1",
+          "unsupported_legacy_v1"
+        ],
+        "deletion_evidence_paths": [
+          "src/r4-migration-cutover-audit.test.ts",
+          "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+          "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+        ],
+        "immutable_provenance_paths": [
+          "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+        ],
+        "historical_document_paths": [
+          "docs/20_architecture/session-ledger-and-prefix-contract.md",
+          "docs/20_architecture/state-manifest-v2.md"
+        ],
+        "current_position_document_paths": [
+          "docs/00_project/project-context.md",
+          "docs/20_architecture/agent-runtime-rebaseline.md",
+          "docs/20_architecture/agent-session-format.md",
+          "docs/20_architecture/r1-legacy-removal-handoff.md",
+          "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+          "docs/20_architecture/runtime-protocol.md",
+          "docs/20_architecture/security-boundary.md",
+          "docs/90_roadmap/roadmap-seed.md"
+        ],
+        "derived_bundle_paths": [".github/actions/agentic-pr-review/dist/index.js"]
+      }
+    },
+    {
+      "leaf_id": "W6",
+      "issue_number": 168,
+      "owned_paths": [
+        "src/state-acceptance/",
+        "protocol/schemas/candidate-registration.v1.json",
+        "protocol/schemas/accepted-state-marker.v1.json",
+        "protocol/schemas/state-selector.v1.json",
+        "protocol/schemas/state-publication-receipt.v1.json"
+      ],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Locator/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/"
+      ],
+      "classification": "removed_after_encrypted_state_transaction_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/state-acceptance/",
+        "protocol/schemas/candidate-registration.v1.json",
+        "protocol/schemas/accepted-state-marker.v1.json",
+        "protocol/schemas/state-selector.v1.json",
+        "protocol/schemas/state-publication-receipt.v1.json"
+      ],
+      "protective_behaviors": [
+        "candidate and acceptance concurrency",
+        "scope and ancestry validation",
+        "mutation outcome reconciliation"
+      ],
+      "csharp_owners": [
+        "OpaqueStoreValidation",
+        "GitHubArtifactRestrictedStateStore",
+        "LocatorRootService",
+        "LineageService",
+        "AuthorizedAcceptedStateComposer",
+        "RetainedStateTransactionAuthority",
+        "StickyCommentPublisher",
+        "PublicationRecoveryService",
+        "ActionHostCoordinator"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/RestrictedStateOpaqueStoreContracts.cs#OpaqueStoreValidation",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/LocalRestrictedStateStore.cs#LocalRestrictedStateStore",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/GitHubArtifactRestrictedStateStore.cs#GitHubArtifactRestrictedStateStore",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/PrivateArtifactBridgeClient.cs#PrivateArtifactBridgeClient",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Locator/LocatorRootService.cs#LocatorRootService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs#LineageService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/ScopedStateInventory.cs#ScopedStateInventory",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/LocalRestrictedStateStoreTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Locator/LocatorCodecAndSelectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs"
+      ],
+      "framework_scenario_ids": [
+        "dispatch-continuation",
+        "dispatch-cross-head-conflict",
+        "stale-head",
+        "artifact-upload-outcome-unknown",
+        "artifact-delete-outcome-unknown",
+        "crash-mutation",
+        "crash-recovery",
+        "cancel-known-commit",
+        "cancel-outcome-unknown",
+        "delete-exact"
+      ],
+      "deletion_prerequisites": [
+        "S6 / #156 merged",
+        "P6 / #162 merged",
+        "W7 / #169 merged",
+        "E1 / #178 framework evidence green"
+      ],
+      "retained_owner_groups": [
+        "encrypted immutable artifact and complete enumeration",
+        "locator lineage and stale-authority admission",
+        "accepted-state candidate reconciliation and cleanup",
+        "sticky mutation/readback receipt identity",
+        "publication recovery and P6 ordering"
+      ],
+      "obsolete_groups": [
+        "Unix socket lock naming and retry",
+        "Git ref CAS tree blob and plaintext namespace",
+        "registration counter contiguous sequence and child harness",
+        "selector-before-sticky acceptance order"
+      ],
+      "legacy_test_cases": [
+        {
+          "id": "github-git-data.test.ts::non-forced-ref-update",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git ref transport is retired."
+        },
+        {
+          "id": "github-git-data.test.ts::truncated-tree",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git tree transport is retired."
+        },
+        {
+          "id": "github-git-data.test.ts::duplicate-tree-paths",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git tree transport is retired."
+        },
+        {
+          "id": "github-state-paths.test.ts::frozen-m4-paths",
+          "disposition": "reviewed_obsolete",
+          "reason": "The frozen Git path grammar is no longer a state route."
+        },
+        {
+          "id": "contract.test.ts::canonical-records",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::schema-stage-order",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::codec-diagnostics",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unicode-canonical-diagnostics",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::state-key-parity",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unsafe-unicode",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::candidate-winner-conflict",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::aggregate-snapshot-bytes",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::enumeration-receipt-digest",
+          "disposition": "retained",
+          "owner": "S3",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs"
+        },
+        {
+          "id": "contract.test.ts::marker-selector-order",
+          "disposition": "reviewed_obsolete",
+          "reason": "Selector-before-sticky mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::predecessor-byte-hash",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::cancel-before-mutation",
+          "disposition": "retained",
+          "owner": "P6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::selection-identity-state-key",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::bootstrap-and-corruption",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::committed-selector-retry",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::contract-version-legacy-v1",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::contract-version-unknown-version",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unsafe-candidate-files",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::unsafe-expected-files",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::reopen-candidate-bytes",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::registration-crash-residue",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "contract.test.ts::child-process-registration",
+          "disposition": "reviewed_obsolete",
+          "reason": "The local child-process registration harness is retired."
+        },
+        {
+          "id": "contract.test.ts::registration-count-boundary",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::immutable-target-id",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "contract.test.ts::registration-cap",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::registration-sequence",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "contract.test.ts::kernel-lock",
+          "disposition": "reviewed_obsolete",
+          "reason": "The Unix-kernel lock is retired."
+        },
+        {
+          "id": "contract.test.ts::lease-selector-cas",
+          "disposition": "reviewed_obsolete",
+          "reason": "Selector CAS-before-publication mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::bootstrap-without-selector",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::explicit-restore-without-selector",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::default-branch-identity",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::counter-transaction",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git ref counters are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::contiguous-registration",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::global-counter-cutoff",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::counter-enumeration",
+          "disposition": "reviewed_obsolete",
+          "reason": "Registration-counter mechanics are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::moved-global-ref",
+          "disposition": "reviewed_obsolete",
+          "reason": "Git ref retries are retired."
+        },
+        {
+          "id": "github-state-store.test.ts::noncanonical-sentinel",
+          "disposition": "retained",
+          "owner": "S2",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::shared-git-data-processes",
+          "disposition": "reviewed_obsolete",
+          "reason": "The Git-data process harness is retired."
+        },
+        {
+          "id": "github-state-store.test.ts::selector-successor",
+          "disposition": "retained",
+          "owner": "S6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::bootstrap-predecessor",
+          "disposition": "retained",
+          "owner": "S5",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs"
+        },
+        {
+          "id": "github-state-store.test.ts::workflow-provenance",
+          "disposition": "retained",
+          "owner": "S3",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs"
+        },
+        {
+          "id": "schema.test.ts::strict-closed-schemas",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "id": "schema.test.ts::nested-key-transition",
+          "disposition": "retained",
+          "owner": "S1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        }
+      ],
+      "legacy_helper_cases": [
+        {
+          "id": "lock-child.mjs::unix-socket-lock",
+          "disposition": "reviewed_obsolete",
+          "reason": "The Unix-socket lock harness belongs only to the retired local reference store."
+        },
+        {
+          "id": "store-child.mjs::reference-store-child",
+          "disposition": "reviewed_obsolete",
+          "reason": "The local reference-store child harness belongs only to the retired route."
+        }
+      ],
+      "receipt_disposition": {
+        "legacy_schema": "protocol/schemas/state-publication-receipt.v1.json",
+        "owners": ["P2", "P5", "S5", "S6", "P6"],
+        "owner_members": [
+          "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+          "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+          "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+          "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AcceptedStateSelector.cs#AcceptedStateSelector",
+          "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionService.cs#RetainedStateTransactionService",
+          "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStatePersistence.cs#RetainedStatePersistence",
+          "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+        ],
+        "evidence_paths": [
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateSelectorTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs"
+        ],
+        "framework_scenarios": [
+          "crash-mutation",
+          "crash-recovery",
+          "cancel-known-commit",
+          "cancel-outcome-unknown"
+        ]
+      },
+      "w6_residual_scan": {
+        "forbidden_tokens": [
+          "GitDataStateTransport",
+          "GitHubGitStateAcceptanceStore",
+          "StateAcceptanceStore",
+          "ReferenceStateStore",
+          "OctokitGitDataClient",
+          "acceptLocalCandidate",
+          "heads/agentic-pr-review-m4-state-v1",
+          "agentic-pr-review-m4-state-v1",
+          "m4-state/v1",
+          "m4-state-v1",
+          "candidate-registration.v1.json",
+          "accepted-state-marker.v1.json",
+          "state-selector.v1.json",
+          "state-publication-receipt.v1.json",
+          "CandidateRegistrationV1",
+          "AcceptedStateMarkerV1",
+          "StateSelectorV1",
+          "StatePublicationReceiptV1",
+          "@actions/cache",
+          "actions/cache",
+          "restoreCache",
+          "saveCache"
+        ],
+        "w8_marker_paths": [
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs"
+        ],
+        "deletion_evidence_paths": [
+          "src/residual-reference-allowlist.ts",
+          "src/r4-migration-cutover-audit.test.ts",
+          "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+          "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+        ],
+        "immutable_provenance_paths": [
+          "docs/20_architecture/r1-legacy-removal-handoff.md",
+          "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+        ],
+        "retired_document_paths": [
+          "docs/00_project/project-context.md",
+          "docs/20_architecture/agent-runtime-rebaseline.md",
+          "docs/20_architecture/m4-state-acceptance.md",
+          "docs/20_architecture/m4-stateful-action.md",
+          "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+          "docs/20_architecture/security-boundary.md",
+          "docs/90_roadmap/roadmap-seed.md"
+        ],
+        "retained_unrelated_policy_paths": ["scripts/check-r3-live-proof.mjs"],
+        "bundled_dependency_artifact_paths": [".github/actions/agentic-pr-review/dist/index.js"]
+      },
+      "deletion_gate": "No callable Git-ref, cache, plaintext, compatibility, or dual state writer remains."
+    },
+    {
+      "leaf_id": "W7",
+      "issue_number": 169,
+      "owned_paths": [
+        "src/ledger-csharp.ts",
+        "src/ledger-csharp.test.ts",
+        "src/ledger-pre-acceptance.test.ts"
+      ],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Ledger/",
+        "runtime/src/AgenticPrReview.Runtime/Agent/"
+      ],
+      "classification": "remove_after_coordinator_gate",
+      "protective_behaviors": [
+        "invocation and pre-acceptance sequencing",
+        "SESSION continuation and result mapping",
+        "target and outcome-unknown validation"
+      ],
+      "csharp_owners": ["ActionHostCoordinator", "AgentLoop"],
+      "framework_scenario_ids": ["dispatch-bootstrap", "dispatch-continuation", "crash-recovery"],
+      "deletion_prerequisites": ["P6 merged", "S6 merged", "E1 continuation and recovery green"],
+      "deletion_gate": "No TypeScript ledger coordinator, root pre-acceptance test, caller, export, or helper remains."
+    },
+    {
+      "leaf_id": "W8",
+      "issue_number": 170,
+      "owned_paths": ["src/comments.ts", "src/comments.test.ts"],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/"
+      ],
+      "classification": "remove_after_sticky_gate",
+      "disposition": "removed",
+      "removed_paths": ["src/comments.ts", "src/comments.test.ts"],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4StickyRendererTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4StickyMarkerTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentSerializerTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryClassifierTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+      ],
+      "historical_provenance_paths": [
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "named_replacement_vectors": [
+        "rendering:P1:R4StickyRendererTests.NonEmptyReviewFreezesExactMarkdownAndBodyDigest",
+        "rendering:P1:R4StickyRendererTests.ProductionTruncationKeepsCompleteProjectionAndWholeBlocks",
+        "marker:P1:R4StickyMarkerTests.OrdinaryAndHistoricalCommentsAreNotR4Targets",
+        "fingerprint:P1:R4PublicationIdentityTests.FindingFingerprintMatchesIndependentGoldenAndEvidenceOrderMatters",
+        "fingerprint:P1:R4PublicationIdentityTests.UnicodeNormalizationDoesNotParticipateInFindingIdentity",
+        "pathless_rejection:P1:R4PublicationIdentityTests.MalformedInternalFindingValuesFailClosed",
+        "target_discovery:P2:StickyCommentPublisherTests.HistoricalAndForeignScopeCommentsAreNotAdopted",
+        "target_discovery:P2:StickyCommentPublisherTests.DiscoveryAcceptsExactlyFiftyPagesAndFiveThousandRecords",
+        "target_discovery:P2:StickyCommentPublisherTests.PageItemAndCompletenessCapPlusOneFailClosed",
+        "target_discovery:P2:StickyCommentPublisherTests.CrossPageLastEvidenceIsRequiredForCompleteDiscovery",
+        "duplicate_handling:P1:R4PublicationIdentityTests.DuplicateFingerprintsFailClosedWithoutAlternateIdentity",
+        "duplicate_handling:P2:StickyCommentPublisherTests.MultipleOrMalformedR4TargetsFailBeforeWrite",
+        "create_update:P2:StickyCommentPublisherTests.ZeroCreatesAndExactResponseGetRelistProduceReceipt",
+        "create_update:P2:StickyCommentPublisherTests.OneUpdatesEvenWhenExistingBodyIsAlreadyExact",
+        "empty_result:P1:R4StickyMarkerTests.EmptyReviewFreezesExactBodyDigestMarkerAndPlacement",
+        "escaping:P1:R4StickyRendererTests.EveryFreeTextRenderContextKeepsTheFullCanaryCorpusInert",
+        "escaping:P1:R4StickyRendererTests.EvidencePathsStayInertInRepeatedListPositions",
+        "bounds:P1:R4StickyRendererTests.ExactFiftyThousandScalarBoundaryIsAccepted",
+        "bounds:P1:R4StickyRendererTests.Utf8BudgetCountsFourByteScalarsIndependently",
+        "bounds:P1:R4StickyRendererTests.TwentyFindingsAreAcceptedAndTwentyOneFailClosed",
+        "bounds:P2:StickyCommentSerializerTests.SerializedRequestAcceptsExactCapAndRejectsCapPlusOne",
+        "response_validation_readback:P2:StickyCommentPublisherTests.ZeroCreatesAndExactResponseGetRelistProduceReceipt",
+        "response_validation_readback:P2:StickyCommentPublisherTests.ReadOnlyExactDiscoveryReturnsObservedReceiptWithoutMutation",
+        "response_validation_readback:P2:StickyPublicationContractsTests.PersistedP1OrReceiptCanAuthorizeReadOnlyDiscovery",
+        "outcome_unknown:P2:StickyCommentPublisherTests.LostCreateResponseReconcilesWithoutSecondWrite",
+        "outcome_unknown:P2:StickyCommentPublisherTests.UnresolvedMutationNeverRetriesAndHasNoReceipt",
+        "outcome_unknown:P5:PublicationRecoveryClassifierTests.AcceptedOutcomeUnknownConvergesOnExactMarkerAfterRestart",
+        "outcome_unknown:P5:PublicationRecoveryClassifierTests.DurableStickyReceiptPinsCommentIdAcrossProcessRestart",
+        "outcome_unknown:P5:PublicationRecoveryServiceTests.ExactStoredPayloadDiscoveryCompletesAcceptanceWithoutMutation",
+        "outcome_unknown:P6:ActionHostCompositionTests.P2FailureClassesConvergeThroughDurableRecovery",
+        "outcome_unknown:P6:ActionHostCompositionTests.RecoversAcceptanceCrashWithoutProviderKeyOrDuplicateSticky"
+      ],
+      "retained_assertion_groups": [
+        "complete ordered projection with whole-block public truncation and an explicit omission notice",
+        "grounded findings reject empty evidence before identity or rendering",
+        "bounded-complete discovery fails closed on page item and completeness overflow"
+      ],
+      "superseded_assertion_groups": [
+        "M4 marker publication and incremental lineage-comment rewriting",
+        "TypeScript pre-render mutation of the structured review envelope",
+        "16-hex JSON fingerprinting"
+      ],
+      "later_leaf_assertion_owners": [
+        "W9: inline candidate and target publication behavior",
+        "W10: structured review validation grounding and host-owned metadata",
+        "W15: root shared DTO and utility consumer retirement"
+      ],
+      "protective_behaviors": [
+        "bounded sticky rendering and marker identity",
+        "create update dedup and readback",
+        "publication outcome recovery"
+      ],
+      "csharp_owners": [
+        "R4StickyRenderer",
+        "R4StickyMarker",
+        "R4PublicationIdentityV1",
+        "StickyCommentPublisher",
+        "PublicationRecoveryService",
+        "ActionHostCoordinator",
+        "ActionHostComposition"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs#R4StickyRenderer",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyMarker.cs#R4StickyMarker",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs#R4PublicationIdentityV1",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs#ActionHostComposition"
+      ],
+      "framework_scenario_ids": [
+        "workflow-run",
+        "dispatch-continuation",
+        "crash-mutation",
+        "crash-recovery"
+      ],
+      "deletion_prerequisites": [
+        "P2 / #158 merged",
+        "P6 / #162 merged",
+        "W7 / #169 merged",
+        "E1 / #178 framework evidence green"
+      ],
+      "deletion_gate": "No TypeScript sticky publisher, renderer, fingerprint, export, or current marker owner remains."
+    },
+    {
+      "leaf_id": "W9",
+      "issue_number": 171,
+      "owned_paths": [
+        "src/inline-comments.ts",
+        "src/inline-comments.test.ts",
+        "src/target.ts",
+        "src/target.test.ts"
+      ],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/Authorization/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Inline/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Inline/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/"
+      ],
+      "classification": "remove_after_inline_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/inline-comments.ts",
+        "src/inline-comments.test.ts",
+        "src/target.ts",
+        "src/target.test.ts"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Authorization/ActionHostAuthorizationFactTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/GitHub/ActionHostGitHubAuthorizationTransportTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Snapshot/BoundedReviewedSnapshotBuilderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Snapshot/ChangedFiles/ReviewedChangedFileReaderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Inline/InlineCandidateMapperTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Inline/InlineCandidateReplacementVectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Inline/InlineCommentCodecTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Inline/InlineCommentPublisherTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md"
+      ],
+      "inventory_evidence_paths": [
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "retained_assertion_groups": [
+        "same-repository open pull-request admission and frozen identity",
+        "exact reviewed diff construction unavailable classifications and right-side coordinates",
+        "trusted severity deterministic ordering fingerprint inline key and fixed cap five",
+        "complete enumeration exact dedup one batch relist readback and retry idempotency",
+        "exact closed 422-only fallback bounded individual writes and both head barriers",
+        "sticky acceptance before inline authorization and post-acceptance warning-only completion"
+      ],
+      "superseded_assertion_groups": [
+        "raw GitHub patch hashing and TypeScript incremental snapshot deltas",
+        "file-SHA-only patch-unavailable comparison and synthetic target resolution",
+        "caller-derived state key confidence gate configurable cap and post-list refill",
+        "M4 marker state identity and original multi-line range presentation",
+        "generic fallback after 5xx or outcome unknown and historical 3000-entry bounds",
+        "TypeScript metadata reason DTO target interfaces helpers and compatibility exports"
+      ],
+      "protective_behaviors": [
+        "right-side target mapping and bounds",
+        "severity cap dedup batch and readback",
+        "stale-head and warning-only failure"
+      ],
+      "csharp_owners": [
+        "ActionHostAuthorizer",
+        "ActionHostGitHubAuthorizationJson",
+        "BoundedReviewedSnapshotBuilder",
+        "ReviewedChangedFileReader",
+        "InlineCandidateMapper",
+        "InlineCommentPublisher",
+        "PostAcceptanceInlinePublisherHook",
+        "ActionHostComposition"
+      ],
+      "framework_scenario_ids": ["inline", "inline-warning", "stale-head"],
+      "deletion_prerequisites": ["P3 merged", "P4 merged", "P6 merged", "E1 inline branch green"],
+      "deletion_gate": "No TypeScript inline or target publisher path remains and sticky-only behavior stays complete."
+    },
+    {
+      "leaf_id": "W10",
+      "issue_number": 172,
+      "owned_paths": ["src/protocol/", "src/structured.ts", "src/structured.test.ts"],
+      "retained_paths": [
+        "protocol/schemas/review-input.v1.json",
+        "protocol/schemas/review-result.v1.json",
+        "protocol/schemas/review-trace.v1.json",
+        "protocol/fixtures/v1/",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/"
+      ],
+      "classification": "remove_typescript_and_retain_csharp_contracts",
+      "inherited_w8_replacement_handoffs": [
+        {
+          "prior_typescript_assertion": "structured.test.ts validates model JSON and injects trusted action-owned metadata",
+          "later_owner": "W10 with P1",
+          "replacement": "R4PublicationIdentityTests.FindingFingerprintMatchesIndependentGoldenAndEvidenceOrderMatters",
+          "deliberate_difference": "P1 computes a full Host-owned 64-hex framed fingerprint and consumes no model fingerprint."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts generates stable action-owned fingerprints for equivalent normalized findings",
+          "later_owner": "W10 with P1",
+          "replacement": "R4PublicationIdentityTests.UnicodeNormalizationDoesNotParticipateInFindingIdentity",
+          "deliberate_difference": "The old 16-hex JSON fingerprint is deliberately incompatible with exact R4 scalar bytes."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts normalizes safe repo-relative finding paths and rejects unsafe non-relative paths",
+          "later_owner": "W10 with Agent H5 and P1",
+          "replacement": "R4StickyRendererTests.EvidencePathsStayInertInRepeatedListPositions",
+          "deliberate_difference": "P1 consumes canonical grounded paths and owns Markdown inertness rather than renormalizing them."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts caps normalized findings and records truncation before rendering and artifacts",
+          "later_owner": "W10 with Agent and P1",
+          "replacement": "R4StickyRendererTests.TwentyFindingsAreAcceptedAndTwentyOneFailClosed",
+          "deliberate_difference": "Agent admission is fixed at 20 and P1 independently bounds complete public blocks."
+        },
+        {
+          "prior_typescript_assertion": "structured.test.ts drops or keeps findings by current pull-request file membership",
+          "later_owner": "W10 with Agent H5 and W9 P3",
+          "replacement": "reviewed grounding contract plus InlineCandidateMapperTests.ExactCurrentPathAdditionAndContextAreTheOnlyTargets",
+          "deliberate_difference": "P1 consumes grounded evidence; later inline mapping owns exact diff targeting."
+        }
+      ],
+      "disposition": "removed",
+      "removed_paths": [
+        "src/protocol/build-review-input.test.ts",
+        "src/protocol/build-review-input.ts",
+        "src/protocol/fixtures.test.ts",
+        "src/protocol/map-review-result.test.ts",
+        "src/protocol/map-review-result.ts",
+        "src/protocol/review-input.test.ts",
+        "src/protocol/review-input.ts",
+        "src/protocol/review-result.test.ts",
+        "src/protocol/review-result.ts",
+        "src/protocol/review-trace.test.ts",
+        "src/protocol/review-trace.ts",
+        "src/structured.test.ts",
+        "src/structured.ts"
+      ],
+      "retained_evidence_paths": [
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs",
+        "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+        "runtime/src/AgenticPrReview.Runtime/Agent/Tools/TerminalReviewValidator.cs",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Application/RuntimeApplicationTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Tools/AgentToolsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "docs/20_architecture/runtime-protocol.md",
+        "docs/20_architecture/runtime-cli-process-contract.md"
+      ],
+      "inventory_evidence_paths": [
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.review-input.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.review-result.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.review-trace.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.Input => input",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.Result => result",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.Trace => trace",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#public static bool HasValidFindingLocations",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs#[JsonSerializable(typeof(ReviewInput))]",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs#[JsonSerializable(typeof(ReviewResult))]",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs#[JsonSerializable(typeof(ReviewTrace))]",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj#protocol\\fixtures\\v1\\**\\*",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs#ManifestFixturesMatchTheEmbeddedSchemasAndSemanticRules"
+      ],
+      "retained_corpus": {
+        "schema_paths": [
+          "protocol/schemas/review-input.v1.json",
+          "protocol/schemas/review-result.v1.json",
+          "protocol/schemas/review-trace.v1.json"
+        ],
+        "fixture_root": "protocol/fixtures/v1/",
+        "file_count": 148,
+        "aggregate_sha256": "4d16450ff1c50d785308002c0bfdb1995c043b34a1ad7c8ff98f422945c3800f",
+        "framing": "ordinal path + NUL + lowercase file sha256 + LF"
+      },
+      "legacy_assertion_dispositions": [
+        {
+          "id": "input-assembly-credentials-and-host-shape",
+          "disposition": "retained",
+          "current_owner": "SchemaContracts RuntimeApplication and H1 ActionHost input",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+          "semantic_difference": "C# consumes the canonical closed schema; the deleted TypeScript builder is not preserved"
+        },
+        {
+          "id": "patch-hash-path-location-and-string-bounds",
+          "disposition": "retained",
+          "current_owner": "SchemaContracts SemanticValidation H5 and Agent",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Tools/AgentToolsTests.cs",
+          "semantic_difference": "current H5 and Agent bounds replace the historical TypeScript cap and filtering mechanics"
+        },
+        {
+          "id": "result-host-fields-grounding-and-fingerprint",
+          "disposition": "retained",
+          "current_owner": "ReviewResultV1 Agent and P1",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+          "semantic_difference": "external results may be pathless while ActionHost findings require grounding and use full evidence-ordered SHA-256"
+        },
+        {
+          "id": "trace-privacy-hashes-and-usage-lineage",
+          "disposition": "retained",
+          "current_owner": "SchemaContracts RuntimeJson and RuntimeApplication",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/RuntimeApplicationTests.cs",
+          "semantic_difference": "ReviewTraceV1 remains a direct runtime protocol; ActionHost E1 does not produce it"
+        },
+        {
+          "id": "fixture-manifest-and-noncircular-hash-chain",
+          "disposition": "retained",
+          "current_owner": "ProtocolFixtureTests and LedgerFixtureTests",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+          "semantic_difference": "C# validates embedded schemas semantics manifest closure and ledger delegation"
+        },
+        {
+          "id": "result-content-and-sidechannel-mapping",
+          "disposition": "superseded",
+          "current_owner": "RuntimeApplication and Agent P1 P6",
+          "evidence_path": "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+          "semantic_difference": "the direct runtime and ActionHost routes own separate outputs; no compatibility mapper remains"
+        },
+        {
+          "id": "structured-extraction-host-assembly-filter-and-cap",
+          "disposition": "superseded",
+          "current_owner": "Agent H5 P1 and P6",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs",
+          "semantic_difference": "grounded Agent evidence and host-owned authorization replace raw or fenced TypeScript assembly"
+        },
+        {
+          "id": "typescript-ajv-diagnostic-wording",
+          "disposition": "obsolete",
+          "current_owner": "SchemaContracts and RuntimeApplication sanitized diagnostics",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/RuntimeApplicationTests.cs",
+          "semantic_difference": "fail-closed classification is retained; Ajv error text and expectedErrorIncludes substring parity are not contracts"
+        },
+        {
+          "id": "typescript-dtos-validators-exports-and-old-fingerprint",
+          "disposition": "obsolete",
+          "current_owner": "C# protocol models and P1 identity",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Rendering/R4PublicationIdentityTests.cs",
+          "semantic_difference": "no dual validator alias converter or 16-hex compatibility reader remains"
+        }
+      ],
+      "retained_assertion_groups": [
+        "embedded Input Result and Trace schemas with complete mixed fixture manifest",
+        "credential exclusion and closed host-owned result fields",
+        "safe paths string bounds and result location semantics",
+        "grounded Agent evidence and full evidence-ordered P1 fingerprint",
+        "RuntimeApplication input result and trace self-validation with sanitized failures",
+        "trace privacy hash links and current-run usage lineage exclusion",
+        "internal ActionHost continuation publication completion and privacy route"
+      ],
+      "superseded_assertion_groups": [
+        "hand-written TypeScript protocol DTOs Ajv validators and diagnostic text",
+        "TypeScript ReviewInput config restored-state and patch adapter",
+        "TypeScript ReviewResult content and side-channel projection",
+        "raw or fenced structured extraction and host metadata assembly",
+        "historical pathless confidence category normalization filtering and caps",
+        "historical 16-hex fingerprint and usage or lineage DTO compatibility",
+        "external cross-language or public protocol compatibility converter claim"
+      ],
+      "protective_behaviors": [
+        "credential exclusion and host-owned fields",
+        "safe paths bounds grounding and fingerprints",
+        "trace privacy and usage lineage"
+      ],
+      "csharp_owners": [
+        "RuntimeApplication",
+        "RuntimeJson",
+        "AgentLoop",
+        "TerminalReviewValidator",
+        "R4PublicationIdentityV1",
+        "ActionHostCoordinator"
+      ],
+      "framework_scenario_ids": ["dispatch-continuation", "inline", "public-result"],
+      "deletion_prerequisites": ["W3 merged", "W7 merged", "H1 H5 P1 P6 and E1 green"],
+      "deletion_gate": "Only TypeScript review and structured implementations are removed; C# schemas, resources, and golden fixtures remain."
+    },
+    {
+      "leaf_id": "W11",
+      "issue_number": 173,
+      "owned_paths": ["src/prefix-contract/"],
+      "retained_paths": [
+        "protocol/fixtures/prefix-contract/",
+        "runtime/src/AgenticPrReview.Runtime/Prefix/"
+      ],
+      "classification": "remove_typescript_and_retain_byte_identical_corpus",
+      "disposition": "removed",
+      "removed_paths": ["src/prefix-contract/", "scripts/regenerate-prefix-contract-fixtures.mjs"],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureLoader.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixGoldenVectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureManifestRejectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerBuilderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md"
+      ],
+      "historical_provenance_paths": [
+        "protocol/fixtures/prefix-contract/v1/manifest.json",
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "retained_assertion_groups": [
+        "framing identities digests materialization append invalidation bounds diagnostics and continuation",
+        "closed corpus manifest vector shapes references and mutation semantics",
+        "immutable historical TypeScript diagnostic provenance",
+        "seven-field Ledger cache-contract digest known answer"
+      ],
+      "superseded_assertion_groups": [
+        "TypeScript barrel exports import restrictions and generator execution",
+        "review-subject digest with no current C# producer or consumer",
+        "JavaScript Proxy descriptor getter sparse-array alias cycle and mutable-object TOCTOU mechanics"
+      ],
+      "manifest_test_dispositions": [
+        "real corpus satisfies every manifest rule: retained by ManifestIsWellFormed and E1 immutable hashes",
+        "rejects duplicate ids: retained C# synthetic rejection",
+        "rejects duplicate file references: retained C# synthetic rejection",
+        "rejects missing listed files: retained C# synthetic rejection",
+        "rejects unlisted files on disk: retained C# synthetic rejection",
+        "rejects unsafe paths: retained C# synthetic rejection",
+        "rejects id/kind mismatch with vector content: retained C# synthetic rejection",
+        "rejects bad references: retained C# synthetic rejection",
+        "rejects wrong-kind references: retained C# synthetic rejection",
+        "rejects unknown vector fields: retained C# synthetic rejection",
+        "rejects missing per-kind required fields: retained C# synthetic rejection",
+        "returns stable violations for malformed top-level manifest containers: retained fail-closed C# rejection",
+        "returns a stable violation for malformed manifest entries: retained fail-closed C# rejection",
+        "rejects unknown invalidation mode: retained C# synthetic rejection",
+        "rejects canonical vectors missing typescriptCode: retained historical-provenance rejection",
+        "rejects invalid expected union on invalid-vectors: retained C# synthetic rejection",
+        "rejects wrong recursive value types in framing and append unions: retained C# synthetic rejection",
+        "rejects malformed nested materialization fields and invalid diagnostics: retained C# synthetic rejection",
+        "requires envelope mutations and their matching digest updates together: retained C# synthetic rejection",
+        "keeps dotted property names distinct from nested mutation paths: retained C# synthetic rejection",
+        "locks the declared invalidation matrix instead of trusting fixture booleans: retained C# tamper test",
+        "closes hash-framing mutation stream and boolean semantics: retained C# tamper test",
+        "rejects non-object vector files with a stable rule id: retained fail-closed C# rejection"
+      ],
+      "digest_test_dispositions": [
+        "uses the review-subject domain tag and one NUL separator: obsolete M4 TypeScript behavior with no current producer or consumer",
+        "uses the exact untagged seven-field cache-contract object: retained C# Ledger known-answer test"
+      ],
+      "later_leaf_assertion_owners": [
+        "W14: RFC 8785 canonical JSON production and retirement evidence"
+      ],
+      "protective_behaviors": [
+        "canonical framing and identities",
+        "alias cycle bounds and TOCTOU snapshot",
+        "continuation prefix invalidation"
+      ],
+      "csharp_owners": ["PrefixMaterializer", "PrefixGoldenVectorTests"],
+      "framework_scenario_ids": ["dispatch-continuation"],
+      "deletion_prerequisites": [
+        "W3 W4 and W7 merged",
+        "E1 continuation green",
+        "C# corpus digest unchanged"
+      ],
+      "deletion_gate": "No TypeScript prefix implementation or generator remains and the retained corpus bytes and hashes are unchanged."
+    },
+    {
+      "leaf_id": "W12",
+      "issue_number": 174,
+      "owned_paths": [
+        "src/provider-metadata/",
+        "protocol/schemas/provider-run-metadata.v1.json",
+        "protocol/fixtures/provider-run-metadata/"
+      ],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/"],
+      "classification": "remove_after_no_consumer_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/provider-metadata/",
+        "protocol/schemas/provider-run-metadata.v1.json",
+        "protocol/fixtures/provider-run-metadata/"
+      ],
+      "removed_csharp_members": [
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.ProviderRunMetadata",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.provider-run-metadata.v1.json"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+        "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs",
+        "runtime/tests/SolusProviderAccountingFixture/SupplementalRetryTests.cs",
+        "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+      ],
+      "retained_owner_groups": [
+        "installed Solus .4 request identity wire privacy bounds parsing usage retries and continuation require exact-head executed qualification",
+        "APR legacy credential codec Host loop SESSION and independent authored typed observer regressions",
+        "W5 opaque sidecar bytes descriptors hashes and fixtures were removed by W5 after S5/S6/P5/P6/E1 disposition"
+      ],
+      "obsolete_groups": [
+        "raw JSON schema semantic aggregate telemetry and hash sidecar representation",
+        "provider metadata fixture manifest corpus and TypeScript diagnostics"
+      ],
+      "protective_behaviors": [
+        "strict provider metadata parsing and bounds",
+        "attempt ordering usage and capability evidence",
+        "provider failure cancellation and privacy"
+      ],
+      "csharp_owners": [
+        "DeepSeekCredential",
+        "DeepSeekReasoningContinuationCodec",
+        "ActionHostHistoricalChatRunnerFactory",
+        "SolusReviewBridge"
+      ],
+      "framework_scenario_ids": ["dispatch-continuation", "provider-malformed"],
+      "deletion_prerequisites": [
+        "W3 merged",
+        "W7 merged",
+        "refreshed C# no-consumer evidence",
+        "E1 provider route green"
+      ],
+      "deletion_gate": "No provider metadata TypeScript surface, schema resource consumer, fixture consumer, or compatibility reader remains.",
+      "provider_retirement_evidence_map": [
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekRequestWriterTests.cs",
+          "contract": "request identity and wire bounds",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportTests.cs",
+          "contract": "endpoint bearer-only credential placement cancellation and transport failures",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/SupplementalRetryTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportArchitectureTests.cs",
+          "contract": "actual installed provider transport boundary and APR generic type absence",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserTests.cs",
+          "contract": "parser model usage malformed response and exact continuation persistence",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserArchitectureTests.cs",
+          "contract": "installed parser boundary and generic implementation absence",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        },
+        {
+          "retired_test": "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+          "contract": "provider accounting continuation and current Host state integration",
+          "installed_fixture_paths": [
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs"
+          ],
+          "retained_apr_paths": [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"
+          ],
+          "qualification": "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof"
+        }
+      ]
+    },
+    {
+      "leaf_id": "W14",
+      "issue_number": 176,
+      "owned_paths": ["src/canonical-json/"],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Canonical/",
+        "protocol/fixtures/prefix-contract/"
+      ],
+      "classification": "remove_after_last_consumer_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/canonical-json/index.ts",
+        "src/canonical-json/index.test.ts",
+        "src/canonical-json/edge-cases.test.ts",
+        "src/canonical-json/import-boundary.test.ts"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/CanonicalWriterTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/EcmaScriptNumberFormatterCorpusTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Canonical/LenientJsonObjectEnumeratorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixCanonicalBoundaryTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixEnvelopeValidatorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixGoldenVectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureManifestRejectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixMaterializerTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerBuilderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+      ],
+      "historical_provenance_paths": [
+        "protocol/fixtures/prefix-contract/v1/manifest.json",
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Canonical/Rfc8785Writer.cs#Rfc8785Writer",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/JsonElementCanonicalizer.cs#JsonElementCanonicalizer",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/EcmaScriptNumberFormatter.cs#EcmaScriptNumberFormatter",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/LenientJsonObjectEnumerator.cs#LenientJsonObjectEnumerator",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/Rfc8785CanonicalizationException.cs#Rfc8785CanonicalizationException",
+        "runtime/src/AgenticPrReview.Runtime/Canonical/CanonicalJsonWriter.cs#CanonicalJsonWriter"
+      ],
+      "typescript_test_dispositions": [
+        {
+          "id": "index.test.ts::sorts object keys by UTF-16 code units",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#ObjectKeysSortByUtf16CodeUnits"]
+        },
+        {
+          "id": "index.test.ts::emits ECMAScript ToString for numbers",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "CanonicalWriterTests#NumberFormattingMatchesEcmaScript",
+            "EcmaScriptNumberFormatterCorpusTests#MatchesNodeCorpus"
+          ]
+        },
+        {
+          "id": "index.test.ts::serializes negative zero as 0 per RFC 8785",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#NumberFormattingMatchesEcmaScript"]
+        },
+        {
+          "id": "index.test.ts::rejects NaN Infinity and -Infinity",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#NonFiniteNumbersAreRejected"]
+        },
+        {
+          "id": "index.test.ts::rejects non-JSON JavaScript values and built-ins",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The retained C# canonicalizer consumes a closed JsonElement or typed Ledger model, not arbitrary JavaScript values or built-ins."
+        },
+        {
+          "id": "index.test.ts::rejects cyclic structures",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The retained closed JsonElement and typed Ledger inputs cannot contain JavaScript object-graph cycles."
+        },
+        {
+          "id": "index.test.ts::rejects sparse arrays",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Sparse-array holes are JavaScript object-model mechanics absent from the retained closed JSON input domain."
+        },
+        {
+          "id": "index.test.ts::rejects symbol-keyed own properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Symbol-keyed properties are outside JSON and absent from the retained closed input domain."
+        },
+        {
+          "id": "index.test.ts::rejects accessor properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Getter and setter descriptors are JavaScript mechanics; the retained owner reads inert JsonElement tokens."
+        },
+        {
+          "id": "index.test.ts::rejects non-enumerable own properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Property enumerability is a JavaScript descriptor concern absent from JsonElement."
+        },
+        {
+          "id": "index.test.ts::rejects custom object prototypes",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Prototype identity is not represented by the retained closed JSON input model."
+        },
+        {
+          "id": "index.test.ts::rejects arrays with extra string properties",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "JsonElement arrays expose only ordered elements and cannot carry JavaScript side properties."
+        },
+        {
+          "id": "index.test.ts::rejects arrays with accessor indices",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Accessor indices are JavaScript descriptor mechanics absent from JsonElement arrays."
+        },
+        {
+          "id": "index.test.ts::rejects arrays with custom prototypes",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Array prototype identity is not represented by the retained closed JSON input model."
+        },
+        {
+          "id": "index.test.ts::rejects lone surrogates in values and names",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "CanonicalWriterTests#LoneSurrogateIsRejected",
+            "PrefixCanonicalBoundaryTests#InvalidPropertyNameAtOpenJsonRoot"
+          ]
+        },
+        {
+          "id": "index.test.ts::produces byte-stable output on repeated calls",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "PrefixMaterializerTests#SameInputProducesByteIdenticalOutput",
+            "PrefixGoldenVectorTests#FramingVectorsMatch"
+          ]
+        },
+        {
+          "id": "index.test.ts::does not import node fs",
+          "source_path": "src/canonical-json/index.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "W14 removes the complete TypeScript implementation, so no TypeScript dependency boundary remains to enforce."
+        },
+        {
+          "id": "edge-cases.test.ts::exports canonical JSON version 1",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "The private TypeScript version export has no surviving consumer and is removed without a compatibility alias."
+        },
+        {
+          "id": "edge-cases.test.ts::positive and negative zero are byte-equal",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#NumberFormattingMatchesEcmaScript"]
+        },
+        {
+          "id": "edge-cases.test.ts::accepts a null-prototype object",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Null-prototype acceptance is a JavaScript object-model rule absent from the retained JsonElement domain."
+        },
+        {
+          "id": "edge-cases.test.ts::accepts a repeated non-cyclic reference",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "Reference alias identity is not represented after values are parsed into the retained JsonElement domain."
+        },
+        {
+          "id": "edge-cases.test.ts::sorts non-ASCII names by UTF-16 code units",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#ObjectKeysSortByUtf16CodeUnits"]
+        },
+        {
+          "id": "edge-cases.test.ts::encodes ordinary Unicode without unnecessary escaping",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::encodes controls with unicode escapes",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::encodes standard short escapes",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::preserves supplementary-plane characters",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": ["CanonicalWriterTests#StringEscapingMatchesRfc8785"]
+        },
+        {
+          "id": "edge-cases.test.ts::nested rejection carries a useful path",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "PrefixCanonicalBoundaryTests#InvalidPropertyNameUnderUnknownAncestor"
+          ],
+          "deliberate_difference": "The retained host emits bounded typed paths for its closed JSON domain rather than exposing the retired TypeScript exception class."
+        },
+        {
+          "id": "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "CanonicalWriterTests#CanonicalizationRoundTripsSemanticallyAndIsIdempotent"
+          ]
+        },
+        {
+          "id": "edge-cases.test.ts::output parses to an equal JSON value",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "CanonicalWriterTests#CanonicalizationRoundTripsSemanticallyAndIsIdempotent"
+          ]
+        },
+        {
+          "id": "edge-cases.test.ts::near-cap performance smoke",
+          "source_path": "src/canonical-json/edge-cases.test.ts",
+          "disposition": "retained",
+          "evidence_methods": [
+            "LenientJsonObjectEnumeratorTests#LongCommonPrefixSortingHasLinearDecodedWork",
+            "PrefixCanonicalBoundaryTests#OversizeStringValidationAllocationIsBoundedBelowTokenSize"
+          ],
+          "deliberate_difference": "The retained C# path locks linear decoded-name work and bounded allocation instead of a wall-clock threshold."
+        },
+        {
+          "id": "import-boundary.test.ts::canonical-json recursive AST filesystem boundary",
+          "source_path": "src/canonical-json/import-boundary.test.ts",
+          "disposition": "reviewed_obsolete",
+          "reason": "W14 removes the complete TypeScript implementation, leaving no module whose filesystem imports require policing."
+        }
+      ],
+      "cap_precedence_difference": {
+        "retired_behavior": "The TypeScript byte cap throws during traversal.",
+        "retained_behavior": "The C# writer enters discard and count-only mode so a later canonical-domain defect can take precedence over the cap result.",
+        "evidence_methods": [
+          "CanonicalWriterTests#DiscardModeRemainsLatchedAfterTheFirstExceededAppend",
+          "PrefixCanonicalBoundaryTests#EarlyOversizeStringDoesNotMaskLaterLoneSurrogate",
+          "PrefixStagePrecedenceTests#CanonicalDefectBeatsEnvelopeCap"
+        ]
+      },
+      "retained_integration_evidence_methods": [
+        "PrefixGoldenVectorTests#DigestVectorsMatch",
+        "PrefixGoldenVectorTests#InteractionVectorsMatch",
+        "PrefixFixtureManifestRejectionTests#SyntheticManifestViolationsReachTheirIntendedBranch",
+        "LedgerBuilderTests#CacheContractDigestMatchesIndependentSevenFieldKnownAnswer",
+        "ActionHostFrameworkVerifierArchitectureTests#ReplacementAndInventoryArtifactsAreClosedAndPinned"
+      ],
+      "protective_behaviors": [
+        "RFC 8785 numeric string and UTF-16 key ordering",
+        "invalid Unicode duplicate property and non-finite number rejection",
+        "bounded canonical output with fail-closed diagnostic precedence",
+        "byte-identical prefix identities and Ledger cache-contract known answer"
+      ],
+      "csharp_owners": [
+        "Rfc8785Writer",
+        "JsonElementCanonicalizer",
+        "EcmaScriptNumberFormatter",
+        "LenientJsonObjectEnumerator",
+        "Rfc8785CanonicalizationException",
+        "CanonicalJsonWriter",
+        "PrefixGoldenVectorTests"
+      ],
+      "framework_scenario_ids": ["dispatch-continuation"],
+      "deletion_prerequisites": [
+        "W3 W4 W5 W6 W11 and W12 merged",
+        "repository-wide no-import proof",
+        "E1 green"
+      ],
+      "w14_residual_scan": {
+        "forbidden_tokens": [
+          "src/canonical-json",
+          "canonicalJsonBytes",
+          "CANONICAL_JSON_VERSION",
+          "CanonicalJsonValue",
+          "CanonicalJsonInputError",
+          "CanonicalJsonByteCapError"
+        ],
+        "deletion_evidence_paths": [
+          "src/r4-migration-cutover-audit.test.ts",
+          "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+          "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+          "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+        ],
+        "immutable_provenance_paths": [
+          "protocol/fixtures/prefix-contract/",
+          "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+        ],
+        "historical_document_paths": [
+          "docs/20_architecture/session-ledger-and-prefix-contract.md",
+          "docs/20_architecture/state-manifest-v2.md"
+        ],
+        "current_position_document_paths": [
+          "docs/00_project/project-context.md",
+          "docs/20_architecture/agent-runtime-rebaseline.md",
+          "docs/20_architecture/r1-legacy-removal-handoff.md",
+          "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+          "docs/50_ai/agent-context.md",
+          "docs/90_roadmap/roadmap-seed.md"
+        ],
+        "derived_bundle_paths": [".github/actions/agentic-pr-review/dist/index.js"]
+      },
+      "deletion_gate": "No TypeScript canonicalizer, import, alias, generator, export, or current documentation claim remains."
+    },
+    {
+      "leaf_id": "W15",
+      "issue_number": 177,
+      "owned_paths": ["src/types.ts", "src/utils.ts"],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Application/",
+        "runtime/src/AgenticPrReview.Runtime/Cli/",
+        "runtime/src/AgenticPrReview.Runtime/Storage/",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs"
+      ],
+      "classification": "remove_after_root_consumer_gate",
+      "disposition": "removed",
+      "removed_paths": ["src/types.ts", "src/utils.ts"],
+      "historical_base_sha": "e698fb1df6daf49f393e87fac4f00e3a2ec2c716",
+      "removed_path_inventory": [
+        {
+          "path": "src/types.ts",
+          "sha256": "f4fd4340c8ab050550e96d6459f89c66fce3a4fef2429073523a19804dd709fe"
+        },
+        {
+          "path": "src/utils.ts",
+          "sha256": "198104fb678ff3cd451ca96a2b2582c1a5d96073d5f1fb042b3ad2ac5f5666e6"
+        }
+      ],
+      "retired_w8_consumer_handoffs": [
+        {
+          "prior_typescript_consumer": "src/comments.ts imported review lineage target usage and structured review DTOs from src/types.ts",
+          "later_owner": "W15",
+          "disposition": "W8 consumer removed; retain shared DTOs until the W15 root-consumer gate",
+          "deliberate_difference": "The C# Host owns sticky publication without a TypeScript compatibility DTO surface."
+        },
+        {
+          "prior_typescript_consumer": "src/comments.ts imported sha256 and truncateText from src/utils.ts",
+          "later_owner": "W15",
+          "disposition": "W8 consumer removed; retain utilities until all remaining root consumers close",
+          "deliberate_difference": "C# publication uses its own strict hashing and bounded rendering implementations."
+        }
+      ],
+      "historical_consumers": [
+        {
+          "leaf_id": "W7",
+          "path": "src/ledger-csharp.test.ts",
+          "sha256": "8a9e830718b91c4db76dbccf2e56f4af83d016e34f37a6fe25e0249b922e3b0a",
+          "types": ["ReviewTarget"]
+        },
+        {
+          "leaf_id": "W7",
+          "path": "src/ledger-csharp.ts",
+          "sha256": "60c12013ca7e40de45bbbbefce603a6d687b8d3dccf61cc6187e3961157282dc",
+          "types": [
+            "LiveProvider",
+            "Phase",
+            "ReviewMode",
+            "ReviewTarget",
+            "StructuredReviewEnvelopeV1"
+          ]
+        },
+        {
+          "leaf_id": "W8",
+          "path": "src/comments.test.ts",
+          "sha256": "72dd8d97e2d3bfeb7f8cdc9a10ade2b4783a6196e919dc475675df7906917400",
+          "types": ["StructuredReviewEnvelopeV1"]
+        },
+        {
+          "leaf_id": "W8",
+          "path": "src/comments.ts",
+          "sha256": "ca44ceede088c1d5fcc689a11113e9f70d8b27bb046ff4b46d90863c59e2af48",
+          "types": [
+            "LineageAction",
+            "LineageReason",
+            "Phase",
+            "ReviewTarget",
+            "RuntimeBackend",
+            "RuntimeLineageTotals",
+            "RuntimeUsage",
+            "StructuredFindingV1",
+            "StructuredReviewEnvelopeV1"
+          ],
+          "utils": ["sha256", "truncateText"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/inline-comments.test.ts",
+          "sha256": "cfd95b65b3b6d193846299376b2d7d8dbac6e5a8c02f0fe909f5f24c61c42ac8",
+          "types": ["InlineCommentsPolicy", "StructuredFindingV1", "StructuredReviewEnvelopeV1"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/inline-comments.ts",
+          "sha256": "815492896d1801e6dcbf3a052ff48a58469c4b34bfa0b577a181f64f35207659",
+          "types": [
+            "ChangedFile",
+            "InlineCommentsMetadata",
+            "InlineCommentsPolicy",
+            "StructuredFindingV1",
+            "StructuredReviewEnvelopeV1"
+          ],
+          "utils": ["sha256", "truncateText"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/target.test.ts",
+          "sha256": "890c1dfed0ef95fb2fa23c6f4debd22e65aaf75deef9dfc298138c34c07a2ba0",
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/target.ts",
+          "sha256": "5940223675c3e6aa87dd6abdfc6b8467d2be378d1262a344b840cbfa8780df5a",
+          "types": [
+            "ChangedFile",
+            "PullRequestDiffSnapshotDeltaV1",
+            "PullRequestDiffSnapshotEntryV1",
+            "PullRequestDiffSnapshotV1",
+            "ReviewTarget",
+            "RuntimeProvider",
+            "TargetMode"
+          ],
+          "utils": ["normalizeRepoRelativePath", "sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/build-review-input.test.ts",
+          "sha256": "a6b210dcefcb61082ba04579e3775b1ac3b539948509f5dbbcc0e5ca65f32df3",
+          "types": ["ChangedFile", "LoadedBlock", "RestoredState", "ReviewTarget"],
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/build-review-input.ts",
+          "sha256": "6f2b43f270b978f9d025a5f119e8f8ad70565430082d5d5eed5889716042ca17",
+          "types": [
+            "InlineCommentConfidence",
+            "InlineCommentSeverity",
+            "LoadedBlock",
+            "Phase",
+            "RestoredState",
+            "ReviewTarget",
+            "RuntimeProvider",
+            "ToolMode"
+          ],
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/map-review-result.test.ts",
+          "sha256": "9515091147b09a9ae43ad177b23a1b56ed557dfae8712e50fe8c368be59d744a",
+          "types": ["StructuredFindingV1"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/review-input.test.ts",
+          "sha256": "9aecf1e1d279eb3774edb76328251a6a074abca03d125fc2c25069b9f14a9006",
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/structured.test.ts",
+          "sha256": "ffa1d0b6335e42a5f9bd863ab134679485dea3db959b62cecc0da00448a22926",
+          "types": ["ReviewTarget", "RuntimeLineageTotals", "RuntimeUsage"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/structured.ts",
+          "sha256": "79e7e7bba6c6ae61fe70b9c520e8b8e15ecffe6edcd757652e6bebe9e764f320",
+          "types": [
+            "InlineCommentsMetadata",
+            "Phase",
+            "ReviewTarget",
+            "ReviewedRange",
+            "RuntimeLineageTotals",
+            "RuntimeProvider",
+            "RuntimeUsage",
+            "StructuredFindingV1",
+            "StructuredReviewEnvelopeV1",
+            "ToolMode"
+          ],
+          "utils": ["normalizeRepoRelativePath", "sha256"]
+        }
+      ],
+      "symbol_dispositions": [
+        {
+          "id": "removed-selectors",
+          "symbols": ["LiveProvider", "RuntimeBackend", "ReviewMode", "EffectiveDiffSource"],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": ["ActionHostComposition"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs"
+          ],
+          "deliberate_semantic_difference": "The single trusted C# composition replaces TypeScript provider backend and review-route selector dispatch.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "protocol-control-fields",
+          "symbols": ["RuntimeProvider", "TargetMode", "Phase", "ToolMode"],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": [
+            "RuntimeReview",
+            "RuntimeOptions",
+            "RuntimeApplication",
+            "RuntimeJsonContext"
+          ],
+          "actionhost_owners": ["ActionHostComposition"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs"
+          ],
+          "deliberate_semantic_difference": "The direct runtime retains phase provider and tool-mode fields while ActionHost uses one provider route and independent trusted policy.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "review-content-envelope",
+          "symbols": [
+            "ModelReviewFindingV1",
+            "ModelReviewContentV1",
+            "StructuredFindingV1",
+            "ReviewedRange",
+            "StructuredReviewEnvelopeV1"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": [
+            "RuntimeFinding",
+            "RuntimeJsonContext",
+            "RuntimeApplication"
+          ],
+          "actionhost_owners": ["TerminalReviewValidator", "AgentLoop", "R4PublicationIdentityV1"],
+          "evidence_paths": [
+            "protocol/schemas/review-result.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs",
+            "runtime/src/AgenticPrReview.Runtime/Agent/Tools/TerminalReviewValidator.cs",
+            "runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs"
+          ],
+          "deliberate_semantic_difference": "Direct-runtime finding fields remain live; grounded Agent evidence and Host identity replace TypeScript envelope mechanics.",
+          "framework_scenario_id": "public-result"
+        },
+        {
+          "id": "inline-policy-metadata",
+          "symbols": [
+            "InlineCommentSeverity",
+            "InlineCommentConfidence",
+            "InlineCommentsPolicy",
+            "InlineCommentsMetadata"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["RuntimeInlineCommentsPolicy", "RuntimeApplication"],
+          "actionhost_owners": [
+            "ActionHostTrustedPolicy",
+            "InlineCandidateMapper",
+            "ActionHostCoordinator"
+          ],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Policy/ActionHostTrustedPolicyMaterializer.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Inline/InlineCandidateMapper.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains inline inputs while ActionHost uses trusted fixed policy targeting and mutation accounting.",
+          "framework_scenario_id": "inline"
+        },
+        {
+          "id": "trusted-context-blocks",
+          "symbols": ["LoadedBlock"],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["RuntimeContextDocument", "RuntimeApplication"],
+          "actionhost_owners": ["ActionHostTrustedPolicy"],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Policy/ActionHostTrustedPolicyMaterializer.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains context documents while H3 independently bounds trusted ActionHost policy blobs.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "target-changed-files-snapshots",
+          "symbols": [
+            "ChangedFile",
+            "PullRequestDiffSnapshotV1",
+            "PullRequestDiffSnapshotEntryV1",
+            "PullRequestDiffSnapshotChangedEntryV1",
+            "PullRequestDiffSnapshotRemovedEntryV1",
+            "PullRequestDiffSnapshotDeltaV1",
+            "ReviewTarget"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["RuntimeChangedFile", "RuntimeApplication"],
+          "actionhost_owners": [
+            "ReviewedChangedFileSet",
+            "BoundedReviewedSnapshotBuilder",
+            "ReviewedExactDiffBuilder",
+            "ReviewedTreePath"
+          ],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ChangedFiles/ReviewedChangedFileSet.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/BoundedReviewedSnapshotBuilder.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/Diff/ReviewedExactDiffBuilder.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedTreeSnapshot.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains changed-file fields while ActionHost exact snapshots replace the old target and delta model.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "state-usage-lineage",
+          "symbols": [
+            "RestoredState",
+            "RuntimeUsage",
+            "RuntimeUsageTotals",
+            "RuntimeLineageTotals",
+            "LineageReason",
+            "LineageAction"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["SchemaContracts", "ProtocolFixtureTests"],
+          "actionhost_owners": [
+            "LiveAgentFreshProcessLineage",
+            "LineageService",
+            "AuthorizedAcceptedStateComposer"
+          ],
+          "evidence_paths": [
+            "protocol/schemas/review-result.v1.json",
+            "protocol/schemas/review-trace.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+            "runtime/src/AgenticPrReview.Runtime/Application/LiveAgentFreshProcessLineage.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains current-run usage schemas while encrypted accepted state replaces TypeScript lineage mechanics.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "generic-configuration-helpers",
+          "symbols": [
+            "required",
+            "parseInteger",
+            "parseOptionalInteger",
+            "parsePositiveInteger",
+            "parseOptionalPositiveInteger",
+            "parseBoolean",
+            "oneOf",
+            "clamp"
+          ],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": ["RuntimeApplication", "SchemaContracts"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs"
+          ],
+          "deliberate_semantic_difference": "Closed schema and C# parsing reject invalid values; generic parsing and silent clamp are not retained APIs.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "safe-path-handling",
+          "symbols": ["normalizeRepoRelativePath"],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["SchemaContracts"],
+          "actionhost_owners": ["ReviewedTreePath"],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "protocol/schemas/review-result.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedTreeSnapshot.cs"
+          ],
+          "deliberate_semantic_difference": "Schemas retain path syntax; H5 rejects unsafe paths instead of normalizing input. SemanticValidation only checks path-line relations.",
+          "framework_scenario_id": "inline"
+        },
+        {
+          "id": "hashing",
+          "symbols": ["sha256"],
+          "typescript_alias_disposition": "retained_replacement",
+          "actionhost_owners": [
+            "R4PublicationIdentityV1",
+            "ReviewedTreeIdentityWriter",
+            "LineageService"
+          ],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedTreeSnapshot.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs"
+          ],
+          "deliberate_semantic_difference": "Feature-specific framed byte identities replace a generic shared hashing helper.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "state-key-sanitization",
+          "symbols": ["sanitizeStateKey"],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": ["AuthorizedAcceptedStateComposer", "LineageService"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs"
+          ],
+          "deliberate_semantic_difference": "Scope-bound state identity rejects mismatches instead of sanitizing caller text into a key.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "bounds-truncation",
+          "symbols": ["assertWithinLimit", "truncateText"],
+          "typescript_alias_disposition": "superseded",
+          "actionhost_owners": [
+            "TerminalReviewValidator",
+            "ReviewedContentLimits",
+            "R4StickyRenderer"
+          ],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Agent/Tools/TerminalReviewValidator.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedContentLimits.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs"
+          ],
+          "deliberate_semantic_difference": "Scalar UTF-8 and complete-block fail-closed rendering replace UTF-16 slicing.",
+          "framework_scenario_id": "public-result"
+        },
+        {
+          "id": "generic-filesystem-json-helpers",
+          "symbols": [
+            "resolveWorkspacePath",
+            "readTextFile",
+            "ensureDir",
+            "writeTextFile",
+            "writeJsonFile",
+            "readJsonFile",
+            "walkFiles",
+            "relativePosix"
+          ],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": [
+            "BoundedReviewedSnapshotBuilder",
+            "AuthorizedAcceptedStateComposer"
+          ],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/BoundedReviewedSnapshotBuilder.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs"
+          ],
+          "deliberate_semantic_difference": "No generic utility barrel survives; feature-local C# code owns bounded I/O.",
+          "framework_scenario_id": "workflow-run"
+        }
+      ],
+      "protective_behaviors": [
+        "safe path normalization and SHA-256",
+        "bounded truncation and review DTOs",
+        "target usage and lineage behavior"
+      ],
+      "csharp_owners": [
+        "RuntimeApplication",
+        "RuntimeJsonContext",
+        "SchemaContracts",
+        "RuntimeFinding",
+        "RuntimeInlineCommentsPolicy",
+        "RuntimeContextDocument",
+        "RuntimeChangedFile",
+        "ActionHostComposition",
+        "ActionHostTrustedPolicy",
+        "ReviewedChangedFileSet",
+        "BoundedReviewedSnapshotBuilder",
+        "ReviewedExactDiffBuilder",
+        "ReviewedTreePath",
+        "TerminalReviewValidator",
+        "AgentLoop",
+        "R4PublicationIdentityV1",
+        "InlineCandidateMapper",
+        "ActionHostCoordinator",
+        "LiveAgentFreshProcessLineage",
+        "LineageService",
+        "AuthorizedAcceptedStateComposer",
+        "ReviewedContentLimits",
+        "R4StickyRenderer"
+      ],
+      "framework_scenario_ids": [
+        "workflow-run",
+        "inline",
+        "dispatch-continuation",
+        "public-result"
+      ],
+      "deletion_prerequisites": [
+        "W7 W8 W9 and W10 merged",
+        "root import inventory empty",
+        "E1 green"
+      ],
+      "deletion_gate": "No root types or utils import, export, test, compatibility barrel, or duplicate shared utility remains."
+    }
+  ]
+}

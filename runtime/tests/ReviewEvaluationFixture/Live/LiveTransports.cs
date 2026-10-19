@@ -1,76 +1,83 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Accounting;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
-// Live transport construction is reachable only through execute mode after
-// plan+corpus+credential admission; dry-run never touches the factory.
-internal interface ILiveTransportFactory
+internal interface ILiveChatFactory
 {
-    IDeepSeekTransport Create(DeepSeekCredential credential);
+    IProjectChatClient Create(DeepSeekAdapterContext context);
 }
 
-internal sealed class LiveDeepSeekTransportFactory : ILiveTransportFactory
+// Historical live evaluation has no production provider capability after R8.
+internal sealed class UnavailableLiveChatFactory : ILiveChatFactory
 {
-    internal static readonly LiveDeepSeekTransportFactory Instance = new();
-
-    public IDeepSeekTransport Create(DeepSeekCredential credential) =>
-        DeepSeekTransport.Create(credential);
+    internal static readonly UnavailableLiveChatFactory Instance = new();
+    public IProjectChatClient Create(DeepSeekAdapterContext context) =>
+        throw new IOException("historical_live_provider_unavailable");
 }
 
-// Metered wrapper at the transport boundary: the only place that sees the
-// reservation gate, typed provider outcomes (429, timeouts) and send counts.
-internal sealed class LiveMeteredTransport(IDeepSeekTransport inner, LiveAccounting accounting,
-    ILiveAttemptObserver? attempt = null)
-    : IDeepSeekTransport
+// Scripted failure labels exercise the frozen accounting journal, not real
+// HTTP statuses, retries, endpoints or transport behavior.
+internal sealed class HistoricalScriptFailure(string outcome) : IOException("historical_script_failure")
 {
-    public async Task<DeepSeekTransportResult> SendAsync(
-        ReadOnlyMemory<byte> requestBody, CancellationToken cancellationToken)
+    internal string Outcome { get; } = outcome;
+}
+
+internal sealed class LiveMeteredChat(IProjectChatClient inner, LiveAccounting accounting,
+    ILiveAttemptObserver? attempt = null) : IProjectChatClient, IDisposable
+{
+    public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {
         var call = attempt?.CurrentCall;
-        // Cancellation is recorded when the token fires, not when the abandoned
-        // continuation happens to run: AgentLoop waits the chat call via
-        // WaitAsync, so the inner task's own OCE would race summary publication.
         var flag = new CancellationFlag();
-        using var registration = cancellationToken.Register(static state =>
+        using var registration = token.Register(static state =>
         {
-            var (metered, seen, current) =
-                ((LiveMeteredTransport, CancellationFlag, ILiveCallObserver?))state!;
-            current?.Cancel();
-            metered.RecordCancelledOnce(seen);
+            var (metered, seen, current) = ((LiveMeteredChat, CancellationFlag, ILiveCallObserver?))state!;
+            current?.Cancel(); metered.RecordCancelledOnce(seen);
         }, (this, flag, call));
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
+            if (request.MaxOutputTokens is < 1 or > 65_536) throw new ProjectChatNormalizationException();
             if (!accounting.TryReserve())
             {
                 call?.Refuse(accounting.AccountingViolation ? "violation_refused" : "budget_refused");
-                return DeepSeekTransportResult.TransportFailure();
+                throw new IOException("historical_script_refused");
             }
             if (call is not null && !call.Dispatch())
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                return DeepSeekTransportResult.TransportFailure();
+                token.ThrowIfCancellationRequested(); throw new IOException("historical_script_refused");
             }
-            var result = await inner.SendAsync(requestBody, cancellationToken);
-            call?.TransportFinished(result);
-            accounting.RecordOutcome(result);
-            return result;
+            try
+            {
+                var response = await inner.GetResponseAsync(request, token);
+                var outcome = response.CapturedResponseBodyBytes > Agent.AgentLimits.ResponseBytes ? "response_too_large" : "success";
+                call?.ScriptFinished(outcome); accounting.RecordOutcome(outcome);
+                return response;
+            }
+            catch (ProjectChatNormalizationException)
+            {
+                // An explicitly authored typed normalization failure has completed its
+                // script dispatch. The frozen journal retains unknown usage, not zero.
+                call?.ScriptFinished("success"); accounting.RecordOutcome("success"); throw;
+            }
+            catch (HistoricalScriptFailure error)
+            {
+                call?.ScriptFinished(error.Outcome); accounting.RecordOutcome(error.Outcome); throw;
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                call?.ScriptFinished("transport_failure"); accounting.RecordOutcome("transport_failure"); throw;
+            }
         }
         catch (OperationCanceledException)
         {
-            call?.Cancel();
-            RecordCancelledOnce(flag);
-            throw;
+            call?.Cancel(); RecordCancelledOnce(flag); throw;
         }
     }
-
     private void RecordCancelledOnce(CancellationFlag flag)
-    {
-        if (Interlocked.Exchange(ref flag.Seen, 1) == 0) accounting.RecordCancelled();
-    }
-
+    { if (Interlocked.Exchange(ref flag.Seen, 1) == 0) accounting.RecordCancelled(); }
     private sealed class CancellationFlag { internal int Seen; }
-
-    public void Dispose() => inner.Dispose();
+    public void Dispose() => (inner as IDisposable)?.Dispose();
 }

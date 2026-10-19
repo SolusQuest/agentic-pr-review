@@ -8,7 +8,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 
 internal sealed record HistoryRow(int Phase, int ProcessId, string Code, bool Accepted, long? Generation,
     string? SessionSha256, string? EnvelopeSha256, bool PredecessorPreserved, bool RestoredMatch,
-    bool WireMatch, PrefixComparison Comparison, HistoryCapture Capture, GrowthChatCounts? Capacity = null);
+    bool LogicalRequestMatch, PrefixComparison Comparison, HistoryCapture Capture, GrowthChatCounts? Capacity = null);
 
 internal sealed record HistoryReport(string Mode, string Profile, string Code, string Cleanup,
     string SourceCommit, string SourceTree, bool SourceClean, ImmutableArray<HistoryRow> Rows)
@@ -33,10 +33,10 @@ internal sealed record HistoryReport(string Mode, string Profile, string Code, s
                 capacity.LastContinuationAfterBytes > MeasurementLimits.Historical.ContinuationTotalBytes);
 
     internal static bool Positive(HistoryRow row) => row.Accepted && row.ProcessId > 0 &&
-        row.RestoredMatch && row.WireMatch && row.Capture.Code == "observed" &&
-        row.Comparison == new PrefixComparison("compared", true, true) &&
+        row.RestoredMatch && row.LogicalRequestMatch && row.Capture.Code == "observed" &&
+        row.Comparison == new PrefixComparison("compared", true) &&
         row.Capture.Baseline is { } baseline && row.Capture.Calls.Length > 0 &&
-        row.Capture.Calls.All(call => call is not null && baseline.Compare(call) == new PrefixComparison("compared", true, true));
+        row.Capture.Calls.All(call => call is not null && baseline.Compare(call) == new PrefixComparison("compared", true));
 }
 
 internal static class HistoryRunner
@@ -95,8 +95,8 @@ internal static class HistoryRunner
             // The caller is the completed supervisor result, after admission, accept and (growth) readback.
             var admitted = staged is { Admitted: true };
             return new(phase, staged?.ProcessId ?? 0, code, accepted, generation, session, envelope, preserved,
-                admitted && staged!.RestoredMatch, admitted && staged!.WireMatch,
-                admitted ? staged!.Comparison : new("unavailable", null, null),
+                admitted && staged!.RestoredMatch, admitted && staged!.LogicalRequestMatch,
+                admitted ? staged!.Comparison : new("unavailable", null),
                 admitted ? staged!.Capture : HistoryCapture.Unavailable);
         }
     }

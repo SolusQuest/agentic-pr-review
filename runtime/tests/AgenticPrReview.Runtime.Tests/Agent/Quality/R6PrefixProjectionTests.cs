@@ -23,11 +23,11 @@ public sealed class R6PrefixProjectionTests
         AgentToolRegistry.Definitions.ToArray(), run.Continuation, ThinkingRequired: true);
 
     [Fact]
-    public async Task ActualLoopRestoreMaterializersAndBackendAgreeWithIndependentSegmentContract()
+    public async Task ActualLoopRestoreAndTypedCallbackAgreeWithIndependentLogicalSegmentContract()
     {
         var (restored, boundary) = await Fixture();
         var run = restored.RunRequest!;
-        using var transport = new FinishTransport();
+        using var transport = new FinishScript();
         var observer = new PrefixObservingChatClient(boundary, Client(transport));
         var outcome = await new AgentLoop(observer, new NoTools()).RunAsync(run, CancellationToken.None);
         Assert.True(outcome.CompletedSessionEligible);
@@ -38,22 +38,18 @@ public sealed class R6PrefixProjectionTests
         Assert.Equal(restored.Artifact!.SessionSha256, observation.Domain.AcceptedSessionSha256);
         Assert.Equal(1, observation.Logical.Control.Count);
         Assert.Equal(4, observation.Logical.History.Count); // three messages + one positional continuation item
-        Assert.Equal(3, observation.Provider.History.Count);
-        Assert.Equal(1, observation.Provider.Dynamic.Count);
+        Assert.Equal(1, observation.Logical.Dynamic.Count);
+        Assert.Equal(PrefixObservation.LogicalDomain, observation.ObservationDomain);
         Assert.Equal("unknown", observation.CacheObservation);
-        // Independent oracle: inspect actual outbound body, never print content on failure.
-        using var wire = JsonDocument.Parse(transport.LastBody!);
-        var messages = wire.RootElement.GetProperty("messages");
-        Assert.True(messages.EnumerateArray().Select(m => m.GetProperty("role").GetString())
-            .SequenceEqual(["system", "user", "assistant", "tool", "user"]));
-        Assert.True(messages[2].GetProperty("reasoning_content").GetString() == "reason " + Canary);
-        Assert.True(messages[2].GetProperty("tool_calls")[0].GetProperty("id").GetString() == "finish-old");
-        Assert.True(messages[3].GetProperty("tool_call_id").GetString() == "finish-old");
-        Assert.True(messages[3].GetProperty("content").GetString() == "{}");
-        Assert.False(wire.RootElement.TryGetProperty("continuation", out _));
-        var direct = DeepSeekRequestWriter.Write(MinimalChatClient.Materialize(Request(run)));
-        Assert.True(direct.Body.AsSpan().SequenceEqual(transport.LastBody));
-        Assert.Equal(transport.LastBody!.Length, observation.Provider.Whole.Bytes);
+        // Inspect the actual typed callback independently; no HTTP projection is present.
+        var messages = transport.LastRequest!.Messages;
+        Assert.True(messages.Select(m => m.Role).SequenceEqual(["system", "user", "assistant", "tool", "user"]));
+        Assert.True(transport.LastRequest.Continuation!.Items.Single().Readable == "reason " + Canary);
+        Assert.True(messages[2].Contents.OfType<ProjectToolCallContent>().Single().CallId == "finish-old");
+        var result = Assert.IsType<ProjectToolResultContent>(Assert.Single(messages[3].Contents));
+        Assert.True(result.CallId == "finish-old" && result.Result == "{}");
+        Assert.True(AgentRequestWriter.Write(Request(run)).AsSpan().SequenceEqual(transport.LastBody));
+        Assert.Equal(transport.LastBody!.Length, observation.Logical.Whole.Bytes);
         Assert.Equal(PrefixMeasurement.Observe(boundary, Request(run)), observation);
         AssertSafe(observation);
     }
@@ -72,14 +68,11 @@ public sealed class R6PrefixProjectionTests
         Assert.Equal(before, secondRun.Observations[0]);
         foreach (var next in new[] { first, second })
         {
-            Assert.Equal(new("compared", true, true), before.Compare(next));
+            Assert.Equal(new("compared", true), before.Compare(next));
             Assert.NotEqual(before.Logical.Whole, next.Logical.Whole);
-            Assert.NotEqual(before.Provider.Whole, next.Provider.Whole);
             Assert.NotEqual(before.Logical.Dynamic, next.Logical.Dynamic);
-            Assert.NotEqual(before.Provider.Dynamic, next.Provider.Dynamic);
         }
-        Assert.NotEqual(first.Provider.Dynamic, second.Provider.Dynamic);
-        Assert.Equal(new("compared", true, true), first.Compare(second));
+        Assert.Equal(new("compared", true), first.Compare(second));
     }
 
     [Theory]
@@ -116,21 +109,18 @@ public sealed class R6PrefixProjectionTests
                     Readable = mutation == "reasoning" ? "changed reasoning" : "run_id=new deadline=tomorrow" }] }; break;
         }
         var changed = PrefixMeasurement.Observe(boundary, request with { Messages = messages, Tools = tools, Continuation = continuation });
-        Assert.Equal(new("compared", false, false), original.Compare(changed));
+        Assert.Equal(new("compared", false), original.Compare(changed));
         if (mutation is "tools" or "tool-order")
         {
             Assert.NotEqual(original.Logical.Settings, changed.Logical.Settings);
-            Assert.NotEqual(original.Provider.Settings, changed.Provider.Settings);
         }
         else if (mutation is "policy" or "order")
         {
             Assert.NotEqual(original.Logical.Control, changed.Logical.Control);
-            Assert.NotEqual(original.Provider.Control, changed.Provider.Control);
         }
         else
         {
             Assert.NotEqual(original.Logical.History, changed.Logical.History);
-            Assert.NotEqual(original.Provider.History, changed.Provider.History);
         }
     }
 
@@ -145,13 +135,10 @@ public sealed class R6PrefixProjectionTests
             items[0] with { Readable = items[1].Readable }, items[1] with { Readable = items[0].Readable }] } };
         var changed = PrefixMeasurement.Observe(boundary, swapped);
         Assert.NotEqual(original.Logical.History, changed.Logical.History);
-        Assert.NotEqual(original.Provider.History, changed.Provider.History);
-        Assert.Equal(new("compared", false, false), original.Compare(changed));
-        // The production materializer intentionally orders by positions; array reordering is
-        // observable logically, but is not a provider-placement mutation.
+        Assert.Equal(new("compared", false), original.Compare(changed));
+        // Logical traces retain original continuation array order without normalization.
         var reordered = PrefixMeasurement.Observe(boundary, request with { Continuation = request.Continuation with {
             Items = items.Reverse().ToArray() } });
-        Assert.Equal(original.Provider, reordered.Provider);
         Assert.NotEqual(original.Logical.Whole, reordered.Logical.Whole);
     }
 
@@ -169,17 +156,17 @@ public sealed class R6PrefixProjectionTests
             Assert.Equal("prefix_observation_invalid", error.ToString());
             Assert.Null(error.InnerException);
         }
-        // Position 1 can be serialized, but the actual backend rejects it as non-DeepSeek replay.
+        // Position 1 is observable logically, but the fixed legacy script requires first-position framing.
         var badReplay = request with { Continuation = request.Continuation with { Items = [item with { ContentPosition = 1 }] } };
         var projected = PrefixMeasurement.Observe(boundary, badReplay);
         Assert.NotEqual(PrefixMeasurement.Observe(boundary, request).Logical.History, projected.Logical.History);
-        using var transport = new FinishTransport();
+        using var transport = new FinishScript();
         await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Client(transport).GetResponseAsync(badReplay, CancellationToken.None));
         Assert.Equal(0, transport.Sends);
     }
 
     [Fact]
-    public async Task LogicalMetadataAndProviderProjectionAreSeparateAndMalformedReplayIsNotCacheEvidence()
+    public async Task LogicalMetadataMutationIsObservableAndMalformedReplayIsNotCacheEvidence()
     {
         var (restored, boundary) = await Fixture();
         var request = Request(restored.RunRequest!);
@@ -187,11 +174,10 @@ public sealed class R6PrefixProjectionTests
         var malformed = request with { Continuation = request.Continuation! with {
             Items = [request.Continuation.Items[0] with { Opaque = Canary }] } };
         var changed = PrefixMeasurement.Observe(boundary, malformed);
-        Assert.Equal(new("compared", false, true), original.Compare(changed));
+        Assert.Equal(new("compared", false), original.Compare(changed));
         Assert.NotEqual(original.Logical.History, changed.Logical.History);
-        Assert.Equal(original.Provider, changed.Provider);
         Assert.Equal("unknown", changed.CacheObservation);
-        using var transport = new FinishTransport();
+        using var transport = new FinishScript();
         await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Client(transport).GetResponseAsync(malformed, CancellationToken.None));
         Assert.Equal(0, transport.Sends);
     }
@@ -206,7 +192,7 @@ public sealed class R6PrefixProjectionTests
             observation.Domain with { SourceClean = !observation.Domain.SourceClean },
             observation.Domain with { Generation = 1 }, observation.Domain with { SessionSha256 = new('c', 64) },
             observation.Domain with { AcceptedSessionSha256 = new('d', 64) } })
-            Assert.Equal(new("incomparable", null, null), observation.Compare(observation with { Domain = domain }));
+            Assert.Equal(new("incomparable", null), observation.Compare(observation with { Domain = domain }));
         var trusted = Trusted;
         var original = Bootstrap(trusted);
         var baseline = PrefixMeasurement.Observe(PrefixBoundary.Bootstrap(trusted, original), Request(original));
@@ -217,7 +203,7 @@ public sealed class R6PrefixProjectionTests
             var run = Bootstrap(changed);
             var next = PrefixMeasurement.Observe(PrefixBoundary.Bootstrap(changed, run), Request(run));
             Assert.NotEqual(baseline.Domain.StablePlanSha256, next.Domain.StablePlanSha256);
-            Assert.Equal(new("incomparable", null, null), baseline.Compare(next));
+            Assert.Equal(new("incomparable", null), baseline.Compare(next));
         }
     }
 
@@ -230,9 +216,8 @@ public sealed class R6PrefixProjectionTests
         var empty = PrefixMeasurement.Observe(boundary, request);
         Assert.Equal(0, empty.HistoricalMessages);
         Assert.Equal(0, empty.Logical.History.Count);
-        Assert.Equal(0, empty.Provider.History.Bytes);
         var growing = await RunSuffix(run, boundary, "new-call");
-        Assert.Equal(new("compared", true, true), empty.Compare(growing.Observations[1]));
+        Assert.Equal(new("compared", true), empty.Compare(growing.Observations[1]));
         AssertSafe(empty);
         foreach (var invalid in new[] {
             request with { Messages = [] }, request with { Messages = [request.Messages[0]] },
@@ -261,7 +246,7 @@ public sealed class R6PrefixProjectionTests
         Assert.False(text.Contains(Canary, StringComparison.Ordinal));
         Assert.False(text.Contains("finish-old", StringComparison.Ordinal));
         Assert.False(text.Contains("reasoning_content", StringComparison.Ordinal));
-        foreach (var projection in new[] { observation.Logical, observation.Provider })
+        foreach (var projection in new[] { observation.Logical })
             foreach (var segment in new[] { projection.Control, projection.History, projection.Dynamic, projection.Settings, projection.Whole })
             {
                 Assert.Matches("^[0-9a-f]{64}$", segment.Sha256);
@@ -280,7 +265,7 @@ public sealed class R6PrefixProjectionTests
     {
         var trusted = Trusted;
         var run = Bootstrap(trusted);
-        using var transport = new FinishTransport("finish-old");
+        using var transport = new FinishScript("finish-old");
         var outcome = await new AgentLoop(Client(transport), new NoTools()).RunAsync(run, CancellationToken.None);
         Assert.True(outcome.CompletedSessionEligible);
         var built = AgentSessionBuilder.Build(new(run, outcome, trusted, run.InitialMessages.Length - 1,
@@ -302,7 +287,7 @@ public sealed class R6PrefixProjectionTests
         bool invalidArguments, string? expectedCode, int expectedExecutions)
     {
         var (restored, boundary) = await Fixture();
-        using var transport = new FinishTransport(firstReadId: "dynamic", invalidArguments: invalidArguments);
+        using var transport = new FinishScript(firstReadId: "dynamic", invalidArguments: invalidArguments);
         var executor = new SyntheticReadExecutor(malformedResult: !invalidArguments);
         var observer = new PrefixObservingChatClient(boundary, Client(transport));
         var outcome = await new AgentLoop(observer, executor).RunAsync(restored.RunRequest!, CancellationToken.None);
@@ -320,7 +305,7 @@ public sealed class R6PrefixProjectionTests
     private static async Task<(ProjectChatRequest Request, ImmutableArray<PrefixObservation> Observations)> RunSuffix(
         AgentRunRequest run, PrefixBoundary boundary, string id)
     {
-        using var transport = new FinishTransport(firstReadId: id);
+        using var transport = new FinishScript(firstReadId: id);
         var capture = new CapturingClient(Client(transport));
         var observer = new PrefixObservingChatClient(boundary, capture);
         var executor = new SyntheticReadExecutor();
@@ -341,42 +326,39 @@ public sealed class R6PrefixProjectionTests
         return (request, observer.Observations);
     }
 
-    private static IProjectChatClient Client(FinishTransport transport) => DeepSeekChatBackend.CreateClient(
-        new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session-275"), transport);
+    private static IProjectChatClient Client(FinishScript script) => script;
 
-    private sealed class FinishTransport(string id = "finish-current", string? firstReadId = null,
-        bool invalidArguments = false) : IDeepSeekTransport
+    private sealed class FinishScript(string id = "finish-current", string? firstReadId = null,
+        bool invalidArguments = false) : IProjectChatClient, IDisposable
     {
         internal byte[]? LastBody { get; private set; }
+        internal ProjectChatRequest? LastRequest { get; private set; }
         internal int Sends { get; private set; }
-        public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody, CancellationToken cancellationToken)
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
-            Sends++; LastBody = requestBody.ToArray();
+            token.ThrowIfCancellationRequested();
+            try { PrefixMeasurement.ValidateContinuation(request); }
+            catch (PrefixObservationException) { throw new ProjectChatNormalizationException(); }
+            if (request.Continuation?.Items.Any(i => i.ContentPosition != 0 || i.Opaque != "" ||
+                i.Framing != DeepSeekReasoningContinuationCodec.FramingName) == true)
+                throw new ProjectChatNormalizationException();
+            Sends++; LastRequest = request; LastBody = AgentRequestWriter.Write(request);
             var read = firstReadId is not null && Sends == 1;
             var arguments = read ? invalidArguments
                 ? "{\"path\":\"a.cs\",\"start_line\":1,\"end_line\":1}"
                 : "{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}"
                 : "{\"summary\":\"done\",\"findings\":[]}";
-            using var response = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(response))
-            {
-                writer.WriteStartObject(); writer.WriteString("model", DeepSeekAdapterContext.Model);
-                writer.WriteStartArray("choices"); writer.WriteStartObject(); writer.WriteNumber("index", 0);
-                writer.WriteString("finish_reason", "tool_calls"); writer.WriteStartObject("message");
-                writer.WriteString("role", "assistant"); writer.WriteString("content", "");
-                writer.WriteString("reasoning_content", read ? "current reasoning" : "reason " + Canary);
-                writer.WriteStartArray("tool_calls"); writer.WriteStartObject(); writer.WriteString("id", read ? firstReadId : id);
-                writer.WriteString("type", "function"); writer.WriteStartObject("function");
-                writer.WriteString("name", read ? "read_file" : "finish_review"); writer.WriteString("arguments", arguments);
-                writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray();
-                writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray();
-                writer.WriteStartObject("usage"); writer.WriteNumber("prompt_tokens", 3); writer.WriteNumber("completion_tokens", 2);
-                writer.WriteNumber("total_tokens", 5); writer.WriteNumber("prompt_cache_hit_tokens", 0);
-                writer.WriteNumber("prompt_cache_miss_tokens", 3); writer.WriteEndObject(); writer.WriteEndObject();
-            }
-            return Task.FromResult(DeepSeekTransportResult.Success(response.ToArray()));
+            var reasoning = read ? "current reasoning" : "reason " + Canary;
+            var position = request.Messages.Length;
+            // Typed fixture: no serialized provider response body; zero is not a wire measurement.
+            return Task.FromResult(new ProjectChatResponse(new("assistant", [
+                new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+                new ProjectToolCallContent(read ? firstReadId! : id, read ? "read_file" : "finish_review", arguments)]),
+                new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, 3)),
+                CapturedResponseBodyBytes: 0, Continuation: new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
+                    "session-275", [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
         }
-        public void Dispose() { LastBody = null; }
+        public void Dispose() { LastBody = null; LastRequest = null; }
     }
 
     // Test-private capture only; neither the observer nor any public output retains requests.

@@ -376,7 +376,7 @@ public sealed class R5SessionGrowthTests
     }
 
     [Theory]
-    [InlineData("diagnostic")] [InlineData("provider_digest")] [InlineData("startup")]
+    [InlineData("diagnostic")] [InlineData("logical_input_digest")] [InlineData("old_provider_domain")] [InlineData("startup")]
     public async Task RejectedRepliesCannotContributeQ1Quality(string mutation)
     {
         string? startup = null;
@@ -389,7 +389,10 @@ public sealed class R5SessionGrowthTests
                 return mutation switch
                 {
                     "diagnostic" => reply with { ObservedStage = "build", ObservedCode = AgentSessionCodes.ConstructionLimit },
-                    "provider_digest" => reply with { ProviderSha256 = new string('f', 64) },
+                    "logical_input_digest" => reply with { LogicalInputSha256 = new string('f', 64) },
+                    "old_provider_domain" => reply with { LogicalInputSha256 =
+                        AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation.EvaluationAttempt.Hash("replay-provider",
+                            reply.Requests.Select(bytes => AgentCanonical.HashRaw(bytes)).ToArray()) },
                     _ => reply with { Startup = startup! },
                 };
             },

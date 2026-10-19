@@ -63,22 +63,16 @@ internal sealed class EconomicsCalls : ILiveAttemptObserver
                 transport = reason; transportObserved = true;
             }
         }
-        public void TransportFinished(DeepSeekTransportResult? result)
+        public void ScriptFinished(string outcome)
         {
             lock (owner.gate)
             {
                 if (!Mutable || !dispatched || transportObserved) return;
                 transportObserved = true;
-                transport = result?.Outcome switch
+                transport = outcome switch
                 {
-                    DeepSeekTransportOutcome.Success => "success",
-                    DeepSeekTransportOutcome.RequestRejected => "request_rejected",
-                    DeepSeekTransportOutcome.ResponseTooLarge => "response_too_large",
-                    DeepSeekTransportOutcome.ConnectTimeout => "connect_timeout",
-                    DeepSeekTransportOutcome.ProviderTimeout => "provider_timeout",
-                    DeepSeekTransportOutcome.HttpFailure when result.StatusClass == DeepSeekHttpStatusClass.TooManyRequests => "http429",
-                    DeepSeekTransportOutcome.HttpFailure when result.StatusClass == DeepSeekHttpStatusClass.Other5xx => "http5xx",
-                    DeepSeekTransportOutcome.HttpFailure => "http4xx",
+                    "success" or "request_rejected" or "response_too_large" or "connect_timeout" or
+                    "provider_timeout" or "http429" or "http5xx" or "http4xx" => outcome,
                     _ => "transport_failure",
                 };
                 if (transport == "request_rejected") dispatched = false;
@@ -95,8 +89,8 @@ internal sealed class EconomicsCalls : ILiveAttemptObserver
                 {
                     UsageJournalCache? cache = null;
                     if (observed.ProviderUsage is { } provider && provider.ProviderId == DeepSeekAdapterContext.Provider &&
-                        provider.RequestedModel == DeepSeekRequestWriter.Model &&
-                        provider.ResponseModel is DeepSeekRequestWriter.Model &&
+                        provider.RequestedModel == DeepSeekAdapterContext.Model &&
+                        provider.ResponseModel is DeepSeekAdapterContext.Model &&
                         provider.CacheReadInputTokens >= 0 && provider.CacheReadInputTokens <= observed.InputTokens &&
                         provider.UncachedInputTokens == observed.InputTokens - provider.CacheReadInputTokens)
                         cache = new(provider.ResponseModel, provider.CacheReadInputTokens, provider.UncachedInputTokens);

@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -61,7 +62,7 @@ internal static class LiveSelfTest
                 await LiveRunner.RunAsync(planPath, execute: true, new LiveOptions
                 {
                     SecretSource = new MissingSecret(),
-                    TransportFactory = factory,
+                    ChatFactory = factory,
                     WriteLine = lines.Add,
                 }, CancellationToken.None);
             }
@@ -182,13 +183,13 @@ internal static class LiveSelfTest
         public string? TakeProviderCredential() => null;
     }
 
-    private sealed class CountingFactory : ILiveTransportFactory
+    private sealed class CountingFactory : ILiveChatFactory
     {
         internal int Calls { get; private set; }
-        public IDeepSeekTransport Create(DeepSeekCredential credential)
+        public IProjectChatClient Create(DeepSeekAdapterContext context)
         {
             Calls++;
-            return LiveDeepSeekTransportFactory.Instance.Create(credential);
+            return UnavailableLiveChatFactory.Instance.Create(context);
         }
     }
 }

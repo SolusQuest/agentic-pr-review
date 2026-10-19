@@ -129,7 +129,7 @@ public sealed partial class AgentLoopTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ProductionWireUsesRemainingOutputAndNeverSendsAfterExactExhaustion(bool terminal)
+    public async Task TypedCallUsesRemainingOutputAndNeverSendsAfterExactExhaustion(bool terminal)
     {
         var run = Request();
         var authority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Current);
@@ -138,11 +138,9 @@ public sealed partial class AgentLoopTests
             ProviderId = DeepSeekAdapterContext.Provider, ModelId = DeepSeekAdapterContext.Model,
             AdapterId = authority.AdapterId,
         } };
-        var transport = new BudgetWireTransport(terminal);
-        var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider,
-            DeepSeekAdapterContext.Model, authority.AdapterId, run.SessionId), transport);
+        var transport = new BudgetScriptClient(terminal);
         var executor = new ScriptedToolExecutor();
-        var outcome = await new AgentLoop(client, executor, limitAuthority: authority).RunAsync(run, default);
+        var outcome = await new AgentLoop(transport, executor, limitAuthority: authority).RunAsync(run, default);
         Assert.Equal(terminal, outcome.Succeeded);
         if (!terminal) AssertFailure(outcome, AgentFailureCodes.TokenLimit);
         Assert.Equal(Enumerable.Repeat(65_536, 8).Concat([7123, 1]), transport.Allowances);
@@ -150,32 +148,20 @@ public sealed partial class AgentLoopTests
         Assert.Equal(524_288, outcome.Accounting!.OutputTokens);
     }
 
-    private sealed class BudgetWireTransport(bool terminal) : IDeepSeekTransport
+    private sealed class BudgetScriptClient(bool terminal) : IProjectChatClient
     {
         internal List<int> Allowances { get; } = [];
-        public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> body, CancellationToken token)
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
-            using var request = JsonDocument.Parse(body);
-            Allowances.Add(request.RootElement.GetProperty("max_tokens").GetInt32());
+            token.ThrowIfCancellationRequested();
+            Assert.True(request.Accounting!.TryBeginDispatch());
+            Allowances.Add(request.MaxOutputTokens!.Value);
             var call = Allowances.Count;
             var output = call < 8 ? 65_536 : call == 8 ? 58_413 : call == 9 ? 7122 : 1;
+            request.Accounting.RecordUsage(ProviderUsageObservation.Create(1, output, 0, 1, 1 + output));
             var finish = call == 10 && terminal;
-            var response = JsonSerializer.SerializeToUtf8Bytes(new
-            {
-                model = "deepseek-flash",
-                choices = new[] { new { index = 0, finish_reason = "tool_calls", message = new
-                {
-                    role = "assistant", content = (string?)null, reasoning_content = "",
-                    tool_calls = new[] { new { id = "wire" + call, type = "function", function = new
-                    {
-                        name = finish ? "finish_review" : "read_file",
-                        arguments = finish ? "{\"summary\":\"done\",\"findings\":[]}" : "{\"path\":\"a.txt\"}",
-                    } } },
-                } } },
-                usage = new { prompt_tokens = 1, completion_tokens = output, total_tokens = 1 + output,
-                    prompt_cache_hit_tokens = 0, prompt_cache_miss_tokens = 1 },
-            });
-            return Task.FromResult(DeepSeekTransportResult.Success(response));
+            return Task.FromResult(Response(new("typed" + call, finish ? "finish_review" : "read_file",
+                finish ? "{\"summary\":\"done\",\"findings\":[]}" : "{\"path\":\"a.txt\"}"), 1, output));
         }
         public void Dispose() { }
     }

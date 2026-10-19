@@ -19,42 +19,21 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Core;
 public sealed partial class AgentCapabilityArchitectureTests
 {
     [Fact]
-    public void LiveAgentVerifierOwnsOnlyTheApprovedTransportSeam()
+    public void LiveAgentVerifierOwnsOnlyTheApprovedTypedScriptSeam()
     {
         var fixtureTypes = typeof(LiveAgentVerifierProfile).Assembly.GetTypes();
-        var forbiddenInterfaces = new[]
-        {
-            typeof(IProjectChatClient),
-            typeof(IMinimalChatBackend),
-            typeof(IDeepSeekTransport),
-        };
-        Assert.DoesNotContain(
-            fixtureTypes,
-            type => forbiddenInterfaces.Any(contract =>
-                type != contract && contract.IsAssignableFrom(type)));
-
-        var factory = Assert.Single(fixtureTypes, type =>
-            type is { IsInterface: false, IsAbstract: false } &&
-            typeof(IR3LiveAgentTransportFactory).IsAssignableFrom(type));
-        Assert.Equal(typeof(VerifierTransportFactory), factory);
-
-        var seamCalls = fixtureTypes
-            .SelectMany(type => DeclaredExecutableMembers(type)
-                .SelectMany(method => ResolveMethodBodyMembers(method)
-                    .OfType<MethodInfo>()
-                    .Where(called => called.DeclaringType ==
-                            typeof(DeepSeekTransport) &&
-                        called.Name is "CreateHandler" or "CreateForTesting")
-                    .Select(called => (Caller: method, Called: called))))
-            .ToArray();
-        Assert.Equal(2, seamCalls.Length);
-        Assert.All(seamCalls, call =>
-        {
-            Assert.Equal(typeof(VerifierTransportFactory),
-                call.Caller.DeclaringType);
-            Assert.Equal(nameof(VerifierTransportFactory.Create),
-                call.Caller.Name);
-        });
+        Assert.DoesNotContain(fixtureTypes, type => typeof(IMinimalChatBackend).IsAssignableFrom(type));
+        Assert.Equal(typeof(VerifierHistoricalChat), Assert.Single(fixtureTypes, type =>
+            type is { IsInterface: false, IsAbstract: false } && typeof(IProjectChatClient).IsAssignableFrom(type)));
+        Assert.Equal(typeof(VerifierChatFactory), Assert.Single(fixtureTypes, type =>
+            type is { IsInterface: false, IsAbstract: false } && typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type)));
+        var seamCalls = fixtureTypes.SelectMany(type => DeclaredExecutableMembers(type)
+            .SelectMany(method => ResolveMethodBodyMembers(method).OfType<ConstructorInfo>()
+                .Where(called => called.DeclaringType == typeof(VerifierHistoricalChat))
+                .Select(called => (Caller: method, Called: called)))).ToArray();
+        var call = Assert.Single(seamCalls);
+        Assert.Equal(typeof(VerifierChatFactory), call.Caller.DeclaringType);
+        Assert.Equal(nameof(VerifierChatFactory.Create), call.Caller.Name);
     }
 
     [Fact]
@@ -161,7 +140,7 @@ public sealed class LiveAgentVerifierContractTests
         var text = Encoding.UTF8.GetString(bytes);
         Assert.DoesNotContain("APR111_RANDOM_", text, StringComparison.Ordinal);
         Assert.DoesNotContain("prior_fact_sha256", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("first_request_sha256", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("first_typed_request_sha256", text, StringComparison.Ordinal);
         Assert.DoesNotContain("terminal_sha256", text, StringComparison.Ordinal);
         Assert.DoesNotContain("accepted_session_sha256", text, StringComparison.Ordinal);
         Assert.DoesNotContain("accepted_envelope_sha256", text, StringComparison.Ordinal);
@@ -174,9 +153,9 @@ public sealed class LiveAgentVerifierContractTests
             [
                 "case\tphase\tstate_expectation\tstable_code",
                 "outer-authorization-denied\tpre_activation\tno_advance\tstate_access_denied",
-                "inner-authorization-denied\tpre_transport\tno_advance\tstate_access_denied",
-                "provider-http-failure\tpre_commit\tno_advance\tagent_chat_failed",
-                "provider-malformed-response\tpre_commit\tno_advance\tagent_response_invalid",
+                "inner-authorization-denied\tpre_script\tno_advance\tstate_access_denied",
+                "script-failure\tpre_commit\tno_advance\tagent_chat_failed",
+                "script-invalid-response\tpre_commit\tno_advance\tagent_response_invalid",
                 "tool-arguments-invalid\tpre_commit\tno_advance\tagent_chat_failed",
                 "terminal-ungrounded\tpre_commit\tno_advance\tagent_terminal_invalid",
                 "transition-from-head-invalid\tpre_activation\tprior_unchanged\tsession_transition_rejected",
@@ -226,66 +205,21 @@ public sealed class LiveAgentVerifierContractTests
     }
 
     [Fact]
-    public void LiveAgentVerifierWireOracleBindsTheCompleteToolContracts()
+    public void LiveAgentVerifierTypedOracleBindsTheCompleteToolContracts()
     {
-        var request = new MinimalChatRequest(
-            [new MinimalChatMessage(
-                "user",
-                [new MinimalChatContent(
-                    "text",
-                    null,
-                    null,
-                    "review",
-                    null,
-                    null,
-                    null,
-                    0,
-                    0)])],
-            AgentToolRegistry.Definitions
-                .Select(definition => new MinimalChatTool(
-                    definition.Name,
-                    definition.Description,
-                    definition.SchemaJson))
-                .ToArray(),
-            Continuation: null,
-            ThinkingRequired: true);
-        var written = DeepSeekRequestWriter.Write(request);
-        Assert.Equal(DeepSeekRequestWriteOutcome.Success, written.Outcome);
-        var body = written.Body.AsSpan().ToArray();
-        VerifierWireOracle.ValidateBody(body, []);
-
-        var missingProperty = JsonNode.Parse(body)!.AsObject();
-        Assert.True(missingProperty.Remove("max_tokens"));
-        var shape = Assert.Throws<VerifierWireException>(() =>
-            VerifierWireOracle.ValidateBody(
-                Encoding.UTF8.GetBytes(missingProperty.ToJsonString()),
-                []));
-        Assert.Equal("wire_body_shape_invalid", shape.Code);
-
-        var changedTool = JsonNode.Parse(body)!.AsObject();
-        changedTool["tools"]![0]!["function"]!["description"] = "changed";
-        var contract = Assert.Throws<VerifierWireException>(() =>
-            VerifierWireOracle.ValidateBody(
-                Encoding.UTF8.GetBytes(changedTool.ToJsonString()),
-                []));
-        Assert.Equal("wire_tool_contract_invalid", contract.Code);
-
-        var changedMessage = JsonNode.Parse(body)!.AsObject();
-        changedMessage["messages"]![0]!["content"] =
-            "APR111_GITHUB_CANARY";
-        var canary = Assert.Throws<VerifierWireException>(() =>
-            VerifierWireOracle.ValidateBody(
-                Encoding.UTF8.GetBytes(changedMessage.ToJsonString()),
-                []));
-        Assert.Equal("wire_canary_invalid", canary.Code);
-
-        var randomFreshInput = Assert.Throws<VerifierWireException>(() =>
-            VerifierWireOracle.ValidateBody(
-                body,
-                [Encoding.UTF8.GetBytes(
-                    "APR111_RANDOM_0123456789abcdef0123456789abcdef" +
-                    "0123456789abcdef0123456789abcdef")]));
-        Assert.Equal("wire_canary_invalid", randomFreshInput.Code);
+        var request = new ProjectChatRequest([new("user", [new ProjectTextContent("review")])],
+            AgentToolRegistry.Definitions.ToArray(), null, ThinkingRequired: true);
+        VerifierLogicalOracle.Validate(request, []);
+        Assert.Equal("typed_input_shape_invalid", Assert.Throws<VerifierScriptException>(() =>
+            VerifierLogicalOracle.Validate(request with { ThinkingRequired = false }, [])).Code);
+        var tools = request.Tools.ToArray(); tools[0] = tools[0] with { Description = "changed" };
+        Assert.Equal("typed_tool_contract_invalid", Assert.Throws<VerifierScriptException>(() =>
+            VerifierLogicalOracle.Validate(request with { Tools = tools }, [])).Code);
+        Assert.Equal("typed_canary_invalid", Assert.Throws<VerifierScriptException>(() =>
+            VerifierLogicalOracle.Validate(request with { Messages = [new("user", [new ProjectTextContent("APR111_GITHUB_CANARY")])] }, [])).Code);
+        Assert.Equal("typed_canary_invalid", Assert.Throws<VerifierScriptException>(() =>
+            VerifierLogicalOracle.Validate(request,
+                [Encoding.UTF8.GetBytes("APR111_RANDOM_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")])).Code);
     }
 
     [Theory]
@@ -427,8 +361,8 @@ public sealed class LiveAgentVerifierContractTests
                         string.Join(
                             ':',
                             receipt.ForbiddenReferencesAbsent,
-                            receipt.RealTransportCreationCalls,
-                            receipt.TransportFactoryTypes,
+                            receipt.TypedFactoryCreationCalls,
+                            receipt.TypedChatFactoryTypes,
                             receipt.ProfileTypes),
                         .. VerifierArchitectureProof
                             .DescribeTransportCallsForTesting(executionArtifact),
@@ -458,7 +392,7 @@ public sealed class LiveAgentVerifierContractTests
             .LiveAgentVerifierFixture.Program).Assembly.Location;
         var calls = VerifierArchitectureProof
             .ReadTransportCallsForTesting(assemblyPath);
-        Assert.Equal(2, calls.Count);
+        Assert.Single(calls);
         Assert.All(calls, call =>
         {
             Assert.Equal(0, call.Caller.GenericParameterCount);
@@ -474,7 +408,7 @@ public sealed class LiveAgentVerifierContractTests
         var ldftn = VerifierArchitectureProof
             .ReadSyntheticTransportReferenceForTesting(
                 assemblyPath,
-                "CreateForTesting",
+                ".ctor",
                 ILOpCode.Ldftn);
         Assert.Equal(ILOpCode.Ldftn, ldftn.OpCode);
         Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
@@ -588,10 +522,10 @@ public sealed class LiveAgentVerifierContractTests
         var testCase = Assert.Single(
             corpus!.Cases,
             item => item.Kind == R3QualityCaseKind.Continuation);
-        var first = new VerifierProviderScript(
+        var first = new VerifierAuthoredChatScript(
             VerifierScenario.ContinuationSeed,
             testCase);
-        var second = new VerifierProviderScript(
+        var second = new VerifierAuthoredChatScript(
             VerifierScenario.ContinuationSeed,
             testCase);
         Assert.NotNull(first.PriorFactSha256);
@@ -723,7 +657,7 @@ public sealed class LiveAgentVerifierContractTests
     public void LiveAgentVerifierTransportProofIsFailClosed()
     {
         var terminal = new string('a', 64);
-        var passed = new VerifierWireProof(
+        var passed = new VerifierTypedProof(
             true,
             1,
             1,
@@ -733,14 +667,14 @@ public sealed class LiveAgentVerifierContractTests
             null,
             false,
             false,
-            null);
+            null, TypedObservations: [new(1, new string('f', 64), "succeeded")]);
         Assert.True(passed.IsSatisfiedBy(terminal));
         Assert.False(passed.IsSatisfiedBy(new string('b', 64)));
         Assert.False((passed with { FactoryCreateCount = 0 })
             .IsSatisfiedBy(terminal));
         Assert.False((passed with { Succeeded = false })
             .IsSatisfiedBy(terminal));
-        Assert.False(VerifierWireProof.Empty.IsSatisfiedBy(null));
+        Assert.False(VerifierTypedProof.Empty.IsSatisfiedBy(null));
     }
 
     [Fact]
@@ -751,7 +685,7 @@ public sealed class LiveAgentVerifierContractTests
         var lineage = new string('3', 64);
         var buildPair = TestBuildPair();
         var valid = new VerifierNegativeReceipt(
-            "apr-r3-live-agent-negative-receipt-v1",
+            "apr-r3-historical-typed-negative-receipt-v1",
             "quality-failed-after-commit",
             "post_commit",
             "accepted_preserved",
@@ -770,7 +704,7 @@ public sealed class LiveAgentVerifierContractTests
             envelope,
             lineage,
             ActivationCount: 1,
-            ProviderRequests: 3,
+            SyntheticCalls: 3,
             CommitDelegationCount: 1,
             HandoffReady: false,
             AcceptedTruthPreserved: true,
@@ -780,7 +714,8 @@ public sealed class LiveAgentVerifierContractTests
             ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
             ArchitectureAssemblySha256:
                 buildPair.ArchitectureAssemblySha256,
-            BuildPairSha256: buildPair.BuildPairSha256);
+            BuildPairSha256: buildPair.BuildPairSha256,
+            TypedObservations: Enumerable.Range(1, 3).Select(i => new VerifierTypedObservation(i, new string('f', 64), "succeeded")).ToArray());
         Assert.True(VerifierEvidence.NegativeValidForTesting(valid));
         Assert.True(VerifierEvidence.BuildPairValidForTesting(
             buildPair,
@@ -820,7 +755,7 @@ public sealed class LiveAgentVerifierContractTests
         var result = new string('7', 64);
         var buildPair = TestBuildPair();
         var valid = new VerifierNegativeReceipt(
-            "apr-r3-live-agent-negative-receipt-v1",
+            "apr-r3-historical-typed-negative-receipt-v1",
             "replacement-write-failed",
             "post_commit",
             "accepted_preserved",
@@ -839,7 +774,7 @@ public sealed class LiveAgentVerifierContractTests
             envelope,
             lineage,
             ActivationCount: 1,
-            ProviderRequests: 1,
+            SyntheticCalls: 1,
             CommitDelegationCount: 1,
             HandoffReady: false,
             AcceptedTruthPreserved: true,
@@ -852,7 +787,7 @@ public sealed class LiveAgentVerifierContractTests
             ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
             ArchitectureAssemblySha256:
                 buildPair.ArchitectureAssemblySha256,
-            BuildPairSha256: buildPair.BuildPairSha256);
+            BuildPairSha256: buildPair.BuildPairSha256, TypedObservations: [new(1, new string('f', 64), "succeeded")]);
         Assert.True(VerifierEvidence.ReplacementNegativeValidForTesting(valid));
 
         var mutations = new[]
@@ -860,7 +795,7 @@ public sealed class LiveAgentVerifierContractTests
             valid with { StateAfterSha256 = stateBefore },
             valid with { LineageAfterSha256 = lineageBefore },
             valid with { ActivationCount = 0 },
-            valid with { ProviderRequests = 0 },
+            valid with { SyntheticCalls = 0 },
             valid with { CommitDelegationCount = 0 },
             valid with { ResultBeforeSha256 = null },
             valid with { ResultAfterSha256 = new string('9', 64) },
@@ -870,11 +805,169 @@ public sealed class LiveAgentVerifierContractTests
             VerifierEvidence.ReplacementNegativeValidForTesting(receipt)));
     }
 
+    [Fact]
+    public void ActualShellReceiptRelocationPreservesPrivateObserverAdmissionAndRejectsExistingPublicParents()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Join(repository.FullName, "runtime/scripts/verify-live-agent.sh")))
+            repository = repository.Parent;
+        Assert.NotNull(repository);
+        var lines = File.ReadAllLines(Path.Join(repository.FullName, "runtime/scripts/verify-live-agent.sh"));
+        var creates = lines.Where(line => line.TrimStart().StartsWith("(umask 077; mkdir -p -- ", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, creates.Length);
+        var relocationStart = Array.FindIndex(lines, line => line.Trim() == "mv -- \"${private_output}\" \"${root}/receipts/${receipt}.json\"");
+        Assert.True(relocationStart >= 0);
+        var relocation = string.Join('\n', lines.Skip(relocationStart).Take(4));
+        var root = Path.Join(Path.GetTempPath(), "apr-r8-shell-observer-" + Guid.NewGuid().ToString("N"));
+        var privateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        Directory.CreateDirectory(root, privateMode);
+        try
+        {
+            foreach (var existing in new[] { false, true })
+            {
+                var phase = Path.Join(root, existing ? "existing" : "fresh");
+                Directory.CreateDirectory(Path.Join(phase, "private"), privateMode);
+                var parents = new[] { "receipts", "receipts/negative", "receipts/negative-seeds" };
+                if (existing)
+                    foreach (var parent in parents)
+                        Directory.CreateDirectory(Path.Join(phase, parent), privateMode | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                var receipt = Path.Join(phase, "private/phase.json");
+                File.WriteAllText(receipt, "{}");
+                var bytes = VerifierReceiptCodec.Write(new VerifierTypedObservationSnapshot("MustFind", new('a', 64), new('b', 64), []));
+                VerifierTypedObservationFiles.WriteNew(receipt, bytes);
+                var start = new System.Diagnostics.ProcessStartInfo("bash") { UseShellExecute = false, RedirectStandardError = true };
+                start.ArgumentList.Add("-c");
+                start.ArgumentList.Add("set -eu\numask 022\nbefore=$(umask)\nroot=$1\n" + string.Join('\n', creates) +
+                    "\ntest \"$(umask)\" = \"$before\"\nprivate_output=$root/private/phase.json\nreceipt=phase\n_fail() { exit 1; }\n" + relocation);
+                start.ArgumentList.Add("r8-shell-observer"); start.ArgumentList.Add(phase);
+                using var child = System.Diagnostics.Process.Start(start)!;
+                var error = child.StandardError.ReadToEnd(); child.WaitForExit();
+                Assert.True(child.ExitCode == 0, error);
+                foreach (var parent in parents)
+                    Assert.Equal(existing ? privateMode | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute : privateMode,
+                        File.GetUnixFileMode(Path.Join(phase, parent)));
+                var moved = Path.Join(phase, "receipts/phase.json");
+                Assert.False(File.Exists(VerifierTypedObservationFiles.PathFor(receipt)));
+                if (existing) Assert.Throws<InvalidDataException>(() => VerifierTypedObservationFiles.Read(moved));
+                else Assert.Equal(bytes, VerifierTypedObservationFiles.Read(moved));
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void LiveAgentVerifierMaterializedPhaseCreatesPrivateObserverParent()
+    {
+        var root = Path.Join(Path.GetTempPath(), "apr-r8-materialized-observer-" + Guid.NewGuid().ToString("N"));
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(root);
+        else Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            Assert.True(FreshProcessMaterializer.TryMaterialize(VerifierScenario.MustFind, root,
+                File.ReadAllBytes(Corpus()), out var materialized));
+            Assert.NotNull(materialized);
+            var parent = Path.Join(root, "private");
+            var receipt = Path.Join(parent, "phase.json");
+            var bytes = VerifierReceiptCodec.Write(new VerifierTypedObservationSnapshot("MustFind", new('a', 64), new('b', 64), []));
+            VerifierTypedObservationFiles.WriteNew(receipt, bytes);
+            Assert.Equal(bytes, VerifierTypedObservationFiles.Read(receipt));
+            if (!OperatingSystem.IsWindows())
+            {
+                var privateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+                Assert.Equal(privateMode, File.GetUnixFileMode(parent));
+                File.SetUnixFileMode(parent, privateMode | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+                Assert.Throws<InvalidDataException>(() => VerifierTypedObservationFiles.WriteNew(Path.Join(parent, "unsafe.json"), bytes));
+                Assert.False(File.Exists(VerifierTypedObservationFiles.PathFor(Path.Join(parent, "unsafe.json"))));
+                File.SetUnixFileMode(parent, privateMode);
+                var sidecar = VerifierTypedObservationFiles.PathFor(receipt);
+                File.SetUnixFileMode(sidecar, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+                Assert.Throws<InvalidDataException>(() => VerifierTypedObservationFiles.Read(receipt));
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void ControlledTypedObserverRejectsCoordinatedReceiptAndTraceForgeries()
+    {
+        var root = Path.Join(Path.GetTempPath(), "apr-r8-typed-observer-" + Guid.NewGuid().ToString("N"));
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(root);
+        else Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            var path = Path.Join(root, "phase.json");
+            var owner = new VerifierTypedObservationOwner();
+            var request = new ProjectChatRequest([new("user", [new ProjectTextContent("fixed authored observation input")])],
+                AgentToolRegistry.Definitions.ToArray(), null, ThinkingRequired: true);
+            var ordinal = owner.Begin(request); owner.Complete(ordinal, "succeeded");
+            var first = owner.Snapshot[0].RequestSha256;
+            var receipt = new VerifierPhaseReceipt("ContinuationRestore", "passed", R3LiveAgentCodes.Completed, 1, "verified_ahead",
+                1, 1, 1, true, null, true, true, first, new('a', 64), new('b', 64), new('c', 64), null,
+                new('d', 64), new('e', 64), new('f', 64), true, new('1', 64), true, true, null,
+                ProcessInstanceSha256: new('2', 64), BuildPairSha256: new('3', 64), TypedObservations: owner.Snapshot);
+            var actual = new VerifierTypedObservationSnapshot(receipt.Scenario, receipt.ProcessInstanceSha256,
+                receipt.BuildPairSha256, owner.Snapshot);
+            VerifierTypedObservationFiles.WriteNew(path, VerifierReceiptCodec.Write(actual));
+            var sidecar = VerifierTypedObservationFiles.PathFor(path);
+            var original = File.ReadAllBytes(sidecar);
+            void Write(VerifierPhaseReceipt value) => File.WriteAllBytes(path, VerifierReceiptCodec.Write(value));
+            Write(receipt); Assert.True(VerifierEvidence.ControlledPhaseValidForTesting(path));
+            foreach (var mutation in new[]
+            {
+                receipt with { FirstTypedRequestSha256 = new('4', 64) },
+                receipt with { FirstTypedRequestSha256 = new('4', 64), TypedObservations = [owner.Snapshot[0] with { RequestSha256 = new('4', 64) }] },
+                receipt with { SyntheticCalls = 2 }, receipt with { Scenario = "MustFind" },
+                receipt with { ProcessInstanceSha256 = new('5', 64) }, receipt with { BuildPairSha256 = new('6', 64) },
+                receipt with { ObservationDomain = "provider-wire" },
+            }) { Write(mutation); Assert.False(VerifierEvidence.ControlledPhaseValidForTesting(path)); }
+            Write(receipt);
+            foreach (var mutation in new[] { "unknown", "phase", "build", "duplicate", "oversize", "missing" })
+            {
+                var node = JsonNode.Parse(original)!;
+                if (mutation == "unknown") node["wire_valid"] = true;
+                else if (mutation == "phase") node["scenario"] = "MustFind";
+                else if (mutation == "build") node["build_pair_sha256"] = new string('6', 64);
+                else if (mutation == "duplicate") node["typed_observations"]![0]!["ordinal"] = 0;
+                if (mutation == "missing") File.Delete(sidecar);
+                else File.WriteAllBytes(sidecar, mutation == "oversize" ? new byte[VerifierTypedObservationFiles.MaximumBytes + 1] : Encoding.UTF8.GetBytes(node.ToJsonString()));
+                Assert.False(VerifierEvidence.ControlledPhaseValidForTesting(path));
+                File.WriteAllBytes(sidecar, original);
+                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(sidecar, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            var wrongReceipt = JsonNode.Parse(VerifierReceiptCodec.Write(receipt))!;
+            wrongReceipt["wire_valid"] = true; File.WriteAllText(path, wrongReceipt.ToJsonString());
+            Assert.False(VerifierEvidence.ControlledPhaseValidForTesting(path));
+            Write(receipt);
+            if (!OperatingSystem.IsWindows())
+            {
+                var target = Path.Join(root, "observer-target"); File.WriteAllBytes(target, original);
+                File.SetUnixFileMode(target, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                File.Delete(sidecar); File.CreateSymbolicLink(sidecar, target);
+                Assert.False(VerifierEvidence.ControlledPhaseValidForTesting(path));
+                File.Delete(sidecar); File.WriteAllBytes(sidecar, original);
+                File.SetUnixFileMode(sidecar, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                var actualParent = Path.Join(root, "actual-parent");
+                Directory.CreateDirectory(actualParent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                var actualReceipt = Path.Join(actualParent, "phase.json");
+                File.WriteAllBytes(actualReceipt, VerifierReceiptCodec.Write(receipt));
+                VerifierTypedObservationFiles.WriteNew(actualReceipt, original);
+                var linkedParent = Path.Join(root, "linked-parent"); Directory.CreateSymbolicLink(linkedParent, actualParent);
+                Assert.False(VerifierEvidence.ControlledPhaseValidForTesting(Path.Join(linkedParent, "phase.json")));
+                Directory.Delete(linkedParent);
+            }
+            Assert.Throws<IOException>(() => VerifierTypedObservationFiles.WriteNew(path, original));
+            Assert.Equal(original, File.ReadAllBytes(sidecar));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static string Fixture(string name) => Path.Join(
         AppContext.BaseDirectory,
         "fixtures",
         "agent",
         "r3-live-agent",
+        "cr1-r8-typed",
         name);
 
     private static string Corpus() => Path.Join(

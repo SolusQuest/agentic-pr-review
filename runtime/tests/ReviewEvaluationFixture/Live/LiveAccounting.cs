@@ -61,8 +61,8 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
                 _cacheMeasured, _cacheUnavailable,
                 _cacheOverflow || _cacheMeasured == 0 ? null : _cacheReadInput,
                 _cacheOverflow || _cacheMeasured == 0 ? null : _uncachedInput,
-                "not_applicable", DeepSeekRequestWriter.Model,
-                _responseFlash ? [DeepSeekRequestWriter.Model] : [],
+                "not_applicable", DeepSeekAdapterContext.Model,
+                _responseFlash ? [DeepSeekAdapterContext.Model] : [],
                 "unavailable");
         }
     }
@@ -116,31 +116,23 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
         return true;
     }
 
-    internal void RecordOutcome(DeepSeekTransportResult result)
+    internal void RecordOutcome(string outcome)
     {
-        lock (_gate) if (_sealed is null) RecordOutcomeCore(result);
+        lock (_gate) if (_sealed is null) RecordOutcomeCore(outcome);
     }
 
-    private void RecordOutcomeCore(DeepSeekTransportResult result)
+    private void RecordOutcomeCore(string outcome)
     {
-        switch (result.Outcome)
+        switch (outcome)
         {
-            case DeepSeekTransportOutcome.RequestRejected: _requestRejected++; break;
-            case DeepSeekTransportOutcome.HttpFailure:
-                if (result.StatusClass == DeepSeekHttpStatusClass.TooManyRequests) _http429++;
-                else if (result.StatusClass == DeepSeekHttpStatusClass.Other5xx) _http5xx++;
-                else _http4xx++;
-                break;
-            case DeepSeekTransportOutcome.ConnectTimeout: _connectTimeout++; break;
-            case DeepSeekTransportOutcome.ProviderTimeout: _providerTimeout++; break;
-            case DeepSeekTransportOutcome.Success: break;
-            case DeepSeekTransportOutcome.ResponseTooLarge:
-                _responseTooLarge++;
-                // The provider body was discarded before usage could be parsed:
-                // the permanent reservation stands, and the call is honestly
-                // counted as usage-unknown rather than known zero usage.
-                UsageUnknownCalls++;
-                break;
+            case "request_rejected": _requestRejected++; break;
+            case "http429": _http429++; break;
+            case "http5xx": _http5xx++; break;
+            case "http4xx": _http4xx++; break;
+            case "connect_timeout": _connectTimeout++; break;
+            case "provider_timeout": _providerTimeout++; break;
+            case "success": break;
+            case "response_too_large": _responseTooLarge++; UsageUnknownCalls++; break;
             default: _transportFailure++; break;
         }
     }
@@ -177,8 +169,8 @@ internal sealed class LiveAccounting(LivePlanBounds bounds)
         // need not provide it, and invalid optional data cannot reject a run.
         if (observed is null ||
             observed.ProviderId != DeepSeekAdapterContext.Provider ||
-            observed.RequestedModel != DeepSeekRequestWriter.Model ||
-            observed.ResponseModel != DeepSeekRequestWriter.Model ||
+            observed.RequestedModel != DeepSeekAdapterContext.Model ||
+            observed.ResponseModel != DeepSeekAdapterContext.Model ||
             observed.CacheReadInputTokens < 0 || observed.UncachedInputTokens < 0 ||
             observed.CacheReadInputTokens > usage.InputTokens ||
             observed.UncachedInputTokens != usage.InputTokens - observed.CacheReadInputTokens)
