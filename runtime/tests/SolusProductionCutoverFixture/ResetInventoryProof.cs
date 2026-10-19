@@ -13,7 +13,8 @@ internal static class ResetInventoryProof
 {
     internal sealed record Entry(string Id, string Name, string Archive, long Expires);
     internal sealed record Input(Entry[] Before, Entry[] After);
-    private sealed record Decoded(Entry Entry, byte[] Bytes, StateControlHeaderV1? Header, LineageHeadV1? Head);
+    private sealed record Decoded(Entry Entry, byte[] Bytes, StateControlHeaderV1? Header, LineageHeadV1? Head,
+        LocatorRootSentinel? Sentinel = null);
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
     internal static int Run(string path)
@@ -40,7 +41,13 @@ internal static class ResetInventoryProof
             mutated[nonHeadIndex] = after[nonHeadIndex] with { Entry = after[nonHeadIndex].Entry with { Id = "999999" } };
             Check(!Matches(before, mutated), "reset_oracle_acceptance_mutant");
             Check(!Matches(before, [.. after, after[nonHeadIndex]]), "reset_oracle_added_record_mutant");
-            Console.WriteLine("APR_SOLUS_RESET_RETRY logical_identity_unchanged=true non_head_bytes_unchanged=true unexpected_mutations_rejected=true");
+            var rootIndex = Array.FindIndex(after, item => item.Sentinel is not null);
+            mutated = after.ToArray();
+            mutated[rootIndex] = after[rootIndex] with { Sentinel = after[rootIndex].Sentinel! with { Root = new byte[32] } };
+            Check(!Matches(before, mutated), "reset_oracle_root_mutant");
+            Console.WriteLine("APR_SOLUS_RESET_RETRY logical_identity_unchanged=true accepted_records_unchanged=true unexpected_mutations_rejected=true");
+            foreach (var item in before.Concat(after))
+                if (item.Sentinel is not null) CryptographicOperations.ZeroMemory(item.Sentinel.Root);
         }
         return 0;
     }
@@ -71,7 +78,7 @@ internal static class ResetInventoryProof
             {
                 return objects.Select(item =>
                 {
-                    if (ReferenceEquals(item, root)) return item;
+                    if (ReferenceEquals(item, root)) return item with { Sentinel = sentinel with { Root = sentinel.Root.ToArray() } };
                     Check(StateControlEnvelopeV1Codec.TryDecrypt(locator!, access, new OpaqueStoreName(item.Entry.Name),
                         item.Bytes, out var header, out var payload, out _) && header is not null, "reset_oracle_decrypt");
                     try
@@ -90,6 +97,9 @@ internal static class ResetInventoryProof
 
     private static bool Matches(Decoded[] before, Decoded[] after)
     {
+        var priorRoots = before.Where(item => item.Sentinel is not null).ToArray();
+        var nextRoots = after.Where(item => item.Sentinel is not null).ToArray();
+        if (priorRoots.Length != 1 || nextRoots.Length != 1 || !RootMatches(priorRoots[0], nextRoots[0])) return false;
         var priorHeads = before.Where(item => item.Head is not null).ToArray();
         var nextHeads = after.Where(item => item.Head is not null).ToArray();
         if (priorHeads.Length != 1 || nextHeads.Length != 1) return false;
@@ -116,8 +126,25 @@ internal static class ResetInventoryProof
                 evidence.Size != prior.Bytes.Length || evidence.ExpiresAtUnixSeconds != prior.Entry.Expires) return false;
         }
         else if (!prior.Head!.PhysicalSuperseded.SequenceEqual(next.Head!.PhysicalSuperseded)) return false;
-        return before.Where(item => item.Head is null).Select(item => item.Entry).OrderBy(item => item.Id)
-            .SequenceEqual(after.Where(item => item.Head is null).Select(item => item.Entry).OrderBy(item => item.Id));
+        return before.Where(item => item.Head is null && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)
+            .SequenceEqual(after.Where(item => item.Head is null && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id));
+    }
+
+    private static bool RootMatches(Decoded prior, Decoded next)
+    {
+        var a = prior.Sentinel!; var b = next.Sentinel!;
+        if (!a.Root.AsSpan().SequenceEqual(b.Root) || a.WriterKeyId != b.WriterKeyId) return false;
+        if (prior.Entry == next.Entry) return LocatorRootSelection.Equivalent(a, b) &&
+            a.CreatedAtUnixSeconds == b.CreatedAtUnixSeconds && a.RequiredExpiresAtUnixSeconds == b.RequiredExpiresAtUnixSeconds;
+        // LocatorRootService creates one retention successor from the singleton
+        // root, then prunes its exact predecessor. This is not a new state epoch.
+        return b.Generation == a.Generation + 1 && b.CreatedAtUnixSeconds >= a.CreatedAtUnixSeconds &&
+            b.RequiredExpiresAtUnixSeconds >= a.RequiredExpiresAtUnixSeconds &&
+            b.RequiredExpiresAtUnixSeconds == b.CreatedAtUnixSeconds + StateRetentionRequirements.SentinelRequestSeconds &&
+            next.Entry.Expires >= b.RequiredExpiresAtUnixSeconds && b.Superseded.IsEmpty && b.Predecessors.Length == 1 &&
+            b.Predecessors[0] == new LocatorArtifactIdentity(prior.Entry.Id,
+                Convert.ToHexStringLower(SHA256.HashData(Convert.FromBase64String(prior.Entry.Archive))),
+                Convert.ToHexStringLower(SHA256.HashData(prior.Bytes)));
     }
 
     private static void Check(bool value, string code)

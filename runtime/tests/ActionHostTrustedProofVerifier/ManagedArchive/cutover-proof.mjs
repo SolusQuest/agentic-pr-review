@@ -372,6 +372,6 @@ export async function verifyResetRetryInventory(root, before, after, names, sha2
   );
   assert.equal(
     proof.trim(),
-    'APR_SOLUS_RESET_RETRY logical_identity_unchanged=true non_head_bytes_unchanged=true unexpected_mutations_rejected=true',
+    'APR_SOLUS_RESET_RETRY logical_identity_unchanged=true accepted_records_unchanged=true unexpected_mutations_rejected=true',
   );
 }
