@@ -35,6 +35,41 @@ function sourceClass(relative: string) {
 }
 
 describe('R4 W13 closed migration inventory', () => {
+  test('retires production native packaging while retaining named historical evidence', async () => {
+    const policy = JSON.parse(await text('scripts/release/build-payload.inputs.json'));
+    const dependencies = [...policy.dependencies, ...policy.managed.additionalDependencies];
+    expect(dependencies).toHaveLength(9);
+    expect(
+      dependencies.some(({ id }: { id: string }) =>
+        /ilcompiler|illink|runtime\.nativeaot|app\.runtime/u.test(id),
+      ),
+    ).toBe(false);
+    for (const removed of [
+      'scripts/release/build-payload.nuget.config',
+      'runtime/src/AgenticPrReview.Runtime/packages.release.lock.json',
+      'tests/distribution/verify-package.mjs',
+      'tests/distribution/verify-generated-action.mjs',
+    ])
+      expect(existsSync(path.join(root, removed))).toBe(false);
+    const current = (
+      await Promise.all([
+        text('scripts/release/build-payload.mjs'),
+        text('scripts/release/candidate.mjs'),
+        text('scripts/release/prepare-candidate.mjs'),
+        text('src/action-wrapper/index.ts'),
+      ])
+    ).join('\n');
+    expect(current).not.toMatch(
+      /inspectHistoricalNative|materializeHistoricalNative|encodeHistoricalNative|resolveReleasePayload/u,
+    );
+    const dispositions = await text('docs/20_architecture/distribution.md');
+    expect(dispositions).toContain('CR1-D6 retirement and retained evidence');
+    expect(dispositions).toContain('FD3');
+    expect(dispositions).toContain('FD4');
+    expect(dispositions).toContain('trusted-proof-payload');
+    expect(dispositions).toContain('verify-managed-candidate-archive.mjs');
+  });
+
   test('classifies every surviving TypeScript or JavaScript source', () => {
     const sources = trackedFiles('src/*.ts', 'src/*.js', 'src/**/*.ts', 'src/**/*.js');
     expect(
@@ -117,7 +152,6 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/release/build-payload.licenses.txt',
       'scripts/release/build-payload.managed.nuget.config',
       'scripts/release/build-payload.mjs',
-      'scripts/release/build-payload.nuget.config',
       'scripts/release/candidate.mjs',
       'scripts/release/prepare-candidate.mjs',
       'scripts/release/solus-package-contract.d.mts',

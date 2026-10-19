@@ -474,7 +474,7 @@ _build_aot() {
   local root="$1"
   local log="${root}/publish.log"
   if ! "${DOTNET_CMD}" publish "${PROJECT}" -c Release -r linux-x64 \
-      --self-contained true -p:PublishAot=true \
+      --self-contained true -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true \
       -p:JsonSerializerIsReflectionEnabledByDefault=false \
       -o "${root}/publish" >"${log}" 2>&1; then
     _fail APR_AGENT_AOT_PUBLISH_FAILED

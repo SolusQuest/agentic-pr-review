@@ -4,13 +4,13 @@ import { request as httpsRequest, type RequestOptions } from 'node:https';
 import path from 'node:path';
 
 import {
-  MEMBERS,
-  materializePackage,
+  HISTORICAL_NATIVE_MEMBERS as MEMBERS,
+  materializeHistoricalNativePackageForFixture as materializePackage,
   readBoundedFile,
   sha256,
 } from '../../../scripts/release/build-payload.format.mjs';
 import {
-  parsePayloadMap,
+  parseHistoricalNativePayloadMapForFixture,
   parseManagedPayloadMap,
   type PayloadMap,
   type ManagedPayloadMap,
@@ -53,19 +53,12 @@ export type RepositoryTestPayloadTransport = (
 const publicTransport: RepositoryTestPayloadTransport = (url, options, onResponse) =>
   httpsRequest(url, options, onResponse);
 
-/** Ordinary acquisition has no endpoint, credential, environment, or local-path override. */
-export async function resolveReleasePayload(
-  request: ReleasePayloadRequest,
-): Promise<VerifiedReleasePayload> {
-  return resolve(request, publicTransport, undefined, ACQUISITION_TIMEOUT_MS);
-}
-
 /**
- * Repository-test entry only. Logical production URL policy is still enforced before transport.
+ * Historical native R7 contract fixture only; never selected by the ordinary Action. Logical production URL policy is still enforced before transport.
  * A local archive bypasses network acquisition, never map/platform/package/opened-file admission.
  * No Action input or environment variable selects this entry or its arguments.
  */
-export function createRepositoryTestPayloadResolver(options: {
+export function createHistoricalNativePayloadResolverForFixture(options: {
   readonly transport: RepositoryTestPayloadTransport;
   readonly localArchivePath?: string;
   readonly timeoutMs?: number;
@@ -84,7 +77,7 @@ async function resolve(
   timeoutMs: number,
 ): Promise<VerifiedReleasePayload> {
   // Snapshot caller-owned values before the first await. Parsed nested identities are frozen.
-  const map = parsePayloadMap(Buffer.from(request.mapBytes));
+  const map = parseHistoricalNativePayloadMapForFixture(Buffer.from(request.mapBytes));
   const { actionSourceSha, stagingParent } = request;
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
   if (process.platform !== 'linux' || process.arch !== 'x64') {

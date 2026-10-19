@@ -260,7 +260,7 @@ NODE
   else
     verify_aot_warning_audit "$temporary_root"
     if ! dotnet publish "${publish_arguments[@]}" --self-contained true \
-      -p:PublishAot=true \
+      -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true \
       -p:JsonSerializerIsReflectionEnabledByDefault=false \
       -p:ActionHostVerifierAotIntermediateDirectory="$intermediate_root" \
       -warnaserror -warnnotaserror:IL3058 > "$publish_log" 2>&1; then

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runIsolatedFixture } from './verify-network.mjs';
 import { prepareCutoverSupport } from './cutover-proof.mjs';
+import { verifyManagedCandidateArchive } from '../../../../tests/release/verify-managed-candidate-archive.mjs';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 for (const role of ['first', 'independent-second']) {
   await runIsolatedFixture({
@@ -113,6 +114,21 @@ for (const role of ['first', 'independent-second']) {
       assert.equal(compiled.sourceCommit, source);
       assert.equal(compiled.archiveSha256, receipt.archiveSha256);
       assert.equal(receipt.identity.sourceCommit, source);
+      const candidateCheck = verifyManagedCandidateArchive({
+        archive: await readFile(join(output, receipt.archiveName)),
+        receipt,
+        sourceCommit: source,
+        sourceTree: tree,
+      });
+      process.stderr.write(
+        'APR_D6_MANAGED_CANDIDATE role=' +
+          role +
+          ' original_archive_sha256=' +
+          candidateCheck.originalArchiveSha256 +
+          ' negative_cases=' +
+          candidateCheck.negativeCases +
+          ' metadata=synthetic-not-provenance\n',
+      );
       await writeFile(
         join(root, 'archive-settings.json'),
         JSON.stringify({ role, source, tree, compiled, repo }),

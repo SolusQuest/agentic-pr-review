@@ -8,8 +8,8 @@
 | `r2-agent-loop`                                                     | Explicit `test` and `framework`: Release tests and complete FDD Agent/SESSION/STATE invariants, positive/negative/current R7 capacity cases and replacement-inventory assertion.                 |
 | `r4-action-host`                                                    | Two separately scheduled `framework` × `{first,second}` workers. Each invokes the unchanged verifier, including its own complete build and clean-source guard.                                   |
 | `runtime`                                                           | Stable aggregate for exactly core, R2 and the R4 matrix. It uses `always()` and rejects every dependency result except exact success.                                                            |
-| `r5-evaluation-gate`                                                | Additive deterministic quality, replay, growth, reset and dry-run coverage with actual framework/AOT semantic parity.                                                                            |
-| `r6-economics-gate`                                                 | Additive offline economics/accounting/lifecycle/failure coverage with actual framework/AOT execution and syscall audit.                                                                          |
+| `r5-evaluation-gate`                                                | Current framework supporting evaluation, replay, growth, reset and dry-run; actual managed Solus evaluation is qualified by the trusted archive workflow.                                        |
+| `r6-economics-gate`                                                 | Current framework supporting economics/accounting/lifecycle/failure and syscall audit; actual managed Solus economics is qualified by the trusted archive workflow.                              |
 | `trusted-proof-payload`                                             | Historical source `5b5769753653bb3fd3e68cf8b7bb88a1bd350613`, two clean production/verifier builds and equal supplemental receipts.                                                              |
 | `trusted-proof-payload-v2-first`, `trusted-proof-payload-v2-second` | Two independent current-source managed V2 production/verifier builds, full V2 scenarios and two-root preparation, each with its own process tree and clean-source guard.                         |
 | `trusted-proof-payload-v2`                                          | Stable aggregate requiring both successful workers and exactly their bounded first/second receipts, with independently verified current-source identities and closed managed V2 receipt schemas. |
@@ -42,7 +42,7 @@ recipe. Only the completed sequence emits a receipt, including both executable
 hashes, CIL/architecture/evidence hashes, exact case inventories and recipe hash.
 The original native preparer, receipt contract and historical source pin remain
 unchanged; `legacy-aot` explicitly selects that historical format and warning
-policy. Managed compilation retains the same exact two IL3058 reference-compatibility warnings per project; those static checks do not establish native execution. Current managed receipts cannot claim native execution or archive
+policy. Current framework V2 compilation requires zero warnings. Explicit historical AOT modes retain the original IL3058 warning allowlists; those static checks do not establish production archive qualification. Current managed receipts cannot claim native execution or archive
 qualification. Neither public worker obtains private feed credentials.
 
 Actual D5 qualification runs in `solus-agent-package-proof.yml`'s reviewed-source

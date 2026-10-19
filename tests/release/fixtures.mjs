@@ -1,4 +1,8 @@
-import { encodePackage, sha256 } from '../../scripts/release/build-payload.format.mjs';
+import {
+  encodeManagedPackage,
+  MANAGED_TARGET,
+  sha256,
+} from '../../scripts/release/build-payload.format.mjs';
 import {
   REPOSITORY,
   REPOSITORY_ID,
@@ -29,13 +33,7 @@ export function storageFixture(producer = producerFixture(), role = 'payload') {
     expiresAt: '2026-10-12T09:55:00Z',
   };
 }
-export function packageFixture() {
-  const executable = Buffer.alloc(128);
-  Buffer.from('7f454c4602010100', 'hex').copy(executable);
-  executable.writeUInt16LE(3, 16);
-  executable.writeUInt16LE(62, 18);
-  executable.writeUInt32LE(1, 20);
-  executable.writeUInt16LE(64, 52);
+export function packageFixture(extraFiles = []) {
   const notices = Buffer.from(
     'Explicit synthetic candidate fixture. No real release authorization.\n',
   );
@@ -47,17 +45,14 @@ export function packageFixture() {
     policySha256: '1'.repeat(64),
     lockSha256: '2'.repeat(64),
     noticesSha256: sha256(notices),
+    assetsSha256: '3'.repeat(64),
+    target: MANAGED_TARGET,
     toolchain: {
       sdk: '10.0.109',
       sdkDriverSha256: '3'.repeat(64),
-      clang: '18.1.3',
-      clangSha256: '4'.repeat(64),
-      linker: 'synthetic GNU ld',
-      linkerSha256: '5'.repeat(64),
       node: '24.21.0',
       zlib: '1.3.1',
       os: 'ubuntu-24.04-x64',
-      systemPackages: [{ name: 'libc6', version: '2.39' }],
     },
     dependencies: [
       {
@@ -69,10 +64,35 @@ export function packageFixture() {
       },
     ],
   };
-  return encodePackage(executable, notices, inputs, {
-    needed: ['libc.so.6'],
-    runtimeLoaded: ['libssl.so.3'],
-  });
+  // Structural contract fixture only; no Solus, provenance or executable claim.
+  const files = [
+    { path: 'AgenticPrReview.Runtime.dll', bytes: Buffer.from('synthetic managed entry') },
+    {
+      path: 'AgenticPrReview.Runtime.runtimeconfig.json',
+      bytes: Buffer.from(
+        JSON.stringify({
+          runtimeOptions: {
+            tfm: 'net10.0',
+            framework: { name: 'Microsoft.NETCore.App', version: '10.0.9' },
+          },
+        }),
+      ),
+    },
+    {
+      path: 'AgenticPrReview.Runtime.deps.json',
+      bytes: Buffer.from(
+        JSON.stringify({
+          runtimeTarget: { name: '.NETCoreApp,Version=v10.0/linux-x64' },
+          targets: {
+            '.NETCoreApp,Version=v10.0/linux-x64': {
+              'Fixture/1.0.0': { runtime: { 'AgenticPrReview.Runtime.dll': {} } },
+            },
+          },
+        }),
+      ),
+    },
+  ];
+  return encodeManagedPackage([...files, ...extraFiles], notices, inputs);
 }
 export function runFixture(producer = producerFixture()) {
   return {

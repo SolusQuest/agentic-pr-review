@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { admitOutput } from './build-payload.mjs';
 import {
-  LIMITS,
+  MANAGED_LIMITS,
   canonicalJson,
   readBoundedFile,
   sha256,
@@ -172,7 +172,7 @@ export async function recordPreparedCandidate({
   } catch {
     throw new Error('invalid_receipt_json');
   }
-  const archive = await readBoundedFile(archivePath, LIMITS.archive);
+  const archive = await readBoundedFile(archivePath, MANAGED_LIMITS.archive);
   const record = createCandidate(archive, receipt, producer, storage, expected);
   return writeCandidate(record, output, repo);
 }
@@ -190,7 +190,7 @@ function argumentsFor(args, required) {
 }
 async function localInspect(args) {
   const p = argumentsFor(args, ['--archive', '--candidate', '--map', '--sha256']);
-  const archive = await readBoundedFile(p['--archive'], LIMITS.archive);
+  const archive = await readBoundedFile(p['--archive'], MANAGED_LIMITS.archive);
   const bytes = await readBoundedFile(p['--candidate'], CAPS.metadata);
   const map = await readBoundedFile(p['--map'], CAPS.map);
   return inspectCandidate(archive, bytes, map, p['--sha256']);

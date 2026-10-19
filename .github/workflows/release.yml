@@ -49,16 +49,16 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Install selected AOT prerequisites
+      - name: Install managed native-asset fixture compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y gcc
       - uses: actions/setup-dotnet@v5
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-p1-dotnet
         with:
           dotnet-version: 10.0.109
-      - name: Real local package and candidate smoke (explicit fixtures only)
+      - name: Public FDD candidate contract smoke (not Solus qualification)
         run: node tests/release/verify-candidate.mjs
 
   prepare-build:
@@ -67,6 +67,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      packages: read
     outputs:
       archive-name: ${{ steps.build.outputs.archive_name }}
       archive-sha256: ${{ steps.build.outputs.archive_sha256 }}
@@ -102,20 +103,25 @@ jobs:
           npm ci
           npm run check
           npm run dist:check
-      - name: Install selected AOT prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
       - uses: actions/setup-dotnet@v5
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-p1-dotnet
         with:
           dotnet-version: 10.0.109
+      - name: Restore and verify exact managed dependencies with bounded package-read authority
+        id: restore
+        working-directory: control
+        env:
+          EXPECTED_HEAD: ${{ github.workflow_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: node scripts/release/solus-package-proof.mjs verify "$RUNNER_TEMP/r7-p1-solus-cache"
       - name: Build and execute original package from clean S without publication credentials
         id: build
         env:
           INPUT_SOURCE: ${{ inputs.source-commit }}
           INPUT_VERSION: ${{ inputs.release-version }}
+          NUGET_PACKAGES: ${{ runner.temp }}/r7-p1-solus-cache/packages
         run: node control/scripts/release/prepare-candidate.mjs build --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --repo "$GITHUB_WORKSPACE/source" --output "$RUNNER_TEMP/r7-p1-package"
       - name: Retain original archive and producer receipt
         id: payload

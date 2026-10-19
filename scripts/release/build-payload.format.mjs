@@ -5,19 +5,35 @@ import { chmod, mkdir, mkdtemp, open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 
-export const LIMITS = Object.freeze({
-  archive: 32 * 1024 * 1024,
-  executable: 64 * 1024 * 1024,
-  notices: 1024 * 1024,
-  manifest: 64 * 1024,
-  expanded: 66 * 1024 * 1024,
-  releaseVersion: 48,
-});
-export const MEMBERS = Object.freeze([
-  { path: 'agentic-pr-review/agentic-pr-review', mode: 0o755, limit: LIMITS.executable },
-  { path: 'agentic-pr-review/manifest.json', mode: 0o644, limit: LIMITS.manifest },
-  { path: 'agentic-pr-review/THIRD-PARTY-NOTICES.txt', mode: 0o644, limit: LIMITS.notices },
-]);
+// Original R7 format-1 codec: explicit historical fixtures only.
+// Current production consumers use managed-v1; no native producer remains.
+export const NOTICE_MAXIMUM_BYTES = 1024 * 1024;
+export const RELEASE_VERSION_MAXIMUM_BYTES = 48;
+// Mark complete fixture-only initialization pure, including property reads,
+// so ordinary Action bundling can discard the historical constant family.
+export const HISTORICAL_NATIVE_LIMITS = /* @__PURE__ */ (() =>
+  Object.freeze({
+    archive: 32 * 1024 * 1024,
+    executable: 64 * 1024 * 1024,
+    notices: 1024 * 1024,
+    manifest: 64 * 1024,
+    expanded: 66 * 1024 * 1024,
+    releaseVersion: 48,
+  }))();
+export const HISTORICAL_NATIVE_MEMBERS = /* @__PURE__ */ (() =>
+  Object.freeze([
+    {
+      path: 'agentic-pr-review/agentic-pr-review',
+      mode: 0o755,
+      limit: HISTORICAL_NATIVE_LIMITS.executable,
+    },
+    {
+      path: 'agentic-pr-review/manifest.json',
+      mode: 0o644,
+      limit: HISTORICAL_NATIVE_LIMITS.manifest,
+    },
+    { path: 'agentic-pr-review/THIRD-PARTY-NOTICES.txt', mode: 0o644, limit: NOTICE_MAXIMUM_BYTES },
+  ]))();
 const gzipHeader = Buffer.from('1f8b0800000000000203', 'hex');
 const hex40 = /^[a-f0-9]{40}$/;
 const hex64 = /^[a-f0-9]{64}$/;
@@ -64,7 +80,7 @@ export function canonicalJson(value) {
 export function validateReleaseVersion(version) {
   requireThat(
     typeof version === 'string' &&
-      version.length <= LIMITS.releaseVersion &&
+      version.length <= RELEASE_VERSION_MAXIMUM_BYTES &&
       versionPattern.test(version),
     'invalid_release_version',
   );
@@ -94,7 +110,7 @@ function validateIdentity(identity) {
     'invalid_compiled_identity',
   );
 }
-function validateInventory(members, specs = MEMBERS) {
+function validateInventory(members, specs = HISTORICAL_NATIVE_MEMBERS) {
   requireThat(Array.isArray(members) && members.length === specs.length, 'invalid_inventory');
   members.forEach((member, index) => {
     keys(member, ['path', 'mode', 'size', 'sha256'], 'invalid_member');
@@ -268,7 +284,7 @@ function validateManifest(manifest) {
     'notice_input_mismatch',
   );
   validateNative(manifest.nativeDependencies);
-  validateInventory(manifest.members, [MEMBERS[0], MEMBERS[2]]);
+  validateInventory(manifest.members, [HISTORICAL_NATIVE_MEMBERS[0], HISTORICAL_NATIVE_MEMBERS[2]]);
 }
 function validateReceipt(receipt) {
   keys(
@@ -280,7 +296,7 @@ function validateReceipt(receipt) {
     receipt.formatVersion === 1 &&
       Number.isSafeInteger(receipt.archiveSize) &&
       receipt.archiveSize > 0 &&
-      receipt.archiveSize <= LIMITS.archive &&
+      receipt.archiveSize <= HISTORICAL_NATIVE_LIMITS.archive &&
       matches(receipt.archiveSha256, hex64),
     'invalid_expected_receipt',
   );
@@ -314,7 +330,7 @@ function entryHeader(spec, size) {
 function inventory(spec, bytes) {
   return { path: spec.path, mode: spec.mode, size: bytes.length, sha256: sha256(bytes) };
 }
-export function validateElf(bytes) {
+export function validateHistoricalNativeElfForFixture(bytes) {
   requireThat(
     bytes.length >= 64 &&
       bytes.subarray(0, 7).equals(Buffer.from('7f454c46020101', 'hex')) &&
@@ -342,12 +358,17 @@ function receiptFor(archive, manifest, files) {
         'informationalVersion',
       ].map((key) => [key, manifest[key]]),
     ),
-    members: MEMBERS.map((spec, index) => inventory(spec, files[index])),
+    members: HISTORICAL_NATIVE_MEMBERS.map((spec, index) => inventory(spec, files[index])),
   };
 }
-export function encodePackage(executable, notices, buildInputs, nativeDependencies) {
+export function encodeHistoricalNativePackageForFixture(
+  executable,
+  notices,
+  buildInputs,
+  nativeDependencies,
+) {
   validateInputs(buildInputs);
-  validateElf(executable);
+  validateHistoricalNativeElfForFixture(executable);
   const buildId = sha256(canonicalJson(buildInputs));
   const manifest = {
     formatVersion: 1,
@@ -360,32 +381,35 @@ export function encodePackage(executable, notices, buildInputs, nativeDependenci
     launcher: 'r7-d0',
     buildInputs,
     nativeDependencies,
-    members: [inventory(MEMBERS[0], executable), inventory(MEMBERS[2], notices)],
+    members: [
+      inventory(HISTORICAL_NATIVE_MEMBERS[0], executable),
+      inventory(HISTORICAL_NATIVE_MEMBERS[2], notices),
+    ],
   };
   validateManifest(manifest);
   const files = [executable, Buffer.from(canonicalJson(manifest)), notices];
-  validateInventory(MEMBERS.map((spec, index) => inventory(spec, files[index])));
+  validateInventory(HISTORICAL_NATIVE_MEMBERS.map((spec, index) => inventory(spec, files[index])));
   const tar = Buffer.concat([
     ...files.flatMap((bytes, index) => [
-      entryHeader(MEMBERS[index], bytes.length),
+      entryHeader(HISTORICAL_NATIVE_MEMBERS[index], bytes.length),
       bytes,
       Buffer.alloc((512 - (bytes.length % 512)) % 512),
     ]),
     Buffer.alloc(1024),
   ]);
-  requireThat(tar.length <= LIMITS.expanded, 'expanded_archive_too_large');
+  requireThat(tar.length <= HISTORICAL_NATIVE_LIMITS.expanded, 'expanded_archive_too_large');
   const trailer = Buffer.alloc(8);
   trailer.writeUInt32LE(crc32(tar), 0);
   trailer.writeUInt32LE(tar.length, 4);
   const archive = Buffer.concat([gzipHeader, deflateRawSync(tar, { level: 9 }), trailer]);
-  requireThat(archive.length <= LIMITS.archive, 'archive_too_large');
+  requireThat(archive.length <= HISTORICAL_NATIVE_LIMITS.archive, 'archive_too_large');
   return { archive, receipt: receiptFor(archive, manifest, files) };
 }
-export function inspectPackage(bytes, expected) {
+export function inspectHistoricalNativePackageForFixture(bytes, expected) {
   validateReceipt(expected);
   requireThat(
     Buffer.isBuffer(bytes) &&
-      bytes.length <= LIMITS.archive &&
+      bytes.length <= HISTORICAL_NATIVE_LIMITS.archive &&
       bytes.length === expected.archiveSize &&
       sha256(bytes) === expected.archiveSha256,
     'archive_digest_mismatch',
@@ -396,7 +420,10 @@ export function inspectPackage(bytes, expected) {
   );
   let inflated;
   try {
-    inflated = inflateRawSync(bytes.subarray(10), { maxOutputLength: LIMITS.expanded, info: true });
+    inflated = inflateRawSync(bytes.subarray(10), {
+      maxOutputLength: HISTORICAL_NATIVE_LIMITS.expanded,
+      info: true,
+    });
   } catch {
     throw new Error('invalid_or_excessive_gzip');
   }
@@ -409,7 +436,7 @@ export function inspectPackage(bytes, expected) {
     'invalid_gzip_trailer',
   );
   let offset = 0;
-  const files = MEMBERS.map((spec) => {
+  const files = HISTORICAL_NATIVE_MEMBERS.map((spec) => {
     requireThat(offset + 512 <= tar.length, 'truncated_tar_header');
     const header = tar.subarray(offset, offset + 512);
     const sizeField = header.subarray(124, 136).toString('ascii');
@@ -442,10 +469,13 @@ export function inspectPackage(bytes, expected) {
   validateManifest(manifest);
   requireThat(
     canonicalJson(manifest.members) ===
-      canonicalJson([inventory(MEMBERS[0], files[0]), inventory(MEMBERS[2], files[2])]),
+      canonicalJson([
+        inventory(HISTORICAL_NATIVE_MEMBERS[0], files[0]),
+        inventory(HISTORICAL_NATIVE_MEMBERS[2], files[2]),
+      ]),
     'member_digest_mismatch',
   );
-  validateElf(files[0]);
+  validateHistoricalNativeElfForFixture(files[0]);
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(files[2]);
   } catch {
@@ -495,16 +525,16 @@ export async function readBoundedFile(path, cap) {
     await handle.close();
   }
 }
-export async function materializePackage(bytes, expected, parent) {
+export async function materializeHistoricalNativePackageForFixture(bytes, expected, parent) {
   // Inspection is repeated inside this boundary; caller-owned views are never trusted.
-  const inspected = inspectPackage(Buffer.from(bytes), expected);
+  const inspected = inspectHistoricalNativePackageForFixture(Buffer.from(bytes), expected);
   const root = await mkdtemp(join(parent, 'apr-package-'));
   try {
     await chmod(root, 0o700);
     const directory = join(root, 'agentic-pr-review');
     await mkdir(directory, { mode: 0o700 });
-    for (let index = 0; index < MEMBERS.length; index++) {
-      const spec = MEMBERS[index];
+    for (let index = 0; index < HISTORICAL_NATIVE_MEMBERS.length; index++) {
+      const spec = HISTORICAL_NATIVE_MEMBERS[index];
       const path = join(root, spec.path);
       const handle = await open(
         path,
@@ -518,7 +548,11 @@ export async function materializePackage(bytes, expected, parent) {
         await handle.close();
       }
     }
-    return { root, executable: join(root, MEMBERS[0].path), manifest: inspected.manifest };
+    return {
+      root,
+      executable: join(root, HISTORICAL_NATIVE_MEMBERS[0].path),
+      manifest: inspected.manifest,
+    };
   } catch (error) {
     await rm(root, { recursive: true, force: true });
     throw error;
@@ -865,7 +899,7 @@ export function encodeManagedPackage(files, notices, buildInputs) {
   requireThat(
     Buffer.isBuffer(notices) &&
       notices.length > 0 &&
-      notices.length <= LIMITS.notices &&
+      notices.length <= NOTICE_MAXIMUM_BYTES &&
       sha256(notices) === buildInputs.noticesSha256,
     'invalid_managed_notices',
   );
@@ -1013,7 +1047,7 @@ export function inspectManagedPackage(bytes, expected) {
   requireThat(
     notices &&
       notices.bytes.length > 0 &&
-      notices.bytes.length <= LIMITS.notices &&
+      notices.bytes.length <= NOTICE_MAXIMUM_BYTES &&
       sha256(notices.bytes) === manifest.buildInputs.noticesSha256,
     'invalid_managed_notices',
   );

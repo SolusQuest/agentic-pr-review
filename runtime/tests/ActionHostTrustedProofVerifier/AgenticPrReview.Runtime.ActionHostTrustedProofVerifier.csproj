@@ -8,8 +8,8 @@
     <PublishAot>false</PublishAot>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>false</PublishSingleFile>
-    <IsAotCompatible>true</IsAotCompatible>
-    <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
+    <IsAotCompatible>$(PublishAot)</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>

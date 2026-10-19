@@ -39,7 +39,7 @@ _run() {
   else
     [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]]
     "${DOTNET_CMD}" publish "${PROJECT}" -c Release -r linux-x64 --self-contained true \
-      -p:PublishAot=true -p:JsonSerializerIsReflectionEnabledByDefault=false \
+      -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true -p:JsonSerializerIsReflectionEnabledByDefault=false \
       -o "${ROOT}/aot" >"${ROOT}/aot.build.log" 2>&1
     runner=("${ROOT}/aot/${ASSEMBLY}")
     [[ -x "${runner[0]}" && "$(head -c 4 "${runner[0]}" | od -An -tx1 | tr -d ' \n')" == 7f454c46 ]]

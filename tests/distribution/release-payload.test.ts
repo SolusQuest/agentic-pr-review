@@ -25,16 +25,15 @@ import {
   sha256,
   encodeManagedPackage,
   inspectManagedPackage,
-  inspectPackage,
+  inspectHistoricalNativePackageForFixture as inspectPackage,
   MANAGED_TARGET,
   type ManagedReceipt,
 } from '../../scripts/release/build-payload.format.mjs';
 import {
-  createRepositoryTestPayloadResolver,
+  createHistoricalNativePayloadResolverForFixture as createRepositoryTestPayloadResolver,
   createRepositoryTestManagedPayloadResolver,
   resolveManagedReleasePayload,
   PAYLOAD_USER_AGENT,
-  resolveReleasePayload,
   type ReleasePayloadRequest,
   type VerifiedReleasePayload,
 } from '../../src/action-wrapper/launcher/release-payload.js';
@@ -219,7 +218,11 @@ test.skipIf(supported)(
   'ordinary resolver refuses unsupported execution platforms before networking',
   async () => {
     await expect(
-      resolveReleasePayload({
+      createRepositoryTestPayloadResolver({
+        transport: () => {
+          throw new Error('unexpected historical fixture network');
+        },
+      })({
         mapBytes: releaseFixture().mapBytes,
         actionSourceSha: ACTION_SOURCE,
         stagingParent: tmpdir(),

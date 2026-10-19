@@ -36,7 +36,7 @@ export interface PackageManifest extends PayloadIdentity {
   readonly members: readonly PayloadMember[];
 }
 
-export const LIMITS: Readonly<{
+export const HISTORICAL_NATIVE_LIMITS: Readonly<{
   archive: number;
   executable: number;
   notices: number;
@@ -44,24 +44,28 @@ export const LIMITS: Readonly<{
   expanded: number;
   releaseVersion: number;
 }>;
-export const MEMBERS: readonly Readonly<{ path: string; mode: number; limit: number }>[];
+export const HISTORICAL_NATIVE_MEMBERS: readonly Readonly<{
+  path: string;
+  mode: number;
+  limit: number;
+}>[];
 export function sha256(bytes: string | Uint8Array): string;
 export function canonicalJson(value: unknown): string;
 export function validateReleaseVersion(version: unknown): string;
 export function compiledIdentity(version: string, buildId: string): string;
 export function archiveName(version: string): string;
-export function validateElf(bytes: Buffer): void;
-export function inspectPackage(
+export function validateHistoricalNativeElfForFixture(bytes: Buffer): void;
+export function inspectHistoricalNativePackageForFixture(
   bytes: Buffer,
   expected: unknown,
 ): { manifest: PackageManifest; receipt: PackageReceipt; files: Buffer[] };
 export function readBoundedFile(path: string, cap: number): Promise<Buffer>;
-export function materializePackage(
+export function materializeHistoricalNativePackageForFixture(
   bytes: Buffer,
   expected: unknown,
   parent: string,
 ): Promise<{ root: string; executable: string; manifest: PackageManifest }>;
-export function encodePackage(
+export function encodeHistoricalNativePackageForFixture(
   executable: Buffer,
   notices: Buffer,
   buildInputs: Readonly<Record<string, unknown>>,
@@ -113,3 +117,6 @@ export function materializeManagedPackage(
 ): Promise<{ root: string; entrypoint: string; manifest: ManagedManifest }>;
 
 export function validateManagedReceipt(receipt: unknown): asserts receipt is ManagedReceipt;
+
+export const NOTICE_MAXIMUM_BYTES: number;
+export const RELEASE_VERSION_MAXIMUM_BYTES: number;

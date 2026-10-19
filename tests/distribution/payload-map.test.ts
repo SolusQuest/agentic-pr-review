@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   PAYLOAD_MAP_MAXIMUM_BYTES,
-  parsePayloadMap,
+  parseHistoricalNativePayloadMapForFixture as parsePayloadMap,
   parseManagedPayloadMap,
   MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES,
 } from '../../src/action-wrapper/launcher/payload-map.js';
