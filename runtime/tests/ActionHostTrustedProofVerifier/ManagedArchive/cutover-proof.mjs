@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 function run(command, args, options) {
   const result = spawnSync(command, args, {
@@ -129,6 +129,15 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
     root,
     'cutover-faults/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
   );
+  const solus = inspected.files.filter((file) =>
+    /^SolusAgent\..+\.dll$/u.test(basename(file.path)),
+  );
+  assert.equal(solus.length, 5);
+  for (const file of solus)
+    assert.equal(
+      sha256(await readFile(join(root, 'cutover-faults', basename(file.path)))),
+      sha256(file.bytes),
+    );
   const faults = run(dotnet, [managedFixture, 'managed-faults', join(root, 'cutover-fault-data')], {
     cwd: root,
     env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
@@ -148,6 +157,7 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
     import_failure_burned: true,
     incompatible_context_rejected_before_work: true,
     supporting_managed_fixture_sha256: sha256(await readFile(managedFixture)),
+    supporting_loaded_package_bytes_match_archive: true,
     old_session_rejected_before_provider: true,
     live_provider_requests: 0,
   };
