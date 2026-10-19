@@ -39,7 +39,7 @@ The output archive is the original tested byte sequence. Promotion must retain t
 
 ## CR1-D2 Managed Release Admission
 
-The explicit managed resolver accepts a separate trusted outer map with `managed-v1` receipt and a 256 KiB map bound. It preserves exact repository, version tag, source S, builder W, Action T and original archive identities. It uses the same credential-free release/asset/download policy as native acquisition, then applies the D1 full archive inspector before materialization. Ordinary native consumers retain their current 16 KiB map contract, selected route and unbound map; D4 must reconcile actual managed map capacity when adopting the route.
+The explicit managed resolver accepts a separate trusted outer map with `managed-v1` receipt and a 256 KiB map bound. It preserves exact repository, version tag, source S, builder W, Action T and original archive identities. It uses the credential-free release/asset/download policy and the D1 full archive inspector before materialization. The ordinary Action uses this managed route with its 256 KiB map bound. The 16 KiB native map is retained only for historical fixtures; the checked ordinary map remains unbound.
 
 Staging requires a launcher-owned 0700 parent outside the canonical reviewed workspace. Admission inventories the exact implicit directory set and every regular file through Linux directory descriptors with no-follow opens, checks ownership/type/link count/size/identity/digest and normalizes files to 0400 and directories to 0500. Missing, extra or substituted entries fail closed. Root and file guards remain open; each lease revalidates the full namespace and bytes before returning a pinned root descriptor and fixed entrypoint. The [managed staging security boundary](./security-boundary.md#managed-payload-staging-boundary) defines the trusted-runner assumptions and their limits.
 
@@ -59,7 +59,7 @@ Authenticated configuration still grants loading capabilities. The runner reads 
 
 Framed IO and cancellation share the native engine: invalid declared frame lengths fail immediately, completion is bounded at 16 KiB, private stderr is drained with bounded capture, and cancellation retains its reconciliation grace before final kill. The runner owns its lease internally. Confirmed close or failed start permits release; unconfirmed termination returns a finite `ManagedHostProcessTerminationUnconfirmedError` while retaining runtime guards and any granted lease. Its actual-child `terminationConfirmed`/`resourcesReleased` promises expose late close and resource settlement. The caller retains the bridge and staging while termination is unconfirmed, then explicitly retries tree disposal after settlement. Guard cleanup failures remain observable and retryable; a signal or arbitrary caller assertion cannot authorize deletion.
 
-The ordinary `CR1 managed loader and lifecycle proof` step runs a real no-package DLL/dependency/satellite/native fixture without private package access. The distinct `CR1 actual APR managed loader proof` runs in the trusted exact-head package workflow with the verified cache and no restore token: original APR archive bytes pass credential-free release transport and real D2 staging, then the actual zero-argument framed Host completes a synthetic unsupported event without provider/GitHub side effects. Qualification requires both selected Ubuntu 24.04 x64 steps to pass on the reviewed source. Fixture-only, local emulation, an earlier main commit or an unexecuted flag is insufficient. D4 owns selected Action adoption and map capacity; D5 owns representative Solus review qualification. The ordinary Action uses the managed consumer; the null map remains unbound and private native gates remain required.
+The ordinary `CR1 managed loader and lifecycle proof` step runs a real no-package DLL/dependency/satellite/native fixture without private package access. The distinct `CR1 actual APR managed loader proof` runs in the trusted exact-head package workflow with the verified cache and no restore token: original APR archive bytes pass credential-free release transport and real D2 staging, then the actual zero-argument framed Host completes a synthetic unsupported event without provider/GitHub side effects. Qualification requires both selected Ubuntu 24.04 x64 steps to pass on the reviewed source. Fixture-only, local emulation, an earlier main commit or an unexecuted flag is insufficient. The D4 ordinary Action supplies managed adoption and map capacity; D5 qualification executes representative Solus reviews. The null map remains unbound. Private native proof requirements remain only for the named historical consumers below.
 
 ## CR1-D4 Ordinary Managed Action
 
@@ -121,13 +121,13 @@ This read-only command verifies the exact metadata surface, package and lockfile
 
 The selected CR1 payload is the managed publish-tree archive above. It keeps Host, review product, Solus runtime/provider integration, state and publisher under one application entry; dependency assemblies do not become independently selected APR components. Package restore pins are distinct from APR release identities.
 
-The current Native AOT implementation is preserved in the R7-D1 package-format section and existing qualification commands below. Current framework-dependent/AOT checks remain applicable until their paths are replaced or retired with evidence. Future CR1 validation must execute representative managed Host, Agent, fake-provider, tool, state and publisher paths from the actual publish tree; a successful publish alone is insufficient.
+The original Native AOT package is historical fixture evidence under the D6 dispositions below. Current qualification executes representative managed Host, Agent, controlled-provider, tool, state and publisher paths from the actual publish tree; a successful publish alone is insufficient. Explicit historical AOT modes retain their separate supporting obligations.
 
 A separate Host/Worker process remains deferred pending concrete isolation needs.
 
 ## Initial Platform Scope
 
-The selected CR1 managed payload targets GitHub-hosted `ubuntu-24.04` x64, initially through the existing nested Action, with a compatible .NET 10 runtime and no downstream SDK requirement. CR2 changes the Action integration; the original R7 AOT profile remains current implementation evidence. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
+The selected CR1 managed payload targets GitHub-hosted `ubuntu-24.04` x64, initially through the existing nested Action, with a compatible .NET 10 runtime and no downstream SDK requirement. CR2 changes the Action integration; the original R7 AOT profile remains historical implementation evidence. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
 
 Additional targets are outside R7 and require separately scoped downstream demand and CI publish/execution proof:
 
@@ -146,7 +146,7 @@ Runner-owned Action repository/ref context supplies exact SHA T or the map's ver
 
 Fully verified repository-test overrides remain isolated and unreachable through ordinary downstream inputs. They bypass download, not executable/platform/manifest/build admission, and do not expand downstream support. Other distribution forms require a separate future contract.
 
-For the current native payload path, the wrapper must not:
+For the current managed payload path, the wrapper must not:
 
 - search `PATH` for an arbitrary runtime;
 - download implicit `latest`;
@@ -156,7 +156,7 @@ For the current native payload path, the wrapper must not:
 
 Repository-test local override paths bypass download but not executable, platform, payload-manifest, or exact build validation.
 
-Ordinary resolution returns the verified executable's opened identity and an owned-root disposer. The wrapper executes that inherited descriptor without pathname readmission and awaits disposal across completion, failure, cancellation and fatal termination, before presentation. Protected R4 proof retains its own prepared admission, closed profiles and strict canonical receipts. Its existing current preparation generates/readbacks a fixed private proof bundle only after exact source/control validation in the ephemeral protected runner checkout; the checked product bundle, workflow/template policy anchors and historical sealed evidence remain separate. See [distribution execution fixtures](../../tests/distribution/README.md).
+Ordinary resolution returns the verified publish tree and its owned-root disposer. The wrapper uses the trusted runtime executable as FD3 and the retained verified directory as FD4, then awaits disposal across completion, failure, cancellation and fatal termination before presentation. Protected R4 proof retains its own prepared admission, closed profiles and strict canonical receipts. Its existing current preparation generates/readbacks a fixed private proof bundle only after exact source/control validation in the ephemeral protected runner checkout; the checked product bundle, workflow/template policy anchors and historical sealed evidence remain separate. See [distribution execution fixtures](../../tests/distribution/README.md).
 
 ## Version Mapping
 
@@ -171,7 +171,7 @@ vX.Y.Z-internal.N at reviewed Action T -> exact map of B, S and builder W
 
 Prepare/test original `B` from `S` without publication credentials; review the binding map and obtain maintainer merge to `T`; qualify exact original `B` with `T`; stage that qualified pair as an unpublished draft; publish and verify payload assets, then create the consumer Action tag last. A fixed Action SHA resolves the same map. Promotion never rebuilds/repackages. Changed build inputs need a new candidate; expiry or ambiguous external state fails closed/reconciles by exact identity, never duplicates/replaces a version.
 
-Mandatory producer attestation and final publish verification restrict expected repository, signer workflow, hosted runner and actual source claims. Attestation of `W` alone cannot prove detached `S` without independently verified candidate/build-policy binding. Consumers must verify SHA-256 against the reviewed map. The current native path retains opened-executable identity through spawn; CR1 must replace that proof with verified managed entrypoint/dependency loading without weakening source or workspace boundaries. Mandatory online consumer attestation is deferred; independent verifier commands belong to the later runbook. See the full [release identity and authority contract](../90_roadmap/r7-plan.md#exact-release-identities-and-trust); this activation creates no release or tag.
+Mandatory producer attestation and final publish verification restrict expected repository, signer workflow, hosted runner and actual source claims. Attestation of `W` alone cannot prove detached `S` without independently verified candidate/build-policy binding. Consumers must verify SHA-256 against the reviewed map. The managed path retains trusted runtime and verified publish-tree authority through entrypoint/dependency loading. Historical native opened-executable proof does not qualify that managed closure. Mandatory online consumer attestation is deferred; independent verifier commands belong to the later runbook. See the full [release identity and authority contract](../90_roadmap/r7-plan.md#exact-release-identities-and-trust); this activation creates no release or tag.
 
 ## Durable State Compatibility
 
@@ -220,7 +220,7 @@ Examples:
 - `SHA256SUMS`;
 - a machine-readable payload manifest.
 
-The current native archive uses a layout such as:
+The historical native archive fixture uses a layout such as:
 
 ```text
 agentic-pr-review/
@@ -229,7 +229,7 @@ agentic-pr-review/
   THIRD-PARTY-NOTICES.txt
 ```
 
-The example chooses no actual candidate/version and is not the CR1 managed layout. The R7-D1 section defines the current implemented native format; CR1 replaces it with a complete managed tree before new candidate binding/qualification.
+The example chooses no actual candidate/version and is not the CR1 managed layout. The retired R7-D1 native format remains historical fixture evidence; new candidate binding/qualification requires the managed tree described above.
 
 ## Dependency Policy
 
