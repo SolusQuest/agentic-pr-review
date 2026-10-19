@@ -13,7 +13,7 @@ const sources = [
   'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs',
 ];
 export function verifyAssertionDispositions(repository, supplied) {
-  if (supplied === undefined) verifyS5AssertionSuccessor(repository);
+  if (supplied === undefined) return verifyS5AssertionSuccessor(repository).currentNativeMethods;
   const mapping =
     supplied ??
     JSON.parse(readFileSync(join(import.meta.dirname, 'native-assertions.json'), 'utf8'));
@@ -73,8 +73,8 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
 
-// This first successor authorizes no deletions. Later per-assertion migrations must
-// extend the closed dispositions here, with independent current execution oracles.
+// Only the five pinned, individually justified format dispositions are admitted.
+// Further migrations require new closed dispositions and independent current oracles.
 // Source fingerprints establish a census, never SDK execution qualification.
 export function verifyS5AssertionSuccessor(repository, supplied) {
   const readFixture = (name) => readFileSync(join(repository, fixtureDirectory, name));
@@ -84,6 +84,34 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   assert.equal(sha256(baselineBytes), baselineIdentitiesSha256);
   const original = JSON.parse(originalBytes);
   const baseline = JSON.parse(baselineBytes);
+  const formatBytes = readFixture('s5-format-retirements.json');
+  assert.equal(
+    sha256(formatBytes),
+    '527d25f064cf4ca4af9ecd9f4e246c987154043b7b48b5e9f1bcb4839ec526b8',
+  );
+  const format = JSON.parse(formatBytes);
+  assert.equal(format.kind, 'apr-cr1-s5-five-native-format-dispositions-v1');
+  assert.equal(format.owner_issue, 409);
+  assert.equal(format.sdk_context_import_qualified, false);
+  assert.equal(format.rows.length, 5);
+  const formats = new Map(format.rows.map((row) => [identity(row), row]));
+  assert.equal(formats.size, 5);
+  const oracleText = format.oracles
+    .map((oracle) => {
+      const bytes = readFileSync(join(repository, oracle.path));
+      assert.equal(sha256(bytes), oracle.sha256, oracle.path);
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    })
+    .join('\n');
+  for (const row of format.rows) {
+    assert.equal(
+      baseline.assertions.find((old) => identity(old) === identity(row))?.body_sha256,
+      row.original_body_sha256,
+    );
+    assert.ok(row.current_oracle_labels.length > 0);
+    for (const label of row.current_oracle_labels) assert.ok(oracleText.includes(label), label);
+  }
+
   const successor = supplied ?? JSON.parse(readFixture('s5-assertion-successor.json'));
   exactKeys(successor, [
     'kind',
@@ -141,6 +169,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   assert.ok(Array.isArray(successor.assertions));
   assert.equal(successor.assertions.length, 152);
   const declared = [];
+  const currentDeclared = [];
   const ranges = new Map();
   for (const row of successor.assertions) {
     exactKeys(row, [
@@ -151,6 +180,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
       'disposition',
       'current',
       'reason',
+      ...(formats.has(identity(row)) ? ['format_disposition'] : []),
     ]);
     const key = identity(row);
     const old = originalById.get(key);
@@ -158,6 +188,16 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     assert.ok(baselineById.has(key), key);
     assert.equal(row.original_disposition, old.disposition);
     assert.equal(row.original_replacement, old.replacement);
+    declared.push(key);
+    if (formats.has(key)) {
+      const disposition = formats.get(key);
+      assert.deepEqual(row.format_disposition, disposition);
+      assert.equal(row.disposition, disposition.disposition);
+      assert.equal(row.reason, disposition.reason);
+      assert.equal(row.current, null);
+      assert.ok(!actual.includes(key), key);
+      continue;
+    }
     assert.equal(row.disposition, 'retained');
     assert.equal(
       row.reason,
@@ -181,7 +221,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     const sourceRanges = ranges.get(row.source) ?? [];
     sourceRanges.push({ start, end: start + length });
     ranges.set(row.source, sourceRanges);
-    declared.push(key);
+    currentDeclared.push(key);
   }
   for (const sourceRanges of ranges.values()) {
     sourceRanges.sort((a, b) => a.start - b.start);
@@ -192,6 +232,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   assert.equal(new Set(declared).size, 152);
   assert.equal(new Set(actual).size, actual.length);
   assert.deepEqual(declared.slice().sort(), [...originalById.keys()].sort());
-  assert.deepEqual(declared.slice().sort(), actual.sort());
-  return { originalMethods: 152, currentNativeMethods: actual.length, authorizedDeletions: 0 };
+  assert.deepEqual(currentDeclared.slice().sort(), actual.sort());
+  assert.equal(actual.length, 147);
+  return { originalMethods: 152, currentNativeMethods: actual.length, authorizedDeletions: 5 };
 }

@@ -16,8 +16,8 @@ const load = () =>
     ),
   );
 describe('V1 native assertion dispositions', () => {
-  test('maps every attributed method in the seven affected source families', () => {
-    expect(verifyAssertionDispositions(process.cwd())).toBe(152);
+  test('preserves the original 152-row mapping while reporting the exact current census', () => {
+    expect(verifyAssertionDispositions(process.cwd())).toBe(147);
   });
   test.each(['missing', 'duplicate', 'unknown-source', 'retirement', 'replacement', 'authority'])(
     'rejects %s drift',
@@ -45,11 +45,11 @@ const loadSuccessor = () =>
   );
 
 describe('S5 source-bound native assertion census', () => {
-  test('binds all 152 original identities and current bodies without authorizing deletion', () => {
+  test('binds all 152 originals, 147 current bodies and exactly five individual dispositions', () => {
     expect(verifyS5AssertionSuccessor(process.cwd())).toEqual({
       originalMethods: 152,
-      currentNativeMethods: 152,
-      authorizedDeletions: 0,
+      currentNativeMethods: 147,
+      authorizedDeletions: 5,
     });
   });
   test.each([
@@ -128,11 +128,46 @@ describe('S5 source-bound native assertion census', () => {
     expect(() => verifyS5AssertionSuccessor(process.cwd(), successor)).toThrow();
   });
   test.each([
+    'body-reintroduced',
+    'original-body',
+    'sdk-label',
+    'reason',
+    'disposition',
+    'unmapped-row',
+    'oracle-name',
+    'extra-authority',
+    'retained-relabel',
+  ])('rejects individual retirement %s drift', (mutation) => {
+    const successor = loadSuccessor();
+    const row = successor.assertions.find((item: { current: unknown }) => item.current === null);
+    if (mutation === 'body-reintroduced')
+      row.current = structuredClone(successor.assertions[0].current);
+    if (mutation === 'original-body') row.format_disposition.original_body_sha256 = '0'.repeat(64);
+    if (mutation === 'sdk-label') row.format_disposition.sdk_context_import_qualified = true;
+    if (mutation === 'reason') row.reason = 'format no longer needed';
+    if (mutation === 'disposition') row.disposition = 'retained';
+    if (mutation === 'unmapped-row') delete row.format_disposition;
+    if (mutation === 'oracle-name') row.format_disposition.current_oracle_labels = ['unexecuted'];
+    if (mutation === 'extra-authority') row.format_disposition.allow_fallback = true;
+    if (mutation === 'retained-relabel')
+      successor.assertions[0] = {
+        ...successor.assertions[0],
+        disposition: row.disposition,
+        current: null,
+        reason: row.reason,
+        format_disposition: row.format_disposition,
+      };
+    expect(() => verifyS5AssertionSuccessor(process.cwd(), successor)).toThrow();
+  });
+  test.each([
     'original-bytes',
     'baseline-bytes',
     'body-change',
     'extra-method',
     'missing-successor',
+    'missing-format-policy',
+    'format-policy-change',
+    'oracle-source-change',
   ])('rejects actual %s drift without a permissive fallback', (mutation) => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-census-'));
     try {
@@ -146,9 +181,28 @@ describe('S5 source-bound native assertion census', () => {
         'native-assertions.json',
         's5-original-method-identities.json',
         's5-assertion-successor.json',
+        's5-format-retirements.json',
       ])
         copy(path.join(fixtureDirectory, name));
       for (const source of successor.current_sources) copy(source.path);
+      const format = JSON.parse(
+        fs.readFileSync(
+          path.join(process.cwd(), fixtureDirectory, 's5-format-retirements.json'),
+          'utf8',
+        ),
+      );
+      for (const oracle of format.oracles) copy(oracle.path);
+      // Establish a valid complete temporary source closure before each mutation.
+      expect(verifyS5AssertionSuccessor(temporary).currentNativeMethods).toBe(147);
+      if (mutation === 'missing-format-policy')
+        fs.unlinkSync(path.join(temporary, fixtureDirectory, 's5-format-retirements.json'));
+      if (mutation === 'format-policy-change')
+        fs.appendFileSync(
+          path.join(temporary, fixtureDirectory, 's5-format-retirements.json'),
+          '\n',
+        );
+      if (mutation === 'oracle-source-change')
+        fs.appendFileSync(path.join(temporary, format.oracles[0].path), '\n');
       if (mutation === 'original-bytes')
         fs.appendFileSync(path.join(temporary, fixtureDirectory, 'native-assertions.json'), '\n');
       if (mutation === 'baseline-bytes')

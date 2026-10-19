@@ -35,7 +35,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
-      "sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145"
+      "sha256": "a192bf4c29627cf222e8112449e83cf22afa8027d8b936e51a492b6eb583187e"
     }
   ],
   "assertions": [
@@ -1154,75 +1154,94 @@
       "method": "FormerRecordBoundaryRemainsAdmitted",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "obsolete-format-retired",
+      "current": null,
+      "reason": "The 255/256/257 sum counts native SESSION records plus decoded continuation items. That representation is retired; actual current SDK capacity retains its own measured candidate/context episodes and refusal, without promising the former record count.",
+      "format_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "FormerRecordBoundaryRemainsAdmitted",
-        "utf8_start": 24657,
-        "utf8_length": 746,
-        "body_sha256": "396489a431674877f23a1fce2ea137f19d1069a40aaa1991d43c7c092da1d014"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "396489a431674877f23a1fce2ea137f19d1069a40aaa1991d43c7c092da1d014",
+        "disposition": "obsolete-format-retired",
+        "reason": "The 255/256/257 sum counts native SESSION records plus decoded continuation items. That representation is retired; actual current SDK capacity retains its own measured candidate/context episodes and refusal, without promising the former record count.",
+        "current_oracle_labels": [
+          "retained_inputs_not_dropped_to_fit_current_round",
+          "first_round_completed"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "R5GrowthRootCountBoundaryIsNotAcceptedHistory",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "obsolete-format-retired",
+      "current": null,
+      "reason": "The adjacent native completed-run root-count grammar deliberately uses duplicated record history that is never accepted replay. Current SDK import validates its own checkpoint/candidate/provider-format graph; native root count and inner stable-plan grammar no longer exist.",
+      "format_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "R5GrowthRootCountBoundaryIsNotAcceptedHistory",
-        "utf8_start": 25403,
-        "utf8_length": 1316,
-        "body_sha256": "f29a0958d9b94e5314521dec735244506660849fda74a13cb0f68806a8d80019"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "f29a0958d9b94e5314521dec735244506660849fda74a13cb0f68806a8d80019",
+        "disposition": "obsolete-format-retired",
+        "reason": "The adjacent native completed-run root-count grammar deliberately uses duplicated record history that is never accepted replay. Current SDK import validates its own checkpoint/candidate/provider-format graph; native root count and inner stable-plan grammar no longer exist.",
+        "current_oracle_labels": ["unsupported_saved_context_has_no_invented_work"]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "R5GrowthPlaintextAndRecordWriterBoundaries",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "obsolete-format-retired",
+      "current": null,
+      "reason": "The native record writer and 16 MiB SESSION plaintext serializer limits, including deliberately overlong workflow root text, are retired. Current S1 limits its opaque SDK payload to 196608 bytes and authenticates exact framing; current SDK cumulative encoded-context capacity is independently measured.",
+      "format_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "R5GrowthPlaintextAndRecordWriterBoundaries",
-        "utf8_start": 26719,
-        "utf8_length": 1415,
-        "body_sha256": "bd590550c2b9899ba644e56ccbc2a7ce78529ccfc4af434f00fb45634b7d14ff"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "bd590550c2b9899ba644e56ccbc2a7ce78529ccfc4af434f00fb45634b7d14ff",
+        "disposition": "obsolete-format-retired",
+        "reason": "The native record writer and 16 MiB SESSION plaintext serializer limits, including deliberately overlong workflow root text, are retired. Current S1 limits its opaque SDK payload to 196608 bytes and authenticates exact framing; current SDK cumulative encoded-context capacity is independently measured.",
+        "current_oracle_labels": [
+          "ExactMaximumAndMalformedLengthsAreBoundedBeforePayloadAllocation",
+          "byte_probe_upper_admitted"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "R5GrowthDecodedContinuationBoundaries",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "obsolete-format-retired",
+      "current": null,
+      "reason": "Individual and aggregate decoded native continuation-item payload limits belong to the removed provider codec and SESSION writer. Current SDK context retention and import owns its encoded format; no native continuation items are reconstructed.",
+      "format_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "R5GrowthDecodedContinuationBoundaries",
-        "utf8_start": 28134,
-        "utf8_length": 876,
-        "body_sha256": "c66f2c4b1f4907d9ad92849fadf885cd35b42531417daae91556ee0caa3f2eea"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "c66f2c4b1f4907d9ad92849fadf885cd35b42531417daae91556ee0caa3f2eea",
+        "disposition": "obsolete-format-retired",
+        "reason": "Individual and aggregate decoded native continuation-item payload limits belong to the removed provider codec and SESSION writer. Current SDK context retention and import owns its encoded format; no native continuation items are reconstructed.",
+        "current_oracle_labels": [
+          "retained_inputs_not_dropped_to_fit_current_round",
+          "first_round_completed"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "R5GrowthReconstructedRequestByteAndMessageBoundaries",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated",
+      "current": null,
+      "reason": "Keep the generic AgentLoop request-byte and message-count limits in actual pre-dispatch execution tests; retire only invoking those limits through the removed SESSION restorer. No generic loop body or bound changes, and no claim that SDK capacity equals native request numbers.",
+      "format_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "R5GrowthReconstructedRequestByteAndMessageBoundaries",
-        "utf8_start": 29010,
-        "utf8_length": 1359,
-        "body_sha256": "c900e62e2b52b1be3c4c5ead38dc08f5751c6471c1b51bd0e29d1878336df6ce"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "c900e62e2b52b1be3c4c5ead38dc08f5751c6471c1b51bd0e29d1878336df6ce",
+        "disposition": "migrated",
+        "reason": "Keep the generic AgentLoop request-byte and message-count limits in actual pre-dispatch execution tests; retire only invoking those limits through the removed SESSION restorer. No generic loop body or bound changes, and no claim that SDK capacity equals native request numbers.",
+        "current_oracle_labels": ["SerializedRequestByteCapIsExact", "TotalMessageCapIsExact"]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",

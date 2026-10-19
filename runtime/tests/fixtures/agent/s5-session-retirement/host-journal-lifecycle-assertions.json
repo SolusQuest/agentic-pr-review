@@ -58,7 +58,7 @@
         "source and successor execution/round differ"
       ],
       "historical_retirement": "Previous P5 terminal records and completed anchors are actually cleaned by their existing owner before source consumption; the one-use claim is a separately authenticated current object.",
-      "historical_oracle": "Original fifteen-object codec and bytes unchanged. Its current eleven-object legacy-compatible subset remains recovery-only; adding the current claim cannot qualify as the historical success topology."
+      "historical_oracle": "Original fifteen-object codec and bytes unchanged. Its current eleven-object historical-codec subset remains recovery-only; adding the current claim cannot qualify as the historical success topology."
     }
   ],
   "current_source_claim_owner": "CurrentHostTestComposition performs actual CandidatePreparation journal scope for source selection/preparation/claim, resolves committed only after real claim, then executes current work. No capability or journal guard is bypassed.",
@@ -66,7 +66,7 @@
     "source_commit": "61e36e4adfce98dbfd7e4689978848981004f148",
     "workflow_run": "https://github.com/SolusQuest/agentic-pr-review/actions/runs/39307647661",
     "stages": "all passed including actual S2 claim, S3 commit/restart, S4 restored successor and V3 capacity",
-    "live_provider_requests": 0
+    "live_calls": 0
   },
   "qualification": "New-source full Ubuntu execution remains required; the supporting earlier exact-source actual SDK run is not final qualification after retirement."
 }

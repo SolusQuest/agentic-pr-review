@@ -1,0 +1,94 @@
+{
+  "kind": "apr-cr1-s5-five-native-format-dispositions-v1",
+  "owner_issue": 409,
+  "sdk_context_import_qualified": false,
+  "original_methods": 5,
+  "oracles": [
+    {
+      "path": "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+      "sha256": "59a485d4b0ed08dabf3d81c7eba9f0670e67a94574ba3374dcf2237ab6814416"
+    },
+    {
+      "path": "runtime/tests/SolusCapacityFixture/CapacityHostRun.cs",
+      "sha256": "d5781a2b8fd63c2df7889fe2dd9101ebe6fd1a9dbacf7f7f2cdfaae3a5fcda0b"
+    },
+    {
+      "path": "runtime/tests/SolusCapacityFixture/CapacityProbes.cs",
+      "sha256": "b69e83717e7a49604a63ba91f766f5fea8a504773ca3d405b7724f9cd725e8d9"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs",
+      "sha256": "b2bba30305fff438352a154bd2a99343a1fbbfafe50cafd283c367aa2fc79ed4"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.R7CountLimits.cs",
+      "sha256": "192307f77be28eeb1ce98abf5bc9baa5e0c2b24cab3a0bab3bd98dd541c58508"
+    },
+    {
+      "path": "runtime/tests/SolusCapacityFixture/verify.mjs",
+      "sha256": "73aedde27b313c5bee518f65f4f11abb60fcca4bc05c6938746e7d7187bf3a81"
+    }
+  ],
+  "rows": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "FormerRecordBoundaryRemainsAdmitted",
+      "original_body_sha256": "396489a431674877f23a1fce2ea137f19d1069a40aaa1991d43c7c092da1d014",
+      "disposition": "obsolete-format-retired",
+      "reason": "The 255/256/257 sum counts native SESSION records plus decoded continuation items. That representation is retired; actual current SDK capacity retains its own measured candidate/context episodes and refusal, without promising the former record count.",
+      "current_oracle_labels": [
+        "retained_inputs_not_dropped_to_fit_current_round",
+        "first_round_completed"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthRootCountBoundaryIsNotAcceptedHistory",
+      "original_body_sha256": "f29a0958d9b94e5314521dec735244506660849fda74a13cb0f68806a8d80019",
+      "disposition": "obsolete-format-retired",
+      "reason": "The adjacent native completed-run root-count grammar deliberately uses duplicated record history that is never accepted replay. Current SDK import validates its own checkpoint/candidate/provider-format graph; native root count and inner stable-plan grammar no longer exist.",
+      "current_oracle_labels": ["unsupported_saved_context_has_no_invented_work"]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthPlaintextAndRecordWriterBoundaries",
+      "original_body_sha256": "bd590550c2b9899ba644e56ccbc2a7ce78529ccfc4af434f00fb45634b7d14ff",
+      "disposition": "obsolete-format-retired",
+      "reason": "The native record writer and 16 MiB SESSION plaintext serializer limits, including deliberately overlong workflow root text, are retired. Current S1 limits its opaque SDK payload to 196608 bytes and authenticates exact framing; current SDK cumulative encoded-context capacity is independently measured.",
+      "current_oracle_labels": [
+        "ExactMaximumAndMalformedLengthsAreBoundedBeforePayloadAllocation",
+        "byte_probe_upper_admitted"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthDecodedContinuationBoundaries",
+      "original_body_sha256": "c66f2c4b1f4907d9ad92849fadf885cd35b42531417daae91556ee0caa3f2eea",
+      "disposition": "obsolete-format-retired",
+      "reason": "Individual and aggregate decoded native continuation-item payload limits belong to the removed provider codec and SESSION writer. Current SDK context retention and import owns its encoded format; no native continuation items are reconstructed.",
+      "current_oracle_labels": [
+        "retained_inputs_not_dropped_to_fit_current_round",
+        "first_round_completed"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthReconstructedRequestByteAndMessageBoundaries",
+      "original_body_sha256": "c900e62e2b52b1be3c4c5ead38dc08f5751c6471c1b51bd0e29d1878336df6ce",
+      "disposition": "migrated",
+      "reason": "Keep the generic AgentLoop request-byte and message-count limits in actual pre-dispatch execution tests; retire only invoking those limits through the removed SESSION restorer. No generic loop body or bound changes, and no claim that SDK capacity equals native request numbers.",
+      "current_oracle_labels": ["SerializedRequestByteCapIsExact", "TotalMessageCapIsExact"]
+    }
+  ],
+  "supporting_execution": {
+    "source_commit": "61e36e4adfce98dbfd7e4689978848981004f148",
+    "actual_package_run": "https://github.com/SolusQuest/agentic-pr-review/actions/runs/39307647661",
+    "actual_package_result": "success; S1/S4/V3 and two original archives; zero live calls",
+    "retained_generic_bounds": "15 native request/count-limit cases passed; unchanged bodies also execute in complete Ubuntu R2 suite",
+    "final_qualification_required": true
+  }
+}
