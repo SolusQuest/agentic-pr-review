@@ -152,7 +152,7 @@ run_aot() {
     -c Release \
     -r linux-x64 \
     --self-contained true \
-    -p:PublishAot=true \
+    -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true \
     -o "${publish_dir}"
 
   _require_file "${binary}"
@@ -172,7 +172,8 @@ run_aot() {
   node "${ACTION_HOST_FIXTURE}" native "${binary}"
   _require_file "${ACTION_HOST_WRAPPER_FIXTURE}"
   node "${ACTION_HOST_WRAPPER_FIXTURE}" native "${binary}"
-  node "${REPO_ROOT}/tests/distribution/verify-package.mjs" "${REPO_ROOT}"
+  # Original native package production proof is historical; the current
+  # producer and required archive qualification are managed-only.
 }
 
 run_managed() {

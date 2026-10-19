@@ -7,7 +7,7 @@ import { readBoundedFile } from '../../../scripts/release/build-payload.format.m
 import {
   MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES,
   parseManagedPayloadMap,
-  parsePayloadMap,
+  parseHistoricalNativePayloadMapForFixture,
   PAYLOAD_REPOSITORY,
 } from './payload-map.js';
 import type { RepositoryTestPayloadTransport } from './release-payload.js';
@@ -32,41 +32,52 @@ export interface InstalledActionSourceRequest {
   readonly signal: AbortSignal;
 }
 
-/** Runner context supplies the ref. Tag use requires the R7 immutable-tag publication invariant. */
-export async function resolveInstalledActionSource(
+/** Historical native source fixture only. Runner context supplies the ref. Tag use requires the R7 immutable-tag publication invariant. */
+export async function resolveHistoricalInstalledActionSourceForFixture(
   request: InstalledActionSourceRequest,
 ): Promise<string> {
-  return resolve(request, (url, options, callback) => httpsRequest(url, options, callback), false);
+  return resolve(
+    request,
+    (url, options, callback) => httpsRequest(url, options, callback),
+    parseHistoricalNativePayloadMapForFixture,
+    false,
+  );
 }
 
 /** The ordinary managed Action selects this capability explicitly, never by fallback. */
 export async function resolveInstalledManagedActionSource(
   request: InstalledActionSourceRequest,
 ): Promise<string> {
-  return resolve(request, (url, options, callback) => httpsRequest(url, options, callback), true);
+  return resolve(
+    request,
+    (url, options, callback) => httpsRequest(url, options, callback),
+    parseManagedPayloadMap,
+    true,
+  );
 }
 
 /** Explicit repository transport seam; no input/environment selects it in the product. */
 export function createRepositoryTestActionSourceResolver(
   transport: RepositoryTestPayloadTransport,
-): typeof resolveInstalledActionSource {
-  return (request) => resolve(request, transport, false);
+): typeof resolveHistoricalInstalledActionSourceForFixture {
+  return (request) => resolve(request, transport, parseHistoricalNativePayloadMapForFixture, false);
 }
 
 export function createRepositoryTestManagedActionSourceResolver(
   transport: RepositoryTestPayloadTransport,
 ): typeof resolveInstalledManagedActionSource {
-  return (request) => resolve(request, transport, true);
+  return (request) => resolve(request, transport, parseManagedPayloadMap, true);
 }
 
 async function resolve(
   request: InstalledActionSourceRequest,
   transport: RepositoryTestPayloadTransport,
+  parseMap: typeof parseManagedPayloadMap | typeof parseHistoricalNativePayloadMapForFixture,
   managed: boolean,
 ): Promise<string> {
   const { actionRoot, actionRepository, actionRef, signal } = request;
   const mapBytes = Buffer.from(request.mapBytes);
-  const map = managed ? parseManagedPayloadMap(mapBytes) : parsePayloadMap(mapBytes);
+  const map = parseMap(mapBytes);
   if (
     actionRepository !== PAYLOAD_REPOSITORY ||
     !path.isAbsolute(actionRoot) ||

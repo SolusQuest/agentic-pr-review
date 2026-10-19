@@ -28,10 +28,10 @@ jobs:
         if: github.event_name == 'pull_request'
         run: npm run r4:trusted-proof:fixture-admission
 
-      - name: Install AOT build dependencies
+      - name: Install managed proof native-asset dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev strace
+          sudo apt-get install -y gcc strace
 
       - name: Set up exact R7-D1 package .NET SDK
         uses: actions/setup-dotnet@v5
@@ -92,10 +92,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install AOT build dependencies
+      - name: Install managed proof native-asset dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y gcc
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -140,10 +140,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install AOT build dependencies
+      - name: Install managed proof native-asset dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y gcc
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -187,10 +187,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install AOT build dependencies
+      - name: Install managed proof native-asset dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y gcc
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -209,11 +209,11 @@ jobs:
           git status --porcelain
           test -z "$(git status --porcelain)"
 
-      - name: R5 deterministic evaluation gate in framework and Linux x64 Native AOT
-        run: bash runtime/scripts/verify-r5-evaluation.sh all
+      - name: R5 deterministic evaluation gate in the retained framework supporting fixture
+        run: bash runtime/scripts/verify-r5-evaluation.sh framework
 
-      - name: R7 capacity gate in framework and Linux x64 Native AOT
-        run: bash runtime/scripts/verify-r7-capacity.sh all
+      - name: R7 capacity gate in the retained framework supporting fixture
+        run: bash runtime/scripts/verify-r7-capacity.sh framework
 
   r6-economics-gate:
     runs-on: ubuntu-24.04
@@ -237,10 +237,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install AOT and execution audit dependencies
+      - name: Install managed native-asset and execution audit dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev strace
+          sudo apt-get install -y gcc strace
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -248,8 +248,8 @@ jobs:
 
       - run: npm ci
 
-      - name: R6 offline economics gate in framework and Linux x64 Native AOT
-        run: bash runtime/scripts/verify-r6-economics.sh all
+      - name: R6 offline economics gate in the retained framework supporting fixture
+        run: bash runtime/scripts/verify-r6-economics.sh framework
 
   trusted-proof-payload:
     runs-on: ubuntu-24.04
@@ -316,10 +316,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Install current-head E2P Native AOT and network-audit dependencies
+      - name: Install current-head FDD and network-audit dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang strace zlib1g-dev
+          sudo apt-get install -y gcc strace
 
       - name: Set up exact current-head R4 E2P .NET SDK
         uses: actions/setup-dotnet@v5
@@ -380,10 +380,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Install current-head E2P Native AOT and network-audit dependencies
+      - name: Install current-head FDD and network-audit dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang strace zlib1g-dev
+          sudo apt-get install -y gcc strace
 
       - name: Set up exact current-head R4 E2P .NET SDK
         uses: actions/setup-dotnet@v5
@@ -554,10 +554,10 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Install AOT build dependencies
+      - name: Install managed proof native-asset dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y gcc
 
       - run: npm ci
 

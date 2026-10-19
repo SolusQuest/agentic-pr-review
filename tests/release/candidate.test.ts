@@ -1,10 +1,14 @@
+import { verifyManagedCandidateArchive } from './verify-managed-candidate-archive.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { parsePayloadMap } from '../../src/action-wrapper/launcher/payload-map.js';
+import {
+  parseManagedPayloadMap,
+  parseHistoricalNativePayloadMapForFixture as parseHistoricalNativePayloadMap,
+} from '../../src/action-wrapper/launcher/payload-map.js';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import {
   CAPS,
@@ -54,20 +58,27 @@ describe('immutable candidate and the shared D2 consumer map projection', () => 
       payload: f.receipt,
     });
     expect(c.buildInputs).toEqual(JSON.parse(f.record.bytes.toString()).buildInputs);
-    expect(c.receipt.members).toHaveLength(3);
-    expect(parsePayloadMap(f.record.mapBytes)).toEqual(map);
+    expect(c.receipt.members.map((m: any) => m.path)).toEqual([
+      'agentic-pr-review/AgenticPrReview.Runtime.deps.json',
+      'agentic-pr-review/AgenticPrReview.Runtime.dll',
+      'agentic-pr-review/AgenticPrReview.Runtime.runtimeconfig.json',
+      'agentic-pr-review/THIRD-PARTY-NOTICES.txt',
+      'agentic-pr-review/manifest.json',
+    ]);
+    expect(parseManagedPayloadMap(f.record.mapBytes)).toEqual(map);
   });
-  test('matches the exact shared #343 synthetic map fixture without activating a consumer', () => {
-    // Snapshot from the coordinator-approved #343 map-contract revision 2.
-    // All version/source/workflow/member identities are synthetic, non-executable.
+  test('preserves original #343 native map evidence and rejects it as a current managed candidate', () => {
     const shared = JSON.parse(readFileSync('tests/release/shared-map.fixture.json', 'utf8'));
-    const producer = { ...producerFixture(), workflowCommit: shared.builder.workflowCommit };
-    const map = proposedMap(shared.payload, producer);
-    expect(map).toEqual(shared);
-    expect(parsePayloadMap(Buffer.from(canonicalJson(map)))).toEqual(shared);
-    expect(sha256(canonicalJson(map))).toBe(
-      'e829f6b9b8a7d10d3e563d934214ce8f7e9e8d1c412eee634a145d49eabdbf21',
-    );
+    const bytes = Buffer.from(canonicalJson(shared));
+    expect(parseHistoricalNativePayloadMap(bytes)).toEqual(shared);
+    expect(() => parseManagedPayloadMap(bytes)).toThrow('wrapper_payload_map_invalid');
+    expect(() =>
+      proposedMap(shared.payload, {
+        ...producerFixture(),
+        workflowCommit: shared.builder.workflowCommit,
+      }),
+    ).toThrow('invalid_managed_receipt');
+    expect(sha256(bytes)).toBe('e829f6b9b8a7d10d3e563d934214ce8f7e9e8d1c412eee634a145d49eabdbf21');
   });
   test.each(['sourceCommit', 'sourceTree', 'releaseVersion', 'archiveSha256'])(
     'rejects independently expected %s drift before output',
@@ -296,5 +307,46 @@ describe('immutable candidate and the shared D2 consumer map projection', () => 
     } finally {
       await rm(parent, { recursive: true, force: true });
     }
+  });
+});
+
+describe('managed full-inventory candidate bounds and original-byte validator', () => {
+  test('admits a complete managed inventory larger than the retired native envelopes', () => {
+    const p = packageFixture(
+      Array.from({ length: 480 }, (_, i) => ({
+        path: 'resources/member-' + String(i).padStart(3, '0') + '.txt',
+        bytes: Buffer.alloc(0),
+      })),
+    );
+    const producer = producerFixture(),
+      storage = storageFixture(producer);
+    const record = createCandidate(p.archive, p.receipt, producer, storage, {
+      ...p.receipt.identity,
+      archiveSha256: p.receipt.archiveSha256,
+    });
+    expect(record.mapBytes.length).toBeGreaterThan(16384);
+    expect(record.bytes.length).toBeGreaterThan(65536);
+    expect(record.mapBytes.length).toBeLessThanOrEqual(CAPS.map);
+    expect(record.bytes.length).toBeLessThanOrEqual(CAPS.metadata);
+    expect(
+      inspectCandidate(p.archive, record.bytes, record.mapBytes, record.candidateSha256).receipt
+        .members,
+    ).toHaveLength(485);
+    expect(parseManagedPayloadMap(record.mapBytes).payload.members).toHaveLength(485);
+  });
+  test('the pure actual-archive hook validates supplied original bytes and all named mutations without changing B', () => {
+    // Structural fixture here. The hosted archive harness calls this SAME helper on real Solus B in both roles.
+    const p = packageFixture(),
+      before = sha256(p.archive);
+    const result = verifyManagedCandidateArchive({
+      archive: p.archive,
+      receipt: p.receipt,
+      sourceCommit: p.receipt.identity.sourceCommit,
+      sourceTree: p.receipt.identity.sourceTree,
+    });
+    expect(result.originalArchiveSha256).toBe(before);
+    expect(result.metadata).toBe('synthetic-not-provenance');
+    expect(result.negativeCases).toBe(11);
+    expect(sha256(p.archive)).toBe(before);
   });
 });

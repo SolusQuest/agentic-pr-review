@@ -97569,19 +97569,8 @@ import { constants as constants3 } from "node:fs";
 import { chmod as chmod2, mkdir as mkdir2, mkdtemp, open as open2, rm as rm2 } from "node:fs/promises";
 import { join as join2 } from "node:path";
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
-var LIMITS = Object.freeze({
-  archive: 32 * 1024 * 1024,
-  executable: 64 * 1024 * 1024,
-  notices: 1024 * 1024,
-  manifest: 64 * 1024,
-  expanded: 66 * 1024 * 1024,
-  releaseVersion: 48
-});
-var MEMBERS = Object.freeze([
-  { path: "agentic-pr-review/agentic-pr-review", mode: 493, limit: LIMITS.executable },
-  { path: "agentic-pr-review/manifest.json", mode: 420, limit: LIMITS.manifest },
-  { path: "agentic-pr-review/THIRD-PARTY-NOTICES.txt", mode: 420, limit: LIMITS.notices }
-]);
+var NOTICE_MAXIMUM_BYTES = 1024 * 1024;
+var RELEASE_VERSION_MAXIMUM_BYTES = 48;
 var gzipHeader = Buffer.from("1f8b0800000000000203", "hex");
 var hex40 = /^[a-f0-9]{40}$/;
 var hex64 = /^[a-f0-9]{64}$/;
@@ -97615,7 +97604,7 @@ function canonicalJson(value) {
 }
 function validateReleaseVersion(version3) {
   requireThat(
-    typeof version3 === "string" && version3.length <= LIMITS.releaseVersion && versionPattern.test(version3),
+    typeof version3 === "string" && version3.length <= RELEASE_VERSION_MAXIMUM_BYTES && versionPattern.test(version3),
     "invalid_release_version"
   );
   return version3;
@@ -97640,9 +97629,6 @@ function validateIdentity(identity2) {
     identity2.informationalVersion === compiledIdentity(identity2.releaseVersion, identity2.buildId),
     "invalid_compiled_identity"
   );
-}
-function archiveName(version3) {
-  return "agentic-pr-review-" + validateReleaseVersion(version3) + "-linux-x64.tar.gz";
 }
 function entryHeader(spec, size) {
   const header3 = Buffer.alloc(512);
@@ -97992,7 +97978,7 @@ function inspectManagedPackage(bytes, expected) {
   );
   const notices = files.find((file) => file.path === managedNoticesPath);
   requireThat(
-    notices && notices.bytes.length > 0 && notices.bytes.length <= LIMITS.notices && sha256(notices.bytes) === manifest.buildInputs.noticesSha256,
+    notices && notices.bytes.length > 0 && notices.bytes.length <= NOTICE_MAXIMUM_BYTES && sha256(notices.bytes) === manifest.buildInputs.noticesSha256,
     "invalid_managed_notices"
   );
   new TextDecoder("utf-8", { fatal: true }).decode(notices.bytes);
@@ -98230,81 +98216,6 @@ function readString(scanner) {
 // src/action-wrapper/launcher/payload-map.ts
 var PAYLOAD_REPOSITORY = "SolusQuest/agentic-pr-review";
 var PAYLOAD_MAP_MAXIMUM_BYTES = 16 * 1024;
-function parsePayloadMap(bytes) {
-  try {
-    const map = exactRecord(parseStrictJson(bytes, PAYLOAD_MAP_MAXIMUM_BYTES), [
-      "formatVersion",
-      "repository",
-      "tag",
-      "builder",
-      "payload"
-    ]);
-    const builder = exactRecord(map.builder, ["repository", "workflowPath", "workflowCommit"]);
-    const receipt = exactRecord(map.payload, [
-      "formatVersion",
-      "archiveName",
-      "archiveSize",
-      "archiveSha256",
-      "identity",
-      "members"
-    ]);
-    const identity2 = exactRecord(receipt.identity, [
-      "releaseVersion",
-      "platform",
-      "sourceCommit",
-      "sourceTree",
-      "buildId",
-      "informationalVersion"
-    ]);
-    const version3 = validateReleaseVersion(identity2.releaseVersion);
-    if (map.formatVersion !== 1 || map.repository !== PAYLOAD_REPOSITORY || map.tag !== `payload-${version3}` || builder.repository !== PAYLOAD_REPOSITORY || typeof builder.workflowPath !== "string" || !/^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.ya?ml$/u.test(builder.workflowPath) || !lowerHex(builder.workflowCommit, 40) || receipt.formatVersion !== 1 || receipt.archiveName !== archiveName(version3) || !positiveSize(receipt.archiveSize, LIMITS.archive) || !lowerHex(receipt.archiveSha256, 64) || identity2.platform !== "linux-x64" || !lowerHex(identity2.sourceCommit, 40) || !lowerHex(identity2.sourceTree, 40) || !lowerHex(identity2.buildId, 64) || identity2.informationalVersion !== compiledIdentity(version3, identity2.buildId) || !Array.isArray(receipt.members) || receipt.members.length !== MEMBERS.length) {
-      fail("wrapper_payload_map_invalid");
-    }
-    const members = receipt.members.map((value, index) => {
-      const member = exactRecord(value, ["path", "mode", "size", "sha256"]);
-      const spec = MEMBERS[index];
-      if (member.path !== spec.path || member.mode !== spec.mode || !positiveSize(member.size, spec.limit) || !lowerHex(member.sha256, 64)) {
-        fail("wrapper_payload_map_invalid");
-      }
-      return Object.freeze({
-        path: spec.path,
-        mode: spec.mode,
-        size: member.size,
-        sha256: member.sha256
-      });
-    });
-    return Object.freeze({
-      formatVersion: 1,
-      repository: PAYLOAD_REPOSITORY,
-      tag: `payload-${version3}`,
-      builder: Object.freeze({
-        repository: PAYLOAD_REPOSITORY,
-        workflowPath: builder.workflowPath,
-        workflowCommit: builder.workflowCommit
-      }),
-      payload: Object.freeze({
-        formatVersion: 1,
-        archiveName: receipt.archiveName,
-        archiveSize: receipt.archiveSize,
-        archiveSha256: receipt.archiveSha256,
-        identity: Object.freeze({
-          releaseVersion: version3,
-          platform: "linux-x64",
-          sourceCommit: identity2.sourceCommit,
-          sourceTree: identity2.sourceTree,
-          buildId: identity2.buildId,
-          informationalVersion: identity2.informationalVersion
-        }),
-        members: Object.freeze(members)
-      })
-    });
-  } catch {
-    fail("wrapper_payload_map_invalid");
-  }
-}
-function positiveSize(value, maximum) {
-  return Number.isSafeInteger(value) && value > 0 && value <= maximum;
-}
 var MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES = 256 * 1024;
 function parseManagedPayloadMap(bytes) {
   try {
@@ -98350,12 +98261,17 @@ var installedFiles = [
   ["dist/index.js", 8 * 1024 * 1024]
 ];
 async function resolveInstalledManagedActionSource(request2) {
-  return resolve2(request2, (url2, options, callback) => httpsRequest(url2, options, callback), true);
+  return resolve2(
+    request2,
+    (url2, options, callback) => httpsRequest(url2, options, callback),
+    parseManagedPayloadMap,
+    true
+  );
 }
-async function resolve2(request2, transport, managed) {
+async function resolve2(request2, transport, parseMap, managed) {
   const { actionRoot, actionRepository, actionRef, signal } = request2;
   const mapBytes = Buffer.from(request2.mapBytes);
-  const map = managed ? parseManagedPayloadMap(mapBytes) : parsePayloadMap(mapBytes);
+  const map = parseMap(mapBytes);
   if (actionRepository !== PAYLOAD_REPOSITORY || !path4.isAbsolute(actionRoot) || actionRef !== map.payload.identity.releaseVersion && !lowerHex(actionRef, 40)) {
     fail("wrapper_action_source_invalid");
   }
@@ -105042,4 +104958,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 8f3fb9b3bb706a8f050893549dcd79fd92fa157fdb36183a071d0922404b10f2
+// Action source inventory sha256: 98256f37a5d20c5f28f5e9765f4b761d4c2c08b3d289c0c4fa39278a0aa098f6

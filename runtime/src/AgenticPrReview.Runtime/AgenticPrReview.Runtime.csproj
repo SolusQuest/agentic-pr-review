@@ -4,16 +4,18 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PublishAot>true</PublishAot>
-    <IsAotCompatible>true</IsAotCompatible>
-    <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
+    <!-- Public development/fixture builds do not restore private packages.
+         The only production producer selects the locked APRManagedPackage profile. -->
+    <PublishAot>false</PublishAot>
+    <IsAotCompatible>$(PublishAot)</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <InformationalVersion Condition="'$(APRReleasePackage)' != 'true' and '$(APRManagedPackage)' != 'true'">0.1.0-dev</InformationalVersion>
-    <InformationalVersion Condition="'$(APRReleasePackage)' == 'true' or '$(APRManagedPackage)' == 'true'">$(APRReleaseVersion)+build.$(APRBuildId)</InformationalVersion>
+    <InformationalVersion Condition="'$(APRManagedPackage)' != 'true'">0.1.0-dev</InformationalVersion>
+    <InformationalVersion Condition="'$(APRManagedPackage)' == 'true'">$(APRReleaseVersion)+build.$(APRBuildId)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
-  <!-- CR1-D1 producer-only profile; native defaults remain until CR1-D6 cutover. -->
+  <!-- The selected production package: complete framework-dependent publish tree. -->
   <PropertyGroup Condition="'$(APRManagedPackage)' == 'true'">
     <DefineConstants>$(DefineConstants);APR_SOLUS_MANAGED</DefineConstants>
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>

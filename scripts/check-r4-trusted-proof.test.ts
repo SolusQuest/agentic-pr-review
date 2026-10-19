@@ -173,6 +173,35 @@ describe('R4 E3 trusted proof policy', () => {
           );
       },
     ],
+    [
+      'package read authority outside manual job',
+      (w: any) => {
+        w.permissions.packages = 'read';
+      },
+    ],
+    [
+      'restore token moved to original producer',
+      (w: any) => {
+        const steps = w.jobs['prepare-build'].steps;
+        const restore = steps.find((s: any) => s.id === 'restore');
+        steps.find((s: any) => s.id === 'build').env.GITHUB_TOKEN = restore.env.GITHUB_TOKEN;
+        delete restore.env.GITHUB_TOKEN;
+      },
+    ],
+    [
+      'unreviewed restore source',
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'restore').env.EXPECTED_HEAD =
+          '${{ inputs.source-commit }}';
+      },
+    ],
+    [
+      'unverified cache',
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'build').env.NUGET_PACKAGES =
+          '/unverified/cache';
+      },
+    ],
   ])('rejects a broadened P1 candidate route: %s', (_name, mutate) => {
     const workflowsRoot = copiedWorkflowsRoot();
     const pathname = path.join(workflowsRoot, 'release.yml');

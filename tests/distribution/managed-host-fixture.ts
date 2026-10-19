@@ -18,7 +18,7 @@ import path from 'node:path';
 import {
   collectManagedPublishTree,
   encodeManagedPackage,
-  inspectPackage,
+  inspectHistoricalNativePackageForFixture as inspectPackage,
   MANAGED_TARGET,
   sha256,
   type ManagedReceipt,
