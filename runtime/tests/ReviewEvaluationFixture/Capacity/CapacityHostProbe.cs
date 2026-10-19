@@ -15,6 +15,8 @@ using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
 using AgenticPrReview.Runtime.Tests.Host.Action;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
@@ -24,14 +26,13 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Capacity;
 
 // Separate production Host composition proof with synthetic network/artifact ports.
 // The large snapshot/local-store chain is genuinely cross-process; this Host probe is in-process.
-internal sealed class CapacityHostProbe
+internal sealed class CapacityHostProbe(int world = 0)
 {
     private readonly ScriptedLocatorStore store = new() { FilterListsByName = true, UseNumericObjectIds = true };
     private readonly ResetProbeRemote remote = new();
     private readonly ResetProbeClock time = new();
     private string? acceptedHead;
-    private readonly List<CapacityHistory> history = [];
-    private readonly List<string> acceptedUsers = [];
+    private int genuineSeedAcceptances;
     // Retain independently observed contexts across reset. Previously rejected and retired
     // contexts remain forbidden even when they are absent from the active accepted suffix.
     private readonly List<string> observedUsers = [];
@@ -41,10 +42,19 @@ internal sealed class CapacityHostProbe
     {
         var receipts = new List<CapacityHostReceipt>();
         receipts.Add(await InvokeAsync(new("host_seed", "success", 64, 1, 64), 0, false, token));
-        foreach (var mode in CapacitySpec.Failures)
-            receipts.Add(await InvokeAsync(new("host_" + mode, mode, mode == "context" ? 0 : 1, 0, 64), receipts.Count, false, token));
-        receipts.Add(await InvokeAsync(new("host_reset", "reset", 2, 1, 64), receipts.Count, true, token));
-        receipts.Add(await InvokeAsync(new("host_reset_restore", "success", 1, 0, 64), receipts.Count, true, token));
+        for (var index = 0; index < CapacitySpec.Failures.Length; index++)
+        {
+            // Each failed round consumes its own genuinely accepted source.
+            // Independent stores/worlds preserve every burned claim; none is
+            // refunded or removed to let another failed round reuse it.
+            var isolated = new CapacityHostProbe(index + 1);
+            await isolated.InvokeAsync(new("host_seed", "success", 64, 1, 64), 0, false, token);
+            var mode = CapacitySpec.Failures[index];
+            receipts.Add(await isolated.InvokeAsync(new("host_" + mode, mode,
+                mode == "context" ? 0 : 1, 0, 64), 1, false, token));
+        }
+        receipts.Add(await InvokeAsync(new("host_reset", "reset", 2, 1, 64), 1, true, token));
+        receipts.Add(await InvokeAsync(new("host_reset_restore", "success", 1, 0, 64), 2, true, token));
         return receipts.ToArray();
     }
 
@@ -66,18 +76,32 @@ internal sealed class CapacityHostProbe
         store.ProducingRunAttempt = launch.RunAttempt;
         var github = new FullPathGitHubFactory(scenario.Transport.PullRequest, previousHead: acceptedHead,
             withInlineFile: true, fileBytes: Encoding.UTF8.GetBytes((fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool) + "\n"));
-        var provider = new Provider(selected, selected.Mode == "reset" ? [] : history.ToArray(),
-            selected.Mode == "reset" ? [] : acceptedUsers.ToArray(),
-            observedUsers.Where(text => selected.Mode == "reset" || !acceptedUsers.Contains(text, StringComparer.Ordinal)).ToArray(), fresh);
+        var provider = new Provider(selected, [], [], observedUsers.ToArray(), fresh);
         var before = Inventory(launch);
         var protectedUpload = false;
-        if (selected.Mode is not ("success" or "reset"))
-            store.AfterUpload = (request, _) => protectedUpload |=
-                Classify(launch, request.Name, request.EncryptedBytes.Span) is not
-                    (StateObjectClass.PublicationIntent or StateObjectClass.PublicationFailure or StateObjectClass.Abandonment or StateObjectClass.Cleanup);
+        var claimUploads = 0;
+        var sourceRecordBound = true;
+        store.AfterUpload = (request, _) =>
+        {
+            if (request.Name.Value == LocatorRootFormat.StoreName) return;
+            var objectClass = ReadControl(launch, request.Name, request.EncryptedBytes.Span, (header, payload) =>
+            {
+                if (header.ObjectClass != StateObjectClass.ContextClaim) return;
+                claimUploads++;
+                CapacitySpec.Require(provider.Request is null, "current_claim_precedes_work");
+                CapacitySpec.Require(SolusContextClaimRecordCodec.TryDecode(payload, out var claim) && claim is not null &&
+                    SolusContextClaimRecordCodec.MatchesHeader(claim, header) &&
+                    header.ProducingRunIdentity == store.ProducingRunIdentity && header.ProducingRunAttempt == store.ProducingRunAttempt,
+                    "current_claim_authentication");
+                sourceRecordBound &= before.RecordHashes.Contains(claim!.RecordSha256);
+            });
+            if (selected.Mode is not ("success" or "reset"))
+                protectedUpload |= objectClass is not (StateObjectClass.ContextClaim or StateObjectClass.PublicationIntent or
+                    StateObjectClass.PublicationFailure or StateObjectClass.Abandonment or StateObjectClass.Cleanup);
+        };
         var writes = remote.MutationAttempts;
         var staging = Path.Combine(Path.GetTempPath(), "apr-r7-capacity-host-" + Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var completion = await new CurrentEvaluationHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github, new StatePorts(store, github),
             remote, provider, time, () => staging)).RunAsync(launch, token);
         CapacitySpec.Require(!Directory.Exists(staging), "host_cleanup");
@@ -88,6 +112,14 @@ internal sealed class CapacityHostProbe
         var success = selected.Mode is "success" or "reset";
         store.AfterUpload = null;
         var after = Inventory(launch);
+        var expectsClaim = phase > 0 && selected.Mode != "reset";
+        CapacitySpec.Require(claimUploads == (expectsClaim ? 1 : 0) && sourceRecordBound, "current_source_claim");
+        var priorClaims = before.Objects.Where(item => item.Value.Class == StateObjectClass.ContextClaim).ToArray();
+        var retainedClaims = after.Objects.Where(item => item.Value.Class == StateObjectClass.ContextClaim).ToArray();
+        CapacitySpec.Require(retainedClaims.Length == priorClaims.Length + claimUploads && priorClaims.All(item =>
+            after.Objects.TryGetValue(item.Key, out var retained) && retained == item.Value), "current_claim_never_refunded");
+        CapacitySpec.Require(provider.Request!.Continuation is null && provider.Request.StablePlan.PriorSessionSha256 is null,
+            "current_native_history_absent");
         var preserved = before.Hash == after.Hash;
         var noMutation = remote.MutationAttempts == writes;
         var noSummary = completion.Summary.FindingCount is null && completion.Summary.ReviewedSha is null && completion.Summary.PublicationUrl is null;
@@ -98,12 +130,10 @@ internal sealed class CapacityHostProbe
             CapacitySpec.Require(completion.Status == ActionHostStatus.Reviewed && completion.ProcessExitCode == 0 &&
                 completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted && !noMutation, "host_acceptance");
             CapacitySpec.Require(phase == 0 ? provider.Request!.Continuation is null : selected.Mode == "reset" ? isFresh :
-                provider.Request!.Continuation is not null && provider.Request.SessionId == previousSession, "host_continuation");
+                provider.Request!.Continuation is null && provider.Request.SessionId == previousSession, "host_continuation");
             acceptedHead = scenario.Transport.PullRequest.HeadSha;
             previousSession = provider.Request!.SessionId;
-            if (selected.Mode == "reset") { history.Clear(); acceptedUsers.Clear(); }
-            history.Add(new(selected.Id, selected.Calls, selected.ToolsPerTurn, provider.Request!.ReviewedIdentity));
-            acceptedUsers.Add(provider.CurrentUser!);
+            if (phase == 0) genuineSeedAcceptances++;
         }
         else
         {
@@ -128,30 +158,40 @@ internal sealed class CapacityHostProbe
         return new(selected.Id, code, completion.Status.ToString(), completion.ProcessExitCode,
             completion.Summary.StateDisposition.ToString(), provider.Outcome.Accounting!.ModelCalls,
             provider.Transport!.Sends, provider.Request!.Continuation is not null, noSummary, noMutation,
-            preserved && !protectedUpload, preserved, isFresh || fresh && provider.Transport.OldHistoryAbsent);
+            preserved && !protectedUpload, preserved, isFresh || fresh && provider.Transport.OldHistoryAbsent,
+            new("apr-s5-current-capacity-host-v1", 409, false, EvaluationSource.Commit, EvaluationSource.Tree,
+                EvaluationSource.Clean, world, phase, genuineSeedAcceptances, claimUploads, sourceRecordBound,
+                provider.Request.Continuation is null && provider.Request.StablePlan.PriorSessionSha256 is null));
     }
 
-    private (string Hash, Dictionary<string, (StateObjectClass Class, string Hash)> Objects) Inventory(ActionHostLaunchContract launch)
+    private (string Hash, Dictionary<string, (StateObjectClass Class, string Hash)> Objects, HashSet<string> RecordHashes) Inventory(ActionHostLaunchContract launch)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var objects = new Dictionary<string, (StateObjectClass, string)>(StringComparer.Ordinal);
+        var recordHashes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in store.Objects.OrderBy(item => item.Reference.ObjectId.Value, StringComparer.Ordinal))
         {
             var bytes = store.Bytes(item);
             var objectClass = item.Reference.Name.Value == LocatorRootFormat.StoreName ? StateObjectClass.LocatorRoot :
-                Classify(launch, item.Reference.Name, bytes);
+                ReadControl(launch, item.Reference.Name, bytes, (header, payload) =>
+                {
+                    if (header.ObjectClass == StateObjectClass.Candidate &&
+                        AcceptedStateGenerationRecordCodec.TryDecode(payload, out var generation))
+                        recordHashes.Add(generation!.SessionSha256);
+                });
             var digest = SHA256.HashData(bytes);
             objects.Add(item.Reference.ObjectId.Value, (objectClass, Convert.ToHexStringLower(digest)));
-            if (objectClass is not (StateObjectClass.PublicationIntent or StateObjectClass.PublicationFailure or StateObjectClass.Abandonment or StateObjectClass.Cleanup))
+            if (objectClass is not (StateObjectClass.PublicationIntent or StateObjectClass.PublicationFailure or StateObjectClass.Abandonment or StateObjectClass.Cleanup or StateObjectClass.ContextClaim))
             {
                 hash.AppendData(Encoding.UTF8.GetBytes(item.Reference.ObjectId.Value));
                 hash.AppendData(digest);
             }
         }
-        return (Convert.ToHexStringLower(hash.GetHashAndReset()), objects);
+        return (Convert.ToHexStringLower(hash.GetHashAndReset()), objects, recordHashes);
     }
 
-    private StateObjectClass Classify(ActionHostLaunchContract launch, OpaqueStoreName name, ReadOnlySpan<byte> encrypted)
+    private StateObjectClass ReadControl(ActionHostLaunchContract launch, OpaqueStoreName name, ReadOnlySpan<byte> encrypted,
+        Action<StateControlHeaderV1, byte[]>? inspect = null)
     {
         var repository = launch.RepositoryId.ToString(CultureInfo.InvariantCulture);
         using var access = AuthorizedLocatorAccess.IssueTrustedProofEvidenceOracle(repository);
@@ -167,7 +207,7 @@ internal sealed class CapacityHostProbe
             using var context = selected!;
             CapacitySpec.Require(StateControlEnvelopeV1Codec.TryDecrypt(context, access, name, encrypted,
                 out var header, out var payload, out _), "host_oracle_record");
-            try { return header!.ObjectClass; }
+            try { inspect?.Invoke(header!, payload); return header!.ObjectClass; }
             finally { CryptographicOperations.ZeroMemory(payload); }
         }
         finally { CryptographicOperations.ZeroMemory(sentinel!.Root); }

@@ -269,7 +269,7 @@ public sealed partial class ActionHostCompositionTests
     }
 
     [Fact]
-    public async Task ActualUncertainContextClaimAnchorCannotAuthorizeExplicitReset()
+    public async Task ActualUncertainClaimWriteRequiresObservationBeforeResetAuthority()
     {
         var world = new CapacityResetWorld();
         Assert.Equal(ActionHostStateDisposition.Accepted, (await world.RunAsync(0)).Completion.Summary.StateDisposition);
@@ -294,17 +294,13 @@ public sealed partial class ActionHostCompositionTests
         Assert.True(faultTriggered);
         Assert.Null(uncertain.Provider.Request);
         world.Store.AfterUpload = null;
-        world.Store.ReadBackFailure = OpaqueStoreFailure.None;
-        world.Store.MetadataFailure = OpaqueStoreFailure.None;
-        world.Store.DownloadFailure = OpaqueStoreFailure.None;
-        var anchors = new List<RetainedStateOpaqueWriteAnchor>();
-        ReadAcceptedStateRecords(world.Store, uncertain.Launch, world.Time, (header, payload, _) =>
-        {
-            if (header.ObjectClass == StateObjectClass.Cleanup &&
-                RetainedStateOpaqueWriteAnchorCodec.TryDecode(payload, out var anchor) && anchor is not null)
-                anchors.Add(anchor);
-        });
-        Assert.Contains(anchors, anchor => anchor.ObjectClass == StateObjectClass.ContextClaim);
+        // Independently observe the real immutable write and the three unavailable
+        // storage observations. S2 does not manufacture an opaque-write anchor.
+        var physical = Assert.Single(world.Store.Objects, item => item.Reference.Name == claimName &&
+            item.ProducingRun.Identity == uncertain.Launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(OpaqueStoreFailure.Io, (await world.Store.ReadBackExactAsync(new(physical), default)).Failure);
+        Assert.Equal(OpaqueStoreFailure.Io, (await world.Store.ReadMetadataAsync(new(physical.Reference), default)).Failure);
+        Assert.Equal(OpaqueStoreFailure.Io, (await world.Store.DownloadAsync(new(physical, checked((int)physical.Size)), default)).Failure);
         var before = world.Store.Objects.ToArray();
         var encrypted = before.ToDictionary(item => item.Reference.ObjectId.Value,
             item => world.Store.Bytes(item), StringComparer.Ordinal);
@@ -312,7 +308,7 @@ public sealed partial class ActionHostCompositionTests
         var deletes = world.Store.DeleteCalls;
         var writes = world.Publications;
         var reset = await world.RunAsync(3, reset: true, fresh: true);
-        Assert.Equal(ActionHostStatus.StateConflict, reset.Completion.Status);
+        Assert.Equal(ActionHostStatus.OutcomeAmbiguous, reset.Completion.Status);
         Assert.Null(reset.Provider.Request);
         Assert.True(reset.Completion.Accounting.IsCompleteZero);
         Assert.Equal(uploads, world.Store.UploadCalls);
@@ -320,6 +316,33 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(writes, world.Publications);
         Assert.Equal(before, world.Store.Objects.ToArray());
         Assert.All(before, item => Assert.Equal(encrypted[item.Reference.ObjectId.Value], world.Store.Bytes(item)));
+
+        // Observation recovery is not approval: authenticate the unchanged
+        // persisted claim/source again before invoking the same strict reset.
+        world.Store.ReadBackFailure = OpaqueStoreFailure.None;
+        world.Store.MetadataFailure = OpaqueStoreFailure.None;
+        world.Store.DownloadFailure = OpaqueStoreFailure.None;
+        Assert.Equal(physical, (await world.Store.ReadMetadataAsync(new(physical.Reference), default)).Metadata);
+        var claims = new List<SolusContextClaimRecord>();
+        var observed = ReadAcceptedStateRecords(world.Store, uncertain.Launch, world.Time, (header, payload, metadata) =>
+        {
+            if (header.ObjectClass != StateObjectClass.ContextClaim) return;
+            Assert.True(SolusContextClaimRecordCodec.TryDecode(payload, out var claim));
+            Assert.True(SolusContextClaimRecordCodec.MatchesHeader(claim!, header));
+            Assert.Equal(header.ProducingRunIdentity, metadata.ProducingRun.Identity);
+            claims.Add(claim!);
+        });
+        Assert.Equal(2, claims.Count);
+        Assert.All(claims, claim => Assert.Contains(observed.Generations,
+            source => source.Generation.SessionSha256 == claim.RecordSha256));
+        Assert.Equal(before, world.Store.Objects.ToArray());
+        Assert.All(before, item => Assert.Equal(encrypted[item.Reference.ObjectId.Value], world.Store.Bytes(item)));
+        var known = await world.RunAsync(3, reset: true, fresh: true);
+        Assert.Equal(ActionHostStateDisposition.Accepted, known.Completion.Summary.StateDisposition);
+        Assert.Equal(ActionHostStatus.Reviewed, known.Completion.Status);
+        Assert.Equal(1, known.Provider.Creates);
+        Assert.Null(known.Provider.Request!.Continuation);
+        Assert.Equal(writes + 1, world.Publications);
     }
 
     private static async Task<(CapacityResetWorld World, CapacityResetInvocation Source)> CurrentClaimedResetWorldAsync(bool advanceClock = false)

@@ -24,7 +24,16 @@ internal sealed record CapacityReceipt(string Id, string Code, int Calls, int To
 internal sealed record CapacityReply(CapacityReceipt Receipt, AcceptedLineage? Lineage, string PlaintextSha256);
 internal sealed record CapacityHostReceipt(string Id, string AgentCode, string Status, int ExitCode,
     string StateDisposition, int Calls, int Sends, bool Continuation, bool NoSuccessSummary,
-    bool NoPublicationMutation, bool NoCandidateMutation, bool PredecessorPreserved, bool FreshSession);
+    bool NoPublicationMutation, bool NoCandidateMutation, bool PredecessorPreserved, bool FreshSession,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapacityCurrentHostEvidence? CurrentHost = null);
+internal sealed record CapacityCurrentHostEvidence(
+    [property: JsonRequired] string Domain, [property: JsonRequired] int OwnerIssue,
+    [property: JsonRequired] bool SdkContextImportQualified,
+    [property: JsonRequired] string SourceCommit, [property: JsonRequired] string SourceTree,
+    [property: JsonRequired] bool SourceClean, [property: JsonRequired] int World,
+    [property: JsonRequired] int Invocation, [property: JsonRequired] int GenuineSeedAcceptances,
+    [property: JsonRequired] int SourceClaims, [property: JsonRequired] bool SourceRecordBound,
+    [property: JsonRequired] bool NativeHistoryAbsent);
 internal sealed record CapacityReport(string Schema, string Code, string CorpusSha256, string SourceCommit,
     string SourceTree, bool SourceClean, CapacityReceipt[] Cases, CapacityHostReceipt[] HostCases, bool Cleanup, [property: JsonRequired] string ObservationDomain);
 
