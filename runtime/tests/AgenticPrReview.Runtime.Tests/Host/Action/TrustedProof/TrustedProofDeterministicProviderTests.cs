@@ -180,6 +180,64 @@ public sealed class TrustedProofDeterministicProviderTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task CapacityObserverReadsRealLoopCarrierAndRejectsMetadataMutations()
+    {
+        var root = Directory.CreateTempSubdirectory("apr-r8-capacity-observer-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Join(root, "mode"), "r7-capacity-0");
+            var trusted = new AgentSessionTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
+                "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
+            Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
+            var run = new AgentRunRequest(new("repo", 404, new('a', 40), new('b', 40)), materialized!.StablePlan,
+                Context.SessionId, [.. materialized.ControlMessages, new("user", [new ProjectTextContent("Review the fixed capacity fixture.")])]);
+            const string path = FrameworkCanaries.ReviewedPath;
+            Directory.CreateDirectory(Path.Join(root, "proof"));
+            File.WriteAllText(Path.Join(root, path), FrameworkCanaries.ToolData + "\n");
+            var diff = new ReviewedDiffSource(run.ReviewedIdentity, path, null, "modified", false,
+                [new ReviewedDiffHunk(0, 0, 1, 1, [new ReviewedDiffLine("addition", null, 1, FrameworkCanaries.ToolData)])]);
+            var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
+                [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
+            var capture = new CapacityCapture(new FrameworkProviderHandler(root, Context));
+            var outcome = await new AgentLoop(capture, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess())).RunAsync(run, default);
+            Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code + ":" + capture.Failure);
+            Assert.Equal(6, capture.Requests.Count);
+            var request = capture.Requests[2];
+            var items = request.Continuation!.Items;
+            Assert.Equal(2, items.Length);
+            Assert.DoesNotContain(request.Messages.SelectMany(message => message.Contents), content => content is ProjectReasoningContent);
+            void Verify(ProjectChatRequest value) => FrameworkSessionCapacity.Observe(root, value, AgentRequestWriter.Write(value), 3, "r7-capacity-0");
+            Verify(request);
+            var first = items[0];
+            foreach (var replacement in new[]
+            {
+                first with { Readable = "wrong" }, first with { Opaque = "wrong" },
+                first with { Framing = "wrong" }, first with { AssociatedCallId = "wrong" },
+                first with { MessagePosition = first.MessagePosition + 1 }, first with { ContentPosition = 1 },
+            })
+                Assert.Throws<InvalidOperationException>(() => Verify(request with { Continuation = request.Continuation with { Items = [replacement, items[1]] } }));
+            foreach (var changed in new[] { items.Reverse().ToArray(), [first, first], [first], [.. items, first] })
+                Assert.Throws<InvalidOperationException>(() => Verify(request with { Continuation = request.Continuation with { Items = changed } }));
+            Assert.Throws<InvalidOperationException>(() => Verify(request with { Continuation = null }));
+            var messages = request.Messages.ToArray();
+            var inline = new ProjectReasoningContent(first.Readable, first.Opaque, first.Framing, first.AssociatedCallId, first.MessagePosition, first.ContentPosition);
+            messages[first.MessagePosition] = messages[first.MessagePosition] with { Contents = [inline, .. messages[first.MessagePosition].Contents] };
+            Verify(request with { Messages = messages });
+            messages[first.MessagePosition] = messages[first.MessagePosition] with { Contents = [inline with { Text = "conflict" }, .. request.Messages[first.MessagePosition].Contents] };
+            Assert.Throws<InvalidOperationException>(() => Verify(request with { Messages = messages }));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    private sealed class CapacityCapture(IProjectChatClient inner) : IProjectChatClient
+    {
+        internal List<ProjectChatRequest> Requests { get; } = [];
+        internal Exception? Failure { get; private set; }
+        public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
+        { Requests.Add(request); try { return await inner.GetResponseAsync(request, token); } catch (Exception error) { Failure = error; throw; } }
+    }
+
     private sealed class AcceptedTools(IAgentToolExecutor inner) : IAgentToolExecutor
     {
         internal List<string> Names { get; } = [];

@@ -806,6 +806,57 @@ public sealed class LiveAgentVerifierContractTests
     }
 
     [Fact]
+    public void ActualShellReceiptRelocationPreservesPrivateObserverAdmissionAndRejectsExistingPublicParents()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Join(repository.FullName, "runtime/scripts/verify-live-agent.sh")))
+            repository = repository.Parent;
+        Assert.NotNull(repository);
+        var lines = File.ReadAllLines(Path.Join(repository.FullName, "runtime/scripts/verify-live-agent.sh"));
+        var creates = lines.Where(line => line.TrimStart().StartsWith("(umask 077; mkdir -p -- ", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, creates.Length);
+        var relocationStart = Array.FindIndex(lines, line => line.Trim() == "mv -- \"${private_output}\" \"${root}/receipts/${receipt}.json\"");
+        Assert.True(relocationStart >= 0);
+        var relocation = string.Join('\n', lines.Skip(relocationStart).Take(4));
+        var root = Path.Join(Path.GetTempPath(), "apr-r8-shell-observer-" + Guid.NewGuid().ToString("N"));
+        var privateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        Directory.CreateDirectory(root, privateMode);
+        try
+        {
+            foreach (var existing in new[] { false, true })
+            {
+                var phase = Path.Join(root, existing ? "existing" : "fresh");
+                Directory.CreateDirectory(Path.Join(phase, "private"), privateMode);
+                var parents = new[] { "receipts", "receipts/negative", "receipts/negative-seeds" };
+                if (existing)
+                    foreach (var parent in parents)
+                        Directory.CreateDirectory(Path.Join(phase, parent), privateMode | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                var receipt = Path.Join(phase, "private/phase.json");
+                File.WriteAllText(receipt, "{}");
+                var bytes = VerifierReceiptCodec.Write(new VerifierTypedObservationSnapshot("MustFind", new('a', 64), new('b', 64), []));
+                VerifierTypedObservationFiles.WriteNew(receipt, bytes);
+                var start = new System.Diagnostics.ProcessStartInfo("bash") { UseShellExecute = false, RedirectStandardError = true };
+                start.ArgumentList.Add("-c");
+                start.ArgumentList.Add("set -eu\numask 022\nbefore=$(umask)\nroot=$1\n" + string.Join('\n', creates) +
+                    "\ntest \"$(umask)\" = \"$before\"\nprivate_output=$root/private/phase.json\nreceipt=phase\n_fail() { exit 1; }\n" + relocation);
+                start.ArgumentList.Add("r8-shell-observer"); start.ArgumentList.Add(phase);
+                using var child = System.Diagnostics.Process.Start(start)!;
+                var error = child.StandardError.ReadToEnd(); child.WaitForExit();
+                Assert.True(child.ExitCode == 0, error);
+                foreach (var parent in parents)
+                    Assert.Equal(existing ? privateMode | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute : privateMode,
+                        File.GetUnixFileMode(Path.Join(phase, parent)));
+                var moved = Path.Join(phase, "receipts/phase.json");
+                Assert.False(File.Exists(VerifierTypedObservationFiles.PathFor(receipt)));
+                if (existing) Assert.Throws<InvalidDataException>(() => VerifierTypedObservationFiles.Read(moved));
+                else Assert.Equal(bytes, VerifierTypedObservationFiles.Read(moved));
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void LiveAgentVerifierMaterializedPhaseCreatesPrivateObserverParent()
     {
         var root = Path.Join(Path.GetTempPath(), "apr-r8-materialized-observer-" + Guid.NewGuid().ToString("N"));

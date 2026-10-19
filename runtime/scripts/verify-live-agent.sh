@@ -326,7 +326,8 @@ _run_negative_case() {
   local receipt="${root}/receipts/negative/${case_id}.json"
   local private_receipt="${phase_root}/private/negative-receipt.json"
   local log="${root}/negative-${case_id}.log"
-  mkdir -p -- "${phase_root}" "${root}/receipts/negative"
+  mkdir -p -- "${phase_root}"
+  (umask 077; mkdir -p -- "${root}/receipts/negative")
   local -a extra_arguments=()
   if [[ "${requires_prior}" == yes ]]; then
     local seed_output="${phase_root}/private/seed-receipt.json"
@@ -343,7 +344,7 @@ _run_negative_case() {
       historical_messages_sha256 "${seed_output}")"
     [[ -n "${expected_lineage}" && -n "${expected_history}" ]] ||
       _fail "APR_R3_LIVE_NEGATIVE_SEED_RECEIPT_INVALID ${case_id}"
-    mkdir -p -- "${root}/receipts/negative-seeds"
+    (umask 077; mkdir -p -- "${root}/receipts/negative-seeds")
     mv -- "${seed_output}" \
       "${root}/receipts/negative-seeds/${case_id}.json"
     [[ ! -e "${root}/receipts/negative-seeds/${case_id}.json.typed-observations.json" && ! -L "${root}/receipts/negative-seeds/${case_id}.json.typed-observations.json" ]] || _fail APR_R3_LIVE_TYPED_OBSERVER_RELOCATION_CONFLICT
@@ -376,7 +377,7 @@ _run_negative_case() {
 
 _run_once() {
   local root="$1"
-  mkdir -p -- "${root}/receipts"
+  (umask 077; mkdir -p -- "${root}/receipts")
 
   local verb directory receipt marker phase
   local -a phases=(

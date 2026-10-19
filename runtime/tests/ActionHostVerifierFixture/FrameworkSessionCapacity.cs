@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
@@ -20,13 +21,22 @@ internal static class FrameworkSessionCapacity
 
     internal static void Observe(string scenarioRoot, ProjectChatRequest request, byte[] logicalTrace, int ordinal, string mode)
     {
-        var assistants = request.Messages.Where(message => message.Role == "assistant").ToArray();
+        var assistants = request.Messages.Select((message, position) => (message, position))
+            .Where(pair => pair.message.Role == "assistant").ToArray();
         if (assistants.Length != Ordinal(mode) * 6 + ordinal - 1) throw new InvalidOperationException("r7_history_population");
+        var items = request.Continuation?.Items ?? [];
+        if (items.Length != assistants.Length) throw new InvalidOperationException("r7_history_association");
         for (var index = 0; index < assistants.Length; index++)
         {
-            var message = assistants[index];
+            var (message, position) = assistants[index];
+            var item = items[index];
+            var inline = message.Contents.OfType<ProjectReasoningContent>().ToArray();
             var calls = message.Contents.OfType<ProjectToolCallContent>().ToArray();
-            if (message.Contents.OfType<ProjectReasoningContent>().ToArray() is not [var reasoning] || reasoning.Text != Reasoning ||
+            if (item.MessagePosition != position || item.ContentPosition != 0 || item.Readable != Reasoning ||
+                item.Opaque != "" || item.Framing != DeepSeekReasoningContinuationCodec.FramingName || item.AssociatedCallId is not null ||
+                inline.Length > 1 || inline is [var reasoning] && (reasoning.Text != item.Readable ||
+                    reasoning.Opaque != item.Opaque || reasoning.Framing != item.Framing || reasoning.AssociatedCallId != item.AssociatedCallId ||
+                    reasoning.MessagePosition != position || reasoning.Position != item.ContentPosition) ||
                 calls is not [var call] || !call.CallId.StartsWith(Prefix + index / 6 + "-", StringComparison.Ordinal))
                 throw new InvalidOperationException("r7_history_association");
             if (index % 6 != 5 && request.Messages.SelectMany(part => part.Contents.OfType<ProjectToolResultContent>())
