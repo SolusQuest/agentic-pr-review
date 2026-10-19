@@ -22,7 +22,7 @@ import {
   workflowSha,
 } from './github-fixture.mjs';
 import { createProviderFixture, reasoningCanary } from './provider-fixture.mjs';
-import { runCutoverArchive } from './cutover-proof.mjs';
+import { runCutoverArchive, runNonmanagedNoWork } from './cutover-proof.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
@@ -476,6 +476,19 @@ try {
   const accepted = official.snapshot(),
     acceptedComment = github.snapshot(),
     prefix = fresh.prefix;
+  stage = 'native-fully-authorized-no-work';
+  const beforeNative = { sends: provider.count, writes: github.writes, calls: github.calls.length };
+  const nativeNoWork = await runNonmanagedNoWork(
+    root,
+    fresh.records.find((record) => record.kind === 'launch')?.document,
+    sha256,
+  );
+  assert.equal(provider.count, beforeNative.sends);
+  assert.equal(github.writes, beforeNative.writes);
+  assert.deepEqual(official.snapshot(), accepted);
+  const nativeCalls = github.calls.slice(beforeNative.calls);
+  assert.ok(nativeCalls.some((call) => call.host === 'codeload.github.com'));
+  assert.ok(nativeCalls.every((call) => call.method === 'GET'));
   const repeated = await run('same-head-recovery', 0, { noProvider: true });
   assert.equal(repeated.status, 'reviewed');
   assertAccounting(repeated, 0);
@@ -576,7 +589,6 @@ try {
   }
   for (const options of [
     { wrongKey: true },
-    { reset: true },
     { noProvider: true },
     { substitution: true },
     { unsupportedRuntime: true },
@@ -602,6 +614,13 @@ try {
       );
     }
   }
+  official.restore(accepted);
+  github.restore(acceptedComment);
+  const beforeReset = github.writes;
+  const reset = await run('authorized-reset-fresh-solus', 1, { reset: true });
+  assert.equal(reset.status, 'reviewed');
+  assertAccounting(reset, 2);
+  assert.equal(github.writes, beforeReset + 1);
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
   assert.equal(provider.receipts.filter((x) => x.kind === 'completed-round').length >= 3, true);
@@ -648,6 +667,7 @@ try {
         sdk_count: 0,
         cases: results,
         direct_cutover: cutover,
+        native_no_work: nativeNoWork,
         context: provider.receipts,
         official_requests: official.calls.length,
         github_requests: github.calls.length,

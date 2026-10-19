@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -90,5 +90,74 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
     original_members_unchanged: true,
     old_session_rejected_before_provider: true,
     live_provider_requests: 0,
+  };
+}
+
+// A separate supporting native DLL receives the exact launch admitted for the
+// real Action. It shares real trust/snapshot preparation but cannot run review.
+export async function runNonmanagedNoWork(root, launch, sha256) {
+  assert.ok(launch && typeof launch === 'object');
+  const entry = join(root, 'cutover-inputs/AgenticPrReview.Runtime.dll');
+  const temp = join(root, 'native-no-work-tmp');
+  await mkdir(temp, { mode: 0o700 });
+  const document = Buffer.from(JSON.stringify(launch));
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(document.length);
+  const child = spawn(join(root, 'runtime/dotnet'), [entry], {
+    cwd: root,
+    env: { TMPDIR: temp, DOTNET_EnableDiagnostics: '0', DOTNET_NOLOGO: '1' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const output = [],
+    errors = [];
+  let bytes = 0;
+  for (const [stream, destination] of [
+    [child.stdout, output],
+    [child.stderr, errors],
+  ])
+    stream.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes > 32768) child.kill('SIGKILL');
+      else destination.push(chunk);
+    });
+  const timeout = setTimeout(() => child.kill('SIGKILL'), 45_000);
+  child.stdin.end(Buffer.concat([header, document]));
+  child.stdin.on('error', () => {});
+  let code;
+  try {
+    code = await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (exit, signal) => {
+        if (signal) reject(new Error('r6_native_no_work_signal'));
+        else resolve(exit);
+      });
+    });
+  } finally {
+    clearTimeout(timeout);
+    document.fill(0);
+  }
+  const frame = Buffer.concat(output);
+  assert.ok(frame.length >= 4 && frame.length <= 16388);
+  assert.equal(frame.readUInt32BE(0), frame.length - 4);
+  const completion = JSON.parse(frame.subarray(4).toString('utf8'));
+  assert.equal(code, completion.process_exit_code);
+  assert.equal(code, 1);
+  assert.equal(completion.status, 'internal_failure');
+  assert.equal(completion.exit_class, 'internal');
+  assert.equal(completion.termination_reason, 'not_started');
+  assert.equal(completion.summary.state_disposition, 'not_committed');
+  assert.equal(completion.summary.publication_url, null);
+  assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
+  assert.equal(completion.accounting.usage_completeness, 'complete');
+  for (const [key, value] of Object.entries(completion.accounting))
+    if (!key.endsWith('_completeness')) assert.equal(value, '0');
+  assert.equal(Buffer.concat(errors).length, 0);
+  return {
+    kind: 'apr-r6-supporting-native-no-work-v1',
+    supporting_dll_sha256: sha256(await readFile(entry)),
+    termination_reason: completion.termination_reason,
+    status: completion.status,
+    accounting_complete_zero: true,
+    archive_qualification: false,
   };
 }
