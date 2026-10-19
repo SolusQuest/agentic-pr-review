@@ -7,6 +7,10 @@ import {
   verifyAssertionDispositions,
   verifyS5AssertionSuccessor,
 } from '../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs';
+import {
+  verifyWideReplyContract,
+  verifyWideReplySources,
+} from '../../runtime/tests/SolusEvaluationFixture/wide-reply-disposition.mjs';
 
 const load = () =>
   JSON.parse(
@@ -43,9 +47,89 @@ const loadSuccessor = () =>
       'utf8',
     ),
   );
+const loadWide = () =>
+  JSON.parse(
+    fs.readFileSync(
+      path.join(process.cwd(), fixtureDirectory, 's5-wide-reply-disposition.json'),
+      'utf8',
+    ),
+  );
+
+describe('S5 individually attributed wide reply guards', () => {
+  test('binds fourteen actual test/scenario bodies and all thirteen original counterexamples', () => {
+    const policy = loadWide();
+    expect(policy.oracles).toHaveLength(14);
+    expect(policy.triggers).toHaveLength(13);
+    verifyWideReplyContract(policy);
+    verifyWideReplySources(process.cwd(), policy);
+  });
+  test.each(Array.from({ length: 13 }, (_, index) => index))(
+    'rejects missing or misattributed counterexample for trigger %s',
+    (index) => {
+      for (const mutation of [
+        'missing',
+        'wrong-owner',
+        'wrong-variant',
+        'helper-as-oracle',
+        'duplicate',
+      ]) {
+        const policy = loadWide();
+        const row = policy.triggers[index];
+        if (mutation === 'missing') delete row.primary_counterexample;
+        if (mutation === 'wrong-owner') row.primary_counterexample.oracle_id = 'wide-positive';
+        if (mutation === 'wrong-variant') row.primary_counterexample.variant = 'positive-only';
+        if (mutation === 'helper-as-oracle')
+          row.primary_counterexample.oracle_id = 'SourceFault.Capture';
+        if (mutation === 'duplicate') row.trigger = policy.triggers[(index + 1) % 13].trigger;
+        expect(() => verifyWideReplyContract(policy)).toThrow();
+      }
+    },
+  );
+  test.each(Array.from({ length: 14 }, (_, index) => index))(
+    'rejects wrong source, no body or self-resigned oracle %s',
+    (index) => {
+      for (const mutation of ['wrong-source', 'same-name-fake', 'no-body', 'resigned-body']) {
+        const policy = loadWide();
+        const oracle = policy.oracles[index];
+        if (mutation === 'wrong-source') oracle.source = 'wrong-owner.cs';
+        if (mutation === 'same-name-fake') oracle.source = 'same-name-in-comment.cs';
+        if (mutation === 'no-body') oracle.utf8_length = 0;
+        if (mutation === 'resigned-body') {
+          oracle.body_sha256 = createHash('sha256').update(oracle.method).digest('hex');
+          oracle.source_sha256 = oracle.body_sha256;
+        }
+        // This path bypasses the outer file seal: fixed AST-derived owners and
+        // actual complete body identities must reject the alleged evidence.
+        expect(() => verifyWideReplyContract(policy)).toThrow(
+          'fixed actual oracle owner and complete body',
+        );
+      }
+    },
+  );
+  test('rejects a physical same-name empty method even after source and body hashes are re-signed', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-wide-owner-'));
+    try {
+      const policy = loadWide();
+      const oracle = policy.oracles.find((item: { id: string }) => item.id === 'diagnostic-counts');
+      const fake = Buffer.from(`[Fact]\npublic void ${oracle.method}() {}\n`);
+      const target = path.join(root, oracle.source);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, fake);
+      oracle.source_sha256 = createHash('sha256').update(fake).digest('hex');
+      oracle.body_sha256 = oracle.source_sha256;
+      oracle.utf8_start = 0;
+      oracle.utf8_length = fake.length;
+      expect(() => verifyWideReplySources(root, policy)).toThrow(
+        'fixed actual oracle owner and complete body',
+      );
+    } finally {
+      fs.rmSync(root, { force: true, recursive: true });
+    }
+  });
+});
 
 describe('S5 source-bound native assertion census', () => {
-  test('binds all 152 originals, 141 original retained bodies, six migrations and five retirements', () => {
+  test('binds all 152 originals, 140 original retained bodies, seven migrations and five retirements', () => {
     expect(verifyS5AssertionSuccessor(process.cwd())).toEqual({
       originalMethods: 152,
       currentNativeMethods: 147,
@@ -54,11 +138,11 @@ describe('S5 source-bound native assertion census', () => {
     const rows = loadSuccessor().assertions;
     expect(
       rows.filter((row: { migration_disposition?: unknown }) => row.migration_disposition),
-    ).toHaveLength(6);
+    ).toHaveLength(7);
     expect(rows.filter((row: { current: unknown }) => row.current === null)).toHaveLength(5);
     expect(
       rows.filter((row: { disposition: string }) => row.disposition === 'retained'),
-    ).toHaveLength(141);
+    ).toHaveLength(140);
   });
   test.each([
     'owner',
@@ -247,6 +331,11 @@ describe('S5 source-bound native assertion census', () => {
     'missing-protocol-policy',
     'protocol-policy-change',
     'protocol-oracle-source-change',
+    'missing-wide-policy',
+    'wide-policy-change',
+    'wide-oracle-source-change',
+    'wide-oracle-body-change',
+    'wide-helper-source-change',
   ])('rejects actual %s drift without a permissive fallback', (mutation) => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-census-'));
     try {
@@ -262,6 +351,7 @@ describe('S5 source-bound native assertion census', () => {
         's5-assertion-successor.json',
         's5-format-retirements.json',
         's5-protocol-migrations.json',
+        's5-wide-reply-disposition.json',
       ])
         copy(path.join(fixtureDirectory, name));
       for (const source of successor.current_sources) copy(source.path);
@@ -279,8 +369,29 @@ describe('S5 source-bound native assertion census', () => {
         ),
       );
       for (const oracle of protocol.oracles) copy(oracle.path);
+      const wide = loadWide();
+      for (const oracle of wide.oracles) copy(oracle.source);
+      for (const helper of wide.helpers) copy(helper.source);
       // Establish a valid complete temporary source closure before each mutation.
       expect(verifyS5AssertionSuccessor(temporary).currentNativeMethods).toBe(147);
+      if (mutation === 'missing-wide-policy')
+        fs.unlinkSync(path.join(temporary, fixtureDirectory, 's5-wide-reply-disposition.json'));
+      if (mutation === 'wide-policy-change')
+        fs.appendFileSync(
+          path.join(temporary, fixtureDirectory, 's5-wide-reply-disposition.json'),
+          '\n',
+        );
+      if (mutation === 'wide-oracle-source-change')
+        fs.appendFileSync(path.join(temporary, wide.oracles[0].source), '\n');
+      if (mutation === 'wide-oracle-body-change') {
+        const oracle = wide.oracles[0];
+        const target = path.join(temporary, oracle.source);
+        const bytes = fs.readFileSync(target);
+        bytes[oracle.utf8_start + oracle.utf8_length - 1] ^= 1;
+        fs.writeFileSync(target, bytes);
+      }
+      if (mutation === 'wide-helper-source-change')
+        fs.appendFileSync(path.join(temporary, wide.helpers[0].source), '\n');
       if (mutation === 'missing-protocol-policy')
         fs.unlinkSync(path.join(temporary, fixtureDirectory, 's5-protocol-migrations.json'));
       if (mutation === 'protocol-policy-change')
@@ -316,7 +427,9 @@ describe('S5 source-bound native assertion census', () => {
         // Select a retained source outside all sealed oracle-file closures so
         // the new baseline-body guard, independently, must reject re-signing.
         const oracleSources = new Set(
-          [...format.oracles, ...protocol.oracles].map((oracle) => oracle.path),
+          [...format.oracles, ...protocol.oracles]
+            .map((oracle) => oracle.path)
+            .concat(wide.oracles.map((oracle: { source: string }) => oracle.source)),
         );
         const row =
           mutation === 'body-and-source-resigned'

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
@@ -8,6 +9,7 @@ using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
@@ -40,7 +42,27 @@ public sealed class CurrentWideQualityProjectionTests
                 new SnapshotToolExecutor(snapshot, input.CreateFileAccess(snapshot)))
                 .RunAsync(request, CancellationToken.None);
             Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
-            Assert.Equal(tools, outcome.Events.OfType<AgentToolResultEvent>().Count());
+            var results = outcome.Events.OfType<AgentToolResultEvent>().ToArray();
+            var calls = outcome.Events.OfType<AgentToolCallEvent>().Where(call => call.Name != "finish_review").ToArray();
+            Assert.Equal(tools, results.Length);
+            Assert.Equal(calls.Select(call => call.CallId), results.Select(result => result.CallId));
+            Assert.Equal(Enumerable.Range(0, tools).Select(index => index < 2
+                ? input.Script.Turns[0].ToolCalls[index].Id : "wide-" + index), results.Select(result => result.CallId));
+            foreach (var result in results)
+            {
+                using var parsed = JsonDocument.Parse(result.CanonicalResult.ToArray());
+                Assert.Equal("ok", parsed.RootElement.GetProperty("status").GetString());
+                if (result.Name == "read_file")
+                    Assert.Equal(result.CallId == "seed_read" ? ReplayCoverage.Fact : ReplayCoverage.Current,
+                        parsed.RootElement.GetProperty("lines")[0].GetProperty("text").GetString());
+                else
+                {
+                    Assert.Equal("list_changed_files", result.Name);
+                    Assert.Equal(0, parsed.RootElement.GetProperty("changes").GetArrayLength());
+                }
+            }
+            Assert.Equal("Seed complete.", outcome.Review!.Summary);
+            Assert.Empty(outcome.Review.Findings);
             Assert.Equal(tools + 1, outcome.Events.OfType<AgentToolCallEvent>().Count());
             Assert.Single(outcome.Events.OfType<AgentTerminalEvent>());
             Assert.Equal((tools + batchSize - 1) / batchSize + 1, chat.RequestBytes.Count);

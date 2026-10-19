@@ -1,0 +1,397 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const policyPath = 'runtime/tests/SolusEvaluationFixture/s5-wide-reply-disposition.json';
+const widePolicySha256 = '6e0d440882109a8904bce5b1dbcd385679443bca6b674cdd7bee8bbee99ca5ca';
+const original = {
+  source: 'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs',
+  method: 'CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds',
+  body_sha256: 'a4a77b423eac4e0bfd09aae98743b20ae8a8b15ecbaceb21fad8a691216ff1d7',
+};
+// Oracle owners and complete method/test bodies were independently enumerated
+// with SDK Roslyn or TypeScript AST. A same-name string is not test evidence.
+const oracleOwners = [
+  {
+    id: 'diagnostic-counts',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs',
+    method: 'CurrentFailedExecutionRejectsNegativeAndOverBudgetDiagnosticCounts',
+    source_sha256: 'ab1cce50db855d924d55dd90bb3be2ac96c680a5d7f0f7a6d31687e3b18f5ffc',
+    utf8_start: 1976,
+    utf8_length: 1431,
+    body_sha256: 'ce2e0061c5ac3dde8ab45acb5681ba0530f0fa550313149824e4a777479ffb9d',
+  },
+  {
+    id: 'fresh-input-and-events',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs',
+    method: 'FreshProjectionRejectsResumedInputsAndDetachedExecutionEvents',
+    source_sha256: 'ab1cce50db855d924d55dd90bb3be2ac96c680a5d7f0f7a6d31687e3b18f5ffc',
+    utf8_start: 215,
+    utf8_length: 1761,
+    body_sha256: '6ee6513dc5392a567256bd1962cff8e8b8fc5938a313835fbf4c83de79a41d0e',
+  },
+  {
+    id: 'wide-positive',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/CurrentWideQualityProjectionTests.cs',
+    method: 'CurrentFreshProjectionAdmitsActualWideCompletedRun',
+    source_sha256: 'ee75cdf0439fe751964a1a9c17ce76cb361545ea5a1f0caff5014dba128f7e23',
+    utf8_start: 813,
+    utf8_length: 4297,
+    body_sha256: 'df0cf99ea31f8d03fcdee7c5bb866aa41272b921c9326ce26dfe91d9ba8ca7b6',
+  },
+  {
+    id: 'generic-512',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.R7CountLimits.cs',
+    method: 'OrdinaryExecutionAndTerminalShareThe512Budget',
+    source_sha256: '192307f77be28eeb1ce98abf5bc9baa5e0c2b24cab3a0bab3bd98dd541c58508',
+    utf8_start: 1201,
+    utf8_length: 1103,
+    body_sha256: 'b54c45c446cdac0e60ff0e957f843a72bdf3cd57cd2608c5aca9c95a5fe215f1',
+  },
+  {
+    id: 'generic-64',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.R7CountLimits.cs',
+    method: 'LowTokenTerminalCanFinishOnLogicalCall64',
+    source_sha256: '192307f77be28eeb1ce98abf5bc9baa5e0c2b24cab3a0bab3bd98dd541c58508',
+    utf8_start: 305,
+    utf8_length: 896,
+    body_sha256: '1aa8bb631a0b0293175dea50a65a303248375c4d559f841b5fe33cbc10fde161',
+  },
+  {
+    id: 'generic-request-bytes',
+    role: 'native-test',
+    source: 'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs',
+    method: 'SerializedRequestByteCapIsExact',
+    source_sha256: 'b2bba30305fff438352a154bd2a99343a1fbbfafe50cafd283c367aa2fc79ed4',
+    utf8_start: 75216,
+    utf8_length: 868,
+    body_sha256: '19274598281a6e957cfe69a6b56aa80ee9723bf89fcf19e6b0278e46c9a9bce8',
+  },
+  {
+    id: 'trace-mutations',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/CurrentHostTraceOracleTests.cs',
+    method: 'ActualCurrentLoopTraceIsAdmittedAndIndependentMutationsAreRejected',
+    source_sha256: '545862821050d689870c975c985ad414b6569af35352fa0d6562cad495322de7',
+    utf8_start: 467,
+    utf8_length: 3831,
+    body_sha256: '975ad05f946511984f6d5eee5c3892dd62d712e6903a038fa9093ee841f0f0b0',
+  },
+  {
+    id: 'claimed-source-authority',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.SolusRestoredReview.cs',
+    method: 'SolusSuccessorRequiresExactConsumedSourceAndNewCheckpoint',
+    source_sha256: '0180277b0e9e8f2891efc0bc8cc8bd6f7a8eacb7c8ba949b0b38826cba858cc4',
+    utf8_start: 582,
+    utf8_length: 9243,
+    body_sha256: 'a366a089e7287851d2861afe1eba2b16bcaf63b0661331c97f0b9af836ea1ad0',
+  },
+  {
+    id: 's1-lineage',
+    role: 'native-test',
+    source: 'runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs',
+    method: 'InconsistentIndependentLineageIsRejectedBeforeKeys',
+    source_sha256: '454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163',
+    utf8_start: 9501,
+    utf8_length: 1329,
+    body_sha256: '08b86ce8dc6cd9dfc282c2f666b863aa1a307a306007dda0120c26c5b1d94cf3',
+  },
+  {
+    id: 's1-tamper',
+    role: 'native-test',
+    source: 'runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs',
+    method: 'HeaderAndTagTamperCannotBeRepairedByUnkeyedDigest',
+    source_sha256: '454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163',
+    utf8_start: 15214,
+    utf8_length: 745,
+    body_sha256: '61852a5d8a87650bb4db84b0a82c9347cdc0c6240b2fd4eaeed6c1a2183c2457',
+  },
+  {
+    id: 'unknown-completion-status',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs',
+    method: 'UnknownCompletionStatusCannotDeclareAnOutcome',
+    source_sha256: '671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33',
+    utf8_start: 10054,
+    utf8_length: 833,
+    body_sha256: 'acb9591d711199b3726cf975e8b8dcc3c8e90302896863fc6b45c4f56f5abb82',
+  },
+  {
+    id: 'launch-bounds',
+    role: 'native-test',
+    source:
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs',
+    method: 'LaunchRejectsClosedShapeUtf8AndOuterBoundViolations',
+    source_sha256: 'e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b',
+    utf8_start: 5552,
+    utf8_length: 1473,
+    body_sha256: 'e6ff4116500d04029ed1defc33b695626eda4f1b4f1fe4915481d0eb051acc43',
+  },
+  {
+    id: 'closed-managed-environment',
+    role: 'node-test',
+    source: 'tests/distribution/managed-host-process.test.ts',
+    method:
+      'builds an explicit diagnostic-disabled environment without ambient loader or credential authority',
+    source_sha256: 'c26e3aba32764ced56d430cd9e9be16eab1f141ba0dce4febdd10f69266b381c',
+    utf8_start: 6280,
+    utf8_length: 755,
+    body_sha256: 'd05a1b7105f054d17482876b3a5520f79bffdd04ddeffb006e966da2ef5efdb0',
+  },
+  {
+    id: 'sdk-malformed-source',
+    role: 'sdk-scenario',
+    source: 'runtime/tests/ActionHostFixture/verify-solus-restored.mjs',
+    method: 'malformed-source(checkpoint,unfinished,provider)',
+    source_sha256: '5505699684da176757f8cbb68115a68a4179ac7778195a014dc0d22d0f0f1bf4',
+    utf8_start: 25169,
+    utf8_length: 288,
+    body_sha256: '9a8642e528a99c76b16e03dffd1a4d28a415ea2efb5eb1de8e00c7681cb31c5e',
+  },
+];
+const helpers = [
+  {
+    source: 'runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/CaptureFaults.cs',
+    role: 'trusted-negative-input-producer-only',
+    source_sha256: '5ae7f88ede452b6af486e6887d11a6b77b80d77e4d40317781baa72dcf1f7839',
+  },
+  {
+    source: 'runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs',
+    role: 'SDK-consumer-no-work-assertions',
+    source_sha256: 'b51e69829e134ea6fdfef248f9ab59652c0531c8b18d789d674aac8947abdf78',
+  },
+];
+const triggerBindings = [
+  {
+    trigger: 'ToolCalls=-1',
+    disposition: 'current-diagnostic-and-generic-bound',
+    primary_counterexample: {
+      oracle_id: 'diagnostic-counts',
+      variant: 'ToolCalls = -1',
+    },
+    supporting_oracle_ids: ['generic-512'],
+  },
+  {
+    trigger: 'ToolCalls=513',
+    disposition: 'current-diagnostic-and-generic-bound',
+    primary_counterexample: {
+      oracle_id: 'diagnostic-counts',
+      variant: 'ToolCalls = 513',
+    },
+    supporting_oracle_ids: ['generic-512'],
+  },
+  {
+    trigger: 'ModelCalls=-1',
+    disposition: 'current-diagnostic-and-generic-bound',
+    primary_counterexample: {
+      oracle_id: 'diagnostic-counts',
+      variant: 'ModelCalls = -1',
+    },
+    supporting_oracle_ids: ['generic-64'],
+  },
+  {
+    trigger: 'ModelCalls=65',
+    disposition: 'current-diagnostic-and-generic-bound',
+    primary_counterexample: {
+      oracle_id: 'diagnostic-counts',
+      variant: 'ModelCalls = 65',
+    },
+    supporting_oracle_ids: ['generic-64'],
+  },
+  {
+    trigger: 'Requests.Length=65',
+    disposition: 'obsolete-self-reported-request-list-with-retained-live-count-bound',
+    primary_counterexample: {
+      oracle_id: 'trace-mutations',
+      variant: 'duplicate-row',
+    },
+    supporting_oracle_ids: ['generic-64'],
+  },
+  {
+    trigger: 'Requests[0].Length=1048577',
+    disposition: 'obsolete-private-request-bytes-field-with-retained-generic-byte-bound',
+    primary_counterexample: {
+      oracle_id: 'generic-request-bytes',
+      variant: 'InlineData(AgentLimits.RequestBytes + 1, false)',
+    },
+    supporting_oracle_ids: ['wide-positive'],
+  },
+  {
+    trigger: 'EnvironmentBytes.Length=ReplayWire.InputLimit+1',
+    disposition: 'obsolete-child-environment-attestation',
+    primary_counterexample: {
+      oracle_id: 'closed-managed-environment',
+      variant: 'DOTNET_STARTUP_HOOKS, LD_PRELOAD, GITHUB_TOKEN',
+    },
+    supporting_oracle_ids: ['launch-bounds'],
+  },
+  {
+    trigger: 'EnvironmentKeys=[]',
+    disposition: 'obsolete-child-environment-attestation',
+    primary_counterexample: {
+      oracle_id: 'closed-managed-environment',
+      variant: 'exact OS child environment',
+    },
+    supporting_oracle_ids: [],
+  },
+  {
+    trigger: 'PrefixHistory=null',
+    disposition: 'obsolete-native-prefix-attestation-not-an-sdk-context-claim',
+    primary_counterexample: {
+      oracle_id: 'fresh-input-and-events',
+      variant: 'CurrentReviewContextIndex = -1; resumed inputs; detached events',
+    },
+    supporting_oracle_ids: ['sdk-malformed-source'],
+  },
+  {
+    trigger: 'Plaintext=malformed_SESSION',
+    disposition: 'current-record-and-import-admission',
+    primary_counterexample: {
+      oracle_id: 's1-tamper',
+      variant: 'authenticated header/tag mutation',
+    },
+    supporting_oracle_ids: ['sdk-malformed-source'],
+  },
+  {
+    trigger: 'Prepared.Generation=1_at_bootstrap',
+    disposition: 'current-claimed-source-preparer-authority',
+    primary_counterexample: {
+      oracle_id: 'claimed-source-authority',
+      variant: 'fresh-preparer',
+    },
+    supporting_oracle_ids: ['s1-lineage'],
+  },
+  {
+    trigger: 'Operation=random_GUID',
+    disposition: 'current-consumed-source-execution-authority',
+    primary_counterexample: {
+      oracle_id: 'claimed-source-authority',
+      variant: 'wrong-execution, wrong-round',
+    },
+    supporting_oracle_ids: [],
+  },
+  {
+    trigger: 'Code=unknown',
+    disposition: 'current-closed-completion-reader',
+    primary_counterexample: {
+      oracle_id: 'unknown-completion-status',
+      variant: 'unknown string and numeric999',
+    },
+    supporting_oracle_ids: [],
+  },
+];
+const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const keys = (value, expected) =>
+  assert.deepEqual(Object.keys(value).sort(), expected.slice().sort());
+
+export function verifyWideReplyContract(policy) {
+  keys(policy, [
+    'kind',
+    'owner_issue',
+    'sdk_context_import_qualified',
+    'execution_qualification',
+    'original',
+    'positive_cases',
+    'oracles',
+    'helpers',
+    'triggers',
+  ]);
+  assert.equal(policy.kind, 'apr-cr1-s5-wide-reply-disposition-v1');
+  assert.equal(policy.owner_issue, 409);
+  assert.equal(policy.sdk_context_import_qualified, false);
+  assert.equal(
+    policy.execution_qualification,
+    'Source and body bindings do not qualify SDK execution. Separate exact-source Ubuntu and final installed internal.4 proof remain mandatory.',
+  );
+  assert.deepEqual(policy.original, original);
+  assert.deepEqual(policy.positive_cases, [
+    [256, 16],
+    [257, 16],
+    [272, 16],
+    [63, 1],
+  ]);
+  assert.deepEqual(policy.oracles, oracleOwners, 'fixed actual oracle owner and complete body');
+  assert.deepEqual(policy.helpers, helpers);
+  assert.equal(policy.triggers.length, 13);
+  for (const row of policy.triggers) {
+    keys(row, [
+      'trigger',
+      'disposition',
+      'reason',
+      'primary_counterexample',
+      'supporting_oracle_ids',
+    ]);
+    assert.ok(typeof row.reason === 'string' && row.reason.length > 40);
+    const owner = oracleOwners.find((item) => item.id === row.primary_counterexample.oracle_id);
+    assert.ok(owner && ['native-test', 'node-test', 'sdk-scenario'].includes(owner.role));
+  }
+  assert.deepEqual(
+    policy.triggers.map(
+      ({ trigger, disposition, primary_counterexample, supporting_oracle_ids }) => ({
+        trigger,
+        disposition,
+        primary_counterexample,
+        supporting_oracle_ids,
+      }),
+    ),
+    triggerBindings,
+    'each original trigger needs its actual counterexample',
+  );
+}
+
+export function verifyWideReplySources(repository, policy) {
+  verifyWideReplyContract(policy);
+  for (const oracle of policy.oracles) {
+    const bytes = readFileSync(join(repository, oracle.source));
+    assert.equal(sha(bytes), oracle.source_sha256, oracle.source);
+    assert.ok(Number.isSafeInteger(oracle.utf8_start) && oracle.utf8_start >= 0);
+    assert.ok(
+      Number.isSafeInteger(oracle.utf8_length) &&
+        oracle.utf8_length > 0 &&
+        oracle.utf8_start + oracle.utf8_length <= bytes.length,
+    );
+    const body = bytes.subarray(oracle.utf8_start, oracle.utf8_start + oracle.utf8_length);
+    assert.equal(sha(body), oracle.body_sha256, oracle.id);
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(body);
+    if (oracle.role === 'native-test') {
+      assert.match(text, /^\s*\[(?:Fact|Theory)(?:\(|\])/mu);
+      assert.match(
+        text,
+        new RegExp('public\\s+(?:async\\s+)?(?:Task(?:<[^>]+>)?|void)\\s+' + oracle.method + '\\('),
+      );
+    } else if (oracle.role === 'node-test') assert.match(text, /^test\(/u);
+    else assert.match(text, /^for\s*\(const source of/u);
+  }
+  for (const helper of policy.helpers)
+    assert.equal(
+      sha(readFileSync(join(repository, helper.source))),
+      helper.source_sha256,
+      helper.source,
+    );
+}
+
+export function verifyWideReplyDisposition(repository, baseline) {
+  const bytes = readFileSync(join(repository, policyPath));
+  assert.equal(sha(bytes), widePolicySha256, 'closed thirteen-trigger disposition bytes');
+  const policy = JSON.parse(bytes);
+  verifyWideReplySources(repository, policy);
+  const old = baseline.assertions.find(
+    (item) => item.source === original.source && item.method === original.method,
+  );
+  assert.equal(old?.body_sha256, original.body_sha256);
+}

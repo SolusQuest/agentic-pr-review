@@ -11,7 +11,7 @@
   "current_sources": [
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
-      "sha256": "3fcbb0ec913ab5203e4af5bfbfc09fb27c73c3fe211dbf2004f6e4319c7d1f4f"
+      "sha256": "559f2a98b40c0a31e46e4130485a04c1c8fd902511f707c11d8dd4633c8ab35f"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
@@ -508,15 +508,30 @@
       "method": "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
+      "disposition": "migrated",
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
         "utf8_start": 1276,
-        "utf8_length": 3198,
-        "body_sha256": "a4a77b423eac4e0bfd09aae98743b20ae8a8b15ecbaceb21fad8a691216ff1d7"
+        "utf8_length": 613,
+        "body_sha256": "946799ae0b7452fedec1440ff81921b3736dbacc1b6fa55f25df6a4ee61089f5"
       },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+      "reason": "Migrate only this mixed wide-reply consumer and its four original positive vectors to actual current generic Loop/Tools execution and nonpersisted fresh quality admission. The separately sealed thirteen-trigger disposition binds actual current negative bodies and variants; obsolete native self-attestation fields confer neither SDK authority nor equivalent SDK numeric limits. Preserve tool-result content, call order, terminal summary/findings, bounds and cleanup directly. Exact-source Ubuntu and final installed internal.4 qualification remain separate and mandatory.",
+      "migration_disposition": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+        "method": "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
+        "original_body_sha256": "a4a77b423eac4e0bfd09aae98743b20ae8a8b15ecbaceb21fad8a691216ff1d7",
+        "current_body_sha256": "946799ae0b7452fedec1440ff81921b3736dbacc1b6fa55f25df6a4ee61089f5",
+        "disposition": "migrated",
+        "reason": "Migrate only this mixed wide-reply consumer and its four original positive vectors to actual current generic Loop/Tools execution and nonpersisted fresh quality admission. The separately sealed thirteen-trigger disposition binds actual current negative bodies and variants; obsolete native self-attestation fields confer neither SDK authority nor equivalent SDK numeric limits. Preserve tool-result content, call order, terminal summary/findings, bounds and cleanup directly. Exact-source Ubuntu and final installed internal.4 qualification remain separate and mandatory.",
+        "current_oracle_labels": [
+          "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
+          "CurrentFreshProjectionAdmitsActualWideCompletedRun",
+          "UnknownCompletionStatusCannotDeclareAnOutcome",
+          "CurrentFailedExecutionRejectsNegativeAndOverBudgetDiagnosticCounts",
+          "verifyWideReplyDisposition"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
@@ -527,7 +542,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery",
-        "utf8_start": 4474,
+        "utf8_start": 1889,
         "utf8_length": 2332,
         "body_sha256": "b41a11990a8d76d440c693998fbef59b5e02488a5b752218d1e744c3904a8710"
       },
@@ -557,7 +572,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
-        "utf8_start": 6806,
+        "utf8_start": 4221,
         "utf8_length": 1050,
         "body_sha256": "a7c52c45ccd3fe78b8ed482455b5d59797f1cf46cf858ffae67975e9bcd4fc00"
       },
@@ -587,7 +602,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "BootstrapPreparesRealStateWithoutAcceptingIt",
-        "utf8_start": 7856,
+        "utf8_start": 5271,
         "utf8_length": 4963,
         "body_sha256": "85a9d201462dee26a89fb063c3663ca3504200ddaa3821e9b0b8daa58dae5952"
       },
@@ -602,7 +617,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ThreeFreshPhasesAcceptAndRestoreCompletedHistory",
-        "utf8_start": 12819,
+        "utf8_start": 10234,
         "utf8_length": 777,
         "body_sha256": "b2074fa041d5596b64eb427d4de364389e26dfc53b6ef43dd58f89463d3e7aff"
       },
@@ -617,7 +632,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "TwoFreshSupervisorExecutablesProduceEqualNormalizedEvidence",
-        "utf8_start": 13596,
+        "utf8_start": 11011,
         "utf8_length": 848,
         "body_sha256": "4156917a6fd67b56bb1540e9daa45beada7eb3f00f700f67183743765f1dd6f4"
       },
@@ -632,7 +647,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "FailedPhaseNeverAdvancesAcceptedPredecessor",
-        "utf8_start": 14444,
+        "utf8_start": 11859,
         "utf8_length": 2675,
         "body_sha256": "016cf9bb879bfe71ce060aaaf891ad255b220170de9fde43561e97b70af13de5"
       },
@@ -647,7 +662,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "RehashedScriptAndHistoricalInputMutationsCannotBlessReplay",
-        "utf8_start": 17119,
+        "utf8_start": 14534,
         "utf8_length": 1360,
         "body_sha256": "6325ba262c245da78b36dd7845a6cb50ecb3595bebb12bd2d9f4f7d821fc463a"
       },
@@ -662,7 +677,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "LiteralAnswerCannotReplaceHistoryDerivationWithValidPredecessor",
-        "utf8_start": 18479,
+        "utf8_start": 15894,
         "utf8_length": 973,
         "body_sha256": "61c87f1754345361dad744cc3621bc728b2706cc09210fff364e63c17407af9d"
       },
@@ -677,7 +692,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "RecoveryWithoutReplacementEvidenceRetainsFailedReplayAndPredecessor",
-        "utf8_start": 19452,
+        "utf8_start": 16867,
         "utf8_length": 1622,
         "body_sha256": "158b2e6fe3601183e4d30dd7be576baa0b9d31ea3a39f4d43307d5d355a71532"
       },
@@ -692,7 +707,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "RestoredExplicitNullToolArgumentRejectsEntireBatchAndPreservesPredecessor",
-        "utf8_start": 21074,
+        "utf8_start": 18489,
         "utf8_length": 2252,
         "body_sha256": "ad8994bc41fad1fd5db0331bcf8db373aeba02a40930c8bcee1f46f248f862d3"
       },
@@ -707,7 +722,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials",
-        "utf8_start": 23326,
+        "utf8_start": 20741,
         "utf8_length": 3002,
         "body_sha256": "21253bf6a457e8e6faff40bb6bf10cf5a886359d5d09adb53709c5204d939b24"
       },
@@ -722,7 +737,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "IndependentConcurrentInvocationsHaveDisjointPrivateState",
-        "utf8_start": 26328,
+        "utf8_start": 23743,
         "utf8_length": 638,
         "body_sha256": "fb5a9336e6a9019ac879147fdf9043f4cc22b47c6152796a8871afc86cd020c7"
       },
@@ -737,7 +752,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CleanupFailureIsExplicitAndCannotReturnSuccess",
-        "utf8_start": 26966,
+        "utf8_start": 24381,
         "utf8_length": 615,
         "body_sha256": "56947416ab904878b79f6313ce3530ec125ebb9740e8123beeadde61df76f4db"
       },
@@ -752,7 +767,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CancelledSupervisorAndInvalidBundleCleanPrivateArtifacts",
-        "utf8_start": 27581,
+        "utf8_start": 24996,
         "utf8_length": 833,
         "body_sha256": "9e87fc088967c002ae28feff75f078ecefa9b6a5f0e4f596e243bb887e5914b6"
       },
@@ -767,7 +782,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ChildProtocolRejectsMalformedOrIncompleteDocuments",
-        "utf8_start": 28414,
+        "utf8_start": 25829,
         "utf8_length": 339,
         "body_sha256": "6d7754a19fd198b097ce2b1f518c31b8a16b8e85dff8f891e2121ebd3a62f6e2"
       },
@@ -795,7 +810,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "PrivateProtocolBoundsUtf8AndStreams",
-        "utf8_start": 28753,
+        "utf8_start": 26168,
         "utf8_length": 457,
         "body_sha256": "6ca75a353d45a30e7e28c09b31017e80d0565f801937f32b2aff62f9291e22a7"
       },

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { verifyWideReplyDisposition } from './wide-reply-disposition.mjs';
 
 const sources = [
   'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs',
@@ -73,7 +74,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
 
-// Five pinned format retirements and six current consumer migrations are closed independently.
+// Five pinned format retirements and seven current consumer migrations are closed independently.
 // Further migrations require new closed dispositions and independent current oracles.
 // Source fingerprints establish a census, never SDK execution qualification.
 export function verifyS5AssertionSuccessor(repository, supplied) {
@@ -84,6 +85,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   assert.equal(sha256(baselineBytes), baselineIdentitiesSha256);
   const original = JSON.parse(originalBytes);
   const baseline = JSON.parse(baselineBytes);
+  verifyWideReplyDisposition(repository, baseline);
   const formatBytes = readFixture('s5-format-retirements.json');
   assert.equal(
     sha256(formatBytes),
@@ -115,7 +117,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const protocolBytes = readFixture('s5-protocol-migrations.json');
   assert.equal(
     sha256(protocolBytes),
-    'c858554264921a415dea6f2632e257bfdeca01fb1e79069c538ed5441f636a48',
+    '72ddb78cd4cab0284c56fc21a066f2e2a657a8c74997d24f90fc18e80400bfef',
   );
   const protocol = JSON.parse(protocolBytes);
   exactKeys(protocol, [
@@ -127,11 +129,11 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     'oracles',
     'rows',
   ]);
-  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v3');
+  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v4');
   assert.equal(protocol.owner_issue, 409);
   assert.equal(protocol.sdk_context_import_qualified, false);
-  assert.equal(protocol.role, 'current-protocol-failure-and-host-test-consumers-only');
-  assert.equal(protocol.original_methods, 6);
+  assert.equal(protocol.role, 'current-test-consumers-only');
+  assert.equal(protocol.original_methods, 7);
   const protocolSource =
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs';
   assert.deepEqual(protocol.rows.map(identity), [
@@ -141,9 +143,10 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs:NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses',
     protocolSource + ':CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts',
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs:ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds',
+    protocolSource + ':CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds',
   ]);
   const migrations = new Map(protocol.rows.map((row) => [identity(row), row]));
-  assert.equal(migrations.size, 6);
+  assert.equal(migrations.size, 7);
   const protocolText = protocol.oracles
     .map((oracle) => {
       exactKeys(oracle, ['path', 'sha256']);

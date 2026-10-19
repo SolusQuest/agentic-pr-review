@@ -35,53 +35,11 @@ public sealed class R5CompletedReplayTests
     [InlineData(63, 1)]
     public async Task CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds(int tools, int batchSize)
     {
-        using var bundle = new MutableBundle();
-        WriteCountReplay(bundle, tools, batchSize);
-        Assert.True(new FileInfo(Path.Combine(bundle.Root, "script-0.json")).Length <= ReplayLimits.FileBytes);
-        Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture);
-        ReplayChildReply? observed = null;
-        bool admitted = false;
-        var rejected = new List<bool>();
-        string? privateRoot = null;
-        var result = await ReplayRunner.RunAsync(bundle.Root, new()
-        {
-            BeforeCleanup = root => privateRoot = root,
-            ObserveReply = (input, run, reply) =>
-            {
-                observed = reply;
-                admitted = ReplayRunner.AdmitReply(input, run, reply, out _);
-                foreach (var invalid in new[]
-                {
-                    reply with { ToolCalls = -1 }, reply with { ToolCalls = 513 },
-                    reply with { ModelCalls = -1 }, reply with { ModelCalls = 65 },
-                    reply with { Requests = [.. reply.Requests, .. Enumerable.Repeat(reply.Requests[^1], 65 - reply.Requests.Length)] },
-                    reply with { Requests = reply.Requests.SetItem(0, new byte[1_048_577]) },
-                    reply with { EnvironmentBytes = new byte[ReplayWire.InputLimit + 1] },
-                    reply with { EnvironmentKeys = [] }, reply with { PrefixHistory = null },
-                    reply with { Plaintext = "malformed session"u8.ToArray() },
-                    reply with { Prepared = reply.Prepared! with { Generation = 1 } },
-                    reply with { Operation = Guid.NewGuid().ToString("N") }, reply with { Code = "unknown" },
-                }) rejected.Add(!ReplayRunner.AdmitReply(input, run, invalid, out _));
-            },
-            Verify = (fixture, phase, reply) => VerifyCountReplay(fixture, phase, reply, tools, batchSize),
-        });
-        Assert.NotNull(observed);
-        Assert.True(observed.Code == "prepared", $"{observed.Code}; tools={observed.ToolCalls}; models={observed.ModelCalls}; requestBytes={observed.Requests.Sum(bytes => (long)bytes.Length)}");
-        Assert.Equal(tools, observed.ToolCalls); // Execution diagnostics exclude the terminal's budget charge.
-        Assert.Equal((tools + batchSize - 1) / batchSize + 1, observed.ModelCalls);
-        Assert.Equal(observed.ModelCalls, observed.Requests.Length);
-        Assert.True(observed.Requests.Sum(bytes => (long)bytes.Length) <= ReplayWire.EvidenceLimit);
-        Assert.Equal("verified", result.Code);
-        Assert.True(admitted);
-        Assert.Equal(13, rejected.Count);
-        Assert.All(rejected, Assert.True);
-        var step = Assert.Single(result.Steps);
-        Assert.True(step.Accepted);
-        Assert.Equal(tools, step.ToolCalls);
-        Assert.Equal(0L, step.Generation);
-        Assert.Single(result.Observations);
-        Assert.Equal("cleaned", result.Cleanup);
-        Assert.False(Directory.Exists(privateRoot));
+        // The closed S5 disposition binds each of the thirteen former private
+        // reply mutations to its actual current reader, authority or execution
+        // oracle. Native SESSION reply fields grant no current state authority.
+        await new CurrentWideQualityProjectionTests()
+            .CurrentFreshProjectionAdmitsActualWideCompletedRun(tools, batchSize);
     }
 
     [Theory]
@@ -625,31 +583,6 @@ public sealed class R5CompletedReplayTests
                 .Where(file => !unused.Contains(file!["path"]!.GetValue<string>())).Select(file => file!.DeepClone()).ToArray());
         });
         foreach (var file in unused) File.Delete(Path.Combine(bundle.Root, file));
-    }
-
-    private static bool VerifyCountReplay(AdmittedReplayFixture fixture, int phase, ReplayChildReply reply, int tools, int batchSize)
-    {
-        if (phase != 0 || fixture.Runs.Length != 1 || reply.ModelCalls != (tools + batchSize - 1) / batchSize + 1 ||
-            reply.ToolCalls != tools || reply.Requests.Length != reply.ModelCalls || reply.Plaintext is null ||
-            !AgentSessionCodec.TryParse(reply.Plaintext, out var artifact, out _) || artifact is null) return false;
-        var run = artifact.Document.CompletedRuns.Single();
-        var results = run.Records.OfType<AgentSessionToolResultRecord>().ToArray();
-        var calls = fixture.Runs[0].Script.Turns.SelectMany(turn => turn.ToolCalls).Where(call => call.Name != "finish_review");
-        if (!results.Select(result => result.CallId).SequenceEqual(calls.Select(call => call.Id)) || results.Length != tools ||
-            run.Continuation.Items.Length != reply.ModelCalls || artifact.Document.Generation != 0) return false;
-        foreach (var result in results)
-        {
-            using var parsed = JsonDocument.Parse(result.ResultJson);
-            if (parsed.RootElement.GetProperty("status").GetString() != "ok") return false;
-            if (result.Name == "read_file")
-            {
-                if (parsed.RootElement.GetProperty("lines")[0].GetProperty("text").GetString() !=
-                    (result.CallId == "seed_read" ? ReplayCoverage.Fact : ReplayCoverage.Current)) return false;
-            }
-            else if (result.Name != "list_changed_files" || parsed.RootElement.GetProperty("changes").GetArrayLength() != 0) return false;
-        }
-        var outcome = run.Records.OfType<AgentSessionReviewOutcomeRecord>().Single();
-        return outcome.Summary == "Seed complete." && outcome.FindingsJson == "[]";
     }
 
     private sealed class MutableBundle : IDisposable

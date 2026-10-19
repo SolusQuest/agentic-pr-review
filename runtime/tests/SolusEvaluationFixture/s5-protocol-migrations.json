@@ -1,13 +1,13 @@
 {
-  "kind": "apr-cr1-s5-current-consumer-migrations-v3",
+  "kind": "apr-cr1-s5-current-consumer-migrations-v4",
   "owner_issue": 409,
   "sdk_context_import_qualified": false,
-  "role": "current-protocol-failure-and-host-test-consumers-only",
-  "original_methods": 6,
+  "role": "current-test-consumers-only",
+  "original_methods": 7,
   "oracles": [
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
-      "sha256": "3fcbb0ec913ab5203e4af5bfbfc09fb27c73c3fe211dbf2004f6e4319c7d1f4f"
+      "sha256": "559f2a98b40c0a31e46e4130485a04c1c8fd902511f707c11d8dd4633c8ab35f"
     },
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
@@ -64,6 +64,22 @@
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Quality/Incremental/IncrementalCoverage.cs",
       "sha256": "3c0467ea78de74292e55e15aa296af4b3a3ca07111994361385bb2a5a54ee851"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/CurrentWideQualityProjectionTests.cs",
+      "sha256": "ee75cdf0439fe751964a1a9c17ce76cb361545ea5a1f0caff5014dba128f7e23"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
+      "sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/wide-reply-disposition.mjs",
+      "sha256": "ab803268a70bf430f432e6407c8538e7ef1843194835dd6b7bf12b0c0301a729"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-wide-reply-disposition.json",
+      "sha256": "6e0d440882109a8904bce5b1dbcd385679443bca6b674cdd7bee8bbee99ca5ca"
     }
   ],
   "rows": [
@@ -151,6 +167,21 @@
         "IncrementalCoverage.VerifyFixture(fixture)",
         "RunIncrementalAsync",
         "Assert.Equal(first, second)"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
+      "original_body_sha256": "a4a77b423eac4e0bfd09aae98743b20ae8a8b15ecbaceb21fad8a691216ff1d7",
+      "current_body_sha256": "946799ae0b7452fedec1440ff81921b3736dbacc1b6fa55f25df6a4ee61089f5",
+      "disposition": "migrated",
+      "reason": "Migrate only this mixed wide-reply consumer and its four original positive vectors to actual current generic Loop/Tools execution and nonpersisted fresh quality admission. The separately sealed thirteen-trigger disposition binds actual current negative bodies and variants; obsolete native self-attestation fields confer neither SDK authority nor equivalent SDK numeric limits. Preserve tool-result content, call order, terminal summary/findings, bounds and cleanup directly. Exact-source Ubuntu and final installed internal.4 qualification remain separate and mandatory.",
+      "current_oracle_labels": [
+        "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
+        "CurrentFreshProjectionAdmitsActualWideCompletedRun",
+        "UnknownCompletionStatusCannotDeclareAnOutcome",
+        "CurrentFailedExecutionRejectsNegativeAndOverBudgetDiagnosticCounts",
+        "verifyWideReplyDisposition"
       ]
     }
   ]
