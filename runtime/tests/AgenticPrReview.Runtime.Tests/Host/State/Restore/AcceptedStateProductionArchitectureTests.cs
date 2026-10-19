@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Tests.Host.State.Transactions;
 using System.Reflection;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
@@ -196,8 +197,7 @@ public sealed class AcceptedStateProductionArchitectureTests
             CancellationToken.None);
         var dependencies = new ThrowingDependencies();
 
-        var result = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        using var support = await SolusTransactionTestSupport.CreateAsync(
             new ArtifactStateRestoreRequest(
                 launch,
                 invocation,
@@ -205,8 +205,9 @@ public sealed class AcceptedStateProductionArchitectureTests
                 new ProjectChatMessage(
                     "user",
                     [new ProjectTextContent("review")]),
-                dependencies),
-            CancellationToken.None);
+                dependencies));
+        var result = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+            support.Request, CancellationToken.None);
 
         Assert.Equal(AcceptedStateCodes.KeyUnavailable, result.Code);
         Assert.Equal(0, dependencies.StoreCreates);

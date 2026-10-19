@@ -455,7 +455,8 @@ sealed class Fixture : IAsyncDisposable
 
     internal async Task<SolusRestrictedStateRecord> SeedAsync(SolusRestrictedStateRecord? suppliedRecord = null)
     {
-        var bootstrap = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(Request, default);
+        var bootstrap = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(Request with {
+            SolusTransaction = new(Targets, Runtime.SourceSelection.Compatibility, Guid.NewGuid()) }, default);
         using var bootstrapContext = bootstrap.Context;
         Proof.Require(bootstrap.IsBootstrap && bootstrapContext is not null &&
             bootstrapContext.TryGetLineageSnapshot(out _), "bootstrap");

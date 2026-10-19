@@ -145,7 +145,7 @@ public sealed partial class ActionHostCompositionTests
         clock ??= new FrozenLocatorTimeProvider(LocatorTestData.Now);
         var provider = new BudgetRecordingFactory(respond, clock);
         var staging = StagingPath();
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, config, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, () => staging))
             .RunAsync(launch, default);

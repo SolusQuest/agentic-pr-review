@@ -271,7 +271,9 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var projection));
         Assert.NotNull(projection);
         Assert.Equal(run.Run.ReviewedIdentity, projection.ReviewedIdentity);
-        Assert.Empty(projection.OrderedFindings);
+        Assert.False(projection.HasCompleteFindings);
+        Assert.True(projection.OrderedFindings.IsDefault);
+        Assert.Equal(run.Outcome.Review!.Findings.Length, projection.FindingCount);
     }
 
     [Fact]
@@ -1008,7 +1010,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
-    public async Task MaximumSessionCompositePersistsAndRecoversThroughS6()
+    public async Task MaximumCurrentRecordCompositePersistsAndRecoversThroughS6()
     {
         var fixture = await CreateFixtureAsync();
         using var currentSupport17 = fixture.Support;
@@ -1035,91 +1037,27 @@ public sealed class RetainedStateTransactionEndToEndTests
                     new string('b', 64),
                     [1])),
         };
-        var messageCount = template.Outcome.Events
-            .OfType<AgentMessageEvent>()
-            .Count(message => message.Contents.Any(part =>
-                part is AgentToolCallReferencePart));
-        Assert.Equal(2, messageCount);
-        var paddingParts = checked(
-            messageCount * (AgentLimits.PartsPerMessage - 2));
-        var minimumPadding = paddingParts;
-        var minimumOutcome = WithFixedTextPadding(
-            template.Outcome,
-            minimumPadding,
-            paddingParts);
-        var minimumBuild = BuildSession(
-            fixture,
-            template.Run,
-            minimumOutcome);
-        Assert.True(minimumBuild.Succeeded, minimumBuild.FailureCode);
-        var minimumArtifact = Assert.IsType<AgentSessionArtifact>(
-            minimumBuild.Artifact);
-        var low = minimumPadding;
-        var high = Math.Min(
-            paddingParts * AgentLimits.ContentBytes,
-            minimumPadding + AgentLimits.SessionPlaintextBytes -
-                minimumArtifact.Plaintext.Length);
-        CryptographicOperations.ZeroMemory(minimumArtifact.Plaintext);
-        var exactPadding = minimumPadding;
-        while (low <= high)
-        {
-            var middle = low + (high - low) / 2;
-            var candidateOutcome = WithFixedTextPadding(
-                template.Outcome,
-                middle,
-                paddingParts);
-            var candidateBuild = BuildSession(
-                fixture,
-                template.Run,
-                candidateOutcome);
-            if (candidateBuild.Succeeded)
-            {
-                CryptographicOperations.ZeroMemory(
-                    candidateBuild.Artifact!.Plaintext);
-                exactPadding = middle;
-                low = middle + 1;
-            }
-            else
-            {
-                high = middle - 1;
-            }
-        }
-
-        var outcome = WithFixedTextPadding(
-            template.Outcome,
-            exactPadding,
-            paddingParts);
-        var exactBuild = BuildSession(fixture, template.Run, outcome);
-        Assert.True(exactBuild.Succeeded, exactBuild.FailureCode);
-        var exactArtifact = Assert.IsType<AgentSessionArtifact>(
-            exactBuild.Artifact);
-        Assert.InRange(
-            exactArtifact.Plaintext.Length,
-            1,
-            AgentLimits.SessionPlaintextBytes);
-        if (exactPadding < paddingParts * AgentLimits.ContentBytes)
-        {
-            var over = BuildSession(
-                fixture,
-                template.Run,
-                WithFixedTextPadding(
-                    template.Outcome,
-                    exactPadding + 1,
-                    paddingParts));
-            Assert.False(over.Succeeded);
-        }
-        Assert.True(R4PreparedPublication.TryCreate(
-            outcome,
-            fixture.PublicationScope,
-            out var publication));
-
-        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
+        var compatibility = SolusTransactionTestSupport.Compatibility();
+        var checkpoint = new SolusRestrictedStateCheckpoint(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            fixture.Support.Request.SolusTransaction!.ExecutionId);
+        // Structural Host input: actual SDK grammar/import is qualified separately.
+        Assert.True(SolusRestrictedStateRecord.TryCreate(compatibility, checkpoint,
+            new byte[SolusRestrictedStateFormat.MaximumPayloadBytes], out var record));
+        Assert.False(SolusRestrictedStateRecord.TryCreate(compatibility, checkpoint,
+            new byte[SolusRestrictedStateFormat.MaximumPayloadBytes + 1], out _));
+        Assert.True(SolusRestrictedStateSnapshotCodec.TryWrite(record!, out var recordBytes));
+        Assert.Equal(SolusRestrictedStateSnapshotCodec.MaximumRecordBytes, recordBytes.Length);
+        var recordSha256 = SolusRestrictedStateSnapshotCodec.RecordSha256(recordBytes);
+        CryptographicOperations.ZeroMemory(recordBytes);
+        Assert.True(R4ValidatedPublicationReview.TryCreateProjection(
+            template.Outcome.Review!, template.Outcome.ReviewedIdentity!,
+            fixture.PublicationScope, out var review));
+        var preparedResult = await RestrictedStateService.PrepareRetainedSolusCandidateAsync(
+            fixture.Context, record!, review!, CancellationToken.None);
         Assert.True(preparedResult.Succeeded, preparedResult.Code);
-        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
-            preparedResult.Value);
-        Assert.Equal(
-            exactArtifact.SessionSha256,
-            prepared.Generation.SessionSha256);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(preparedResult.Value);
+        Assert.Equal(recordSha256, prepared.Generation.SessionSha256);
         Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
             prepared.Generation,
             out var originalGeneration));
@@ -1148,14 +1086,13 @@ public sealed class RetainedStateTransactionEndToEndTests
         var recovered = Assert.IsType<RetainedStatePersistedCandidate>(
             recoveredResult.Value);
         Assert.Equal(
-            exactArtifact.SessionSha256,
+            recordSha256,
             recovered.Prepared.Generation.SessionSha256);
         Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
             recovered.Prepared.Generation,
             out var recoveredGeneration));
         Assert.True(originalGeneration.AsSpan().SequenceEqual(
             recoveredGeneration));
-        CryptographicOperations.ZeroMemory(exactArtifact.Plaintext);
     }
 
     [Fact]

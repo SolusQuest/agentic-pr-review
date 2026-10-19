@@ -988,6 +988,9 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
         Assert.NotNull(admitted);
         Assert.Equal(SolusRestrictedStateFormat.MaximumPayloadBytes, admitted!.PayloadByteCount);
         Assert.Equal(SolusTransactionTestSupport.Compatibility(), admitted.Compatibility);
+        var observed = await ObserveSelectedLineageAsync(store, request, time);
+        Assert.Equal(15, observed.Generation);
+        Assert.NotNull(observed.PredecessorEnvelopeSha256);
     }
 
     private static RestrictedStateAdmittedSession CurrentRecord(ReviewedIdentity identity,
@@ -1793,7 +1796,9 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
                 accepted.Code,
                 accepted.IsBootstrap,
                 accepted.Selection is not null,
-                accepted.Expiry is not null);
+                accepted.Expiry is not null,
+                accepted.Selection?.Current.Generation.Generation,
+                accepted.Selection?.Current.Generation.PredecessorEnvelopeSha256);
         }
     }
 
@@ -2252,7 +2257,9 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
         string AcceptedCode,
         bool IsBootstrap,
         bool HasSelection,
-        bool HasExpiry);
+        bool HasExpiry,
+        long? Generation,
+        string? PredecessorEnvelopeSha256);
 
     private sealed record InterruptedExpiryScenario(
         ScriptedLocatorStore Store,

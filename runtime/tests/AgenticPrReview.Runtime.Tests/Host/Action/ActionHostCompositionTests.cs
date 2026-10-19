@@ -49,7 +49,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = new FakePublisherTransportFactory();
         var provider = new FullPathProviderFactory();
         var stagingCalls = 0;
-        var composition = new ActionHostComposition(
+        var composition = new CurrentHostTestComposition(
             new ActionHostCompositionDependencies(
                 authorization.EventReader,
                 authorization.Factory,
@@ -139,7 +139,7 @@ public sealed partial class ActionHostCompositionTests
                 File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite |
                     UnixFileMode.UserExecute | UnixFileMode.GroupRead);
             }
-            running = new ActionHostComposition(new ActionHostCompositionDependencies(
+            running = new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                 scenario.EventReader, scenario.Factory, github, github, state, publisher, provider, clock,
                 () => staging)).RunAsync(launch, cancellation.Token);
             if (cancelWhileWaiting)
@@ -202,7 +202,7 @@ public sealed partial class ActionHostCompositionTests
                 throw new InvalidOperationException("calibration complete");
             });
         var calibrationStaging = StagingPath();
-        var calibrationCompletion = await new ActionHostComposition(
+        var calibrationCompletion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     calibration.EventReader,
                     calibration.Factory,
@@ -244,7 +244,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = EmptyPublisher();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -282,7 +282,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = EmptyPublisher();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -331,7 +331,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = EmptyPublisher();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -411,7 +411,7 @@ public sealed partial class ActionHostCompositionTests
         var provider = new FullPathProviderFactory();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -474,7 +474,7 @@ public sealed partial class ActionHostCompositionTests
         };
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -527,7 +527,7 @@ public sealed partial class ActionHostCompositionTests
         };
         var firstStaging = StagingPath();
 
-        var first = await new ActionHostComposition(
+        var first = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -550,7 +550,7 @@ public sealed partial class ActionHostCompositionTests
         store.AfterUpload = null;
         store.HideNextUploadedObjectForNextLists = 0;
         var resumedStaging = StagingPath();
-        var resumed = await new ActionHostComposition(
+        var resumed = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -620,7 +620,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var composition = new ActionHostComposition(
+        var composition = new CurrentHostTestComposition(
             new ActionHostCompositionDependencies(
                 authorization.EventReader,
                 authorization.Factory,
@@ -667,7 +667,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var resumed = await new ActionHostComposition(
+        var resumed = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -924,7 +924,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -993,7 +993,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -1078,7 +1078,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -1112,7 +1112,7 @@ public sealed partial class ActionHostCompositionTests
             ActionHostAuthorizationRoute.WorkflowDispatch,
             includeToken: false);
         var stagingCalls = 0;
-        var composition = new ActionHostComposition(Dependencies(
+        var composition = new CurrentHostTestComposition(Dependencies(
             scenario,
             () =>
             {
@@ -1154,7 +1154,7 @@ public sealed partial class ActionHostCompositionTests
             _ => pullRequest with { State = "closed" },
         };
         var stagingCalls = 0;
-        var composition = new ActionHostComposition(Dependencies(
+        var composition = new CurrentHostTestComposition(Dependencies(
             scenario,
             () =>
             {
@@ -1205,7 +1205,7 @@ public sealed partial class ActionHostCompositionTests
         TimeProvider time)
     {
         var staging = StagingPath();
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     value.Scenario.EventReader,
                     value.Scenario.Factory,

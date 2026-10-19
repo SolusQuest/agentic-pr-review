@@ -142,7 +142,7 @@ public sealed partial class ActionHostCompositionTests
         var github = new FullPathGitHubFactory(scenario.Transport.PullRequest, withInlineFile: hook is not null);
         var store = FullPathStore(launch);
         var staging = StagingPath();
-        var result = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var result = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), SuccessfulPublisher(346), provider,
             clock ?? new FrozenLocatorTimeProvider(LocatorTestData.Now), () => staging, inlineHook: hook))

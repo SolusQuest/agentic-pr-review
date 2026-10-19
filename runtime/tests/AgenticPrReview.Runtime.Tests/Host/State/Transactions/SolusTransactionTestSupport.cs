@@ -69,7 +69,7 @@ internal sealed class SolusTransactionTestSupport : IDisposable
             var empty = AgentCanonical.HashRaw([]);
             snapshot = new(reviewed, new(request.Launch.RepositoryId, invocation.PullRequest.Number,
                 identity.BaseSha, identity.HeadSha, tree.Identity.Sha256, empty, empty, root.Identity.Sha256), root);
-            if (previous is not null && previous.exclusion.Value.MatchesInvocation(request))
+            if (previous is not null && previous.CanShareInvocation(request))
             {
                 shared = previous.exclusion;
                 Interlocked.Increment(ref shared.References);
