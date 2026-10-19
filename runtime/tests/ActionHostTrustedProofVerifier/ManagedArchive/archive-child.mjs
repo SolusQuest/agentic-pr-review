@@ -684,6 +684,9 @@ try {
   assertAccounting(reset, 2);
   assert.equal(github.writes, beforeReset + 1);
   const afterReset = official.snapshot();
+  // Exercise real retention succession, even when both invocations would
+  // otherwise fall within the same wall-clock second.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
   const resetRetry = await run('same-reset-invocation-recovery', 1, {
     reset: true,
     noProvider: true,
