@@ -1,5 +1,6 @@
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.State.Lineage;
+using AgenticPrReview.Runtime.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Host.State.Restore;
 
@@ -11,7 +12,9 @@ internal static class ResetPublicationCapture
         AcceptedStatePolicyBinding policy,
         AcceptedStatePublicationBinding publication,
         TimeProvider time,
-        out ResetPublicationTargetV1? target)
+        out ResetPublicationTargetV1? target,
+        ArtifactStateRestoreRequest? restoreRequest = null,
+        LocatorContext? locator = null)
     {
         target = null;
         var head = observation.Selection.Selection?.Head;
@@ -21,7 +24,8 @@ internal static class ResetPublicationCapture
         if (!selected.Succeeded && !selected.IsBootstrap) return false;
         var active = snapshot.Authenticated.Concat(snapshot.UnderRetained)
             .Where(item => item.Header.Epoch == head.Header.Epoch && item.Header.SessionId == head.Header.SessionId);
-        if (!PublicationRecoveryInventoryFactory.ResetSourceRecordsAreAccepted(active, selected.Selection)) return false;
+        if (!PublicationRecoveryInventoryFactory.ResetSourceRecordsAreAccepted(active, selected.Selection,
+                restoreRequest, locator, request, snapshot, time.GetUtcNow().ToUnixTimeSeconds(), publication)) return false;
         if (selected.Selection?.Current is { } current)
         {
             if (!AcceptedStateRestoreService.MatchesPublication(current, policy, publication)) return false;

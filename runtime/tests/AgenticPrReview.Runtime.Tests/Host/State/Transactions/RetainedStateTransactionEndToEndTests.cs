@@ -2333,7 +2333,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var decodedRecovery = Assert.IsType<TrustedProofCodecOracleResult>(recoveryResult);
         Assert.False(decodedRecovery.ExactSevenSuccess);
         Assert.True(decodedRecovery.RecoveryOnly);
-        Assert.Equal(15, decodedRecovery.Records.Length);
+        Assert.Equal(11, decodedRecovery.Records.Length);
         Assert.Empty(decodedRecovery.MaintainerHandoff);
 
         var locatorInput = oracleInputs[0];

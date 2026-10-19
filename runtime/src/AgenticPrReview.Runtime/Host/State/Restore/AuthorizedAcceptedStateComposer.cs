@@ -494,6 +494,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                 }
 
                 var reset = await ResolveResetAsync(
+                        request,
                         authorization,
                         lineageService,
                         locator,
@@ -860,6 +861,7 @@ internal sealed class AuthorizedAcceptedStateComposer
             policy.BuildDiscriminator);
 
     private static async Task<LineageResolveResult> ResolveResetAsync(
+        ArtifactStateRestoreRequest restoreRequest,
         AcceptedStateProductionAuthorization authorization,
         LineageService service,
         LocatorContext locator,
@@ -940,7 +942,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                     new AcceptedStatePolicyBinding(policy.PolicySha256, policy.ConfigSha256,
                         policy.InstructionsSha256, policy.PayloadSha256,
                         policy.PayloadContinuityMode, policy.BuildDiscriminator),
-                    publicationBinding, timeProvider, out target))
+                    publicationBinding, timeProvider, out target, restoreRequest, locator))
                 return LineageResolveResult.Fail(LineageCodes.Conflict);
         }
         var reset = AuthorizedLineageReset.Issue(

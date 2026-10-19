@@ -284,7 +284,13 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             var accepted = ReadAcceptedStateRecords(world.Store, reset.Launch, world.Time);
             var writes = world.Publications;
             var retried = await world.RunAsync(1, reset: true, fresh: true);
-            Assert.Equal(ActionHostStatus.Reviewed, retried.Completion.Status);
+            // Current recovery preserves the accepted public finding count,
+            // without recreating private findings for optional inline work.
+            Assert.Equal(ActionHostStatus.ReviewedWithInlineWarnings, retried.Completion.Status);
+            Assert.Contains(retried.Completion.Annotations, annotation =>
+                annotation.Code == ActionHostAnnotationCode.InlinePublicationIncomplete);
+            Assert.Equal(ActionHostStateDisposition.Accepted, retried.Completion.Summary.StateDisposition);
+            Assert.True(retried.Completion.Accounting.IsCompleteZero);
             Assert.Equal(0, retried.Provider.Creates);
             Assert.Equal(writes, world.Publications);
             var after = ReadAcceptedStateRecords(world.Store, retried.Launch, world.Time);
@@ -294,6 +300,15 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
 
         private sealed class CapacityResetWorld
         {
+            internal CapacityResetWorld() { }
+            private CapacityResetWorld(ScriptedLocatorStore store, IncrementalRemote sharedRemote)
+            { Store = store; remote = sharedRemote; }
+            internal CapacityResetWorld WithProofStore(ScriptedLocatorStore store)
+            {
+                var copied = new CapacityResetWorld(store, remote);
+                copied.Time.UnixSeconds = Time.UnixSeconds;
+                return copied;
+            }
             private readonly AdmittedReplayFixture fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(
                 Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "growth")).Fixture);
             private readonly IncrementalRemote remote = new();

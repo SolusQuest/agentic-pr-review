@@ -821,3 +821,169 @@ describe('S5 finite current Framework source inventory', () => {
     },
   );
 });
+
+describe('S5 finite full Framework golden selector', () => {
+  const selectorPath = '../runtime/tests/fixtures/action-host/cr1-s5-host/framework-golden.mjs';
+  const contractPath = 'runtime/tests/fixtures/action-host/cr1-s5-host/framework-expectations.json';
+  test('preserves all untouched original invariants and selects an explicitly separate Host domain', async () => {
+    const { createS5FrameworkGolden, verifyS5FrameworkEvidence } = await import(selectorPath);
+    const original = JSON.parse(
+      await text('runtime/tests/fixtures/action-host/cr1-r8-typed/expected-evidence.json.golden'),
+    );
+    const expected = createS5FrameworkGolden(root);
+    expect(verifyS5FrameworkEvidence(root, expected)).toEqual({
+      cases: 32,
+      sdkContextImportQualified: false,
+    });
+    expect(expected.schema).toBe('apr.action-host.cr1-s5-current-framework-evidence.v1');
+    expect(expected.observation_domain).toBe('apr-s5-current-framework-host-work-v1');
+    expect(expected.sdk_context_import_qualified).toBe(false);
+    expect(expected.scenarios.map((item: { name: string }) => item.name)).toEqual(
+      original.scenarios.map((item: { name: string }) => item.name),
+    );
+    for (let index = 0; index < original.scenarios.length; index++) {
+      const before = original.scenarios[index];
+      const after = expected.scenarios[index];
+      for (const key of [
+        'ExitCode',
+        'ToolSequence',
+        'SyntheticCalls',
+        'StickyMutations',
+        'InlineMutations',
+        'CanarySafe',
+      ])
+        expect(after[key], before.name + '.' + key).toEqual(before[key]);
+      if (before.name !== 'dispatch-cross-head-conflict') expect(after.status).toBe(before.status);
+    }
+    expect(expected.scenarios[2]).toMatchObject({
+      status: 'authorization_failed',
+      ToolSequence: 0,
+      StickyMutations: 0,
+      InlineMutations: 0,
+      SyntheticCalls: 0,
+    });
+    for (const key of [
+      'replacement_record_digest',
+      'base_inventory_digest',
+      'canary_table_digest',
+      'process',
+      'exact_child_environment',
+      'outputs_match_summary',
+      'canary_oracle_passed',
+      'canary_negative_injection_count',
+      'artifact_metadata_route_probe_count',
+    ])
+      expect(expected[key], key).toEqual(original[key]);
+    expect(expected.continuation.sticky_lineage_digest).toBe(
+      original.continuation.sticky_lineage_digest,
+    );
+    expect(expected.official_bridge.delete).toBe(original.official_bridge.delete);
+    expect(() => verifyS5FrameworkEvidence(root, original)).toThrow();
+  });
+  test.each([
+    'owner',
+    'kind',
+    'role',
+    'sdk',
+    'source',
+    'historical-pin',
+    'missing-counter',
+    'duplicate-counter',
+    'wrong-counter',
+    'unsupported-counter',
+    'missing-identity',
+    'wrong-identity',
+    'reason',
+    'extra-authority',
+  ])('rejects contract %s drift', async (mutation) => {
+    const { createS5FrameworkGolden } = await import(selectorPath);
+    const contract = JSON.parse(await text(contractPath));
+    if (mutation === 'owner') contract.owner_issue = 403;
+    if (mutation === 'kind') contract.kind = 'historical';
+    if (mutation === 'role') contract.host_role = 'sdk';
+    if (mutation === 'sdk') contract.sdk_context_import_qualified = true;
+    if (mutation === 'source') contract.source_inventory_digest = '0'.repeat(64);
+    if (mutation === 'historical-pin') contract.historical_golden_sha256 = '0'.repeat(64);
+    if (mutation === 'missing-counter') contract.counter_dispositions.pop();
+    if (mutation === 'duplicate-counter')
+      contract.counter_dispositions[1] = contract.counter_dispositions[0];
+    if (mutation === 'wrong-counter') contract.counter_dispositions[0].current++;
+    if (mutation === 'unsupported-counter')
+      contract.counter_dispositions[0].path = 'scenarios.dispatch-bootstrap.StickyMutations';
+    if (mutation === 'missing-identity') contract.identity_dispositions.pop();
+    if (mutation === 'wrong-identity') contract.identity_dispositions[0].current = '0'.repeat(64);
+    if (mutation === 'reason') contract.counter_dispositions[0].reason = 'no longer needed';
+    if (mutation === 'extra-authority') contract.allow_unknown_scenarios = true;
+    expect(() => createS5FrameworkGolden(root, contract)).toThrow();
+  });
+  test.each([
+    'sdk',
+    'owner',
+    'role',
+    'source',
+    'missing-case',
+    'duplicate-case',
+    'case-order',
+    'cross-head-code',
+    'cross-head-provider',
+    'publication',
+    'tool-count',
+    'call-count',
+    'github-count',
+    'state-count',
+    'canary-count',
+    'bridge-count',
+    'carrier-overclaim',
+    'old-domain',
+    'old-field',
+    'context-import',
+    'missing-boundary',
+    'source-substitution',
+    'wrong-identity',
+    'mutation-scope',
+  ])('rejects actual evidence %s drift', async (mutation) => {
+    const { createS5FrameworkGolden, verifyS5FrameworkEvidence } = await import(selectorPath);
+    // Data admission only. This fixture is never a receipt for Host execution.
+    const value = createS5FrameworkGolden(root);
+    if (mutation === 'sdk') value.sdk_context_import_qualified = true;
+    if (mutation === 'owner') value.owner_issue = 403;
+    if (mutation === 'role') value.host_role = 'sdk-context';
+    if (mutation === 'source') value.source_inventory_digest = '0'.repeat(64);
+    if (mutation === 'missing-case') value.scenarios.pop();
+    if (mutation === 'duplicate-case') value.scenarios[1] = value.scenarios[0];
+    if (mutation === 'case-order') value.scenarios.reverse();
+    if (mutation === 'cross-head-code') value.scenarios[2].status = 'state_conflict';
+    if (mutation === 'cross-head-provider') value.scenarios[2].SyntheticCalls = 1;
+    if (mutation === 'publication') value.scenarios[2].StickyMutations = 1;
+    if (mutation === 'tool-count') value.scenarios[0].ToolSequence--;
+    if (mutation === 'call-count') value.scenarios[0].SyntheticCalls--;
+    if (mutation === 'github-count') value.scenarios[1].GitHubRequests--;
+    if (mutation === 'state-count') value.scenarios[1].StateOperations--;
+    if (mutation === 'canary-count') value.canary_negative_injection_count--;
+    if (mutation === 'bridge-count') value.official_bridge.rest--;
+    if (mutation === 'carrier-overclaim')
+      value.continuation.prior_marker_first_request_exact = true;
+    if (mutation === 'old-domain')
+      value.observation_domain = 'apr-historical-authored-typed-chat-v1';
+    if (mutation === 'old-field') value.scenarios[0].ContinuationObserved = true;
+    if (mutation === 'context-import') value.continuation.sdk_context_import_qualified = true;
+    if (mutation === 'missing-boundary') delete value.scenarios[2].CurrentWorkBoundarySatisfied;
+    if (mutation === 'source-substitution') value.historical_golden_sha256 = '0'.repeat(64);
+    if (mutation === 'wrong-identity') value.continuation.state_identity_digest = '0'.repeat(64);
+    if (mutation === 'mutation-scope') value.official_bridge.delete++;
+    expect(() => verifyS5FrameworkEvidence(root, value)).toThrow();
+  });
+  test('the actual wrapper chooses the new selector only in its framework branch', async () => {
+    const script = await text('runtime/scripts/verify-action-host.sh');
+    expect(script).toContain(
+      'if [[ "$mode" == framework ]]; then\n  golden="$temporary_root/s5-current-framework-evidence.json"',
+    );
+    expect(script).toContain(
+      '"$repo_root/runtime/tests/fixtures/action-host/cr1-s5-host/framework-golden.mjs"',
+    );
+    expect(script).toContain('--golden "$golden" --canaries "$canaries" --node "$node_path"');
+    expect(script).toContain(
+      '-p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true',
+    );
+  });
+});

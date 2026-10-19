@@ -34,9 +34,18 @@
   "sdk_history_owner": {
     "source_commit": "61e36e4adfce98dbfd7e4689978848981004f148",
     "workflow_run": "https://github.com/SolusQuest/agentic-pr-review/actions/runs/39307647661",
-    "actual_cases": "Actual S4 selected source/import, useful successor work, tampered SDK history rejection before sends, restart/recovery; actual V3 cumulative capacity and explicit reset. All stages passed, zero live provider requests.",
+    "actual_cases": "Actual S4 selected source/import, useful successor work, tampered SDK history rejection before sends, restart/recovery; actual V3 cumulative capacity. The original-archive managed proof separately covers authorized reset from genuine historical SESSION, not reset after current source consumption. All stages passed, zero live provider requests.",
     "qualification": "Earlier exact-source support only; final current-head .4 run remains required."
   },
   "preserved": "All generic R6 prefix history and generic loop/request budget assertions remain in their existing R7-owned bodies. No current reader/converter or synthetic SDK import is introduced.",
-  "qualification": "Native report-admission twenty cases passed; new-source full Ubuntu actual reset/report execution remains pending."
+  "qualification": "Source compilation and native/source checks are supporting feedback. New actual current-claim reset/negative/partial/restart/budget-limit Linux execution and installed .4 qualification remain pending.",
+  "current_claim_reset": {
+    "original_failure_source": "83d2a16e98b43c031042504cc8a05f92fb80a0a4",
+    "original_failed_run": "https://github.com/SolusQuest/agentic-pr-review/actions/runs/39314458506",
+    "root_cause": "ResetSourceRecordsAreAccepted rejected every ContextClaim. Actual two accepts plus failed source consumption could not authorize explicit reset.",
+    "fix": "Only3production files carry existing trusted restore/locator context and verify current+immediate-predecessor real source records/receipt/head/envelope/record/checkpoint/owner/expiry/grant/conflicts. Existing reset exact-inventory transition remains the effect owner. No source consumption/import/issuer/selector/retention change.",
+    "tests": "ActualTwoAcceptedSourcesAndFailedConsumptionResetWithoutDeletingFixtureClaims;21 controlled authenticated faults; ActualClaimedResetReconcilesPartialCleanupAndRestart; CurrentClaimBudgetAndEvictedResetSourcesRemainVisibleWithoutFreshFallback",
+    "remaining_limit": "At bootstrap+8sourceclaims, seven claimed sources are expected outside retained current+predecessor. Their claims alone cannot authenticate deleted source records, so explicit reset remains refused; exact new-source Linux execution and report required. No claim garbage collection or full-session reset claim.",
+    "actual_sdk_append": "S4 adds actual seed+review+third-run failed import\u2192authorized fresh reset+same-reset recovery+authenticated reset readback, using four genuine producer runs in the unchanged bridge registry. Pending installed-package execution."
+  }
 }

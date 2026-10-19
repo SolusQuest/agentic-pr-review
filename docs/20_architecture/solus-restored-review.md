@@ -16,6 +16,12 @@ Only `NoPendingWork` can enter the S2 source path. Current credentials, input cl
 
 The actual runtime receives `NewRunFromContext`, the selected envelope and the source-bound grant. It retains historical classified inputs, model/tool associations, usage and accepted receipts, while creating a new execution, round and logical work. Completed historical tools are not invoked again. APR validates the current domain result against only this invocation's new tool observations; old observation IDs and lines cannot independently ground a current finding.
 
+## Explicit reset and consumed claims
+
+Explicit reset retains its existing authorized exact-inventory transition and publication-target binding. Current context claims are spent storage data, not reset authority. For a selected current record and its immediate predecessor, reset validates every claim against the actual authenticated source receipt, logical head, generation, envelope and record digests, decoded S1 checkpoint, owner, grant derivation and time bounds. It performs no SDK import or second consumption. Unknown, under-retained, conflicting, duplicate, unaccepted or uncertain work remains a refusal; existing P5 settlement and reset cleanup keep their original owners.
+
+This repair has a bounded source closure. A claim whose original source was already evicted beyond the current record and immediate predecessor cannot be authenticated from the claim alone, so reset still refuses that longer session. The existing eight-claim limit is unchanged. This limitation is separately exercised at the actual claim-budget boundary; it is not full-session reset qualification or permission to discard old claims. Reset from a genuine historical SESSION without current claims retains its existing path.
+
 ## Independent results and capacities
 
 Admission, current work, terminal/domain acceptance, capture validity and durable acceptance are separate observations. Import rejection has a context admission result and no invented current work. Valid work remains visible when capture is unavailable, invalid, duplicated or throws, or when a later state/publication effect fails. A capture alone authorizes no publication or acceptance.

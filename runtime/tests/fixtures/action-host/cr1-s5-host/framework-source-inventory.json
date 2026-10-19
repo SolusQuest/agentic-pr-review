@@ -11,7 +11,7 @@
   },
   "current_role": "host-only-structural-records",
   "sdk_context_import_qualified": false,
-  "current_source_inventory_digest": "2fff7647347680b34212688245a7ab99a3b51705621589e629c13f07a85aa385",
+  "current_source_inventory_digest": "c94b77d7d4823a96815cfbe13ad6fedf2461360ce1193f93a0220f90b28e2e0d",
   "sources": [
     {
       "path": "runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj",
@@ -76,20 +76,20 @@
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkProviderHandler.cs",
       "original_sha256": "966d92d49c43155c5544c68e85b613a19cd65edc31c7ac6ec088c5e6de4075dc",
-      "current_sha256": "62641e0055c623f4ec0a6e044acf6165cabd092521e1f14e682901ea542e2e98",
+      "current_sha256": "fcbafb346c0f41891ea350dccf3ac5b84097742d3149bcb945d4a146eb1831b6",
       "disposition": "current-Host-only-successor"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSessionCapacity.cs",
       "original_sha256": "1c54900f00a02b1685a7da5fb3ecd7e14e980268522555094373df8ec1fdcf40",
-      "current_sha256": "1c54900f00a02b1685a7da5fb3ecd7e14e980268522555094373df8ec1fdcf40",
-      "disposition": "unchanged"
+      "current_sha256": "50e34af85535037f759476fa5349677a8629e68b805dafe2844baa4334ffea35",
+      "disposition": "current-Host-only-successor"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSessionCapacitySupervisor.cs",
       "original_sha256": "be4a2988e1dfba2bf3e3ebcc60f9f80aaa466976d2eac570303a38a5d9d262bd",
-      "current_sha256": "be4a2988e1dfba2bf3e3ebcc60f9f80aaa466976d2eac570303a38a5d9d262bd",
-      "disposition": "unchanged"
+      "current_sha256": "5826d31a4f57f5b1ccb227efcbc5716cbd9f8fe3a1a69a0109c194639c822862",
+      "disposition": "current-Host-only-successor"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkStateDependencies.cs",

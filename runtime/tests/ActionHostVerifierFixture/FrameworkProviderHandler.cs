@@ -48,7 +48,7 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
             Record("provider-checkpoint-ready", 1);
             await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
         }
-        var prefix = FrameworkSessionCapacity.IsMode(mode) ? mode + "-" : mode == "continuation" ? "continuation-" : "framework-";
+        var prefix = mode == "continuation" ? "continuation-" : "framework-";
         var response = mode == "continuation" ? call switch
         {
             1 => Tool(request, "continuation-read-file", "read_file", ReadFileArguments(), call),
@@ -127,14 +127,13 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
     }
     private ProjectChatResponse Tool(ProjectChatRequest request, string id, string name, string arguments, int ordinal, string? marker = null)
     {
-        var reasoning = id.StartsWith(FrameworkSessionCapacity.Prefix, StringComparison.Ordinal) ? FrameworkSessionCapacity.Reasoning :
-            "framework-reasoning-" + ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) + (marker is null ? "" : " " + marker);
+        var reasoning = "framework-reasoning-" + ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) + (marker is null ? "" : " " + marker);
         var position = request.Messages.Length;
-        return new(new("assistant", [new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+        return new(new("assistant", [new ProjectReasoningContent(reasoning, "", "deepseek.reasoning_content.utf8.v1", null, position, 0),
             new ProjectToolCallContent(id, name, arguments)]),
             new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 1, 2)),
             CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                [new(reasoning, "", "deepseek.reasoning_content.utf8.v1", null, position, 0)]));
     }
     private string ReadMode() => File.Exists(Path.Join(scenarioRoot, "mode")) ? File.ReadAllText(Path.Join(scenarioRoot, "mode")).Trim() : "sticky";
     private int Increment(string name)

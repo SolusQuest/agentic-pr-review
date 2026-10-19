@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
@@ -29,6 +28,7 @@ internal static partial class FrameworkSupervisor
         var copies = 0;
         var messages = 0;
         var maximumOperations = 0;
+        string? priorRecordSha256 = null;
         for (var generation = 0; generation < FrameworkSessionCapacity.Generations; generation++)
         {
             var name = FrameworkSessionCapacity.Prefix + generation;
@@ -37,33 +37,43 @@ internal static partial class FrameworkSupervisor
             if (!result.Passed || !pids.Add(result.HostPid)) return false;
             maximumOperations = Math.Max(maximumOperations, File.ReadLines(Path.Join(root, name, "state-operations.tsv")).Count());
             last = ReadR7State(platform, Path.Join(root, name), generation);
-            if (last.Generation != generation) return false;
+            if (last.Generation != generation ||
+                (generation == 0 ? last.ConsumedRecordSha256 is not null : last.ConsumedRecordSha256 != priorRecordSha256) ||
+                !CurrentFrameworkTraceIsValid(Path.Join(root, name), 6, false)) return false;
+            priorRecordSha256 = last.SessionSha256;
             copies += last.PhysicalCopies;
             using var projection = JsonDocument.Parse(File.ReadAllBytes(Path.Join(root, name, "r7-projection.json")));
             messages = projection.RootElement.GetProperty("messages").GetInt32();
             await File.WriteAllTextAsync(Path.Join(root, "capacity-progress.json"), FrameworkJson.Serialize(FrameworkJson.Object(
-                ("generation", last.Generation), ("plaintext_bytes", last.PlaintextBytes), ("records", last.CombinedRecords),
+                ("generation", last.Generation), ("plaintext_bytes", last.PlaintextBytes), ("sdk_context_import_qualified", false),
                 ("messages", messages), ("physical_copy_observations", copies), ("maximum_store_operations", maximumOperations))));
         }
-        if (last is null || last.PlaintextBytes <= 1_048_576 || last.CombinedRecords <= 256 || messages <= 64 || copies == 0 || maximumOperations <= 2048 || maximumOperations > 4096) return false;
+        // Exercise bootstrap plus the existing eight-claim budget, physical-copy observation and
+        // the existing store-operation ceiling. Native SESSION bytes/records/
+        // cumulative messages are retired rather than claimed for SDK state.
+        if (last is null || last.PlaintextBytes <= 0 || last.PlaintextBytes > SolusRestrictedStateSnapshotCodec.MaximumEnvelopeBytes ||
+            messages != 12 || copies == 0 || maximumOperations <= 2048 || maximumOperations > 4096) return false;
         var failureName = FrameworkSessionCapacity.Prefix + FrameworkSessionCapacity.Generations;
-        var failed = await RunCaseAsync(new(failureName, failureName, "agent_result_invalid", ExpectedProviderRequests: 0, ExpectedStickyMutations: 0),
+        var failed = await RunCaseAsync(new(failureName, failureName, "state_conflict", ExpectedProviderRequests: 0, ExpectedStickyMutations: 0),
             root, repository, payload, bundle, node, platform);
         if (!failed.Passed || !pids.Add(failed.HostPid) ||
-            File.ReadAllText(Path.Join(root, failureName, "r7-agent-code")) != "agent_response_invalid") return false;
+            File.Exists(Path.Join(root, failureName, "r7-agent-code")) ||
+            !CurrentFrameworkTraceIsValid(Path.Join(root, failureName), 0, false)) return false;
         var after = ReadR7State(platform, Path.Join(root, failureName), FrameworkSessionCapacity.Generations);
         if (after.Generation != last.Generation || after.SessionSha256 != last.SessionSha256) return false;
-        var receipt = FrameworkJson.Object(("schema", "r7-historical-typed-session-input-capacity-v1"),
+        var receipt = FrameworkJson.Object(("schema", "apr.s5.current.framework.retained-host.v1"),
+            ("owner_issue", 409), ("sdk_context_import_qualified", false),
+            ("observation_domain", CurrentFrameworkChatObserver.Domain),
             ("accepted_generations", FrameworkSessionCapacity.Generations), ("fresh_host_processes", pids.Count),
-            ("messages", messages), ("combined_records", last.CombinedRecords), ("plaintext_bytes", last.PlaintextBytes),
+            ("current_messages", messages), ("current_record_bytes", last.PlaintextBytes),
             ("physical_copy_observations", copies), ("maximum_store_operations", maximumOperations), ("refused_script_calls", failed.ProviderRequests),
-            ("predecessor_preserved", true), ("session_sha256", last.SessionSha256));
+            ("predecessor_preserved", true), ("record_sha256", last.SessionSha256));
         await File.WriteAllTextAsync(Path.Join(root, "capacity-receipt.json"), FrameworkJson.Serialize(receipt) + "\n");
-        Console.WriteLine("APR_R7_ARTIFACT_SESSION_CAPACITY_OK");
+        Console.WriteLine("APR_S5_CURRENT_HOST_RETENTION_OK");
         return true;
     }
 
-    private sealed record R7Measurement(long Generation, int PlaintextBytes, int CombinedRecords, int PhysicalCopies, string SessionSha256);
+    private sealed record R7Measurement(long Generation, int PlaintextBytes, int PhysicalCopies, string SessionSha256, string? ConsumedRecordSha256);
 
     private static R7Measurement ReadR7State(SyntheticOfficialPlatform platform, string scenario, int ordinal)
     {
@@ -102,6 +112,7 @@ internal static partial class FrameworkSupervisor
                 using var locator = selected!;
                 var generations = new Dictionary<string, StateGenerationRecordV1>();
                 var receipts = new Dictionary<string, AcceptanceReceiptV1>();
+                var claims = new List<(StateControlHeaderV1 Header, SolusContextClaimRecord Claim)>();
                 var copies = 0;
                 foreach (var item in objects.Where(item => item.Name != LocatorRootFormat.StoreName))
                 {
@@ -123,6 +134,12 @@ internal static partial class FrameworkSupervisor
                                 copies++;
                             }
                         }
+                        else if (header.ObjectClass == StateObjectClass.ContextClaim)
+                        {
+                            RequireR7(SolusContextClaimRecordCodec.TryDecode(record, out var claim) && claim is not null &&
+                                claim.BaseScopeDigest == header.BaseScopeDigest && claim.Epoch == header.Epoch && claim.SessionId == header.SessionId);
+                            claims.Add((header, claim!));
+                        }
                         else if (header.ObjectClass == StateObjectClass.Acceptance)
                         {
                             RequireR7(AcceptedStateAcceptanceReceiptCodec.TryDecode(record, out var receipt));
@@ -142,9 +159,15 @@ internal static partial class FrameworkSupervisor
                     new R7ReadKeys(stateAccess!, access, locator), out var plaintext, out _));
                 try
                 {
-                    RequireR7(AgentSessionCodec.TryParse(plaintext!, out var session, out _) && session!.SessionSha256 == tail.SessionSha256);
-                    var records = session!.Document.CompletedRuns.Sum(r => r.Records.Length + r.Continuation.Items.Length);
-                    return new(tail.Generation, plaintext!.Length, records, copies, tail.SessionSha256);
+                    RequireR7(SolusRestrictedStateSnapshotCodec.TryRead(plaintext!, CurrentFrameworkHostTestComposition.Compatibility(), out var current, out _) &&
+                        current is not null && SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext!) == tail.SessionSha256);
+                    var consumed = claims.Where(item => item.Claim.ExecutionId == current!.Checkpoint.ExecutionId &&
+                        item.Claim.RoundId == current.Checkpoint.RoundId).ToArray();
+                    RequireR7(tail.Generation == 0 ? consumed.Length == 0 : consumed.Length == 1 &&
+                        consumed[0].Claim.Source.ExecutionId != current!.Checkpoint.ExecutionId &&
+                        consumed[0].Claim.Source.RoundId != current.Checkpoint.RoundId);
+                    return new(tail.Generation, plaintext!.Length, copies, tail.SessionSha256,
+                        consumed.SingleOrDefault().Claim?.RecordSha256);
                 }
                 finally { CryptographicOperations.ZeroMemory(plaintext!); }
             }

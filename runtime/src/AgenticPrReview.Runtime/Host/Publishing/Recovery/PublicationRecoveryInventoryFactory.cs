@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
+using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.Transactions;
@@ -1090,14 +1091,30 @@ internal static class PublicationRecoveryInventoryFactory
 
     internal static bool ResetSourceRecordsAreAccepted(
         IEnumerable<AuthenticatedStateObject> active,
-        AcceptedStateSelection? selection)
+        AcceptedStateSelection? selection,
+        ArtifactStateRestoreRequest? restoreRequest = null,
+        LocatorContext? locator = null,
+        LineageResolveRequest? lineageRequest = null,
+        ScopedStateInventorySnapshot? snapshot = null,
+        long trustedNow = 0,
+        AcceptedStatePublicationBinding? expectedPublication = null)
     {
+        var records = active.ToArray();
+        var claims = records.Where(item => item.Header.ObjectClass == StateObjectClass.ContextClaim).ToArray();
+        // Claims are spent storage data, never reset authority. Only the exact
+        // selected source closure can explain them before the existing reset
+        // owner captures its immutable inventory. No claim is consumed here.
+        var hasClaims = claims.Length > 0 || snapshot is not null &&
+            snapshot.Authenticated.Concat(snapshot.UnderRetained).Any(item => item.Header.ObjectClass == StateObjectClass.ContextClaim);
+        if (hasClaims && (claims.Length == 0 || !ResetClaimsMatchSelectedSources(records, claims, selection,
+                restoreRequest, locator, lineageRequest, snapshot, trustedNow, expectedPublication))) return false;
         var accepted = new[] { selection?.Current, selection?.ImmediatePredecessor }
             .OfType<SelectedAcceptedGeneration>()
             .ToDictionary(value => value.OriginalCandidateObjectIdentity, StringComparer.Ordinal);
         var sets = accepted.Keys.ToDictionary(key => key, _ => new ParsedRecordSet(), StringComparer.Ordinal);
-        foreach (var item in active)
+        foreach (var item in records)
         {
+            if (item.Header.ObjectClass == StateObjectClass.ContextClaim) continue; // All claims checked as a closed set above.
             if (item.Header.ObjectClass is StateObjectClass.LineageHead or StateObjectClass.Candidate or StateObjectClass.Acceptance)
                 continue;
             if (item.Header.ObjectClass == StateObjectClass.Cleanup &&
@@ -1112,6 +1129,129 @@ internal static class PublicationRecoveryInventoryFactory
                 decoded is null || !decoded.Matches(publication) || !sets[parent].TryAdd(decoded)) return false;
         }
         return sets.Values.All(value => ValidAttemptGraph(value, allowTerminalCleanupSubgraph: true));
+    }
+
+    private static bool ResetClaimsMatchSelectedSources(
+        AuthenticatedStateObject[] active, AuthenticatedStateObject[] claims,
+        AcceptedStateSelection? selection, ArtifactStateRestoreRequest? restoreRequest,
+        LocatorContext? locator, LineageResolveRequest? request,
+        ScopedStateInventorySnapshot? snapshot, long now, AcceptedStatePublicationBinding? publication)
+    {
+        if (selection is null || restoreRequest is null || locator is null || request is null ||
+            snapshot is null || publication is null || !snapshot.Unknown.IsEmpty || !LineageValidation.IsTime(now) ||
+            snapshot.UnderRetained.Any(item => item.Header.ObjectClass == StateObjectClass.ContextClaim) ||
+            claims.Length > LineageFormat.MaximumPhysicalPerClass ||
+            snapshot.Authenticated.Count(item => item.Header.ObjectClass == StateObjectClass.ContextClaim) != claims.Length) return false;
+        var targets = restoreRequest.SolusTransaction?.Targets ?? restoreRequest.SolusSourceSelection?.Targets;
+        var compatibility = restoreRequest.SolusTransaction?.Compatibility ?? restoreRequest.SolusSourceSelection?.Compatibility;
+        if (targets is null || !targets.Matches(restoreRequest) || !SolusRestrictedStateAdmission.IsSupported(compatibility) ||
+            !LineageBaseScopeCodec.TryDigest(request.BaseScope, out var digest)) return false;
+        var head = selection.LineageHead.Header;
+        if (head.BaseScopeDigest != digest) return false;
+        var owners = new[] { selection.Current, selection.ImmediatePredecessor }
+            .OfType<SelectedAcceptedGeneration>().ToArray();
+        // This bounded repair does not treat an evicted source or an unaccepted
+        // candidate as an attested source. Long-session claims outside this
+        // closure remain a visible refusal, never an arbitrary inventory scan.
+        if (active.Any(item => item.Header.ObjectClass == StateObjectClass.Candidate &&
+                !owners.Any(owner => owner.Physical == item))) return false;
+        var policy = restoreRequest.TrustedPolicy;
+        var scope = new RestrictedStateScope(restoreRequest.Launch.RepositoryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            request.BaseScope.TrustedWorkflowIdentity, restoreRequest.Invocation.PullRequest.Number,
+            head.SessionId, policy.ProviderId, policy.ModelId, policy.AdapterId,
+            policy.InstructionsSha256, policy.LimitsSha256, policy.ToolsetSha256, policy.BuildDiscriminator);
+        if (AuthorizedStateAccess.Authorize(new(scope, scope, true, true, false), out var access).Code != RestrictedStateCodes.Authorized ||
+            access is null) return false;
+        var expectedPolicy = new AcceptedStatePolicyBinding(policy.PolicySha256, policy.ConfigSha256,
+            policy.InstructionsSha256, policy.PayloadSha256, policy.PayloadContinuityMode, policy.BuildDiscriminator);
+        var checkpoints = new Dictionary<string, SolusRestrictedStateCheckpoint>(StringComparer.Ordinal);
+        foreach (var owner in owners)
+        {
+            var generation = owner.Generation;
+            if (!snapshot.Authenticated.Contains(owner.Physical) || !snapshot.Authenticated.Contains(owner.ReceiptPhysical) ||
+                generation.PayloadSha256 != policy.PayloadSha256 ||
+                !AcceptedStateRestoreService.MatchesPublication(owner, expectedPolicy, publication) ||
+                owner.Physical.Header.BaseScopeDigest != head.BaseScopeDigest || owner.Physical.Header.Epoch != head.Epoch ||
+                owner.Physical.Header.SessionId != head.SessionId ||
+                owner.ReceiptPhysical.Header.BaseScopeDigest != head.BaseScopeDigest || owner.ReceiptPhysical.Header.Epoch != head.Epoch ||
+                owner.ReceiptPhysical.Header.SessionId != head.SessionId) return false;
+            var binding = new RestrictedStateBinding(scope, generation.ProducerBaseSha,
+                generation.ProducerHeadSha, generation.Generation, generation.PredecessorEnvelopeSha256,
+                generation.PreparedAtUnixSeconds, generation.PreparedExpiresAtUnixSeconds);
+            var lineage = new AcceptedLineage(scope, generation.Generation, generation.SessionSha256,
+                generation.StateEnvelopeSha256, generation.PredecessorEnvelopeSha256,
+                generation.PreparedAtUnixSeconds, generation.PreparedExpiresAtUnixSeconds, true);
+            // The existing S1 reader authenticates the selected nested envelope,
+            // validates the exact record digest/compatibility and clears plaintext.
+            if (!SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, lineage,
+                    generation.EncryptedStateEnvelope.AsSpan(), compatibility, now,
+                    new ResetClaimReadKeys(access, request.Access, locator), out var record, out _) || record is null ||
+                !checkpoints.TryAdd(owner.LogicalGenerationIdentity, record.Checkpoint)) return false;
+        }
+        var seen = new List<SolusContextClaimRecord>();
+        foreach (var physical in claims)
+        {
+            var header = physical.Header;
+            if (!snapshot.Authenticated.Contains(physical) ||
+                header.ProducingRunIdentity != physical.Metadata.ProducingRun.Identity ||
+                header.ProducingRunAttempt != physical.Metadata.ProducingRun.Attempt ||
+                !SolusContextClaimRecordCodec.TryDecode(physical.Payload, out var claim) || claim is null ||
+                !SolusContextClaimRecordCodec.IsValid(claim) || !SolusContextClaimRecordCodec.MatchesHeader(claim, header) ||
+                claim.BaseScopeDigest != head.BaseScopeDigest || claim.Epoch != head.Epoch || claim.SessionId != head.SessionId ||
+                // Within one live epoch normal acceptance and physical retention
+                // preserve the authenticated logical head identity. Reset/expiry
+                // creates a new epoch; an unrelated/evicted head is not guessed.
+                claim.SelectedHeadIdentity != head.ObjectIdentity ||
+                header.CreatedAtUnixSeconds > now || now >= claim.SourceExpiresAtUnixSeconds ||
+                now >= header.LogicalExpiresAtUnixSeconds || seen.Any(prior => prior.ConflictsWith(claim))) return false;
+            var matches = owners.Where(owner => owner.ReceiptPhysical.Header.ObjectIdentity == claim.AcceptanceIdentity &&
+                owner.LogicalGenerationIdentity == claim.LogicalGenerationIdentity).ToArray();
+            if (matches.Length != 1) return false;
+            var source = matches[0];
+            if (claim.EnvelopeSha256 != source.Generation.StateEnvelopeSha256 ||
+                claim.RecordSha256 != source.Generation.SessionSha256 ||
+                claim.SourceExpiresAtUnixSeconds != source.Generation.PreparedExpiresAtUnixSeconds ||
+                header.CreatedAtUnixSeconds < source.Generation.PreparedAtUnixSeconds ||
+                claim.Source != checkpoints[source.LogicalGenerationIdentity]) return false;
+            if (source != selection.Current)
+            {
+                var successor = selection.Current;
+                var target = checkpoints[successor.LogicalGenerationIdentity];
+                if (source.Generation.Generation == long.MaxValue || successor.Generation.Generation != source.Generation.Generation + 1 ||
+                    successor.Generation.PreviousLogicalGenerationIdentity != source.LogicalGenerationIdentity ||
+                    successor.Generation.PredecessorEnvelopeSha256 != source.Generation.StateEnvelopeSha256 ||
+                    successor.Receipt.PreviousAcceptanceReceiptIdentity != source.ReceiptPhysical.Header.ObjectIdentity ||
+                    target.ExecutionId != claim.ExecutionId || target.RoundId != claim.RoundId ||
+                    target.CheckpointId == claim.Source.CheckpointId || target.LogicalWorkId == claim.Source.LogicalWorkId ||
+                    successor.Receipt.ProducingRunIdentity != header.ProducingRunIdentity ||
+                    successor.Receipt.ProducingRunAttempt != header.ProducingRunAttempt) return false;
+            }
+            // A claim against the current tail has no accepted successor. The
+            // existing P5 graph and cleanup checks below must still prove no
+            // unaccepted/uncertain publication work before authorized reset.
+            seen.Add(claim);
+        }
+        return seen.Count == claims.Length;
+    }
+
+    private sealed class ResetClaimReadKeys(AuthorizedStateAccess expected,
+        AuthorizedLocatorAccess authority, LocatorContext locator) : IRestrictedStateKeyResolver
+    {
+        public bool TryGetCurrentWriteKey(AuthorizedStateAccess access, out RestrictedStateKey? key)
+        { key = null; return false; }
+        public bool TryGetApprovedReadKey(AuthorizedStateAccess access, string keyId, long expiry, out RestrictedStateKey? key)
+        {
+            key = null;
+            if (!ReferenceEquals(access, expected) || !LineageValidation.IsSha256(keyId) || !LineageValidation.IsTime(expiry)) return false;
+            Span<byte> material = stackalloc byte[RestrictedStateFormat.KeyBytes];
+            try
+            {
+                if (!locator.TryCopyApprovedReadKey(authority, keyId, material)) return false;
+                key = new RestrictedStateKey(keyId, material);
+                return true;
+            }
+            finally { CryptographicOperations.ZeroMemory(material); }
+        }
     }
 
     private static bool TryDecodePayload(

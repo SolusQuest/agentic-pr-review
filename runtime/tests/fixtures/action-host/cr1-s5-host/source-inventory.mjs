@@ -11,6 +11,8 @@ const changedSources = [
   sourceRoot + '/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj',
   sourceRoot + '/FrameworkHost.cs',
   sourceRoot + '/FrameworkProviderHandler.cs',
+  sourceRoot + '/FrameworkSessionCapacity.cs',
+  sourceRoot + '/FrameworkSessionCapacitySupervisor.cs',
   sourceRoot + '/FrameworkSupervisor.cs',
   sourceRoot + '/SyntheticOfficialPlatform.cs',
 ];

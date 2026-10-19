@@ -184,7 +184,11 @@ try {
                     ? '9009'
                     : mode.startsWith('seed')
                       ? '7001'
-                      : '7002',
+                      : mode === 'reject-import-next'
+                        ? '7003'
+                        : ['reset-claimed', 'reset-claimed-retry', 'readback-reset'].includes(mode)
+                          ? '7004'
+                          : '7002',
               attempt: mode === 'retry' ? '3' : '2',
             }),
           );
@@ -366,6 +370,57 @@ try {
       assert.equal(all.filter((item) => item.operation === 'sticky' && item.written).length, 2);
     });
   }
+  stage = 'actual_claimed_source_reset_and_restart';
+  await scenario('cs-safe', async ({ run, operations, work }) => {
+    assert.equal(run('seed').accepted, true);
+    assert.equal(run('review').accepted, true);
+    const old = JSON.parse(await readFile(join(work, 'target.json'), 'utf8'));
+    const deniedImport = run('reject-import-next');
+    assert.equal(deniedImport.accepted, false);
+    assert.equal(deniedImport.admission, 'Rejected');
+    assert.equal(deniedImport.sends, 0);
+    const before = await operations();
+    assert.equal(
+      before.filter(
+        (item) => item.operation === 'upload' && item.kind === 'context_claim' && item.committed,
+      ).length,
+      2,
+    );
+    const reset = run('reset-claimed');
+    assert.equal(reset.accepted, true);
+    assert.equal(reset.historical_attempts, 0);
+    assert.ok(reset.sends > 0);
+    const current = JSON.parse(await readFile(join(work, 'reset.json'), 'utf8'));
+    assert.equal(current.rounds, 1);
+    for (const field of ['execution', 'round', 'work']) assert.notEqual(current[field], old[field]);
+    const resetEvents = (await operations()).slice(before.length);
+    assert.equal(
+      resetEvents.filter((item) => item.operation === 'upload' && item.kind === 'context_claim')
+        .length,
+      0,
+    );
+    assert.equal(
+      resetEvents.filter((item) => item.operation === 'sticky' && item.written).length,
+      1,
+    );
+    const after = await operations();
+    const retry = run('reset-claimed-retry');
+    assert.equal(retry.accepted, true);
+    assert.equal(retry.sends, 0);
+    assert.equal(
+      (await operations())
+        .slice(after.length)
+        .filter((item) => item.operation === 'sticky' && item.written).length,
+      0,
+    );
+    assert.equal(
+      (await operations())
+        .slice(after.length)
+        .filter((item) => item.operation === 'upload' && item.kind === 'context_claim').length,
+      0,
+    );
+    run('readback-reset');
+  });
   // An actual Action run starts a new official bridge correlation registry.
   // This fixture keeps its in-memory synthetic object store alive across Hosts;
   // use independent cases so it never accumulates five runs in one registry.

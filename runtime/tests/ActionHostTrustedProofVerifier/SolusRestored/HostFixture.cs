@@ -46,7 +46,9 @@ internal sealed class HostFixture : IDisposable
         Authorization = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch,
             tokenValue: GitHubKey, pullRequestNumber: 242);
         var transport = Authorization.Transport;
-        var runId = mode.StartsWith("seed", StringComparison.Ordinal) ? 7001L : 7002L;
+        var runId = mode.StartsWith("seed", StringComparison.Ordinal) ? 7001L :
+            mode == "reject-import-next" ? 7003L :
+            mode is "reset-claimed" or "reset-claimed-retry" or "readback-reset" ? 7004L : 7002L;
         var attempt = mode == "retry" ? 3 : Authorization.Launch.RunAttempt;
         var source = continuation ? TrustedProofPayloadBuildIdentity.SourceCommit : Authorization.Launch.WorkflowSha;
         if (continuation)
@@ -69,7 +71,7 @@ internal sealed class HostFixture : IDisposable
         Proof.Require(ActionHostProviderApiKey.TryCreate(ProviderKey, out var provider), "synthetic_provider");
         Proof.Require(ActionHostStateKey.TryCreate(StateKey, out var state), "synthetic_state_key");
         Proof.Require(ActionHostInputs.TryCreate(Authorization.Launch.Inputs.GitHubToken,
-            providerKey ? provider : null, state, null, null, 242, ActionHostStateMode.Auto, out var inputs), "synthetic_inputs");
+            providerKey ? provider : null, state, null, null, 242, mode is "reset-claimed" or "reset-claimed-retry" ? ActionHostStateMode.Reset : ActionHostStateMode.Auto, out var inputs), "synthetic_inputs");
         var original = Authorization.Launch;
         Proof.Require(ActionHostLaunchContract.TryCreate(inputs, original.EventJsonPath,
             Convert.ToHexStringLower(SHA256.HashData(eventBytes)), original.RepositoryName, 242, runId,

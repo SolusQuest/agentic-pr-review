@@ -6,7 +6,7 @@
   "oracles": [
     {
       "path": "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
-      "sha256": "59a485d4b0ed08dabf3d81c7eba9f0670e67a94574ba3374dcf2237ab6814416"
+      "sha256": "53137471e590a61bf088202a1d69ab1197ccd0333366530e4dab2b111858c7aa"
     },
     {
       "path": "runtime/tests/SolusCapacityFixture/CapacityHostRun.cs",
