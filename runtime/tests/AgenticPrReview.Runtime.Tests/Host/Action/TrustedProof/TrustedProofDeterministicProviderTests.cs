@@ -1,5 +1,9 @@
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Loop;
+using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Tools;
+using System.Text;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using Xunit;
@@ -50,9 +54,11 @@ public sealed class TrustedProofDeterministicProviderTests
     }
 
     [Theory]
-    [InlineData("list_changed_files", "{\"after\":null}")]
-    [InlineData("list_files", "{\"prefix\":null,\"after\":null}")]
-    public async Task TypedHistoryRejectsDurableNullSpelling(string toolName, string canonicalArguments)
+    [InlineData("list_changed_files", "{}")]
+    [InlineData("list_changed_files", "{\"after\":\"forged\"}")]
+    [InlineData("list_files", "{}")]
+    [InlineData("list_files", "{\"prefix\":null}")]
+    public async Task TypedHistoryRejectsRawOrMalformedCanonicalArguments(string toolName, string canonicalArguments)
     {
         var script = new TrustedProofDeterministicDeepSeekHandler(Context);
         var messages = new List<ProjectChatMessage>();
@@ -133,6 +139,59 @@ public sealed class TrustedProofDeterministicProviderTests
     }
 
     [Fact]
+    public async Task VerifierProbeBuildsCanonicalHistoryBeforeRejectingReorderedExchanges()
+    {
+        var root = Directory.CreateTempSubdirectory("apr-r8-verifier-order-probe-").FullName;
+        try
+        {
+            var assembly = Observer(root, new PermissiveChat()).GetType().Assembly;
+            var type = assembly.GetType("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.TrustedProofVerifierHost", true)!;
+            var method = type.GetMethod("RejectsReorderedContinuationAsync", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            Assert.True(await Assert.IsType<Task<bool>>(method.Invoke(null, null)));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ActualLoopCanonicalHistoryPassesIndependentObserverForEveryScriptTool()
+    {
+        var root = Directory.CreateTempSubdirectory("apr-r8-actual-loop-observer-").FullName;
+        try
+        {
+            var trusted = new AgentSessionTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
+                "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
+            Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
+            var run = new AgentRunRequest(new("repo", 404, new('a', 40), new('b', 40)), materialized!.StablePlan,
+                Context.SessionId, [.. materialized.ControlMessages, new("user", [new ProjectTextContent("Review the fixed fixture.")])]);
+            const string path = "proof/apr178-path-canary.txt";
+            Directory.CreateDirectory(Path.Join(root, "proof"));
+            File.WriteAllText(Path.Join(root, path), "trusted-proof\n");
+            var diff = new ReviewedDiffSource(run.ReviewedIdentity, path, null, "modified", false,
+                [new ReviewedDiffHunk(0, 0, 1, 1, [new ReviewedDiffLine("addition", null, 1, "trusted-proof")])]);
+            var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
+                [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
+            var tools = new AcceptedTools(new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()));
+            var outcome = await new AgentLoop(Observer(root, new TrustedProofDeterministicDeepSeekHandler(Context)), tools).RunAsync(run, default);
+            Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
+            Assert.Equal(["list_changed_files", "list_files", "read_diff", "read_file", "search_text"], tools.Names);
+            Assert.True(FrameworkSupervisor.TypedTraceIsValid(root, 6, false));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    private sealed class AcceptedTools(IAgentToolExecutor inner) : IAgentToolExecutor
+    {
+        internal List<string> Names { get; } = [];
+        public string? Preflight(PreparedAgentToolCall call) => inner.Preflight(call);
+        public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested(); Names.Add(call.Name);
+            return inner.ExecuteAsync(call, token);
+        }
+    }
+
+    [Fact]
     public async Task IndependentObserverReadsContinuationWithoutDuplicateInlineReasoning()
     {
         var root = Directory.CreateTempSubdirectory("apr-r8-observer-").FullName;
@@ -150,7 +209,7 @@ public sealed class TrustedProofDeterministicProviderTests
             Assert.True(FrameworkSupervisor.TypedTraceIsValid(root, 6, false));
             var trace = Path.Join(root, "verifier-typed-chat-trace.tsv");
             var original = File.ReadAllLines(trace);
-            foreach (var mutation in new[] { "missing", "reordered", "duplicate", "marker", "outcome", "hash", "domain", "counter", "sequence", "http" })
+            foreach (var mutation in new[] { "missing", "reordered", "duplicate", "marker", "outcome", "hash", "argument-hash", "domain", "counter", "sequence", "http" })
             {
                 var lines = original.ToArray();
                 File.WriteAllText(Path.Join(root, "synthetic-chat-call-count"), "6");
@@ -164,6 +223,7 @@ public sealed class TrustedProofDeterministicProviderTests
                     case "marker": { var fields = lines[3].Split('\t'); fields[3] = "0"; lines[3] = string.Join('\t', fields); break; }
                     case "outcome": lines[2] = lines[2].Replace("succeeded", "cancelled", StringComparison.Ordinal); break;
                     case "hash": { var fields = lines[2].Split('\t'); fields[8] = "bad"; lines[2] = string.Join('\t', fields); break; }
+                    case "argument-hash": { var fields = lines[3].Split('\t'); var values = fields[7].Split(','); values[0] = new string('0', 64); fields[7] = string.Join(',', values); lines[3] = string.Join('\t', fields); break; }
                     case "domain": lines[0] = lines[0].Replace("apr-historical-authored-typed-chat-v1", "wire-valid", StringComparison.Ordinal); break;
                     case "counter": File.WriteAllText(Path.Join(root, "synthetic-chat-call-count"), "5"); break;
                     case "sequence": File.WriteAllText(Path.Join(root, "synthetic-chat-sequence"), "5"); break;
@@ -207,6 +267,24 @@ public sealed class TrustedProofDeterministicProviderTests
             await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Observer(root, inner).GetResponseAsync(request, default));
             Assert.Equal(0, inner.Calls);
             Assert.Contains("\tfailed\t", File.ReadAllText(Path.Join(root, "verifier-typed-chat-trace.tsv")), StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)] [InlineData(5)]
+    public async Task IndependentObserverRejectsArgumentsForEveryHistoricalTool(int exchange)
+    {
+        var root = Directory.CreateTempSubdirectory("apr-r8-observer-arguments-").FullName;
+        try
+        {
+            var request = ObservedRequest(await BootstrapHistory());
+            var position = exchange * 2;
+            var call = Assert.IsType<ProjectToolCallContent>(Assert.Single(request.Messages[position].Contents));
+            request.Messages[position] = request.Messages[position] with { Contents = [call with { ArgumentsJson = "{}" }] };
+            var inner = new PermissiveChat();
+            await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Observer(root, inner).GetResponseAsync(request, default));
+            Assert.Equal(0, inner.Calls);
         }
         finally { Directory.Delete(root, true); }
     }
@@ -282,7 +360,14 @@ public sealed class TrustedProofDeterministicProviderTests
     private static ProjectToolCallContent Call(ProjectChatResponse response) => Assert.Single(response.Message.Contents.OfType<ProjectToolCallContent>());
     private static void AppendExchange(List<ProjectChatMessage> messages, ProjectChatResponse response)
     {
-        messages.Add(response.Message);
-        messages.Add(new("tool", [new ProjectToolResultContent(Call(response).CallId, "{\"result\":\"accepted\"}")]));
+        var call = Call(response);
+        var admitted = call with { ArgumentsJson = call.Name switch
+        {
+            "list_changed_files" => "{\"after\":null}",
+            "list_files" => "{\"prefix\":null,\"after\":null}",
+            _ => call.ArgumentsJson,
+        } };
+        messages.Add(response.Message with { Contents = [response.Message.Contents[0], admitted] });
+        messages.Add(new("tool", [new ProjectToolResultContent(call.CallId, "{\"result\":\"accepted\"}")]));
     }
 }

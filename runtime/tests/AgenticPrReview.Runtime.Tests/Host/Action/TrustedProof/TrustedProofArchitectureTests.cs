@@ -62,6 +62,57 @@ public sealed class TrustedProofArchitectureTests
     }
 
     [Fact]
+    public void TypedGoldenPreservesFactsAndRetiresOnlyTheObservedProviderHeaderRoute()
+    {
+        var fixture = Path.Join(FindRepositoryRoot(), "runtime", "tests", "fixtures", "action-host");
+        var prior = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(Path.Join(fixture, "r7-action-outputs", "expected-evidence.json.golden")))!;
+        var current = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(Path.Join(fixture, "cr1-r8-typed", "expected-evidence.json.golden")))!;
+        // Frozen from actual capture sites and bound to the immutable original coverage commitment.
+        string[] typedRoutes =
+        [
+            "actions-runtime-jwt\tresults.authorization",
+            "artifact-ciphertext\tartifact.archive",
+            "github-token\tartifact-rest.authorization",
+            "github-token\tgithub.authorization",
+            "github-token\thost.credential",
+            "prompt\tprovider.request",
+            "provider-key\thost.credential",
+            "public-result\tagent.validation",
+            "repository\tgithub.repository",
+            "repository\thost.launch",
+            "reviewed-path\tagent.validation",
+            "reviewed-path\tgithub.changed-files",
+            "reviewed-path\tprovider.request",
+            "session-plaintext\tprovider.request",
+            "signed-url-sig\tblob.query",
+            "signed-url-sig\tresults.create-response",
+            "state-key-current\tstate.cryptographic-memory",
+            "state-key-previous\tstate.cryptographic-memory",
+            "tool-data\tgithub.changed-files",
+            "tool-data\tprovider.request",
+            "workflow-source\tgithub.workflow-source",
+        ];
+        string Digest(IEnumerable<string> routes) => Convert.ToHexStringLower(SHA256.HashData(
+            Encoding.UTF8.GetBytes(string.Join('\n', routes.Order(StringComparer.Ordinal)) + "\n")));
+        Assert.Equal(prior["canary_route_coverage_digest"]!.GetValue<string>(), Digest(typedRoutes.Append("provider-key\tprovider.authorization")));
+        Assert.Equal(current["canary_route_coverage_digest"]!.GetValue<string>(), Digest(typedRoutes));
+        Assert.Contains("github-token\tgithub.authorization", typedRoutes);
+        Assert.Contains("github-token\tartifact-rest.authorization", typedRoutes);
+        Assert.DoesNotContain("provider-key\tprovider.authorization", typedRoutes);
+        Assert.Equal("apr.action-host.historical-typed-framework-evidence.v1", current["schema"]!.GetValue<string>());
+        Assert.Equal("apr-historical-authored-typed-chat-v1", current["observation_domain"]!.GetValue<string>());
+        foreach (var key in new[] { "schema", "source_inventory_digest", "replacement_record_digest", "canary_route_coverage_digest" })
+            prior[key] = current[key]!.DeepClone();
+        prior["observation_domain"] = current["observation_domain"]!.DeepClone();
+        foreach (var scenario in prior["scenarios"]!.AsArray())
+        {
+            scenario!["SyntheticCalls"] = scenario["ProviderRequests"]!.DeepClone();
+            scenario.AsObject().Remove("ProviderRequests");
+        }
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(prior, current));
+    }
+
+    [Fact]
     public void CurrentFlashGoldenPreservesAllHistoricalSemanticsExceptDerivedCommitments()
     {
         var fixtureRoot = Path.Join(FindRepositoryRoot(), "runtime", "tests", "fixtures", "action-host");

@@ -120,7 +120,13 @@ internal static class TrustedProofVerifierHost
         {
             var response = await bootstrap.GetResponseAsync(new(messages.ToArray(), [], continuation), CancellationToken.None);
             var call = response.Message.Contents.OfType<ProjectToolCallContent>().Single();
-            messages.Add(response.Message);
+            var admitted = call with { ArgumentsJson = call.Name switch
+            {
+                "list_changed_files" => "{\"after\":null}",
+                "list_files" => "{\"prefix\":null,\"after\":null}",
+                _ => call.ArgumentsJson,
+            } };
+            messages.Add(response.Message with { Contents = [response.Message.Contents[0], admitted] });
             messages.Add(new("tool", [new ProjectToolResultContent(call.CallId, "{\"result\":\"accepted\"}")]));
             continuation = response.Continuation;
         }

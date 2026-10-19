@@ -107,7 +107,12 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(DeepSeekAdapterCo
     }
     private static bool CallMatches(ProjectChatMessage message, (string Id, string Name, string Arguments) expected) =>
         message.Role == "assistant" && message.Contents.OfType<ProjectToolCallContent>().ToArray() is [var call] &&
-        call.CallId == expected.Id && call.Name == expected.Name && call.ArgumentsJson == expected.Arguments;
+        call.CallId == expected.Id && call.Name == expected.Name && call.ArgumentsJson == (expected.Name switch
+        {
+            "list_changed_files" => "{\"after\":null}",
+            "list_files" => "{\"prefix\":null,\"after\":null}",
+            _ => expected.Arguments,
+        });
     private static int Count(string value)
     {
         var count = 0;

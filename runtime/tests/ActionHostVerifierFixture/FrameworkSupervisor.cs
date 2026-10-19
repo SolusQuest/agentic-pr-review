@@ -4071,6 +4071,18 @@ internal static partial class FrameworkSupervisor
                 !File.Exists(Path.Join(scenario, "typed-chat-observation-domain"));
             if (expectedCalls != (continuation ? 3 : 6) || !File.Exists(path) || new FileInfo(path).Length > 16_384 ||
                 ReadOptionalText(scenario, "typed-chat-observation-domain") != domain) return false;
+            // Frozen from the canonical typed contract, independently of emitted trace values.
+            string[] expectedArgumentHashes =
+            [
+                "f755f60a030e4ab480e2f28ad4fd6e31a98c7825bc5cdd6b7b3062a71b12765c",
+                "6ca41046f0f7ddb647c450814ad86a8725f38a2611d04b46b46abf757e117bab",
+                "4439e2c51fcc62776f64f57771209602c4323f8eb88145baadde7566d2533c00",
+                "45700d2afb155e53426f33f2ccfd133af8897af6d399cae313e31a87aebc79c3",
+                "94695db0825eb7a2d1079381248b0d7e5a45670c00daf20350715164ac9b9a18",
+                "cd9f8a375316bddc371535253816f6cde73566b4d6cadd787b24c93b2123aee5",
+                "45700d2afb155e53426f33f2ccfd133af8897af6d399cae313e31a87aebc79c3",
+                "94695db0825eb7a2d1079381248b0d7e5a45670c00daf20350715164ac9b9a18",
+            ];
             var lines = File.ReadAllLines(path);
             if (lines.Length != expectedCalls) return false;
             for (var index = 0; index < lines.Length; index++)
@@ -4084,7 +4096,7 @@ internal static partial class FrameworkSupervisor
                     messages < results * 2 || messages > 4096 || fields[6] != results.ToString(CultureInfo.InvariantCulture) ||
                     !TypedHash(fields[8])) return false;
                 var arguments = fields[7] == "-" ? [] : fields[7].Split(',');
-                if (arguments.Length != results || arguments.Any(value => !TypedHash(value))) return false;
+                if (!arguments.SequenceEqual(expectedArgumentHashes.Take(results), StringComparer.Ordinal)) return false;
             }
             return true;
         }

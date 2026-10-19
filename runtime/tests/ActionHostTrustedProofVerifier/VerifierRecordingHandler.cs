@@ -182,8 +182,20 @@ internal sealed class VerifierRecordingChatClient(string scenarioRoot, IProjectC
         var expectedCalls = (restored == true ? 6 : 0) + ordinal - 1;
         string[] expectedIds = ["e2p-list-changed", "e2p-list-files", "e2p-read-diff", "e2p-read-file", "e2p-search", "e2p-finish",
             "e2p-continuation-read-file", "e2p-continuation-search"];
+        string[] expectedArguments =
+        [
+            "{\"after\":null}", "{\"prefix\":null,\"after\":null}",
+            "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1,\"hunk_count\":20}",
+            "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1,\"line_count\":20}",
+            "{\"query\":\"trusted-proof\",\"path\":\"proof/apr178-path-canary.txt\"}",
+            "{\"summary\":\"Trusted proof complete.\",\"findings\":[]}",
+            "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1,\"line_count\":20}",
+            "{\"query\":\"trusted-proof\",\"path\":\"proof/apr178-path-canary.txt\"}",
+        ];
         if (expectedCalls > expectedIds.Length || calls.Length != expectedCalls ||
-            !calls.Select(call => call.CallId).SequenceEqual(expectedIds.Take(expectedCalls), StringComparer.Ordinal))
+            !calls.Select(call => call.CallId).SequenceEqual(expectedIds.Take(expectedCalls), StringComparer.Ordinal) ||
+            !calls.Select(call => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(call.ArgumentsJson))))
+                .SequenceEqual(expectedArguments.Take(expectedCalls).Select(value => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)))), StringComparer.Ordinal))
             throw new ProjectChatNormalizationException();
         var protocol = request.Messages.Where(message => message.Contents.Any(part =>
             part is ProjectToolCallContent or ProjectToolResultContent)).ToArray();
