@@ -221,7 +221,7 @@ internal sealed class VerifierRecordingChatClient(string scenarioRoot, IProjectC
         if (carriers is [var carrier])
         {
             if (carrier.MessagePosition < 0 || carrier.MessagePosition >= request.Messages.Length || carrier.ContentPosition != 0 ||
-                carrier.AssociatedCallId is not null || carrier.Opaque != "" || carrier.Framing != DeepSeekReasoningContinuationCodec.FramingName ||
+                carrier.AssociatedCallId is not null || carrier.Opaque != "" || carrier.Framing != DeepSeekAdapterContext.ReasoningFraming ||
                 request.Messages[carrier.MessagePosition].Role != "assistant" ||
                 request.Messages[carrier.MessagePosition].Contents.OfType<ProjectToolCallContent>().ToArray() is not [var markerCall] ||
                 markerCall.CallId != "e2p-read-diff" || markerCall.Name != "read_diff" ||

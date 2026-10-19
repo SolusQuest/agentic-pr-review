@@ -12,8 +12,7 @@ internal sealed class DeepSeekReasoningContinuationCodec :
     internal const string Id = "deepseek-reasoning-content";
     internal const string Discriminator = "deepseek-flash-thinking-v1";
     internal const string EncodingName = "utf8";
-    internal const string FramingName =
-        "deepseek.reasoning_content.utf8.v1";
+    internal const string FramingName = DeepSeekAdapterContext.ReasoningFraming;
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 

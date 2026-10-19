@@ -48,13 +48,13 @@ internal sealed class CurrentHostScriptedChatClient(DeepSeekAdapterContext conte
         var reasoning = "current-host-work-" + ordinal;
         request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, 2, 1, 2, 5));
         return new(new("assistant", [new ProjectReasoningContent(reasoning, "",
-            DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+            DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
             new ProjectToolCallContent(call.Id, call.Name,
                 call.Name is "list_changed_files" or "list_files" ? "{}" : call.Arguments)]),
             new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 1, 2)),
             CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId,
                 context.AdapterId, context.SessionId,
-                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)]));
     }
 
     private static void ValidateCurrentTranscript(ProjectChatRequest request,
