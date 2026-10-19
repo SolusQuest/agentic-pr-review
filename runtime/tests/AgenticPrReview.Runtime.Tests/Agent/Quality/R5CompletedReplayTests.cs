@@ -386,15 +386,23 @@ public sealed class R5CompletedReplayTests
         var names = new[] { "GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "AGENTIC_REVIEW_DEEPSEEK_API_KEY", "ARBITRARY_CANARY_CREDENTIAL", "AWS_SECRET_ACCESS_KEY", "NPM_TOKEN" };
         var prior = names.ToDictionary(name => name, Environment.GetEnvironmentVariable);
         var values = names.Select(_ => "APR246_SECRET_" + Guid.NewGuid().ToString("N")).ToArray();
+        var priorDarwinEncoding = Environment.GetEnvironmentVariable("__CF_USER_TEXT_ENCODING");
+        var ambientDarwinEncoding = "APR437_ENCODING_" + Guid.NewGuid().ToString("N");
         var inspected = false;
         try
         {
             for (var i = 0; i < names.Length; i++) Environment.SetEnvironmentVariable(names[i], values[i]);
+            if (OperatingSystem.IsMacOS()) Environment.SetEnvironmentVariable("__CF_USER_TEXT_ENCODING", ambientDarwinEncoding);
             var result = await ReplayRunner.RunAsync(Bundle, new()
             {
                 Verify = (fixture, phase, reply) =>
                 {
                     Assert.DoesNotContain(reply.EnvironmentKeys, names.Contains);
+                    if (OperatingSystem.IsMacOS())
+                    {
+                        Assert.Contains("__CF_USER_TEXT_ENCODING", reply.EnvironmentKeys);
+                        Assert.DoesNotContain(ambientDarwinEncoding, Encoding.UTF8.GetString(reply.EnvironmentBytes));
+                    }
                     foreach (var value in values)
                     {
                         Assert.DoesNotContain(value, Encoding.UTF8.GetString(reply.EnvironmentBytes));
@@ -418,7 +426,11 @@ public sealed class R5CompletedReplayTests
             Assert.True(inspected);
             foreach (var value in values) Assert.DoesNotContain(value, Encoding.UTF8.GetString(ReplayWire.Write(result)));
         }
-        finally { foreach (var name in names) Environment.SetEnvironmentVariable(name, prior[name]); }
+        finally
+        {
+            foreach (var name in names) Environment.SetEnvironmentVariable(name, prior[name]);
+            if (OperatingSystem.IsMacOS()) Environment.SetEnvironmentVariable("__CF_USER_TEXT_ENCODING", priorDarwinEncoding);
+        }
     }
 
     [Fact]

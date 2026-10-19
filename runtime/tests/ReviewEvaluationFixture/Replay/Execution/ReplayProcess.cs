@@ -15,6 +15,8 @@ internal static class ReplayProcess
 {
     internal static readonly string[] EnvironmentNames = OperatingSystem.IsWindows()
         ? ["HOME", "TMP", "TEMP", "DOTNET_CLI_HOME", "DOTNET_EnableDiagnostics", "SystemRoot"]
+        : OperatingSystem.IsMacOS()
+        ? ["HOME", "TMP", "TEMP", "TMPDIR", "DOTNET_CLI_HOME", "DOTNET_EnableDiagnostics", "LANG", "LC_ALL", "__CF_USER_TEXT_ENCODING"]
         : ["HOME", "TMP", "TEMP", "TMPDIR", "DOTNET_CLI_HOME", "DOTNET_EnableDiagnostics", "LANG", "LC_ALL"];
 
     internal static string CreatePrivateRoot()
@@ -88,6 +90,10 @@ internal static class ReplayProcess
             start.Environment["TMPDIR"] = Path.Combine(root, "tmp");
             start.Environment["LANG"] = "C.UTF-8";
             start.Environment["LC_ALL"] = "C.UTF-8";
+            // CoreFoundation adds/normalizes this during Darwin startup. Supply
+            // a fixed input rather than inheriting the caller's encoding data;
+            // the observed child still has to match the exact platform key set.
+            if (OperatingSystem.IsMacOS()) start.Environment["__CF_USER_TEXT_ENCODING"] = "0:0:0";
         }
         return start;
     }

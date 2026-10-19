@@ -1570,7 +1570,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     [Fact]
     public void AssemblerPublishesActualCandidateAcrossRealCorpusAndFullAdmittedInventory()
     {
-        var repository = FindRepositoryRoot();
+        var repository = CreateMaintainedRepositoryCorpus();
         var worktree = CreatePlainRoot("successful-assembler-worktree");
         var logs = CreatePlainRoot("successful-assembler-logs");
         File.WriteAllText(Path.Join(logs, "run.log"), "ordinary-public-log");
@@ -1662,7 +1662,7 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
     [Fact]
     public void RecoveryOnlyAssemblerAdmitsAuthenticatedExtraWithoutPublicProjection()
     {
-        var repository = FindRepositoryRoot();
+        var repository = CreateMaintainedRepositoryCorpus();
         var worktree = CreatePlainRoot("recovery-assembler-worktree");
         var logs = CreatePlainRoot("recovery-assembler-logs");
         File.WriteAllText(Path.Join(logs, "run.log"), "ordinary-public-log");
@@ -4349,6 +4349,25 @@ public sealed class TrustedProofEvidenceBoundaryTests : IDisposable
         Directory.CreateDirectory(path);
         roots.Add(path);
         return path;
+    }
+
+    private string CreateMaintainedRepositoryCorpus()
+    {
+        // Exercise real maintained source bytes in a controlled public corpus.
+        // Developer scratch/TRX output is not a public fixture. The production
+        // corpus scanner still inspects every entry in its supplied roots.
+        var source = FindRepositoryRoot();
+        var corpus = CreatePlainRoot("maintained-corpus");
+        var inventory = RunProcess(FindExecutable("git"), source, "ls-files", "-z");
+        foreach (var relative in inventory.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var original = Path.Join(source, relative);
+            if (Directory.Exists(original)) continue; // pinned submodule gitlink
+            var destination = Path.Join(corpus, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(original, destination);
+        }
+        return corpus;
     }
 
     private static string FindExecutable(string name)

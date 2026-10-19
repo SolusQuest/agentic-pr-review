@@ -68,6 +68,9 @@ describe('R4 W13 closed migration inventory', () => {
       'runtime:integration': 'node scripts/run-runtime-integration.mjs',
       typecheck: 'tsc --noEmit',
       test: 'vitest run',
+      'test:native': 'node scripts/run-native-tests.mjs',
+      'test:native:node': 'node scripts/run-native-tests.mjs node',
+      'test:native:runtime': 'node scripts/run-native-tests.mjs runtime',
     });
     expect(trackedFiles('scripts/*')).toEqual([
       'scripts/assemble-r4-trusted-proof-evidence.mjs',
@@ -122,6 +125,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/release/solus-package-proof.mjs',
       'scripts/run-clean-source-proof.mjs',
       'scripts/run-clean-source-proof.test.ts',
+      'scripts/run-native-tests.mjs',
       'scripts/run-runtime-integration.mjs',
       'scripts/verify-runtime-ci-timing.mjs',
       'scripts/verify-runtime-ci-workflow.mjs',

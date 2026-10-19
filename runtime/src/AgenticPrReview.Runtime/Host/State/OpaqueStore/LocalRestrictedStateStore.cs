@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
+using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using Microsoft.Win32.SafeHandles;
 
@@ -23,6 +24,8 @@ internal sealed class LocalRestrictedStateStore
     private readonly Action? afterFinalRootProofTestHook;
     private readonly Func<string, bool>? deleteTemporaryTestHook;
     private readonly Func<string, bool>? syncDirectoryTestHook;
+    private readonly RestrictedStateFileIdentity? expectedRootIdentity;
+    private readonly Func<bool>? rootAuthorityIsCurrent;
 
     internal LocalRestrictedStateStore(
         string explicitTestOwnedRoot,
@@ -33,7 +36,9 @@ internal sealed class LocalRestrictedStateStore
         Action? afterFinalRootProofTestHook = null,
         TimeProvider? timeProvider = null,
         OpaqueStoreProducingRun? producingRun = null,
-        Func<OpaqueStoreObjectId>? objectIdFactory = null)
+        Func<OpaqueStoreObjectId>? objectIdFactory = null,
+        RestrictedStateFileIdentity? expectedRootIdentity = null,
+        Func<bool>? rootAuthorityIsCurrent = null)
     {
         if (string.IsNullOrWhiteSpace(explicitTestOwnedRoot))
         {
@@ -54,6 +59,8 @@ internal sealed class LocalRestrictedStateStore
         this.deleteTemporaryTestHook = deleteTemporaryTestHook;
         this.syncDirectoryTestHook = syncDirectoryTestHook;
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.expectedRootIdentity = expectedRootIdentity;
+        this.rootAuthorityIsCurrent = rootAuthorityIsCurrent;
     }
 
     public async Task<OpaqueStoreListResult> ListExactAsync(
@@ -91,10 +98,7 @@ internal sealed class LocalRestrictedStateStore
                 var references = ImmutableArray.CreateBuilder<
                     OpaqueStoreObjectReference>();
                 var identities = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var path in Directory.EnumerateFiles(
-                    operation.OperationRoot,
-                    string.Concat(operation.FilePrefix, "*.aprobject"),
-                    SearchOption.TopDirectoryOnly))
+                foreach (var path in EnumerateObjectFiles(operation))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (references.Count >= request.MaximumObjects)
@@ -313,14 +317,7 @@ internal sealed class LocalRestrictedStateStore
                             OpaqueStoreFailure.Invalid);
                     }
 
-                    await using (var stream = new FileStream(
-                        temporaryPath,
-                        FileMode.CreateNew,
-                        FileAccess.Write,
-                        FileShare.None,
-                        bufferSize: 16 * 1024,
-                        FileOptions.Asynchronous |
-                            FileOptions.WriteThrough))
+                    await using (var stream = CreateTemporaryFile(operation, temporaryPath))
                     {
                         await stream.WriteAsync(record, cancellationToken)
                             .ConfigureAwait(false);
@@ -344,7 +341,7 @@ internal sealed class LocalRestrictedStateStore
                             OpaqueStoreFailure.Invalid);
                     }
 
-                    var attributes = File.GetAttributes(temporaryPath);
+                    var attributes = TemporaryAttributes(operation, temporaryPath);
                     if ((attributes &
                         (FileAttributes.Directory |
                             FileAttributes.ReparsePoint)) != 0)
@@ -353,11 +350,11 @@ internal sealed class LocalRestrictedStateStore
                             OpaqueStoreFailure.Invalid);
                     }
 
-                    File.Move(temporaryPath, finalPath, overwrite: false);
+                    MoveFile(operation, temporaryPath, finalPath);
                     committed = true;
                     if (!OperationIsCurrent(operation))
                     {
-                        if (TryDeleteTemporaryFile(finalPath))
+                        if (TryDeleteTemporaryFile(operation, finalPath))
                         {
                             committed = false;
                             return OpaqueStoreUploadResult.Fail(
@@ -385,7 +382,7 @@ internal sealed class LocalRestrictedStateStore
                 }
                 catch (OperationCanceledException) when (!committed)
                 {
-                    if (!TryDeleteTemporaryFile(temporaryPath))
+                    if (!TryDeleteTemporaryFile(operation, temporaryPath))
                     {
                         return OpaqueStoreUploadResult.Fail(
                             OpaqueStoreFailure.Cleanup);
@@ -415,7 +412,7 @@ internal sealed class LocalRestrictedStateStore
                 {
                     if (!committed)
                     {
-                        TryDeleteTemporaryFile(temporaryPath);
+                        TryDeleteTemporaryFile(operation, temporaryPath);
                     }
                 }
             }
@@ -551,14 +548,14 @@ internal sealed class LocalRestrictedStateStore
                 var moved = false;
                 try
                 {
-                    File.Move(path, tombstonePath, overwrite: false);
+                    MoveFile(operation, path, tombstonePath);
                     moved = true;
                     if (!MovedPathStillNamesIdentity(
-                            tombstonePath,
+                            operation, tombstonePath,
                             read.Identity,
                             read.RecordLength))
                     {
-                        if (TryRestoreMovedFile(tombstonePath, path))
+                        if (TryRestoreMovedFile(operation, tombstonePath, path))
                         {
                             moved = false;
                             return OpaqueStoreDeleteResult.Fail(
@@ -572,7 +569,7 @@ internal sealed class LocalRestrictedStateStore
 
                     if (!OperationIsCurrent(operation))
                     {
-                        if (TryRestoreMovedFile(tombstonePath, path))
+                        if (TryRestoreMovedFile(operation, tombstonePath, path))
                         {
                             moved = false;
                             return OpaqueStoreDeleteResult.Fail(
@@ -584,9 +581,9 @@ internal sealed class LocalRestrictedStateStore
                             OpaqueStoreMutationState.OutcomeUnknown);
                     }
 
-                    if (!TryDeleteTemporaryFile(tombstonePath))
+                    if (!TryDeleteTemporaryFile(operation, tombstonePath))
                     {
-                        if (TryRestoreMovedFile(tombstonePath, path))
+                        if (TryRestoreMovedFile(operation, tombstonePath, path))
                         {
                             return OpaqueStoreDeleteResult.Fail(
                                 OpaqueStoreFailure.Cleanup);
@@ -599,8 +596,8 @@ internal sealed class LocalRestrictedStateStore
 
                     moved = false;
                     if (!SyncDirectory(operation) ||
-                        File.Exists(path) ||
-                        File.Exists(tombstonePath))
+                        FileExists(operation, path) ||
+                        FileExists(operation, tombstonePath))
                     {
                         return OpaqueStoreDeleteResult.Fail(
                             OpaqueStoreFailure.Io,
@@ -613,7 +610,7 @@ internal sealed class LocalRestrictedStateStore
                 }
                 catch (Exception exception) when (IsFileFailure(exception))
                 {
-                    if (moved && TryRestoreMovedFile(tombstonePath, path))
+                    if (moved && TryRestoreMovedFile(operation, tombstonePath, path))
                     {
                         return OpaqueStoreDeleteResult.Fail(
                             OpaqueStoreFailure.Io);
@@ -683,7 +680,7 @@ internal sealed class LocalRestrictedStateStore
         }
     }
 
-    private static async Task<LocalOpaqueStoreRead> ReadRecordAsync(
+    private async Task<LocalOpaqueStoreRead> ReadRecordAsync(
         LocalOpaqueStoreOperation operation,
         string path,
         CancellationToken cancellationToken,
@@ -695,8 +692,8 @@ internal sealed class LocalRestrictedStateStore
             return LocalOpaqueStoreRead.Fail(OpaqueStoreFailure.Invalid);
         }
 
-        var open = NativeRestrictedStateFiles.OpenFileNoFollow(
-            path,
+        var open = OpenOperationFile(
+            operation, path,
             out var handle);
         if (open == RestrictedStateOpenResult.NotFound)
         {
@@ -758,7 +755,7 @@ internal sealed class LocalRestrictedStateStore
                     }
 
                     if (RandomAccess.GetLength(handle) != length ||
-                        !PathStillNamesIdentity(path, identity, length) ||
+                        !PathStillNamesIdentity(operation, path, identity, length) ||
                         !OperationIsCurrent(operation) ||
                         !LocalOpaqueStoreRecordCodec.TryRead(
                             bytes,
@@ -800,7 +797,8 @@ internal sealed class LocalRestrictedStateStore
     {
         operation = null!;
         failure = OpaqueStoreFailure.Invalid;
-        if (!TryResolveRoot(out var root) ||
+        if (rootAuthorityIsCurrent?.Invoke() == false ||
+            !TryResolveRoot(out var root) ||
             !TryCaptureRootProof(root, out var proof, out failure))
         {
             return false;
@@ -817,9 +815,18 @@ internal sealed class LocalRestrictedStateStore
             return false;
         }
 
-        var operationRoot = NativeRestrictedStateFiles.AnchoredRoot(
-            root,
-            guard);
+        if (expectedRootIdentity is { } expected &&
+            (!NativeRestrictedStateFiles.TryGetIdentity(guard, true, out var actual) || actual != expected))
+        {
+            guard.Dispose();
+            failure = OpaqueStoreFailure.Invalid;
+            return false;
+        }
+
+        // On Darwin this is only a display/test-hook path. Every child read,
+        // mutation and rollback below uses the retained RootGuard descriptor.
+        var operationRoot = OperatingSystem.IsMacOS() ? root
+            : NativeRestrictedStateFiles.AnchoredRoot(root, guard);
         if (!RootGuardMatchesProof(guard, proof) ||
             !TryResolveFilePrefix(name, operationRoot, out var prefix))
         {
@@ -890,8 +897,9 @@ internal sealed class LocalRestrictedStateStore
             ".aprobject");
     }
 
-    private static bool OperationIsCurrent(
+    private bool OperationIsCurrent(
         LocalOpaqueStoreOperation operation) =>
+        rootAuthorityIsCurrent?.Invoke() != false &&
         RootGuardMatchesProof(operation.RootGuard, operation.RootProof) &&
         RootProofIsCurrent(operation.Root, operation.RootProof);
 
@@ -979,12 +987,12 @@ internal sealed class LocalRestrictedStateStore
         identity == proof[0].Identity;
 
     private static bool PathStillNamesIdentity(
-        string path,
+        LocalOpaqueStoreOperation operation, string path,
         RestrictedStateFileIdentity expectedIdentity,
         long expectedLength)
     {
-        var open = NativeRestrictedStateFiles.OpenFileNoFollow(
-            path,
+        var open = OpenOperationFile(
+            operation, path,
             out var handle);
         if (open != RestrictedStateOpenResult.Success || handle is null)
         {
@@ -1003,14 +1011,14 @@ internal sealed class LocalRestrictedStateStore
     }
 
     private static bool MovedPathStillNamesIdentity(
-        string path,
+        LocalOpaqueStoreOperation operation, string path,
         RestrictedStateFileIdentity expectedIdentity,
         long expectedLength)
     {
         if (!OperatingSystem.IsWindows())
         {
             return PathStillNamesIdentity(
-                path,
+                operation, path,
                 expectedIdentity,
                 expectedLength);
         }
@@ -1051,7 +1059,50 @@ internal sealed class LocalRestrictedStateStore
             operation.RootGuard);
     }
 
-    private bool TryDeleteTemporaryFile(string path)
+    private static IEnumerable<string> EnumerateObjectFiles(LocalOpaqueStoreOperation operation) =>
+        OperatingSystem.IsMacOS()
+            ? DarwinFiles.EnumerateNames(operation.RootGuard)
+                .Where(name => name.StartsWith(operation.FilePrefix, StringComparison.Ordinal) && name.EndsWith(".aprobject", StringComparison.Ordinal))
+                .Select(name => Path.Join(operation.OperationRoot, name))
+            : Directory.EnumerateFiles(operation.OperationRoot, operation.FilePrefix + "*.aprobject", SearchOption.TopDirectoryOnly);
+
+    private static RestrictedStateOpenResult OpenOperationFile(LocalOpaqueStoreOperation operation, string path, out SafeFileHandle? handle)
+    {
+        if (!OperatingSystem.IsMacOS()) return NativeRestrictedStateFiles.OpenFileNoFollow(path, out handle);
+        var descriptor = DarwinFiles.OpenChildDescriptor(operation.RootGuard, Path.GetFileName(path));
+        if (descriptor < 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            handle = null;
+            return error == 2 ? RestrictedStateOpenResult.NotFound
+                : error == 62 ? RestrictedStateOpenResult.Unsafe : RestrictedStateOpenResult.Io;
+        }
+        handle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        return RestrictedStateOpenResult.Success;
+    }
+
+    private static FileStream CreateTemporaryFile(LocalOpaqueStoreOperation operation, string path) =>
+        OperatingSystem.IsMacOS()
+            ? new FileStream(DarwinFiles.OpenChild(operation.RootGuard, Path.GetFileName(path), create: true), FileAccess.Write, 16 * 1024, isAsync: false)
+            : new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 16 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough);
+
+    private static FileAttributes TemporaryAttributes(LocalOpaqueStoreOperation operation, string path)
+    {
+        if (!OperatingSystem.IsMacOS()) return File.GetAttributes(path);
+        using var handle = DarwinFiles.OpenChild(operation.RootGuard, Path.GetFileName(path));
+        return File.GetAttributes(handle);
+    }
+
+    private static void MoveFile(LocalOpaqueStoreOperation operation, string source, string destination)
+    {
+        if (OperatingSystem.IsMacOS()) DarwinFiles.MoveChild(operation.RootGuard, Path.GetFileName(source), Path.GetFileName(destination));
+        else File.Move(source, destination, overwrite: false);
+    }
+
+    private static bool FileExists(LocalOpaqueStoreOperation operation, string path) =>
+        OperatingSystem.IsMacOS() ? DarwinFiles.ChildExists(operation.RootGuard, Path.GetFileName(path)) : File.Exists(path);
+
+    private bool TryDeleteTemporaryFile(LocalOpaqueStoreOperation operation, string path)
     {
         if (deleteTemporaryTestHook is not null)
         {
@@ -1060,7 +1111,8 @@ internal sealed class LocalRestrictedStateStore
 
         try
         {
-            File.Delete(path);
+            if (OperatingSystem.IsMacOS()) DarwinFiles.DeleteChild(operation.RootGuard, Path.GetFileName(path));
+            else File.Delete(path);
             return true;
         }
         catch (Exception exception) when (IsFileFailure(exception))
@@ -1069,16 +1121,16 @@ internal sealed class LocalRestrictedStateStore
         }
     }
 
-    private static bool TryRestoreMovedFile(string source, string destination)
+    private static bool TryRestoreMovedFile(LocalOpaqueStoreOperation operation, string source, string destination)
     {
         try
         {
-            if (!File.Exists(source) || File.Exists(destination))
+            if (!FileExists(operation, source) || FileExists(operation, destination))
             {
                 return false;
             }
 
-            File.Move(source, destination, overwrite: false);
+            MoveFile(operation, source, destination);
             return true;
         }
         catch (Exception exception) when (IsFileFailure(exception))

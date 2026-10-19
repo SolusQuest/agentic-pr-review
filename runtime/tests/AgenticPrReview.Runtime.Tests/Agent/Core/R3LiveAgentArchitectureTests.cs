@@ -120,6 +120,9 @@ public sealed partial class AgentCapabilityArchitectureTests
             [
                 "AgenticPrReview.Runtime.Canonical.LenientJsonObjectEnumerator+<Enumerate>d__5|.ctor|get_CurrentManagedThreadId",
                 "AgenticPrReview.Runtime.Canonical.LenientJsonObjectEnumerator+<Enumerate>d__5|System.Collections.Generic.IEnumerable<AgenticPrReview.Runtime.Canonical.LenientJsonObjectEnumerator.Entry>.GetEnumerator|get_CurrentManagedThreadId",
+                // Compiler-generated iterator bookkeeping only; no ambient environment values.
+                "AgenticPrReview.Runtime.DarwinFiles+<EnumerateNames>d__22|.ctor|get_CurrentManagedThreadId",
+                "AgenticPrReview.Runtime.DarwinFiles+<EnumerateNames>d__22|System.Collections.Generic.IEnumerable<System.String>.GetEnumerator|get_CurrentManagedThreadId",
                 "AgenticPrReview.Runtime.R3LiveAgentEnvironmentSecretSource|TakeAndClear|GetEnvironmentVariable",
                 "AgenticPrReview.Runtime.R3LiveAgentEnvironmentSecretSource|TakeAndClear|GetEnvironmentVariable",
                 "AgenticPrReview.Runtime.R3LiveAgentEnvironmentSecretSource|TakeAndClear|SetEnvironmentVariable",

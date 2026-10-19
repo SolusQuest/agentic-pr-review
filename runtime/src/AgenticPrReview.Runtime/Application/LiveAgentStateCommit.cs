@@ -67,13 +67,14 @@ internal interface ILiveAgentStateTransactionFactory
 }
 
 internal sealed class LiveAgentStateTransactionFactory(
-    TimeProvider timeProvider) : ILiveAgentStateTransactionFactory
+    TimeProvider timeProvider,
+    Func<string, LocalRestrictedStateStore>? storeFactory = null) : ILiveAgentStateTransactionFactory
 {
     public ILiveAgentStateTransaction Create(
         string stateRoot,
         IRestrictedStateKeyResolver keyResolver) =>
         new LiveAgentStateTransaction(
-            new LocalRestrictedStateStore(stateRoot),
+            storeFactory is null ? new LocalRestrictedStateStore(stateRoot) : storeFactory(stateRoot),
             keyResolver,
             timeProvider);
 }

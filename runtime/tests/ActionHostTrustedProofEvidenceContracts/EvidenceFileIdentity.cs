@@ -434,7 +434,7 @@ internal static class ExactIdentityFileDisposition
             return;
         }
 
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             throw new InvalidDataException("restricted_platform_unsupported");
         }
@@ -576,10 +576,10 @@ public static partial class EvidenceFileHandle
 {
     private const int OpenReadOnly = 0;
     private const int OpenReadWrite = 2;
-    private const int OpenCreate = 0x40;
-    private const int OpenExclusive = 0x80;
-    private const int OpenNoFollowFlag = 0x20000;
-    private const int OpenCloseOnExec = 0x80000;
+    private static readonly int OpenCreate = OperatingSystem.IsMacOS() ? 0x200 : 0x40;
+    private static readonly int OpenExclusive = OperatingSystem.IsMacOS() ? 0x800 : 0x80;
+    private static readonly int OpenNoFollowFlag = OperatingSystem.IsMacOS() ? 0x20000000 : 0x20000;
+    private static readonly int OpenCloseOnExec = OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
     private const uint DeleteAccess = 0x00010000;
@@ -613,9 +613,9 @@ public static partial class EvidenceFileHandle
             return handle;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
-            var descriptor = Open(path, OpenReadOnly | OpenNoFollowFlag | OpenCloseOnExec);
+            var descriptor = Open(path, OpenReadOnly | OpenNoFollowFlag | OpenCloseOnExec | (OperatingSystem.IsMacOS() ? 4 : 0x800));
             if (descriptor < 0)
             {
                 throw new InvalidDataException("restricted_file_open_invalid");
@@ -714,10 +714,13 @@ public static partial class EvidenceFileHandle
             return handle;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             const uint ownerReadWrite = 0x180;
-            var descriptor = OpenCreateNew(
+            var descriptor = OperatingSystem.IsMacOS() ? DarwinOpenCreateNew(
+                path,
+                OpenReadWrite | OpenCreate | OpenExclusive | OpenNoFollowFlag | OpenCloseOnExec,
+                ownerReadWrite) : OpenCreateNew(
                 path,
                 OpenReadWrite | OpenCreate | OpenExclusive | OpenNoFollowFlag | OpenCloseOnExec,
                 ownerReadWrite);
@@ -750,7 +753,7 @@ public static partial class EvidenceFileHandle
         }
 
         var descriptor = checked((int)handle.DangerousGetHandle());
-        if (FStat(descriptor, out var stat) != 0 || (stat.Mode & FileTypeMask) != RegularFile)
+        if (ReadInformation(descriptor, out var stat) != 0 || (stat.Mode & FileTypeMask) != RegularFile)
         {
             throw new InvalidDataException("restricted_file_identity_invalid");
         }
@@ -763,7 +766,7 @@ public static partial class EvidenceFileHandle
             stat.UserId);
     }
 
-    internal static uint EffectiveUserId() => OperatingSystem.IsLinux() ? GetEffectiveUserId() : 0;
+    internal static uint EffectiveUserId() => (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) ? GetEffectiveUserId() : 0;
 
     internal static void MoveNoReplace(string source, string destination)
     {
@@ -775,11 +778,11 @@ public static partial class EvidenceFileHandle
             }
             return;
         }
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             const int currentDirectory = -100;
             const uint noReplace = 1;
-            if (RenameAt2(currentDirectory, source, currentDirectory, destination, noReplace) != 0)
+            if ((OperatingSystem.IsMacOS() ? RenameExclusive(source, destination, 4) : RenameAt2(currentDirectory, source, currentDirectory, destination, noReplace)) != 0)
             {
                 throw new InvalidDataException("created_file_publish_invalid");
             }
@@ -799,7 +802,7 @@ public static partial class EvidenceFileHandle
             return;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             const uint ownerReadWriteExecute = 0x1c0;
             if (MakeDirectory(path, ownerReadWriteExecute) != 0)
@@ -869,6 +872,11 @@ public static partial class EvidenceFileHandle
     [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int OpenCreateNew(string path, int flags, uint mode);
 
+    // Fixed-arity forwarder used by Apple's variadic open wrapper; mode must not
+    // be passed to a variadic Darwin arm64 entry as a normal register argument.
+    [LibraryImport("libc", EntryPoint = "__open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int DarwinOpenCreateNew(string path, int flags, uint mode);
+
     [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int RenameAt2(
         int oldDirectory,
@@ -876,6 +884,36 @@ public static partial class EvidenceFileHandle
         int newDirectory,
         string newPath,
         uint flags);
+
+    // Independent evidence-fixture metadata; Darwin uses the 64-bit inode ABI.
+    [StructLayout(LayoutKind.Explicit, Size = 144)]
+    private struct DarwinFileInformation
+    {
+        [FieldOffset(0)] internal uint Device;
+        [FieldOffset(4)] internal ushort Mode;
+        [FieldOffset(6)] internal ushort Links;
+        [FieldOffset(8)] internal ulong Inode;
+        [FieldOffset(16)] internal uint UserId;
+        [FieldOffset(96)] internal long Size;
+    }
+
+    [LibraryImport("libc", EntryPoint = "fstat64", SetLastError = true)]
+    private static partial int DarwinFStat(int descriptor, out DarwinFileInformation information);
+
+    [LibraryImport("libc", EntryPoint = "renamex_np", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameExclusive(string source, string destination, uint flags);
+
+    private static int ReadInformation(int descriptor, out LinuxFileInformation information)
+    {
+        if (!OperatingSystem.IsMacOS()) return FStat(descriptor, out information);
+        var result = DarwinFStat(descriptor, out var native);
+        information = new LinuxFileInformation
+        {
+            Device = native.Device, Inode = native.Inode, Mode = native.Mode,
+            HardLinkCount = native.Links, UserId = native.UserId, Size = native.Size,
+        };
+        return result;
+    }
 
     [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static partial int FStat(int fileDescriptor, out LinuxFileInformation information);

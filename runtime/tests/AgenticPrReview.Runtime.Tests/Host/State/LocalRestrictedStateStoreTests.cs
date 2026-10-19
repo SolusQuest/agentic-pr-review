@@ -19,7 +19,7 @@ public sealed class LocalRestrictedStateStoreTests
             var upload = await store.UploadImmutableAsync(
                 Upload("bounded", new byte[maximum + delta], RestrictedStateTestData.Expires),
                 CancellationToken.None);
-            Assert.True(upload.Succeeded);
+            Assert.True(upload.Succeeded, $"{upload.Failure}/{upload.MutationState}");
             var metadata = upload.Metadata!;
             var listed = await store.ListExactAsync(
                 new OpaqueStoreListRequest(metadata.Reference.Name, 8, maximum), CancellationToken.None);
@@ -734,7 +734,7 @@ public sealed class LocalRestrictedStateStoreTests
     private static async Task WithLinuxSwapRootsAsync(
         Func<string, string, string, Task> action)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             return;
         }

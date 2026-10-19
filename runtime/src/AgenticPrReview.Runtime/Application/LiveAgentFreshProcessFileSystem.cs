@@ -336,7 +336,10 @@ internal sealed class LiveAgentFreshProcessFileSystem :
             return null;
         }
 
-        var read = ReadFixed(path, maximumBytes);
+        var parent = OperatingSystem.IsMacOS() && capability.Guard is AuthorizedLayoutGuard guard
+            ? guard.ParentFor(path) : null;
+        if (OperatingSystem.IsMacOS() && parent is null) return null;
+        var read = ReadFixed(path, maximumBytes, parent);
         return read is not null && IsAuthorized(capability)
             ? read
             : null;
@@ -358,7 +361,10 @@ internal sealed class LiveAgentFreshProcessFileSystem :
             return null;
         }
 
-        var existing = InspectRegularPath(path);
+        var parent = OperatingSystem.IsMacOS() && capability.Guard is AuthorizedLayoutGuard authority
+            ? authority.ParentFor(path) : null;
+        if (OperatingSystem.IsMacOS() && parent is null) return null;
+        var existing = InspectRegularPath(path, parent);
         if (expectedPrior is null && existing is not null ||
             expectedPrior is not null && existing != expectedPrior)
         {
@@ -373,7 +379,9 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         var moved = false;
         try
         {
-            using (var stream = new FileStream(
+            using (var stream = parent is not null
+                ? new FileStream(DarwinFiles.OpenChild(parent, Path.GetFileName(temporary), create: true), FileAccess.Write, 4_096, isAsync: false)
+                : new FileStream(
                 temporary,
                 FileMode.CreateNew,
                 FileAccess.Write,
@@ -387,19 +395,21 @@ internal sealed class LiveAgentFreshProcessFileSystem :
 
             if (!IsAuthorized(capability) ||
                 (expectedPrior is null
-                    ? InspectRegularPath(path) is not null
-                    : InspectRegularPath(path) != expectedPrior))
+                    ? InspectRegularPath(path, parent) is not null
+                    : InspectRegularPath(path, parent) != expectedPrior))
             {
                 return null;
             }
 
-            File.Move(temporary, path, overwrite: allowReplace);
+            if (parent is not null)
+                DarwinFiles.MoveChild(parent, Path.GetFileName(temporary), Path.GetFileName(path), overwrite: allowReplace);
+            else File.Move(temporary, path, overwrite: allowReplace);
             moved = true;
             var synchronized =
                 capability.Guard is AuthorizedLayoutGuard guard &&
                 !failParentSyncForTests &&
                 guard.TrySyncParent(path);
-            var read = ReadFixed(path, maximumBytes);
+            var read = ReadFixed(path, maximumBytes, parent);
             var reconciled = read is not null &&
                 read.Bytes.SequenceEqual(bytes) &&
                 IsAuthorized(capability);
@@ -410,7 +420,7 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or
             ArgumentException or
-            NotSupportedException)
+            NotSupportedException or ObjectDisposedException)
         {
             return moved
                 ? new LiveAgentFreshProcessAtomicWriteReceipt(
@@ -422,7 +432,7 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         {
             if (!moved)
             {
-                TryDelete(temporary);
+                TryDelete(temporary, parent);
             }
         }
     }
@@ -446,12 +456,25 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         capability.Guard is AuthorizedLayoutGuard guard &&
         guard.IsCurrent;
 
+    internal LocalRestrictedStateStore CreateStateStore(LiveAgentFreshProcessAuthorizedRoot capability, string stateRoot)
+    {
+        if (!IsAuthorized(capability) || !PathComparer.Equals(stateRoot, capability.StateRootPath) ||
+            capability.Guard is not AuthorizedLayoutGuard guard || guard.DirectoryIdentityFor(stateRoot) is not { } identity)
+            throw new IOException("The state directory authority is no longer current.");
+        // A display pathname cannot transfer directory authority on Darwin.
+        // Every store operation must admit the original held directory and
+        // remain within the enclosing capability's lifetime.
+        return new LocalRestrictedStateStore(stateRoot, expectedRootIdentity: identity,
+            rootAuthorityIsCurrent: () => IsAuthorized(capability));
+    }
+
     private static LiveAgentFreshProcessRead? ReadFixed(
         string path,
-        int maximumBytes)
+        int maximumBytes,
+        SafeFileHandle? parent = null)
     {
-        var open = NativeRestrictedStateFiles.OpenFileNoFollow(
-            path,
+        var open = OpenFixedFile(
+            path, parent,
             out var handle);
         if (open != RestrictedStateOpenResult.Success || handle is null)
         {
@@ -487,7 +510,7 @@ internal sealed class LiveAgentFreshProcessFileSystem :
             if (!TryInspectRegular(handle, out var after, out var afterLength) ||
                 after != identity ||
                 afterLength != length ||
-                InspectRegularPath(path) is not { } current ||
+                InspectRegularPath(path, parent) is not { } current ||
                 current.Device != identity.Device ||
                 current.File != identity.File ||
                 current.Length != length)
@@ -500,10 +523,11 @@ internal sealed class LiveAgentFreshProcessFileSystem :
     }
 
     private static LiveAgentFreshProcessFileVersion? InspectRegularPath(
-        string path)
+        string path,
+        SafeFileHandle? parent = null)
     {
-        var open = NativeRestrictedStateFiles.OpenFileNoFollow(
-            path,
+        var open = OpenFixedFile(
+            path, parent,
             out var handle);
         if (open != RestrictedStateOpenResult.Success || handle is null)
         {
@@ -519,6 +543,21 @@ internal sealed class LiveAgentFreshProcessFileSystem :
                     length)
                 : null;
         }
+    }
+
+    private static RestrictedStateOpenResult OpenFixedFile(string path, SafeFileHandle? parent, out SafeFileHandle? handle)
+    {
+        if (parent is null) return NativeRestrictedStateFiles.OpenFileNoFollow(path, out handle);
+        handle = null;
+        try
+        {
+            var descriptor = DarwinFiles.OpenChildDescriptor(parent, Path.GetFileName(path));
+            if (descriptor < 0) return RestrictedStateOpenResult.Io;
+            handle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
+            return RestrictedStateOpenResult.Success;
+        }
+        catch (Exception error) when (error is IOException or ArgumentException or ObjectDisposedException)
+        { return RestrictedStateOpenResult.Io; }
     }
 
     private static bool TryInspectRegular(
@@ -588,12 +627,13 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         }
     }
 
-    private static bool MatchesEntries(string directory, string[] expected)
+    private static bool MatchesEntries(string directory, string[] expected, SafeFileHandle? heldDirectory = null)
     {
         try
         {
-            var actual = Directory.EnumerateFileSystemEntries(directory)
-                .Select(Path.GetFileName)
+            var names = heldDirectory is not null ? DarwinFiles.EnumerateNames(heldDirectory)
+                : Directory.EnumerateFileSystemEntries(directory).Select(Path.GetFileName);
+            var actual = names
                 .Order(StringComparer.Ordinal)
                 .ToArray();
             return actual.SequenceEqual(expected, StringComparer.Ordinal);
@@ -715,10 +755,9 @@ internal sealed class LiveAgentFreshProcessFileSystem :
                 pathChecks.Add(true);
             }
 
-            rootPath = NativeRestrictedStateFiles.AnchoredRoot(
-                root,
-                handles[0]);
-            if (!MatchesEntries(rootPath, RootEntries))
+            rootPath = OperatingSystem.IsMacOS() ? root
+                : NativeRestrictedStateFiles.AnchoredRoot(root, handles[0]);
+            if (!MatchesEntries(rootPath, RootEntries, OperatingSystem.IsMacOS() ? handles[0] : null))
             {
                 return false;
             }
@@ -726,18 +765,24 @@ internal sealed class LiveAgentFreshProcessFileSystem :
             foreach (var name in RootEntries)
             {
                 var configured = Path.Join(rootPath, name);
-                if (!TryOpenDirectoryGuard(
+                SafeFileHandle? handle;
+                RestrictedStateFileIdentity identity;
+                if (OperatingSystem.IsMacOS())
+                {
+                    handle = DarwinFiles.OpenChild(handles[0], name, isDirectory: true);
+                    if (!TryGetDirectoryIdentity(handle, out identity)) { handle.Dispose(); return false; }
+                }
+                else if (!TryOpenDirectoryGuard(
                         configured,
                         expected: null,
-                        out var handle,
-                        out var identity))
+                        out handle,
+                        out identity))
                 {
                     return false;
                 }
 
-                var anchored = NativeRestrictedStateFiles.AnchoredRoot(
-                    configured,
-                    handle!);
+                var anchored = OperatingSystem.IsMacOS() ? configured
+                    : NativeRestrictedStateFiles.AnchoredRoot(configured, handle!);
                 handles.Add(handle!);
                 identities.Add(identity);
                 paths.Add(anchored);
@@ -762,26 +807,35 @@ internal sealed class LiveAgentFreshProcessFileSystem :
                 }
             }
 
+            SafeFileHandle? HeldDirectory(string? path)
+            {
+                if (!OperatingSystem.IsMacOS()) return null;
+                for (var index = 0; index < paths.Count; index++)
+                    if (PathComparer.Equals(paths[index], path)) return handles[index];
+                return null;
+            }
+
             if (inputPath is null ||
                 hostPath is null ||
                 outputPath is null ||
                 privatePath is null ||
                 statePath is null ||
-                !MatchesEntries(inputPath, InputEntries) ||
+                !MatchesEntries(inputPath, InputEntries, HeldDirectory(inputPath)) ||
                 !MatchesEntries(
                     hostPath,
                     lineageExpected
                         ? ["accepted-lineage.json", "authorization.json"]
-                        : ["authorization.json"]) ||
-                !MatchesEntries(privatePath, []) ||
-                !MatchesEntries(outputPath, []))
+                        : ["authorization.json"], HeldDirectory(hostPath)) ||
+                !MatchesEntries(privatePath, [], HeldDirectory(privatePath)) ||
+                !MatchesEntries(outputPath, [], HeldDirectory(outputPath)))
             {
                 return false;
             }
 
             var currentAuthorization = ReadFixed(
                 Path.Join(hostPath, "authorization.json"),
-                LiveAgentFreshProcessCodec.AuthorizationBytes);
+                LiveAgentFreshProcessCodec.AuthorizationBytes,
+                HeldDirectory(hostPath));
             if (currentAuthorization is null ||
                 currentAuthorization.Version != authorization.Version ||
                 !currentAuthorization.Bytes.SequenceEqual(
@@ -876,6 +930,23 @@ internal sealed class LiveAgentFreshProcessFileSystem :
     {
         private int disposed;
 
+        internal SafeFileHandle? ParentFor(string path)
+        {
+            if (!IsCurrent) return null;
+            var parent = Path.GetDirectoryName(path);
+            for (var index = 0; index < paths.Length; index++)
+                if (PathComparer.Equals(paths[index], parent)) return handles[index];
+            return null;
+        }
+
+        internal RestrictedStateFileIdentity? DirectoryIdentityFor(string path)
+        {
+            if (!IsCurrent) return null;
+            for (var index = 0; index < paths.Length; index++)
+                if (PathComparer.Equals(paths[index], path)) return identities[index];
+            return null;
+        }
+
         internal bool IsCurrent
         {
             get
@@ -946,15 +1017,16 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         }
     }
 
-    private static void TryDelete(string path)
+    private static void TryDelete(string path, SafeFileHandle? parent = null)
     {
         try
         {
-            File.Delete(path);
+            if (parent is not null) DarwinFiles.DeleteChild(parent, Path.GetFileName(path));
+            else File.Delete(path);
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or
-            ArgumentException)
+            ArgumentException or ObjectDisposedException)
         {
             // The primary write failure remains authoritative.
         }
