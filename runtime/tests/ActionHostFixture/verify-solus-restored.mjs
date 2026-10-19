@@ -11,6 +11,7 @@ import { createInterface } from 'node:readline';
 import { build } from 'esbuild';
 import { SOLUS_VERSION } from '../../../scripts/release/solus-package-contract.mjs';
 import { readCorrelationObservation } from './correlation-observation.mjs';
+import { nextHostBridge } from './bridge-host-control.mjs';
 
 let stage = 'environment';
 let root;
@@ -141,7 +142,7 @@ try {
   const corpus = resolve('runtime/tests/fixtures/agent/r5/quality/bundle');
   let scenarios = 0,
     hosts = 0;
-  const scenario = async (id, execute) => {
+  const scenario = async (id, execute, freshBridgePerHost = false) => {
     const work = join(root, 'c' + scenarios++);
     for (const part of ['', 'bridge-staging', 'control'])
       await mkdir(join(work, part), { mode: 0o700 });
@@ -155,8 +156,9 @@ try {
         'r4-h2-tests',
         join(work, 'bridge-staging'),
         join(work, 'control'),
+        ...(freshBridgePerHost ? ['--per-host-bridge'] : []),
       ],
-      { env, stdio: ['ignore', 'pipe', 'pipe'] },
+      { env, stdio: ['ignore', 'pipe', 'pipe', ...(freshBridgePerHost ? ['ipc'] : [])] },
     );
     const lines = createInterface({ input: bridge.stdout });
     try {
@@ -217,6 +219,15 @@ try {
         assert.equal(observed.mode, mode);
         return observed;
       };
+      let completedHosts = 0;
+      const freshRun = async (mode, expectedExit = 0) => {
+        if (completedHosts > 0) await nextHostBridge(bridge);
+        // run returns only after the actual Host has exited. Never rotate an
+        // active invocation or replay a failed operation under the next server.
+        const result = run(mode, expectedExit);
+        completedHosts++;
+        return result;
+      };
       const operations = async () =>
         (await readFile(join(work, 'operations.jsonl'), 'utf8'))
           .trim()
@@ -271,7 +282,7 @@ try {
         for (const result of results) if (result.status === 'rejected') throw result.reason;
         return results.map((result) => result.value);
       };
-      await execute({ run, operations, work, race });
+      await execute({ run: freshBridgePerHost ? freshRun : run, operations, work, race });
       console.error(JSON.stringify({ proof: 'APR_SOLUS_RESTORED_CASE', stage, passed: true }));
     } catch (error) {
       const events = await readFile(join(work, 'operations.jsonl'), 'utf8').catch(() => '');
@@ -289,8 +300,31 @@ try {
       throw error;
     } finally {
       lines.close();
-      bridge.kill('SIGTERM');
-      if (bridge.exitCode === null && bridge.signalCode === null) await once(bridge, 'exit');
+      if (freshBridgePerHost) {
+        let timer;
+        try {
+          assert.equal(bridge.connected, true);
+          const exited = once(bridge, 'exit');
+          bridge.disconnect();
+          const [code, signal] = await Promise.race([
+            exited,
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error('bridge_teardown_failed')), 20_000);
+            }),
+          ]);
+          assert.equal(code, 0);
+          assert.equal(signal, null);
+        } finally {
+          clearTimeout(timer);
+          if (bridge.exitCode === null && bridge.signalCode === null) {
+            bridge.kill('SIGTERM');
+            await once(bridge, 'exit');
+          }
+        }
+      } else {
+        bridge.kill('SIGTERM');
+        if (bridge.exitCode === null && bridge.signalCode === null) await once(bridge, 'exit');
+      }
     }
   };
   for (const id of ['repository-rule', 'cs-defect', 'cs-safe', 'ts-defect', 'ts-safe']) {
@@ -375,56 +409,61 @@ try {
     });
   }
   stage = 'actual_claimed_source_reset_and_restart';
-  await scenario('cs-safe', async ({ run, operations, work }) => {
-    assert.equal(run('seed').accepted, true);
-    assert.equal(run('review').accepted, true);
-    const old = JSON.parse(await readFile(join(work, 'target.json'), 'utf8'));
-    const deniedImport = run('reject-import-next');
-    assert.equal(deniedImport.accepted, false);
-    assert.equal(deniedImport.admission, 'Rejected');
-    assert.equal(deniedImport.sends, 0);
-    const before = await operations();
-    assert.equal(
-      before.filter(
-        (item) => item.operation === 'upload' && item.kind === 'context_claim' && item.committed,
-      ).length,
-      2,
-    );
-    const reset = run('reset-claimed');
-    assert.equal(reset.accepted, true);
-    assert.equal(reset.historical_attempts, 0);
-    assert.ok(reset.sends > 0);
-    const current = JSON.parse(await readFile(join(work, 'reset.json'), 'utf8'));
-    assert.equal(current.rounds, 1);
-    for (const field of ['execution', 'round', 'work']) assert.notEqual(current[field], old[field]);
-    const resetEvents = (await operations()).slice(before.length);
-    assert.equal(
-      resetEvents.filter((item) => item.operation === 'upload' && item.kind === 'context_claim')
-        .length,
-      0,
-    );
-    assert.equal(
-      resetEvents.filter((item) => item.operation === 'sticky' && item.written).length,
-      1,
-    );
-    const after = await operations();
-    const retry = run('reset-claimed-retry');
-    assert.equal(retry.accepted, true);
-    assert.equal(retry.sends, 0);
-    assert.equal(
-      (await operations())
-        .slice(after.length)
-        .filter((item) => item.operation === 'sticky' && item.written).length,
-      0,
-    );
-    assert.equal(
-      (await operations())
-        .slice(after.length)
-        .filter((item) => item.operation === 'upload' && item.kind === 'context_claim').length,
-      0,
-    );
-    run('readback-reset');
-  });
+  await scenario(
+    'cs-safe',
+    async ({ run, operations, work }) => {
+      assert.equal((await run('seed')).accepted, true);
+      assert.equal((await run('review')).accepted, true);
+      const old = JSON.parse(await readFile(join(work, 'target.json'), 'utf8'));
+      const deniedImport = await run('reject-import-next');
+      assert.equal(deniedImport.accepted, false);
+      assert.equal(deniedImport.admission, 'Rejected');
+      assert.equal(deniedImport.sends, 0);
+      const before = await operations();
+      assert.equal(
+        before.filter(
+          (item) => item.operation === 'upload' && item.kind === 'context_claim' && item.committed,
+        ).length,
+        2,
+      );
+      const reset = await run('reset-claimed');
+      assert.equal(reset.accepted, true);
+      assert.equal(reset.historical_attempts, 0);
+      assert.ok(reset.sends > 0);
+      const current = JSON.parse(await readFile(join(work, 'reset.json'), 'utf8'));
+      assert.equal(current.rounds, 1);
+      for (const field of ['execution', 'round', 'work'])
+        assert.notEqual(current[field], old[field]);
+      const resetEvents = (await operations()).slice(before.length);
+      assert.equal(
+        resetEvents.filter((item) => item.operation === 'upload' && item.kind === 'context_claim')
+          .length,
+        0,
+      );
+      assert.equal(
+        resetEvents.filter((item) => item.operation === 'sticky' && item.written).length,
+        1,
+      );
+      const after = await operations();
+      const retry = await run('reset-claimed-retry');
+      assert.equal(retry.accepted, true);
+      assert.equal(retry.sends, 0);
+      assert.equal(
+        (await operations())
+          .slice(after.length)
+          .filter((item) => item.operation === 'sticky' && item.written).length,
+        0,
+      );
+      assert.equal(
+        (await operations())
+          .slice(after.length)
+          .filter((item) => item.operation === 'upload' && item.kind === 'context_claim').length,
+        0,
+      );
+      await run('readback-reset');
+    },
+    true,
+  );
   // An actual Action run starts a new official bridge correlation registry.
   // This fixture keeps its in-memory synthetic object store alive across Hosts;
   // use independent cases so it never accumulates five runs in one registry.
