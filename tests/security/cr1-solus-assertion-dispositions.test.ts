@@ -45,7 +45,7 @@ const loadSuccessor = () =>
   );
 
 describe('S5 source-bound native assertion census', () => {
-  test('binds all 152 originals, 147 current bodies, five retirements and two current protocol migrations', () => {
+  test('binds all 152 originals, 147 current bodies, five retirements and three current admission migrations', () => {
     expect(verifyS5AssertionSuccessor(process.cwd())).toEqual({
       originalMethods: 152,
       currentNativeMethods: 147,

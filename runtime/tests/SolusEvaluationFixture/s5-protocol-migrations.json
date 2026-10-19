@@ -1,13 +1,13 @@
 {
-  "kind": "apr-cr1-s5-two-current-protocol-migrations-v1",
+  "kind": "apr-cr1-s5-current-admission-migrations-v2",
   "owner_issue": 409,
   "sdk_context_import_qualified": false,
-  "role": "current-protocol-admission-only",
-  "original_methods": 2,
+  "role": "current-protocol-and-failure-admission-only",
+  "original_methods": 3,
   "oracles": [
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
-      "sha256": "49e91c49fa1beb53a9ff1c67667d95923604e74e1d7370274928290f64523508"
+      "sha256": "3fcbb0ec913ab5203e4af5bfbfc09fb27c73c3fe211dbf2004f6e4319c7d1f4f"
     },
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
@@ -24,6 +24,18 @@
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayExecutionContracts.cs",
       "sha256": "4c73d7a31ad2ab136c56e97acda0e63b5a52df6e01d993c94aa0d4c09e125020"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs",
+      "sha256": "ab1cce50db855d924d55dd90bb3be2ac96c680a5d7f0f7a6d31687e3b18f5ffc"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.R7CountLimits.cs",
+      "sha256": "192307f77be28eeb1ce98abf5bc9baa5e0c2b24cab3a0bab3bd98dd541c58508"
+    },
+    {
+      "path": "runtime/tests/ReviewEvaluationFixture/Evaluation/EvaluationSubject.cs",
+      "sha256": "6bc879ed7ea05b6f83cbdcfb8921c30ae0715fbff3bf2dff01dacfc184a18e7e"
     }
   ],
   "rows": [
@@ -53,6 +65,21 @@
         "TryReadLaunch",
         "ReadBoundedAsync",
         "MaximumLaunchDocumentBytes"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery",
+      "original_body_sha256": "a4820787024147e33cad93151a64e5f7e581ec7fc920010c0d4d63405b0c6230",
+      "current_body_sha256": "b41a11990a8d76d440c693998fbef59b5e02488a5b752218d1e744c3904a8710",
+      "disposition": "migrated",
+      "reason": "Preserve the genuine generic512-tool/33-model-call execution and adjacent513 diagnostic forgery refusal through the current typed failure projection and evaluator. Failed work has no completed subject or durable candidate, and its real private root is removed. The old native child-reply status/plaintext/prepared fields are obsolete; no SESSION or state capability is fabricated and no SDK numeric capacity equivalence is claimed.",
+      "current_oracle_labels": [
+        "ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery",
+        "ProductionExhaustionRun",
+        "CurrentFailedExecutionRejectsNegativeAndOverBudgetDiagnosticCounts",
+        "OrdinaryExecutionAndTerminalShareThe512Budget",
+        "FromAgentOutcome"
       ]
     }
   ]

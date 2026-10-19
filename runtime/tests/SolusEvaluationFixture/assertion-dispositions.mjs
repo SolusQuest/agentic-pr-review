@@ -73,7 +73,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
 
-// Five pinned format retirements and two current protocol migrations are closed independently.
+// Five pinned format retirements and three current admission migrations are closed independently.
 // Further migrations require new closed dispositions and independent current oracles.
 // Source fingerprints establish a census, never SDK execution qualification.
 export function verifyS5AssertionSuccessor(repository, supplied) {
@@ -115,7 +115,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const protocolBytes = readFixture('s5-protocol-migrations.json');
   assert.equal(
     sha256(protocolBytes),
-    '8d6800587a302d39366bc827c085e70a387de5817d6ed76b0e741947fd331d4f',
+    '715063a87db553b003dc32e2ebeb68dcd7e660844681e2d4edfeb7fda5b85cfe',
   );
   const protocol = JSON.parse(protocolBytes);
   exactKeys(protocol, [
@@ -127,19 +127,20 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     'oracles',
     'rows',
   ]);
-  assert.equal(protocol.kind, 'apr-cr1-s5-two-current-protocol-migrations-v1');
+  assert.equal(protocol.kind, 'apr-cr1-s5-current-admission-migrations-v2');
   assert.equal(protocol.owner_issue, 409);
   assert.equal(protocol.sdk_context_import_qualified, false);
-  assert.equal(protocol.role, 'current-protocol-admission-only');
-  assert.equal(protocol.original_methods, 2);
+  assert.equal(protocol.role, 'current-protocol-and-failure-admission-only');
+  assert.equal(protocol.original_methods, 3);
   const protocolSource =
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs';
   assert.deepEqual(protocol.rows.map(identity), [
     protocolSource + ':ChildProtocolRejectsMalformedOrIncompleteDocuments',
     protocolSource + ':PrivateProtocolBoundsUtf8AndStreams',
+    protocolSource + ':ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery',
   ]);
   const migrations = new Map(protocol.rows.map((row) => [identity(row), row]));
-  assert.equal(migrations.size, 2);
+  assert.equal(migrations.size, 3);
   const protocolText = protocol.oracles
     .map((oracle) => {
       exactKeys(oracle, ['path', 'sha256']);

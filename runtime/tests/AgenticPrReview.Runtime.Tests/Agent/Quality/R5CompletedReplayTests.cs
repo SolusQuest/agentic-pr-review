@@ -8,6 +8,7 @@ using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
@@ -90,36 +91,38 @@ public sealed class R5CompletedReplayTests
     {
         using var bundle = new MutableBundle();
         WriteCountReplay(bundle, 512, 16);
-        ReplayChildReply? actual = null;
-        string? privateRoot = null;
-        var result = await ReplayRunner.RunAsync(bundle.Root, new()
+        var privateRoot = ReplayProcess.CreatePrivateRoot();
+        try
         {
-            BeforeCleanup = root => privateRoot = root,
-            // The real transport's retained 4 MiB cumulative request trace stops this large
-            // corpus before 512. Isolate the diagnostic count boundary with a real production
-            // loop and snapshot tools, measured history and scored failure at the IPC seam.
-            // The positive wide-replay test above separately exercises fresh child IPC/SESSION.
-            RunProcess = async (input, _, token) =>
+            var actual = await ProductionExhaustionRun(bundle.Root, privateRoot, CancellationToken.None);
+            var outcome = actual.Input.Outcome;
+            Assert.False(outcome.Succeeded);
+            Assert.False(outcome.CompletedSessionEligible);
+            Assert.Equal(AgentFailureCodes.ToolLimit, outcome.Diagnostic!.Code);
+            Assert.Equal(512, outcome.Diagnostic.ToolCalls);
+            Assert.Equal(512, outcome.Events.OfType<AgentToolResultEvent>().Count());
+            Assert.Equal(33, outcome.Accounting!.ModelCalls);
+            Assert.Equal(33, actual.HistoryCalls);
+            Assert.Null(EvaluationSubject.AdmitFresh(actual.Input, actual.Descriptor));
+            var classified = EvaluationFailure.FromAgentOutcome(outcome with {
+                Diagnostic = outcome.Diagnostic with { ToolCalls = reportedTools } });
+            if (expected == "unknown_failed")
+                Assert.Equal(EvaluationFailureSource.Unknown, classified.Source);
+            else
             {
-                actual = await ProductionExhaustionReply(input, token);
-                return new("completed", actual with { ToolCalls = reportedTools });
-            },
-        });
-        Assert.NotNull(actual);
-        Assert.Equal("unknown_failed", actual.Code); // Preserve the evaluator's ToolLimit failure classification.
-        Assert.Equal(512, actual.ToolCalls);
-        Assert.Equal(33, actual.ModelCalls);
-        Assert.Empty(actual.Requests); // This isolated seam observes ProjectChat requests, not transport bytes.
-        Assert.Equal(33, actual.PrefixHistory!.Calls.Length);
-        Assert.Null(actual.Prepared); // 512 executed tools leave no budget for finish_review.
-        Assert.Null(actual.Plaintext);
-        Assert.Equal(expected, result.Code);
-        var step = Assert.Single(result.Steps);
-        Assert.False(step.Accepted);
-        Assert.True(step.PredecessorPreserved);
-        Assert.Equal(reportedTools == 512 ? 512 : 0, step.ToolCalls);
-        Assert.Equal(reportedTools == 512 ? 1 : 0, result.Observations.Length);
-        Assert.Equal("cleaned", result.Cleanup);
+                Assert.Equal("result_invalid", expected);
+                Assert.Same(EvaluationFailure.Invalid, classified);
+            }
+            var report = EvaluationScorer.Failure(actual.Case, classified, actual.Attempt);
+            Assert.NotEqual(EvaluationStatus.Completed, report.ExecutionStatus);
+            Assert.Equal(ModelObservationStatus.NotEvaluated, report.ModelStatus);
+            Assert.Equal(AssertionStatus.NotEvaluated, report.ScenarioStatus);
+            // This current generic loop never constructs state or a durable
+            // candidate. The retired private reply's prepared/plaintext fields
+            // are not fabricated to preserve a native SESSION transport shape.
+            Assert.False(Directory.Exists(Path.Join(privateRoot, "state")));
+        }
+        finally { Assert.True(ReplayProcess.Cleanup(privateRoot)); }
         Assert.False(Directory.Exists(privateRoot));
     }
 
@@ -552,35 +555,30 @@ public sealed class R5CompletedReplayTests
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
     }
 
-    private static async Task<ReplayChildReply> ProductionExhaustionReply(ReplayChildInput input, CancellationToken token)
+    private sealed record CurrentExhaustion(FreshQualityRun Input, EvaluationRunInput Descriptor,
+        EvaluationCase Case, EvaluationAttempt Attempt, int HistoryCalls);
+
+    private static async Task<CurrentExhaustion> ProductionExhaustionRun(string bundle, string root, CancellationToken token)
     {
-        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Path.Combine(input.Root, "bundle")).Fixture);
+        var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(bundle).Fixture);
         var run = Assert.Single(fixture.Runs);
-        using var state = new ReplayState(run, input.Session, input.Root, input.Key);
-        Assert.True(AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable));
-        var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable!.StablePlan, input.Session,
+        var trusted = run.CreateTrustedRequest("r5-current-exhaustion");
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
+        var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable!.StablePlan, Guid.NewGuid().ToString("N"),
             [.. stable.ControlMessages, new("user", [new ProjectTextContent(run.InitialContext)])]);
-        var boundary = PrefixBoundary.Bootstrap(state.Trusted, request);
+        var boundary = PrefixBoundary.Bootstrap(trusted, request);
         var history = new HistoryChatClient(boundary, new CountReplayChatClient(run.Script),
             HistoryChatClient.Measure(boundary, HistoryCapture.Request(request)));
-        var reviewed = Path.Combine(input.Root, "reviewed");
+        var reviewed = Path.Combine(root, "reviewed");
         Directory.CreateDirectory(reviewed);
         var snapshot = run.CreateSnapshot(reviewed);
         var outcome = await new AgentLoop(history, new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot)))
             .RunAsync(request, token);
-        Assert.False(outcome.Succeeded);
-        Assert.Equal(AgentFailureCodes.ToolLimit, outcome.Diagnostic!.Code);
-        Assert.Equal(512, outcome.Diagnostic.ToolCalls);
-        Assert.Equal(33, outcome.Accounting!.ModelCalls);
-        Assert.Equal(512, outcome.Events.OfType<AgentToolResultEvent>().Count());
-        var attempt = EvaluationAttempt.Admit(state.Trusted, new(run.Input.Id, "deterministic", EvaluationSource.Commit,
-            EvaluationSource.Tree, EvaluationSource.Clean, run.ProviderConfigurationSha256));
-        var scored = EvaluationScorer.Failure(run.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
-        return new(input.Operation, input.Corpus, input.Phase, input.Session, EvaluationSource.Commit, EvaluationSource.Tree,
-            EvaluationSource.Clean, Environment.ProcessId, Guid.NewGuid().ToString("N"), "unknown_failed", null,
-            EvaluationJson.Write(scored), null, null, outcome.Accounting!.ModelCalls,
-            outcome.Events.OfType<AgentToolResultEvent>().Count(), null, [], [.. ReplayProcess.EnvironmentNames], [],
-            PrefixHistory: history.Capture);
+        var descriptor = new EvaluationRunInput(run.Input.Id, "deterministic", EvaluationSource.Commit,
+            EvaluationSource.Tree, EvaluationSource.Clean, run.ProviderConfigurationSha256);
+        var attempt = Assert.IsType<EvaluationAttempt>(EvaluationAttempt.Admit(trusted, descriptor));
+        return new(new(request, outcome, trusted, request.InitialMessages.Length - 1), descriptor,
+            run.Expected, attempt, history.Capture.Calls.Length);
     }
 
     private sealed class CountReplayChatClient(ReplayScript script) : IProjectChatClient
