@@ -582,10 +582,10 @@ internal enum RestrictedStateOpenResult
 internal static partial class NativeRestrictedStateFiles
 {
     private const int OpenReadOnly = 0;
-    private const int OpenNonBlocking = 0x800;
-    private const int OpenNoFollow = 0x20000;
-    private const int OpenCloseOnExec = 0x80000;
-    private const int OpenDirectory = 0x10000;
+    private static readonly int OpenNonBlocking = OperatingSystem.IsMacOS() ? DarwinFiles.NonBlocking : 0x800;
+    private static readonly int OpenNoFollow = OperatingSystem.IsMacOS() ? DarwinFiles.NoFollowAny : 0x20000;
+    private static readonly int OpenCloseOnExec = OperatingSystem.IsMacOS() ? DarwinFiles.CloseOnExec : 0x80000;
+    private static readonly int OpenDirectory = OperatingSystem.IsMacOS() ? DarwinFiles.Directory : 0x10000;
     private const int DuplicateCloseOnExec = 1030;
     private const string LinuxDescriptorPrefix = "/proc/self/fd/";
     private const uint FileTypeMask = 0xF000;
@@ -670,16 +670,16 @@ internal static partial class NativeRestrictedStateFiles
             return RestrictedStateOpenResult.Success;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
-            if (TryParseLinuxDescriptor(path, out var existingDescriptor))
+            if (OperatingSystem.IsLinux() && TryParseLinuxDescriptor(path, out var existingDescriptor))
             {
                 var duplicate = Fcntl(
                     existingDescriptor,
                     DuplicateCloseOnExec,
                     0);
                 if (duplicate < 0 ||
-                    FStat(duplicate, out var duplicateInfo) != 0 ||
+                    ReadInformation(duplicate, out var duplicateInfo) != 0 ||
                     (duplicateInfo.Mode & FileTypeMask) != DirectoryFile)
                 {
                     if (duplicate >= 0)
@@ -786,6 +786,8 @@ internal static partial class NativeRestrictedStateFiles
         SafeFileHandle rootGuard) =>
         OperatingSystem.IsLinux()
             ? $"/proc/self/fd/{checked((int)rootGuard.DangerousGetHandle())}"
+            : OperatingSystem.IsMacOS()
+            ? throw new PlatformNotSupportedException("Darwin directory authority requires descriptor-relative operations.")
             : configuredRoot;
 
     internal static bool TryGetIdentity(
@@ -807,13 +809,13 @@ internal static partial class NativeRestrictedStateFiles
             return true;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             var descriptor = checked((int)handle.DangerousGetHandle());
             var expectedType = expectDirectory
                 ? DirectoryFile
                 : RegularFile;
-            if (FStat(descriptor, out var info) != 0 ||
+            if (ReadInformation(descriptor, out var info) != 0 ||
                 (info.Mode & FileTypeMask) != expectedType)
             {
                 identity = default;
@@ -833,13 +835,13 @@ internal static partial class NativeRestrictedStateFiles
     private static RestrictedStateOpenResult MapOpenError(int error) =>
         error is ErrorFileNotFound or ErrorPathNotFound
             ? RestrictedStateOpenResult.NotFound
-            : error == LinuxSymbolicLinkLoop
+            : error == (OperatingSystem.IsMacOS() ? 62 : LinuxSymbolicLinkLoop)
                 ? RestrictedStateOpenResult.Unsafe
                 : RestrictedStateOpenResult.Io;
 
     internal static bool TrySyncDirectory(SafeFileHandle rootGuard)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             return true;
         }
@@ -875,6 +877,18 @@ internal static partial class NativeRestrictedStateFiles
     [LibraryImport("libc", EntryPoint = "open", SetLastError = true,
         StringMarshalling = StringMarshalling.Utf8)]
     private static partial int Open(string path, int flags);
+
+    private static int ReadInformation(int descriptor, out LinuxFileInformation information)
+    {
+        if (!OperatingSystem.IsMacOS()) return FStat(descriptor, out information);
+        var result = DarwinFiles.Stat(descriptor, out var native);
+        information = new LinuxFileInformation
+        {
+            Device = native.Device, Inode = native.Inode, Mode = native.Mode,
+            HardLinkCount = native.Links, UserId = native.UserId, Size = native.Size,
+        };
+        return result;
+    }
 
     [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static partial int FStat(

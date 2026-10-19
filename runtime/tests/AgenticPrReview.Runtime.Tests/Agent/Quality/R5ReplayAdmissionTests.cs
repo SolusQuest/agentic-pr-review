@@ -525,7 +525,7 @@ public sealed class R5ReplayAdmissionTests
     [InlineData("socket")]
     public async Task LinuxLinksAndSpecialFilesRejectWithoutBlocking(string fault)
     {
-        if (!OperatingSystem.IsLinux()) return;
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())) return;
         using var bundle = new Bundle();
         using var other = new Bundle();
         string root = bundle.Root;
@@ -579,7 +579,9 @@ public sealed class R5ReplayAdmissionTests
                 {
                     Directory.CreateDirectory(bundle.Root);
                     Assert.False(guard.StillMatches());
-                    Assert.True(File.Exists(Path.Combine(guard.AnchoredPath, "manifest.json")));
+                    Assert.Equal(AgenticPrReview.Runtime.Host.State.RestrictedStateOpenResult.Success,
+                        guard.OpenFile("manifest.json", out var retained));
+                    using (retained) Assert.True(RandomAccess.GetLength(retained!) > 0);
                     Reject(bundle.Root);
                 }
                 finally { Directory.Delete(bundle.Root); Directory.Move(moved, bundle.Root); }

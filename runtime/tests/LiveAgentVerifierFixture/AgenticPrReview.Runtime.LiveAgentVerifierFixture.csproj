@@ -13,6 +13,21 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
   </ItemGroup>
+  <!-- Closed-environment apphost probes must also find a custom local SDK.
+       Configure only this macOS fixture, without inheriting DOTNET_ROOT or
+       changing the production launcher environment/global installation. The
+       fixture and its test-reference copy have the same output-directory depth. -->
+  <Target Name="ConfigureMacNativeFixtureAppHost"
+          AfterTargets="_CreateAppHost"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$(AppHostSourcePath)' != '' and Exists('$(AppHostIntermediatePath)')">
+    <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
+                   AppHostDestinationPath="$(AppHostIntermediatePath)"
+                   AppBinaryName="$(AssemblyName)$(TargetExt)"
+                   IntermediateAssembly="@(IntermediateAssembly->'%(FullPath)')"
+                   EnableMacOSCodeSign="true"
+                   DotNetSearchLocations="AppRelative"
+                   AppRelativeDotNet="$([System.IO.Path]::GetRelativePath('$(TargetDir)', '$(NetCoreRoot)'))" />
+  </Target>
   <Target Name="ExportLiveAgentVerifierAotIntermediate"
           AfterTargets="ComputeIlcCompileInputs"
           BeforeTargets="IlcCompile"

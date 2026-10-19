@@ -14,6 +14,8 @@ public static class Program
                 _ when args[0] == "supervise" =>
                     await FrameworkSupervisor.RunAsync(args[1..])
                         .ConfigureAwait(false),
+                _ when args[0] == "primary-bucket-probe" =>
+                    await FrameworkPrimaryRateLimitBucket.RunProbeAsync(args[1..]).ConfigureAwait(false),
                 _ => 2,
             };
         }

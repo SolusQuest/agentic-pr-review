@@ -228,14 +228,18 @@ internal static class LiveAgentFreshProcessCommand
             input.InvocationIdentitySha256,
             prior);
         var timeProvider = TimeProvider.System;
+        Func<string, LocalRestrictedStateStore>? storeFactory =
+            OperatingSystem.IsMacOS() && fileSystem is LiveAgentFreshProcessFileSystem nativeFiles
+                ? stateRoot => nativeFiles.CreateStateStore(authorizedRoot, stateRoot)
+                : null;
         var stateCommitCoordinator = profileExecution.Observe(
             new LiveAgentStateCommitCoordinator(
-                new LiveAgentStateTransactionFactory(timeProvider),
+                new LiveAgentStateTransactionFactory(timeProvider, storeFactory),
                 new AgentSessionRestrictedStateAdmission(),
                 lineageSink));
         var dependencies = new R3LiveAgentDependencies(
             new R3LiveAgentEnvironmentSecretSource(),
-            new R3LiveAgentStateRestorer(),
+            new R3LiveAgentStateRestorer(storeFactory),
             profileExecution.TransportFactory,
             snapshot.FileAccessFactory,
             stateCommitCoordinator,

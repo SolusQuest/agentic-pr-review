@@ -167,7 +167,7 @@ public sealed class ReviewedRootMaterializerTests
                     "file.txt")) & FileAttributes.ReadOnly) != 0 ||
                 OperatingSystem.IsLinux());
 
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 Assert.Throws<UnauthorizedAccessException>(() =>
                     File.OpenWrite(Path.Join(
@@ -409,7 +409,7 @@ public sealed class ReviewedRootMaterializerTests
     [Fact]
     public async Task LinuxParentReplacementCannotRedirectRootCreation()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             return;
         }
@@ -467,7 +467,7 @@ public sealed class ReviewedRootMaterializerTests
     [Fact]
     public async Task LinuxRootReplacementReportsIncompleteWithoutDeletingIt()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             return;
         }
@@ -531,7 +531,7 @@ public sealed class ReviewedRootMaterializerTests
     [Fact]
     public async Task LinuxDanglingRootLinkReportsIncompleteWithoutFollowingIt()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             return;
         }
@@ -597,7 +597,7 @@ public sealed class ReviewedRootMaterializerTests
     [Fact]
     public async Task LinuxChildReplacementDoesNotTouchOutsideSentinel()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             return;
         }
@@ -686,6 +686,7 @@ public sealed class ReviewedRootMaterializerTests
     }
 
     [SupportedOSPlatform("linux")]
+    [SupportedOSPlatform("macos")]
     private static void MakeWritableRecursive(string root)
     {
         File.SetUnixFileMode(

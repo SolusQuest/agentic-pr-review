@@ -59,7 +59,7 @@ public sealed class PhysicalRuntimeFileSystem : IRuntimeFileSystem
                 throw new IOException("The destination could not be committed without replacement.");
             }
         }
-        else if (OperatingSystem.IsLinux())
+        else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             if (NativeFileOperations.RenameNoReplace(stagedFile.TempPath, stagedFile.FinalPath) != 0)
             {
@@ -97,6 +97,11 @@ internal static partial class NativeFileOperations
     [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int RenameAt2(int oldDirectory, string oldPath, int newDirectory, string newPath, uint flags);
 
+    [LibraryImport("libc", EntryPoint = "renamex_np", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameExclusive(string source, string destination, uint flags);
+
     internal static int RenameNoReplace(string source, string destination) =>
-        RenameAt2(AtFileSystemDirectory, source, AtFileSystemDirectory, destination, RenameNoReplaceFlag);
+        OperatingSystem.IsMacOS()
+            ? RenameExclusive(source, destination, DarwinFiles.RenameExclusive)
+            : RenameAt2(AtFileSystemDirectory, source, AtFileSystemDirectory, destination, RenameNoReplaceFlag);
 }

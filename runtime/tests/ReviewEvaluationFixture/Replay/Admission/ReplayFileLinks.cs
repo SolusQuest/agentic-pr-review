@@ -8,6 +8,8 @@ internal static class ReplayFileLinks
 {
     internal static bool IsSingleLink(SafeFileHandle handle) => OperatingSystem.IsWindows()
         ? GetFileInformationByHandle(handle, out var windows) && windows.Links == 1
+        : OperatingSystem.IsMacOS()
+            ? DarwinFiles.Stat(checked((int)handle.DangerousGetHandle()), out var darwin) == 0 && darwin.Links == 1
         : OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64 &&
             FStat(checked((int)handle.DangerousGetHandle()), out var linux) == 0 && linux.Links == 1;
 

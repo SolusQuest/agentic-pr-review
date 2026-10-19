@@ -29,6 +29,8 @@ public sealed partial class AgentCapabilityArchitectureTests
 
     private static readonly HashSet<string> FreshProcessFileSystemMembers =
     [
+        // Darwin opens relative to retained parents instead of procfs paths.
+        "Microsoft.Win32.SafeHandles.SafeFileHandle..ctor(System.IntPtr,System.Boolean)->ctor",
         "System.IO.Directory.EnumerateFileSystemEntries(System.String)->" +
             "System.Collections.Generic.IEnumerable`1[[System.String, " +
             "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, " +
@@ -44,6 +46,8 @@ public sealed partial class AgentCapabilityArchitectureTests
         "System.IO.FileStream..ctor(System.String,System.IO.FileMode," +
             "System.IO.FileAccess,System.IO.FileShare,System.Int32," +
             "System.IO.FileOptions)->ctor",
+        "System.IO.FileStream..ctor(Microsoft.Win32.SafeHandles.SafeFileHandle," +
+            "System.IO.FileAccess,System.Int32,System.Boolean)->ctor",
         "System.IO.FileStream.Flush(System.Boolean)->System.Void",
         "System.IO.FileSystemInfo.get_FullName()->System.String",
         "System.IO.Path.GetDirectoryName(System.String)->System.String",

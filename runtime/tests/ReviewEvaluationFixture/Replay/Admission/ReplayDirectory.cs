@@ -22,12 +22,27 @@ internal sealed class ReplayDirectoryGuard : IDisposable
     internal string Path { get; }
     internal SafeFileHandle Handle { get; }
     internal ReviewedStagedFileIdentity Identity { get; }
-    internal string AnchoredPath => NativeRestrictedStateFiles.AnchoredRoot(Path, Handle);
+    // Darwin traversal/read/enumeration use Handle; this path is display/proof only.
+    internal string AnchoredPath => OperatingSystem.IsMacOS() ? Path
+        : NativeRestrictedStateFiles.AnchoredRoot(Path, Handle);
 
-    internal static ReplayDirectoryGuard Open(string path)
+    internal RestrictedStateOpenResult OpenFile(string name, out SafeFileHandle? handle)
+    {
+        if (!OperatingSystem.IsMacOS()) return NativeRestrictedStateFiles.OpenFileNoFollow(System.IO.Path.Join(AnchoredPath, name), out handle);
+        var descriptor = DarwinFiles.OpenChildDescriptor(Handle, name);
+        handle = descriptor < 0 ? null : new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        return descriptor < 0 ? RestrictedStateOpenResult.Unsafe : RestrictedStateOpenResult.Success;
+    }
+
+    internal static ReplayDirectoryGuard Open(string path, ReplayDirectoryGuard? parent = null, string? name = null)
     {
         SafeFileHandle? handle;
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsMacOS() && parent is not null)
+        {
+            try { handle = DarwinFiles.OpenChild(parent.Handle, name!, isDirectory: true); }
+            catch (IOException) { throw new ReplayRejected(ReplayAdmissionCode.UnsafeEntry); }
+        }
+        else if (OperatingSystem.IsWindows())
         {
             // A metadata-only desired-access handle does not reliably prevent directory rename.
             // Hold read access without delete sharing for the entire capture.
@@ -62,7 +77,7 @@ internal static class ReplayDirectory
 {
     internal static CapturedReplay Capture(string root, CancellationToken cancellationToken)
     {
-        if (!(OperatingSystem.IsWindows() || OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64) ||
+        if (!(OperatingSystem.IsWindows() || OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64 || OperatingSystem.IsMacOS()) ||
             string.IsNullOrWhiteSpace(root) || root.Length > 4096 || root.StartsWith("\\\\", StringComparison.Ordinal) ||
             root.StartsWith("//", StringComparison.Ordinal) || root.Contains("://", StringComparison.Ordinal))
             throw new ReplayRejected(ReplayAdmissionCode.UnsafeEntry);
@@ -81,7 +96,7 @@ internal static class ReplayDirectory
             if (components.Length > 64) throw new ReplayRejected(ReplayAdmissionCode.UnsafeEntry);
             foreach (var component in components)
             {
-                current = ReplayDirectoryGuard.Open(System.IO.Path.Join(current.AnchoredPath, component));
+                current = ReplayDirectoryGuard.Open(System.IO.Path.Join(current.AnchoredPath, component), current, component);
                 guards.Add(current);
             }
             var bundle = current;
@@ -112,7 +127,10 @@ internal static class ReplayDirectory
                     cancellationToken.ThrowIfCancellationRequested();
                     var parent = directories[relative];
                     if (!parent.StillMatches()) throw new ReplayRejected(ReplayAdmissionCode.UnsafeEntry);
-                    foreach (var entry in Directory.EnumerateFileSystemEntries(parent.AnchoredPath))
+                    var inventory = OperatingSystem.IsMacOS()
+                        ? DarwinFiles.EnumerateNames(parent.Handle).Select(name => System.IO.Path.Join(parent.Path, name))
+                        : Directory.EnumerateFileSystemEntries(parent.AnchoredPath);
+                    foreach (var entry in inventory)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (++entries > expectedFiles.Count + expectedDirectories.Count)
@@ -124,7 +142,7 @@ internal static class ReplayDirectory
                         {
                             if (openDirectories)
                             {
-                                var child = ReplayDirectoryGuard.Open(System.IO.Path.Join(parent.AnchoredPath, name));
+                                var child = ReplayDirectoryGuard.Open(System.IO.Path.Join(parent.AnchoredPath, name), parent, name);
                                 guards.Add(child);
                                 directories.Add(path, child);
                             }
@@ -163,7 +181,7 @@ internal static class ReplayDirectory
     private static ImmutableArray<byte> Read(ReplayDirectoryGuard parent, string name, int limit, string? hash, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!parent.StillMatches() || NativeRestrictedStateFiles.OpenFileNoFollow(System.IO.Path.Join(parent.AnchoredPath, name), out var handle) != RestrictedStateOpenResult.Success)
+        if (!parent.StillMatches() || parent.OpenFile(name, out var handle) != RestrictedStateOpenResult.Success)
             throw new ReplayRejected(ReplayAdmissionCode.UnsafeEntry);
         using (handle)
         {

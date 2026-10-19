@@ -79,7 +79,8 @@ internal interface IR3LiveAgentStateRestorer
         CancellationToken cancellationToken);
 }
 
-internal sealed class R3LiveAgentStateRestorer : IR3LiveAgentStateRestorer
+internal sealed class R3LiveAgentStateRestorer(
+    Func<string, LocalRestrictedStateStore>? storeFactory = null) : IR3LiveAgentStateRestorer
 {
     public async Task<RestrictedStateRestoreResult> RestoreAsync(
         string stateRoot,
@@ -89,7 +90,7 @@ internal sealed class R3LiveAgentStateRestorer : IR3LiveAgentStateRestorer
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
-        var store = new LocalRestrictedStateStore(stateRoot);
+        var store = storeFactory is null ? new LocalRestrictedStateStore(stateRoot) : storeFactory(stateRoot);
         var service = new RestrictedStateService(
             store,
             keyResolver,

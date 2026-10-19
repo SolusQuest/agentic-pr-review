@@ -14,7 +14,10 @@
     "runtime:verify": "bash runtime/scripts/verify-runtime.sh all",
     "runtime:integration": "node scripts/run-runtime-integration.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:native": "node scripts/run-native-tests.mjs",
+    "test:native:node": "node scripts/run-native-tests.mjs node",
+    "test:native:runtime": "node scripts/run-native-tests.mjs runtime"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
