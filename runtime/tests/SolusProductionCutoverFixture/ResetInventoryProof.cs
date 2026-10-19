@@ -16,6 +16,8 @@ internal static class ResetInventoryProof
     private sealed record Decoded(Entry Entry, byte[] Bytes, StateControlHeaderV1? Header, LineageHeadV1? Head,
         LocatorRootSentinel? Sentinel = null);
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
+    private static string mismatch = "reset_retry_inventory";
+    private static bool Mismatch(string code) { mismatch = code; return false; }
 
     internal static int Run(string path)
     {
@@ -27,7 +29,7 @@ internal static class ResetInventoryProof
         {
             var before = Read(input.Before, access, keys!);
             var after = Read(input.After, access, keys!);
-            Check(Matches(before, after), "reset_retry_inventory");
+            Check(Matches(before, after), mismatch);
             var headIndex = Array.FindIndex(after, item => item.Head is not null);
             var nonHeadIndex = Array.FindIndex(after, item => item.Header?.ObjectClass == StateObjectClass.Acceptance);
             Check(headIndex >= 0 && nonHeadIndex >= 0, "reset_oracle_accepted");
@@ -68,11 +70,11 @@ internal static class ResetInventoryProof
             return new Decoded(entry, bytes, null, null);
         }).ToArray();
         var root = objects.Single(item => item.Entry.Name == LocatorRootFormat.StoreName);
-        Check(LocatorRootSentinelCodec.TryDecrypt(access, keys, root.Bytes, out var sentinel, out _) && sentinel is not null,
-            "reset_oracle_root");
+        if (!LocatorRootSentinelCodec.TryDecrypt(access, keys, root.Bytes, out var sentinel, out _) || sentinel is null)
+            throw new CutoverProofFailure("reset_oracle_root");
         try
         {
-            Check(LocatorContext.TryCreate(access, keys, sentinel!.Root, true,
+            Check(LocatorContext.TryCreate(access, keys, sentinel.Root, true,
                 sentinel.RequiredExpiresAtUnixSeconds, TimeProvider.System, out var locator), "reset_oracle_locator");
             using (locator)
             {
@@ -92,42 +94,42 @@ internal static class ResetInventoryProof
                 }).ToArray();
             }
         }
-        finally { CryptographicOperations.ZeroMemory(sentinel!.Root); }
+        finally { CryptographicOperations.ZeroMemory(sentinel.Root); }
     }
 
     private static bool Matches(Decoded[] before, Decoded[] after)
     {
         var priorRoots = before.Where(item => item.Sentinel is not null).ToArray();
         var nextRoots = after.Where(item => item.Sentinel is not null).ToArray();
-        if (priorRoots.Length != 1 || nextRoots.Length != 1 || !RootMatches(priorRoots[0], nextRoots[0])) return false;
+        if (priorRoots.Length != 1 || nextRoots.Length != 1 || !RootMatches(priorRoots[0], nextRoots[0])) return Mismatch("reset_oracle_root_delta");
         var priorHeads = before.Where(item => item.Head is not null).ToArray();
         var nextHeads = after.Where(item => item.Head is not null).ToArray();
-        if (priorHeads.Length != 1 || nextHeads.Length != 1) return false;
+        if (priorHeads.Length != 1 || nextHeads.Length != 1) return Mismatch("reset_oracle_head_count");
         var prior = priorHeads[0]; var next = nextHeads[0];
         var a = prior.Header!; var b = next.Header!;
         if (b.LogicalExpiresAtUnixSeconds < a.LogicalExpiresAtUnixSeconds ||
             b.RequiredPlatformExpiresAtUnixSeconds < a.RequiredPlatformExpiresAtUnixSeconds ||
             next.Entry.Expires < prior.Entry.Expires || b.CreatedAtUnixSeconds < a.CreatedAtUnixSeconds ||
             a != b with { CreatedAtUnixSeconds = a.CreatedAtUnixSeconds, LogicalExpiresAtUnixSeconds = a.LogicalExpiresAtUnixSeconds,
-                RequiredPlatformExpiresAtUnixSeconds = a.RequiredPlatformExpiresAtUnixSeconds }) return false;
+                RequiredPlatformExpiresAtUnixSeconds = a.RequiredPlatformExpiresAtUnixSeconds }) return Mismatch("reset_oracle_header_delta");
         if (!LineageHeadCodec.TryEncode(prior.Head! with { PhysicalSuperseded = [] }, out var first) ||
             !LineageHeadCodec.TryEncode(next.Head! with { PhysicalSuperseded = [] }, out var second) ||
-            !first.AsSpan().SequenceEqual(second)) return false;
+            !first.AsSpan().SequenceEqual(second)) return Mismatch("reset_oracle_head_delta");
         // A refresh records exactly the old physical head as superseded. An
         // unchanged physical head retains its original authenticated evidence.
         if (prior.Entry != next.Entry)
         {
-            if (next.Head!.PhysicalSuperseded.Length != 1) return false;
+            if (next.Head!.PhysicalSuperseded.Length != 1) return Mismatch("reset_oracle_superseded_count");
             var evidence = next.Head.PhysicalSuperseded[0];
             if (evidence.Name != prior.Entry.Name || evidence.ObjectId != prior.Entry.Id ||
                 evidence.ProducingRunIdentity != a.ProducingRunIdentity || evidence.ProducingRunAttempt != a.ProducingRunAttempt ||
                 evidence.ArchiveSha256 != Convert.ToHexStringLower(SHA256.HashData(Convert.FromBase64String(prior.Entry.Archive))) ||
                 evidence.EncryptedObjectSha256 != Convert.ToHexStringLower(SHA256.HashData(prior.Bytes)) ||
-                evidence.Size != prior.Bytes.Length || evidence.ExpiresAtUnixSeconds != prior.Entry.Expires) return false;
+                evidence.Size != prior.Bytes.Length || evidence.ExpiresAtUnixSeconds != prior.Entry.Expires) return Mismatch("reset_oracle_superseded_delta");
         }
-        else if (!prior.Head!.PhysicalSuperseded.SequenceEqual(next.Head!.PhysicalSuperseded)) return false;
+        else if (!prior.Head!.PhysicalSuperseded.SequenceEqual(next.Head!.PhysicalSuperseded)) return Mismatch("reset_oracle_superseded_delta");
         return before.Where(item => item.Head is null && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)
-            .SequenceEqual(after.Where(item => item.Head is null && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id));
+            .SequenceEqual(after.Where(item => item.Head is null && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)) || Mismatch("reset_oracle_record_delta");
     }
 
     private static bool RootMatches(Decoded prior, Decoded next)

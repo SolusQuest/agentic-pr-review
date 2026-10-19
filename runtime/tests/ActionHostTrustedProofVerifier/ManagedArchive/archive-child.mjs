@@ -27,6 +27,7 @@ import {
   runNonmanagedNoWork,
   runHistoricalAction,
   verifyResetRetryInventory,
+  CutoverSupportFailure,
 } from './cutover-proof.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
@@ -756,6 +757,7 @@ try {
       '\n',
   );
 } catch (error) {
+  if (error instanceof CutoverSupportFailure) diagnostic.supporting_failure = error.proofCode;
   diagnostic.assertion_site =
     /(?:github-fixture|provider-fixture|official-platform|archive-child|cutover-proof|cutover-bridge)\.mjs:[0-9]+/u.exec(
       error.stack,

@@ -5,6 +5,13 @@ import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { basename, join } from 'node:path';
 
+export class CutoverSupportFailure extends Error {
+  constructor(code) {
+    super('r6_supporting_process_failed');
+    this.proofCode = code;
+  }
+}
+
 function run(command, args, options) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -18,6 +25,10 @@ function run(command, args, options) {
     const failures =
       output.match(/^APR_SOLUS_(?:CUTOVER|DIRECT_FAULTS)_FAILED [a-zA-Z0-9_]+$/gmu) ?? [];
     process.stderr.write(JSON.stringify({ stage: 'r6-cutover', diagnostics, failures }) + '\n');
+    const code = /^APR_SOLUS_CUTOVER_FAILED (reset_(?:oracle_[a-z_]+|retry_inventory))$/mu.exec(
+      output,
+    )?.[1];
+    throw new CutoverSupportFailure(code ?? 'supporting_process_failed');
   }
   assert.equal(result.error, undefined, 'r6_cutover_process_error');
   assert.equal(result.status, 0, 'r6_cutover_process_failed');
