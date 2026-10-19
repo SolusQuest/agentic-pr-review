@@ -10,6 +10,7 @@ import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { build } from 'esbuild';
 import { SOLUS_VERSION } from '../../../scripts/release/solus-package-contract.mjs';
+import { readCorrelationObservation } from './correlation-observation.mjs';
 
 let stage = 'environment';
 let root;
@@ -202,7 +203,10 @@ try {
           const failures = (result.stderr || '')
             .split(/\r?\n/)
             .filter((line) => /^APR_SOLUS_RESTORED_FAILED [a-z0-9_-]+$/.test(line));
-          console.error(JSON.stringify({ stage, mode, status: result.status, failures }));
+          const correlations = readCorrelationObservation(join(work, 'control'));
+          console.error(
+            JSON.stringify({ stage, mode, status: result.status, failures, correlations }),
+          );
         }
         assert.equal(result.status, expectedExit);
         if (expectedExit === 73) return null;
