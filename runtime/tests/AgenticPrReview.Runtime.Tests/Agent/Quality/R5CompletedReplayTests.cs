@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
@@ -508,17 +510,18 @@ public sealed class R5CompletedReplayTests
 
     [Theory]
     [InlineData("{}")]
-    [InlineData("{\"operation\":\"x\",\"operation\":\"y\"}")]
+    [InlineData("{\"run_id\":\"1\",\"run_id\":\"2\"}")]
     [InlineData("{\"unknown\":true}")]
     [InlineData("[]")]
     public void ChildProtocolRejectsMalformedOrIncompleteDocuments(string json) =>
-        Assert.Null(ReplayWire.Read(Encoding.UTF8.GetBytes(json), ReplayExecutionJson.Default.ReplayChildInput, ReplayWire.InputLimit));
+        Assert.False(ActionHostJsonCodec.TryReadLaunch(Encoding.UTF8.GetBytes(json), out _, out _));
 
     [Fact]
     public async Task PrivateProtocolBoundsUtf8AndStreams()
     {
-        Assert.Null(ReplayWire.Read(new byte[] { 0xff }, ReplayExecutionJson.Default.ReplayChildReply, ReplayWire.ReplyLimit));
-        Assert.Null(ReplayWire.Read(new byte[ReplayWire.InputLimit + 1], ReplayExecutionJson.Default.ReplayChildInput, ReplayWire.InputLimit));
+        Assert.False(ActionHostJsonCodec.TryReadLaunch([0xff], out _, out _));
+        Assert.False(ActionHostJsonCodec.TryReadLaunch(
+            new byte[ActionHostContractBounds.MaximumLaunchDocumentBytes + 1], out _, out _));
         await Assert.ThrowsAsync<IOException>(() => ReplayWire.ReadBoundedAsync(new MemoryStream(new byte[100]), 99, CancellationToken.None));
     }
 

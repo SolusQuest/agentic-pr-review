@@ -73,7 +73,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
 
-// Only the five pinned, individually justified format dispositions are admitted.
+// Five pinned format retirements and two current protocol migrations are closed independently.
 // Further migrations require new closed dispositions and independent current oracles.
 // Source fingerprints establish a census, never SDK execution qualification.
 export function verifyS5AssertionSuccessor(repository, supplied) {
@@ -110,6 +110,61 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     );
     assert.ok(row.current_oracle_labels.length > 0);
     for (const label of row.current_oracle_labels) assert.ok(oracleText.includes(label), label);
+  }
+
+  const protocolBytes = readFixture('s5-protocol-migrations.json');
+  assert.equal(
+    sha256(protocolBytes),
+    '8d6800587a302d39366bc827c085e70a387de5817d6ed76b0e741947fd331d4f',
+  );
+  const protocol = JSON.parse(protocolBytes);
+  exactKeys(protocol, [
+    'kind',
+    'owner_issue',
+    'sdk_context_import_qualified',
+    'role',
+    'original_methods',
+    'oracles',
+    'rows',
+  ]);
+  assert.equal(protocol.kind, 'apr-cr1-s5-two-current-protocol-migrations-v1');
+  assert.equal(protocol.owner_issue, 409);
+  assert.equal(protocol.sdk_context_import_qualified, false);
+  assert.equal(protocol.role, 'current-protocol-admission-only');
+  assert.equal(protocol.original_methods, 2);
+  const protocolSource =
+    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs';
+  assert.deepEqual(protocol.rows.map(identity), [
+    protocolSource + ':ChildProtocolRejectsMalformedOrIncompleteDocuments',
+    protocolSource + ':PrivateProtocolBoundsUtf8AndStreams',
+  ]);
+  const migrations = new Map(protocol.rows.map((row) => [identity(row), row]));
+  assert.equal(migrations.size, 2);
+  const protocolText = protocol.oracles
+    .map((oracle) => {
+      exactKeys(oracle, ['path', 'sha256']);
+      const bytes = readFileSync(join(repository, oracle.path));
+      assert.equal(sha256(bytes), oracle.sha256, oracle.path);
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    })
+    .join('\n');
+  for (const row of protocol.rows) {
+    exactKeys(row, [
+      'source',
+      'method',
+      'original_body_sha256',
+      'current_body_sha256',
+      'disposition',
+      'reason',
+      'current_oracle_labels',
+    ]);
+    assert.equal(row.disposition, 'migrated');
+    assert.equal(
+      baseline.assertions.find((old) => identity(old) === identity(row))?.body_sha256,
+      row.original_body_sha256,
+    );
+    assert.ok(!formats.has(identity(row)));
+    for (const label of row.current_oracle_labels) assert.ok(protocolText.includes(label), label);
   }
 
   const successor = supplied ?? JSON.parse(readFixture('s5-assertion-successor.json'));
@@ -181,6 +236,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
       'current',
       'reason',
       ...(formats.has(identity(row)) ? ['format_disposition'] : []),
+      ...(migrations.has(identity(row)) ? ['migration_disposition'] : []),
     ]);
     const key = identity(row);
     const old = originalById.get(key);
@@ -198,11 +254,19 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
       assert.ok(!actual.includes(key), key);
       continue;
     }
-    assert.equal(row.disposition, 'retained');
-    assert.equal(
-      row.reason,
-      'Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification.',
-    );
+    if (migrations.has(key)) {
+      const migration = migrations.get(key);
+      assert.deepEqual(row.migration_disposition, migration);
+      assert.equal(row.disposition, migration.disposition);
+      assert.equal(row.reason, migration.reason);
+      assert.equal(row.current?.body_sha256, migration.current_body_sha256);
+    } else {
+      assert.equal(row.disposition, 'retained');
+      assert.equal(
+        row.reason,
+        'Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification.',
+      );
+    }
     exactKeys(row.current, ['source', 'method', 'utf8_start', 'utf8_length', 'body_sha256']);
     assert.equal(row.current.source, row.source);
     assert.equal(row.current.method, row.method);

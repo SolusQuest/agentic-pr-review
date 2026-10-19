@@ -1,0 +1,59 @@
+{
+  "kind": "apr-cr1-s5-two-current-protocol-migrations-v1",
+  "owner_issue": 409,
+  "sdk_context_import_qualified": false,
+  "role": "current-protocol-admission-only",
+  "original_methods": 2,
+  "oracles": [
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "sha256": "49e91c49fa1beb53a9ff1c67667d95923604e74e1d7370274928290f64523508"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
+      "sha256": "c7539bb7aae77a4a011349734dde70591dac109a0e25edbc33287d2407b11e76"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Contracts/ActionHostContractValidation.cs",
+      "sha256": "a83d409e7b24d264d20ff71a8bed54030682b871f12d37535711cc39bd69a5a0"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
+      "sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b"
+    },
+    {
+      "path": "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayExecutionContracts.cs",
+      "sha256": "4c73d7a31ad2ab136c56e97acda0e63b5a52df6e01d993c94aa0d4c09e125020"
+    }
+  ],
+  "rows": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ChildProtocolRejectsMalformedOrIncompleteDocuments",
+      "original_body_sha256": "5733081da6983a34c8965ebe52962fa7aefe85776676c9b2c976560e56ce4f56",
+      "current_body_sha256": "6d7754a19fd198b097ce2b1f518c31b8a16b8e85dff8f891e2121ebd3a62f6e2",
+      "disposition": "migrated",
+      "reason": "Migrate the four malformed, duplicate, unknown and incomplete private-child document triggers to the actual current ActionHost launch reader. The native replay child input schema is obsolete. Existing independent complete-launch positive and hostile-shape oracles establish the current reader; this is protocol admission only, never SDK history or execution qualification.",
+      "current_oracle_labels": [
+        "ChildProtocolRejectsMalformedOrIncompleteDocuments",
+        "LaunchRejectsClosedShapeUtf8AndOuterBoundViolations",
+        "TryReadLaunch"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "PrivateProtocolBoundsUtf8AndStreams",
+      "original_body_sha256": "e94a5c0bb993e5fb3d7292f4c11d92ac850be7db4565c64ddfc5a98ca3e0b502",
+      "current_body_sha256": "6ca75a353d45a30e7e28c09b31017e80d0565f801937f32b2aff62f9291e22a7",
+      "disposition": "migrated",
+      "reason": "Migrate invalid UTF8 and outer-cap-plus-one to the actual current ActionHost launch reader and its own bounded document contract. The former16KiB replay-child numeric cap is obsolete, not a new current launch promise. Preserve the original100-byte/99-byte generic stream rejection verbatim through ReadBoundedAsync. This creates no SESSION reader, converter or durable state authority.",
+      "current_oracle_labels": [
+        "PrivateProtocolBoundsUtf8AndStreams",
+        "LaunchRejectsClosedShapeUtf8AndOuterBoundViolations",
+        "TryReadLaunch",
+        "ReadBoundedAsync",
+        "MaximumLaunchDocumentBytes"
+      ]
+    }
+  ]
+}
