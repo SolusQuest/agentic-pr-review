@@ -224,7 +224,7 @@
       "method": "NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses",
       "original_disposition": "replacement",
       "original_replacement": "managed-admission",
-      "disposition": "retained",
+      "disposition": "migrated",
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
         "method": "NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses",
@@ -232,7 +232,21 @@
         "utf8_length": 2215,
         "body_sha256": "2f825a6b813097e1cf5cfe4f23d77ed62bf40702a04723453469d05ed91dc42f"
       },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+      "reason": "Replace only the retired SESSION builder failure producer with an actual malformed current S1 snapshot read and its typed state-admission failure. Preserve all six provider/agent/tool/Host/evaluator/unknown classifications, no guessed cause and no evaluated model/scenario on failure. The original negative current-review index remains independently rejected by the fresh completed-run projection. No SDK import is inferred from this scorer vector.",
+      "migration_disposition": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+        "method": "NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses",
+        "original_body_sha256": "e7451a77a975bd9fe612a6abdff689a6c5c03b1ff2b1989b765968896eaea3f2",
+        "current_body_sha256": "2f825a6b813097e1cf5cfe4f23d77ed62bf40702a04723453469d05ed91dc42f",
+        "disposition": "migrated",
+        "reason": "Replace only the retired SESSION builder failure producer with an actual malformed current S1 snapshot read and its typed state-admission failure. Preserve all six provider/agent/tool/Host/evaluator/unknown classifications, no guessed cause and no evaluated model/scenario on failure. The original negative current-review index remains independently rejected by the fresh completed-run projection. No SDK import is inferred from this scorer vector.",
+        "current_oracle_labels": [
+          "CurrentStateFailure",
+          "FromSolusAdmission",
+          "NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses",
+          "FreshProjectionRejectsResumedInputsAndDetachedExecutionEvents"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
@@ -539,7 +553,7 @@
       "method": "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
+      "disposition": "migrated",
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
@@ -547,7 +561,22 @@
         "utf8_length": 1050,
         "body_sha256": "a7c52c45ccd3fe78b8ed482455b5d59797f1cf46cf858ffae67975e9bcd4fc00"
       },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+      "reason": "Keep the same real bundle admission rejection for 17 tool members and 65 script turns under unchanged generic limits. Replace the obsolete SESSION child runner with the current quality runner: zero executions/cases and a complete unchanged input-file census. Native child-step/observation/cleanup DTO fields are retired with that wrapper; no state, provider execution or SDK numeric equivalence is introduced.",
+      "migration_disposition": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+        "method": "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
+        "original_body_sha256": "aac252cbdd8e12530bb1a9785a90c131f21de75782ba5dea933572f751d4ec2f",
+        "current_body_sha256": "a7c52c45ccd3fe78b8ed482455b5d59797f1cf46cf858ffae67975e9bcd4fc00",
+        "disposition": "migrated",
+        "reason": "Keep the same real bundle admission rejection for 17 tool members and 65 script turns under unchanged generic limits. Replace the obsolete SESSION child runner with the current quality runner: zero executions/cases and a complete unchanged input-file census. Native child-step/observation/cleanup DTO fields are retired with that wrapper; no state, provider execution or SDK numeric equivalence is introduced.",
+        "current_oracle_labels": [
+          "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
+          "QualityRunner.RunAsync(admission)",
+          "Assert.Equal(before, Snapshot())",
+          "ToolCallsPerResponse",
+          "ModelCalls"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
@@ -822,7 +851,7 @@
       "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
+      "disposition": "migrated",
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
@@ -830,7 +859,21 @@
         "utf8_length": 777,
         "body_sha256": "c2bc26bd4e2ea473dcd39e88a181a9d484ee7faf3c3e7300a58c1c55b033eaf8"
       },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+      "reason": "Retain both independently executed current Host worlds and their exact revision, authored source, observation, finding and publication comparisons. Replace the retired native SESSION replay prerequisite with the explicit admitted-fixture oracle used by those actual Host executions. This Host-only regression grants no SDK continuation/import qualification and leaves all actual world assertions unchanged.",
+      "migration_disposition": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+        "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
+        "original_body_sha256": "26816c5809001bf918ac1ef6ccb8fedafa2d7b5da7e38cc134997a96e5acbb14",
+        "current_body_sha256": "c2bc26bd4e2ea473dcd39e88a181a9d484ee7faf3c3e7300a58c1c55b033eaf8",
+        "disposition": "migrated",
+        "reason": "Retain both independently executed current Host worlds and their exact revision, authored source, observation, finding and publication comparisons. Replace the retired native SESSION replay prerequisite with the explicit admitted-fixture oracle used by those actual Host executions. This Host-only regression grants no SDK continuation/import qualification and leaves all actual world assertions unchanged.",
+        "current_oracle_labels": [
+          "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
+          "IncrementalCoverage.VerifyFixture(fixture)",
+          "RunIncrementalAsync",
+          "Assert.Equal(first, second)"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",

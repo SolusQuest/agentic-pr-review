@@ -45,12 +45,20 @@ const loadSuccessor = () =>
   );
 
 describe('S5 source-bound native assertion census', () => {
-  test('binds all 152 originals, 147 current bodies, five retirements and three current admission migrations', () => {
+  test('binds all 152 originals, 141 original retained bodies, six migrations and five retirements', () => {
     expect(verifyS5AssertionSuccessor(process.cwd())).toEqual({
       originalMethods: 152,
       currentNativeMethods: 147,
       authorizedDeletions: 5,
     });
+    const rows = loadSuccessor().assertions;
+    expect(
+      rows.filter((row: { migration_disposition?: unknown }) => row.migration_disposition),
+    ).toHaveLength(6);
+    expect(rows.filter((row: { current: unknown }) => row.current === null)).toHaveLength(5);
+    expect(
+      rows.filter((row: { disposition: string }) => row.disposition === 'retained'),
+    ).toHaveLength(141);
   });
   test.each([
     'owner',
@@ -193,14 +201,44 @@ describe('S5 source-bound native assertion census', () => {
       };
     if (mutation === 'sdk-overclaim') row.migration_disposition.sdk_context_import_qualified = true;
     if (mutation === 'redirected-current-source')
-      row.current.source = successor.assertions[0].source;
+      row.current.source = successor.current_sources.find(
+        (source: { path: string }) => source.path !== row.source,
+      ).path;
     if (mutation === 'extra-authority') row.migration_disposition.allow_fallback = true;
     expect(() => verifyS5AssertionSuccessor(process.cwd(), successor)).toThrow();
+  });
+  test.each([
+    'NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses',
+    'CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts',
+    'ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds',
+  ])('independently closes prior rewritten consumer %s', (method) => {
+    for (const mutation of [
+      'original-body',
+      'current-body',
+      'oracle',
+      'reason',
+      'retained-relabel',
+    ]) {
+      const successor = loadSuccessor();
+      const row = successor.assertions.find((item: { method: string }) => item.method === method);
+      expect(row.disposition).toBe('migrated');
+      if (mutation === 'original-body')
+        row.migration_disposition.original_body_sha256 = '0'.repeat(64);
+      if (mutation === 'current-body') row.current.body_sha256 = '0'.repeat(64);
+      if (mutation === 'oracle') row.migration_disposition.current_oracle_labels = ['unexecuted'];
+      if (mutation === 'reason') row.reason = 'No independent current evidence';
+      if (mutation === 'retained-relabel') {
+        row.disposition = 'retained';
+        delete row.migration_disposition;
+      }
+      expect(() => verifyS5AssertionSuccessor(process.cwd(), successor)).toThrow();
+    }
   });
   test.each([
     'original-bytes',
     'baseline-bytes',
     'body-change',
+    'body-and-source-resigned',
     'extra-method',
     'missing-successor',
     'missing-format-policy',
@@ -270,11 +308,27 @@ describe('S5 source-bound native assertion census', () => {
         );
       if (mutation === 'missing-successor')
         fs.unlinkSync(path.join(temporary, fixtureDirectory, 's5-assertion-successor.json'));
-      if (mutation === 'body-change' || mutation === 'extra-method') {
-        const row = successor.assertions[0];
+      if (
+        mutation === 'body-change' ||
+        mutation === 'body-and-source-resigned' ||
+        mutation === 'extra-method'
+      ) {
+        // Select a retained source outside all sealed oracle-file closures so
+        // the new baseline-body guard, independently, must reject re-signing.
+        const oracleSources = new Set(
+          [...format.oracles, ...protocol.oracles].map((oracle) => oracle.path),
+        );
+        const row =
+          mutation === 'body-and-source-resigned'
+            ? successor.assertions.find(
+                (item: { disposition: string; source: string }) =>
+                  item.disposition === 'retained' && !oracleSources.has(item.source),
+              )
+            : successor.assertions[0];
+        expect(row).toBeDefined();
         const target = path.join(temporary, row.source);
         let bytes = fs.readFileSync(target);
-        if (mutation === 'body-change') {
+        if (mutation === 'body-change' || mutation === 'body-and-source-resigned') {
           // Keep UTF8 and method identity valid, but change a real method body byte.
           const body = bytes.subarray(
             row.current.utf8_start,
@@ -283,6 +337,8 @@ describe('S5 source-bound native assertion census', () => {
           const offset = body.indexOf(Buffer.from('Assert.'));
           expect(offset).toBeGreaterThanOrEqual(0);
           bytes[row.current.utf8_start + offset] = 'X'.charCodeAt(0);
+          if (mutation === 'body-and-source-resigned')
+            row.current.body_sha256 = createHash('sha256').update(body).digest('hex');
         } else {
           bytes = Buffer.concat([
             bytes,
@@ -299,7 +355,11 @@ describe('S5 source-bound native assertion census', () => {
           JSON.stringify(successor),
         );
       }
-      expect(() => verifyS5AssertionSuccessor(temporary)).toThrow();
+      if (mutation === 'body-and-source-resigned')
+        expect(() => verifyS5AssertionSuccessor(temporary)).toThrow(
+          /retained body must match immutable baseline/u,
+        );
+      else expect(() => verifyS5AssertionSuccessor(temporary)).toThrow();
     } finally {
       fs.rmSync(temporary, { recursive: true, force: true });
     }
